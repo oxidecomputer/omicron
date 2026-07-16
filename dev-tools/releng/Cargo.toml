@@ -6,11 +6,13 @@ license = "MPL-2.0"
 
 [dependencies]
 anyhow.workspace = true
+blake3 = "1.8.5"
 camino.workspace = true
 camino-tempfile.workspace = true
 cargo_metadata.workspace = true
 chrono.workspace = true
 clap.workspace = true
+dev-tools-common.workspace = true
 fs-err = { workspace = true, features = ["tokio"] }
 futures.workspace = true
 hex.workspace = true
@@ -22,7 +24,6 @@ reqwest.workspace = true
 semver.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-sha2.workspace = true
 shell-words.workspace = true
 slog.workspace = true
 slog-async.workspace = true
@@ -31,7 +32,9 @@ tar.workspace = true
 tokio = { workspace = true, features = ["full"] }
 toml.workspace = true
 tufaceous-artifact.workspace = true
+tufaceous-artifact-v2.workspace = true
 tufaceous-lib.workspace = true
+tufaceous-v2.workspace = true
 update-common.workspace = true
 
 [lints]

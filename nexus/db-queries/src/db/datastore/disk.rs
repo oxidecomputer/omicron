@@ -47,6 +47,7 @@ use nexus_db_errors::OptionalError;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_lookup::LookupPath;
 use nexus_types::external_api::disk as disk_types;
+use nexus_types::external_api::instance as instance_types;
 use nexus_types::identity::Asset;
 use omicron_common::api;
 use omicron_common::api::external;
@@ -1146,8 +1147,8 @@ impl DataStore {
                             }
                             match collection.nexus_state.state() {
                                 // Ok-to-be-attached instance states:
-                                api::external::InstanceState::Creating
-                                | api::external::InstanceState::Stopped => {
+                                instance_types::InstanceState::Creating
+                                | instance_types::InstanceState::Stopped => {
                                     // The disk is ready to be attached, and the
                                     // instance is ready to be attached. Perhaps
                                     // we are at attachment capacity?
@@ -1336,8 +1337,8 @@ impl DataStore {
                             }
                             match collection.nexus_state.state() {
                                 // Ok-to-be-detached instance states:
-                                api::external::InstanceState::Creating |
-                                api::external::InstanceState::Stopped => {
+                                instance_types::InstanceState::Creating |
+                                instance_types::InstanceState::Stopped => {
                                     if collection.boot_disk_id == Some(authz_disk.id()) {
                                         return Err(Error::conflict(
                                             "boot disk cannot be detached"

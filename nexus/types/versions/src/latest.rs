@@ -11,14 +11,18 @@
 pub mod affinity {
     pub use crate::v2025_11_20_00::affinity::AffinityGroup;
     pub use crate::v2025_11_20_00::affinity::AffinityGroupCreate;
+    pub use crate::v2025_11_20_00::affinity::AffinityGroupMember;
     pub use crate::v2025_11_20_00::affinity::AffinityGroupSelector;
     pub use crate::v2025_11_20_00::affinity::AffinityGroupUpdate;
     pub use crate::v2025_11_20_00::affinity::AffinityInstanceGroupMemberPath;
+    pub use crate::v2025_11_20_00::affinity::AffinityPolicy;
     pub use crate::v2025_11_20_00::affinity::AntiAffinityGroup;
     pub use crate::v2025_11_20_00::affinity::AntiAffinityGroupCreate;
+    pub use crate::v2025_11_20_00::affinity::AntiAffinityGroupMember;
     pub use crate::v2025_11_20_00::affinity::AntiAffinityGroupSelector;
     pub use crate::v2025_11_20_00::affinity::AntiAffinityGroupUpdate;
     pub use crate::v2025_11_20_00::affinity::AntiAffinityInstanceGroupMemberPath;
+    pub use crate::v2025_11_20_00::affinity::FailureDomain;
 }
 
 pub mod alert {
@@ -150,13 +154,18 @@ pub mod image {
 }
 
 pub mod instance {
+    pub use crate::v2025_11_20_00::instance::InstanceAutoRestartPolicy;
+    pub use crate::v2025_11_20_00::instance::InstanceAutoRestartStatus;
+    pub use crate::v2025_11_20_00::instance::InstanceCpuCount;
     pub use crate::v2025_11_20_00::instance::InstanceDiskAttach;
     pub use crate::v2025_11_20_00::instance::InstanceNetworkInterfaceSelector;
     pub use crate::v2025_11_20_00::instance::InstanceNetworkInterfaceUpdate;
+    pub use crate::v2025_11_20_00::instance::InstanceRuntimeState;
     pub use crate::v2025_11_20_00::instance::InstanceSelector;
     pub use crate::v2025_11_20_00::instance::InstanceSerialConsoleData;
     pub use crate::v2025_11_20_00::instance::InstanceSerialConsoleRequest;
     pub use crate::v2025_11_20_00::instance::InstanceSerialConsoleStreamRequest;
+    pub use crate::v2025_11_20_00::instance::InstanceState;
     pub use crate::v2025_11_20_00::instance::MAX_USER_DATA_BYTES;
     pub use crate::v2025_11_20_00::instance::OptionalInstanceSelector;
     pub use crate::v2025_11_20_00::instance::UserData;
@@ -236,8 +245,8 @@ pub mod multicast {
     pub use crate::v2026_01_08_00::multicast::MulticastGroupPath;
     pub use crate::v2026_01_08_00::multicast::MulticastGroupSelector;
 
-    pub use crate::v2026_06_16_00::multicast::MulticastGroupMember;
-    pub use crate::v2026_06_16_00::multicast::MulticastGroupMemberParentKind;
+    pub use crate::v2026_07_16_01::multicast::MulticastGroupMember;
+    pub use crate::v2026_07_16_01::multicast::MulticastGroupMemberParentKind;
 
     pub use crate::v2026_03_14_00::multicast::MulticastGroup;
     pub use crate::v2026_03_14_00::multicast::MulticastGroupCreate;
@@ -250,9 +259,14 @@ pub mod multicast {
 pub mod networking {
     pub use crate::v2025_11_20_00::networking::Address;
     pub use crate::v2025_11_20_00::networking::AddressConfig;
+    pub use crate::v2025_11_20_00::networking::AddressLot;
+    pub use crate::v2025_11_20_00::networking::AddressLotBlock;
     pub use crate::v2025_11_20_00::networking::AddressLotBlockCreate;
     pub use crate::v2025_11_20_00::networking::AddressLotCreate;
+    pub use crate::v2025_11_20_00::networking::AddressLotCreateResponse;
+    pub use crate::v2025_11_20_00::networking::AddressLotKind;
     pub use crate::v2025_11_20_00::networking::AddressLotSelector;
+    pub use crate::v2025_11_20_00::networking::AddressLotViewResponse;
     pub use crate::v2025_11_20_00::networking::AggregateBgpMessageHistory;
     pub use crate::v2025_11_20_00::networking::BgpAnnounceListSelector;
     pub use crate::v2025_11_20_00::networking::BgpAnnounceSet;
@@ -267,11 +281,14 @@ pub mod networking {
     pub use crate::v2025_11_20_00::networking::LinkConfigCreate;
     pub use crate::v2025_11_20_00::networking::LldpLinkConfig;
     pub use crate::v2025_11_20_00::networking::LldpLinkConfigCreate;
+    pub use crate::v2025_11_20_00::networking::LldpNeighbor;
     pub use crate::v2025_11_20_00::networking::Route;
     pub use crate::v2025_11_20_00::networking::RouteConfig;
     pub use crate::v2025_11_20_00::networking::SwitchBgpHistory;
     pub use crate::v2025_11_20_00::networking::SwitchInterfaceConfigCreate;
     pub use crate::v2025_11_20_00::networking::SwitchInterfaceKind;
+    pub use crate::v2025_11_20_00::networking::SwitchPortAddressConfig;
+    pub use crate::v2025_11_20_00::networking::SwitchPortAddressView;
     pub use crate::v2025_11_20_00::networking::SwitchPortApplySettings;
     pub use crate::v2025_11_20_00::networking::SwitchPortConfig;
     pub use crate::v2025_11_20_00::networking::SwitchPortConfigCreate;
@@ -279,6 +296,7 @@ pub mod networking {
     pub use crate::v2025_11_20_00::networking::SwitchPortLinkConfig;
     pub use crate::v2025_11_20_00::networking::SwitchPortPageSelector;
     pub use crate::v2025_11_20_00::networking::SwitchPortPathSelector;
+    pub use crate::v2025_11_20_00::networking::SwitchPortRouteConfig;
     pub use crate::v2025_11_20_00::networking::SwitchPortSettingsGroup;
     pub use crate::v2025_11_20_00::networking::SwitchPortSettingsGroups;
     pub use crate::v2025_11_20_00::networking::SwitchPortSettingsIdentity;
@@ -312,6 +330,8 @@ pub mod networking {
 
     pub use crate::v2026_05_07_00::networking::SwitchInterfaceConfig;
     pub use crate::v2026_05_07_00::networking::SwitchPortSettings;
+
+    pub use crate::v2026_06_10_00::networking::BgpConfigUpdate;
 }
 
 pub mod oxql {
@@ -337,7 +357,7 @@ pub mod probe {
 
     pub use crate::v2026_01_03_00::probe::ProbeInfo;
 
-    pub use crate::v2026_06_16_00::probe::ProbeCreate;
+    pub use crate::v2026_07_16_01::probe::ProbeCreate;
 }
 
 pub mod project {

@@ -61,7 +61,9 @@ pub async fn collect(
         status.errors.push(InlineErrorChain::new(err.as_ref()).to_string());
     };
 
-    Ok(CollectionStepOutput::Ereports(status))
+    let details = serde_json::to_value(&status)
+        .context("failed to serialize ereport collection status")?;
+    Ok(CollectionStepOutput::Details(details))
 }
 
 // Save ereports to disk, paginating through the database.
@@ -161,7 +163,7 @@ async fn write_ereport(ereport: Ereport, dir: &Utf8Path) -> anyhow::Result<()> {
         .as_deref()
         .filter(|&s| is_fs_safe_single_path_component(s))
         .unwrap_or("unknown_serial");
-    let id = &ereport.data.id;
+    let id = &ereport.id;
 
     let dir = dir
         .join(format!("{pn}-{sn}"))

@@ -11,9 +11,9 @@ use nexus_db_model::AntiAffinityGroup;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_types::external_api::affinity;
+use nexus_types::external_api::instance;
 use nexus_types::external_api::project;
 use nexus_types::identity::Resource;
-use omicron_common::api::external;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
@@ -236,7 +236,7 @@ impl super::Nexus {
         opctx: &OpContext,
         affinity_group_lookup: &lookup::AffinityGroup<'_>,
         pagparams: &PaginatedBy<'_>,
-    ) -> ListResultVec<external::AffinityGroupMember> {
+    ) -> ListResultVec<affinity::AffinityGroupMember> {
         let (.., authz_affinity_group) = affinity_group_lookup
             .lookup_for(authz::Action::ListChildren)
             .await?;
@@ -250,7 +250,7 @@ impl super::Nexus {
         opctx: &OpContext,
         anti_affinity_group_lookup: &lookup::AntiAffinityGroup<'_>,
         pagparams: &PaginatedBy<'_>,
-    ) -> ListResultVec<external::AntiAffinityGroupMember> {
+    ) -> ListResultVec<affinity::AntiAffinityGroupMember> {
         let (.., authz_anti_affinity_group) = anti_affinity_group_lookup
             .lookup_for(authz::Action::ListChildren)
             .await?;
@@ -268,7 +268,7 @@ impl super::Nexus {
         opctx: &OpContext,
         affinity_group_lookup: &lookup::AffinityGroup<'_>,
         instance_lookup: &lookup::Instance<'_>,
-    ) -> Result<external::AffinityGroupMember, Error> {
+    ) -> Result<affinity::AffinityGroupMember, Error> {
         let (.., authz_affinity_group) =
             affinity_group_lookup.lookup_for(authz::Action::Read).await?;
         let (.., authz_instance) =
@@ -289,7 +289,7 @@ impl super::Nexus {
         opctx: &OpContext,
         anti_affinity_group_lookup: &lookup::AntiAffinityGroup<'_>,
         instance_lookup: &lookup::Instance<'_>,
-    ) -> Result<external::AntiAffinityGroupMember, Error> {
+    ) -> Result<affinity::AntiAffinityGroupMember, Error> {
         let (.., authz_anti_affinity_group) =
             anti_affinity_group_lookup.lookup_for(authz::Action::Read).await?;
         let (.., authz_instance) =
@@ -310,7 +310,7 @@ impl super::Nexus {
         opctx: &OpContext,
         affinity_group_lookup: &lookup::AffinityGroup<'_>,
         instance_lookup: &lookup::Instance<'_>,
-    ) -> Result<external::AffinityGroupMember, Error> {
+    ) -> Result<affinity::AffinityGroupMember, Error> {
         let (.., authz_affinity_group) =
             affinity_group_lookup.lookup_for(authz::Action::Modify).await?;
         let (.., authz_instance, instance) =
@@ -324,13 +324,13 @@ impl super::Nexus {
                 member,
             )
             .await?;
-        Ok(external::AffinityGroupMember::Instance {
+        Ok(affinity::AffinityGroupMember::Instance {
             id: member,
             name: instance.name().clone(),
             // TODO: This is kinda a lie - the current implementation of
             // "affinity_group_member_instance_add" relies on the instance
             // not having a VMM, but that might change in the future.
-            run_state: external::InstanceState::Stopped,
+            run_state: instance::InstanceState::Stopped,
         })
     }
 
@@ -339,7 +339,7 @@ impl super::Nexus {
         opctx: &OpContext,
         anti_affinity_group_lookup: &lookup::AntiAffinityGroup<'_>,
         instance_lookup: &lookup::Instance<'_>,
-    ) -> Result<external::AntiAffinityGroupMember, Error> {
+    ) -> Result<affinity::AntiAffinityGroupMember, Error> {
         let (.., authz_anti_affinity_group) = anti_affinity_group_lookup
             .lookup_for(authz::Action::Modify)
             .await?;
@@ -354,13 +354,13 @@ impl super::Nexus {
                 member,
             )
             .await?;
-        Ok(external::AntiAffinityGroupMember::Instance {
+        Ok(affinity::AntiAffinityGroupMember::Instance {
             id: member,
             name: instance.name().clone(),
             // TODO: This is kinda a lie - the current implementation of
             // "anti_affinity_group_member_instance_add" relies on the instance
             // not having a VMM, but that might change in the future.
-            run_state: external::InstanceState::Stopped,
+            run_state: instance::InstanceState::Stopped,
         })
     }
 

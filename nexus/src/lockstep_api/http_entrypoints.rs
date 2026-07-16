@@ -97,7 +97,7 @@ impl NexusLockstepApi for NexusLockstepApiImpl {
         nexus
             .rack_initialize(
                 &opctx,
-                path.rack_id,
+                RackUuid::from_untyped_uuid(path.rack_id),
                 request,
                 true, // blueprint_execution_enabled
             )

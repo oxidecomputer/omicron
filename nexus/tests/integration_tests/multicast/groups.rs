@@ -39,6 +39,7 @@ use nexus_test_utils::resource_helpers::{
     object_get, object_get_error, object_put_error,
 };
 use nexus_test_utils_macros::nexus_test;
+use nexus_types::external_api::instance::InstanceState;
 use nexus_types::external_api::ip_pool::PoolSelector;
 use nexus_types::external_api::ip_pool::{
     IpPool, IpPoolCreate, IpPoolRange, IpRange, IpVersion, Ipv4Range, Ipv6Range,
@@ -48,9 +49,7 @@ use nexus_types::external_api::multicast::{
     MulticastGroupMember,
 };
 use nexus_types::external_api::probe::ProbeCreate;
-use omicron_common::api::external::{
-    IdentityMetadataCreateParams, InstanceState,
-};
+use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::{Name, Probe};
 use omicron_uuid_kinds::InstanceUuid;
 
@@ -1356,7 +1355,7 @@ async fn wait_for_dpd_source_filter(
             if actual == expected {
                 Ok(())
             } else {
-                Err(CondCheckError::<()>::NotYet)
+                Err(CondCheckError::<()>::NotYet { status: Some("source filter does not match expected".to_string()) })
             }
         },
         &POLL_INTERVAL,

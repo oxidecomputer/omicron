@@ -35,6 +35,7 @@ use nexus_test_utils::resource_helpers::{
     create_project, object_get, objects_list_page_authz,
 };
 use nexus_test_utils_macros::nexus_test;
+use nexus_types::external_api::instance::InstanceState;
 use nexus_types::external_api::instance::{
     ExternalIpCreate, InstanceDiskAttachment,
     InstanceNetworkInterfaceAttachment,
@@ -43,7 +44,6 @@ use nexus_types::external_api::multicast::{
     InstanceMulticastGroupJoin, MulticastGroup, MulticastGroupJoinSpec,
     MulticastGroupMember,
 };
-use omicron_common::api::external::InstanceState;
 use omicron_uuid_kinds::{InstanceUuid, MulticastGroupUuid};
 use sled_agent_types::early_networking::SwitchSlot;
 
@@ -1032,7 +1032,9 @@ async fn test_left_member_waits_for_group_active(
                 list_multicast_group_members(client, group_name).await;
             match members.first() {
                 Some(m) if m.state == "Left" => Ok(()),
-                _ => Err(CondCheckError::<()>::NotYet),
+                _ => Err(CondCheckError::<()>::NotYet {
+                    status: Some("member not yet Left".to_string()),
+                }),
             }
         },
         &POLL_INTERVAL,

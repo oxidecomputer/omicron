@@ -89,10 +89,12 @@ pub mod v4;
 pub mod v40;
 #[path = "add_instance_primary_nic_mtu/mod.rs"]
 pub mod v41;
-#[path = "mcast_m2p_forwarding/mod.rs"]
+#[path = "non_empty_uplink_ports/mod.rs"]
 pub mod v42;
-#[path = "probe_multicast_groups/mod.rs"]
+#[path = "mcast_m2p_forwarding/mod.rs"]
 pub mod v43;
+#[path = "probe_multicast_groups/mod.rs"]
+pub mod v44;
 #[path = "add_probe_put_endpoint/mod.rs"]
 pub mod v6;
 #[path = "multicast_support/mod.rs"]

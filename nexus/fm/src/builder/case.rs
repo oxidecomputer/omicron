@@ -10,6 +10,7 @@ use nexus_types::alert::AlertPayload;
 use nexus_types::fm;
 use nexus_types::support_bundle::BundleDataSelection;
 use omicron_uuid_kinds::CaseUuid;
+use omicron_uuid_kinds::FactUuid;
 use omicron_uuid_kinds::SitrepUuid;
 use std::sync::Arc;
 
@@ -20,6 +21,20 @@ pub struct CaseBuilder {
     sitrep_id: SitrepUuid,
     rng: rng::CaseBuilderRng,
     report_log: analysis_reports::DebugLog,
+    /// Set to `true` if this case requested at least one new alert during the
+    /// current analysis run. This means the new sitrep's alert request set will
+    /// differ from its parent's, so its alert generation must be bumped. Set by
+    /// [`Self::request_alert`], read by [`super::SitrepBuilder::build`] via
+    /// [`AllCases::alert_set_changed`].
+    pub(super) new_alerts_requested: bool,
+    /// Set to `true` if this case requested at least one new support bundle
+    /// during the current analysis run. This means the new sitrep's support
+    /// bundle request set will differ from its parent's, so its support
+    /// bundle generation must be bumped. Set by
+    /// [`Self::request_support_bundle`], read by
+    /// [`super::SitrepBuilder::build`] via
+    /// [`AllCases::support_bundle_set_changed`].
+    pub(super) new_support_bundles_requested: bool,
 }
 
 #[derive(Debug)]
@@ -76,6 +91,7 @@ impl AllCases {
                     ereports: Default::default(),
                     alerts_requested: Default::default(),
                     support_bundles_requested: Default::default(),
+                    facts: Default::default(),
                 };
                 let mut builder =
                     CaseBuilder::new(&self.log, sitrep_id, case, case_rng);
@@ -112,6 +128,14 @@ impl AllCases {
     pub fn is_empty(&self) -> bool {
         self.cases.is_empty()
     }
+
+    pub(super) fn alert_set_changed(&self) -> bool {
+        self.cases.iter().any(|c| c.new_alerts_requested)
+    }
+
+    pub(super) fn support_bundle_set_changed(&self) -> bool {
+        self.cases.iter().any(|c| c.new_support_bundles_requested)
+    }
 }
 
 impl CaseBuilder {
@@ -126,7 +150,15 @@ impl CaseBuilder {
             "de" => case.metadata.de.to_string(),
             "created_sitrep_id" => case.metadata.created_sitrep_id.to_string(),
         ));
-        Self { log, case, sitrep_id, rng, report_log: Default::default() }
+        Self {
+            log,
+            case,
+            sitrep_id,
+            rng,
+            report_log: Default::default(),
+            new_alerts_requested: false,
+            new_support_bundles_requested: false,
+        }
     }
 
     pub fn request_alert<A: AlertPayload>(
@@ -179,7 +211,7 @@ impl CaseBuilder {
             .kv("alert_version", version)
             .kv("alert_payload_type", payload_type)
             .comment(comment);
-
+        self.new_alerts_requested = true;
         Ok(())
     }
 
@@ -216,6 +248,7 @@ impl CaseBuilder {
             .entry("requested support bundle")
             .kv("support_bundle_id", id)
             .comment(comment);
+        self.new_support_bundles_requested = true;
     }
 
     pub fn close(&mut self, comment: impl ToString) {
@@ -224,6 +257,78 @@ impl CaseBuilder {
         let comment = comment.to_string();
         slog::info!(&self.log, "case closed"; "comment" => %comment);
         self.report_log.entry("case closed").comment(comment);
+    }
+
+    /// Replace this case's free-form comment string.
+    pub fn set_comment(&mut self, comment: impl ToString) {
+        self.case.metadata.comment = comment.to_string();
+    }
+
+    /// Emit a new fact under this case.
+    ///
+    /// Returns the newly generated fact UUID.
+    pub fn add_fact(
+        &mut self,
+        payload: impl Into<fm::FactPayload>,
+        comment: impl ToString,
+    ) -> FactUuid {
+        let id = loop {
+            let id = self.rng.next_fact();
+            if !self.case.facts.contains_key(&id) {
+                break id;
+            }
+        };
+        let payload = payload.into();
+        let comment = comment.to_string();
+        slog::info!(
+            &self.log,
+            "added a fact";
+            "fact_id" => %id,
+            "payload" => ?payload,
+            "comment" => %comment,
+        );
+        self.report_log
+            .entry("added fact")
+            .kv("fact_id", id)
+            .kv("payload", &payload)
+            .comment(comment.clone());
+        let fact = fm::case::Fact {
+            metadata: fm::case::FactMetadata {
+                id,
+                created_sitrep_id: self.sitrep_id,
+                comment,
+            },
+            payload,
+        };
+        self.case.facts.insert_unique(fact).expect("UUID should be unused");
+        id
+    }
+
+    /// Remove a fact from this case. The fact will not be carried forward
+    /// into the next sitrep. `comment` records why it was removed.
+    pub fn remove_fact(&mut self, id: FactUuid, comment: impl ToString) {
+        let comment = comment.to_string();
+        if let Some(fact) = self.case.facts.remove(&id) {
+            slog::info!(
+                &self.log,
+                "removed a fact";
+                "fact_id" => %id,
+                "payload" => ?fact.payload,
+                "comment" => %comment,
+            );
+            self.report_log
+                .entry("removed fact")
+                .kv("fact_id", id)
+                .kv("payload", &fact.payload)
+                .comment(comment);
+        } else {
+            slog::warn!(
+                &self.log,
+                "tried to remove a fact that does not exist";
+                "fact_id" => %id,
+                "comment" => %comment,
+            );
+        }
     }
 
     pub fn add_ereport(
@@ -242,8 +347,8 @@ impl CaseBuilder {
             Ok(_) => {
                 slog::info!(
                     self.log,
-                    "assigned ereport {} to case", report.id();
-                    "ereport_id" => %report.id(),
+                    "assigned ereport {} to case", report.id;
+                    "ereport_id" => %report.id,
                     "ereport_class" => ?report.class,
                     "assignment_id" => %assignment_id,
                     "comment" => %comment,
@@ -252,7 +357,7 @@ impl CaseBuilder {
                 self.report_log
                     .entry("assigned ereport to case")
                     .comment(comment)
-                    .kv("ereport_id", &format_args!("{}", report.id()))
+                    .kv("ereport_id", &format_args!("{}", report.id))
                     .kv(
                         "ereport_class",
                         &report.class.as_deref().unwrap_or("<none>"),
@@ -262,8 +367,8 @@ impl CaseBuilder {
             Err(_) => {
                 slog::warn!(
                     self.log,
-                    "ereport {} already assigned to case", report.id();
-                    "ereport_id" => %report.id(),
+                    "ereport {} already assigned to case", report.id;
+                    "ereport_id" => %report.id,
                     "ereport_class" => ?report.class,
                 );
             }
@@ -314,4 +419,71 @@ impl iddqd::IdOrdItem for CaseBuilder {
     }
 
     iddqd::id_upcast!();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use nexus_types::alert::test_alerts;
+    use nexus_types::support_bundle::BundleDataSelection;
+    use omicron_test_utils::dev;
+
+    fn make_all_cases(log: &slog::Logger) -> AllCases {
+        AllCases {
+            log: log.clone(),
+            sitrep_id: SitrepUuid::new_v4(),
+            cases: IdOrdMap::new(),
+            rng: rng::SitrepBuilderRng::from_seed("make_all_cases"),
+        }
+    }
+
+    #[test]
+    fn dirty_bits_default_false() {
+        let logctx = dev::test_setup_log("dirty_bits_default_false");
+        let mut all_cases = make_all_cases(&logctx.log);
+        let case = all_cases.open_case(fm::DiagnosisEngineKind::PowerShelf);
+        assert!(!case.new_alerts_requested);
+        assert!(!case.new_support_bundles_requested);
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn request_alert_flips_alert_state() {
+        let logctx = dev::test_setup_log("request_alert_flips_alert_state");
+        let mut all_cases = make_all_cases(&logctx.log);
+        assert!(!all_cases.alert_set_changed());
+
+        {
+            let mut case =
+                all_cases.open_case(fm::DiagnosisEngineKind::PowerShelf);
+            case.request_alert(&test_alerts::Foo(serde_json::json!({})), "")
+                .unwrap();
+            assert!(case.new_alerts_requested);
+            assert!(!case.new_support_bundles_requested);
+        }
+
+        assert!(all_cases.alert_set_changed());
+        assert!(!all_cases.support_bundle_set_changed());
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn request_support_bundle_flips_bundle_state() {
+        let logctx =
+            dev::test_setup_log("request_support_bundle_flips_bundle_state");
+        let mut all_cases = make_all_cases(&logctx.log);
+        assert!(!all_cases.support_bundle_set_changed());
+
+        {
+            let mut case =
+                all_cases.open_case(fm::DiagnosisEngineKind::PowerShelf);
+            case.request_support_bundle(BundleDataSelection::default(), "");
+            assert!(case.new_support_bundles_requested);
+            assert!(!case.new_alerts_requested);
+        }
+
+        assert!(all_cases.support_bundle_set_changed());
+        assert!(!all_cases.alert_set_changed());
+        logctx.cleanup_successful();
+    }
 }

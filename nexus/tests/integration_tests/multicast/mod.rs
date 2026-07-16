@@ -42,7 +42,8 @@ use nexus_test_utils::resource_helpers::{
 };
 use nexus_types::deployment::SledFilter;
 use nexus_types::external_api::instance::{
-    InstanceCreate, InstanceNetworkInterfaceAttachment,
+    InstanceCpuCount, InstanceCreate, InstanceNetworkInterfaceAttachment,
+    InstanceState,
 };
 use nexus_types::external_api::ip_pool::{
     IpPool, IpPoolCreate, IpPoolRange, IpRange, IpVersion, Ipv4Range,
@@ -56,7 +57,6 @@ use nexus_types::internal_api::params::InstanceMigrateRequest;
 use nexus_types_versions::latest::instance::Instance;
 use omicron_common::api::external::{
     ByteCount, DataPageParams, Hostname, IdentityMetadataCreateParams,
-    InstanceCpuCount, InstanceState,
 };
 use omicron_nexus::TestInterfaces;
 use omicron_test_utils::dev::poll::{self, CondCheckError, wait_for_condition};
@@ -316,28 +316,38 @@ pub(crate) async fn ensure_inventory_ready(
                 Ok(sleds) => sleds,
                 Err(e) => {
                     warn!(log, "failed to list sleds: {e}");
-                    return Err(CondCheckError::<String>::NotYet);
+                    return Err(CondCheckError::<String>::NotYet {
+                        status: Some(format!("failed to list sleds: {e}")),
+                    });
                 }
             };
 
             if sleds.is_empty() {
                 warn!(log, "no in-service sleds found yet");
-                return Err(CondCheckError::<String>::NotYet);
+                return Err(CondCheckError::<String>::NotYet {
+                    status: Some("no in-service sleds found yet".to_string()),
+                });
             }
 
             // Get latest inventory
-            let inventory =
-                match datastore.inventory_get_latest_collection(&opctx).await {
-                    Ok(Some(inv)) => inv,
-                    Ok(None) => {
-                        debug!(log, "no inventory collection yet");
-                        return Err(CondCheckError::<String>::NotYet);
-                    }
-                    Err(e) => {
-                        warn!(log, "failed to get inventory: {e}");
-                        return Err(CondCheckError::<String>::NotYet);
-                    }
-                };
+            let inventory = match datastore
+                .inventory_get_latest_collection(&opctx)
+                .await
+            {
+                Ok(Some(inv)) => inv,
+                Ok(None) => {
+                    debug!(log, "no inventory collection yet");
+                    return Err(CondCheckError::<String>::NotYet {
+                        status: Some("no inventory collection yet".to_string()),
+                    });
+                }
+                Err(e) => {
+                    warn!(log, "failed to get inventory: {e}");
+                    return Err(CondCheckError::<String>::NotYet {
+                        status: Some(format!("failed to get inventory: {e}")),
+                    });
+                }
+            };
 
             // Verify inventory has SP data for each sled
             let mut missing_sleds = Vec::new();
@@ -366,7 +376,12 @@ pub(crate) async fn ensure_inventory_ready(
                     missing_sleds.len(),
                     missing_sleds
                 );
-                Err(CondCheckError::<String>::NotYet)
+                Err(CondCheckError::<String>::NotYet {
+                    status: Some(format!(
+                        "inventory missing SP data for sleds: \
+                         {missing_sleds:?}"
+                    )),
+                })
             }
         },
         &POLL_INTERVAL,
@@ -377,7 +392,7 @@ pub(crate) async fn ensure_inventory_ready(
         Ok(_) => {
             info!(log, "inventory ready with SP data for all sleds");
         }
-        Err(poll::Error::TimedOut(elapsed)) => {
+        Err(poll::Error::TimedOut { elapsed, .. }) => {
             panic!(
                 "inventory did not get SP data for all sleds within {elapsed:?}"
             );
@@ -428,7 +443,9 @@ pub(crate) async fn ensure_dpd_ready(cptestctx: &ControlPlaneTestContext) {
                         "DPD not ready yet";
                         "error" => %e
                     );
-                    Err(CondCheckError::<String>::NotYet)
+                    Err(CondCheckError::<String>::NotYet {
+                        status: Some(format!("dpd not responding: {e}")),
+                    })
                 }
             }
         },
@@ -440,7 +457,7 @@ pub(crate) async fn ensure_dpd_ready(cptestctx: &ControlPlaneTestContext) {
         Ok(_) => {
             info!(log, "DPD/switch infrastructure is ready");
         }
-        Err(poll::Error::TimedOut(elapsed)) => {
+        Err(poll::Error::TimedOut { elapsed, .. }) => {
             panic!(
                 "DPD/switch infrastructure did not become ready within {elapsed:?}"
             );
@@ -501,7 +518,9 @@ pub(crate) async fn wait_for_group_state(
             if group.state == expected_state_as_str {
                 Ok(group)
             } else {
-                Err(CondCheckError::<()>::NotYet)
+                Err(CondCheckError::<()>::NotYet {
+                    status: Some(format!("group state: {}", group.state)),
+                })
             }
         },
         &POLL_INTERVAL,
@@ -510,7 +529,7 @@ pub(crate) async fn wait_for_group_state(
     .await
     {
         Ok(group) => group,
-        Err(poll::Error::TimedOut(elapsed)) => {
+        Err(poll::Error::TimedOut { elapsed, .. }) => {
             panic!(
                 "group {group_name} did not reach state '{expected_state_as_str}' within {elapsed:?}",
             );
@@ -595,7 +614,9 @@ pub(crate) async fn wait_for_member_state(
                  '{}' after one reconciler pass, expected '{expected_state_as_str}'",
                 member.state
             ))),
-            None => Err(CondCheckError::NotYet),
+            None => Err(CondCheckError::NotYet {
+                status: Some("member not found".to_string()),
+            }),
         }
     };
 
@@ -607,7 +628,7 @@ pub(crate) async fn wait_for_member_state(
     .await
     {
         Ok(member) => member,
-        Err(poll::Error::TimedOut(elapsed)) => {
+        Err(poll::Error::TimedOut { elapsed, .. }) => {
             panic!(
                 "member {instance_id} in group {group_name} did not appear within {elapsed:?}",
             );
@@ -670,7 +691,11 @@ pub(crate) async fn wait_for_members_state(
                         member.state
                     )));
                 }
-                None => return Err(CondCheckError::NotYet),
+                None => {
+                    return Err(CondCheckError::NotYet {
+                        status: Some("member not found".to_string()),
+                    });
+                }
             }
         }
         Ok(resolved)
@@ -684,7 +709,7 @@ pub(crate) async fn wait_for_members_state(
     .await
     {
         Ok(members) => members,
-        Err(poll::Error::TimedOut(elapsed)) => panic!(
+        Err(poll::Error::TimedOut { elapsed, .. }) => panic!(
             "members in group {group_name} did not all appear within \
              {elapsed:?} (expected {expected:?})",
         ),
@@ -751,7 +776,12 @@ pub(crate) async fn wait_for_instance_sled_assignment(
                         "instance_id" => %instance_id,
                         "instance_state" => ?instance.nexus_state.state()
                     );
-                    Err(CondCheckError::<String>::NotYet)
+                    Err(CondCheckError::<String>::NotYet {
+                        status: Some(format!(
+                            "instance has no VMM yet, state: {:?}",
+                            instance.nexus_state.state()
+                        )),
+                    })
                 }
             } else {
                 warn!(
@@ -759,7 +789,11 @@ pub(crate) async fn wait_for_instance_sled_assignment(
                     "instance not found in batch fetch";
                     "instance_id" => %instance_id
                 );
-                Err(CondCheckError::<String>::NotYet)
+                Err(CondCheckError::<String>::NotYet {
+                    status: Some(
+                        "instance not found in batch fetch".to_string(),
+                    ),
+                })
             }
         },
         &POLL_INTERVAL,
@@ -774,7 +808,7 @@ pub(crate) async fn wait_for_instance_sled_assignment(
                 "instance_id" => %instance_id
             );
         }
-        Err(poll::Error::TimedOut(elapsed)) => {
+        Err(poll::Error::TimedOut { elapsed, .. }) => {
             panic!(
                 "instance {instance_id} did not get sled_id assigned within {elapsed:?}"
             );
@@ -824,7 +858,12 @@ pub(crate) async fn instance_wait_for_running_with_simulation(
             if instance.runtime.run_state == expected_state {
                 Ok(instance)
             } else {
-                Err(CondCheckError::<String>::NotYet)
+                Err(CondCheckError::<String>::NotYet {
+                    status: Some(format!(
+                        "instance state: {:?}",
+                        instance.runtime.run_state
+                    )),
+                })
             }
         },
         &POLL_INTERVAL,
@@ -833,7 +872,7 @@ pub(crate) async fn instance_wait_for_running_with_simulation(
     .await
     {
         Ok(instance) => instance,
-        Err(poll::Error::TimedOut(elapsed)) => {
+        Err(poll::Error::TimedOut { elapsed, .. }) => {
             panic!(
                 "instance {instance_id} did not reach {expected_state:?} within {elapsed:?}"
             );
@@ -899,7 +938,12 @@ pub(crate) async fn wait_for_instance_stopped(
                         .await;
                 }
 
-                Err(CondCheckError::<anyhow::Error>::NotYet)
+                Err(CondCheckError::<anyhow::Error>::NotYet {
+                    status: Some(format!(
+                        "instance state: {:?}",
+                        instance.runtime.run_state
+                    )),
+                })
             }
         },
         &POLL_INTERVAL,
@@ -914,7 +958,7 @@ pub(crate) async fn wait_for_instance_stopped(
                 "instance_id" => %instance_id,
             );
         }
-        Err(poll::Error::TimedOut(elapsed)) => {
+        Err(poll::Error::TimedOut { elapsed, .. }) => {
             panic!(
                 "instance {instance_name} ({instance_id}) did not stop \
                  within {elapsed:?}"
@@ -944,7 +988,9 @@ pub(crate) async fn wait_for_member_count(
             if members.len() == expected_count {
                 Ok(())
             } else {
-                Err(CondCheckError::<String>::NotYet)
+                Err(CondCheckError::<String>::NotYet {
+                    status: Some(format!("member count: {}", members.len())),
+                })
             }
         },
         &POLL_INTERVAL,
@@ -953,7 +999,7 @@ pub(crate) async fn wait_for_member_count(
     .await
     {
         Ok(_) => {}
-        Err(poll::Error::TimedOut(elapsed)) => {
+        Err(poll::Error::TimedOut { elapsed, .. }) => {
             panic!(
                 "group {group_name} did not reach member count {expected_count} within {elapsed:?}",
             );
@@ -991,7 +1037,9 @@ pub(crate) async fn wait_for_group_deleted(
         .await;
         match response {
             Ok(_) => Ok(()),
-            Err(_) => Err(CondCheckError::<()>::NotYet),
+            Err(_) => Err(CondCheckError::<()>::NotYet {
+                status: Some("group still present".to_string()),
+            }),
         }
     };
 
@@ -1003,7 +1051,7 @@ pub(crate) async fn wait_for_group_deleted(
     .await
     {
         Ok(_) => {}
-        Err(poll::Error::TimedOut(elapsed)) => {
+        Err(poll::Error::TimedOut { elapsed, .. }) => {
             panic!(
                 "group {group_name} was not deleted within {elapsed:?} after \
                  one reconciler pass",
@@ -1034,7 +1082,7 @@ pub(crate) async fn wait_for_group_deleted_from_dpd(
 
     let check = || async {
         match dpd_client.multicast_group_get(&multicast_ip).await {
-            Ok(_) => Err(CondCheckError::<()>::NotYet),
+            Ok(_) => Err(CondCheckError::<()>::NotYet { status: None }),
             Err(_) => Ok(()),
         }
     };
@@ -1047,7 +1095,7 @@ pub(crate) async fn wait_for_group_deleted_from_dpd(
     .await
     {
         Ok(_) => {}
-        Err(poll::Error::TimedOut(elapsed)) => {
+        Err(poll::Error::TimedOut { elapsed, .. }) => {
             panic!(
                 "group with IP {multicast_ip} was not deleted from DPD within \
                  {elapsed:?} after one reconciler pass",
@@ -1350,8 +1398,12 @@ pub(crate) async fn wait_for_member_sled_ids(
             let member = members
                 .iter()
                 .find(|m| m.parent_id == *instance_id)
-                .ok_or(CondCheckError::NotYet)?;
-            let sled_id = member.sled_id.ok_or(CondCheckError::NotYet)?;
+                .ok_or(CondCheckError::NotYet {
+                status: Some("member not found".to_string()),
+            })?;
+            let sled_id = member.sled_id.ok_or(CondCheckError::NotYet {
+                status: Some("member has no sled yet".to_string()),
+            })?;
             if sled_id.into_untyped_uuid() != expected_sled.into_untyped_uuid()
             {
                 return Err(CondCheckError::Failed(format!(
@@ -1682,7 +1734,13 @@ pub(crate) async fn assert_mrib_route_exists(
                 // A transient mgd error is not-yet, not a panic.
                 let routes = match mgd_client.static_list_mcast_routes().await {
                     Ok(routes) => routes.into_inner(),
-                    Err(_) => return Err(CondCheckError::NotYet),
+                    Err(_) => {
+                        return Err(CondCheckError::NotYet {
+                            status: Some(
+                                "mgd route list unavailable".to_string(),
+                            ),
+                        });
+                    }
                 };
                 if routes
                     .iter()
@@ -1690,7 +1748,9 @@ pub(crate) async fn assert_mrib_route_exists(
                 {
                     Ok(())
                 } else {
-                    Err(CondCheckError::NotYet)
+                    Err(CondCheckError::NotYet {
+                        status: Some("no matching route in MRIB".to_string()),
+                    })
                 }
             },
             &POLL_INTERVAL,
@@ -1717,13 +1777,21 @@ pub(crate) async fn assert_mrib_route_absent(
                 // A transient mgd error is not-yet, not a panic.
                 let routes = match mgd_client.static_list_mcast_routes().await {
                     Ok(routes) => routes.into_inner(),
-                    Err(_) => return Err(CondCheckError::NotYet),
+                    Err(_) => {
+                        return Err(CondCheckError::NotYet {
+                            status: Some(
+                                "mgd route list unavailable".to_string(),
+                            ),
+                        });
+                    }
                 };
                 if routes
                     .iter()
                     .any(|r| mrib_route_matches_group(&r.key, group_ip))
                 {
-                    Err(CondCheckError::NotYet)
+                    Err(CondCheckError::NotYet {
+                        status: Some("route still in MRIB".to_string()),
+                    })
                 } else {
                     Ok(())
                 }
@@ -1780,7 +1848,13 @@ pub(crate) async fn assert_mrib_route_sources(
                 // A transient mgd error is not-yet, not a panic.
                 let routes = match mgd_client.static_list_mcast_routes().await {
                     Ok(routes) => routes.into_inner(),
-                    Err(_) => return Err(CondCheckError::NotYet),
+                    Err(_) => {
+                        return Err(CondCheckError::NotYet {
+                            status: Some(
+                                "mgd route list unavailable".to_string(),
+                            ),
+                        });
+                    }
                 };
                 let group_routes: Vec<_> = routes
                     .iter()
@@ -1792,19 +1866,37 @@ pub(crate) async fn assert_mrib_route_sources(
                         .map(|r| mrib_route_source(&r.key))
                         .collect();
                 if sources != *expected {
-                    return Err(CondCheckError::NotYet);
+                    return Err(CondCheckError::NotYet {
+                        status: Some(
+                            "route sources do not match expected".to_string(),
+                        ),
+                    });
                 }
                 for route in &group_routes {
                     if route.underlay_group.segments()[0] != 0xff04 {
-                        return Err(CondCheckError::NotYet);
+                        return Err(CondCheckError::NotYet {
+                            status: Some(
+                                "underlay group not admin-scoped".to_string(),
+                            ),
+                        });
                     }
                     if expected_underlay
                         .is_some_and(|exp| exp != route.underlay_group)
                     {
-                        return Err(CondCheckError::NotYet);
+                        return Err(CondCheckError::NotYet {
+                            status: Some(
+                                "underlay group does not match expected"
+                                    .to_string(),
+                            ),
+                        });
                     }
                     if route.underlay_group != group_routes[0].underlay_group {
-                        return Err(CondCheckError::NotYet);
+                        return Err(CondCheckError::NotYet {
+                            status: Some(
+                                "underlay group differs across routes"
+                                    .to_string(),
+                            ),
+                        });
                     }
                 }
                 Ok(group_routes.first().map(|r| r.underlay_group))

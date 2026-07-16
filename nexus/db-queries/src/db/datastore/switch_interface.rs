@@ -22,7 +22,9 @@ use omicron_common::api::external::{
     CreateResult, DataPageParams, DeleteResult, Error, ListResultVec,
     LookupResult, ResourceType,
 };
+use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::LoopbackAddressKind;
+use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::TypedUuid;
 use uuid::Uuid;
 
@@ -76,7 +78,7 @@ impl DataStore {
                         id,
                         block.id,
                         rsvd_block.id,
-                        params.rack_id,
+                        RackUuid::from_untyped_uuid(params.rack_id),
                         params.switch_slot,
                         inet,
                         params.anycast,

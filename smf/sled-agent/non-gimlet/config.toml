@@ -18,31 +18,6 @@ sidecar_revision.soft_zone = { front_port_count = 1, rear_port_count = 1 }
 # in-sync, rather than querying its NTP zone.
 skip_timesync = false
 
-# For testing purposes, a file-backed virtual disk can be manually created with
-# the following:
-#
-# # truncate -s 10GB <name>.vdev
-#
-# Note that you'll need to create one such file for each disk below.
-# `cargo xtask virtual-hardware create` does this for you.
-#
-# These paths have the prefix of either "u2" or "m2", followed by an underscore,
-# followed by a string that is embedded into their fake serial values.
-vdevs = [
-  "m2_0.vdev",
-  "m2_1.vdev",
-
-  "u2_0.vdev",
-  "u2_1.vdev",
-  "u2_2.vdev",
-  "u2_3.vdev",
-  "u2_4.vdev",
-  "u2_5.vdev",
-  "u2_6.vdev",
-  "u2_7.vdev",
-  "u2_8.vdev",
-]
-
 # The amount of memory held back for services which exist between zero and one
 # times on this system. As this is a non-Gimlet target, it is likely that
 # services will all cohabitate here, so this is perhaps less overallocation than
@@ -105,7 +80,36 @@ swap_device_size_gb = 64
 # as-is.
 switch_zone_maghemite_links = ["tfportrear0_0"]
 
-data_links = ["net0", "net1"]
+# For testing purposes, a file-backed virtual disk can be manually created with
+# the following:
+#
+# # truncate -s 10GB <name>.vdev
+#
+# Note that you'll need to create one such file for each disk below.
+# `cargo xtask virtual-hardware create` does this for you.
+#
+# These paths have the prefix of either "u2" or "m2", followed by an underscore,
+# followed by a string that is embedded into their fake serial values.
+[external_disks]
+kind = "virtual"
+vdevs = [
+  "m2_0.vdev",
+  "m2_1.vdev",
+
+  "u2_0.vdev",
+  "u2_1.vdev",
+  "u2_2.vdev",
+  "u2_3.vdev",
+  "u2_4.vdev",
+  "u2_5.vdev",
+  "u2_6.vdev",
+  "u2_7.vdev",
+  "u2_8.vdev",
+]
+
+[data_links]
+kind = "virtual"
+devices = ["net0", "net1"]
 
 [dropshot]
 default_request_body_max_bytes = 1048576
@@ -123,3 +127,4 @@ if_exists = "append"
 resolve = { which = "local", priv_key = "/opt/oxide/sled-agent/pkg/test-sprockets-auth-1.key.pem", cert_chain = "/opt/oxide/sled-agent/pkg/test-sprockets-auth-1.certlist.pem" }
 attest = { which = "local", priv_key = "/opt/oxide/sled-agent/pkg/test-alias-1.key.pem", cert_chain = "/opt/oxide/sled-agent/pkg/test-alias-1.certlist.pem", log = "/opt/oxide/sled-agent/pkg/sprockets-log.bin", test_corpus = [ "/opt/oxide/sled-agent/pkg/testing-measurements/corim-rot.cbor", "/opt/oxide/sled-agent/pkg/testing-measurements/corim-sp.cbor"] }
 roots = ["/opt/oxide/sled-agent/pkg/test-root-a.cert.pem"]
+enforce = "Enforced"

@@ -120,13 +120,13 @@ use nexus_db_queries::db::datastore::CrucibleDisk;
 use nexus_db_queries::db::datastore::CrucibleTargets;
 use nexus_db_queries::db::datastore::Disk;
 use nexus_db_queries::db::datastore::InstanceAndActiveVmm;
-use nexus_db_queries::db::datastore::InstanceStateComputer;
 use nexus_db_queries::db::datastore::LocalStorageAllocation;
 use nexus_db_queries::db::datastore::LocalStorageDisk;
 use nexus_db_queries::db::datastore::SQL_BATCH_SIZE;
 use nexus_db_queries::db::datastore::VolumeCookedResult;
 use nexus_db_queries::db::datastore::read_only_resources_associated_with_volume;
 use nexus_db_queries::db::identity::Asset;
+use nexus_db_queries::db::model::InstanceStateComputer;
 use nexus_db_queries::db::model::ServiceKind;
 use nexus_db_queries::db::pagination::Paginator;
 use nexus_db_queries::db::pagination::paginated;
@@ -139,6 +139,7 @@ use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::DiskFilter;
 use nexus_types::deployment::SledFilter;
 use nexus_types::external_api::disk::BlockSize;
+use nexus_types::external_api::instance::InstanceState;
 use nexus_types::external_api::physical_disk::{
     PhysicalDiskPolicy, PhysicalDiskState,
 };
@@ -151,7 +152,6 @@ use nexus_types::inventory::CollectionDisplayCliFilter;
 use omicron_common::api::external;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Generation;
-use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::MacAddr;
 use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::DatasetUuid;
@@ -2677,7 +2677,7 @@ async fn cmd_db_disk_info(
             .select(nexus_db_model::Disk::as_select())
             .get_result_async(&*conn)
             .await
-            .unwrap()
+            .context("failed to find disk")?
     };
 
     match datastore.disk_get_with_model(opctx, disk).await? {
@@ -4111,7 +4111,7 @@ async fn cmd_db_region_used_by(
 
     let rows: Vec<_> = regions
         .into_iter()
-        .zip(volumes_used_by.into_iter())
+        .zip(volumes_used_by)
         .map(|(region, volume_used_by)| RegionRow {
             id: region.id(),
             volume_id: volume_used_by.volume_id,
@@ -4830,7 +4830,7 @@ async fn cmd_db_sled_instances(
     // Step 2: Sort sleds by slot number so that Sled 2 comes
     // before Sled 10.
     let mut sorted_sleds: Vec<_> = sled_info.iter().collect();
-    sorted_sleds.sort_by(|(_, a), (_, b)| a.sp_slot.cmp(&b.sp_slot));
+    sorted_sleds.sort_by_key(|(_, a)| a.sp_slot);
 
     // Step 3: For each sled, query for instances running on it
     // and print the results.
@@ -5085,15 +5085,29 @@ async fn cmd_db_instance_info(
                 "    {KARMIC_STATUS:>WIDTH$}: nirvāṇa (reincarnation disabled)"
             );
         }
-        Reincarnatability::CoolingDown(remaining) => {
+        Reincarnatability::CoolingDown { until } => {
             println!(
-                "/!\\ {KARMIC_STATUS:>WIDTH$}: cooling down \
-                 ({remaining:?} remaining)"
+                "    {KARMIC_STATUS:>WIDTH$}: cooling down \
+                 (until {until})"
             );
+
+            if let Some(last) = time_last_auto_restarted {
+                let icon = if needs_reincarnation { "/!\\" } else { "(i)" };
+                println!("{icon}  this instance last restarted at {last}.");
+                if needs_reincarnation {
+                    println!(
+                        "     it will not be permitted to restart until {until}"
+                    );
+                } else {
+                    println!(
+                        "     if it fails, it will not be permitted to \
+                        restart again until {until}"
+                    );
+                }
+            }
         }
     }
     println!("    {LAST_AUTO_RESTART:>WIDTH$}: {time_last_auto_restarted:?}");
-
     println!("    {ACTIVE_VMM:>WIDTH$}: {propolis_id:?}");
     println!("    {TARGET_VMM:>WIDTH$}: {dst_propolis_id:?}");
 
@@ -5952,7 +5966,7 @@ async fn cmd_db_eips(
         rows.push(row);
     }
 
-    rows.sort_by(|a, b| a.ip.cmp(&b.ip));
+    rows.sort_by_key(|a| a.ip);
     let table = tabled::Table::new(rows)
         .with(tabled::settings::Style::empty())
         .to_string();
