@@ -168,9 +168,7 @@ function install_packages {
     # latest.
     RTVER=13
     for p in system/library/gcc-runtime system/library/g++-runtime; do
-        # buildmat runners do not yet have a new enough `pkg` for -o
-        #v=$(pkg list -Ho release $p)
-        v=$(pkg list -H -F tsv $p | awk '{split($2, a, "-"); print a[1]}')
+        v=$(pkg list -Ho release "$p")
         ((v < RTVER)) && packages+=($p@latest)
     done
 
