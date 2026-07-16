@@ -552,7 +552,7 @@ async fn test_silo_user_multicast_permissions(
         list_multicast_group_members(client, &group.identity.name.to_string())
             .await;
     assert!(
-        members.iter().any(|m| m.instance_id == instance2.identity.id),
+        members.iter().any(|m| m.parent_id == instance2.identity.id),
         "Instance2 should be a member of the group"
     );
 }
@@ -818,7 +818,7 @@ async fn test_unprivileged_users_can_list_group_members(
     // when operating on someone else's instance
 
     // Use the instance ID from the member list
-    let instance_id = privileged_members[0].instance_id;
+    let instance_id = privileged_members[0].parent_id;
 
     // Attempt JOIN via instance-centric path (by ID) as unprivileged user
     let group_id = group.identity.id;
@@ -1235,7 +1235,7 @@ async fn test_cross_silo_multicast_isolation(
     assert_eq!(members.len(), 2, "Should have 2 members (one from each silo)");
 
     // Verify both instances are in the member list
-    let instance_ids: Vec<_> = members.iter().map(|m| m.instance_id).collect();
+    let instance_ids: Vec<_> = members.iter().map(|m| m.parent_id).collect();
     assert!(
         instance_ids.contains(&instance_a.identity.id),
         "Instance from Silo A should be in member list"
@@ -1318,7 +1318,7 @@ async fn test_cross_silo_multicast_isolation(
         "Should have 1 member after Silo B's instance detached"
     );
     assert_eq!(
-        members_after_detach.items[0].instance_id, instance_a.identity.id,
+        members_after_detach.items[0].parent_id, instance_a.identity.id,
         "Remaining member should be Silo A's instance"
     );
 
@@ -1592,7 +1592,7 @@ async fn test_both_member_endpoints_have_same_permissions(
     // Verify the member was created
     let members = list_multicast_group_members(client, group_name).await;
     assert!(
-        members.iter().any(|m| m.instance_id == instance_b.identity.id),
+        members.iter().any(|m| m.parent_id == instance_b.identity.id),
         "Instance B should be a member of the group"
     );
 

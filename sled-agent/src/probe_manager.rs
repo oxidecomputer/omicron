@@ -31,6 +31,7 @@ use sled_agent_resolvable_files::ramdisk_file_source;
 use sled_agent_types::instance::ExternalIpConfig;
 use sled_agent_types::instance::ExternalIpv4Config;
 use sled_agent_types::instance::ExternalIpv6Config;
+use sled_agent_types::instance::InstanceMulticastMembership;
 use sled_agent_types::instance::ResolvedVpcFirewallRule;
 use sled_agent_types::inventory::NetworkInterface;
 use sled_agent_types::probes::ExternalIp;
@@ -153,6 +154,10 @@ struct ProbeState {
     /// If we've built this object from a request through the sled-agent API,
     /// then we always have this.
     interface: Option<NetworkInterface>,
+    /// Multicast groups the probe's OPTE port should subscribe to,
+    /// fixed at probe zone provisioning. Empty when reconstructing
+    /// state from an existing zone.
+    multicast_groups: Vec<InstanceMulticastMembership>,
 }
 
 impl IdHashItem for ProbeState {
@@ -172,6 +177,7 @@ impl From<ProbeCreate> for ProbeState {
             status: zone::State::Running,
             external_ips: params.external_ips,
             interface: Some(params.interface),
+            multicast_groups: params.multicast_groups,
         }
     }
 }
@@ -204,6 +210,7 @@ impl TryFrom<Zone> for ProbeState {
             status: value.state(),
             external_ips: Vec::new(),
             interface: None,
+            multicast_groups: Vec::new(),
         })
     }
 }
@@ -382,7 +389,14 @@ impl ProbeManagerInner {
             // but probes are supposed to mimic instances as closely as
             // possible. We should consider if we want to support them here.
             attached_subnets: vec![],
-            multicast_groups: &[],
+            multicast_groups: &probe
+                .multicast_groups
+                .iter()
+                .map(|m| illumos_utils::opte::MulticastGroupCfg {
+                    group_ip: m.group_ip,
+                    sources: m.sources.clone(),
+                })
+                .collect::<Vec<_>>(),
             mtu: None,
         })?;
 
@@ -533,6 +547,7 @@ mod test {
             status: zone::State::Configured,
             external_ips: Vec::new(),
             interface: None,
+            multicast_groups: Vec::new(),
         };
 
         let mut b = a.clone();

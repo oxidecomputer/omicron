@@ -28,6 +28,7 @@ use http::{Method, StatusCode};
 use crate::integration_tests::instances::{
     instance_simulate, instance_wait_for_state,
 };
+use nexus_test_utils::SLED_AGENT_UUID;
 use nexus_test_utils::dpd_client;
 use nexus_test_utils::http_testing::{
     AuthnMode, Collection, NexusRequest, RequestBuilder,
@@ -39,13 +40,17 @@ use nexus_test_utils::resource_helpers::{
 };
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::instance::InstanceState;
+use nexus_types::external_api::ip_pool::PoolSelector;
 use nexus_types::external_api::ip_pool::{
     IpPool, IpPoolCreate, IpPoolRange, IpRange, IpVersion, Ipv4Range, Ipv6Range,
 };
 use nexus_types::external_api::multicast::{
-    InstanceMulticastGroupJoin, MulticastGroup, MulticastGroupMember,
+    InstanceMulticastGroupJoin, MulticastGroup, MulticastGroupJoinSpec,
+    MulticastGroupMember,
 };
+use nexus_types::external_api::probe::ProbeCreate;
 use omicron_common::api::external::IdentityMetadataCreateParams;
+use omicron_common::api::external::{Name, Probe};
 use omicron_uuid_kinds::InstanceUuid;
 
 use super::*;
@@ -191,7 +196,7 @@ async fn test_multicast_group_member_operations(
         put_upsert(client, &join_url, &join_params).await;
 
     assert_eq!(
-        added_member.instance_id.to_string(),
+        added_member.parent_id.to_string(),
         instance.identity.id.to_string()
     );
 
@@ -209,7 +214,7 @@ async fn test_multicast_group_member_operations(
     // Test listing members (should have 1 now in Joined state)
     let members = list_multicast_group_members(&client, group_name).await;
     assert_eq!(members.len(), 1, "Expected exactly 1 member");
-    assert_eq!(members[0].instance_id, added_member.instance_id);
+    assert_eq!(members[0].parent_id, added_member.parent_id);
     assert_eq!(members[0].multicast_group_id, added_member.multicast_group_id);
 
     // Test listing groups (should include our implicitly created group)
@@ -381,7 +386,7 @@ async fn test_instance_multicast_endpoints(
     // Use PUT method and expect 201 Created (implicitly creating group1)
     let member1: MulticastGroupMember =
         put_upsert(client, &instance_join_group1_url, &join_params).await;
-    assert_eq!(member1.instance_id, instance.identity.id);
+    assert_eq!(member1.parent_id, instance.identity.id);
 
     // Wait for group1 to become active after implicitly create
     wait_for_group_active(client, group1_name).await;
@@ -400,7 +405,7 @@ async fn test_instance_multicast_endpoints(
     let group1_members =
         list_multicast_group_members(&client, group1_name).await;
     assert_eq!(group1_members.len(), 1);
-    assert_eq!(group1_members[0].instance_id, instance.identity.id);
+    assert_eq!(group1_members[0].parent_id, instance.identity.id);
 
     // Check instance-centric view (test the list endpoint thoroughly)
     let instance_memberships: ResultsPage<MulticastGroupMember> =
@@ -410,7 +415,7 @@ async fn test_instance_multicast_endpoints(
         1,
         "Instance should have exactly 1 membership"
     );
-    assert_eq!(instance_memberships.items[0].instance_id, instance.identity.id);
+    assert_eq!(instance_memberships.items[0].parent_id, instance.identity.id);
     assert_eq!(
         instance_memberships.items[0].multicast_group_id,
         member1.multicast_group_id
@@ -425,7 +430,7 @@ async fn test_instance_multicast_endpoints(
         InstanceMulticastGroupJoin { source_ips: None, ip_version: None };
     let member2: MulticastGroupMember =
         put_upsert(client, &join_group2_url, &join_params2).await;
-    assert_eq!(member2.instance_id, instance.identity.id);
+    assert_eq!(member2.parent_id, instance.identity.id);
 
     // Wait for group2 to become active after implicitly create
     wait_for_group_active(client, group2_name).await;
@@ -465,7 +470,7 @@ async fn test_instance_multicast_endpoints(
 
     // Verify all memberships show correct instance_id and state
     for membership in &instance_memberships.items {
-        assert_eq!(membership.instance_id, instance.identity.id);
+        assert_eq!(membership.parent_id, instance.identity.id);
         assert_eq!(membership.state, "Joined");
     }
 
@@ -476,8 +481,8 @@ async fn test_instance_multicast_endpoints(
         list_multicast_group_members(&client, group2_name).await;
     assert_eq!(group1_members.len(), 1);
     assert_eq!(group2_members.len(), 1);
-    assert_eq!(group1_members[0].instance_id, instance.identity.id);
-    assert_eq!(group2_members[0].instance_id, instance.identity.id);
+    assert_eq!(group1_members[0].parent_id, instance.identity.id);
+    assert_eq!(group2_members[0].parent_id, instance.identity.id);
 
     // Leave group1 using instance-centric endpoint
     let instance_leave_group1_url = format!(
@@ -646,7 +651,7 @@ async fn test_instance_deletion_removes_multicast_memberships(
     // Verify member was added
     let members = list_multicast_group_members(&client, group_name).await;
     assert_eq!(members.len(), 1, "Instance should be a member of the group");
-    assert_eq!(members[0].instance_id, instance.identity.id);
+    assert_eq!(members[0].parent_id, instance.identity.id);
 
     // Verify MRIB route exists while group is active with a joined member.
     assert_mrib_route_exists(cptestctx, multicast_ip).await;
@@ -1830,4 +1835,133 @@ async fn test_multicast_group_ip_version_conflict(
     // Wait for both groups to be deleted (test creates two groups)
     wait_for_group_deleted(cptestctx, "conflict-test-group").await;
     wait_for_group_deleted(cptestctx, &ip_based_group_name).await;
+}
+
+/// Drives the probe-multicast end-to-end path for both v4 and v6 in one
+/// test: pre-create the multicast group via an instance attach, then
+/// create a probe enrolling in the same group at probe-create time, then
+/// verify the probe membership row appears in the group's member list.
+#[nexus_test]
+async fn test_probe_multicast_member(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
+    let project_name = "probe-mcast-project";
+    create_project(client, project_name).await;
+    let (v4_default_pool, _v6_default_pool) =
+        create_default_ip_pools(client).await;
+
+    // v4 setup
+    create_multicast_ip_pool_with_range(
+        client,
+        "probe-mcast-v4-pool",
+        (224, 50, 0, 10),
+        (224, 50, 0, 50),
+    )
+    .await;
+    enroll_probe_in_group(
+        cptestctx,
+        project_name,
+        "probe-mcast-v4-group",
+        "primer-instance-v4",
+        "probe-mcaster-v4",
+        &v4_default_pool,
+        IpVersion::V4,
+    )
+    .await;
+
+    // v6 setup. Both multicast pools exist at this point, so the
+    // by-name auto-create needs `ip_version` to disambiguate which
+    // pool to allocate the group from.
+    create_multicast_ip_pool_v6(client, "probe-mcast-v6-pool").await;
+    enroll_probe_in_group(
+        cptestctx,
+        project_name,
+        "probe-mcast-v6-group",
+        "primer-instance-v6",
+        "probe-mcaster-v6",
+        &v4_default_pool,
+        IpVersion::V6,
+    )
+    .await;
+}
+
+/// Inner step shared by the v4 and v6 setups of
+/// [`test_probe_multicast_member`]. Materializes `group_name` by attaching
+/// `instance_name`, drives it to "Joined", then creates `probe_name`
+/// enrolling in the same group and asserts the probe row appears in the
+/// group's member list. `unicast_pool` supplies the probe's external IP, which
+/// is separate from the multicast pool.
+async fn enroll_probe_in_group(
+    cptestctx: &ControlPlaneTestContext,
+    project_name: &str,
+    group_name: &str,
+    instance_name: &str,
+    probe_name: &str,
+    unicast_pool: &IpPool,
+    ip_version: IpVersion,
+) {
+    let client = &cptestctx.external_client;
+
+    // Materialize the group via an instance attach. Group creation has no
+    // direct API and instance join auto-creates. `ip_version` selects the
+    // multicast pool when multiple are linked.
+    let instance = create_instance(client, project_name, instance_name).await;
+    let join_url = format!(
+        "/v1/instances/{instance_name}/multicast-groups/{group_name}?project={project_name}"
+    );
+    let join_params = InstanceMulticastGroupJoin {
+        source_ips: None,
+        ip_version: Some(ip_version),
+    };
+    let _: MulticastGroupMember =
+        put_upsert(client, &join_url, &join_params).await;
+
+    // Drive instance member to "Joined" so the group is "Active" and the
+    // probe-side enrollment lands in a steady state.
+    wait_for_member_state(
+        cptestctx,
+        group_name,
+        instance.identity.id,
+        nexus_db_model::MulticastGroupMemberState::Joined,
+    )
+    .await;
+
+    // Create a probe enrolling in the same group at create time. Use an
+    // explicit unicast pool selector since the probe's external IP is
+    // unicast (the multicast group is separate from that pool).
+    let probe_body = ProbeCreate {
+        identity: IdentityMetadataCreateParams {
+            name: probe_name.parse().unwrap(),
+            description: "probe-multicast e2e fixture".to_owned(),
+        },
+        sled: SLED_AGENT_UUID.parse().unwrap(),
+        pool_selector: PoolSelector::Explicit {
+            pool: unicast_pool.identity.name.clone().into(),
+        },
+        multicast_groups: vec![MulticastGroupJoinSpec {
+            group: group_name.parse::<Name>().unwrap().into(),
+            source_ips: None,
+            ip_version: None,
+        }],
+    };
+    let probe: Probe = NexusRequest::objects_post(
+        client,
+        &format!("/experimental/v1/probes?project={project_name}"),
+        &probe_body,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body()
+    .unwrap();
+
+    // Verify the probe appears as a member of the group. The view's
+    // `parent_id` field carries the parent's UUID regardless of kind.
+    let members = list_multicast_group_members(client, group_name).await;
+    let probe_id = probe.identity.id;
+    let actual: Vec<_> = members.iter().map(|m| m.parent_id).collect();
+    assert!(
+        members.iter().any(|m| m.parent_id == probe_id),
+        "expected probe {probe_id} in group {group_name} members. Received {actual:?}",
+    );
 }

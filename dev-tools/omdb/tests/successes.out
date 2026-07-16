@@ -99,7 +99,7 @@ EXECUTING COMMAND: omdb ["db", "multicast", "members"]
 termination: Exited(0)
 ---------------------------------------------
 stdout:
-ID GROUP_NAME PARENT_ID STATE MULTICAST_IP SOURCES SLED_ID CREATED 
+ID GROUP_NAME PARENT_KIND PARENT_ID STATE MULTICAST_IP SOURCES SLED_ID CREATED 
 ---------------------------------------------
 stderr:
 note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable

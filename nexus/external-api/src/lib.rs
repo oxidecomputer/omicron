@@ -86,6 +86,7 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyy_mm_dd_nn, IDENT),
+    (2026_07_16_01, PROBE_MULTICAST),
     (2026_07_16_00, MULTICAST_SOURCE_LIMITS),
     (2026_06_10_00, BGP_CONFIGURATION_UPDATE),
     (2026_06_08_00, INSTANCE_CPU_TYPE_TURIN_V2),
@@ -3214,7 +3215,7 @@ pub trait NexusExternalApi {
         method = GET,
         path = "/v1/multicast-groups/{multicast_group}/members",
         tags = ["experimental"],
-        versions = VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES..,
+        versions = VERSION_PROBE_MULTICAST..,
     }]
     async fn multicast_group_member_list(
         rqctx: RequestContext<Self::Context>,
@@ -3224,6 +3225,43 @@ pub trait NexusExternalApi {
         HttpResponseOk<ResultsPage<latest::multicast::MulticastGroupMember>>,
         HttpError,
     >;
+
+    /// List members of multicast group
+    ///
+    /// The group can be specified by name, UUID, or multicast IP address.
+    #[endpoint {
+        method = GET,
+        path = "/v1/multicast-groups/{multicast_group}/members",
+        tags = ["experimental"],
+        operation_id = "multicast_group_member_list",
+        versions = VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES..VERSION_PROBE_MULTICAST,
+    }]
+    async fn multicast_group_member_list_v2026_01_08_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v2026_01_08_00::multicast::MulticastGroupPath>,
+        query_params: Query<PaginatedById>,
+    ) -> Result<
+        HttpResponseOk<
+            ResultsPage<v2026_01_08_00::multicast::MulticastGroupMember>,
+        >,
+        HttpError,
+    > {
+        let HttpResponseOk(page) =
+            Self::multicast_group_member_list(rqctx, path_params, query_params)
+                .await?;
+        // Drop probe-parented rows that have no representation in this
+        // version's type. A single-row fetch would surface the mismatch
+        // as 406, but list pages stay readable for the instance subset.
+        let items = page
+            .items
+            .into_iter()
+            .filter_map(|m| {
+                v2026_01_08_00::multicast::MulticastGroupMember::try_from(m)
+                    .ok()
+            })
+            .collect();
+        Ok(HttpResponseOk(ResultsPage { items, next_page: page.next_page }))
+    }
 
     /// List members of multicast group
     ///
@@ -3246,14 +3284,19 @@ pub trait NexusExternalApi {
         HttpError,
     > {
         let path = path_params.map(Into::into);
-        Self::multicast_group_member_list(rqctx, path, query_params).await.map(
-            |HttpResponseOk(page)| {
-                HttpResponseOk(ResultsPage {
-                    items: page.items.into_iter().map(|m| m.into()).collect(),
-                    next_page: page.next_page,
-                })
-            },
-        )
+        let HttpResponseOk(page) =
+            Self::multicast_group_member_list(rqctx, path, query_params)
+                .await?;
+        let items = page
+            .items
+            .into_iter()
+            .filter_map(|m| {
+                v2026_01_08_00::multicast::MulticastGroupMember::try_from(m)
+                    .ok()
+                    .map(Into::into)
+            })
+            .collect();
+        Ok(HttpResponseOk(ResultsPage { items, next_page: page.next_page }))
     }
 
     /// Add instance to multicast group
@@ -6590,7 +6633,7 @@ pub trait NexusExternalApi {
         method = GET,
         path = "/v1/instances/{instance}/multicast-groups",
         tags = ["experimental"],
-        versions = VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES..,
+        versions = VERSION_PROBE_MULTICAST..,
     }]
     async fn instance_multicast_group_list(
         rqctx: RequestContext<Self::Context>,
@@ -6602,6 +6645,43 @@ pub trait NexusExternalApi {
         HttpResponseOk<ResultsPage<latest::multicast::MulticastGroupMember>>,
         HttpError,
     >;
+
+    /// List multicast groups for an instance
+    #[endpoint {
+        method = GET,
+        path = "/v1/instances/{instance}/multicast-groups",
+        tags = ["experimental"],
+        operation_id = "instance_multicast_group_list",
+        versions = VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES..VERSION_PROBE_MULTICAST,
+    }]
+    async fn instance_multicast_group_list_v2026_01_08_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<
+            PaginatedById<v2025_11_20_00::project::OptionalProjectSelector>,
+        >,
+        path_params: Path<v2025_11_20_00::path_params::InstancePath>,
+    ) -> Result<
+        HttpResponseOk<
+            ResultsPage<v2026_01_08_00::multicast::MulticastGroupMember>,
+        >,
+        HttpError,
+    > {
+        let HttpResponseOk(page) = Self::instance_multicast_group_list(
+            rqctx,
+            query_params,
+            path_params,
+        )
+        .await?;
+        let items = page
+            .items
+            .into_iter()
+            .filter_map(|m| {
+                v2026_01_08_00::multicast::MulticastGroupMember::try_from(m)
+                    .ok()
+            })
+            .collect();
+        Ok(HttpResponseOk(ResultsPage { items, next_page: page.next_page }))
+    }
 
     /// List multicast groups for an instance
     #[endpoint {
@@ -6631,14 +6711,22 @@ pub trait NexusExternalApi {
                 )?)
                 .map_err(|e| HttpError::for_bad_request(None, e.to_string()))
             })?;
-        Self::instance_multicast_group_list(rqctx, query_params, path_params)
-            .await
-            .map(|HttpResponseOk(page)| {
-                HttpResponseOk(ResultsPage {
-                    next_page: page.next_page,
-                    items: page.items.into_iter().map(Into::into).collect(),
-                })
+        let HttpResponseOk(page) = Self::instance_multicast_group_list(
+            rqctx,
+            query_params,
+            path_params,
+        )
+        .await?;
+        let items = page
+            .items
+            .into_iter()
+            .filter_map(|m| {
+                v2026_01_08_00::multicast::MulticastGroupMember::try_from(m)
+                    .ok()
+                    .map(Into::into)
             })
+            .collect();
+        Ok(HttpResponseOk(ResultsPage { items, next_page: page.next_page }))
     }
 
     /// Join multicast group by name, IP address, or UUID
@@ -6657,7 +6745,7 @@ pub trait NexusExternalApi {
         method = PUT,
         path = "/v1/instances/{instance}/multicast-groups/{multicast_group}",
         tags = ["experimental"],
-        versions = VERSION_MULTICAST_SOURCE_LIMITS..,
+        versions = VERSION_PROBE_MULTICAST..,
     }]
     async fn instance_multicast_group_join(
         rqctx: RequestContext<Self::Context>,
@@ -6666,6 +6754,39 @@ pub trait NexusExternalApi {
         body_params: TypedBody<latest::multicast::InstanceMulticastGroupJoin>,
     ) -> Result<
         HttpResponseCreated<latest::multicast::MulticastGroupMember>,
+        HttpError,
+    >;
+
+    /// Join multicast group by name, IP address, or UUID
+    ///
+    /// Groups can be referenced by name, IP address, or UUID. If the group
+    /// doesn't exist, it's implicitly created with an auto-allocated IP from a
+    /// multicast pool linked to the caller's silo. When referencing by UUID,
+    /// the group must already exist.
+    ///
+    /// Source IPs are optional for ASM addresses but required for SSM addresses
+    /// (232.0.0.0/8 for IPv4, ff3x::/32 for IPv6). Duplicate source IPs in a
+    /// single request are rejected. Per-member source list is capped at 32, and
+    /// the union of source IPs across all members of a single group is capped
+    /// at 256.
+    #[endpoint {
+        method = PUT,
+        path = "/v1/instances/{instance}/multicast-groups/{multicast_group}",
+        tags = ["experimental"],
+        operation_id = "instance_multicast_group_join",
+        versions = VERSION_MULTICAST_SOURCE_LIMITS..VERSION_PROBE_MULTICAST,
+    }]
+    async fn instance_multicast_group_join_v2026_05_22_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<
+            v2026_01_08_00::multicast::InstanceMulticastGroupPath,
+        >,
+        query_params: Query<v2025_11_20_00::project::OptionalProjectSelector>,
+        body_params: TypedBody<
+            v2026_01_08_00::multicast::InstanceMulticastGroupJoin,
+        >,
+    ) -> Result<
+        HttpResponseCreated<v2026_01_08_00::multicast::MulticastGroupMember>,
         HttpError,
     >;
 
@@ -8545,13 +8666,29 @@ pub trait NexusExternalApi {
         method = POST,
         path = "/experimental/v1/probes",
         tags = ["experimental"], // system/probes: only one tag is allowed
-        versions = VERSION_POOL_SELECTION_ENUMS..,
+        versions = VERSION_PROBE_MULTICAST..,
     }]
     async fn probe_create(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<latest::project::ProjectSelector>,
         new_probe: TypedBody<latest::probe::ProbeCreate>,
     ) -> Result<HttpResponseCreated<Probe>, HttpError>;
+
+    /// Create instrumentation probe
+    #[endpoint {
+        operation_id = "probe_create",
+        method = POST,
+        path = "/experimental/v1/probes",
+        tags = ["experimental"], // system/probes: only one tag is allowed
+        versions = VERSION_POOL_SELECTION_ENUMS..VERSION_PROBE_MULTICAST,
+    }]
+    async fn probe_create_v2026_01_05_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<v2025_11_20_00::project::ProjectSelector>,
+        new_probe: TypedBody<v2026_01_05_00::probe::ProbeCreate>,
+    ) -> Result<HttpResponseCreated<Probe>, HttpError> {
+        Self::probe_create(rqctx, query_params, new_probe.map(Into::into)).await
+    }
 
     /// Create instrumentation probe
     #[endpoint {
@@ -8566,7 +8703,12 @@ pub trait NexusExternalApi {
         query_params: Query<v2025_11_20_00::project::ProjectSelector>,
         new_probe: TypedBody<v2025_11_20_00::probe::ProbeCreate>,
     ) -> Result<HttpResponseCreated<Probe>, HttpError> {
-        Self::probe_create(rqctx, query_params, new_probe.map(Into::into)).await
+        Self::probe_create_v2026_01_05_00(
+            rqctx,
+            query_params,
+            new_probe.map(Into::into),
+        )
+        .await
     }
 
     /// Delete instrumentation probe

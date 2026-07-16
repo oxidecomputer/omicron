@@ -5357,10 +5357,35 @@ impl NexusExternalApi for NexusExternalApiImpl {
         .await
     }
 
-    // Pre-MULTICAST_SOURCE_LIMITS version: same types as the latest variant
-    // (re-exported through `latest::`), so delegate directly. The behavioral
-    // difference (per-member and per-group source IP caps) is enforced
-    // unconditionally in the Nexus app layer.
+    // Pre-PROBE_MULTICAST version: body and path types are unchanged, so
+    // delegate to the latest and downgrade the response via the version-
+    // chain `TryFrom`, which fails 406 if the row is probe-parented.
+    async fn instance_multicast_group_join_v2026_05_22_00(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<
+            v2026_01_08_00::multicast::InstanceMulticastGroupPath,
+        >,
+        query_params: Query<project::OptionalProjectSelector>,
+        body_params: TypedBody<
+            v2026_01_08_00::multicast::InstanceMulticastGroupJoin,
+        >,
+    ) -> Result<
+        HttpResponseCreated<v2026_01_08_00::multicast::MulticastGroupMember>,
+        HttpError,
+    > {
+        let HttpResponseCreated(latest) = Self::instance_multicast_group_join(
+            rqctx,
+            path_params,
+            query_params,
+            body_params,
+        )
+        .await?;
+        let member: v2026_01_08_00::multicast::MulticastGroupMember =
+            latest.try_into()?;
+        Ok(HttpResponseCreated(member))
+    }
+
+    // Same shape as the v2026_05_22_00 variant. Delegate.
     async fn instance_multicast_group_join_v2026_01_08_00(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<
@@ -5374,7 +5399,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
         HttpResponseCreated<v2026_01_08_00::multicast::MulticastGroupMember>,
         HttpError,
     > {
-        Self::instance_multicast_group_join(
+        Self::instance_multicast_group_join_v2026_05_22_00(
             rqctx,
             path_params,
             query_params,
@@ -5425,7 +5450,9 @@ impl NexusExternalApi for NexusExternalApiImpl {
                     None, // Old API version doesn't support ip_version
                 )
                 .await?;
-            let member = multicast::MulticastGroupMember::try_from(result)?;
+            let latest = multicast::MulticastGroupMember::try_from(result)?;
+            let member: v2026_01_08_00::multicast::MulticastGroupMember =
+                latest.try_into()?;
             Ok(HttpResponseCreated(member.into()))
         };
         apictx

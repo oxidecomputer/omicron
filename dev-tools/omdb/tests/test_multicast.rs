@@ -130,7 +130,7 @@ async fn wait_for_member_state(
                     .await
                     .items;
             if let Some(member) =
-                members.iter().find(|m| m.instance_id == instance_id)
+                members.iter().find(|m| m.parent_id == instance_id)
             {
                 if member.state == expected_state_str {
                     Ok(member.clone())

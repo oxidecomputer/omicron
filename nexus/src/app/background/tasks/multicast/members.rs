@@ -114,7 +114,7 @@ use slog::{debug, info, trace, warn};
 use uuid::Uuid;
 
 use nexus_db_model::{
-    DbTypedUuid, MulticastGroup, MulticastGroupMember,
+    DbTypedUuid, MemberParentRef, MulticastGroup, MulticastGroupMember,
     MulticastGroupMemberState, MulticastGroupState,
 };
 use nexus_db_queries::context::OpContext;
@@ -125,8 +125,8 @@ use nexus_types::external_api::instance::InstanceState;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::DataPageParams;
 use omicron_uuid_kinds::{
-    GenericUuid, InstanceUuid, MulticastGroupUuid, PropolisUuid, SledKind,
-    SledUuid,
+    GenericUuid, InstanceUuid, MulticastGroupUuid, ProbeUuid, PropolisUuid,
+    SledKind, SledUuid,
 };
 
 use super::{MulticastGroupReconciler, StateTransition};
@@ -179,59 +179,6 @@ pub(super) struct MemberReconcileCounts {
 struct SledIdUpdate {
     old: Option<DbTypedUuid<SledKind>>,
     new: Option<DbTypedUuid<SledKind>>,
-}
-
-/// Trait for processing different types of multicast group members.
-trait MemberStateProcessor {
-    /// Process a member in "Joining" state.
-    async fn process_joining(
-        &self,
-        reconciler: &MulticastGroupReconciler,
-        ctx: &MemberReconcileCtx<'_>,
-    ) -> Result<StateTransition, anyhow::Error>;
-
-    /// Process a member in "Joined" state.
-    async fn process_joined(
-        &self,
-        reconciler: &MulticastGroupReconciler,
-        ctx: &MemberReconcileCtx<'_>,
-    ) -> Result<StateTransition, anyhow::Error>;
-
-    /// Process a member in "Left" state.
-    async fn process_left(
-        &self,
-        reconciler: &MulticastGroupReconciler,
-        ctx: &MemberReconcileCtx<'_>,
-    ) -> Result<StateTransition, anyhow::Error>;
-}
-
-/// Processor for instance-based multicast group members.
-struct InstanceMemberProcessor;
-
-impl MemberStateProcessor for InstanceMemberProcessor {
-    async fn process_joining(
-        &self,
-        reconciler: &MulticastGroupReconciler,
-        ctx: &MemberReconcileCtx<'_>,
-    ) -> Result<StateTransition, anyhow::Error> {
-        reconciler.handle_instance_joining(ctx).await
-    }
-
-    async fn process_joined(
-        &self,
-        reconciler: &MulticastGroupReconciler,
-        ctx: &MemberReconcileCtx<'_>,
-    ) -> Result<StateTransition, anyhow::Error> {
-        reconciler.handle_instance_joined(ctx).await
-    }
-
-    async fn process_left(
-        &self,
-        reconciler: &MulticastGroupReconciler,
-        ctx: &MemberReconcileCtx<'_>,
-    ) -> Result<StateTransition, anyhow::Error> {
-        reconciler.handle_instance_left(ctx).await
-    }
 }
 
 impl MulticastGroupReconciler {
@@ -410,19 +357,33 @@ impl MulticastGroupReconciler {
                 .await;
         }
 
-        // For now, all members are instance-based, but this is where we'd
-        // dispatch to different processors for different member types
-        let processor = InstanceMemberProcessor;
-
-        match member.state {
-            MulticastGroupMemberState::Joining => {
-                processor.process_joining(self, ctx).await
+        // Dispatch on (parent_kind, state). Probe OPTE state is set up at
+        // probe-zone provisioning, so the probe path skips the sled-agent
+        // RPCs the instance path needs and resolves its sled directly from
+        // the probe row. Probes have no update endpoint, as is normal for
+        // probes outside multicast, so membership is fixed at create and
+        // never mutates after it. The probe path therefore only drives
+        // initial setup and delete-time teardown, never a join or leave on
+        // a live probe.
+        use MulticastGroupMemberState::{Joined, Joining, Left};
+        match (member.parent_ref(), member.state) {
+            (MemberParentRef::Instance(_), Joining) => {
+                self.handle_instance_joining(ctx).await
             }
-            MulticastGroupMemberState::Joined => {
-                processor.process_joined(self, ctx).await
+            (MemberParentRef::Instance(_), Joined) => {
+                self.handle_instance_joined(ctx).await
             }
-            MulticastGroupMemberState::Left => {
-                processor.process_left(self, ctx).await
+            (MemberParentRef::Instance(_), Left) => {
+                self.handle_instance_left(ctx).await
+            }
+            (MemberParentRef::Probe(id), Joining) => {
+                self.handle_probe_joining(ctx, id).await
+            }
+            (MemberParentRef::Probe(id), Joined) => {
+                self.handle_probe_joined(ctx, id).await
+            }
+            (MemberParentRef::Probe(_), Left) => {
+                self.handle_probe_left(ctx).await
             }
         }
     }
@@ -514,10 +475,12 @@ impl MulticastGroupReconciler {
         let current_sled_id_db = current_sled_id.map(|id| id.into());
 
         self.datastore
-            .multicast_group_member_reconcile_joining(
+            .multicast_group_member_reconcile_joining_for_parent(
                 ctx.opctx,
                 MulticastGroupUuid::from_untyped_uuid(ctx.group.id()),
-                InstanceUuid::from_untyped_uuid(ctx.member.parent_id),
+                MemberParentRef::Instance(InstanceUuid::from_untyped_uuid(
+                    ctx.member.parent_id,
+                )),
                 instance_valid,
                 current_sled_id_db,
             )
@@ -707,10 +670,12 @@ impl MulticastGroupReconciler {
         // Update database state (atomically set "Left" and clear `sled_id`)
         let updated = self
             .datastore
-            .multicast_group_member_to_left_if_current(
+            .multicast_group_member_to_left_if_current_for_parent(
                 opctx,
                 MulticastGroupUuid::from_untyped_uuid(group.id()),
-                InstanceUuid::from_untyped_uuid(member.parent_id),
+                MemberParentRef::Instance(InstanceUuid::from_untyped_uuid(
+                    member.parent_id,
+                )),
                 MulticastGroupMemberState::Joined,
             )
             .await
@@ -846,10 +811,12 @@ impl MulticastGroupReconciler {
 
                 let updated = self
                     .datastore
-                    .multicast_group_member_set_state_if_current(
+                    .multicast_group_member_set_state_if_current_for_parent(
                         ctx.opctx,
                         MulticastGroupUuid::from_untyped_uuid(ctx.group.id()),
-                        InstanceUuid::from_untyped_uuid(ctx.member.parent_id),
+                        MemberParentRef::Instance(
+                            InstanceUuid::from_untyped_uuid(ctx.member.parent_id),
+                        ),
                         MulticastGroupMemberState::Joined,
                         MulticastGroupMemberState::Joining,
                     )
@@ -893,10 +860,12 @@ impl MulticastGroupReconciler {
         // DB state moves to "Left".
         let updated = self
             .datastore
-            .multicast_group_member_set_state_if_current(
+            .multicast_group_member_set_state_if_current_for_parent(
                 opctx,
                 MulticastGroupUuid::from_untyped_uuid(group.id()),
-                InstanceUuid::from_untyped_uuid(member.parent_id),
+                MemberParentRef::Instance(InstanceUuid::from_untyped_uuid(
+                    member.parent_id,
+                )),
                 MulticastGroupMemberState::Joined,
                 MulticastGroupMemberState::Left,
             )
@@ -981,6 +950,127 @@ impl MulticastGroupReconciler {
         Ok(StateTransition::NoChange)
     }
 
+    /// Probe-side "Joining" handler.
+    ///
+    /// Drives the polymorphic `_for_parent` reconcile-CAS with the probe's
+    /// hosting sled read directly from `probe.sled`. The probe's OPTE
+    /// multicast subscription is set up at zone provisioning, so there is no
+    /// sled-agent RPC here, unlike the instance path.
+    async fn handle_probe_joining(
+        &self,
+        ctx: &MemberReconcileCtx<'_>,
+        probe_id: ProbeUuid,
+    ) -> Result<StateTransition, anyhow::Error> {
+        let probe_state = self.lookup_probe_state(ctx.opctx, probe_id).await?;
+
+        let reconcile_res = self
+            .datastore
+            .multicast_group_member_reconcile_joining_for_parent(
+                ctx.opctx,
+                MulticastGroupUuid::from_untyped_uuid(ctx.group.id()),
+                MemberParentRef::Probe(probe_id),
+                probe_state.valid,
+                probe_state.sled_id.map(Into::into),
+            )
+            .await
+            .context("failed to reconcile probe member in 'Joining' state")?;
+
+        match reconcile_res.action {
+            ReconcileAction::TransitionedToLeft => {
+                info!(
+                    ctx.opctx.log,
+                    "multicast probe member 'Joining' → 'Left'";
+                    "member_id" => %ctx.member.id,
+                    "probe_id" => %ctx.member.parent_id,
+                    "group_id" => %ctx.group.id(),
+                    "reason" => "probe_not_valid_for_multicast",
+                );
+                Ok(StateTransition::StateChanged)
+            }
+            ReconcileAction::UpdatedSledId { .. }
+            | ReconcileAction::NotFound
+            | ReconcileAction::NoChange => {
+                if ctx.group.state == MulticastGroupState::Active
+                    && probe_state.valid
+                {
+                    self.datastore
+                        .multicast_group_member_set_state_if_current_for_parent(
+                            ctx.opctx,
+                            MulticastGroupUuid::from_untyped_uuid(
+                                ctx.group.id(),
+                            ),
+                            MemberParentRef::Probe(probe_id),
+                            MulticastGroupMemberState::Joining,
+                            MulticastGroupMemberState::Joined,
+                        )
+                        .await?;
+                    Ok(StateTransition::StateChanged)
+                } else {
+                    Ok(StateTransition::NoChange)
+                }
+            }
+        }
+    }
+
+    /// Probe-side "Joined" handler.
+    ///
+    /// A missing or invalid probe transitions the member to "Left".
+    /// Otherwise this is a noop (steady state).
+    async fn handle_probe_joined(
+        &self,
+        ctx: &MemberReconcileCtx<'_>,
+        probe_id: ProbeUuid,
+    ) -> Result<StateTransition, anyhow::Error> {
+        let probe_state = self.lookup_probe_state(ctx.opctx, probe_id).await?;
+
+        if !probe_state.valid {
+            self.datastore
+                .multicast_group_member_set_state_if_current_for_parent(
+                    ctx.opctx,
+                    MulticastGroupUuid::from_untyped_uuid(ctx.group.id()),
+                    MemberParentRef::Probe(probe_id),
+                    MulticastGroupMemberState::Joined,
+                    MulticastGroupMemberState::Left,
+                )
+                .await?;
+            return Ok(StateTransition::StateChanged);
+        }
+
+        Ok(StateTransition::NoChange)
+    }
+
+    /// Probe-side "Left" handler.
+    ///
+    /// If the membership is soft-deleted, finish cleanup. Otherwise noop:
+    /// probes do not reactivate, since membership is set only at probe-create
+    /// time. Rear-port underlay membership is owned by mg-lower, so there is
+    /// no dataplane cleanup to do here.
+    async fn handle_probe_left(
+        &self,
+        ctx: &MemberReconcileCtx<'_>,
+    ) -> Result<StateTransition, anyhow::Error> {
+        if ctx.member.time_deleted.is_some() {
+            self.cleanup_deleted_member(ctx).await?;
+            return Ok(StateTransition::NeedsCleanup);
+        }
+        Ok(StateTransition::NoChange)
+    }
+
+    /// Per-row probe lookup state. Probes are rare, so there is no pre-pass
+    /// cache. The `valid` field reflects an active (not soft-deleted) probe
+    /// row with a hosting sled.
+    async fn lookup_probe_state(
+        &self,
+        opctx: &OpContext,
+        probe_id: ProbeUuid,
+    ) -> Result<InstanceMulticastState, anyhow::Error> {
+        let sled_id = self
+            .datastore
+            .probe_get_sled_for_multicast(opctx, probe_id)
+            .await?;
+        Ok(InstanceMulticastState { valid: sled_id.is_some(), sled_id })
+    }
+
     /// Reactivate a member in "Left" state when instance becomes valid again.
     /// Transitions the member back to "Joining" state so it can rejoin the group.
     async fn reactivate_left_member(
@@ -1000,10 +1090,12 @@ impl MulticastGroupReconciler {
 
         let updated = if let Some(sled_id) = current_sled_id {
             self.datastore
-                .multicast_group_member_left_to_joining_if_current(
+                .multicast_group_member_left_to_joining_if_current_for_parent(
                     opctx,
                     MulticastGroupUuid::from_untyped_uuid(group.id()),
-                    InstanceUuid::from_untyped_uuid(member.parent_id),
+                    MemberParentRef::Instance(InstanceUuid::from_untyped_uuid(
+                        member.parent_id,
+                    )),
                     sled_id.into(),
                 )
                 .await
@@ -1012,10 +1104,12 @@ impl MulticastGroupReconciler {
                 )?
         } else {
             self.datastore
-                .multicast_group_member_set_state_if_current(
+                .multicast_group_member_set_state_if_current_for_parent(
                     opctx,
                     MulticastGroupUuid::from_untyped_uuid(group.id()),
-                    InstanceUuid::from_untyped_uuid(member.parent_id),
+                    MemberParentRef::Instance(InstanceUuid::from_untyped_uuid(
+                        member.parent_id,
+                    )),
                     MulticastGroupMemberState::Left,
                     MulticastGroupMemberState::Joining,
                 )
@@ -1250,10 +1344,12 @@ impl MulticastGroupReconciler {
         if ctx.member.state != MulticastGroupMemberState::Joined {
             let updated = self
                 .datastore
-                .multicast_group_member_set_state_if_current(
+                .multicast_group_member_set_state_if_current_for_parent(
                     ctx.opctx,
                     MulticastGroupUuid::from_untyped_uuid(ctx.group.id()),
-                    InstanceUuid::from_untyped_uuid(ctx.member.parent_id),
+                    MemberParentRef::Instance(InstanceUuid::from_untyped_uuid(
+                        ctx.member.parent_id,
+                    )),
                     MulticastGroupMemberState::Joining,
                     MulticastGroupMemberState::Joined,
                 )

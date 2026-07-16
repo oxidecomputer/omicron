@@ -113,7 +113,7 @@ async fn test_dpd_failure_during_creating_state(
     wait_for_member_state(
         cptestctx,
         group_name,
-        members[0].instance_id,
+        members[0].parent_id,
         nexus_db_model::MulticastGroupMemberState::Joined,
     )
     .await;
@@ -367,7 +367,7 @@ async fn test_multicast_group_members_during_dpd_failure(
         .await
         .items;
     assert_eq!(initial_members.len(), 1, "Should have exactly one member");
-    assert_eq!(initial_members[0].instance_id, instance.identity.id);
+    assert_eq!(initial_members[0].parent_id, instance.identity.id);
 
     // Wait for reconciler - group should remain in "Creating" state
     wait_for_multicast_reconciler(&cptestctx.lockstep_client).await;
@@ -384,7 +384,7 @@ async fn test_multicast_group_members_during_dpd_failure(
         1,
         "Member should still be accessible during DPD failure"
     );
-    assert_eq!(members_during_failure[0].instance_id, instance.identity.id);
+    assert_eq!(members_during_failure[0].parent_id, instance.identity.id);
     assert_eq!(
         members_during_failure[0].multicast_group_id,
         created_group.identity.id
@@ -569,7 +569,7 @@ async fn test_concurrent_implicit_creation_race(
     // Verify each instance is a member
     for instance in &instances {
         assert!(
-            final_members.iter().any(|m| m.instance_id == instance.identity.id),
+            final_members.iter().any(|m| m.parent_id == instance.identity.id),
             "Instance {} should be a member of the group",
             instance.identity.name
         );
@@ -702,7 +702,7 @@ async fn test_implicit_deletion_race_with_instance_join(
                 assert!(
                     !members
                         .iter()
-                        .any(|m| m.instance_id == instances[0].identity.id),
+                        .any(|m| m.parent_id == instances[0].identity.id),
                     "Leaving instance should not be a member"
                 );
             }

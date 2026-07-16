@@ -84,6 +84,7 @@ define_enums! {
     MulticastGroupStateEnum => "multicast_group_state",
     MulticastGroupMemberStateEnum => "multicast_group_member_state",
     MulticastGroupMemberOriginEnum => "multicast_group_member_origin",
+    MulticastGroupMemberParentKindEnum => "multicast_group_member_parent_kind",
     NetworkInterfaceKindEnum => "network_interface_kind",
     OximeterReadModeEnum => "oximeter_read_mode",
     PhysicalDiskKindEnum => "physical_disk_kind",

@@ -10,8 +10,10 @@
 #:	"/out/falcon/*.log",
 #:	"/out/falcon/*.err",
 #:  "/out/connectivity-report.json",
+#:  "%/out/multicast-connectivity-report.json",
 #:  "/ci/out/*-sled-agent.log",
 #:  "/ci/out/*cockroach*.log",
+#:  "%/ci/out/mcast-omdb-*.log",
 #:  "%/out/dhcp-server.log",
 #: ]
 #: skip_clone = true
@@ -52,6 +54,8 @@ _exit_trap() {
         mv /out/falcon/$x.out /out/falcon/$x.log
     done
     cp connectivity-report.json /out/
+    # The multicast report only exists once the multicast phase has run.
+    cp multicast-connectivity-report.json /out/ 2>/dev/null || true
 
     mkdir -p /ci/out
 
@@ -76,6 +80,23 @@ _exit_trap() {
 
         ./a4x2 exec $gimlet 'cat /pool/ext/*/crypt/zone/oxz_cockroachdb*/root/var/svc/log/oxide-cockroachdb:default.log*' > \
             /ci/out/$gimlet-oxide-cockroachdb.log
+    done
+
+    # Capture multicast control-plane state so a failed mcast phase can be told
+    # apart from a data-plane-only failure: a reaped or never-created group, a
+    # member stuck out of "Joined", or ddmd peers not in Exchange all look
+    # identical from the connectivity report alone. omdb lives in the switch
+    # zone on the scrimlets (g0/g3); try each until one answers.
+    for cmd in "db multicast groups" "db multicast members" \
+               "db multicast pools" "nexus multicast ddm-peers"; do
+        tag=$(echo "$cmd" | tr ' ' '-')
+        for scrimlet in g0 g3; do
+            if ./a4x2 exec $scrimlet \
+                "pfexec zlogin oxz_switch /opt/oxide/omdb/bin/omdb $cmd" \
+                > /ci/out/mcast-omdb-$tag.log 2>&1; then
+                break
+            fi
+        done
     done
 }
 trap _exit_trap EXIT
@@ -210,6 +231,10 @@ NO_COLOR=1 pfexec ./commtest \
     --ip-pool-end 198.51.100.70 \
     --icmp-loss-tolerance 500 \
     --test-duration 200s \
-    --packet-rate 10
+    --packet-rate 10 \
+    --mcast-group-ip 239.100.0.1 \
+    --mcast-pool-begin 239.100.0.0 \
+    --mcast-pool-end 239.100.0.255
 
 cp connectivity-report.json /out/
+cp multicast-connectivity-report.json /out/

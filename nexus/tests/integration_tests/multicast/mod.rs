@@ -605,7 +605,7 @@ pub(crate) async fn wait_for_member_state(
     // `NotYet`, but treat any other observed state as a permanent failure.
     let check_member = || async {
         let members = list_multicast_group_members(client, group_name).await;
-        match members.iter().find(|m| m.instance_id == instance_id) {
+        match members.iter().find(|m| m.parent_id == instance_id) {
             Some(member) if member.state == expected_state_as_str => {
                 Ok(member.clone())
             }
@@ -679,7 +679,7 @@ pub(crate) async fn wait_for_members_state(
         let mut resolved = Vec::with_capacity(expected.len());
         for (instance_id, expected_state) in expected {
             let expected_str = expected_state.to_string();
-            match members.iter().find(|m| m.instance_id == *instance_id) {
+            match members.iter().find(|m| m.parent_id == *instance_id) {
                 Some(member) if member.state == expected_str => {
                     resolved.push(member.clone());
                 }
@@ -1128,7 +1128,7 @@ pub(crate) async fn wait_for_all_members_joined(
     let expected: Vec<_> = members
         .iter()
         .map(|m| {
-            (m.instance_id, nexus_db_model::MulticastGroupMemberState::Joined)
+            (m.parent_id, nexus_db_model::MulticastGroupMemberState::Joined)
         })
         .collect();
     wait_for_members_state(cptestctx, group_name, &expected).await;

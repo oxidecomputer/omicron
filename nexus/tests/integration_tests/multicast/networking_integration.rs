@@ -164,7 +164,7 @@ async fn test_multicast_external_ip_scenarios(
             1,
             "Multicast member should still exist after external IP allocation"
         );
-        assert_eq!(members_after_ip[0].instance_id, instance_id);
+        assert_eq!(members_after_ip[0].parent_id, instance_id);
         assert_eq!(
             members_after_ip[0].state, "Joined",
             "Member state should remain Joined"
@@ -193,7 +193,7 @@ async fn test_multicast_external_ip_scenarios(
             1,
             "Multicast member should persist after external IP removal"
         );
-        assert_eq!(members_after_detach[0].instance_id, instance_id);
+        assert_eq!(members_after_detach[0].parent_id, instance_id);
         assert_eq!(
             members_after_detach[0].state, "Joined",
             "Member should remain Joined"
@@ -591,7 +591,7 @@ async fn test_multicast_with_floating_ip_basic(
         1,
         "Multicast member should still exist after floating IP attachment"
     );
-    assert_eq!(members_after_ip[0].instance_id, instance_id);
+    assert_eq!(members_after_ip[0].parent_id, instance_id);
     assert_eq!(
         members_after_ip[0].state, "Joined",
         "Member state should remain Joined"
@@ -656,7 +656,7 @@ async fn test_multicast_with_floating_ip_basic(
         1,
         "Multicast member should persist after floating IP detachment"
     );
-    assert_eq!(members_after_detach[0].instance_id, instance_id);
+    assert_eq!(members_after_detach[0].parent_id, instance_id);
     assert_eq!(
         members_after_detach[0].state, "Joined",
         "Member should remain Joined"

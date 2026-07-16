@@ -11,6 +11,7 @@ use crate::app::MAX_DISKS_PER_INSTANCE;
 use crate::app::sagas::declare_saga_actions;
 use crate::app::sagas::disk_create::{self, SagaDiskCreate};
 use nexus_db_lookup::LookupPath;
+use nexus_db_model::MemberParentRef;
 use nexus_db_model::NetworkInterfaceKind;
 use nexus_db_model::{ExternalIp, IpVersion};
 use nexus_db_queries::db::queries::network_interface::InsertError as InsertNicError;
@@ -1105,16 +1106,16 @@ async fn sic_join_instance_multicast_group(
 
     // Add the instance as a member of the multicast group in "Joining" state.
     //
-    // We use `multicast_group_member_attach_to_instance` (same as explicit join API) which
+    // We use `multicast_group_member_attach` (same as explicit join API) which
     // doesn't require the group to be in "Active" state. This supports
     // auto-created groups (which start in "Creating" state)
     //
     // The RPW reconciler handles transitioning both group and member to active states.
     if let Err(e) = datastore
-        .multicast_group_member_attach_to_instance(
+        .multicast_group_member_attach(
             &opctx,
             group_id,
-            instance_id,
+            MemberParentRef::Instance(instance_id),
             join_spec.source_ips.as_deref(),
         )
         .await
@@ -1180,10 +1181,10 @@ async fn sic_join_instance_multicast_group_undo(
     // This ensures saga undo doesn't affect other instances that may have
     // independently joined the same group.
     datastore
-        .multicast_group_member_delete_by_group_and_instance(
+        .multicast_group_member_delete_by_group_and_parent(
             &opctx,
             MulticastGroupUuid::from_untyped_uuid(db_group.id()),
-            instance_id,
+            MemberParentRef::Instance(instance_id),
         )
         .await?;
 

@@ -353,6 +353,7 @@ use crate::app::db::model::Generation;
 use crate::app::db::model::InstanceIntendedState;
 use crate::app::db::model::InstanceRuntimeState;
 use crate::app::db::model::InstanceState;
+use crate::app::db::model::MemberParentRef;
 use crate::app::db::model::MigrationState;
 use crate::app::db::model::Vmm;
 use crate::app::db::model::VmmState;
@@ -1334,9 +1335,11 @@ async fn siu_commit_instance_updates(
     if update.deprovision.is_some() && nexus.multicast_enabled() {
         if let Err(e) = osagactx
             .datastore()
-            .multicast_group_members_detach_by_instance(
+            .multicast_group_members_detach_by_parent(
                 &opctx,
-                InstanceUuid::from_untyped_uuid(instance_id),
+                MemberParentRef::Instance(InstanceUuid::from_untyped_uuid(
+                    instance_id,
+                )),
             )
             .await
         {

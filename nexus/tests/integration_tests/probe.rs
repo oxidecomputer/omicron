@@ -47,6 +47,7 @@ async fn test_probe_basic_crud(ctx: &ControlPlaneTestContext) {
             pool: v6_pool.identity.name.clone().into(),
         },
         sled: SLED_AGENT_UUID.parse().unwrap(),
+        multicast_groups: Vec::new(),
     };
 
     let created: Probe = NexusRequest::objects_post(
@@ -152,6 +153,7 @@ async fn test_probe_pool_selector_ip_version(ctx: &ControlPlaneTestContext) {
         },
         pool_selector: PoolSelector::Auto { ip_version: Some(IpVersion::V6) },
         sled: SLED_AGENT_UUID.parse().unwrap(),
+        multicast_groups: Vec::new(),
     };
 
     let created_v6: Probe = NexusRequest::objects_post(
@@ -198,6 +200,7 @@ async fn test_probe_pool_selector_ip_version(ctx: &ControlPlaneTestContext) {
         },
         pool_selector: PoolSelector::Auto { ip_version: Some(IpVersion::V4) },
         sled: SLED_AGENT_UUID.parse().unwrap(),
+        multicast_groups: Vec::new(),
     };
 
     let created_v4: Probe = NexusRequest::objects_post(

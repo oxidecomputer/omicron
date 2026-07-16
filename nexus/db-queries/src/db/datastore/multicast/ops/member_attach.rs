@@ -37,7 +37,9 @@ use ipnetwork::IpNetwork;
 use uuid::Uuid;
 
 use nexus_db_lookup::DbConnection;
-use nexus_db_model::{MulticastGroupMember, MulticastGroupMemberState};
+use nexus_db_model::{
+    MemberParentRef, MulticastGroupMember, MulticastGroupMemberState,
+};
 use omicron_common::address::MAX_SOURCE_IPS_PER_GROUP;
 use omicron_common::api::external;
 
@@ -49,6 +51,7 @@ use crate::db::true_or_cast_error::matches_sentinel;
 const GROUP_NOT_FOUND_SENTINEL: &str = "group-not-found";
 const INSTANCE_NOT_FOUND_SENTINEL: &str = "instance-not-found";
 const UNION_EXCEEDED_SENTINEL: &str = "source-union-exceeded";
+const PROBE_NOT_FOUND_SENTINEL: &str = "probe-not-found";
 
 /// Result of attaching an instance to a multicast group.
 #[derive(Debug, Clone, PartialEq)]
@@ -57,7 +60,7 @@ pub(crate) struct AttachMemberResult {
     pub member: MulticastGroupMember,
 }
 
-/// Errors from attaching an instance to a multicast group.
+/// Errors from attaching a parent to a multicast group.
 #[derive(Debug)]
 pub(crate) enum AttachMemberError {
     /// Multicast group doesn't exist or is being deleted
@@ -67,6 +70,8 @@ pub(crate) enum AttachMemberError {
     /// Attaching this member would push the group's source IP union past
     /// the per-group cap.
     SourceUnionExceeded { cap: usize },
+    /// Probe doesn't exist or has been deleted
+    ProbeNotFound,
     /// Database constraint violation (unique index, etc.)
     ConstraintViolation(String),
     /// Other database error
@@ -77,13 +82,14 @@ impl AttachMemberError {
     /// Construct an [`AttachMemberError`] from a database error.
     ///
     /// This catches the sentinel errors that indicate validation failures
-    /// (group not found, instance not found, source union cap) as well as
+    /// (group / instance / probe not found, source union cap) as well as
     /// constraint violations.
-    fn from_diesel(err: DieselError) -> Self {
+    pub(crate) fn from_diesel(err: DieselError) -> Self {
         // Check for sentinel errors first
         let sentinels = [
             GROUP_NOT_FOUND_SENTINEL,
             INSTANCE_NOT_FOUND_SENTINEL,
+            PROBE_NOT_FOUND_SENTINEL,
             UNION_EXCEEDED_SENTINEL,
         ];
         if let Some(sentinel) = matches_sentinel(&err, &sentinels) {
@@ -92,6 +98,7 @@ impl AttachMemberError {
                 INSTANCE_NOT_FOUND_SENTINEL => {
                     AttachMemberError::InstanceNotFound
                 }
+                PROBE_NOT_FOUND_SENTINEL => AttachMemberError::ProbeNotFound,
                 UNION_EXCEEDED_SENTINEL => {
                     AttachMemberError::SourceUnionExceeded {
                         cap: MAX_SOURCE_IPS_PER_GROUP,
@@ -128,6 +135,11 @@ impl From<AttachMemberError> for external::Error {
             AttachMemberError::InstanceNotFound => {
                 external::Error::invalid_request(
                     "Instance does not exist or has been deleted",
+                )
+            }
+            AttachMemberError::ProbeNotFound => {
+                external::Error::invalid_request(
+                    "Probe does not exist or has been deleted",
                 )
             }
             AttachMemberError::SourceUnionExceeded { cap } => {
@@ -174,7 +186,10 @@ impl From<AttachMemberError> for external::Error {
 #[must_use = "Queries must be executed"]
 pub(crate) struct AttachMemberToGroupStatement {
     group_id: Uuid,
-    instance_id: Uuid,
+    parent: MemberParentRef,
+    /// Cached `parent.as_uuid()` so each CTE arm can borrow it instead
+    /// of rederiving it per bind.
+    parent_uuid: Uuid,
     new_member_id: Uuid,
     time_created: DateTime<Utc>,
     time_modified: DateTime<Utc>,
@@ -190,25 +205,30 @@ impl AttachMemberToGroupStatement {
     /// # Arguments
     ///
     /// - `group_id`: Multicast group to attach to
-    /// - `instance_id`: Instance being attached as member
+    /// - `parent`: Typed reference to the parent being attached as a
+    ///   member. The variant determines how the CTE resolves the parent's
+    ///   hosting sled.
     /// - `new_member_id`: UUID for new member row (if creating)
     /// - `source_ips`: Source IPs for filtering (`None` preserves existing on reactivation)
     ///
-    /// CTEs atomically validate group is not in a "Deleting" state, that the
-    /// instance exists, retrieves the current `sled_id` from VMM table, and
-    /// (when a non-empty source list is being applied) verifies that the
-    /// resulting per-group source IP union stays within
-    /// [`MAX_SOURCE_IPS_PER_GROUP`].
+    /// CTEs atomically validate group is not in a "Deleting" state, that
+    /// the parent exists, and retrieve the current `sled_id`. For instance
+    /// parents the lookup joins `instance` and `vmm` on
+    /// `active_propolis_id`. For probe parents the lookup reads `sled`
+    /// directly from the `probe` row. When a non-empty source list is
+    /// being applied, the CTEs also verify that the resulting per-group
+    /// source IP union stays within [`MAX_SOURCE_IPS_PER_GROUP`].
     pub fn new(
         group_id: Uuid,
-        instance_id: Uuid,
+        parent: MemberParentRef,
         new_member_id: Uuid,
         source_ips: Option<Vec<IpNetwork>>,
     ) -> Self {
         let now = Utc::now();
         Self {
             group_id,
-            instance_id,
+            parent,
+            parent_uuid: parent.as_uuid(),
             new_member_id,
             time_created: now,
             time_modified: now,
@@ -272,43 +292,78 @@ impl AttachMemberToGroupStatement {
         Ok(())
     }
 
-    /// Generates the `instance_sled` CTE (validates instance and gets sled_id).
-    ///
-    /// Joins instance and VMM tables via active_propolis_id to get current `sled_id`.
-    /// Returns one row with (`instance_id`, `sled_id`) if instance exists and not deleted.
-    fn push_instance_sled_cte<'a>(
+    /// Generates the `parent_sled` CTE that validates the parent exists
+    /// and produces a single `(id, sled_id)` row, dispatching on parent
+    /// kind so instance parents resolve through the `instance`/`vmm` join
+    /// while probe parents read `sled` directly from the `probe` row.
+    fn push_parent_sled_cte<'a>(
         &'a self,
         mut out: AstPass<'_, 'a, Pg>,
     ) -> QueryResult<()> {
-        out.push_sql(
-            "SELECT instance.id, vmm.sled_id \
-             FROM instance \
-             LEFT JOIN vmm ON instance.active_propolis_id = vmm.id \
-             WHERE instance.id = ",
-        );
-        out.push_bind_param::<diesel::sql_types::Uuid, _>(&self.instance_id)?;
-        out.push_sql(" AND instance.time_deleted IS NULL");
+        match self.parent {
+            MemberParentRef::Instance(_) => {
+                out.push_sql(
+                    "SELECT instance.id, vmm.sled_id \
+                     FROM instance \
+                     LEFT JOIN vmm ON instance.active_propolis_id = vmm.id \
+                     WHERE instance.id = ",
+                );
+                out.push_bind_param::<diesel::sql_types::Uuid, _>(
+                    &self.parent_uuid,
+                )?;
+                out.push_sql(" AND instance.time_deleted IS NULL");
+            }
+            MemberParentRef::Probe(_) => {
+                out.push_sql(
+                    "SELECT probe.id, probe.sled AS sled_id \
+                     FROM probe \
+                     WHERE probe.id = ",
+                );
+                out.push_bind_param::<diesel::sql_types::Uuid, _>(
+                    &self.parent_uuid,
+                )?;
+                out.push_sql(" AND probe.time_deleted IS NULL");
+            }
+        }
         Ok(())
     }
 
     /// Generates the `validation` CTE that triggers sentinel errors on failure.
     ///
     /// Uses CAST to trigger a predictable error when validation fails:
+    /// - If parent not found → CAST(parent-kind sentinel AS BOOL) fails
     /// - If group not found → CAST('group-not-found' AS BOOL) fails
-    /// - If instance not found → CAST('instance-not-found' AS BOOL) fails
     /// - If the resulting source IP union would exceed the per-group cap
     ///   → CAST('source-union-exceeded' AS BOOL) fails (only checked when a
     ///     non-empty source list is being applied)
     /// - If all valid → CAST('TRUE' AS BOOL) succeeds
+    ///
+    /// The parent-kind sentinel is selected from the [`MemberParentRef`]
+    /// variant, so the decoded error matches the parent the caller passed
+    /// (instance vs. probe).
     ///
     /// This follows the pattern used in `network_interface.rs` and `external_ip.rs`.
     fn push_validation_cte<'a>(
         &'a self,
         mut out: AstPass<'_, 'a, Pg>,
     ) -> QueryResult<()> {
+        let parent_sentinel = match self.parent {
+            MemberParentRef::Instance(_) => INSTANCE_NOT_FOUND_SENTINEL,
+            MemberParentRef::Probe(_) => PROBE_NOT_FOUND_SENTINEL,
+        };
+
+        // SELECT CAST(
+        //   CASE
+        //     WHEN NOT EXISTS (SELECT 1 FROM parent_sled) THEN <parent-sentinel>
+        //     WHEN NOT EXISTS (SELECT 1 FROM valid_group) THEN 'group-not-found'
+        //     ELSE 'TRUE'
+        //   END AS BOOL
+        // ) AS validated
+        //
+        // Parent is checked first so the more specific error surfaces up front.
         out.push_sql("SELECT CAST(CASE ");
-        out.push_sql("WHEN NOT EXISTS (SELECT 1 FROM instance_sled) THEN '");
-        out.push_sql(INSTANCE_NOT_FOUND_SENTINEL);
+        out.push_sql("WHEN NOT EXISTS (SELECT 1 FROM parent_sled) THEN '");
+        out.push_sql(parent_sentinel);
         out.push_sql("' ");
         out.push_sql("WHEN NOT EXISTS (SELECT 1 FROM valid_group) THEN '");
         out.push_sql(GROUP_NOT_FOUND_SENTINEL);
@@ -338,7 +393,10 @@ impl AttachMemberToGroupStatement {
     /// Computes the size of the source IP union that would result from this
     /// attach: all other active members' source IPs unioned with the proposed
     /// list. This member's existing row (if any) is excluded because its
-    /// sources are being replaced.
+    /// sources are being replaced. The exclusion is scoped to the full
+    /// `(parent_kind, parent_id)` key: an instance and a probe may share a
+    /// UUID in the same group, so excluding by `parent_id` alone would drop the
+    /// other kind's sources from the cap check.
     fn push_proposed_union_size_cte<'a>(
         &'a self,
         mut out: AstPass<'_, 'a, Pg>,
@@ -350,9 +408,13 @@ impl AttachMemberToGroupStatement {
                  WHERE external_group_id = ",
         );
         out.push_bind_param::<diesel::sql_types::Uuid, _>(&self.group_id)?;
-        out.push_sql(" AND parent_id != ");
-        out.push_bind_param::<diesel::sql_types::Uuid, _>(&self.instance_id)?;
-        out.push_sql(" AND time_deleted IS NULL ");
+        out.push_sql(" AND NOT (parent_id = ");
+        out.push_bind_param::<diesel::sql_types::Uuid, _>(&self.parent_uuid)?;
+        out.push_sql(" AND parent_kind = ");
+        out.push_sql(super::member_parent_kind_as_sql_literal(
+            self.parent.kind(),
+        ));
+        out.push_sql(") AND time_deleted IS NULL ");
         out.push_sql("UNION ALL SELECT unnest(");
         out.push_bind_param::<Array<diesel::sql_types::Inet>, _>(
             &self.source_ips_for_insert,
@@ -363,10 +425,10 @@ impl AttachMemberToGroupStatement {
 
     /// Generates the `upserted_member` CTE (performs unconditional upsert).
     ///
-    /// SELECT joins with both `valid_group` and `instance_sled` CTEs to:
+    /// SELECT joins with both `valid_group` and `parent_sled` CTEs to:
     /// 1. Ensure group exists and is attachable (FROM valid_group)
     /// 2. Retrieve group's multicast_ip (FROM valid_group)
-    /// 3. Retrieve instance's current sled_id (CROSS JOIN instance_sled)
+    /// 3. Retrieve the parent's current sled_id (CROSS JOIN parent_sled)
     ///
     /// ON CONFLICT clause uses partial unique index (only rows with time_deleted IS NULL):
     /// - Conflict only for members with time_deleted=NULL (active or stopped)
@@ -380,13 +442,15 @@ impl AttachMemberToGroupStatement {
         &'a self,
         mut out: AstPass<'_, 'a, Pg>,
     ) -> QueryResult<()> {
-        // Column order matches schema: id, time_created, time_modified, time_deleted,
-        // external_group_id, parent_id, sled_id, state, version_added, version_removed,
-        // multicast_ip, source_ips
+        // Schema column order: id, time_created, time_modified, time_deleted,
+        // external_group_id, parent_id, sled_id, state, version_added,
+        // version_removed, multicast_ip, source_ips, parent_kind. The INSERT
+        // names columns explicitly, so the order below is independent of the
+        // table layout.
         out.push_sql(
             "INSERT INTO multicast_group_member (\
                  id, time_created, time_modified, external_group_id, \
-                 parent_id, sled_id, state, multicast_ip, source_ips) SELECT ",
+                 parent_id, parent_kind, sled_id, state, multicast_ip, source_ips) SELECT ",
         );
         out.push_bind_param::<diesel::sql_types::Uuid, _>(&self.new_member_id)?;
         out.push_sql(", ");
@@ -396,8 +460,12 @@ impl AttachMemberToGroupStatement {
         out.push_sql(", ");
         out.push_bind_param::<diesel::sql_types::Uuid, _>(&self.group_id)?;
         out.push_sql(", ");
-        out.push_bind_param::<diesel::sql_types::Uuid, _>(&self.instance_id)?;
-        out.push_sql(", instance_sled.sled_id, ");
+        out.push_bind_param::<diesel::sql_types::Uuid, _>(&self.parent_uuid)?;
+        out.push_sql(", ");
+        out.push_sql(super::member_parent_kind_as_sql_literal(
+            self.parent.kind(),
+        ));
+        out.push_sql(", parent_sled.sled_id, ");
         out.push_sql(super::member_state_as_sql_literal(
             MulticastGroupMemberState::Joining,
         ));
@@ -405,10 +473,10 @@ impl AttachMemberToGroupStatement {
         out.push_bind_param::<Array<diesel::sql_types::Inet>, _>(
             &self.source_ips_for_insert,
         )?;
-        out.push_sql(" FROM valid_group CROSS JOIN instance_sled ");
+        out.push_sql(" FROM valid_group CROSS JOIN parent_sled ");
 
         // ON CONFLICT: only update "Left" members, preserve other states
-        out.push_sql("ON CONFLICT (external_group_id, parent_id) WHERE time_deleted IS NULL DO UPDATE SET state = CASE WHEN multicast_group_member.state = ");
+        out.push_sql("ON CONFLICT (external_group_id, parent_kind, parent_id) WHERE time_deleted IS NULL DO UPDATE SET state = CASE WHEN multicast_group_member.state = ");
         out.push_sql(super::member_state_as_sql_literal(
             MulticastGroupMemberState::Left,
         ));
@@ -450,7 +518,7 @@ impl AttachMemberToGroupStatement {
         // Return all columns so caller gets full member record
         // Column order must match schema: id, time_created, time_modified, time_deleted,
         // external_group_id, parent_id, sled_id, state, version_added, version_removed,
-        // multicast_ip, source_ips, membership_origin
+        // multicast_ip, source_ips, membership_origin, parent_kind
         //
         // membership_origin is not written by the INSERT (its column DEFAULT
         // 'static' applies) nor by the ON CONFLICT path (a reactivated member
@@ -458,7 +526,8 @@ impl AttachMemberToGroupStatement {
         out.push_sql(
             " RETURNING id, time_created, time_modified, time_deleted, \
              external_group_id, parent_id, sled_id, state, version_added, \
-             version_removed, multicast_ip, source_ips, membership_origin",
+             version_removed, multicast_ip, source_ips, membership_origin, \
+             parent_kind",
         );
         Ok(())
     }
@@ -473,11 +542,12 @@ impl AttachMemberToGroupStatement {
     ) -> QueryResult<()> {
         // Column order must match schema: id, time_created, time_modified, time_deleted,
         // external_group_id, parent_id, sled_id, state, version_added, version_removed,
-        // multicast_ip, source_ips, membership_origin
+        // multicast_ip, source_ips, membership_origin, parent_kind
         out.push_sql(
             "SELECT id, time_created, time_modified, time_deleted, \
              external_group_id, parent_id, sled_id, state, version_added, \
-             version_removed, multicast_ip, source_ips, membership_origin \
+             version_removed, multicast_ip, source_ips, membership_origin, \
+             parent_kind \
              FROM upserted_member",
         );
         Ok(())
@@ -493,9 +563,9 @@ impl QueryFragment<Pg> for AttachMemberToGroupStatement {
         self.push_valid_group_cte(out.reborrow())?;
         out.push_sql("), ");
 
-        // CTE: Validate instance exists and get sled_id
-        out.push_sql("instance_sled AS (");
-        self.push_instance_sled_cte(out.reborrow())?;
+        // CTE: Validate parent (instance or probe) exists and get sled_id
+        out.push_sql("parent_sled AS (");
+        self.push_parent_sled_cte(out.reborrow())?;
         out.push_sql("), ");
 
         // CTE: Compute the prospective per-group source IP union size when

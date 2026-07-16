@@ -29,6 +29,7 @@ use nexus_db_model::InstanceIntendedState as IntendedState;
 use nexus_db_model::InstanceUpdate;
 use nexus_db_model::IpAttachState;
 use nexus_db_model::IpKind;
+use nexus_db_model::MemberParentRef;
 use nexus_db_model::Vmm as DbVmm;
 use nexus_db_model::VmmState as DbVmmState;
 use nexus_db_queries::authn;
@@ -422,9 +423,11 @@ impl super::Nexus {
         // Get current multicast group memberships (active-only)
         let current_memberships = self
             .datastore()
-            .multicast_group_members_list_by_instance(
+            .multicast_group_members_list_by_parent(
                 opctx,
-                InstanceUuid::from_untyped_uuid(instance_id),
+                MemberParentRef::Instance(InstanceUuid::from_untyped_uuid(
+                    instance_id,
+                )),
                 &DataPageParams::max_page(),
             )
             .await?;
@@ -519,10 +522,12 @@ impl super::Nexus {
                 "group_id" => %group_id
             );
             self.datastore()
-                .multicast_group_member_detach_by_group_and_instance(
+                .multicast_group_member_detach_by_group_and_parent(
                     opctx,
                     MulticastGroupUuid::from_untyped_uuid(group_id),
-                    InstanceUuid::from_untyped_uuid(instance_id),
+                    MemberParentRef::Instance(InstanceUuid::from_untyped_uuid(
+                        instance_id,
+                    )),
                 )
                 .await?;
         }
@@ -543,10 +548,12 @@ impl super::Nexus {
                 "source_ips" => ?source_ips
             );
             self.datastore()
-                .multicast_group_member_attach_to_instance(
+                .multicast_group_member_attach(
                     opctx,
                     MulticastGroupUuid::from_untyped_uuid(group_id),
-                    InstanceUuid::from_untyped_uuid(instance_id),
+                    MemberParentRef::Instance(InstanceUuid::from_untyped_uuid(
+                        instance_id,
+                    )),
                     source_ips.as_deref(),
                 )
                 .await?;
@@ -1176,9 +1183,11 @@ impl super::Nexus {
         // that is still running if the request fails.
         if self.multicast_enabled() {
             self.db_datastore
-                .multicast_group_members_detach_by_instance(
+                .multicast_group_members_detach_by_parent(
                     opctx,
-                    InstanceUuid::from_untyped_uuid(authz_instance.id()),
+                    MemberParentRef::Instance(InstanceUuid::from_untyped_uuid(
+                        authz_instance.id(),
+                    )),
                 )
                 .await?;
         }
@@ -1631,9 +1640,11 @@ impl super::Nexus {
         if self.multicast_enabled() {
             let multicast_members = self
                 .db_datastore
-                .multicast_group_members_list_by_instance(
+                .multicast_group_members_list_by_parent(
                     opctx,
-                    InstanceUuid::from_untyped_uuid(authz_instance.id()),
+                    MemberParentRef::Instance(
+                        InstanceUuid::from_untyped_uuid(authz_instance.id()),
+                    ),
                     &DataPageParams::max_page(),
                 )
                 .await
