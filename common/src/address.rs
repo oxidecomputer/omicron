@@ -473,28 +473,14 @@ impl<'de, const N: u8> Deserialize<'de> for Ipv6Subnet<N> {
     }
 }
 
-impl Ipv6Subnet<AZ_PREFIX> {
-    pub fn check_external_ip(
-        &self,
-        ip: IpAddr,
-    ) -> Result<IpAddr, UnexpectedUnderlayIpError> {
-        match ip {
-            IpAddr::V6(v6) if self.net().contains(v6) => {
-                Err(UnexpectedUnderlayIpError { ip, az_subnet: *self })
-            }
-            _ => Ok(ip),
-        }
-    }
-}
-
 #[derive(Debug, Clone, thiserror::Error)]
 #[error(
-    "expected an external IP, but address ({ip}) is within the AZ underlay \
-     subnet ({az_subnet})"
+    "expected an external IP, but address ({ip}) is within the underlay \
+     subnet ({subnet})"
 )]
 pub struct UnexpectedUnderlayIpError {
     ip: IpAddr,
-    az_subnet: Ipv6Subnet<AZ_PREFIX>,
+    subnet: Ipv6Net,
 }
 
 /// A rack's underlay subnet, along with the AZ-wide underlay subnet
@@ -512,6 +498,30 @@ impl UnderlaySubnets {
         Self {
             rack_subnet,
             az_subnet: Ipv6Subnet::new(rack_subnet.net().addr()),
+        }
+    }
+
+    pub fn check_external_ip(
+        &self,
+        ip: IpAddr,
+    ) -> Result<IpAddr, UnexpectedUnderlayIpError> {
+        let az_subnet = self.az_subnet.net();
+        match ip {
+            // Is it in the AZ underlay subnet?
+            IpAddr::V6(v6) if az_subnet.contains(v6) => {
+                Err(UnexpectedUnderlayIpError { ip, subnet: az_subnet })
+            }
+            // The underlay multicast subnet is also part of the underlay
+            // network, so check that, too.
+            IpAddr::V6(v6) if UNDERLAY_MULTICAST_SUBNET.contains(v6) => {
+                Err(UnexpectedUnderlayIpError {
+                    ip,
+                    subnet: UNDERLAY_MULTICAST_SUBNET,
+                })
+            }
+            // Note that we need not also check if the IP is contained by the
+            // rack subnet, because the AZ subnet contains the rack subnet.
+            _ => Ok(ip),
         }
     }
 }
