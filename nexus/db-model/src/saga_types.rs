@@ -308,11 +308,9 @@ pub struct AbandonMetadata {
 /// insertion.
 ///
 /// Compared to [`SagaRow`], the three abandon metadata columns are bundled
-/// into a single private `abandon` field, kept all or none. It's populated
-/// only together with the `Abandoned` state, via [`Saga::set_abandoned`], and
-/// read via [`Saga::abandon_metadata`]. Reads go through `TryFrom<SagaRow>`,
-/// which rejects rows whose metadata is inconsistent with `saga_state` with an
-/// [`Error::internal_error`].
+/// into a single private `abandon` field, kept all or none. Reads go through
+/// `TryFrom<SagaRow>`, which rejects rows whose metadata is inconsistent with
+/// `saga_state` with an [`Error::internal_error`].
 #[derive(Clone, Debug, PartialEq)]
 pub struct Saga {
     pub id: SagaId,
