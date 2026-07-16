@@ -931,7 +931,7 @@ dependencies = [
  "sled-agent-types",
  "sled-agent-types-versions",
  "sled-hardware-types",
- "tufaceous-artifact",
+ "tufaceous-artifact 0.1.0",
 ]
 
 [[package]]
@@ -968,6 +968,7 @@ dependencies = [
 name = "bootstrap-agent-lockstep-client"
 version = "0.1.0"
 dependencies = [
+ "bootstrap-agent-lockstep-types",
  "omicron-common",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
@@ -1331,9 +1332,9 @@ dependencies = [
 
 [[package]]
 name = "chrono"
-version = "0.4.44"
+version = "0.4.45"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c673075a2e0e5f4a1dde27ce9dee1ea4558c7ffe648f576438a20ca1d2acc4b0"
+checksum = "1aa79e62e7697b8e29b513a68abacf485adcd1fe8284a4316c5ae868e6633327"
 dependencies = [
  "iana-time-zone",
  "js-sys",
@@ -1630,7 +1631,7 @@ dependencies = [
 [[package]]
 name = "client-common"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=dc84a6ce494a9d004568b67e22add2285a04d887#dc84a6ce494a9d004568b67e22add2285a04d887"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=65cc70aa5507f779551a1d33c0089bb0a9b7ac72#65cc70aa5507f779551a1d33c0089bb0a9b7ac72"
 
 [[package]]
 name = "clipboard-win"
@@ -1979,6 +1980,22 @@ name = "corncobs"
 version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b0e03e9489176ebd301922fdcd0234f6dee954cbf65311863353f20d2746a8db"
+
+[[package]]
+name = "corpus-adjust"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "camino",
+ "clap",
+ "iddqd",
+ "omicron-common",
+ "omicron-workspace-hack",
+ "serde_json",
+ "sha2 0.10.9",
+ "tufaceous-artifact 0.1.0",
+ "uuid",
+]
 
 [[package]]
 name = "cpubits"
@@ -2649,7 +2666,7 @@ dependencies = [
 [[package]]
 name = "ddm-admin-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=dc84a6ce494a9d004568b67e22add2285a04d887#dc84a6ce494a9d004568b67e22add2285a04d887"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=65cc70aa5507f779551a1d33c0089bb0a9b7ac72#65cc70aa5507f779551a1d33c0089bb0a9b7ac72"
 dependencies = [
  "ddm-api-types-versions",
  "oxnet",
@@ -2663,7 +2680,7 @@ dependencies = [
 [[package]]
 name = "ddm-api-types-versions"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=dc84a6ce494a9d004568b67e22add2285a04d887#dc84a6ce494a9d004568b67e22add2285a04d887"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=65cc70aa5507f779551a1d33c0089bb0a9b7ac72#65cc70aa5507f779551a1d33c0089bb0a9b7ac72"
 dependencies = [
  "ddm-protocol",
  "oxnet",
@@ -2676,7 +2693,7 @@ dependencies = [
 [[package]]
 name = "ddm-protocol"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=dc84a6ce494a9d004568b67e22add2285a04d887#dc84a6ce494a9d004568b67e22add2285a04d887"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=65cc70aa5507f779551a1d33c0089bb0a9b7ac72#65cc70aa5507f779551a1d33c0089bb0a9b7ac72"
 dependencies = [
  "oxnet",
  "schemars 0.8.22",
@@ -3080,6 +3097,15 @@ dependencies = [
  "const-oid 0.10.2",
  "crypto-common 0.2.2",
  "ctutils",
+]
+
+[[package]]
+name = "digest-io"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2de63d600bc7fab91180bc17385f29b342468dc8ef2af09dceba450a293de3da"
+dependencies = [
+ "digest 0.11.3",
 ]
 
 [[package]]
@@ -4256,6 +4282,7 @@ dependencies = [
  "futures",
  "gateway-client",
  "gateway-messages",
+ "gateway-types",
  "omicron-common",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
@@ -4270,7 +4297,7 @@ dependencies = [
  "termios",
  "tokio",
  "tokio-tungstenite 0.23.1",
- "tufaceous-artifact",
+ "tufaceous-artifact 0.1.0",
  "uuid",
 ]
 
@@ -4407,7 +4434,7 @@ dependencies = [
  "serde",
  "test-strategy",
  "thiserror 2.0.18",
- "tufaceous-artifact",
+ "tufaceous-artifact 0.1.0",
  "uuid",
 ]
 
@@ -5812,7 +5839,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tokio-stream",
- "tufaceous-artifact",
+ "tufaceous-artifact 0.1.0",
  "tufaceous-lib",
  "update-engine",
 ]
@@ -5832,7 +5859,7 @@ dependencies = [
  "schemars 0.8.22",
  "serde",
  "slog",
- "tufaceous-artifact",
+ "tufaceous-artifact 0.1.0",
  "update-engine",
  "uuid",
 ]
@@ -6005,7 +6032,7 @@ dependencies = [
  "slog-error-chain",
  "test-strategy",
  "thiserror 2.0.18",
- "tufaceous-artifact",
+ "tufaceous-artifact 0.1.0",
 ]
 
 [[package]]
@@ -6839,7 +6866,7 @@ dependencies = [
 [[package]]
 name = "mg-admin-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=dc84a6ce494a9d004568b67e22add2285a04d887#dc84a6ce494a9d004568b67e22add2285a04d887"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=65cc70aa5507f779551a1d33c0089bb0a9b7ac72#65cc70aa5507f779551a1d33c0089bb0a9b7ac72"
 dependencies = [
  "chrono",
  "client-common",
@@ -6859,7 +6886,7 @@ dependencies = [
 [[package]]
 name = "mg-api-types"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=dc84a6ce494a9d004568b67e22add2285a04d887#dc84a6ce494a9d004568b67e22add2285a04d887"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=65cc70aa5507f779551a1d33c0089bb0a9b7ac72#65cc70aa5507f779551a1d33c0089bb0a9b7ac72"
 dependencies = [
  "mg-api-types-versions",
 ]
@@ -6867,7 +6894,7 @@ dependencies = [
 [[package]]
 name = "mg-api-types-versions"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=dc84a6ce494a9d004568b67e22add2285a04d887#dc84a6ce494a9d004568b67e22add2285a04d887"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=65cc70aa5507f779551a1d33c0089bb0a9b7ac72#65cc70aa5507f779551a1d33c0089bb0a9b7ac72"
 dependencies = [
  "chrono",
  "nom 8.0.0",
@@ -7334,7 +7361,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "trust-quorum-protocol",
- "tufaceous-artifact",
+ "tufaceous-artifact 0.1.0",
  "uuid",
 ]
 
@@ -7432,7 +7459,7 @@ dependencies = [
  "tokio",
  "trust-quorum-protocol",
  "trust-quorum-types",
- "tufaceous-artifact",
+ "tufaceous-artifact 0.1.0",
  "url",
  "usdt 0.5.0",
  "uuid",
@@ -7496,7 +7523,7 @@ dependencies = [
  "serde_json",
  "slog-error-chain",
  "trust-quorum-types",
- "tufaceous-artifact",
+ "tufaceous-artifact 0.1.0",
  "uuid",
 ]
 
@@ -7591,7 +7618,7 @@ dependencies = [
  "swrite",
  "thiserror 2.0.18",
  "tokio",
- "tufaceous-artifact",
+ "tufaceous-artifact 0.1.0",
  "typed-rng",
  "uuid",
 ]
@@ -7725,7 +7752,7 @@ dependencies = [
  "tokio-stream",
  "tokio-util",
  "trust-quorum-types",
- "tufaceous-artifact",
+ "tufaceous-artifact 0.1.0",
  "uuid",
 ]
 
@@ -7769,7 +7796,7 @@ dependencies = [
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "sled-agent-types",
- "tufaceous-artifact",
+ "tufaceous-artifact 0.1.0",
 ]
 
 [[package]]
@@ -7915,8 +7942,8 @@ dependencies = [
  "tokio",
  "toml 0.8.23",
  "transient-dns-server",
- "tufaceous",
- "tufaceous-artifact",
+ "tufaceous 0.1.0",
+ "tufaceous-artifact 0.1.0",
  "tufaceous-lib",
  "typed-rng",
  "update-common",
@@ -7992,7 +8019,7 @@ dependencies = [
  "swrite",
  "sync-ptr",
  "thiserror 2.0.18",
- "tufaceous-artifact",
+ "tufaceous-artifact 0.1.0",
  "typed-rng",
  "uuid",
 ]
@@ -8219,7 +8246,7 @@ dependencies = [
  "tough",
  "trust-quorum-protocol",
  "trust-quorum-types",
- "tufaceous-artifact",
+ "tufaceous-artifact 0.1.0",
  "unicode-width 0.1.14",
  "update-engine",
  "url",
@@ -8259,7 +8286,7 @@ dependencies = [
  "strum 0.27.2",
  "thiserror 2.0.18",
  "tough",
- "tufaceous-artifact",
+ "tufaceous-artifact 0.1.0",
  "url",
  "uuid",
 ]
@@ -8391,20 +8418,6 @@ dependencies = [
  "omicron-workspace-hack",
  "schemars 0.8.22",
  "serde",
-]
-
-[[package]]
-name = "ntp-admin-v1-client"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "git-stub-vcs",
- "omicron-workspace-hack",
- "progenitor 0.14.0",
- "reqwest 0.13.2",
- "schemars 0.8.22",
- "serde",
- "slog",
 ]
 
 [[package]]
@@ -8811,7 +8824,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "toml 0.8.23",
- "tufaceous-artifact",
+ "tufaceous-artifact 0.1.0",
  "uuid",
 ]
 
@@ -8967,7 +8980,7 @@ dependencies = [
  "tokio-stream",
  "tokio-tungstenite 0.23.1",
  "toml 0.8.23",
- "tufaceous-artifact",
+ "tufaceous-artifact 0.1.0",
  "uuid",
  "zip 4.6.1",
 ]
@@ -9235,8 +9248,8 @@ dependencies = [
  "tokio-util",
  "tough",
  "trust-quorum-types",
- "tufaceous",
- "tufaceous-artifact",
+ "tufaceous 0.1.0",
+ "tufaceous-artifact 0.1.0",
  "tufaceous-lib",
  "update-common",
  "update-engine",
@@ -9379,7 +9392,7 @@ dependencies = [
  "textwrap 0.16.2",
  "tokio",
  "trust-quorum-types",
- "tufaceous-artifact",
+ "tufaceous-artifact 0.1.0",
  "unicode-width 0.1.14",
  "update-engine",
  "url",
@@ -9512,7 +9525,6 @@ dependencies = [
  "semver 1.0.28",
  "serde",
  "serde_json",
- "sha2 0.10.9",
  "shell-words",
  "slog",
  "slog-async",
@@ -9520,7 +9532,9 @@ dependencies = [
  "tar",
  "tokio",
  "toml 0.8.23",
- "tufaceous-artifact",
+ "tufaceous 0.2.0",
+ "tufaceous-artifact 0.1.0",
+ "tufaceous-artifact 0.2.0",
  "tufaceous-lib",
  "update-common",
 ]
@@ -9559,7 +9573,7 @@ dependencies = [
  "slog-error-chain",
  "tokio",
  "tokio-util",
- "tufaceous-artifact",
+ "tufaceous-artifact 0.1.0",
  "update-common",
 ]
 
@@ -9695,8 +9709,8 @@ dependencies = [
  "trust-quorum",
  "trust-quorum-protocol",
  "trust-quorum-types",
- "tufaceous-artifact",
- "tufaceous-brand-metadata",
+ "tufaceous-artifact 0.1.0",
+ "tufaceous-brand-metadata 0.1.0",
  "usdt 0.5.0",
  "uuid",
  "walkdir",
@@ -9730,6 +9744,7 @@ dependencies = [
  "omicron-workspace-hack",
  "oxide-tokio-rt",
  "pem",
+ "port-file",
  "rcgen",
  "regex",
  "reqwest 0.13.2",
@@ -9777,6 +9792,7 @@ dependencies = [
  "bitflags 2.11.0",
  "bstr",
  "buf-list",
+ "byte-wrapper",
  "bytes",
  "camino",
  "chacha20 0.10.0",
@@ -10270,6 +10286,7 @@ dependencies = [
  "oximeter-api",
  "oximeter-client",
  "oximeter-db",
+ "oximeter-test-utils",
  "oximeter-types",
  "proptest",
  "qorb",
@@ -11273,6 +11290,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "port-file"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "34fced1ed6fb91e9fa97e7c31a418cc71a9814586af88acefdaa46bc0ebdf712"
+dependencies = [
+ "atomicwrites",
+ "camino",
+ "tokio",
+]
+
+[[package]]
 name = "portable-atomic"
 version = "1.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -12148,6 +12176,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "rawzip"
+version = "0.4.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9d9575f44c8cf85bc843ad666dcdf20d05a7753772bef56eb2a5140282b32150"
+
+[[package]]
 name = "rayon"
 version = "1.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -12225,8 +12259,8 @@ dependencies = [
  "tabled 0.15.0",
  "tokio",
  "toml 0.8.23",
- "tufaceous",
- "tufaceous-artifact",
+ "tufaceous 0.1.0",
+ "tufaceous-artifact 0.1.0",
  "tufaceous-lib",
  "update-common",
  "uuid",
@@ -12259,7 +12293,7 @@ dependencies = [
  "slog",
  "swrite",
  "tokio",
- "tufaceous-artifact",
+ "tufaceous-artifact 0.1.0",
 ]
 
 [[package]]
@@ -12430,7 +12464,7 @@ dependencies = [
  "omicron-workspace-hack",
  "schemars 0.8.22",
  "serde",
- "tufaceous-artifact",
+ "tufaceous-artifact 0.1.0",
 ]
 
 [[package]]
@@ -13814,7 +13848,7 @@ dependencies = [
  "sled-hardware-types",
  "slog-error-chain",
  "trust-quorum-types",
- "tufaceous-artifact",
+ "tufaceous-artifact 0.1.0",
  "uuid",
  "x509-cert",
 ]
@@ -13870,7 +13904,7 @@ dependencies = [
  "installinator-common",
  "key-manager",
  "key-manager-types",
- "ntp-admin-v1-client",
+ "ntp-admin-client",
  "omicron-common",
  "omicron-ledger",
  "omicron-test-utils",
@@ -13898,7 +13932,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "trust-quorum-types",
- "tufaceous-artifact",
+ "tufaceous-artifact 0.1.0",
  "xshell",
  "zone",
 ]
@@ -14049,7 +14083,7 @@ dependencies = [
  "slog",
  "slog-error-chain",
  "thiserror 2.0.18",
- "tufaceous-artifact",
+ "tufaceous-artifact 0.1.0",
 ]
 
 [[package]]
@@ -14066,7 +14100,7 @@ dependencies = [
  "sha2 0.10.9",
  "sled-agent-types",
  "sled-storage",
- "tufaceous-artifact",
+ "tufaceous-artifact 0.1.0",
 ]
 
 [[package]]
@@ -14096,7 +14130,7 @@ dependencies = [
  "swrite",
  "test-strategy",
  "thiserror 2.0.18",
- "tufaceous-artifact",
+ "tufaceous-artifact 0.1.0",
  "uuid",
 ]
 
@@ -14140,7 +14174,7 @@ dependencies = [
  "thiserror 2.0.18",
  "toml 0.8.23",
  "trust-quorum-types-versions",
- "tufaceous-artifact",
+ "tufaceous-artifact 0.1.0",
  "uuid",
 ]
 
@@ -14925,7 +14959,7 @@ dependencies = [
  "slog-error-chain",
  "tokio",
  "tokio-util",
- "tufaceous-artifact",
+ "tufaceous-artifact 0.1.0",
  "uuid",
  "zip 4.6.1",
 ]
@@ -15135,9 +15169,9 @@ checksum = "55937e1799185b12863d447f42597ed69d9928686b8d88a1df17376a097d8369"
 
 [[package]]
 name = "tar"
-version = "0.4.45"
+version = "0.4.46"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "22692a6476a21fa75fdfc11d452fda482af402c008cdbaf3476414e122040973"
+checksum = "3f6221d9a6003c78398e3b239969f352578258df48c8eb051caadae0015bc840"
 dependencies = [
  "filetime",
  "libc",
@@ -16223,7 +16257,7 @@ dependencies = [
 [[package]]
 name = "tufaceous"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#a7d440f5a111c7e3504e8eb125c105d7baf0deab"
+source = "git+https://github.com/oxidecomputer/tufaceous?branch=v1#95395cecb019b851519232468472212efce1e42d"
 dependencies = [
  "anyhow",
  "camino",
@@ -16237,14 +16271,48 @@ dependencies = [
  "slog-envlogger",
  "slog-term",
  "tokio",
- "tufaceous-artifact",
+ "tufaceous-artifact 0.1.0",
  "tufaceous-lib",
+]
+
+[[package]]
+name = "tufaceous"
+version = "0.2.0"
+source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#de59b9508e99da8fc39a70d29e4d69300325b220"
+dependencies = [
+ "atomicwrites",
+ "aws-lc-rs",
+ "bytes",
+ "camino",
+ "camino-tempfile",
+ "chrono",
+ "ciborium",
+ "daft",
+ "digest-io",
+ "flate2",
+ "futures-util",
+ "hex",
+ "hubtools 0.4.7 (git+https://github.com/oxidecomputer/hubtools.git?rev=2b1ef9b38d75563ea800baa3b17327eec17b1b7a)",
+ "rats-corim 0.1.0 (git+https://github.com/oxidecomputer/rats-corim.git?rev=f0d5d5168d3d31487a56df32c676b0c6240bcc6b)",
+ "rawzip",
+ "semver 1.0.28",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "slog",
+ "tar",
+ "thiserror 2.0.18",
+ "tokio",
+ "tough",
+ "tufaceous-artifact 0.2.0",
+ "tufaceous-brand-metadata 0.2.0",
+ "url",
 ]
 
 [[package]]
 name = "tufaceous-artifact"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#a7d440f5a111c7e3504e8eb125c105d7baf0deab"
+source = "git+https://github.com/oxidecomputer/tufaceous?branch=v1#95395cecb019b851519232468472212efce1e42d"
 dependencies = [
  "daft",
  "hex",
@@ -16259,21 +16327,45 @@ dependencies = [
 ]
 
 [[package]]
+name = "tufaceous-artifact"
+version = "0.2.0"
+source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#de59b9508e99da8fc39a70d29e4d69300325b220"
+dependencies = [
+ "byte-wrapper",
+ "daft",
+ "hubtools 0.4.7 (git+https://github.com/oxidecomputer/hubtools.git?rev=2b1ef9b38d75563ea800baa3b17327eec17b1b7a)",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "tufaceous-brand-metadata"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#a7d440f5a111c7e3504e8eb125c105d7baf0deab"
+source = "git+https://github.com/oxidecomputer/tufaceous?branch=v1#95395cecb019b851519232468472212efce1e42d"
 dependencies = [
  "semver 1.0.28",
  "serde",
  "serde_json",
  "tar",
- "tufaceous-artifact",
+ "tufaceous-artifact 0.1.0",
+]
+
+[[package]]
+name = "tufaceous-brand-metadata"
+version = "0.2.0"
+source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#de59b9508e99da8fc39a70d29e4d69300325b220"
+dependencies = [
+ "serde",
+ "serde_json",
+ "tar",
+ "tufaceous-artifact 0.2.0",
 ]
 
 [[package]]
 name = "tufaceous-lib"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#a7d440f5a111c7e3504e8eb125c105d7baf0deab"
+source = "git+https://github.com/oxidecomputer/tufaceous?branch=v1#95395cecb019b851519232468472212efce1e42d"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -16306,8 +16398,8 @@ dependencies = [
  "tokio",
  "toml 0.8.23",
  "tough",
- "tufaceous-artifact",
- "tufaceous-brand-metadata",
+ "tufaceous-artifact 0.1.0",
+ "tufaceous-brand-metadata 0.1.0",
  "url",
  "zip 4.6.1",
 ]
@@ -16605,9 +16697,9 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tough",
- "tufaceous",
- "tufaceous-artifact",
- "tufaceous-brand-metadata",
+ "tufaceous 0.1.0",
+ "tufaceous-artifact 0.1.0",
+ "tufaceous-brand-metadata 0.1.0",
  "tufaceous-lib",
 ]
 
@@ -17242,7 +17334,7 @@ dependencies = [
  "toml 0.8.23",
  "toml_edit 0.22.27",
  "transceiver-controller 0.1.1 (git+https://github.com/oxidecomputer/transceiver-control)",
- "tufaceous-artifact",
+ "tufaceous-artifact 0.1.0",
  "tui-tree-widget",
  "unicode-width 0.1.14",
  "update-engine",
@@ -17273,13 +17365,13 @@ dependencies = [
  "sled-agent-types",
  "sled-hardware-types",
  "slog",
- "slog-error-chain",
  "thiserror 2.0.18",
  "tokio",
  "toml 0.8.23",
  "transceiver-controller 0.1.1 (git+https://github.com/oxidecomputer/transceiver-control)",
- "tufaceous-artifact",
+ "tufaceous-artifact 0.1.0",
  "update-engine",
+ "wicketd-commission-types",
 ]
 
 [[package]]
@@ -17314,6 +17406,7 @@ dependencies = [
  "base64 0.22.1",
  "bootstrap-agent-client",
  "bootstrap-agent-lockstep-client",
+ "bootstrap-agent-lockstep-types",
  "buf-list",
  "bytes",
  "camino",
@@ -17384,8 +17477,8 @@ dependencies = [
  "toml 0.8.23",
  "tough",
  "transceiver-controller 0.1.1 (git+https://github.com/oxidecomputer/transceiver-control)",
- "tufaceous",
- "tufaceous-artifact",
+ "tufaceous 0.1.0",
+ "tufaceous-artifact 0.1.0",
  "tufaceous-lib",
  "update-common",
  "update-engine",
@@ -17401,6 +17494,7 @@ name = "wicketd-api"
 version = "0.1.0"
 dependencies = [
  "bootstrap-agent-lockstep-client",
+ "bootstrap-agent-lockstep-types",
  "dropshot",
  "gateway-client",
  "omicron-common",
@@ -17412,8 +17506,9 @@ dependencies = [
  "serde",
  "sled-hardware-types",
  "slog",
- "tufaceous-artifact",
+ "tufaceous-artifact 0.1.0",
  "wicket-common",
+ "wicketd-commission-types",
 ]
 
 [[package]]
@@ -17439,6 +17534,29 @@ dependencies = [
  "update-engine",
  "uuid",
  "wicket-common",
+]
+
+[[package]]
+name = "wicketd-commission-types"
+version = "0.1.0"
+dependencies = [
+ "omicron-workspace-hack",
+ "wicketd-commission-types-versions",
+]
+
+[[package]]
+name = "wicketd-commission-types-versions"
+version = "0.1.0"
+dependencies = [
+ "omicron-common",
+ "omicron-workspace-hack",
+ "oxnet",
+ "schemars 0.8.22",
+ "serde",
+ "serde_json",
+ "sled-agent-types-versions",
+ "slog-error-chain",
+ "toml 0.8.23",
 ]
 
 [[package]]

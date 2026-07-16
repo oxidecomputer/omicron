@@ -10,14 +10,14 @@ use serde::{Deserialize, Serialize};
 /// Version information for the API and the system software serving it
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Version {
-    /// The API version, e.g. `2026062900.0.0`, matching the `version` field
+    /// The API version, e.g., `2026071500.0.0`, matching the `version` field
     /// of the OpenAPI schema. Clients should send it in the `api-version`
     /// header to select this version of the API. The official SDKs do this
     /// automatically.
     pub api_version: semver::Version,
 
-    /// The version of the system software serving this API, e.g., `21.0.0`.
+    /// The version of the system software serving this API, e.g., `22.0.0`.
     /// Use this version to find the right docs and release notes. During an
-    /// upgrade, some components of the system may be running a newer version.
+    /// update, some components of the system may be running a newer version.
     pub system_version: semver::Version,
 }

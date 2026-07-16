@@ -96,4 +96,4 @@ pub mod v2026_06_08_00;
 #[path = "bgp_configuration_update/mod.rs"]
 pub mod v2026_06_10_00;
 #[path = "api_version/mod.rs"]
-pub mod v2026_06_29_00;
+pub mod v2026_07_15_00;

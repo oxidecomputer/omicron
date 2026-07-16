@@ -21,10 +21,12 @@ use crate::db::raw_query_builder::TypedSqlQuery;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::DateTime;
 use chrono::Utc;
+use diesel::define_sql_function;
 use diesel::pg::Pg;
 use diesel::prelude::*;
 use diesel::query_builder::*;
 use diesel::sql_types;
+use diesel::upsert::excluded;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_lookup::DbConnection;
@@ -228,6 +230,15 @@ impl DataStore {
             .select((dsl::restart_id, dsl::ena))
     }
 
+    /// Returns an [`EreportId`] with the latest ENA that exists for the given
+    /// [`EreporterRestartUuid`], or [`None`] if no (non-deleted)ereports exist
+    /// with that restart ID.
+    ///
+    /// This is used when inserting a batch of ereports, in order to determine
+    /// the most recent ENA to use in a subsequent request for more ereports
+    /// from that reporter. This is intentionally a separate query than the CTE
+    /// that inserts the batch, as additional ereports with a greater ENA may
+    /// have been inserted concurrently.
     async fn latest_ena_for_restart_on_conn(
         &self,
         restart_id: EreporterRestartUuid,
@@ -235,6 +246,7 @@ impl DataStore {
     ) -> Result<Option<EreportId>, Error> {
         let ena = dsl::ereport
             .filter(dsl::restart_id.eq(restart_id.into_untyped_uuid()))
+            .filter(dsl::time_deleted.is_null())
             .order_by(dsl::ena.desc())
             .limit(1)
             .select(dsl::ena)
@@ -246,8 +258,28 @@ impl DataStore {
     }
 
     /// Inserts the provided tranche of `ereports` into the `ereport` table, and
-    /// potentially updates the `ereporter_restart` table if the restart ID of
-    /// the inserted ereports has not been seen before.
+    /// creates or updates the [`EreporterRestart`] table for the `restart_id`
+    /// of the ereports' reporter.
+    ///
+    /// If no entry in the `ereporter_restart` table exists for the provided
+    /// `restart_id`, one is created. Otherwise, if a restart entry is already
+    /// tracked, the entry is updated as follows:
+    ///
+    /// - The restart record's `time_latest_ereport_received` is set to the
+    ///   `time_collected` of the inserted ereports, if that time is *more
+    ///   recent* than the current value. This tracks the latest time at which
+    ///   we saw activity from this reporter.
+    ///
+    /// - The restart record's `time_first_seen` is set to the `time_collected`
+    ///   of the inserted ereports, if that time is *earlier* than the current
+    ///   value. This allows us to adjust that timestamp backwards in  time, if
+    ///   a Nexus that encountered it earlier than the currently-recorded
+    ///   first-seen time but had not managed to insert anything into the
+    ///   database suddenly wakes up and tries to record those ereports.
+    ///
+    /// - If the restart record's `slot` is `NULL`, and the `slot` number of the
+    ///   provided `reporter` is `Some`, the restart record's slot is set to the
+    ///   provided one.
     ///
     /// # Returns
     ///
@@ -345,7 +377,6 @@ impl DataStore {
         struct EreportInsertQuery<IE, IR> {
             insert_ereports: IE,
             insert_reporter: IR,
-            slot: Option<SqlU16>,
         }
 
         impl<IE, IR> QueryId for EreportInsertQuery<IE, IR> {
@@ -373,22 +404,34 @@ impl DataStore {
 
                 out.push_sql("), inserted_reporter AS (");
                 self.insert_reporter.walk_ast(out.reborrow())?;
-                out.push_sql(" ON CONFLICT (id) DO ");
-                // If we have a slot number, update it so that a previously-null
-                // slot number is filled in; if we do not, do nothing on
-                // conflict so a previously non-NULL slot is not clobbered.
-                if let Some(ref slot) = self.slot {
-                    out.push_sql("UPDATE SET \"slot\" = ");
-                    out.push_bind_param::<sql_types::Int4, _>(slot)?;
-                } else {
-                    out.push_sql("NOTHING");
-                }
                 // We don't actually need this, but `WITH` clauses have to
                 // return something, sooo....
                 out.push_sql(" RETURNING id) ");
                 out.push_sql("SELECT count(*) FROM inserted_ereports");
                 Ok(())
             }
+        }
+
+        // We're gonna use these in the `ON CONFLICT` clause of the ereport
+        // insert query, below. For some reason, you have to manually inform
+        // Diesel that they exist. Whatever.
+        define_sql_function! {
+            fn greatest(
+                a: sql_types::Timestamptz,
+                b: sql_types::Timestamptz,
+            ) -> sql_types::Timestamptz;
+        }
+        define_sql_function! {
+            fn least(
+                a: sql_types::Timestamptz,
+                b: sql_types::Timestamptz,
+            ) -> sql_types::Timestamptz;
+        }
+        define_sql_function! {
+            fn coalesce(
+                a: sql_types::Nullable<sql_types::Int4>,
+                b: sql_types::Nullable<sql_types::Int4>,
+            ) -> sql_types::Nullable<sql_types::Int4>;
         }
 
         let (reporter, slot_type, slot) = match reporter {
@@ -414,24 +457,56 @@ impl DataStore {
             .returning(dsl::ena);
 
         // Query fragment to insert the reporter restart entry into the
-        // ereporter restart table, or update the existing entry's slot column
-        // if one exists and the slot column is null. The null behavior will be
-        // added by the `walk_ast()` method on `EreporterInsertQuery`, because
-        // it depends on whether or not there is a slot number to insert, and I
-        // couldn't figure out how to get diesel to let me type erase an INSERT
-        // statement that may have one of multiple ON CONFLICT clauses...
-        let insert_reporter = diesel::insert_into(
-            restart_dsl::ereporter_restart,
-        )
-        .values(crate::db::model::EreporterRestart {
-            id: restart_id.into(),
-            time_first_seen: time_collected,
-            reporter,
-            slot_type,
-            slot: slot.map(SpMgsSlot::from),
-            rack_id: rack_id.into(),
-        });
-        EreportInsertQuery { insert_ereports, insert_reporter, slot }
+        // ereporter restart table, or update the existing entry if one exists.
+        let insert_reporter =
+            diesel::insert_into(restart_dsl::ereporter_restart)
+                .values(crate::db::model::EreporterRestart {
+                    id: restart_id.into(),
+                    time_first_seen: time_collected,
+                    reporter,
+                    slot_type,
+                    slot: slot.map(SpMgsSlot::from),
+                    rack_id: rack_id.into(),
+                    time_latest_ereport_received: time_collected,
+                })
+                // If this restart ID is already known, do the following:
+                .on_conflict(restart_dsl::id)
+                .do_update()
+                .set((
+                    // - Update the timestamp of the latest ereport from this
+                    //   reporter, if (and only if) the new `time_collected` is
+                    //   greater than the previously recorded one. Using
+                    //   `GREATEST` here prevents us from traveling backwards
+                    //   in time based on when Nexuses which are holding
+                    //   ereports in memory actually manage to insert them into
+                    //   the database.
+                    restart_dsl::time_latest_ereport_received.eq(greatest(
+                        restart_dsl::time_latest_ereport_received,
+                        excluded(restart_dsl::time_latest_ereport_received),
+                    )),
+                    // - Updates the `time_first_seen` timestamp, if (and only
+                    //   if) the `time_collected` timestamp for this tranche is
+                    //   earlier than the previously recorded `time_first_seen`.
+                    //   This will scootch the "first seen" timestamp
+                    //   *backwards* in time, if a Nexus had encountered this
+                    //   restart ID earlier but didn't get around to inserting
+                    //   ereports from it until after another Nexus inserted
+                    //   some with a later timestamp.
+                    restart_dsl::time_first_seen.eq(least(
+                        restart_dsl::time_first_seen,
+                        excluded(restart_dsl::time_first_seen),
+                    )),
+                    // - If we did not previously know the slot number for this
+                    //   reporter, fill it in now. Using `COALESCE` here
+                    //   ensures that we only update the slot number if the
+                    //   preexisting one is `NULL`.
+                    restart_dsl::slot.eq(coalesce(
+                        // prefer the preexisting value, if it is non-null.
+                        restart_dsl::slot,
+                        excluded(restart_dsl::slot),
+                    )),
+                ));
+        EreportInsertQuery { insert_ereports, insert_reporter }
     }
 
     /// Lists ereports which have not been marked as **definitely seen**
@@ -1271,36 +1346,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_ereporter_restarts() {
-        fn mk_ereport(ena: u64) -> (fm::Ena, fm::EreportData) {
-            (
-                Ena(ena),
-                fm::EreportData {
-                    part_number: None,
-                    serial_number: None,
-                    class: None,
-                    report: serde_json::json!({}),
-                },
-            )
-        }
-
         let logctx = dev::test_setup_log("test_ereporter_restarts");
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
         let collector_id = OmicronZoneUuid::new_v4();
         let rack_id = RackUuid::new_v4();
-        let t0 = Utc::now();
+        let t0 = Clock::new();
 
-        let timestamp = move |secs: usize| -> DateTime<Utc> {
-            let t1 = omicron_common::timestamp_db_precision(t0);
-            let t2 = t1 + Duration::from_secs(secs as u64);
-            let t2 = omicron_common::timestamp_db_precision(t2);
-            assert_ne!(
-                t1, t2,
-                "two timestamps intended to be distinct would be equal after \
-                truncating to database precision (advanced by {secs} seconds)"
-            );
-            t2
-        };
         // For host OS reporters, the sled's physical location may not be known
         // immediately, so we may insert ereports with a NULL slot number. We
         // wish to ensure that, if subsequent ereports are inserted for the same
@@ -1308,7 +1360,7 @@ mod tests {
         // updated to the new value, but the first seen timestamp is not
         // changed.
         let host0_restart_id = EreporterRestartUuid::new_v4();
-        let host0_first_seen = timestamp(100);
+        let host0_first_seen = t0.timestamp(100);
         let host0_slot = 7;
         let sled = SledUuid::new_v4();
         datastore
@@ -1324,7 +1376,7 @@ mod tests {
             .await
             .unwrap();
         {
-            let time_collected = timestamp(200);
+            let time_collected = t0.timestamp(200);
             datastore
                 .ereports_insert(
                     opctx,
@@ -1345,7 +1397,7 @@ mod tests {
         // shouldn't happen in practice, but we should make sure the behavior
         // here is correct anyway.
         let host1_restart_id = EreporterRestartUuid::new_v4();
-        let host1_first_seen = timestamp(150);
+        let host1_first_seen = t0.timestamp(150);
         let host1_slot = 3;
         let sled = SledUuid::new_v4();
         datastore
@@ -1364,7 +1416,7 @@ mod tests {
             .ereports_insert(
                 opctx,
                 host1_restart_id,
-                timestamp(250),
+                t0.timestamp(250),
                 collector_id,
                 rack_id,
                 fm::Reporter::HostOs { sled, slot: None },
@@ -1376,7 +1428,7 @@ mod tests {
         // Finally, let's do some SP ereports. These are mostly uncomplicated,
         // since the slot number will always be present.
         let sp0_restart_id0 = EreporterRestartUuid::new_v4();
-        let sp0_first_seen = timestamp(300);
+        let sp0_first_seen = t0.timestamp(300);
         let sp0_slot = 1;
         datastore
             .ereports_insert(
@@ -1394,7 +1446,7 @@ mod tests {
             .await
             .unwrap();
         {
-            let time_collected = timestamp(350);
+            let time_collected = t0.timestamp(350);
             datastore
                 .ereports_insert(
                     opctx,
@@ -1413,7 +1465,7 @@ mod tests {
         }
         // And a subsequent restart of the same SP slot.
         let sp0_restart_id1 = EreporterRestartUuid::new_v4();
-        let sp0_restart1_first_seen = timestamp(360);
+        let sp0_restart1_first_seen = t0.timestamp(360);
         datastore
             .ereports_insert(
                 opctx,
@@ -1449,6 +1501,11 @@ mod tests {
             host0.time_first_seen, host0_first_seen,
             "time_first_seen comes from the first insert and is not updated",
         );
+        assert_eq!(
+            host0.time_latest_ereport_received,
+            t0.timestamp(200),
+            "time_latest_ereport_received is advanced by the second insert",
+        );
 
         // host 1 restart 0
         let Some(host1) = restarts.remove(&host1_restart_id) else {
@@ -1467,6 +1524,11 @@ mod tests {
             host1.time_first_seen, host1_first_seen,
             "time_first_seen comes from the first insert and is not updated",
         );
+        assert_eq!(
+            host1.time_latest_ereport_received,
+            t0.timestamp(250),
+            "time_latest_ereport_received is advanced by the second insert",
+        );
 
         // SP 0 restart 0
         let Some(sp0_restart_0) = restarts.remove(&sp0_restart_id0) else {
@@ -1476,6 +1538,10 @@ mod tests {
         assert_eq!(sp0_restart_0.slot_type, SpType::Switch);
         assert_eq!(sp0_restart_0.slot_number(), Some(sp0_slot));
         assert_eq!(sp0_restart_0.time_first_seen, sp0_first_seen);
+        assert_eq!(
+            sp0_restart_0.time_latest_ereport_received,
+            t0.timestamp(350)
+        );
 
         // SP 0 restart 1
         let Some(sp0_restart_1) = restarts.remove(&sp0_restart_id1) else {
@@ -1485,6 +1551,11 @@ mod tests {
         assert_eq!(sp0_restart_1.slot_type, SpType::Switch);
         assert_eq!(sp0_restart_1.slot_number(), Some(1));
         assert_eq!(sp0_restart_1.time_first_seen, sp0_restart1_first_seen);
+        assert_eq!(
+            sp0_restart_1.time_latest_ereport_received, sp0_restart1_first_seen,
+            "a restart with a single tranche's high-water mark is that \
+             tranche's collection time",
+        );
 
         assert!(
             restarts.is_empty(),
@@ -1493,5 +1564,143 @@ mod tests {
 
         db.terminate().await;
         logctx.cleanup_successful();
+    }
+
+    /// Tests that a restart's `time_latest_ereport_received` is advanced when
+    /// inserting ereports with later collection timestamps, but never goes
+    /// backwards in time when inserting ones that were collected earlier.
+    #[tokio::test]
+    async fn test_time_latest_ereport_received_never_regresses() {
+        let logctx = dev::test_setup_log(
+            "test_time_latest_ereport_received_never_regresses",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+        let collector_id = OmicronZoneUuid::new_v4();
+        let rack_id = RackUuid::new_v4();
+        let sled = SledUuid::new_v4();
+        let restart_id = EreporterRestartUuid::new_v4();
+        let slot = 4;
+        let t0 = Clock::new();
+
+        let fetch_restart = async || {
+            fetch_restarts(datastore, opctx)
+                .await
+                .remove(&restart_id)
+                .expect("the restart should be present")
+        };
+
+        // The first ereports inserted sets the `time_latest_ereport_received`
+        // timestamp. The sled's location is not yet known, so the slot is NULL.
+        let t_first = t0.timestamp(100);
+        datastore
+            .ereports_insert(
+                opctx,
+                restart_id,
+                t_first,
+                collector_id,
+                rack_id,
+                fm::Reporter::HostOs { sled, slot: None },
+                vec![mk_ereport(1)],
+            )
+            .await
+            .unwrap();
+        let restart = fetch_restart().await;
+        assert_eq!(
+            restart.time_latest_ereport_received, t_first,
+            "the first ereports inserted set `time_latest_ereport_received`",
+        );
+
+        // A newer ereport advances the `time_latest_ereport_received` timestamp.
+        let t_newer = t0.timestamp(200);
+        datastore
+            .ereports_insert(
+                opctx,
+                restart_id,
+                t_newer,
+                collector_id,
+                rack_id,
+                fm::Reporter::HostOs { sled, slot: Some(slot) },
+                vec![mk_ereport(2)],
+            )
+            .await
+            .unwrap();
+        let restart = fetch_restart().await;
+        assert_eq!(
+            restart.time_latest_ereport_received, t_newer,
+            "inserting newer ereports advances `time_latest_ereport_received`",
+        );
+        assert_eq!(restart.slot_number(), Some(slot));
+
+        // A belatedly-ingested older ereport (e.g. buffered by the reporter and
+        // delivered out of order) must not move the timestamp backwards. The
+        // `NULL` slot should not clobber the previously discovered slot,
+        // either.
+        let t_belated = t0.timestamp(50);
+        assert!(t_belated < t_newer);
+        datastore
+            .ereports_insert(
+                opctx,
+                restart_id,
+                t_belated,
+                collector_id,
+                rack_id,
+                fm::Reporter::HostOs { sled, slot: None },
+                vec![mk_ereport(3)],
+            )
+            .await
+            .unwrap();
+        let restart = fetch_restart().await;
+        assert_eq!(
+            restart.time_latest_ereport_received, t_newer,
+            "inserting ereports with an older timestamp does not move \
+            `time_latest_ereport_received` backwards"
+        );
+        assert_eq!(
+            restart.slot_number(),
+            Some(slot),
+            "inserting ereports without a known slot must not clobber a \
+             previously non-NULL slot number",
+        );
+        assert_eq!(
+            restart.time_first_seen, t_belated,
+            "inserting ereports with a timestamp earlier than time_first_seen \
+             adjusts it backwards",
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    fn mk_ereport(ena: u64) -> (fm::Ena, fm::EreportData) {
+        (
+            Ena(ena),
+            fm::EreportData {
+                part_number: None,
+                serial_number: None,
+                class: None,
+                report: serde_json::json!({}),
+            },
+        )
+    }
+
+    struct Clock(chrono::DateTime<Utc>);
+
+    impl Clock {
+        fn new() -> Self {
+            Clock(chrono::Utc::now())
+        }
+
+        fn timestamp(&self, seconds: u64) -> chrono::DateTime<Utc> {
+            let seconds = Duration::from_secs(seconds);
+            let t0 = omicron_common::timestamp_db_precision(self.0);
+            let t1 = omicron_common::timestamp_db_precision(t0 + seconds);
+            assert_ne!(
+                t0, t1,
+                "two timestamps intended to be distinct would be equal after \
+                truncating to database precision (advanced by {seconds:?})"
+            );
+            t1
+        }
     }
 }

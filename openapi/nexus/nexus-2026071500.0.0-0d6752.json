@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "2026070700.0.0"
+    "version": "2026071500.0.0"
   },
   "paths": {
     "/device/auth": {
@@ -30688,12 +30688,12 @@
         "type": "object",
         "properties": {
           "api_version": {
-            "description": "The API version, e.g. `2026062900.0.0`, matching the `version` field of the OpenAPI schema. Clients should send it in the `api-version` header to select this version of the API. The official SDKs do this automatically.",
+            "description": "The API version, e.g., `2026071500.0.0`, matching the `version` field of the OpenAPI schema. Clients should send it in the `api-version` header to select this version of the API. The official SDKs do this automatically.",
             "type": "string",
             "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$"
           },
           "system_version": {
-            "description": "The version of the system software serving this API, e.g., `21.0.0`. Use this version to find the right docs and release notes. During an upgrade, some components of the system may be running a newer version.",
+            "description": "The version of the system software serving this API, e.g., `22.0.0`. Use this version to find the right docs and release notes. During an update, some components of the system may be running a newer version.",
             "type": "string",
             "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$"
           }

@@ -20,7 +20,6 @@ members = [
     "clients/nexus-client",
     "clients/nexus-lockstep-client",
     "clients/ntp-admin-client",
-    "clients/ntp-admin-v1-client",
     "clients/oxide-client",
     "clients/oximeter-client",
     "clients/repo-depot-client",
@@ -37,6 +36,7 @@ members = [
     "dev-tools/clickhouse-cluster-dev",
     "dev-tools/ch-dev",
     "dev-tools/common",
+    "dev-tools/corpus-adjust",
     "dev-tools/crdb-seed",
     "dev-tools/db-dev",
     "dev-tools/downloader",
@@ -184,6 +184,8 @@ members = [
     "wicket",
     "wicketd",
     "wicketd-api",
+    "wicketd-commission-types",
+    "wicketd-commission-types/versions",
     "workspace-hack",
     "zone-setup"
 ]
@@ -210,7 +212,6 @@ default-members = [
     "clients/nexus-client",
     "clients/nexus-lockstep-client",
     "clients/ntp-admin-client",
-    "clients/ntp-admin-v1-client",
     "clients/oxide-client",
     "clients/oximeter-client",
     "clients/repo-depot-client",
@@ -227,6 +228,7 @@ default-members = [
     "dev-tools/clickhouse-cluster-dev",
     "dev-tools/ch-dev",
     "dev-tools/common",
+    "dev-tools/corpus-adjust",
     "dev-tools/crdb-seed",
     "dev-tools/db-dev",
     "dev-tools/downloader",
@@ -376,6 +378,8 @@ default-members = [
     "wicket",
     "wicketd",
     "wicketd-api",
+    "wicketd-commission-types",
+    "wicketd-commission-types/versions",
     "workspace-hack",
     "zone-setup",
 ]
@@ -618,11 +622,10 @@ maplit = "1.0.2"
 newtype_derive = "0.1.6"
 ntp-admin-api = { path = "ntp-admin/api" }
 ntp-admin-client = { path = "clients/ntp-admin-client" }
-ntp-admin-v1-client = { path = "clients/ntp-admin-v1-client" }
 ntp-admin-types = { path = "ntp-admin/types" }
 ntp-admin-types-versions = { path = "ntp-admin/types/versions" }
-mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "dc84a6ce494a9d004568b67e22add2285a04d887" }
-ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "dc84a6ce494a9d004568b67e22add2285a04d887" }
+mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "65cc70aa5507f779551a1d33c0089bb0a9b7ac72" }
+ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "65cc70aa5507f779551a1d33c0089bb0a9b7ac72" }
 multimap = "0.10.1"
 nexus-auth = { path = "nexus/auth" }
 nexus-background-task-interface = { path = "nexus/background-task-interface" }
@@ -728,6 +731,7 @@ pem = "3.0"
 # false: petname = { workspace = true, default-features = false }.
 petname = { version = "2.0.2", default-features = false, features = ["default-rng", "default-words"] }
 petgraph = "0.8.2"
+port-file = { version = "0.1.0", features = ["tokio"] }
 postgres-protocol = "0.6.8"
 predicates = "3.1.3"
 pretty_assertions = "1.4.1"
@@ -761,7 +765,7 @@ rats-corim = { git = "https://github.com/oxidecomputer/rats-corim.git", rev = "f
 raw-cpuid = { git = "https://github.com/oxidecomputer/rust-cpuid.git", rev = "a4cf01df76f35430ff5d39dc2fe470bcb953503b" }
 rayon = "1.10"
 rcgen = { version = "0.12.1", default-features = false, features = ["aws_lc_rs", "pem"] }
-mg-api-types = { git = "https://github.com/oxidecomputer/maghemite", rev = "dc84a6ce494a9d004568b67e22add2285a04d887" }
+mg-api-types = { git = "https://github.com/oxidecomputer/maghemite", rev = "65cc70aa5507f779551a1d33c0089bb0a9b7ac72" }
 reconfigurator-cli = { path = "dev-tools/reconfigurator-cli" }
 reedline = "0.40.0"
 ref-cast = "1.0"
@@ -868,10 +872,12 @@ tough = { version = "0.22.0" }
 transceiver-controller = { git = "https://github.com/oxidecomputer/transceiver-control", features = [ "api-traits" ] }
 transient-dns-server = { path = "dns-server/transient" }
 trybuild = "1.0.106"
-tufaceous = { git = "https://github.com/oxidecomputer/tufaceous", branch = "main" }
-tufaceous-artifact = { git = "https://github.com/oxidecomputer/tufaceous", branch = "main", features = ["proptest", "schemars"] }
-tufaceous-brand-metadata = { git = "https://github.com/oxidecomputer/tufaceous", branch = "main" }
-tufaceous-lib = { git = "https://github.com/oxidecomputer/tufaceous", branch = "main" }
+tufaceous = { git = "https://github.com/oxidecomputer/tufaceous", branch = "v1" }
+tufaceous-artifact = { git = "https://github.com/oxidecomputer/tufaceous", branch = "v1", features = ["proptest", "schemars"] }
+tufaceous-brand-metadata = { git = "https://github.com/oxidecomputer/tufaceous", branch = "v1" }
+tufaceous-lib = { git = "https://github.com/oxidecomputer/tufaceous", branch = "v1" }
+tufaceous-v2 = { git = "https://github.com/oxidecomputer/tufaceous", branch = "main", package = "tufaceous" }
+tufaceous-artifact-v2 = { git = "https://github.com/oxidecomputer/tufaceous", branch = "main", package = "tufaceous-artifact" }
 tui-tree-widget = "0.23.1"
 typed-rng = { path = "typed-rng" }
 typify = "0.3.0"
@@ -889,6 +895,8 @@ wicket = { path = "wicket" }
 wicket-common = { path = "wicket-common" }
 wicketd-api = { path = "wicketd-api" }
 wicketd-client = { path = "clients/wicketd-client" }
+wicketd-commission-types = { path = "wicketd-commission-types" }
+wicketd-commission-types-versions = { path = "wicketd-commission-types/versions" }
 x509-cert = { version = "0.2.5", default-features = false }
 xshell = "0.2.7"
 zerocopy = "0.8.26"
@@ -1110,7 +1118,8 @@ opt-level = 3
 # tufaceous-artifact = { path = "../tufaceous/artifact" }
 # tufaceous-brand-metadata = { path = "../tufaceous/brand-metadata" }
 # tufaceous-lib = { path = "../tufaceous/lib" }
-# Extra slash here to pretend to be a different source.
+# tufaceous-v2 = { path = "../tufaceous/lib", package = "tufaceous" }
+# tufaceous-artifact-v2 = { path = "../tufaceous/artifact", package = "tufaceous-artifact" }
 
 # [patch."https://github.com/oxidecomputer/typify"]
 # typify = { path = "../typify/typify" }

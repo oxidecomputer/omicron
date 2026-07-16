@@ -112,7 +112,7 @@ pub fn format_time_delta(time_delta: chrono::TimeDelta) -> String {
 ///
 /// The releng build process appends build metadata to this to produce the full
 /// version string; the `/v1/version` API endpoint returns it as-is.
-pub const SYSTEM_VERSION: semver::Version = semver::Version::new(21, 0, 0);
+pub const SYSTEM_VERSION: semver::Version = semver::Version::new(22, 0, 0);
 
 pub const OMICRON_DPD_TAG: &str = "omicron";
 

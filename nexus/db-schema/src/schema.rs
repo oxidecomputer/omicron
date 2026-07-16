@@ -3013,6 +3013,7 @@ table! {
         slot_type -> crate::enums::SpTypeEnum,
         slot -> Nullable<Int4>,
         rack_id -> Uuid,
+        time_latest_ereport_received -> Timestamptz,
     }
 }
 
