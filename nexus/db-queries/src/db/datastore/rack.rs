@@ -667,18 +667,22 @@ impl DataStore {
             zone_config.id,
             zone_config.zone_type.kind(),
         );
-        Self::allocate_external_ip_on_connection(conn, db_ip).await.map_err(
-            |err| {
-                error!(
-                    log,
-                    "Initializing Rack: Failed to allocate \
-                     IP address for {}",
-                     zone_report_str;
-                    "err" => %err,
-                );
-                RackInitError::AddingIp(err.into_public_ignore_retries())
-            },
-        )?;
+        Self::allocate_external_ip_on_connection(
+            conn,
+            db_ip,
+            LookupType::ById(service_pool.db_pool.id()),
+        )
+        .await
+        .map_err(|err| {
+            error!(
+                log,
+                "Initializing Rack: Failed to allocate \
+                 IP address for {}",
+                 zone_report_str;
+                "err" => %err,
+            );
+            RackInitError::AddingIp(err.into_public_ignore_retries())
+        })?;
 
         self.create_network_interface_raw_conn(conn, db_nic)
             .await
