@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use super::json_display::fmt_json_value;
+use super::display;
 use crate::alert::AlertClass;
 use crate::fm::DiagnosisEngineKind;
 use crate::fm::Ereport;
@@ -115,9 +115,7 @@ impl Metadata {
                 const CLOSED_IN: &str = "closed in sitrep:";
                 const WIDTH: usize = const_max_len(&[DE, OPENED_IN, CLOSED_IN]);
 
-                for line in comment.lines() {
-                    writeln!(f, "{:>indent$}// {line}", "")?;
-                }
+                display::Comment::from(comment).indent(*indent).fmt(f)?;
                 writeln!(f, "{:>indent$}{DE:<WIDTH$} {de}", "")?;
                 writeln!(
                     f,
@@ -233,9 +231,7 @@ impl Fact {
                 };
 
                 writeln!(f, "{BULLET:>indent$}fact {id}")?;
-                for line in comment.lines() {
-                    writeln!(f, "{:>indent$}// {line}", "")?;
-                }
+                display::Comment::from(comment).indent(indent).fmt(f)?;
                 writeln!(
                     f,
                     "{:>indent$}added in: {created_sitrep_id}{}",
@@ -244,7 +240,7 @@ impl Fact {
                 )?;
                 let payload = serde_json::to_value(payload)
                     .unwrap_or(serde_json::Value::Null);
-                fmt_json_value(f, "payload", &payload, indent)?;
+                display::fmt_json_value(f, "payload", &payload, indent)?;
                 writeln!(f)
             }
         }
@@ -358,9 +354,7 @@ impl fmt::Display for DisplayCase<'_> {
                 let sn =
                     ereport.serial_number.as_deref().unwrap_or("<UNKNOWN>");
                 writeln!(f, "{BULLET:>indent$}ereport {}", ereport.id)?;
-                for line in comment.lines() {
-                    writeln!(f, "{:>indent$}// {line}", "")?;
-                }
+                display::Comment::from(comment).indent(indent).fmt(f)?;
                 writeln!(
                     f,
                     "{:>indent$}{CLASS:<WIDTH$} {}",
@@ -413,9 +407,7 @@ impl fmt::Display for DisplayCase<'_> {
                 const WIDTH: usize = const_max_len(&[CLASS, REQUESTED_IN]);
 
                 writeln!(f, "{BULLET:>indent$}alert {id}",)?;
-                for line in comment.lines() {
-                    writeln!(f, "{:>indent$}// {line}", "")?;
-                }
+                display::Comment::from(comment).indent(indent).fmt(f)?;
                 writeln!(
                     f,
                     "{:>indent$}{CLASS:<WIDTH$} {class}, v{version}",
@@ -448,10 +440,7 @@ impl fmt::Display for DisplayCase<'_> {
                 const WIDTH: usize = const_max_len(&[REQUESTED_IN, DATA]);
 
                 writeln!(f, "{BULLET:>indent$}bundle {id}",)?;
-
-                for line in comment.lines() {
-                    writeln!(f, "{:>indent$}// {line}", "")?;
-                }
+                display::Comment::from(comment).indent(indent).fmt(f)?;
                 writeln!(
                     f,
                     "{:>indent$}{REQUESTED_IN:<WIDTH$} {requested_sitrep_id}{}",
