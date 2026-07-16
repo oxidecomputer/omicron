@@ -34,6 +34,17 @@ ptime -m cargo run --locked --release --bin omicron-package -- \
   -t test target create -p dev
 ptime -m cargo run --locked --release --bin omicron-package -- \
   -t test package
+
+# Exercise the same stamped-zone path used by releng while giving the deploy
+# job a distinctive value to verify through Nexus. `install` reads packages
+# from their unversioned output paths, so replace the Nexus archive with the
+# stamped output before assembling package.tar.gz.
+DEPLOY_SYSTEM_VERSION="0.0.0-deploy-test"
+ptime -m cargo run --locked --release --bin omicron-package -- \
+  --target test stamp nexus "$DEPLOY_SYSTEM_VERSION"
+cp out/versioned/nexus.tar.gz out/nexus.tar.gz
+printf '%s\n' "$DEPLOY_SYSTEM_VERSION" >out/deploy-system-version
+
 mapfile -t packages \
   < <(cargo run --locked --release --bin omicron-package -- -t test list-outputs)
 
@@ -55,6 +66,7 @@ mkdir tests
 
 files=(
 	.github/buildomat/ci-env.sh
+	out/deploy-system-version
 	out/target/test
 	out/npuzone/*
 	package-manifest.toml
