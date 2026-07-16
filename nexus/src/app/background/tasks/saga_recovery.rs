@@ -383,7 +383,7 @@ impl<N: MakeSagaContext> SagaRecoveryInner<N> {
                         *saga_id,
                         SagaStateTransition::Abandoned {
                             reason: SagaReasonAbandoned::Unrecoverable,
-                            information: message.clone(),
+                            comment: message.clone(),
                         },
                         *sec_id,
                     )

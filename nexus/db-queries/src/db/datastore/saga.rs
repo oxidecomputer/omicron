@@ -51,7 +51,7 @@ pub enum SagaStateTransition {
     Running,
     Unwinding,
     Done,
-    Abandoned { reason: SagaReasonAbandoned, information: String },
+    Abandoned { reason: SagaReasonAbandoned, comment: String },
 }
 
 impl From<SagaStateTransition> for SagaState {
@@ -60,7 +60,7 @@ impl From<SagaStateTransition> for SagaState {
             SagaStateTransition::Running => SagaState::Running,
             SagaStateTransition::Unwinding => SagaState::Unwinding,
             SagaStateTransition::Done => SagaState::Done,
-            SagaStateTransition::Abandoned { reason: _, information: _ } => {
+            SagaStateTransition::Abandoned { reason: _, comment: _ } => {
                 SagaState::Abandoned
             }
         }
@@ -78,12 +78,12 @@ impl From<SagaStateTransition> for SagaStateDbFields {
                 abandon_comment: None,
                 abandon_time: None,
             },
-            SagaStateTransition::Abandoned { reason, information } => {
+            SagaStateTransition::Abandoned { reason, comment } => {
                 let now = chrono::Utc::now();
                 SagaStateDbFields {
                     saga_state: SagaState::Abandoned,
                     abandon_reason: Some(reason),
-                    abandon_comment: Some(information),
+                    abandon_comment: Some(comment),
                     abandon_time: Some(now),
                 }
             }
@@ -689,7 +689,7 @@ mod test {
                 node_cx.saga_id,
                 SagaStateTransition::Abandoned {
                     reason: SagaReasonAbandoned::Unrecoverable,
-                    information: "test".to_string(),
+                    comment: "test".to_string(),
                 },
                 node_cx.sec_id,
             )
@@ -711,7 +711,7 @@ mod test {
 
         assert_eq!(found_saga.saga_state, SagaState::Abandoned);
         let abandon = found_saga
-            .abandon_metadata()
+            .abandon_metadata
             .expect("an abandoned saga should have abandonment metadata");
         assert_eq!(abandon.reason, SagaReasonAbandoned::Unrecoverable);
         assert_eq!(abandon.comment, "test".to_string());
@@ -744,22 +744,18 @@ mod test {
         }
 
         fn new_abandoned_db_saga(&self) -> db::model::saga_types::Saga {
-            let params = steno::SagaCreateParams {
-                id: self.saga_id,
-                name: steno::SagaName::new("test saga"),
-                dag: serde_json::value::Value::Null,
-                state: steno::SagaCachedState::Running,
-            };
-
-            let mut saga =
-                db::model::saga_types::Saga::new(self.sec_id, params);
-            let time = saga.adopt_time;
-            saga.set_abandoned(db::model::saga_types::AbandonMetadata {
-                time,
+            let abandon_metadata = db::model::saga_types::AbandonMetadata {
+                time: Utc::now(),
                 reason: SagaReasonAbandoned::Unrecoverable,
                 comment: "fake abandoned saga created".to_string(),
-            });
-            saga
+            };
+            db::model::saga_types::Saga::new_abandoned(
+                self.sec_id,
+                self.saga_id.into(),
+                "test_saga".to_string(),
+                serde_json::value::Value::Null,
+                abandon_metadata,
+            )
         }
 
         fn new_unwinding_db_saga(&self) -> db::model::saga_types::Saga {

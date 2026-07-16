@@ -355,7 +355,7 @@ pub struct Saga {
     pub adopt_generation: super::Generation,
     pub adopt_time: DateTime<Utc>,
     // Abandon metadata, present only when `saga_state` is `Abandoned`.
-    abandon_metadata: Option<AbandonMetadata>,
+    pub abandon_metadata: Option<AbandonMetadata>,
 }
 
 impl Saga {
@@ -385,18 +385,32 @@ impl Saga {
         }
     }
 
-    pub fn abandon_metadata(&self) -> Option<AbandonMetadata> {
-        self.abandon_metadata.clone()
-    }
+    // The sec store has no concept of an abandoned saga. To construct a new
+    // saga in an abandoned state, this method should be used.
+    //
+    // Other than for testing, there should be no other use for this method.
+    pub fn new_abandoned(
+        creator: SecId,
+        saga_id: SagaId,
+        name: String,
+        dag: serde_json::Value,
+        abandon_metadata: AbandonMetadata,
+    ) -> Self {
+        let now = now_db_precision();
 
-    /// Marks this saga abandoned with the required metadata.
-    ///
-    /// Sets `saga_state` and the abandonment metadata together so they stay
-    /// all or none. This is the only way to populate `abandon_metadata` other
-    /// than loading a validated row from the database.
-    pub fn set_abandoned(&mut self, metadata: AbandonMetadata) {
-        self.saga_state = SagaState::Abandoned;
-        self.abandon_metadata = Some(metadata);
+        Self {
+            id: saga_id,
+            creator,
+            time_created: now,
+            name,
+            saga_dag: dag,
+            saga_state: SagaState::Abandoned,
+            current_sec: Some(creator),
+            adopt_generation: Generation::new().into(),
+            adopt_time: now,
+            // An abandoned saga must always contain abandonment metadata.
+            abandon_metadata: Some(abandon_metadata),
+        }
     }
 }
 
@@ -621,7 +635,7 @@ mod test {
             .expect("abandoned saga with full metadata should be valid");
         assert_eq!(saga.saga_state, SagaState::Abandoned);
         assert_eq!(
-            saga.abandon_metadata(),
+            saga.abandon_metadata,
             Some(AbandonMetadata { time, reason, comment: comment.clone() })
         );
 
@@ -631,7 +645,7 @@ mod test {
         let saga = Saga::try_from(row)
             .expect("non-abandoned saga without metadata should be valid");
         assert_eq!(saga.saga_state, SagaState::Running);
-        assert_eq!(saga.abandon_metadata(), None);
+        assert_eq!(saga.abandon_metadata, None);
 
         // Abandoned and empty metadata is invalid.
         let row = fake_saga_row(SagaState::Abandoned, None, None, None);

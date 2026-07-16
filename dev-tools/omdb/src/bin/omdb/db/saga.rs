@@ -134,8 +134,7 @@ impl SagaArgs {
 
             SagaCommands::Abandon(args) => {
                 let token = omdb.check_allow_destructive()?;
-                cmd_sagas_abandon(omdb, opctx, datastore, args.clone(), token)
-                    .await
+                cmd_sagas_abandon(omdb, opctx, datastore, args, token).await
             }
 
             SagaCommands::Show(args) => {
@@ -186,8 +185,7 @@ impl From<Saga> for SagaRow {
             current_sec,
             adopt_generation: _,
             adopt_time: _,
-            // Saga contains private fields which are ignored
-            ..
+            abandon_metadata: _,
         } = saga;
         Self {
             id: id.0.into(),
@@ -371,7 +369,7 @@ async fn cmd_sagas_abandon(
     omdb: &Omdb,
     opctx: &OpContext,
     datastore: &DataStore,
-    SagaAbandonArgs { saga_id, comment, bypass_sec_check }: SagaAbandonArgs,
+    args: &SagaAbandonArgs,
     _destruction_token: DestructiveOperationToken,
 ) -> anyhow::Result<()> {
     use nexus_db_schema::schema::saga::dsl;
@@ -381,7 +379,7 @@ async fn cmd_sagas_abandon(
     let conn = datastore.pool_connection_for_tests().await?;
     let saga: Saga = {
         let row = dsl::saga
-            .filter(dsl::id.eq(saga_id))
+            .filter(dsl::id.eq(args.saga_id))
             .select(nexus_db_model::SagaRow::as_select())
             .first_async(&*conn)
             .await?;
@@ -390,10 +388,10 @@ async fn cmd_sagas_abandon(
 
     match saga.saga_state {
         SagaState::Done => {
-            bail!("saga {saga_id} is already done executing");
+            bail!("saga {} is already done executing", args.saga_id);
         }
         SagaState::Abandoned => {
-            bail!("saga {saga_id} is already abandoned");
+            bail!("saga {} is already abandoned", args.saga_id);
         }
         SagaState::Running | SagaState::Unwinding => {}
     }
@@ -425,10 +423,10 @@ execute even if it is abandoned. You should only proceed if:
 
     // Before doing anything: find the current SEC for the saga, and ping it to
     // ensure that the Nexus is down.
-    if !bypass_sec_check {
+    if !args.bypass_sec_check {
         let saga = {
             let row = dsl::saga
-                .filter(dsl::id.eq(saga_id))
+                .filter(dsl::id.eq(args.saga_id))
                 .select(nexus_db_model::SagaRow::as_select())
                 .first_async(&*conn)
                 .await?;
@@ -456,12 +454,12 @@ execute even if it is abandoned. You should only proceed if:
     let new_state = SagaStateDbFields {
         saga_state: SagaState::Abandoned,
         abandon_reason: Some(nexus_db_model::SagaReasonAbandoned::Omdb),
-        abandon_comment: Some(comment),
+        abandon_comment: Some(args.comment.to_string()),
         abandon_time: Some(Utc::now()),
     };
 
     diesel::update(dsl::saga)
-        .filter(dsl::id.eq(saga_id))
+        .filter(dsl::id.eq(args.saga_id))
         .set(new_state)
         .execute_async(&*conn)
         .await?;
@@ -492,7 +490,12 @@ async fn get_all_sagas_in_state(
             .found_batch(&records_batch, &|s: &nexus_db_model::SagaRow| s.id());
 
         for row in records_batch {
-            sagas.push(Saga::try_from(row)?);
+            match Saga::try_from(row.clone()) {
+                Ok(saga_row) => sagas.push(saga_row),
+                Err(e) => {
+                    println!("WARNING: Skipping saga with id {}: {e}", row.id())
+                }
+            };
         }
     }
 
