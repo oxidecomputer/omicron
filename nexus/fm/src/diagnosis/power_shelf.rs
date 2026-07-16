@@ -911,6 +911,31 @@ mod tests {
             "slot": 4,
             "v": 0
         }"#;
+
+        // A totally incomprehensible weird ereport, which this DE cannot parse.
+        // This is used as a stand-in for an ereport that a past or future
+        // version of the DE might assign to a case, but which this version of
+        // the DE cannot interpret. It must, however, have a *class* that this
+        // DE recognizes, so it's a PSU remove ereport, but with a slot that's
+        // out of range, the "rail" field removed, and the "refdes" field
+        // replaced with an object.
+        pub(super) const FAKE_BAD_EREPORT_JSON: &str = r#"{
+            "baseboard_part_number": "913-0000003",
+            "baseboard_rev": 8,
+            "baseboard_serial_number": "BRM45220004",
+            "ereport_message_version": 0,
+            "hubris_archive_id": "qSm4IUtvQe0",
+            "hubris_task_gen": 0,
+            "hubris_task_name": "sequencer",
+            "hubris_uptime_ms": 1197337481,
+            "k": "hw.remove.psu",
+            "refdes": {
+                "badness": "very yes",
+                "psu": "PSU4"
+            },
+            "slot": 9,
+            "v": 69420
+        }"#;
     }
 
     fn test_dogfood_ereport_parses(
@@ -1481,6 +1506,144 @@ mod tests {
             &case,
             [(AlertClass::PsuRemoved, 2), (AlertClass::PsuInserted, 1)],
             "each of the ereports should request an alert",
+        );
+
+        logctx.cleanup_successful();
+    }
+
+    /// A case in which the DE that produced the parent sitrep assigned ereports
+    /// that this DE cannot parse must never be closed, even if the ereports
+    /// that *could* be interpreted suggest that the case has been resolved. If
+    /// any ereports could not be interpreted successfully, it is possible our
+    /// conclusion about the current state of the case is incorrect, and closing
+    /// it would be invalid. Instead, we must leave the case open for future
+    /// iterations of the DE, which may correctly handle those ereports, to
+    /// figure out what's up.
+    ///
+    /// In this test, a case from the parent sitrep contains a parseable remove
+    /// ereport and an unparseable ereport; then a new insert ereport arrives.
+    /// Without the unparseable ereport, the insert would close the case. Here,
+    /// the case must not be closed.
+    #[test]
+    fn unparseable_ereport_prevents_close_despite_insert() {
+        let (mut fmtest, logctx) = FmTest::new_with_logctx(
+            "unparseable_ereport_prevents_close_despite_insert",
+        );
+        let (example, _bp) = fmtest.system_builder.build();
+        let inv_collection_id = example.collection.id;
+        let mut reporter = fmtest.reporters.reporter(ereport::Reporter::Sp {
+            sp_type: SpType::Power,
+            slot: SHELF,
+        });
+
+        // The parent case saw a remove of PSU4, plus an ereport that this
+        // version of the DE cannot interpret.
+        let remove = Arc::new(
+            reporter.parse_ereport(Utc::now(), ereports::PSU_REMOVE_JSON),
+        );
+        let unparseable = Arc::new(
+            reporter.parse_ereport(Utc::now(), ereports::FAKE_BAD_EREPORT_JSON),
+        );
+        let parent =
+            parent_with_open_case(inv_collection_id, [remove, unparseable], []);
+
+        // A fresh insert arrives, which would normally close the case.
+        let insert =
+            reporter.parse_ereport(Utc::now(), ereports::PSU_INSERT_JSON);
+        let input =
+            build_input(&fmtest, example.collection, Some(parent), [insert]);
+        let sitrep = run_analyze(&logctx.log, &input);
+
+        let case = sole_case(&sitrep);
+        assert!(
+            case.is_open(),
+            "a case containing a ereports this DE could not interpret must \
+             remain open, regardless of the outcome based on the ereports that \
+             could be parsed",
+        );
+        assert_alert_counts(
+            &case,
+            [(AlertClass::PsuInserted, 1)],
+            "the new insert should still request its alert even though the \
+             case stays open",
+        );
+
+        logctx.cleanup_successful();
+    }
+
+    /// A case from the parent sitrep in which *none* of the previously assigned
+    /// ereports can be parsed must remain open. This way, the case is preserved
+    /// in the hopes a future DE can understand those ereports, rather than
+    /// discarding evidence that previously indicated something was going on.
+    #[test]
+    fn case_with_only_unparseable_ereports_stays_open() {
+        let (mut fmtest, logctx) = FmTest::new_with_logctx(
+            "case_with_only_unparseable_ereports_stays_open",
+        );
+        let (example, _bp) = fmtest.system_builder.build();
+        let inv_collection_id = example.collection.id;
+        let mut reporter = fmtest.reporters.reporter(ereport::Reporter::Sp {
+            sp_type: SpType::Power,
+            slot: SHELF,
+        });
+
+        let unparseable = Arc::new(
+            reporter.parse_ereport(Utc::now(), ereports::FAKE_BAD_EREPORT_JSON),
+        );
+        let parent =
+            parent_with_open_case(inv_collection_id, [unparseable], []);
+
+        let input = build_input(&fmtest, example.collection, Some(parent), []);
+        let sitrep = run_analyze(&logctx.log, &input);
+
+        let case = sole_case(&sitrep);
+        assert!(
+            case.is_open(),
+            "a case where all ereports cannot be parsed must remain open for
+             future generations to try and figure it out",
+        );
+        assert!(
+            case.alerts_requested.is_empty(),
+            "no alerts should be requested for unparseable ereports"
+        );
+
+        logctx.cleanup_successful();
+    }
+
+    /// When the interpretable evidence would leave the case open anyway (a PSU
+    /// is still absent), an unparseable ereport doesn't change the outcome, and
+    /// the case stays open.
+    #[test]
+    fn unparseable_ereport_case_with_absent_psu_stays_open() {
+        let (mut fmtest, logctx) = FmTest::new_with_logctx(
+            "unparseable_ereport_case_with_absent_psu_stays_open",
+        );
+        let (example, _bp) = fmtest.system_builder.build();
+        let inv_collection_id = example.collection.id;
+        let mut reporter = fmtest.reporters.reporter(ereport::Reporter::Sp {
+            sp_type: SpType::Power,
+            slot: SHELF,
+        });
+
+        // The parent case saw a remove (PSU4 is still absent) and an
+        // unparseable ereport.
+        let remove = Arc::new(
+            reporter.parse_ereport(Utc::now(), ereports::PSU_REMOVE_JSON),
+        );
+        let unparseable = Arc::new(
+            reporter.parse_ereport(Utc::now(), ereports::FAKE_BAD_EREPORT_JSON),
+        );
+        let parent =
+            parent_with_open_case(inv_collection_id, [remove, unparseable], []);
+
+        let input = build_input(&fmtest, example.collection, Some(parent), []);
+        let sitrep = run_analyze(&logctx.log, &input);
+
+        let case = sole_case(&sitrep);
+        assert!(
+            case.is_open(),
+            "the PSU is still absent AND an ereport couldn't be parsed; \
+             the case must remain open"
         );
 
         logctx.cleanup_successful();
