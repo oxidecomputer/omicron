@@ -7,7 +7,12 @@ license = "MPL-2.0"
 [lints]
 workspace = true
 
+[features]
+# Enable test-only assertion helpers on `Activator`.
+testing = ["dep:tokio-test"]
+
 [dependencies]
 omicron-workspace-hack.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
+tokio-test = { workspace = true, optional = true }

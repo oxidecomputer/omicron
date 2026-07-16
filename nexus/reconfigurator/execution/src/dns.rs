@@ -1530,12 +1530,16 @@ mod test {
             .expect("constructed ExternalNetworkingAllocator")
             .for_new_nexus()
             .expect("found external IP for Nexus");
+        let nexus_config =
+            DataStore::blueprint_operator_nexus_config(&blueprint)
+                .expect("blueprint has at least one Nexus zone");
         builder
             .sled_add_zone_nexus(
                 sled_id,
                 BlueprintZoneImageSource::InstallDataset,
                 new_nexus_external_ip,
                 blueprint.nexus_generation,
+                &nexus_config,
             )
             .unwrap();
         // The silo creation above advanced external DNS past B1's recorded

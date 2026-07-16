@@ -807,9 +807,11 @@ impl DataStore {
     /// Runs pre-computed verification SQL (from a `.verify.sql` file) in a
     /// **separate transaction** from the DDL that was just applied.
     /// The verification SQL is generated at test time by parsing each
-    /// migration and detecting operations that involve async backfill in
-    /// CockroachDB (CREATE INDEX, ALTER COLUMN SET NOT NULL, ADD CONSTRAINT,
-    /// ADD COLUMN with backfill).
+    /// migration and detecting operations whose async backfill or validation
+    /// can outlast the statement that issued it (CREATE INDEX and validating
+    /// ADD CONSTRAINT). Operations like ALTER COLUMN SET NOT NULL and ADD
+    /// COLUMN are excluded: their issuing statement blocks on the
+    /// schema-change job, so on success the change has already landed.
     ///
     /// If verification fails, the error propagates immediately — the outer
     /// startup retry loop will re-attempt the entire migration.

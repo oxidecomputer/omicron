@@ -33,7 +33,8 @@ use nexus_test_utils::resource_helpers::{
 };
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::instance::{
-    InstanceCreate, InstanceNetworkInterfaceAttachment, InstanceUpdate,
+    InstanceCpuCount, InstanceCreate, InstanceNetworkInterfaceAttachment,
+    InstanceState, InstanceUpdate,
 };
 use nexus_types::external_api::multicast::{
     InstanceMulticastGroupJoin, MulticastGroup, MulticastGroupJoinSpec,
@@ -43,8 +44,7 @@ use nexus_types::internal_api::params::InstanceMigrateRequest;
 
 use nexus_types_versions::latest::instance::Instance;
 use omicron_common::api::external::{
-    ByteCount, IdentityMetadataCreateParams, InstanceCpuCount, InstanceState,
-    Nullable,
+    ByteCount, IdentityMetadataCreateParams, Nullable,
 };
 use omicron_nexus::TestInterfaces;
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid, MulticastGroupUuid};
@@ -939,7 +939,11 @@ async fn test_multicast_migration_scenarios(
                 let has_sub = groups.get(&propolis1_id).map_or(false, |g| {
                     g.iter().any(|m| m.group_ip == multicast_ip)
                 });
-                if has_sub { Ok(()) } else { Err(CondCheckError::NotYet::<()>) }
+                if has_sub {
+                    Ok(())
+                } else {
+                    Err(CondCheckError::<()>::NotYet { status: None })
+                }
             },
             &POLL_INTERVAL,
             &POLL_TIMEOUT,
@@ -957,7 +961,7 @@ async fn test_multicast_migration_scenarios(
                 if m2p.contains(&(multicast_ip, underlay_ipv6)) {
                     Ok(())
                 } else {
-                    Err(CondCheckError::NotYet::<()>)
+                    Err(CondCheckError::<()>::NotYet { status: None })
                 }
             },
             &POLL_INTERVAL,

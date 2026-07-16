@@ -475,8 +475,9 @@ struct UpdatesRequired {
     new_intent: Option<InstanceIntendedState>,
 
     /// If this is [`Some`], the instance's active VMM with this UUID has
-    /// transitioned to [`VmmState::Destroyed`], and its resources must be
-    /// cleaned up by a [`destroyed`] subsaga.
+    /// transitioned to a terminal state ([`VmmState::Destroyed`] or
+    /// [`VmmState::Failed`]), and its resources must be cleaned up by a
+    /// [`destroyed`] subsaga.
     destroy_active_vmm: Option<PropolisUuid>,
 
     /// If this is [`Some`], then a migration finished successfully, and the
@@ -489,8 +490,9 @@ struct UpdatesRequired {
         Option<MigrateSuccessUpdate>,
 
     /// If this is [`Some`], the instance's migration target VMM with this UUID
-    /// has transitioned to [`VmmState::Destroyed`], and its resources must be
-    /// cleaned up by a [`destroyed`] subsaga.
+    /// has transitioned to a terminal state ([`VmmState::Destroyed`] or
+    /// [`VmmState::Failed`]), and its resources must be cleaned up by a
+    /// [`destroyed`] subsaga.
     destroy_target_vmm: Option<PropolisUuid>,
 
     /// If this is [`Some`], the instance no longer has an active VMM, and its
@@ -1688,22 +1690,24 @@ mod test {
         create_default_ip_pools, create_project, object_create,
     };
     use nexus_test_utils_macros::nexus_test;
+    use nexus_types::external_api::instance::InstanceCpuCount;
     use nexus_types::external_api::{
         instance as instance_types, networking as networking_types,
     };
+    use nexus_types::identity::Asset as _;
     use nexus_types::instance::Migrations;
     use nexus_types::instance::VmmFailureReason;
     use nexus_types::instance::VmmState as NexusVmmState;
     use nexus_types::internal_api::params::InstanceMigrateRequest;
     use omicron_common::api::external::{
-        ByteCount, DataPageParams, IdentityMetadataCreateParams,
-        InstanceCpuCount, Name,
+        ByteCount, DataPageParams, IdentityMetadataCreateParams, Name,
     };
     use omicron_test_utils::dev::poll;
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::PropolisUuid;
     use sled_agent_types::early_networking::SwitchSlot;
     use sled_agent_types::instance::{MigrationRuntimeState, MigrationState};
+    use slog_error_chain::InlineErrorChain;
     use std::sync::Arc;
     use std::sync::Mutex;
     use std::time::Duration;
@@ -2053,6 +2057,89 @@ mod test {
             &cptestctx.logctx.log,
         )
         .await;
+    }
+
+    // Regression test for
+    // <https://github.com/oxidecomputer/omicron/issues/10784>.
+    //
+    // This test ensures that start sagas unwind correctly when the instance to
+    // be updated is deleted before the saga attempts to lock it.
+    #[nexus_test(server = crate::Server)]
+    async fn test_start_saga_fails_when_instance_deleted(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        let _project_id = setup_test_project(&cptestctx.external_client).await;
+        let nexus = &cptestctx.server.server_context().nexus;
+        let (_, params) = setup_active_vmm_destroyed_test(cptestctx).await;
+
+        // Delete the instance out from under the saga-to-be. Since the
+        // instance record still points at the (now destroyed) active VMM, it
+        // cannot yet be deleted through the external API, so manually update
+        // the DB record into a deletable state first.
+        let state = test_helpers::instance_fetch_by_name(
+            cptestctx,
+            INSTANCE_NAME,
+            PROJECT_NAME,
+        )
+        .await;
+        let instance = state.instance();
+        let instance_id = InstanceUuid::from_untyped_uuid(instance.id());
+        nexus
+            .datastore()
+            .instance_update_runtime(
+                &instance_id,
+                &InstanceRuntimeState {
+                    time_updated: Utc::now(),
+                    generation: Generation(
+                        instance.runtime().generation.0.next(),
+                    ),
+                    propolis_id: None,
+                    dst_propolis_id: None,
+                    migration_id: None,
+                    nexus_state: InstanceState::NoVmm,
+                    time_last_auto_restarted: None,
+                },
+            )
+            .await
+            .unwrap();
+        test_helpers::instance_delete_by_name(
+            cptestctx,
+            INSTANCE_NAME,
+            PROJECT_NAME,
+        )
+        .await;
+
+        // Now, run the start saga. If `siu_lock_instance` (incorrectly)
+        // retries the lock query forever when the instance is gone, the saga
+        // will never complete, so bound how long we wait for it.
+        const TIMEOUT: Duration = Duration::from_secs(60);
+        let dag = create_saga_dag::<SagaInstanceUpdate>(params).unwrap();
+        let running_saga = nexus
+            .sagas
+            .saga_prepare(dag)
+            .await
+            .expect("saga should prepare successfully")
+            .start()
+            .await
+            .expect("saga should start successfully");
+        let result = tokio::time::timeout(
+            TIMEOUT,
+            running_saga.wait_until_stopped(),
+        )
+        .await
+        .expect(
+            "a start saga must  complete within a reasonable period of time \
+             if the instance record has been deleted.",
+        )
+        .into_omicron_result();
+        let error = result.expect_err(
+            "start saga should fail when the instance has been deleted",
+        );
+        assert!(
+            matches!(error, Error::ObjectNotFound { .. }),
+            "expected the start saga to fail with `ObjectNotFound`, but saw: \
+             {error:#?}",
+        );
     }
 
     // --- test helpers ---
@@ -2550,7 +2637,7 @@ mod test {
         .unwrap();
 
         // Shutdown switch 0.
-        shutdown_switch0(&cptestctx).await;
+        cptestctx.stop_dendrite(SwitchSlot::Switch0).await;
         assert!(switch0_dpd_client.dpd_uptime().await.is_err());
 
         // Okay, now that we've taken down one of the simulated switches, we
@@ -2652,7 +2739,7 @@ mod test {
             .await;
 
         // Shut down switch 0.
-        let switch0_port = shutdown_switch0(&cptestctx).await;
+        cptestctx.stop_dendrite(SwitchSlot::Switch0).await;
         assert!(switch0_dpd_client.dpd_uptime().await.is_err());
 
         // Run the instance-update saga to complete the migration.
@@ -2692,7 +2779,7 @@ mod test {
         .unwrap();
 
         // Restart switch 0 and verify it also gets the new entries.
-        restart_switch0(&cptestctx, switch0_port).await;
+        cptestctx.restart_dendrite(SwitchSlot::Switch0).await;
         wait_for_n_nat_entries(
             log,
             &switch0_dpd_client,
@@ -2764,8 +2851,7 @@ mod test {
             .unwrap()
             .pop()
             .unwrap()
-            .identity
-            .id;
+            .id();
 
         let uplink0 = datastore
             .switch_port_get_id(
@@ -2816,7 +2902,7 @@ mod test {
         let port = dendrite_guard
             .get(&switch_slot)
             .expect("dendrite should be present for this switch slot")
-            .port;
+            .port();
         let client_state = dpd_client::ClientState {
             tag: String::from("nexus"),
             log: cptestctx.logctx.log.new(o!(
@@ -2847,6 +2933,24 @@ mod test {
 
         poll::wait_for_condition(
             async || {
+                // Force dendrite's NAT to reconcile against Nexus now. (See
+                // "Relying on periodic background-task activation" in
+                // docs/flake-patterns.adoc.)
+                //
+                // (Triggering reconciliation is idempotent, so it is safe to do
+                // on every iteration.)
+                if let Err(error) = client.nat_trigger_update().await {
+                    slog::info!(
+                        log,
+                        "failed to trigger NAT reconciliation, will retry";
+                        "switch" => ?switch,
+                        InlineErrorChain::new(&error),
+                    );
+                    return Err(poll::CondCheckError::<&'static str>::NotYet {
+                        status: None,
+                    });
+                }
+
                 let result =
                     client.nat_ipv4_list(&NAT_SUBNET, None, None).await;
 
@@ -2861,7 +2965,9 @@ mod test {
                     // implements `Display`, which is necessary for the
                     // `poll::Error` to be `Display`...even though we never
                     // return a `Permanent` error here. I love types.
-                    poll::CondCheckError::<&'static str>::NotYet
+                    poll::CondCheckError::<&'static str>::NotYet {
+                        status: None,
+                    }
                 })?;
                 let len = data.items.len();
                 if len != n {
@@ -2872,7 +2978,9 @@ mod test {
                         "entries" => ?data.items,
                         "expected_len" => n,
                     );
-                    return Err(poll::CondCheckError::<&'static str>::NotYet);
+                    return Err(poll::CondCheckError::<&'static str>::NotYet {
+                        status: None,
+                    });
                 }
 
                 Ok(())
@@ -2886,54 +2994,6 @@ mod test {
                 "{switch:?} did not have {n} NAT entries after {max_wait:?}"
             )
         })
-    }
-
-    /// Shut down switch 0's dendrite, returning the port it was listening on.
-    async fn shutdown_switch0(cptestctx: &ControlPlaneTestContext) -> u16 {
-        let mut switch0_dpd = cptestctx
-            .dendrite
-            .write()
-            .unwrap()
-            .remove(&SwitchSlot::Switch0)
-            .expect("switch 0 dendrite should be running");
-
-        let port = switch0_dpd.port;
-
-        switch0_dpd
-            .cleanup()
-            .await
-            .expect("switch0 process should get cleaned up");
-
-        port
-    }
-
-    /// Restart switch 0's dendrite on the given port.
-    async fn restart_switch0(
-        cptestctx: &ControlPlaneTestContext,
-        switch0_port: u16,
-    ) {
-        use std::net::Ipv6Addr;
-        use std::net::SocketAddrV6;
-
-        let nexus_address = cptestctx.internal_client.bind_address;
-        let mgs = cptestctx.gateway.get(&SwitchSlot::Switch0).unwrap();
-        let mgs_address =
-            SocketAddrV6::new(Ipv6Addr::LOCALHOST, mgs.port, 0, 0).into();
-
-        let new_switch0 =
-            omicron_test_utils::dev::dendrite::DendriteInstance::start(
-                switch0_port,
-                Some(nexus_address),
-                Some(mgs_address),
-            )
-            .await
-            .unwrap();
-
-        cptestctx
-            .dendrite
-            .write()
-            .unwrap()
-            .insert(SwitchSlot::Switch0, new_switch0);
     }
 
     // === migration test helpers ===

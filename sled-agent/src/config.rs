@@ -14,8 +14,8 @@ use illumos_utils::dladm::FindPhysicalLinkError;
 use illumos_utils::dladm::PhysicalLink;
 use omicron_common::vlan::VlanID;
 use serde::Deserialize;
-use sled_hardware::UnparsedDisk;
-use sled_hardware::is_oxide_sled;
+use sled_hardware::DataLinks;
+use sled_hardware::ExternalDisks;
 use sprockets_tls::keys::SprocketsConfig;
 
 #[derive(Clone, Debug, Deserialize)]
@@ -33,6 +33,15 @@ pub enum SidecarRevision {
     Physical(String),
     SoftZone(SoftPortConfig),
     SoftPropolis(SoftPortConfig),
+}
+
+impl SidecarRevision {
+    pub fn is_physical(&self) -> bool {
+        match self {
+            Self::Physical(_) => true,
+            Self::SoftZone(_) | Self::SoftPropolis(_) => false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -79,12 +88,8 @@ pub struct Config {
     pub swap_device_size_gb: Option<u32>,
     /// Optional VLAN ID to be used for tagging guest VNICs.
     pub vlan: Option<VlanID>,
-    /// Optional list of virtual devices to be used as "discovered disks".
-    pub vdevs: Option<Vec<Utf8PathBuf>>,
-    /// Optional list of real devices to be injected as observed disks during
-    /// device polling.
-    #[serde(default)]
-    pub nongimlet_observed_disks: Option<Vec<UnparsedDisk>>,
+    /// The source of external disks to use.
+    pub external_disks: ExternalDisks,
     /// Optionally skip waiting for time synchronization
     pub skip_timesync: Option<bool>,
 
@@ -99,9 +104,8 @@ pub struct Config {
     /// systems.
     pub data_link: Option<PhysicalLink>,
 
-    /// The data links that sled-agent will treat as a real gimlet cxgbe0/cxgbe1
-    /// links.
-    pub data_links: [String; 2],
+    /// The data links sled-agent will use.
+    pub data_links: DataLinks,
 
     #[serde(default)]
     pub updates: ConfigUpdates,
@@ -159,8 +163,11 @@ impl Config {
         if let Some(link) = self.data_link.as_ref() {
             Ok(link.clone())
         } else {
-            if is_oxide_sled().map_err(ConfigError::SystemDetection)? {
-                Dladm::list_physical()
+            match self.data_links {
+                DataLinks::Virtual { .. } => {
+                    Dladm::find_physical().await.map_err(ConfigError::FindLinks)
+                }
+                DataLinks::Physical => Dladm::list_physical()
                     .await
                     .map_err(ConfigError::FindLinks)?
                     .into_iter()
@@ -169,9 +176,7 @@ impl Config {
                         ConfigError::FindLinks(
                             FindPhysicalLinkError::NoPhysicalLinkFound,
                         )
-                    })
-            } else {
-                Dladm::find_physical().await.map_err(ConfigError::FindLinks)
+                    }),
             }
         }
     }

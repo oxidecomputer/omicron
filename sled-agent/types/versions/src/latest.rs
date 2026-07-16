@@ -75,7 +75,6 @@ pub mod early_networking {
     pub use crate::v30::early_networking::BgpPeerConfig;
     pub use crate::v30::early_networking::InvalidIpAddrError;
     pub use crate::v30::early_networking::PortConfig;
-    pub use crate::v30::early_networking::RackNetworkConfig;
     pub use crate::v30::early_networking::RouterPeerIpAddr;
     pub use crate::v30::early_networking::RouterPeerIpAddrError;
     pub use crate::v30::early_networking::RouterPeerType;
@@ -83,6 +82,10 @@ pub mod early_networking {
     pub use crate::v30::early_networking::UplinkAddressConfig;
     pub use crate::v30::early_networking::UplinkIpNet;
     pub use crate::v30::early_networking::UplinkIpNetError;
+
+    pub use crate::v42::early_networking::EmptyUplinkPortsError;
+    pub use crate::v42::early_networking::RackNetworkConfig;
+    pub use crate::v42::early_networking::UplinkPorts;
 }
 
 pub mod firewall_rules {
@@ -90,15 +93,15 @@ pub mod firewall_rules {
 }
 
 pub mod multicast {
-    pub use crate::v42::multicast::ClearMcast2Phys;
-    pub use crate::v42::multicast::ClearMcastForwarding;
-    pub use crate::v42::multicast::Mcast2PhysMapping;
-    pub use crate::v42::multicast::McastFilterMode;
-    pub use crate::v42::multicast::McastForwardingEntry;
-    pub use crate::v42::multicast::McastForwardingNextHop;
-    pub use crate::v42::multicast::McastReplication;
-    pub use crate::v42::multicast::McastSourceFilter;
-    pub use crate::v42::multicast::MulticastGroupCfg;
+    pub use crate::v43::multicast::ClearMcast2Phys;
+    pub use crate::v43::multicast::ClearMcastForwarding;
+    pub use crate::v43::multicast::Mcast2PhysMapping;
+    pub use crate::v43::multicast::McastFilterMode;
+    pub use crate::v43::multicast::McastForwardingEntry;
+    pub use crate::v43::multicast::McastForwardingNextHop;
+    pub use crate::v43::multicast::McastReplication;
+    pub use crate::v43::multicast::McastSourceFilter;
+    pub use crate::v43::multicast::MulticastGroupCfg;
 }
 
 pub mod instance {
@@ -203,6 +206,10 @@ pub mod inventory {
     pub use crate::v40::inventory::FmdResource;
     pub use crate::v40::inventory::Inventory;
 
+    pub use crate::impls::inventory::FmdHostCaseDisplay;
+    pub use crate::impls::inventory::FmdInventoryDisplay;
+    pub use crate::impls::inventory::FmdInventoryResultDisplay;
+    pub use crate::impls::inventory::FmdResourceDisplay;
     pub use crate::impls::inventory::ManifestBootInventoryDisplay;
     pub use crate::impls::inventory::ManifestInventoryDisplay;
     pub use crate::impls::inventory::ManifestNonBootInventoryDisplay;
@@ -235,9 +242,9 @@ pub mod rot {
 }
 
 pub mod sled {
-    pub use crate::v1::sled::AddSledRequest;
-    pub use crate::v1::sled::StartSledAgentRequest;
-    pub use crate::v1::sled::StartSledAgentRequestBody;
+    pub use crate::v42::sled::AddSledRequest;
+    pub use crate::v42::sled::StartSledAgentRequest;
+    pub use crate::v42::sled::StartSledAgentRequestBody;
 }
 
 pub mod support_bundle {
@@ -258,8 +265,9 @@ pub mod system_networking {
     pub use crate::v33::system_networking::ServiceZoneNatKind;
 
     pub use crate::v39::system_networking::BlueprintExternalNetworkingConfig;
-    pub use crate::v39::system_networking::SystemNetworkingConfig;
-    pub use crate::v39::system_networking::WriteNetworkConfigRequest;
+
+    pub use crate::v42::system_networking::SystemNetworkingConfig;
+    pub use crate::v42::system_networking::WriteNetworkConfigRequest;
 }
 
 pub mod trust_quorum {

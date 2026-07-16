@@ -9,6 +9,55 @@ use std::fmt;
 
 /// Recursively format a JSON value as a bulleted list entry, nesting any
 /// object or array children as indented sub-bullets.
+pub struct Displayer<'json> {
+    json: &'json serde_json::Value,
+    indent: usize,
+}
+
+impl<'json> Displayer<'json> {
+    pub fn new(json: &'json serde_json::Value) -> Self {
+        Self { json, indent: 0 }
+    }
+
+    pub fn with_indent(mut self, indent: usize) -> Self {
+        self.indent = indent;
+        self
+    }
+}
+
+impl fmt::Display for Displayer<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let indent = self.indent;
+        match self.json {
+            serde_json::Value::Object(map) => {
+                for (k, v) in map {
+                    fmt_json_value(f, k, v, indent)?;
+                }
+            }
+            serde_json::Value::Array(arr) => {
+                for (i, v) in arr.iter().enumerate() {
+                    fmt_json_array_item(f, i + 1, v, indent)?;
+                }
+            }
+            serde_json::Value::String(s) => {
+                writeln!(f, "{:indent$}{s}", "")?;
+            }
+            serde_json::Value::Null => {
+                writeln!(f, "{:indent$}<none>", "")?;
+            }
+            serde_json::Value::Bool(val) => {
+                writeln!(f, "{:indent$}{val}", "")?;
+            }
+            serde_json::Value::Number(val) => {
+                writeln!(f, "{:indent$}{val}", "")?;
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Recursively format a JSON value as a bulleted list entry, nesting any
+/// object or array children as indented sub-bullets.
 pub(crate) fn fmt_json_value(
     f: &mut fmt::Formatter<'_>,
     key: &str,

@@ -121,8 +121,9 @@ use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::datastore::multicast::ops::member_reconcile::{
     ReconcileAction, ReconcileJoiningResult,
 };
+use nexus_types::external_api::instance::InstanceState;
 use nexus_types::identity::Resource;
-use omicron_common::api::external::{DataPageParams, InstanceState};
+use omicron_common::api::external::DataPageParams;
 use omicron_uuid_kinds::{
     GenericUuid, InstanceUuid, MulticastGroupUuid, PropolisUuid, SledKind,
     SledUuid,
