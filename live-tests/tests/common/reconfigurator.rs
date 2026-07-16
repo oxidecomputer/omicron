@@ -212,7 +212,7 @@ pub async fn blueprint_wait_sled_configs_propagated(
                     // a permanent error, so we need to put a type here.  We
                     // want the resulting error to impl `ToString`, so we need a
                     // type that impls that.  We pick `String`.
-                    Err(CondCheckError::<String>::NotYet)
+                    Err(CondCheckError::<String>::NotYet { status: None })
                 }
             }
         },

@@ -16,7 +16,7 @@ use std::{collections::BTreeMap, sync::LazyLock};
 ///
 /// This must be updated when you change the database schema.  Refer to
 /// schema/crdb/README.adoc in the root of this repository for details.
-pub const SCHEMA_VERSION: Version = Version::new(266, 0, 0);
+pub const SCHEMA_VERSION: Version = Version::new(278, 0, 0);
 
 /// List of all past database schema versions, in *reverse* order
 ///
@@ -28,7 +28,19 @@ pub static KNOWN_VERSIONS: LazyLock<Vec<KnownVersion>> = LazyLock::new(|| {
         // |  leaving the first copy as an example for the next person.
         // v
         // KnownVersion::new(next_int, "unique-dirname-with-the-sql-files"),
-        KnownVersion::new(266, "saga-abandonment-metadata"),
+        KnownVersion::new(278, "saga-abandonment-metadata"),
+        KnownVersion::new(277, "ereporter-restart-latest-ereport"),
+        KnownVersion::new(276, "webhook-delivery-list-indices"),
+        KnownVersion::new(275, "alert-list-matching-indices"),
+        KnownVersion::new(274, "ereporter-restart-rack-id"),
+        KnownVersion::new(273, "fm-support-bundle-resource-deletion"),
+        KnownVersion::new(272, "ereporter-restart-order-v2"),
+        KnownVersion::new(271, "inv-fmd"),
+        KnownVersion::new(270, "fm-alert-resource-deletion"),
+        KnownVersion::new(269, "fm-disk-de-and-facts"),
+        KnownVersion::new(268, "fm-sitrep-analysis-report"),
+        KnownVersion::new(267, "add-disruption-policy"),
+        KnownVersion::new(266, "alert-version"),
         KnownVersion::new(265, "sled-resource-vmm-state"),
         KnownVersion::new(264, "instance-cpu-type-turin-v2"),
         KnownVersion::new(263, "external-jumbo-frames"),

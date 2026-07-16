@@ -40,7 +40,7 @@ pub async fn wait_background_task(
                     }
                 }
             } else {
-                Err(CondCheckError::<()>::NotYet)
+                Err(CondCheckError::<()>::NotYet { status: None })
             }
         },
         &Duration::from_millis(50),
@@ -100,7 +100,7 @@ pub async fn activate_background_task_with_timeout(
                 "waiting for {task_name} to go idle",
             );
 
-            Err(CondCheckError::<()>::NotYet)
+            Err(CondCheckError::<()>::NotYet { status: None })
         },
         &Duration::from_millis(50),
         &timeout,
@@ -144,7 +144,7 @@ pub async fn activate_background_task_with_timeout(
                         LastResult::NeverCompleted,
                     ) => {
                         // task hasn't started yet
-                        Err(CondCheckError::<()>::NotYet)
+                        Err(CondCheckError::<()>::NotYet { status: None })
                     }
 
                     // task was activated for the first time by this function
@@ -168,7 +168,7 @@ pub async fn activate_background_task_with_timeout(
                             Ok(task)
                         } else if last.iteration == current.iteration {
                             // task hasn't started yet
-                            Err(CondCheckError::<()>::NotYet)
+                            Err(CondCheckError::<()>::NotYet { status: None })
                         } else {
                             // last.iteration > current.iteration
                             panic!(
@@ -179,7 +179,7 @@ pub async fn activate_background_task_with_timeout(
                     }
                 }
             } else {
-                Err(CondCheckError::<()>::NotYet)
+                Err(CondCheckError::<()>::NotYet { status: None })
             }
         },
         &Duration::from_millis(50),
@@ -189,6 +189,43 @@ pub async fn activate_background_task_with_timeout(
     .unwrap();
 
     last_task_poll
+}
+
+/// Run the abandoned_vmm_reaper background task, panicking if the activation
+/// reported any errors.
+pub async fn run_abandoned_vmm_reaper(
+    lockstep_client: &ClientTestContext,
+) -> AbandonedVmmReaperStatus {
+    let last_background_task =
+        activate_background_task(&lockstep_client, "abandoned_vmm_reaper")
+            .await;
+
+    let LastResult::Completed(last_result_completed) =
+        last_background_task.last
+    else {
+        panic!(
+            "unexpected {:?} returned from abandoned_vmm_reaper task",
+            last_background_task.last,
+        );
+    };
+
+    let status = serde_json::from_value::<AbandonedVmmReaperStatus>(
+        last_result_completed.details.clone(),
+    )
+    .unwrap_or_else(|error| {
+        panic!(
+            "abandoned_vmm_reaper status should deserialize as \
+             AbandonedVmmReaperStatus: {error} (raw value: {:?})",
+            last_result_completed.details,
+        )
+    });
+
+    assert!(
+        status.errors.is_empty(),
+        "abandoned_vmm_reaper task should complete without errors: {status:?}",
+    );
+
+    status
 }
 
 /// Run the region_replacement background task, returning how many actions

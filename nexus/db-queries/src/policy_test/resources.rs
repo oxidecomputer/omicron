@@ -9,6 +9,8 @@ use super::resource_builder::ResourceSet;
 use nexus_auth::authz;
 use omicron_common::api::external::LookupType;
 use omicron_uuid_kinds::AccessTokenKind;
+use omicron_uuid_kinds::BuiltInUserKind;
+use omicron_uuid_kinds::ConsoleSessionKind;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::RackUuid;
@@ -179,6 +181,21 @@ pub async fn make_resources(
         LookupType::ById(address_lot_id),
     ));
 
+    let bgp_config_id = "8c1e3f7a-2d4b-4e6c-9a8f-1b2c3d4e5f60".parse().unwrap();
+    builder.new_resource(authz::BgpConfig::new(
+        authz::FLEET,
+        bgp_config_id,
+        LookupType::ById(bgp_config_id.into_untyped_uuid()),
+    ));
+
+    let bgp_announce_set_id =
+        "f1e6c5d4-3b2a-4190-8e7d-6c5b4a392817".parse().unwrap();
+    builder.new_resource(authz::BgpAnnounceSet::new(
+        authz::FLEET,
+        bgp_announce_set_id,
+        LookupType::ById(bgp_announce_set_id.into_untyped_uuid()),
+    ));
+
     let loopback_address_id =
         "9efbf1b1-16f9-45ab-864a-f7ebe501ae5b".parse().unwrap();
     builder.new_resource(authz::LoopbackAddress::new(
@@ -205,6 +222,29 @@ pub async fn make_resources(
         LookupType::by_id(subnet_pool_id),
     ));
 
+    let ip_pool_id = "f9bf2e93-1f3f-4f4e-9c0f-3c8f6a8d6f2a".parse().unwrap();
+    builder.new_resource(authz::IpPool::new(
+        authz::FLEET,
+        ip_pool_id,
+        LookupType::by_id(ip_pool_id),
+    ));
+
+    let console_session_id: TypedUuid<ConsoleSessionKind> =
+        "a1b2c3d4-0000-4000-8000-000000000001".parse().unwrap();
+    builder.new_resource(authz::ConsoleSession::new(
+        authz::FLEET,
+        console_session_id,
+        LookupType::by_id(console_session_id),
+    ));
+
+    let user_builtin_id: TypedUuid<BuiltInUserKind> =
+        "a1b2c3d4-0000-4000-8000-000000000002".parse().unwrap();
+    builder.new_resource(authz::UserBuiltin::new(
+        authz::FLEET,
+        user_builtin_id,
+        LookupType::by_id(user_builtin_id),
+    ));
+
     builder.build()
 }
 
@@ -229,13 +269,15 @@ async fn make_services(builder: &mut ResourceBuilder<'_>) {
 
 /// Helper for `make_resources()` that constructs a small Rack hierarchy
 fn make_rack(builder: &mut ResourceBuilder<'_>) {
-    let rack_id = "c037e882-8b6d-c8b5-bef4-97e848eb0a50".parse().unwrap();
-    let rack =
-        authz::Rack::new(authz::FLEET, rack_id, LookupType::ById(rack_id));
+    let rack_id: RackUuid =
+        "c037e882-8b6d-c8b5-bef4-97e848eb0a50".parse().unwrap();
+    let rack = authz::Rack::new(
+        authz::FLEET,
+        rack_id,
+        LookupType::ById(rack_id.into_untyped_uuid()),
+    );
     builder.new_resource(rack.clone());
-    builder.new_resource(authz::TrustQuorumConfig::for_rack_id(
-        RackUuid::from_untyped_uuid(rack_id),
-    ));
+    builder.new_resource(authz::TrustQuorumConfig::for_rack_id(rack_id));
 }
 
 /// Helper for `make_resources()` that constructs a small Silo hierarchy
@@ -264,6 +306,8 @@ async fn make_silo(
         LookupType::ByName(format!("{}-certificate", silo_name)),
     ));
 
+    builder.new_resource(authz::SiloImageList::new(silo.clone()));
+
     builder.new_resource(authz::SiloIdentityProviderList::new(silo.clone()));
     let idp_id = Uuid::new_v4();
     builder.new_resource(authz::IdentityProvider::new(
@@ -286,6 +330,13 @@ async fn make_silo(
         LookupType::ByName(format!("{}-user", silo_name)),
     );
     builder.new_resource(silo_user.clone());
+    // Register this silo user itself as a roleless actor (only in the branch
+    // whose silo is the main silo, where actors live). This exercises
+    // identity-based self-access: the actor acting on its own SiloUser, SshKey,
+    // and session/token lists, which no role assignment can grant.
+    if first_branch {
+        builder.push_user(&format!("{}-user-self", silo_name), silo_user_id);
+    }
     let ssh_key_id = Uuid::new_v4();
     builder.new_resource(authz::SshKey::new(
         silo_user.clone(),
@@ -411,6 +462,19 @@ async fn make_project(
         Uuid::new_v4(),
         LookupType::ByName(format!("{}-subnet1", vpc1_name)),
     ));
+    let router_name = format!("{}-router1", vpc1_name);
+    let router = authz::VpcRouter::new(
+        vpc1.clone(),
+        Uuid::new_v4(),
+        LookupType::ByName(router_name.clone()),
+    );
+    builder.new_resource(router.clone());
+    // Test a resource nested three levels below Project
+    builder.new_resource(authz::RouterRoute::new(
+        router,
+        Uuid::new_v4(),
+        LookupType::ByName(format!("{}-route1", router_name)),
+    ));
 
     builder.new_resource(authz::Snapshot::new(
         project.clone(),
@@ -522,11 +586,8 @@ pub fn exempted_authz_classes() -> BTreeSet<String> {
         // need to call the macro `impl_dyn_authorized_resource_for_resource!`
         // for the type you are implementing the test for. See
         // resource_builder.rs for examples.
-        authz::IpPool::get_polar_class(),
-        authz::VpcRouter::get_polar_class(),
-        authz::RouterRoute::get_polar_class(),
-        authz::ConsoleSession::get_polar_class(),
-        authz::UserBuiltin::get_polar_class(),
+        //
+        // none yet.
     ]
     .into_iter()
     .map(|c| c.name)

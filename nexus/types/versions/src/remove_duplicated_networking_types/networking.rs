@@ -16,13 +16,14 @@
 
 use crate::v2025_11_20_00::networking::SwitchInterfaceKind;
 use crate::v2025_11_20_00::networking::SwitchInterfaceKindNoVlanDetails;
+use crate::v2025_11_20_00::networking::SwitchPortAddressView;
 use crate::v2025_11_20_00::networking::SwitchPortConfig;
 use crate::v2025_11_20_00::networking::SwitchPortLinkConfig;
+use crate::v2025_11_20_00::networking::SwitchPortRouteConfig;
 use crate::v2025_11_20_00::networking::SwitchPortSettingsGroups;
 use crate::v2025_11_20_00::networking::SwitchVlanInterface;
 use crate::v2025_11_20_00::networking::SwitchVlanInterfaceConfig;
 use crate::v2026_04_16_00::networking::BgpPeer;
-use omicron_common::api::external;
 use omicron_common::api::external::IdentityMetadata;
 use omicron_common::api::external::Name;
 use schemars::JsonSchema;
@@ -52,11 +53,6 @@ pub struct SwitchInterfaceConfig {
 /// This structure contains all port settings information in one place. It's a
 /// convenience data structure for getting a complete view of a particular
 /// port's settings.
-// TODO: several fields below embed `external::*` types directly from
-// `omicron-common`, which means their serialized shape is not truly frozen.
-// Once `omicron-common-versions` exists, replace these with version-local
-// copies of the types to ensure the initial version's wire format is
-// immutable.
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
 pub struct SwitchPortSettings {
     #[serde(flatten)]
@@ -75,13 +71,13 @@ pub struct SwitchPortSettings {
     pub interfaces: Vec<SwitchInterfaceConfig>,
 
     /// IP route settings.
-    pub routes: Vec<external::SwitchPortRouteConfig>,
+    pub routes: Vec<SwitchPortRouteConfig>,
 
     /// BGP peer settings.
     pub bgp_peers: Vec<BgpPeer>,
 
     /// Layer 3 IP address settings.
-    pub addresses: Vec<external::SwitchPortAddressView>,
+    pub addresses: Vec<SwitchPortAddressView>,
 }
 
 impl From<SwitchPortSettings>

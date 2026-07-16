@@ -158,6 +158,11 @@ async fn test_nexus_boots_before_dendrite() {
     starter.start_mgd(SwitchSlot::Switch1).await;
     info!(log, "Started mgd");
 
+    info!(log, "Starting ddm");
+    starter.start_ddm(SwitchSlot::Switch0).await;
+    starter.start_ddm(SwitchSlot::Switch1).await;
+    info!(log, "Started ddm");
+
     info!(log, "Populating internal DNS records");
     starter
         .record_switch_dns(
@@ -197,6 +202,8 @@ async fn nexus_schema_test_setup(
     starter.start_dendrite(SwitchSlot::Switch1).await;
     starter.start_mgd(SwitchSlot::Switch0).await;
     starter.start_mgd(SwitchSlot::Switch1).await;
+    starter.start_ddm(SwitchSlot::Switch0).await;
+    starter.start_ddm(SwitchSlot::Switch1).await;
     starter.populate_internal_dns().await;
 }
 

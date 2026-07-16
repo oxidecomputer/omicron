@@ -18,8 +18,6 @@ use crate::ui::widgets::ButtonText;
 use crate::ui::widgets::PopupBuilder;
 use crate::ui::widgets::PopupScrollOffset;
 use itertools::Itertools;
-use omicron_common::address::IpRange;
-use omicron_common::api::internal::shared::AllowedSourceIps;
 use ratatui::Frame;
 use ratatui::layout::Constraint;
 use ratatui::layout::Direction;
@@ -37,20 +35,22 @@ use sled_agent_types::early_networking::LldpAdminStatus;
 use sled_agent_types::early_networking::LldpPortConfig;
 use sled_agent_types::early_networking::RouteConfig;
 use sled_agent_types::early_networking::SwitchSlot;
-use sled_agent_types::early_networking::UplinkAddress;
 use std::borrow::Cow;
 use wicket_common::rack_setup::BgpAuthKeyInfo;
 use wicket_common::rack_setup::BgpAuthKeyStatus;
 use wicket_common::rack_setup::CurrentRssUserConfigInsensitive;
-use wicket_common::rack_setup::UserSpecifiedBgpPeerConfig;
-use wicket_common::rack_setup::UserSpecifiedImportExportPolicy;
-use wicket_common::rack_setup::UserSpecifiedPortConfig;
-use wicket_common::rack_setup::UserSpecifiedRackNetworkConfig;
-use wicket_common::rack_setup::UserSpecifiedRouterPeerAddr;
-use wicket_common::rack_setup::UserSpecifiedUplinkAddressConfig;
 use wicketd_client::types::CurrentRssUserConfig;
 use wicketd_client::types::CurrentRssUserConfigSensitive;
 use wicketd_client::types::RackOperationStatus;
+use wicketd_commission_types::rack_setup::AllowedSourceIps;
+use wicketd_commission_types::rack_setup::IpRange;
+use wicketd_commission_types::rack_setup::ManualPortConfig;
+use wicketd_commission_types::rack_setup::UplinkAddress;
+use wicketd_commission_types::rack_setup::UserSpecifiedBgpPeerConfig;
+use wicketd_commission_types::rack_setup::UserSpecifiedImportExportPolicy;
+use wicketd_commission_types::rack_setup::UserSpecifiedRackNetworkConfig;
+use wicketd_commission_types::rack_setup::UserSpecifiedRouterPeerAddr;
+use wicketd_commission_types::rack_setup::UserSpecifiedUplinkAddressConfig;
 
 #[derive(Debug)]
 enum Popup {
@@ -790,7 +790,7 @@ fn rss_config_text<'a>(
         } = cfg;
 
         for (i, (switch, port, uplink)) in cfg.iter_uplinks().enumerate() {
-            let UserSpecifiedPortConfig {
+            let ManualPortConfig {
                 routes,
                 addresses,
                 uplink_port_speed,

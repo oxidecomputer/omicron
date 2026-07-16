@@ -7,7 +7,8 @@ SELECT
   alert.alert_class,
   alert.payload,
   alert.num_dispatched,
-  alert.case_id
+  alert.case_id,
+  alert.alert_version
 FROM
   alert INNER JOIN webhook_delivery AS delivery ON delivery.alert_id = alert.id
 WHERE

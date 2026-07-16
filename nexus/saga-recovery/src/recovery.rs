@@ -628,7 +628,7 @@ mod test {
             plan.sagas_needing_recovery().collect::<Vec<_>>();
         assert_eq!(to_recover.len(), found_to_recover.len());
         for (expected_saga_id, (found_saga_id, found_saga_record)) in
-            to_recover.into_iter().zip(found_to_recover.into_iter())
+            to_recover.into_iter().zip(found_to_recover)
         {
             assert_eq!(expected_saga_id, *found_saga_id);
             assert_eq!(expected_saga_id, found_saga_record.id.0);

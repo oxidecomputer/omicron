@@ -21,9 +21,10 @@ use tufaceous_artifact::{ArtifactHash, KnownArtifactKind};
 
 use crate::latest::inventory::{
     BootImageHeader, BootPartitionContents, BootPartitionDetails,
-    ConfigReconcilerInventory, ConfigReconcilerInventoryResult,
-    HostPhase2DesiredContents, HostPhase2DesiredSlots, ManifestBootInventory,
-    ManifestInventory, ManifestNonBootInventory, MupdateOverrideBootInventory,
+    ConfigReconcilerInventory, ConfigReconcilerInventoryResult, FmdHostCase,
+    FmdInventory, FmdInventoryError, FmdResource, HostPhase2DesiredContents,
+    HostPhase2DesiredSlots, ManifestBootInventory, ManifestInventory,
+    ManifestNonBootInventory, MupdateOverrideBootInventory,
     MupdateOverrideInventory, MupdateOverrideNonBootInventory,
     NetworkInterface, OmicronFileSourceResolverInventory, OmicronSledConfig,
     OmicronZoneConfig, OmicronZoneImageSource, OmicronZoneType,
@@ -910,6 +911,116 @@ impl fmt::Display for SingleMeasurementInventoryDisplay<'_> {
     }
 }
 
+/// a displayer for the FMD inventory result on a sled
+pub struct FmdInventoryResultDisplay<'a> {
+    inner: &'a Result<FmdInventory, FmdInventoryError>,
+}
+
+impl<'a> FmdInventoryResultDisplay<'a> {
+    pub fn new(result: &'a Result<FmdInventory, FmdInventoryError>) -> Self {
+        Self { inner: result }
+    }
+}
+
+impl fmt::Display for FmdInventoryResultDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.inner {
+            Ok(inv) => write!(f, "{}", inv.display()),
+            Err(err) => writeln!(f, "FMD collection failed: {err}"),
+        }
+    }
+}
+
+impl FmdInventory {
+    pub fn display(&self) -> FmdInventoryDisplay<'_> {
+        FmdInventoryDisplay { inner: self }
+    }
+}
+
+/// a displayer for [`FmdInventory`]
+pub struct FmdInventoryDisplay<'a> {
+    inner: &'a FmdInventory,
+}
+
+impl fmt::Display for FmdInventoryDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let FmdInventory { cases, resources } = self.inner;
+        if cases.is_empty() && resources.is_empty() {
+            writeln!(f, "no faults reported")?;
+            return Ok(());
+        }
+        writeln!(f, "cases ({}):", cases.len())?;
+        for case in cases {
+            let mut indent = IndentWriter::new("  ", &mut *f);
+            write!(indent, "{}", case.display())?;
+        }
+        writeln!(f, "resources ({}):", resources.len())?;
+        for resource in resources {
+            let mut indent = IndentWriter::new("  ", &mut *f);
+            write!(indent, "{}", resource.display())?;
+        }
+        Ok(())
+    }
+}
+
+impl FmdHostCase {
+    pub fn display(&self) -> FmdHostCaseDisplay<'_> {
+        FmdHostCaseDisplay { inner: self }
+    }
+}
+
+/// a displayer for [`FmdHostCase`]
+pub struct FmdHostCaseDisplay<'a> {
+    inner: &'a FmdHostCase,
+}
+
+impl fmt::Display for FmdHostCaseDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let FmdHostCase { uuid, code, url, event } = self.inner;
+        writeln!(f, "case {uuid} ({code})")?;
+        writeln!(f, "  url: {url}")?;
+        // The event payload is the FMD nvlist serialized to JSON. We
+        // intentionally do not interpret it; round-trip pretty-printing
+        // is enough to make it human-readable.
+        if let Some(event) = event {
+            match serde_json::to_string_pretty(event) {
+                Ok(rendered) => {
+                    writeln!(f, "  event:")?;
+                    let mut indent = IndentWriter::new("    ", &mut *f);
+                    writeln!(indent, "{rendered}")?;
+                }
+                Err(_) => writeln!(f, "  event: <unrenderable>")?,
+            }
+        }
+        Ok(())
+    }
+}
+
+impl FmdResource {
+    pub fn display(&self) -> FmdResourceDisplay<'_> {
+        FmdResourceDisplay { inner: self }
+    }
+}
+
+/// a displayer for [`FmdResource`]
+pub struct FmdResourceDisplay<'a> {
+    inner: &'a FmdResource,
+}
+
+impl fmt::Display for FmdResourceDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let FmdResource { uuid, fmri, case_id, faulty, unusable, invisible } =
+            self.inner;
+        writeln!(f, "resource {uuid} (case {case_id})")?;
+        writeln!(f, "  fmri: {fmri}")?;
+        writeln!(
+            f,
+            "  faulty: {faulty:<5}  unusable: {unusable:<5}  invisible: {invisible:<5}"
+        )?;
+        Ok(())
+    }
+}
+
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 #[error("unrecognized zpool health value `{0}`")]
 pub struct ZpoolHealthParseError(pub String);
@@ -1064,4 +1175,92 @@ pub enum SourceNatConfigError {
          ({first_port}, {last_port})"
     )]
     UnalignedPortPair { first_port: u16, last_port: u16 },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::latest::inventory::{FmdInventoryError, FmdInventoryErrorKind};
+    use iddqd::IdOrdMap;
+    use omicron_uuid_kinds::{FmdHostCaseUuid, FmdResourceUuid, GenericUuid};
+    use uuid::Uuid;
+
+    #[test]
+    fn fmd_inventory_result_display_snapshot() {
+        let case_uuid = FmdHostCaseUuid::from_untyped_uuid(Uuid::from_u128(
+            0xfeed_face_dead_beef_dead_beef_dead_beef,
+        ));
+        let case_uuid_2 = FmdHostCaseUuid::from_untyped_uuid(Uuid::from_u128(
+            0xfeed_face_dead_beef_dead_beef_dead_b00f,
+        ));
+        let resource_uuid = FmdResourceUuid::from_untyped_uuid(
+            Uuid::from_u128(0xbada_55ca_fe00_0000_0000_0000_0000_0001),
+        );
+        let resource_uuid_2 = FmdResourceUuid::from_untyped_uuid(
+            Uuid::from_u128(0xbada_55ca_fe00_0000_0000_0000_0000_0002),
+        );
+
+        let mut cases = IdOrdMap::new();
+        cases
+            .insert_unique(FmdHostCase {
+                uuid: case_uuid,
+                code: "JOKE-9001-FAKE".to_string(),
+                url: "http://example.invalid/msg/JOKE-9001-FAKE".to_string(),
+                event: Some(serde_json::json!({
+                    "class": "fault.vibes.off",
+                    "spookiness": 9001,
+                    "suspects": ["casper", "slimer"],
+                })),
+            })
+            .expect("case uuid is unique");
+        cases
+            .insert_unique(FmdHostCase {
+                uuid: case_uuid_2,
+                code: "BOO-0000-FAKE".to_string(),
+                url: "http://example.invalid/msg/BOO-0000-FAKE".to_string(),
+                event: None,
+            })
+            .expect("case uuid is unique");
+
+        let mut resources = IdOrdMap::new();
+        resources
+            .insert_unique(FmdResource {
+                uuid: resource_uuid,
+                fmri: "ghost:///not/a/real/fmri".to_string(),
+                case_id: case_uuid,
+                faulty: true,
+                unusable: false,
+                invisible: false,
+            })
+            .expect("resource uuid is unique");
+        resources
+            .insert_unique(FmdResource {
+                uuid: resource_uuid_2,
+                fmri: "ghost:///also/not/a/real/fmri".to_string(),
+                case_id: case_uuid_2,
+                faulty: false,
+                unusable: true,
+                invisible: true,
+            })
+            .expect("resource uuid is unique");
+
+        let ok: Result<FmdInventory, FmdInventoryError> =
+            Ok(FmdInventory { cases, resources });
+        let err: Result<FmdInventory, FmdInventoryError> =
+            Err(FmdInventoryError {
+                kind: FmdInventoryErrorKind::FmdError,
+                message: "haunted by an absent fmd daemon".to_string(),
+            });
+
+        let mut out = String::new();
+        out.push_str("--- ok variant ---\n");
+        out.push_str(&FmdInventoryResultDisplay::new(&ok).to_string());
+        out.push_str("--- err variant ---\n");
+        out.push_str(&FmdInventoryResultDisplay::new(&err).to_string());
+
+        expectorate::assert_contents(
+            "tests/output/fmd_inventory_display.txt",
+            &out,
+        );
+    }
 }

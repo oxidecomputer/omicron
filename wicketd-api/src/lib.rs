@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use bootstrap_agent_lockstep_client::types::RackOperationStatus;
+use bootstrap_agent_lockstep_types::RackOperationStatus;
 use dropshot::HttpError;
 use dropshot::HttpResponseOk;
 use dropshot::HttpResponseUpdatedNoContent;
@@ -26,17 +26,20 @@ use tufaceous_artifact::ArtifactHashId;
 use wicket_common::inventory::RackV1Inventory;
 use wicket_common::inventory::SpIdentifier;
 use wicket_common::inventory::SpType;
+use wicket_common::multirack_setup::CurrentMultirackJoinUserConfig;
+use wicket_common::multirack_setup::MultirackJoinConfigBaseUserInput;
 use wicket_common::preflight_check;
 use wicket_common::rack_setup::BgpAuthKey;
-use wicket_common::rack_setup::BgpAuthKeyId;
 use wicket_common::rack_setup::CurrentRssUserConfigInsensitive;
 use wicket_common::rack_setup::GetBgpAuthKeyInfoResponse;
-use wicket_common::rack_setup::PutRssUserConfigInsensitive;
 use wicket_common::rack_update::AbortUpdateOptions;
 use wicket_common::rack_update::ClearUpdateStateOptions;
 use wicket_common::rack_update::ClearUpdateStateResponse;
 use wicket_common::rack_update::StartUpdateOptions;
 use wicket_common::update_events::EventReport;
+use wicketd_commission_types::rack_setup::BgpAuthKeyId;
+use wicketd_commission_types::rack_setup::CertificateUploadResponse;
+use wicketd_commission_types::rack_setup::PutRssUserConfigInsensitive;
 
 /// Full release repositories are currently (Dec 2024) 1.8 GiB and are likely to
 /// continue growing.
@@ -76,6 +79,28 @@ pub trait WicketdApi {
     async fn put_rss_config(
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<PutRssUserConfigInsensitive>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Get the current status of the multirack join configuration.
+    #[endpoint {
+        method = GET,
+        path = "/rack-setup/config/multirack"
+    }]
+    async fn get_multirack_join_config(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<CurrentMultirackJoinUserConfig>, HttpError>;
+
+    /// Upload a configuration for joining this rack into an existing regional
+    /// cluster.
+    ///
+    /// A multirack join configuration is mutually exclusive with an RSS config.
+    #[endpoint {
+        method = PUT,
+        path = "/rack-setup/config/multirack"
+    }]
+    async fn put_multirack_join_config(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<MultirackJoinConfigBaseUserInput>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
     /// Add an external certificate.
@@ -387,21 +412,6 @@ pub struct CurrentRssUserConfigSensitive {
 pub struct CurrentRssUserConfig {
     pub sensitive: CurrentRssUserConfigSensitive,
     pub insensitive: CurrentRssUserConfigInsensitive,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
-#[serde(tag = "status", rename_all = "snake_case")]
-pub enum CertificateUploadResponse {
-    /// The key has been uploaded, but we're waiting on its corresponding
-    /// certificate chain.
-    WaitingOnCert,
-    /// The cert chain has been uploaded, but we're waiting on its corresponding
-    /// private key.
-    WaitingOnKey,
-    /// A cert chain and its key have been accepted.
-    CertKeyAccepted,
-    /// A cert chain and its key are valid, but have already been uploaded.
-    CertKeyDuplicateIgnored,
 }
 
 #[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Eq)]

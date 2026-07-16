@@ -11,7 +11,7 @@ use std::sync::Mutex;
 use tokio::sync::oneshot;
 use wicket_common::preflight_check::EventBuffer;
 use wicket_common::preflight_check::EventReport;
-use wicket_common::rack_setup::UserSpecifiedRackNetworkConfig;
+use wicketd_commission_types::rack_setup::UserSpecifiedRackNetworkConfig;
 
 mod uplink;
 
