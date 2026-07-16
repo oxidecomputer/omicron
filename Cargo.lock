@@ -969,6 +969,7 @@ name = "bootstrap-agent-lockstep-client"
 version = "0.1.0"
 dependencies = [
  "bootstrap-agent-lockstep-types",
+ "chrono",
  "omicron-common",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",

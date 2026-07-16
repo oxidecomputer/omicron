@@ -9,6 +9,7 @@ workspace = true
 
 [dependencies]
 bootstrap-agent-lockstep-types.workspace = true
+chrono.workspace = true
 omicron-common.workspace = true
 omicron-uuid-kinds.workspace = true
 omicron-workspace-hack.workspace = true

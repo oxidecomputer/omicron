@@ -54,6 +54,7 @@ use slog_error_chain::InlineErrorChain;
 use std::io;
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
+use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
@@ -227,6 +228,9 @@ impl Server {
             sprockets: config.sprockets.clone(),
             trust_quorum_handle: long_running_task_handles.trust_quorum.clone(),
             measurements: long_running_task_handles.measurements.clone(),
+            scrimlet_reconcilers: Arc::clone(
+                &long_running_task_handles.scrimlet_reconcilers,
+            ),
         };
         let bootstrap_http_server =
             start_dropshot_server(bootstrap_context.clone())?;

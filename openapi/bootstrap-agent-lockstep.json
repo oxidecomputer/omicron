@@ -35,6 +35,31 @@
         }
       }
     },
+    "/debug/scrimlet-reconcilers-status": {
+      "get": {
+        "summary": "Get the status of the \"scrimlet reconcilers\" subsystem.",
+        "description": "This should ONLY be used for debugging (e.g., via `omdb`). This is akin to the \"background task status\" exposed by the Nexus lockstep API. If we find a need for any of the information contained in this endpoint for production, we should refine this, version it, and (probably?) move it to inventory.",
+        "operationId": "scrimlet_reconcilers_status_for_debug",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScrimletReconcilersStatus"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/rack-initialize": {
       "get": {
         "summary": "Get the current status of rack initialization or reset.",
@@ -519,6 +544,483 @@
           "key"
         ]
       },
+      "DetermineSwitchSlotStatus": {
+        "description": "Status of attempting to determine this sled's switch slot via MGS within this sled's switch zone.",
+        "oneOf": [
+          {
+            "description": "We're not attempting to contact MGS because we're not a scrimlet.",
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "not_scrimlet"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          {
+            "description": "We're currently attempting to contact MGS.\n\nIf this is not the first attempt, `prev_attempt_err` contains the error we encountered the last time. (If the last time succeeded, we'd be done!)",
+            "type": "object",
+            "properties": {
+              "prev_attempt_err": {
+                "nullable": true,
+                "type": "string"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "contacting_mgs"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          {
+            "description": "We're currently idle waiting for a timeout to retry due to a previous failure.",
+            "type": "object",
+            "properties": {
+              "prev_attempt_err": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "waiting_to_retry"
+                ]
+              }
+            },
+            "required": [
+              "prev_attempt_err",
+              "status"
+            ]
+          }
+        ]
+      },
+      "DpdNatReconcilerStatus": {
+        "description": "Status of reconciling service zone NAT entries with `dpd`.",
+        "oneOf": [
+          {
+            "description": "Reconciliation was skipped because the bootstore contains no NAT entry config information.",
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "no_nat_entries_config"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          {
+            "description": "Reconciliation failed while attempting to read the current set of entries from `dpd`.",
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "failed_reading_current_dpd_nat_entries"
+                ]
+              },
+              "value": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "status",
+              "value"
+            ]
+          },
+          {
+            "description": "Reconciliation failed because the bootstore config contained an illegal combination of entries (e.g., two zones with identical NAT entries).",
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "invalid_system_networking_config"
+                ]
+              },
+              "value": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "status",
+              "value"
+            ]
+          },
+          {
+            "description": "Reconciliation completed successfully.",
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "success"
+                ]
+              },
+              "value": {
+                "type": "object",
+                "properties": {
+                  "created": {
+                    "description": "Map of zone NAT entries created.",
+                    "type": "object",
+                    "additionalProperties": {
+                      "$ref": "#/components/schemas/DpdNatReconcilerStatusNatEntry"
+                    }
+                  },
+                  "removed": {
+                    "description": "List of NAT entries removed.",
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/DpdNatReconcilerStatusNatEntry"
+                    }
+                  },
+                  "unchanged": {
+                    "description": "Set of zone IDs whose NAT entries were already correct in `dpd` and left unchanged.",
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/OmicronZoneUuid"
+                    },
+                    "uniqueItems": true
+                  }
+                },
+                "required": [
+                  "created",
+                  "removed",
+                  "unchanged"
+                ]
+              }
+            },
+            "required": [
+              "status",
+              "value"
+            ]
+          },
+          {
+            "description": "Reconciliation completed but had at least one failure.",
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "partial_success"
+                ]
+              },
+              "value": {
+                "type": "object",
+                "properties": {
+                  "create_failures": {
+                    "description": "Map of zone NAT entries we tried but failed to create.",
+                    "type": "object",
+                    "additionalProperties": {
+                      "$ref": "#/components/schemas/DpdNatReconcilerStatusNatEntryFailure"
+                    }
+                  },
+                  "created": {
+                    "description": "Map of zone NAT entries successfully created.",
+                    "type": "object",
+                    "additionalProperties": {
+                      "$ref": "#/components/schemas/DpdNatReconcilerStatusNatEntry"
+                    }
+                  },
+                  "remove_failures": {
+                    "description": "List of NAT entries we tried but failed to remove.",
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/DpdNatReconcilerStatusNatEntryFailure"
+                    }
+                  },
+                  "removed": {
+                    "description": "List of NAT entries successfully removed.",
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/DpdNatReconcilerStatusNatEntry"
+                    }
+                  },
+                  "unchanged": {
+                    "description": "Set of zone IDs whose NAT entries were already correct in `dpd` and left unchanged.",
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/OmicronZoneUuid"
+                    },
+                    "uniqueItems": true
+                  }
+                },
+                "required": [
+                  "create_failures",
+                  "created",
+                  "remove_failures",
+                  "removed",
+                  "unchanged"
+                ]
+              }
+            },
+            "required": [
+              "status",
+              "value"
+            ]
+          }
+        ]
+      },
+      "DpdNatReconcilerStatusNatEntry": {
+        "type": "object",
+        "properties": {
+          "external_ip": {
+            "type": "string",
+            "format": "ip"
+          },
+          "first_port": {
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          },
+          "last_port": {
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "external_ip",
+          "first_port",
+          "last_port"
+        ]
+      },
+      "DpdNatReconcilerStatusNatEntryFailure": {
+        "type": "object",
+        "properties": {
+          "entry": {
+            "$ref": "#/components/schemas/DpdNatReconcilerStatusNatEntry"
+          },
+          "error": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "entry",
+          "error"
+        ]
+      },
+      "DpdPortOperationFailure": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "port_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "error",
+          "port_id"
+        ]
+      },
+      "DpdPortReconcilerStatus": {
+        "description": "Status of reconciling QSFP port settings with `dpd`.",
+        "oneOf": [
+          {
+            "description": "Reconciliation failed while attempting to read the current settings from `dpd`.",
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "failed_reading_current_settings"
+                ]
+              },
+              "value": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "status",
+              "value"
+            ]
+          },
+          {
+            "description": "Reconciliation failed because the data prevented us from constructing a plan - this should be impossible absent bugs.",
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "failed_generating_plan"
+                ]
+              },
+              "value": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "status",
+              "value"
+            ]
+          },
+          {
+            "description": "Reconciliation completed successfully.",
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "success"
+                ]
+              },
+              "value": {
+                "type": "object",
+                "properties": {
+                  "applied": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "uniqueItems": true
+                  },
+                  "cleared": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "uniqueItems": true
+                  },
+                  "unchanged": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "uniqueItems": true
+                  }
+                },
+                "required": [
+                  "applied",
+                  "cleared",
+                  "unchanged"
+                ]
+              }
+            },
+            "required": [
+              "status",
+              "value"
+            ]
+          },
+          {
+            "description": "Reconciliation completed but had at least one failure.",
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "partial_success"
+                ]
+              },
+              "value": {
+                "type": "object",
+                "properties": {
+                  "applied": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "uniqueItems": true
+                  },
+                  "apply_failures": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/DpdPortOperationFailure"
+                    }
+                  },
+                  "clear_failures": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/DpdPortOperationFailure"
+                    }
+                  },
+                  "cleared": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "uniqueItems": true
+                  },
+                  "unchanged": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "uniqueItems": true
+                  }
+                },
+                "required": [
+                  "applied",
+                  "apply_failures",
+                  "clear_failures",
+                  "cleared",
+                  "unchanged"
+                ]
+              }
+            },
+            "required": [
+              "status",
+              "value"
+            ]
+          }
+        ]
+      },
+      "DpdReconcilerStatus": {
+        "type": "object",
+        "properties": {
+          "nat_status": {
+            "description": "Result of reconciling service zone NAT entries",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/DpdNatReconcilerStatus"
+              }
+            ]
+          },
+          "port_settings_status": {
+            "description": "Result of reconciling port settings",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/DpdPortReconcilerStatus"
+              }
+            ]
+          }
+        },
+        "required": [
+          "nat_status",
+          "port_settings_status"
+        ]
+      },
+      "Duration": {
+        "type": "object",
+        "properties": {
+          "nanos": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "secs": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "nanos",
+          "secs"
+        ]
+      },
       "Error": {
         "description": "Error information from a response.",
         "type": "object",
@@ -839,11 +1341,788 @@
           "status"
         ]
       },
+      "LldpdReconcilerStatus": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "failed"
+                ]
+              },
+              "value": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "status",
+              "value"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "skipped_config_up_to_date"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "reconciled"
+                ]
+              },
+              "value": {
+                "type": "object",
+                "properties": {
+                  "ports": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "$ref": "#/components/schemas/LldpAdminStatus"
+                    }
+                  }
+                },
+                "required": [
+                  "ports"
+                ]
+              }
+            },
+            "required": [
+              "status",
+              "value"
+            ]
+          }
+        ]
+      },
       "MaxPathConfig": {
         "type": "integer",
         "format": "uint8",
         "minimum": 1,
         "maximum": 32
+      },
+      "MgdBfdOperationFailure": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "peer": {
+            "type": "string",
+            "format": "ip"
+          }
+        },
+        "required": [
+          "error",
+          "peer"
+        ]
+      },
+      "MgdBfdReconcilerStatus": {
+        "oneOf": [
+          {
+            "description": "Reconciliation was skipped because we couldn't fetch the current set of BFD peers from mgd.",
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "failed_reading_bfd_peers"
+                ]
+              },
+              "value": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "status",
+              "value"
+            ]
+          },
+          {
+            "description": "Reconciliation completed successfully.",
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "success"
+                ]
+              },
+              "value": {
+                "type": "object",
+                "properties": {
+                  "add_success": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "format": "ip"
+                    }
+                  },
+                  "remove_success": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "format": "ip"
+                    }
+                  },
+                  "unchanged": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "format": "ip"
+                    },
+                    "uniqueItems": true
+                  }
+                },
+                "required": [
+                  "add_success",
+                  "remove_success",
+                  "unchanged"
+                ]
+              }
+            },
+            "required": [
+              "status",
+              "value"
+            ]
+          },
+          {
+            "description": "Reconciliation completed.",
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "partial_success"
+                ]
+              },
+              "value": {
+                "type": "object",
+                "properties": {
+                  "add_failure": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/MgdBfdOperationFailure"
+                    }
+                  },
+                  "add_success": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "format": "ip"
+                    }
+                  },
+                  "remove_failure": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/MgdBfdOperationFailure"
+                    }
+                  },
+                  "remove_success": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "format": "ip"
+                    }
+                  },
+                  "unchanged": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "format": "ip"
+                    },
+                    "uniqueItems": true
+                  }
+                },
+                "required": [
+                  "add_failure",
+                  "add_success",
+                  "remove_failure",
+                  "remove_success",
+                  "unchanged"
+                ]
+              }
+            },
+            "required": [
+              "status",
+              "value"
+            ]
+          }
+        ]
+      },
+      "MgdBgpReconcilerStatus": {
+        "oneOf": [
+          {
+            "description": "Reconciliation was skipped because we couldn't fetch the current BGP configuration from MGD.",
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "failed_reading_bgp_config"
+                ]
+              },
+              "value": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "status",
+              "value"
+            ]
+          },
+          {
+            "description": "Reconciliation was skipped because we couldn't generate a desired config from the bootstore.\n\nThis should never happen - it indicates there's faulty data in the persisted config.",
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "failed_generating_desired_config"
+                ]
+              },
+              "value": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "status",
+              "value"
+            ]
+          },
+          {
+            "description": "Reconciliation completed successfully.\n\nmgd operations are performed in bulk, so each item here contains the count of items involved.",
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "success"
+                ]
+              },
+              "value": {
+                "type": "object",
+                "properties": {
+                  "counts": {
+                    "$ref": "#/components/schemas/MgdBgpReconcilerStatusOpCount"
+                  },
+                  "did_change_max_paths": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "counts",
+                  "did_change_max_paths"
+                ]
+              }
+            },
+            "required": [
+              "status",
+              "value"
+            ]
+          },
+          {
+            "description": "Reconciliation completed with at least one failure.\n\nmgd operations are performed in bulk, so each item here contains the count of items applied on success.",
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "partial_success"
+                ]
+              },
+              "value": {
+                "type": "object",
+                "properties": {
+                  "counts": {
+                    "$ref": "#/components/schemas/MgdBgpReconcilerStatusOpCount"
+                  },
+                  "did_change_max_paths": {
+                    "type": "boolean"
+                  },
+                  "errors": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "required": [
+                  "counts",
+                  "did_change_max_paths",
+                  "errors"
+                ]
+              }
+            },
+            "required": [
+              "status",
+              "value"
+            ]
+          }
+        ]
+      },
+      "MgdBgpReconcilerStatusOpCount": {
+        "type": "object",
+        "properties": {
+          "checkers_created": {
+            "type": "integer",
+            "format": "uint",
+            "minimum": 0
+          },
+          "checkers_deleted": {
+            "type": "integer",
+            "format": "uint",
+            "minimum": 0
+          },
+          "checkers_updated": {
+            "type": "integer",
+            "format": "uint",
+            "minimum": 0
+          },
+          "numbered_peers_created": {
+            "type": "integer",
+            "format": "uint",
+            "minimum": 0
+          },
+          "numbered_peers_deleted": {
+            "type": "integer",
+            "format": "uint",
+            "minimum": 0
+          },
+          "numbered_peers_updated": {
+            "type": "integer",
+            "format": "uint",
+            "minimum": 0
+          },
+          "origin4_created": {
+            "type": "integer",
+            "format": "uint",
+            "minimum": 0
+          },
+          "origin4_deleted": {
+            "type": "integer",
+            "format": "uint",
+            "minimum": 0
+          },
+          "origin4_updated": {
+            "type": "integer",
+            "format": "uint",
+            "minimum": 0
+          },
+          "origin6_created": {
+            "type": "integer",
+            "format": "uint",
+            "minimum": 0
+          },
+          "origin6_deleted": {
+            "type": "integer",
+            "format": "uint",
+            "minimum": 0
+          },
+          "origin6_updated": {
+            "type": "integer",
+            "format": "uint",
+            "minimum": 0
+          },
+          "routers_created": {
+            "type": "integer",
+            "format": "uint",
+            "minimum": 0
+          },
+          "routers_deleted": {
+            "type": "integer",
+            "format": "uint",
+            "minimum": 0
+          },
+          "routers_updated": {
+            "type": "integer",
+            "format": "uint",
+            "minimum": 0
+          },
+          "shapers_created": {
+            "type": "integer",
+            "format": "uint",
+            "minimum": 0
+          },
+          "shapers_deleted": {
+            "type": "integer",
+            "format": "uint",
+            "minimum": 0
+          },
+          "shapers_updated": {
+            "type": "integer",
+            "format": "uint",
+            "minimum": 0
+          },
+          "unnumbered_peers_created": {
+            "type": "integer",
+            "format": "uint",
+            "minimum": 0
+          },
+          "unnumbered_peers_deleted": {
+            "type": "integer",
+            "format": "uint",
+            "minimum": 0
+          },
+          "unnumbered_peers_updated": {
+            "type": "integer",
+            "format": "uint",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "checkers_created",
+          "checkers_deleted",
+          "checkers_updated",
+          "numbered_peers_created",
+          "numbered_peers_deleted",
+          "numbered_peers_updated",
+          "origin4_created",
+          "origin4_deleted",
+          "origin4_updated",
+          "origin6_created",
+          "origin6_deleted",
+          "origin6_updated",
+          "routers_created",
+          "routers_deleted",
+          "routers_updated",
+          "shapers_created",
+          "shapers_deleted",
+          "shapers_updated",
+          "unnumbered_peers_created",
+          "unnumbered_peers_deleted",
+          "unnumbered_peers_updated"
+        ]
+      },
+      "MgdReconcilerStatus": {
+        "type": "object",
+        "properties": {
+          "bfd_status": {
+            "$ref": "#/components/schemas/MgdBfdReconcilerStatus"
+          },
+          "bgp_status": {
+            "$ref": "#/components/schemas/MgdBgpReconcilerStatus"
+          },
+          "static_routes_status": {
+            "$ref": "#/components/schemas/MgdStaticRouteReconcilerStatus"
+          }
+        },
+        "required": [
+          "bfd_status",
+          "bgp_status",
+          "static_routes_status"
+        ]
+      },
+      "MgdStaticRouteReconcilerStatus": {
+        "oneOf": [
+          {
+            "description": "Reconciliation was skipped because we couldn't fetch the current set of static routes from MGD.",
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "failed_reading_static_routes"
+                ]
+              },
+              "value": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "status",
+              "value"
+            ]
+          },
+          {
+            "description": "Reconciliation was skipped because we couldn't determine a plan for changes to make.\n\nThis should never happen - it indicates there's some faulty data somewhere (either coming from mgd or in the rack network config).",
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "failed_generating_plan"
+                ]
+              },
+              "value": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "status",
+              "value"
+            ]
+          },
+          {
+            "description": "Reconciliation completed successfully.\n\nmgd operations are performed in bulk, so each item here contains the count of items involved.",
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "success"
+                ]
+              },
+              "value": {
+                "type": "object",
+                "properties": {
+                  "added_v4": {
+                    "type": "integer",
+                    "format": "uint",
+                    "minimum": 0
+                  },
+                  "added_v6": {
+                    "type": "integer",
+                    "format": "uint",
+                    "minimum": 0
+                  },
+                  "deleted_v4": {
+                    "type": "integer",
+                    "format": "uint",
+                    "minimum": 0
+                  },
+                  "deleted_v6": {
+                    "type": "integer",
+                    "format": "uint",
+                    "minimum": 0
+                  },
+                  "unchanged": {
+                    "type": "integer",
+                    "format": "uint",
+                    "minimum": 0
+                  }
+                },
+                "required": [
+                  "added_v4",
+                  "added_v6",
+                  "deleted_v4",
+                  "deleted_v6",
+                  "unchanged"
+                ]
+              }
+            },
+            "required": [
+              "status",
+              "value"
+            ]
+          },
+          {
+            "description": "Reconciliation completed with at least one failure.\n\nmgd operations are performed in bulk, so each item here contains the count of items applied on success.",
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "partial_success"
+                ]
+              },
+              "value": {
+                "type": "object",
+                "properties": {
+                  "add_v4_result": {
+                    "x-rust-type": {
+                      "crate": "std",
+                      "parameters": [
+                        {
+                          "format": "uint",
+                          "minimum": 0.0,
+                          "type": "integer"
+                        },
+                        {
+                          "type": "string"
+                        }
+                      ],
+                      "path": "::std::result::Result",
+                      "version": "*"
+                    },
+                    "oneOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "ok": {
+                            "type": "integer",
+                            "format": "uint",
+                            "minimum": 0
+                          }
+                        },
+                        "required": [
+                          "ok"
+                        ]
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "err": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "err"
+                        ]
+                      }
+                    ]
+                  },
+                  "add_v6_result": {
+                    "x-rust-type": {
+                      "crate": "std",
+                      "parameters": [
+                        {
+                          "format": "uint",
+                          "minimum": 0.0,
+                          "type": "integer"
+                        },
+                        {
+                          "type": "string"
+                        }
+                      ],
+                      "path": "::std::result::Result",
+                      "version": "*"
+                    },
+                    "oneOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "ok": {
+                            "type": "integer",
+                            "format": "uint",
+                            "minimum": 0
+                          }
+                        },
+                        "required": [
+                          "ok"
+                        ]
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "err": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "err"
+                        ]
+                      }
+                    ]
+                  },
+                  "delete_v4_result": {
+                    "x-rust-type": {
+                      "crate": "std",
+                      "parameters": [
+                        {
+                          "format": "uint",
+                          "minimum": 0.0,
+                          "type": "integer"
+                        },
+                        {
+                          "type": "string"
+                        }
+                      ],
+                      "path": "::std::result::Result",
+                      "version": "*"
+                    },
+                    "oneOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "ok": {
+                            "type": "integer",
+                            "format": "uint",
+                            "minimum": 0
+                          }
+                        },
+                        "required": [
+                          "ok"
+                        ]
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "err": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "err"
+                        ]
+                      }
+                    ]
+                  },
+                  "delete_v6_result": {
+                    "x-rust-type": {
+                      "crate": "std",
+                      "parameters": [
+                        {
+                          "format": "uint",
+                          "minimum": 0.0,
+                          "type": "integer"
+                        },
+                        {
+                          "type": "string"
+                        }
+                      ],
+                      "path": "::std::result::Result",
+                      "version": "*"
+                    },
+                    "oneOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "ok": {
+                            "type": "integer",
+                            "format": "uint",
+                            "minimum": 0
+                          }
+                        },
+                        "required": [
+                          "ok"
+                        ]
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "err": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "err"
+                        ]
+                      }
+                    ]
+                  },
+                  "unchanged": {
+                    "type": "integer",
+                    "format": "uint",
+                    "minimum": 0
+                  }
+                },
+                "required": [
+                  "add_v4_result",
+                  "add_v6_result",
+                  "delete_v4_result",
+                  "delete_v6_result",
+                  "unchanged"
+                ]
+              }
+            },
+            "required": [
+              "status",
+              "value"
+            ]
+          }
+        ]
       },
       "Name": {
         "title": "A name unique within the parent collection",
@@ -857,6 +2136,15 @@
         "title": "A password hash in PHC string format",
         "description": "Password hashes must be in PHC (Password Hashing Competition) string format.  Passwords must be hashed with Argon2id.  Password hashes may be rejected if the parameters appear not to be secure enough.",
         "type": "string"
+      },
+      "OmicronZoneUuid": {
+        "x-rust-type": {
+          "crate": "omicron-uuid-kinds",
+          "path": "omicron_uuid_kinds::OmicronZoneUuid",
+          "version": "*"
+        },
+        "type": "string",
+        "format": "uuid"
       },
       "PortConfig": {
         "type": "object",
@@ -1286,6 +2574,355 @@
         "type": "string",
         "format": "uuid"
       },
+      "ReconcilerActivationReason": {
+        "description": "Why a reconciler task was activated.",
+        "oneOf": [
+          {
+            "description": "Each reconciler runs once on startup.",
+            "type": "string",
+            "enum": [
+              "startup"
+            ]
+          },
+          {
+            "description": "The task was activated due to its periodic timer firing.",
+            "type": "string",
+            "enum": [
+              "periodic_timer"
+            ]
+          },
+          {
+            "description": "The task was activated in response to a change in the networking config.",
+            "type": "string",
+            "enum": [
+              "system_networking_config_changed"
+            ]
+          },
+          {
+            "description": "The task was activated in response to the sled becoming a scrimlet again (after previously transitioning to \"not a scrimlet\").",
+            "type": "string",
+            "enum": [
+              "scrimlet_status_changed"
+            ]
+          }
+        ]
+      },
+      "ReconcilerCurrentStatus": {
+        "oneOf": [
+          {
+            "description": "The reconciler is inert: it will not or cannot run for some reason.",
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "inert"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/ReconcilerInertReason"
+              }
+            },
+            "required": [
+              "status",
+              "value"
+            ]
+          },
+          {
+            "description": "The reconciler is currently running.",
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "running"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/ReconcilerRunningStatus"
+              }
+            },
+            "required": [
+              "status",
+              "value"
+            ]
+          },
+          {
+            "description": "The reconciler is not currently running.",
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "idle"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          }
+        ]
+      },
+      "ReconcilerInertReason": {
+        "description": "Why a reconciler task has gone inert.",
+        "oneOf": [
+          {
+            "description": "The reconciler task started when this sled was a scrimlet, but it has since become \"not a scrimlet\" (e.g., because the attached switch has gone away).",
+            "type": "string",
+            "enum": [
+              "no_longer_a_scrimlet"
+            ]
+          },
+          {
+            "description": "The reconciler task exited. This is not expected except in tests; the task runs forever as long as sled-agent holds on to the channels used to communicate with it.",
+            "type": "string",
+            "enum": [
+              "task_exited_unexpectedly"
+            ]
+          }
+        ]
+      },
+      "ReconcilerRunningStatus": {
+        "type": "object",
+        "properties": {
+          "activation_reason": {
+            "$ref": "#/components/schemas/ReconcilerActivationReason"
+          },
+          "running_for": {
+            "$ref": "#/components/schemas/Duration"
+          },
+          "started_at_time": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "activation_reason",
+          "running_for",
+          "started_at_time"
+        ]
+      },
+      "ReconcilerStatusDpdReconcilerStatus": {
+        "type": "object",
+        "properties": {
+          "current_status": {
+            "description": "Status of the task at this moment.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ReconcilerCurrentStatus"
+              }
+            ]
+          },
+          "last_completion": {
+            "nullable": true,
+            "description": "Final status of the most recent activation of this task.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ReconciliationCompletedStatusDpdReconcilerStatus"
+              }
+            ]
+          }
+        },
+        "required": [
+          "current_status"
+        ]
+      },
+      "ReconcilerStatusLldpdReconcilerStatus": {
+        "type": "object",
+        "properties": {
+          "current_status": {
+            "description": "Status of the task at this moment.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ReconcilerCurrentStatus"
+              }
+            ]
+          },
+          "last_completion": {
+            "nullable": true,
+            "description": "Final status of the most recent activation of this task.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ReconciliationCompletedStatusLldpdReconcilerStatus"
+              }
+            ]
+          }
+        },
+        "required": [
+          "current_status"
+        ]
+      },
+      "ReconcilerStatusMgdReconcilerStatus": {
+        "type": "object",
+        "properties": {
+          "current_status": {
+            "description": "Status of the task at this moment.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ReconcilerCurrentStatus"
+              }
+            ]
+          },
+          "last_completion": {
+            "nullable": true,
+            "description": "Final status of the most recent activation of this task.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ReconciliationCompletedStatusMgdReconcilerStatus"
+              }
+            ]
+          }
+        },
+        "required": [
+          "current_status"
+        ]
+      },
+      "ReconcilerStatusUplinkdReconcilerStatus": {
+        "type": "object",
+        "properties": {
+          "current_status": {
+            "description": "Status of the task at this moment.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ReconcilerCurrentStatus"
+              }
+            ]
+          },
+          "last_completion": {
+            "nullable": true,
+            "description": "Final status of the most recent activation of this task.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ReconciliationCompletedStatusUplinkdReconcilerStatus"
+              }
+            ]
+          }
+        },
+        "required": [
+          "current_status"
+        ]
+      },
+      "ReconciliationCompletedStatusDpdReconcilerStatus": {
+        "type": "object",
+        "properties": {
+          "activation_count": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "activation_reason": {
+            "$ref": "#/components/schemas/ReconcilerActivationReason"
+          },
+          "completed_at_time": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "ran_for": {
+            "$ref": "#/components/schemas/Duration"
+          },
+          "status": {
+            "$ref": "#/components/schemas/DpdReconcilerStatus"
+          }
+        },
+        "required": [
+          "activation_count",
+          "activation_reason",
+          "completed_at_time",
+          "ran_for",
+          "status"
+        ]
+      },
+      "ReconciliationCompletedStatusLldpdReconcilerStatus": {
+        "type": "object",
+        "properties": {
+          "activation_count": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "activation_reason": {
+            "$ref": "#/components/schemas/ReconcilerActivationReason"
+          },
+          "completed_at_time": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "ran_for": {
+            "$ref": "#/components/schemas/Duration"
+          },
+          "status": {
+            "$ref": "#/components/schemas/LldpdReconcilerStatus"
+          }
+        },
+        "required": [
+          "activation_count",
+          "activation_reason",
+          "completed_at_time",
+          "ran_for",
+          "status"
+        ]
+      },
+      "ReconciliationCompletedStatusMgdReconcilerStatus": {
+        "type": "object",
+        "properties": {
+          "activation_count": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "activation_reason": {
+            "$ref": "#/components/schemas/ReconcilerActivationReason"
+          },
+          "completed_at_time": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "ran_for": {
+            "$ref": "#/components/schemas/Duration"
+          },
+          "status": {
+            "$ref": "#/components/schemas/MgdReconcilerStatus"
+          }
+        },
+        "required": [
+          "activation_count",
+          "activation_reason",
+          "completed_at_time",
+          "ran_for",
+          "status"
+        ]
+      },
+      "ReconciliationCompletedStatusUplinkdReconcilerStatus": {
+        "type": "object",
+        "properties": {
+          "activation_count": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "activation_reason": {
+            "$ref": "#/components/schemas/ReconcilerActivationReason"
+          },
+          "completed_at_time": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "ran_for": {
+            "$ref": "#/components/schemas/Duration"
+          },
+          "status": {
+            "$ref": "#/components/schemas/UplinkdReconcilerStatus"
+          }
+        },
+        "required": [
+          "activation_count",
+          "activation_reason",
+          "completed_at_time",
+          "ran_for",
+          "status"
+        ]
+      },
       "RecoverySiloConfig": {
         "description": "Configuration for the recovery silo created during rack setup.",
         "type": "object",
@@ -1660,6 +3297,83 @@
           }
         ]
       },
+      "ScrimletReconcilersStatus": {
+        "oneOf": [
+          {
+            "description": "`sled-agent` has not yet provided underlay networking information.",
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "waiting_for_sled_agent_networking_info"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          {
+            "description": "We're attempting to determine our switch slot.",
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "determining_switch_slot"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/DetermineSwitchSlotStatus"
+              }
+            },
+            "required": [
+              "status",
+              "value"
+            ]
+          },
+          {
+            "description": "We are a scrimlet and the individual reconcilers are running.",
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "running"
+                ]
+              },
+              "value": {
+                "type": "object",
+                "properties": {
+                  "dpd_reconciler": {
+                    "$ref": "#/components/schemas/ReconcilerStatusDpdReconcilerStatus"
+                  },
+                  "lldpd_reconciler": {
+                    "$ref": "#/components/schemas/ReconcilerStatusLldpdReconcilerStatus"
+                  },
+                  "mgd_reconciler": {
+                    "$ref": "#/components/schemas/ReconcilerStatusMgdReconcilerStatus"
+                  },
+                  "uplinkd_reconciler": {
+                    "$ref": "#/components/schemas/ReconcilerStatusUplinkdReconcilerStatus"
+                  }
+                },
+                "required": [
+                  "dpd_reconciler",
+                  "lldpd_reconciler",
+                  "mgd_reconciler",
+                  "uplinkd_reconciler"
+                ]
+              }
+            },
+            "required": [
+              "status",
+              "value"
+            ]
+          }
+        ]
+      },
       "SwitchSlot": {
         "description": "Identifies switch physical location",
         "oneOf": [
@@ -1781,6 +3495,74 @@
           "$ref": "#/components/schemas/PortConfig"
         },
         "minItems": 1
+      },
+      "UplinkdReconcilerStatus": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "failed"
+                ]
+              },
+              "value": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "status",
+              "value"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "skipped_config_up_to_date"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "reconciled"
+                ]
+              },
+              "value": {
+                "type": "object",
+                "properties": {
+                  "ports": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                },
+                "required": [
+                  "ports"
+                ]
+              }
+            },
+            "required": [
+              "status",
+              "value"
+            ]
+          }
+        ]
       },
       "UserId": {
         "title": "A username for a local-only user",

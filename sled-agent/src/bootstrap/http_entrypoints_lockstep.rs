@@ -17,6 +17,7 @@ use bootstrap_agent_lockstep_types::RackInitializeRequest;
 use bootstrap_agent_lockstep_types::RackOperationStatus;
 use bootstrap_agent_lockstep_types::ReplicatedNetworkConfig;
 use bootstrap_agent_lockstep_types::ReplicatedNetworkConfigContents;
+use bootstrap_agent_lockstep_types::scrimlet_reconcilers::ScrimletReconcilersStatus;
 use dropshot::{
     ApiDescription, HttpError, HttpResponseOk, RequestContext, TypedBody,
 };
@@ -92,5 +93,15 @@ impl BootstrapAgentLockstepApi for BootstrapAgentLockstepImpl {
             },
         );
         Ok(HttpResponseOk(ReplicatedNetworkConfig { contents }))
+    }
+
+    async fn scrimlet_reconcilers_status_for_debug(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<
+        HttpResponseOk<ScrimletReconcilersStatus>,
+        HttpError,
+    > {
+        let ctx = rqctx.context();
+        Ok(HttpResponseOk(ctx.scrimlet_reconcilers.status()))
     }
 }

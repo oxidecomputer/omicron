@@ -12,6 +12,7 @@
 use bootstrap_agent_lockstep_types::RackInitializeRequest;
 use bootstrap_agent_lockstep_types::RackOperationStatus;
 use bootstrap_agent_lockstep_types::ReplicatedNetworkConfig;
+use bootstrap_agent_lockstep_types::scrimlet_reconcilers;
 use dropshot::{HttpError, HttpResponseOk, RequestContext, TypedBody};
 use omicron_uuid_kinds::RackInitUuid;
 use omicron_uuid_kinds::RackResetUuid;
@@ -62,4 +63,22 @@ pub trait BootstrapAgentLockstepApi {
     async fn network_config_contents_for_debug(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<ReplicatedNetworkConfig>, HttpError>;
+
+    /// Get the status of the "scrimlet reconcilers" subsystem.
+    ///
+    /// This should ONLY be used for debugging (e.g., via `omdb`). This is akin
+    /// to the "background task status" exposed by the Nexus lockstep API. If we
+    /// find a need for any of the information contained in this endpoint for
+    /// production, we should refine this, version it, and (probably?) move it
+    /// to inventory.
+    #[endpoint {
+        method = GET,
+        path = "/debug/scrimlet-reconcilers-status",
+    }]
+    async fn scrimlet_reconcilers_status_for_debug(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<
+        HttpResponseOk<scrimlet_reconcilers::ScrimletReconcilersStatus>,
+        HttpError,
+    >;
 }

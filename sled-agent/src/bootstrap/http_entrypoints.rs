@@ -25,6 +25,7 @@ use omicron_uuid_kinds::RackInitUuid;
 use sled_agent_config_reconciler::InternalDisksReceiver;
 use sled_agent_measurements::MeasurementsHandle;
 use sled_agent_rack_setup::RackInitializeRequestParams;
+use sled_agent_scrimlet_reconcilers::ScrimletReconcilers;
 use sled_hardware_types::Baseboard;
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
@@ -48,6 +49,7 @@ pub(crate) struct BootstrapServerContext {
     pub(crate) sprockets: SprocketsConfig,
     pub(crate) trust_quorum_handle: trust_quorum::NodeTaskHandle,
     pub(crate) measurements: Arc<MeasurementsHandle>,
+    pub(crate) scrimlet_reconcilers: Arc<ScrimletReconcilers>,
 }
 
 impl BootstrapServerContext {

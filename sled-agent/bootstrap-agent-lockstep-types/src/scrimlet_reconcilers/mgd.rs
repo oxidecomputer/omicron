@@ -5,6 +5,8 @@
 //! Types for the status and results of the scrimlet reconcilers responsible for
 //! syncing configuration from the bootstore to mgd in the switch zone.
 
+use omicron_common::snake_case_result;
+use omicron_common::snake_case_result::SnakeCaseResult;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
@@ -17,6 +19,7 @@ pub struct MgdBfdOperationFailure {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case", tag = "status", content = "value")]
 pub enum MgdBfdReconcilerStatus {
     /// Reconciliation was skipped because we couldn't fetch the current set of
     /// BFD peers from mgd.
@@ -174,6 +177,7 @@ impl slog::KV for MgdBgpReconcilerStatusOpCount {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case", tag = "status", content = "value")]
 pub enum MgdBgpReconcilerStatus {
     /// Reconciliation was skipped because we couldn't fetch the current BGP
     /// configuration from MGD.
@@ -243,6 +247,7 @@ impl slog::KV for MgdBgpReconcilerStatus {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case", tag = "status", content = "value")]
 pub enum MgdStaticRouteReconcilerStatus {
     /// Reconciliation was skipped because we couldn't fetch the current set of
     /// static routes from MGD.
@@ -273,9 +278,25 @@ pub enum MgdStaticRouteReconcilerStatus {
     /// count of items applied on success.
     PartialSuccess {
         unchanged: usize,
+        #[serde(with = "snake_case_result")]
+        #[schemars(
+            schema_with = "SnakeCaseResult::<usize, String>::json_schema"
+        )]
         delete_v4_result: Result<usize, String>,
+        #[serde(with = "snake_case_result")]
+        #[schemars(
+            schema_with = "SnakeCaseResult::<usize, String>::json_schema"
+        )]
         delete_v6_result: Result<usize, String>,
+        #[serde(with = "snake_case_result")]
+        #[schemars(
+            schema_with = "SnakeCaseResult::<usize, String>::json_schema"
+        )]
         add_v4_result: Result<usize, String>,
+        #[serde(with = "snake_case_result")]
+        #[schemars(
+            schema_with = "SnakeCaseResult::<usize, String>::json_schema"
+        )]
         add_v6_result: Result<usize, String>,
     },
 }
@@ -367,4 +388,3 @@ impl slog::KV for MgdReconcilerStatus {
         Ok(())
     }
 }
-

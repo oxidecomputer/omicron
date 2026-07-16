@@ -11,6 +11,7 @@ use sled_agent_types::early_networking::LldpAdminStatus;
 use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case", tag = "status", content = "value")]
 pub enum LldpdReconcilerStatus {
     Failed(String),
     SkippedConfigUpToDate,
