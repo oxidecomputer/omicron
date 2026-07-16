@@ -28,12 +28,14 @@
 //! [RFD 538]: https://rfd.shared.oxide.computer/538
 
 use crate::Nexus;
+use crate::app::external_client::ExternalHttpClient;
 use anyhow::Context;
 use chrono::TimeDelta;
 use chrono::Utc;
 use hmac::{Hmac, Mac};
 use http::HeaderName;
 use http::HeaderValue;
+use nexus_config::ExternalHttpClientConfig;
 use nexus_db_lookup::LookupPath;
 use nexus_db_lookup::lookup;
 use nexus_db_queries::authz;
@@ -317,9 +319,10 @@ impl Nexus {
 
 /// Construct a [`reqwest::Client`] configured for webhook delivery requests.
 pub(super) fn delivery_client(
-    builder: reqwest::ClientBuilder,
-) -> Result<reqwest::Client, reqwest::Error> {
-    builder
+    external_client_config: &ExternalHttpClientConfig,
+    resolver: &Arc<external_dns::Resolver>,
+) -> Result<ExternalHttpClient, reqwest::Error> {
+    let builder = reqwest::ClientBuilder::new()
         // Per [RFD 538 § 4.3.1][1], webhook delivery does *not* follow
         // redirects.
         //
@@ -335,8 +338,8 @@ pub(super) fn delivery_client(
         // each webhook delivery request.
         //
         // [1]: https://rfd.shared.oxide.computer/rfd/538#delivery-failure
-        .timeout(Duration::from_secs(30))
-        .build()
+        .timeout(Duration::from_secs(30));
+    ExternalHttpClient::from_builder(external_client_config, resolver, builder)
 }
 
 /// Everything necessary to send a delivery request to a webhook receiver.
@@ -345,7 +348,7 @@ pub(super) fn delivery_client(
 /// background task, as it is used both by the deliverator RPW and by the Nexus
 /// API in the liveness probe endpoint.
 pub(crate) struct ReceiverClient<'a> {
-    client: &'a reqwest::Client,
+    client: &'a ExternalHttpClient,
     rx: &'a AlertReceiver,
     secrets: Vec<(WebhookSecretUuid, Hmac<Sha256>)>,
     hdr_rx_id: http::HeaderValue,
@@ -354,7 +357,7 @@ pub(crate) struct ReceiverClient<'a> {
 
 impl<'a> ReceiverClient<'a> {
     pub(crate) fn new(
-        client: &'a reqwest::Client,
+        client: &'a ExternalHttpClient,
         secrets: impl IntoIterator<Item = WebhookSecret>,
         rx: &'a AlertReceiver,
         nexus_id: OmicronZoneUuid,
@@ -468,7 +471,7 @@ impl<'a> ReceiverClient<'a> {
         };
         let mut request = self
             .client
-            .post(&self.rx.endpoint)
+            .post(&self.rx.endpoint).expect("TODO ELIZA YOU HAVE TO ACTUALLY HANDLE THE EXTERNAL CLIENT ERROR HERE LOL")
             .header(HDR_RX_ID, self.hdr_rx_id.clone())
             .header(HDR_DELIVERY_ID, delivery.id.to_string())
             .header(HDR_ALERT_ID, delivery.alert_id.to_string())

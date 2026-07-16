@@ -72,6 +72,7 @@ pub mod crucible;
 mod deployment;
 mod device_auth;
 mod disk;
+pub(crate) mod external_client;
 mod external_dns;
 pub(crate) mod external_endpoints;
 mod external_ip;
@@ -479,6 +480,13 @@ impl Nexus {
         ) = background::BackgroundTasksInitializer::new();
 
         let underlay_subnets = Arc::new(OnceLock::new());
+        // The IP policy is shared by the external DNS resolver (which applies
+        // it to resolved addresses) and any `ExternalHttpClient` (which
+        // applies it to IP literals in URLs).
+        let external_ip_policy = external_client::ExternalIpPolicy::new(
+            underlay_subnets.clone(),
+            config.deployment.external_http_clients.treat_loopback_as_external,
+        );
         let external_resolver = {
             if config.deployment.external_dns_servers.is_empty() {
                 return Err("expected at least 1 external DNS server".into());
@@ -486,7 +494,7 @@ impl Nexus {
 
             Arc::new(external_dns::Resolver::new(
                 &config.deployment.external_dns_servers,
-                underlay_subnets.clone(),
+                external_ip_policy,
             ))
         };
 
@@ -494,7 +502,7 @@ impl Nexus {
             // The webhook delivery HTTP client will send requests to endpoints
             // external to the rack, so apply the configuration for external
             // HTTP clients.
-            let builder = external_http_client_builder(
+            let builder = external_client::external_http_client_builder(
                 &config.deployment.external_http_clients,
                 &external_resolver,
             );
@@ -1462,15 +1470,4 @@ async fn map_switch_zone_addrs(
     );
 
     switch_zone_addrs
-}
-
-/// Begin configuring an external HTTP client, returning a
-/// `reqwest::ClientBuilder`.
-pub(crate) fn external_http_client_builder(
-    _config: &nexus_config::ExternalHttpClientConfig,
-    resolver: &Arc<external_dns::Resolver>,
-) -> reqwest::ClientBuilder {
-    let mut builder = reqwest::ClientBuilder::new();
-    builder = builder.dns_resolver(resolver.clone());
-    builder
 }
