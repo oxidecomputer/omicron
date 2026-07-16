@@ -6651,7 +6651,7 @@ dependencies = [
 [[package]]
 name = "lldpd-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/lldp#54b266174d4de9628bca9c97b0db176e16f12154"
+source = "git+https://github.com/oxidecomputer/lldp?rev=54b266174d4de9628bca9c97b0db176e16f12154#54b266174d4de9628bca9c97b0db176e16f12154"
 dependencies = [
  "chrono",
  "futures",
@@ -6670,7 +6670,7 @@ dependencies = [
 [[package]]
 name = "lldpd-common"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/lldp#54b266174d4de9628bca9c97b0db176e16f12154"
+source = "git+https://github.com/oxidecomputer/lldp?rev=54b266174d4de9628bca9c97b0db176e16f12154#54b266174d4de9628bca9c97b0db176e16f12154"
 dependencies = [
  "anyhow",
  "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?branch=main)",
@@ -6687,7 +6687,7 @@ dependencies = [
 [[package]]
 name = "lldpd-types-versions"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/lldp#54b266174d4de9628bca9c97b0db176e16f12154"
+source = "git+https://github.com/oxidecomputer/lldp?rev=54b266174d4de9628bca9c97b0db176e16f12154#54b266174d4de9628bca9c97b0db176e16f12154"
 dependencies = [
  "chrono",
  "protocol",
@@ -9065,6 +9065,7 @@ dependencies = [
  "omicron-deployment-graph",
  "omicron-test-utils",
  "omicron-workspace-hack",
+ "omicron-zone-package",
  "parse-display",
  "petgraph 0.8.3",
  "serde",
@@ -9794,6 +9795,7 @@ dependencies = [
  "byte-wrapper",
  "bytes",
  "camino",
+ "cc",
  "chacha20 0.10.0",
  "chrono",
  "cipher 0.5.2",
@@ -11823,7 +11825,7 @@ dependencies = [
 [[package]]
 name = "protocol"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/lldp#54b266174d4de9628bca9c97b0db176e16f12154"
+source = "git+https://github.com/oxidecomputer/lldp?rev=54b266174d4de9628bca9c97b0db176e16f12154#54b266174d4de9628bca9c97b0db176e16f12154"
 dependencies = [
  "anyhow",
  "schemars 0.8.22",
