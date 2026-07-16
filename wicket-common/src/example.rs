@@ -74,8 +74,8 @@ impl ExampleRackSetupData {
 
         let mut inventory = MgsV1Inventory {
             sps: vec![
-                SpInventory::new(SpIdentifier { slot: 1, type_: SpType::Sled }),
-                SpInventory::new(SpIdentifier { slot: 5, type_: SpType::Sled }),
+                SpInventory::new(SpIdentifier { slot: 1, typ: SpType::Sled }),
+                SpInventory::new(SpIdentifier { slot: 5, typ: SpType::Sled }),
             ],
         };
 
@@ -128,12 +128,12 @@ impl ExampleRackSetupData {
 
         let bootstrap_sleds = btreeset![
             BootstrapSledDescription {
-                id: SpIdentifier { slot: 1, type_: SpType::Sled },
+                id: SpIdentifier { slot: 1, typ: SpType::Sled },
                 baseboard: our_baseboard.clone(),
                 bootstrap_ip: Some(Ipv6Addr::LOCALHOST)
             },
             BootstrapSledDescription {
-                id: SpIdentifier { slot: 5, type_: SpType::Sled },
+                id: SpIdentifier { slot: 5, typ: SpType::Sled },
                 baseboard: Baseboard::Gimlet {
                     model: "model2".into(),
                     revision: 5,

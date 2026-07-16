@@ -35,6 +35,7 @@ use nexus_types::deployment::PendingMgsUpdates;
 use nexus_types::deployment::ReconfiguratorConfigParam;
 
 use omicron_common::address::MGS_PORT;
+use omicron_common::address::UnderlaySubnets;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Error;
 use omicron_uuid_kinds::OmicronZoneUuid;
@@ -316,6 +317,11 @@ pub struct Nexus {
 
     /// state of overall Nexus quiesce activity
     quiesce: NexusQuiesceHandle,
+
+    /// the underlay subnets (rack and AZ), set once they have been loaded, or
+    /// once the rack has been initialized (if RSS has not already finished when
+    /// this Nexus process starts).
+    underlay_subnets: Arc<OnceLock<UnderlaySubnets>>,
 }
 
 impl Nexus {
@@ -472,12 +478,15 @@ impl Nexus {
             background_tasks_internal,
         ) = background::BackgroundTasksInitializer::new();
 
+        let underlay_subnets = Arc::new(OnceLock::new());
         let external_resolver = {
             if config.deployment.external_dns_servers.is_empty() {
                 return Err("expected at least 1 external DNS server".into());
             }
+
             Arc::new(external_dns::Resolver::new(
                 &config.deployment.external_dns_servers,
+                underlay_subnets.clone(),
             ))
         };
 
@@ -582,6 +591,7 @@ impl Nexus {
             update_status: UpdateStatusHandle::new(blueprint_load_rx),
             quiesce,
             sitrep_load_rx,
+            underlay_subnets,
         };
 
         // TODO-cleanup all the extra Arcs here seems wrong
@@ -1457,24 +1467,10 @@ async fn map_switch_zone_addrs(
 /// Begin configuring an external HTTP client, returning a
 /// `reqwest::ClientBuilder`.
 pub(crate) fn external_http_client_builder(
-    config: &nexus_config::ExternalHttpClientConfig,
+    _config: &nexus_config::ExternalHttpClientConfig,
     resolver: &Arc<external_dns::Resolver>,
 ) -> reqwest::ClientBuilder {
     let mut builder = reqwest::ClientBuilder::new();
-
     builder = builder.dns_resolver(resolver.clone());
-
-    // If we are configured to only bind external TCP connections on a specific interface, do so.
-    #[cfg(any(
-        target_os = "linux",
-        target_os = "macos",
-        target_os = "illumos",
-    ))]
-    {
-        if let Some(ref interface) = config.interface {
-            builder = builder.interface(interface);
-        }
-    }
-
     builder
 }
