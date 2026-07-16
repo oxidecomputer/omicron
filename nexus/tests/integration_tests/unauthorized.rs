@@ -359,7 +359,7 @@ static SETUP_REQUESTS: LazyLock<Vec<SetupReq>> = LazyLock::new(|| {
         SetupReq::Post {
             url: &DEMO_IP_POOLS_URL,
             body: serde_json::to_value(&*DEMO_IP_POOL_CREATE).unwrap(),
-            id_routes: vec!["/v1/ip-pools/{id}"],
+            id_routes: vec!["/v1/system/ip-pools/{id}"],
         },
         // Create an IP pool range
         SetupReq::Post {
@@ -372,6 +372,16 @@ static SETUP_REQUESTS: LazyLock<Vec<SetupReq>> = LazyLock::new(|| {
             url: &DEMO_IP_POOL_SILOS_URL,
             body: serde_json::to_value(&*DEMO_IP_POOL_SILOS_BODY).unwrap(),
             id_routes: vec![],
+        },
+        // Create a default services IP pool.
+        //
+        // This is just another IP Pool that the operator can control, but it's
+        // assigned to Oxide system services. See the create-parameters for
+        // details.
+        SetupReq::Post {
+            url: &DEMO_IP_POOLS_URL,
+            body: serde_json::to_value(&*DEMO_SERVICES_IP_POOL_CREATE).unwrap(),
+            id_routes: vec!["/v1/system/ip-pools/{id}"],
         },
         // Create a Project in the Organization
         SetupReq::Post {

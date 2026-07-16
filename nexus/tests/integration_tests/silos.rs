@@ -2706,7 +2706,7 @@ async fn test_silo_delete_cleans_up_ip_pool_links(
     assert_eq!(links.items.len(), 0);
 
     // but the pools are of course still there
-    let url = "/v1/system/ip-pools";
+    let url = "/v1/system/ip-pools?assignment=silos";
     let pools = objects_list_page_authz::<ip_pool::IpPool>(client, &url).await;
     assert_eq!(pools.items.len(), 2);
     assert_eq!(pools.items[0].identity.name, "pool1");

@@ -36,6 +36,7 @@ pub enum SpType {
     Copy,
     PartialEq,
     Eq,
+    Hash,
     PartialOrd,
     Ord,
     Serialize,
