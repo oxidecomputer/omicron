@@ -54,6 +54,7 @@ pub struct BackgroundTasks {
     pub task_sp_ereport_ingester: Activator,
     pub task_reconfigurator_config_loader: Activator,
     pub task_fm_analysis: Activator,
+    pub task_fm_config_loader: Activator,
     pub task_fm_rendezvous: Activator,
     pub task_fm_sitrep_loader: Activator,
     pub task_fm_sitrep_gc: Activator,

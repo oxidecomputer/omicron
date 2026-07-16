@@ -25,6 +25,8 @@ mod alert_request;
 pub use alert_request::*;
 mod case;
 pub use case::*;
+mod config;
+pub use config::*;
 mod diagnosis_engine;
 pub use diagnosis_engine::*;
 mod rendezvous_created;

@@ -9016,6 +9016,42 @@ CREATE TABLE IF NOT EXISTS omicron.public.trust_quorum_member (
     PRIMARY KEY (rack_id, epoch DESC, hw_baseboard_id)
 );
 
+
+-- Overrides to the fault management system's global configuration.
+--
+-- If no overrides are set, this table is empty and the system uses the default
+-- configuration. Otherwise, the row in this table with the highest `version` is
+-- selected and used as the active configuration.
+CREATE TABLE IF NOT EXISTS omicron.public.fm_config (
+    -- The version number of the configuration.
+    --
+    -- Configuration changes are made by inserting a new row with a higher
+    -- version number.
+    version INT8 PRIMARY KEY,
+    -- The maximum number of historical sitreps to keep in the database.
+    --
+    -- If the number of records in the `omicron.public.fm_sitrep_history` table
+    -- exceeds this limit, the FM analysis background task will not produce a
+    -- new sitrep until old ones are deleted.
+    sitrep_limit INT8 NOT NULL,
+    -- The number of entries in the `omicron.public.fm_sitrep_history` at which
+    -- the `fm_sitrep_gc` background task will begin deleting the oldest sitreps
+    -- from the history.
+    --
+    -- This must be less than `sitrep_limit`, and must be at least 2.
+    sitrep_deletion_threshold INT8 NOT NULL,
+    -- The time at which this config version was created.
+    time_modified TIMESTAMPTZ NOT NULL,
+
+    CONSTRAINT versions_are_positive CHECK (version > 0),
+    CONSTRAINT sitrep_min_limit CHECK (sitrep_limit >= 3),
+    CONSTRAINT sitrep_deletion_threshold_validity CHECK (
+        sitrep_deletion_threshold >= 2 AND
+        sitrep_deletion_threshold < sitrep_limit
+    )
+);
+
+
 -- Keep this at the end of file so that the database does not contain a version
 -- until it is fully populated.
 INSERT INTO omicron.public.db_metadata (
@@ -9025,7 +9061,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '277.0.0', NULL)
+    (TRUE, NOW(), NOW(), '278.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

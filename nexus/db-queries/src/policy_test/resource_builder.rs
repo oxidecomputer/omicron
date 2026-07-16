@@ -310,6 +310,7 @@ impl_dyn_authorized_resource_for_global!(authz::ConsoleSessionList);
 impl_dyn_authorized_resource_for_global!(authz::Database);
 impl_dyn_authorized_resource_for_global!(authz::DeviceAuthRequestList);
 impl_dyn_authorized_resource_for_global!(authz::DnsConfig);
+impl_dyn_authorized_resource_for_global!(authz::FmConfig);
 impl_dyn_authorized_resource_for_global!(authz::IpPoolList);
 impl_dyn_authorized_resource_for_global!(authz::MulticastGroupList);
 impl_dyn_authorized_resource_for_global!(authz::AuditLog);

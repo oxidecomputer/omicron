@@ -206,18 +206,20 @@ async fn test_omdb_success_cases() {
     // snapshot of each task's last completed activation is deterministic
     // rather than racing the tasks' watch-channel triggers:
     //
-    // 1. `fm_analysis` commits the first sitrep (unless its natural cadence
+    // 1. `fm_config_loader` loads the default config for the FM system.
+    // 2. `fm_analysis` commits the first sitrep (unless its natural cadence
     //    already has). This run reports "committed new sitrep".
-    // 2. `fm_sitrep_loader` loads that sitrep and publishes it on the sitrep
+    // 3. `fm_sitrep_loader` loads that sitrep and publishes it on the sitrep
     //    watch channel.
-    // 3. `fm_analysis` re-runs with the loaded sitrep as its parent and
+    // 4. `fm_analysis` re-runs with the loaded sitrep as its parent and
     //    reports "no changes" -- the steady-state output asserted below.
     //    (No later activation ever commits another sitrep here: this
     //    environment has no in-service control plane disks and no
     //    consumable ereports, so every post-load analysis is a no-op.)
-    // 4. `fm_rendezvous` runs against the loaded sitrep, so its status shows
+    // 5. `fm_rendezvous` runs against the loaded sitrep, so its status shows
     //    the executed operations rather than "no FM situation report loaded".
     let lockstep_client = &cptestctx.lockstep_client;
+    activate_background_task(lockstep_client, "fm_config_loader").await;
     activate_background_task(lockstep_client, "fm_analysis").await;
     activate_background_task(lockstep_client, "fm_sitrep_loader").await;
     activate_background_task(lockstep_client, "fm_analysis").await;

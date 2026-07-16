@@ -351,6 +351,10 @@ task: "fm_analysis"
     performs fault management analysis and updates the sitrep
 
 
+task: "fm_config_loader"
+    loads the current fault management configuration from the database
+
+
 task: "fm_rendezvous"
     updates externally visible database tables to match the current fault
     management sitrep
@@ -721,6 +725,17 @@ task: "fm_analysis"
       sitrep ID: ..........<REDACTED_UUID>...........
       no cases changed in this analysis step
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+
+task: "fm_config_loader"
+  configured period: every <REDACTED_DURATION>s
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    config last updated at:       <REDACTED_TIMESTAMP>
+      updated by this activation: false
+    current config:
+      source:                    default
+      sitrep history limit:      1000
+      sitrep deletion threshold: 900
 
 task: "fm_rendezvous"
   configured period: every <REDACTED_DURATION>m
@@ -1431,6 +1446,17 @@ task: "fm_analysis"
       sitrep ID: ..........<REDACTED_UUID>...........
       no cases changed in this analysis step
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+
+task: "fm_config_loader"
+  configured period: every <REDACTED_DURATION>s
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    config last updated at:       <REDACTED_TIMESTAMP>
+      updated by this activation: false
+    current config:
+      source:                    default
+      sitrep history limit:      1000
+      sitrep deletion threshold: 900
 
 task: "fm_rendezvous"
   configured period: every <REDACTED_DURATION>m
