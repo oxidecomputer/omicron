@@ -294,17 +294,6 @@ pub struct RackSetupService {
 
 impl RackSetupService {
     /// Creates a new rack setup service, which runs in a background task.
-    ///
-    /// Arguments:
-    /// - `log`: The logger.
-    /// - `config`: The config file, which is used to setup the rack.
-    /// - `internal_disks_rx`: Tells us about available internal disks
-    /// - `local_bootstrap_agent`: Communication channel by which we can send
-    ///   commands to our local bootstrap-agent (e.g., to start sled-agents)
-    /// - `our_bootstrap_address`: The bootstrap address of the sled
-    ///   hosting RSS (i.e., this sled).
-    /// - `bootstore` - A handle to call bootstore APIs
-    /// - `trust_quorum` - A handle to the trust qurom task
     #[expect(clippy::too_many_arguments)]
     pub fn new<T: LocalBootstrapAgent + 'static>(
         ctx: RssContext,
@@ -1376,13 +1365,8 @@ async fn init_trust_quorum(
             break;
         }
 
-        let mut still_waiting = String::new();
-        for member in members.difference(&status.acked_prepares) {
-            still_waiting.push_str(&member.to_string());
-            still_waiting.push(',');
-        }
-        let _ = still_waiting.strip_suffix(",");
-
+        let still_waiting =
+            itertools::join(members.difference(&status.acked_prepares), ",");
         info!(
             log,
             "RSS: Trust quorum coordinator waiting for PrepareAcks";

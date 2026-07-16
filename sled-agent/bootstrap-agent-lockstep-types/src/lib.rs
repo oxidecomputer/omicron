@@ -376,8 +376,6 @@ impl RssStep {
 pub enum MultirackJoinStep {
     Requested,
     Starting,
-    LoadExistingPlan,
-    CreateSledPlan,
     InitTrustQuorum,
     InitialNetworkConfigUpdate,
     SledInit,
