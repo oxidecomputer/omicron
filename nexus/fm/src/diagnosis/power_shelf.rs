@@ -95,6 +95,7 @@ pub fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
                         .kv("ereport_id", format_args!("{}", ereport.id))
                         .kv("case_ereport_id", case_ereport.id)
                         .kv("error", error.to_string());
+                    psc_case.has_unparseable_ereports = true;
                 }
             }
         }
@@ -122,8 +123,10 @@ pub fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
                     ereports. This may be because no ereports could be\n\
                     interpreted successfully.",
                 )
-                .kv("num_case_ereports", case.ereports.len())
-                .kv("num_ereports_parsed_ok", psc_case.total_ereports());
+                .kv(
+                    "has_unparseable_ereports",
+                    psc_case.has_unparseable_ereports,
+                );
         }
     }
 
@@ -256,6 +259,30 @@ pub fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
 
         // Decide the case's fate from the latest restart's end state.
         match latest {
+            Some(state) if psc_case.has_unparseable_ereports => {
+                let log = case_builder.log_warning(
+                    "this case's fate cannot be determined, as some \
+                    ereports could not be parsed. leaving it open.",
+                );
+                if state.psus_absent.is_empty() {
+                    log.comment(
+                        "According to my understanding of the case, I did not\n\
+                         see evidence that any PSUs were absent. So normally,\n\
+                         it would be closed. But because the ereports that\n\
+                         couldn't be parsed may indicate otherwise, I am \n\
+                         leaving this case open in the hopes that some \n\
+                         future DE will be able to fully understand it.",
+                    );
+                } else {
+                    log.comment(
+                        "It appears that some PSUs are absent, but this may\n\
+                         not be the case as some ereports could not be\n\
+                         interpreted. Regardless, I am leaving this case open\n\
+                         in the hopes that some future DE will be able to\n\
+                         fully understand it.",
+                    );
+                }
+            }
             Some(state) if !state.psus_absent.is_empty() => {
                 case_builder
                     .log_event(
@@ -275,6 +302,12 @@ pub fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
             Some(_) => {
                 case_builder
                     .close("as of the latest restart, all PSUs are present");
+            }
+            None if psc_case.has_unparseable_ereports => {
+                case_builder.log_warning(
+                    "this case's fate cannot be determined, as NONE of \
+                     its ereports could be parsed. leaving it open.",
+                );
             }
             None => {
                 case_builder.close(
@@ -404,6 +437,7 @@ struct PscCase {
     case_id: CaseUuid,
     impacted_psus: PsuSet,
     restarts: IdOrdMap<Restart>,
+    has_unparseable_ereports: bool,
 }
 
 impl IdOrdItem for PscCase {
@@ -422,6 +456,7 @@ impl PscCase {
             case_id,
             impacted_psus: PsuSet::default(),
             restarts: IdOrdMap::default(),
+            has_unparseable_ereports: false,
         }
     }
 
@@ -444,10 +479,6 @@ impl PscCase {
             })?;
         self.impacted_psus.insert(location);
         Ok(())
-    }
-
-    fn total_ereports(&self) -> usize {
-        self.restarts.iter().map(|r| r.ereports.len()).sum()
     }
 }
 
