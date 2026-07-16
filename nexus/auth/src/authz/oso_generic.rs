@@ -159,6 +159,7 @@ pub fn make_omicron_oso(log: &slog::Logger) -> Result<OsoInit, anyhow::Error> {
         AddressLot::init(),
         BgpConfig::init(),
         BgpAnnounceSet::init(),
+        RouterConfiguration::init(),
         Blueprint::init(),
         LoopbackAddress::init(),
         Certificate::init(),

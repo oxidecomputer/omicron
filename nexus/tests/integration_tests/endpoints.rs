@@ -66,6 +66,7 @@ use omicron_common::api::external::VpcFirewallRuleUpdateParams;
 use omicron_test_utils::certificates::CertificateChain;
 use semver::Version;
 use sled_agent_types::early_networking::BfdMode;
+use sled_agent_types::early_networking::ImportExportPolicy;
 use sled_agent_types::early_networking::MaxPathConfig;
 use sled_agent_types::early_networking::SwitchSlot;
 use std::collections::BTreeSet;
@@ -1019,6 +1020,84 @@ pub static DEMO_BGP_CONFIG_UPDATE: LazyLock<networking::BgpConfigUpdate> =
         },
         bgp_announce_set_id: Some(NameOrId::Name("instances".parse().unwrap())),
         max_paths: Some(MaxPathConfig::new(1).unwrap()),
+    });
+
+pub const DEMO_ROUTER_CONFIGURATIONS_URL: &'static str =
+    "/v1/system/networking/router-configurations";
+pub const DEMO_ROUTER_CONFIGURATION_URL: &'static str =
+    "/v1/system/networking/router-configurations/demo-router-configuration";
+pub const DEMO_ROUTER_CONFIGURATION_BGP_CONFIG_URL: &'static str = "/v1/system/networking/router-configurations/demo-router-configuration/bgp-config";
+pub static DEMO_ROUTER_CONFIGURATION_CREATE: LazyLock<
+    networking::RouterConfigurationCreate,
+> = LazyLock::new(|| networking::RouterConfigurationCreate {
+    identity: IdentityMetadataCreateParams {
+        name: "demo-router-configuration".parse().unwrap(),
+        description: "a demo router configuration".into(),
+    },
+});
+pub static DEMO_ROUTER_CONFIGURATION_UPDATE: LazyLock<
+    networking::RouterConfigurationUpdate,
+> = LazyLock::new(|| networking::RouterConfigurationUpdate {
+    identity: IdentityMetadataUpdateParams {
+        name: Some("demo-router-configuration".parse().unwrap()),
+        description: Some("an updated demo router configuration".into()),
+    },
+});
+pub static DEMO_ROUTER_CONFIGURATION_BGP_CONFIG_SET: LazyLock<
+    networking::RouterConfigurationBgpConfigSet,
+> = LazyLock::new(|| networking::RouterConfigurationBgpConfigSet {
+    asn: 47,
+    max_paths: Default::default(),
+    bgp_announce_set: NameOrId::Name("instances".parse().unwrap()),
+});
+pub const DEMO_ROUTER_CONFIGURATION_BGP_PEERS_URL: &'static str = "/v1/system/networking/router-configurations/demo-router-configuration/bgp-peers";
+pub const DEMO_ROUTER_CONFIGURATION_BGP_PEER_URL: &'static str = "/v1/system/networking/router-configurations/demo-router-configuration/bgp-peers/demo-bgp-peer";
+pub static DEMO_ROUTER_CONFIGURATION_BGP_PEER: LazyLock<
+    networking::RouterConfigurationBgpPeer,
+> = LazyLock::new(|| networking::RouterConfigurationBgpPeer {
+    name: "demo-bgp-peer".parse().unwrap(),
+    peer: networking::BgpPeerKind::Unnumbered {
+        port: "qsfp0".parse().unwrap(),
+    },
+    remote_asn: 65001,
+    allowed_import: ImportExportPolicy::NoFiltering,
+    allowed_export: ImportExportPolicy::NoFiltering,
+    hold_time: 6,
+    keepalive: 2,
+    connect_retry: 3,
+    delay_open: 0,
+    idle_hold_time: 3,
+    local_pref: None,
+    communities: Vec::new(),
+    multi_exit_discriminator: None,
+    enforce_first_as: false,
+    md5_auth_key: None,
+    min_ttl: None,
+    vlan_id: None,
+    router_lifetime: Default::default(),
+});
+pub const DEMO_ROUTER_CONFIGURATION_STATIC_ROUTES_URL: &'static str = "/v1/system/networking/router-configurations/demo-router-configuration/routes";
+pub const DEMO_ROUTER_CONFIGURATION_STATIC_ROUTE_URL: &'static str = "/v1/system/networking/router-configurations/demo-router-configuration/routes/demo-static-route";
+pub static DEMO_ROUTER_CONFIGURATION_STATIC_ROUTE: LazyLock<
+    networking::StaticRoute,
+> = LazyLock::new(|| networking::StaticRoute {
+    name: "demo-static-route".parse().unwrap(),
+    dst: "10.0.0.0/24".parse().unwrap(),
+    gw: "10.0.0.1".parse().unwrap(),
+    rib_priority: None,
+    vlan_id: None,
+});
+pub const DEMO_ROUTER_CONFIGURATION_BFD_PEERS_URL: &'static str = "/v1/system/networking/router-configurations/demo-router-configuration/bfd-peers";
+pub const DEMO_ROUTER_CONFIGURATION_BFD_PEER_URL: &'static str = "/v1/system/networking/router-configurations/demo-router-configuration/bfd-peers/demo-bfd-peer";
+pub static DEMO_ROUTER_CONFIGURATION_BFD_PEER: LazyLock<networking::BfdPeer> =
+    LazyLock::new(|| networking::BfdPeer {
+        name: "demo-bfd-peer".parse().unwrap(),
+        remote: "10.0.0.1".parse().unwrap(),
+        local: None,
+        mode: BfdMode::MultiHop,
+        detection_threshold: 3,
+        required_rx: 1000000,
+        switch: SwitchSlot::Switch0,
     });
 
 pub const DEMO_BGP_ANNOUNCE_SET_URL: &'static str =
@@ -3474,6 +3553,137 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                 visibility: Visibility::Public,
                 unprivileged_access: UnprivilegedAccess::None,
                 allowed_methods: vec![AllowedMethod::GetNonexistent],
+            },
+            VerifyEndpoint {
+                url: &DEMO_ROUTER_CONFIGURATIONS_URL,
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::Get,
+                    AllowedMethod::Post(
+                        serde_json::to_value(
+                            &*DEMO_ROUTER_CONFIGURATION_CREATE,
+                        )
+                        .unwrap(),
+                    ),
+                ],
+            },
+            VerifyEndpoint {
+                url: &DEMO_ROUTER_CONFIGURATION_URL,
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::GetNonexistent,
+                    AllowedMethod::Put(
+                        serde_json::to_value(
+                            &*DEMO_ROUTER_CONFIGURATION_UPDATE,
+                        )
+                        .unwrap(),
+                    ),
+                    AllowedMethod::Delete,
+                ],
+            },
+            VerifyEndpoint {
+                url: &DEMO_ROUTER_CONFIGURATION_BGP_CONFIG_URL,
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::GetNonexistent,
+                    AllowedMethod::Put(
+                        serde_json::to_value(
+                            &*DEMO_ROUTER_CONFIGURATION_BGP_CONFIG_SET,
+                        )
+                        .unwrap(),
+                    ),
+                    AllowedMethod::Delete,
+                ],
+            },
+            VerifyEndpoint {
+                url: &DEMO_ROUTER_CONFIGURATION_BGP_PEERS_URL,
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::GetNonexistent,
+                    AllowedMethod::Post(
+                        serde_json::to_value(
+                            &*DEMO_ROUTER_CONFIGURATION_BGP_PEER,
+                        )
+                        .unwrap(),
+                    ),
+                ],
+            },
+            VerifyEndpoint {
+                url: &DEMO_ROUTER_CONFIGURATION_BGP_PEER_URL,
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::GetNonexistent,
+                    AllowedMethod::Put(
+                        serde_json::to_value(
+                            &*DEMO_ROUTER_CONFIGURATION_BGP_PEER,
+                        )
+                        .unwrap(),
+                    ),
+                    AllowedMethod::Delete,
+                ],
+            },
+            VerifyEndpoint {
+                url: &DEMO_ROUTER_CONFIGURATION_STATIC_ROUTES_URL,
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::GetNonexistent,
+                    AllowedMethod::Post(
+                        serde_json::to_value(
+                            &*DEMO_ROUTER_CONFIGURATION_STATIC_ROUTE,
+                        )
+                        .unwrap(),
+                    ),
+                ],
+            },
+            VerifyEndpoint {
+                url: &DEMO_ROUTER_CONFIGURATION_STATIC_ROUTE_URL,
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::GetNonexistent,
+                    AllowedMethod::Put(
+                        serde_json::to_value(
+                            &*DEMO_ROUTER_CONFIGURATION_STATIC_ROUTE,
+                        )
+                        .unwrap(),
+                    ),
+                    AllowedMethod::Delete,
+                ],
+            },
+            VerifyEndpoint {
+                url: &DEMO_ROUTER_CONFIGURATION_BFD_PEERS_URL,
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::GetNonexistent,
+                    AllowedMethod::Post(
+                        serde_json::to_value(
+                            &*DEMO_ROUTER_CONFIGURATION_BFD_PEER,
+                        )
+                        .unwrap(),
+                    ),
+                ],
+            },
+            VerifyEndpoint {
+                url: &DEMO_ROUTER_CONFIGURATION_BFD_PEER_URL,
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::GetNonexistent,
+                    AllowedMethod::Put(
+                        serde_json::to_value(
+                            &*DEMO_ROUTER_CONFIGURATION_BFD_PEER,
+                        )
+                        .unwrap(),
+                    ),
+                    AllowedMethod::Delete,
+                ],
             },
             VerifyEndpoint {
                 url: &DEMO_BGP_STATUS_URL,

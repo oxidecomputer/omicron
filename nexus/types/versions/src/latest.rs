@@ -330,6 +330,20 @@ pub mod networking {
     pub use crate::v2026_05_07_00::networking::SwitchPortSettings;
 
     pub use crate::v2026_06_10_00::networking::BgpConfigUpdate;
+
+    pub use crate::v2026_07_07_00::networking::BfdPeer;
+    pub use crate::v2026_07_07_00::networking::BgpPeerKind;
+    pub use crate::v2026_07_07_00::networking::RouterConfiguration;
+    pub use crate::v2026_07_07_00::networking::RouterConfigurationBfdPeerSelector;
+    pub use crate::v2026_07_07_00::networking::RouterConfigurationBgpConfig;
+    pub use crate::v2026_07_07_00::networking::RouterConfigurationBgpConfigSet;
+    pub use crate::v2026_07_07_00::networking::RouterConfigurationBgpPeer;
+    pub use crate::v2026_07_07_00::networking::RouterConfigurationBgpPeerSelector;
+    pub use crate::v2026_07_07_00::networking::RouterConfigurationCreate;
+    pub use crate::v2026_07_07_00::networking::RouterConfigurationSelector;
+    pub use crate::v2026_07_07_00::networking::RouterConfigurationStaticRouteSelector;
+    pub use crate::v2026_07_07_00::networking::RouterConfigurationUpdate;
+    pub use crate::v2026_07_07_00::networking::StaticRoute;
 }
 
 pub mod oxql {

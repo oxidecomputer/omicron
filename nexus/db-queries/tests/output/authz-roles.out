@@ -2581,6 +2581,27 @@ resource: BgpAnnounceSet id "f1e6c5d4-3b2a-4190-8e7d-6c5b4a392817"
   internal-api                      ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
   external-authn                    ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
 
+resource: RouterConfiguration id "e4f2c8b6-7a5d-4e3c-9b1f-8d6a5c4e3b2a"
+
+  USER                              Q  R LC RP  M MP CC  D
+  fleet-admin                       ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
+  fleet-collaborator                ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
+  fleet-viewer                      ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
+  silo1-admin                       ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
+  silo1-collaborator                ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
+  silo1-limited-collaborator        ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
+  silo1-viewer                      ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
+  silo1-user-self                   ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
+  silo1-proj1-admin                 ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
+  silo1-proj1-collaborator          ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
+  silo1-proj1-limited-collaborator  ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
+  silo1-proj1-viewer                ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
+  unauthenticated                   !  !  !  !  !  !  !  !
+  scim                              ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
+  db-init                           ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
+  internal-api                      ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
+  external-authn                    ∅  ∅  ∅  ∅  ∅  ∅  ∅  ∅
+
 resource: LoopbackAddress id "9efbf1b1-16f9-45ab-864a-f7ebe501ae5b"
 
   USER                              Q  R LC RP  M MP CC  D

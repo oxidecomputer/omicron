@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "2026061000.0.0"
+    "version": "2026070700.0.0"
   },
   "paths": {
     "/device/auth": {
@@ -11316,6 +11316,1010 @@
         }
       }
     },
+    "/v1/system/networking/router-configurations": {
+      "get": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "List router configurations",
+        "operationId": "networking_router_configuration_list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrIdSortMode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RouterConfigurationResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": []
+        }
+      },
+      "post": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "Create router configuration",
+        "operationId": "networking_router_configuration_create",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RouterConfigurationCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RouterConfiguration"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/networking/router-configurations/{configuration}": {
+      "get": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "Fetch router configuration",
+        "operationId": "networking_router_configuration_view",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "configuration",
+            "description": "A name or id to use when selecting a router configuration.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RouterConfiguration"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "Update router configuration",
+        "operationId": "networking_router_configuration_update",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "configuration",
+            "description": "A name or id to use when selecting a router configuration.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RouterConfigurationUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RouterConfiguration"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "Delete router configuration",
+        "operationId": "networking_router_configuration_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "configuration",
+            "description": "A name or id to use when selecting a router configuration.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/networking/router-configurations/{configuration}/bfd-peers": {
+      "get": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "List BFD peers in router configuration",
+        "operationId": "networking_router_configuration_bfd_peer_list",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "configuration",
+            "description": "A name or id to use when selecting a router configuration.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Array_of_BfdPeer",
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/BfdPeer"
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "Add BFD peer to router configuration",
+        "operationId": "networking_router_configuration_bfd_peer_create",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "configuration",
+            "description": "A name or id to use when selecting a router configuration.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BfdPeer"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BfdPeer"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/networking/router-configurations/{configuration}/bfd-peers/{peer}": {
+      "get": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "Fetch BFD peer in router configuration",
+        "operationId": "networking_router_configuration_bfd_peer_view",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "configuration",
+            "description": "A name or id to use when selecting a router configuration.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "path",
+            "name": "peer",
+            "description": "Name of the BFD peer entry.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BfdPeer"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "Update BFD peer in router configuration",
+        "operationId": "networking_router_configuration_bfd_peer_update",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "configuration",
+            "description": "A name or id to use when selecting a router configuration.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "path",
+            "name": "peer",
+            "description": "Name of the BFD peer entry.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BfdPeer"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BfdPeer"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "Remove BFD peer from router configuration",
+        "operationId": "networking_router_configuration_bfd_peer_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "configuration",
+            "description": "A name or id to use when selecting a router configuration.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "path",
+            "name": "peer",
+            "description": "Name of the BFD peer entry.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/networking/router-configurations/{configuration}/bgp-config": {
+      "get": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "Fetch BGP configuration for router configuration",
+        "operationId": "networking_router_configuration_bgp_config_view",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "configuration",
+            "description": "A name or id to use when selecting a router configuration.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RouterConfigurationBgpConfig"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "Create or update BGP configuration for router configuration",
+        "operationId": "networking_router_configuration_bgp_config_set",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "configuration",
+            "description": "A name or id to use when selecting a router configuration.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RouterConfigurationBgpConfigSet"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RouterConfigurationBgpConfig"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "Remove BGP configuration from router configuration",
+        "operationId": "networking_router_configuration_bgp_config_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "configuration",
+            "description": "A name or id to use when selecting a router configuration.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/networking/router-configurations/{configuration}/bgp-peers": {
+      "get": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "List BGP peers in router configuration",
+        "operationId": "networking_router_configuration_bgp_peer_list",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "configuration",
+            "description": "A name or id to use when selecting a router configuration.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Array_of_RouterConfigurationBgpPeer",
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/RouterConfigurationBgpPeer"
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "Add BGP peer to router configuration",
+        "operationId": "networking_router_configuration_bgp_peer_create",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "configuration",
+            "description": "A name or id to use when selecting a router configuration.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RouterConfigurationBgpPeer"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RouterConfigurationBgpPeer"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/networking/router-configurations/{configuration}/bgp-peers/{peer}": {
+      "get": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "Fetch BGP peer in router configuration",
+        "operationId": "networking_router_configuration_bgp_peer_view",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "configuration",
+            "description": "A name or id to use when selecting a router configuration.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "path",
+            "name": "peer",
+            "description": "Name of the BGP peer entry.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RouterConfigurationBgpPeer"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "Update BGP peer in router configuration",
+        "operationId": "networking_router_configuration_bgp_peer_update",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "configuration",
+            "description": "A name or id to use when selecting a router configuration.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "path",
+            "name": "peer",
+            "description": "Name of the BGP peer entry.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RouterConfigurationBgpPeer"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RouterConfigurationBgpPeer"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "Remove BGP peer from router configuration",
+        "operationId": "networking_router_configuration_bgp_peer_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "configuration",
+            "description": "A name or id to use when selecting a router configuration.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "path",
+            "name": "peer",
+            "description": "Name of the BGP peer entry.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/networking/router-configurations/{configuration}/routes": {
+      "get": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "List static routes in router configuration",
+        "operationId": "networking_router_configuration_static_route_list",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "configuration",
+            "description": "A name or id to use when selecting a router configuration.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Array_of_StaticRoute",
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/StaticRoute"
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "Add static route to router configuration",
+        "operationId": "networking_router_configuration_static_route_create",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "configuration",
+            "description": "A name or id to use when selecting a router configuration.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StaticRoute"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StaticRoute"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/networking/router-configurations/{configuration}/routes/{route}": {
+      "get": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "Fetch static route in router configuration",
+        "operationId": "networking_router_configuration_static_route_view",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "configuration",
+            "description": "A name or id to use when selecting a router configuration.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "path",
+            "name": "route",
+            "description": "Name of the static route entry.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StaticRoute"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "Update static route in router configuration",
+        "operationId": "networking_router_configuration_static_route_update",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "configuration",
+            "description": "A name or id to use when selecting a router configuration.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "path",
+            "name": "route",
+            "description": "Name of the static route entry.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StaticRoute"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StaticRoute"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "Remove static route from router configuration",
+        "operationId": "networking_router_configuration_static_route_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "configuration",
+            "description": "A name or id to use when selecting a router configuration.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "path",
+            "name": "route",
+            "description": "Name of the static route entry.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/v1/system/networking/settings": {
       "get": {
         "tags": [
@@ -17186,6 +18190,67 @@
           "multi_hop"
         ]
       },
+      "BfdPeer": {
+        "description": "A BFD peer within a router configuration",
+        "type": "object",
+        "properties": {
+          "detection_threshold": {
+            "description": "The negotiated Control packet transmission interval, multiplied by this variable, will be the Detection Time for this session (as seen by the remote system)",
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
+          },
+          "local": {
+            "nullable": true,
+            "description": "Local address to listen on for BFD traffic. If `None` then the unspecified address (0.0.0.0 or ::) is used.",
+            "type": "string",
+            "format": "ip"
+          },
+          "mode": {
+            "description": "Select either single-hop (RFC 5881) or multi-hop (RFC 5883)",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/BfdMode"
+              }
+            ]
+          },
+          "name": {
+            "description": "Name of this BFD peer entry",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          },
+          "remote": {
+            "description": "Address of the remote peer to establish a BFD session with",
+            "type": "string",
+            "format": "ip"
+          },
+          "required_rx": {
+            "description": "The minimum interval, in microseconds, between received BFD Control packets that this system requires",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "switch": {
+            "description": "The switch hosting this BFD session",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SwitchSlot"
+              }
+            ]
+          }
+        },
+        "required": [
+          "detection_threshold",
+          "mode",
+          "name",
+          "remote",
+          "required_rx",
+          "switch"
+        ]
+      },
       "BfdSessionDisable": {
         "description": "Information needed to disable a BFD session",
         "type": "object",
@@ -17842,6 +18907,65 @@
         "required": [
           "link_name",
           "peers"
+        ]
+      },
+      "BgpPeerKind": {
+        "description": "The peer to establish a BGP session with",
+        "oneOf": [
+          {
+            "description": "A session with a specific peer address on a given port",
+            "type": "object",
+            "properties": {
+              "addr": {
+                "description": "Address of the peer.",
+                "type": "string",
+                "format": "ip"
+              },
+              "port": {
+                "description": "Name of the external port the peer is reachable on, such as `qsfp0`.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Name"
+                  }
+                ]
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "numbered"
+                ]
+              }
+            },
+            "required": [
+              "addr",
+              "port",
+              "type"
+            ]
+          },
+          {
+            "description": "An unnumbered session on a given port",
+            "type": "object",
+            "properties": {
+              "port": {
+                "description": "Name of the external port the peer is reachable on, such as `qsfp0`.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Name"
+                  }
+                ]
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "unnumbered"
+                ]
+              }
+            },
+            "required": [
+              "port",
+              "type"
+            ]
+          }
         ]
       },
       "BgpPeerState": {
@@ -26918,6 +28042,347 @@
           }
         ]
       },
+      "RouterConfiguration": {
+        "description": "A named collection of rack routing configuration",
+        "type": "object",
+        "properties": {
+          "bfd_peers": {
+            "description": "BFD peers in this router configuration",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BfdPeer"
+            }
+          },
+          "bgp_config": {
+            "nullable": true,
+            "description": "The BGP configuration for this router configuration, if set",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RouterConfigurationBgpConfig"
+              }
+            ]
+          },
+          "bgp_peers": {
+            "description": "BGP peers in this router configuration",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RouterConfigurationBgpPeer"
+            }
+          },
+          "description": {
+            "description": "Human-readable free-form text about a resource",
+            "type": "string"
+          },
+          "id": {
+            "description": "Unique, immutable, system-controlled identifier for each resource",
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "description": "Unique, mutable, user-controlled identifier for each resource",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          },
+          "routes": {
+            "description": "Static routes in this router configuration",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StaticRoute"
+            }
+          },
+          "time_created": {
+            "description": "Timestamp when this resource was created",
+            "type": "string",
+            "format": "date-time"
+          },
+          "time_modified": {
+            "description": "Timestamp when this resource was last modified",
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "bfd_peers",
+          "bgp_peers",
+          "description",
+          "id",
+          "name",
+          "routes",
+          "time_created",
+          "time_modified"
+        ]
+      },
+      "RouterConfigurationBgpConfig": {
+        "description": "The BGP configuration associated with a router configuration",
+        "type": "object",
+        "properties": {
+          "asn": {
+            "description": "The autonomous system number",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "bgp_announce_set": {
+            "description": "BGP announce set that defines the prefixes originated by this router configuration",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/NameOrId"
+              }
+            ]
+          },
+          "max_paths": {
+            "description": "Maximum number of equal-cost paths for BGP ECMP",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/MaxPathConfig"
+              }
+            ]
+          }
+        },
+        "required": [
+          "asn",
+          "bgp_announce_set",
+          "max_paths"
+        ]
+      },
+      "RouterConfigurationBgpConfigSet": {
+        "description": "Parameters for setting the BGP configuration of a router configuration",
+        "type": "object",
+        "properties": {
+          "asn": {
+            "description": "The autonomous system number",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "bgp_announce_set": {
+            "description": "BGP announce set that defines the prefixes originated by this router configuration",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/NameOrId"
+              }
+            ]
+          },
+          "max_paths": {
+            "description": "Maximum number of equal-cost paths for BGP ECMP. Defaults to 1.",
+            "default": 1,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/MaxPathConfig"
+              }
+            ]
+          }
+        },
+        "required": [
+          "asn",
+          "bgp_announce_set"
+        ]
+      },
+      "RouterConfigurationBgpPeer": {
+        "description": "A BGP peer within a router configuration",
+        "type": "object",
+        "properties": {
+          "allowed_export": {
+            "description": "Export prefix filtering policy",
+            "default": {
+              "type": "no_filtering"
+            },
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ImportExportPolicy"
+              }
+            ]
+          },
+          "allowed_import": {
+            "description": "Import prefix filtering policy",
+            "default": {
+              "type": "no_filtering"
+            },
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ImportExportPolicy"
+              }
+            ]
+          },
+          "communities": {
+            "description": "BGP communities to include in updates",
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            }
+          },
+          "connect_retry": {
+            "description": "TCP connection retry interval in seconds",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "delay_open": {
+            "description": "Delay in seconds before sending open request after TCP session establishment",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "enforce_first_as": {
+            "description": "Enforce that the first AS in paths matches the peer's AS",
+            "type": "boolean"
+          },
+          "hold_time": {
+            "description": "Hold time between keepalives in seconds",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "idle_hold_time": {
+            "description": "Time to hold peer in idle state in seconds",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "keepalive": {
+            "description": "Keepalive request interval in seconds",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "local_pref": {
+            "nullable": true,
+            "description": "Local preference for received routes",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "md5_auth_key": {
+            "nullable": true,
+            "description": "TCP-MD5 authentication key",
+            "type": "string"
+          },
+          "min_ttl": {
+            "nullable": true,
+            "description": "Minimum IP TTL for peer messages (GTSM)",
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
+          },
+          "multi_exit_discriminator": {
+            "nullable": true,
+            "description": "Multi-exit discriminator for updates sent to this peer",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "name": {
+            "description": "Name of this BGP peer entry",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          },
+          "peer": {
+            "description": "The peer to establish a BGP session with",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/BgpPeerKind"
+              }
+            ]
+          },
+          "remote_asn": {
+            "description": "The remote autonomous system number of the peer",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "router_lifetime": {
+            "description": "Router lifetime in seconds for unnumbered BGP peers. Defaults to 0 (disabled).",
+            "default": 0,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RouterLifetimeConfig"
+              }
+            ]
+          },
+          "vlan_id": {
+            "nullable": true,
+            "description": "VLAN ID associated with this peer",
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "connect_retry",
+          "delay_open",
+          "enforce_first_as",
+          "hold_time",
+          "idle_hold_time",
+          "keepalive",
+          "name",
+          "peer",
+          "remote_asn"
+        ]
+      },
+      "RouterConfigurationCreate": {
+        "description": "Parameters for creating a router configuration",
+        "type": "object",
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "name": {
+            "$ref": "#/components/schemas/Name"
+          }
+        },
+        "required": [
+          "description",
+          "name"
+        ]
+      },
+      "RouterConfigurationResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RouterConfiguration"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "RouterConfigurationUpdate": {
+        "description": "Parameters for updating a router configuration\n\nIf a value is not specified, it will remain unchanged.",
+        "type": "object",
+        "properties": {
+          "description": {
+            "nullable": true,
+            "type": "string"
+          },
+          "name": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          }
+        }
+      },
       "RouterLifetimeConfig": {
         "description": "Router lifetime in seconds for unnumbered BGP peers",
         "type": "integer",
@@ -28504,6 +29969,52 @@
         },
         "required": [
           "items"
+        ]
+      },
+      "StaticRoute": {
+        "description": "A static route to a destination network through a gateway address",
+        "type": "object",
+        "properties": {
+          "dst": {
+            "description": "Route destination network",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/IpNet"
+              }
+            ]
+          },
+          "gw": {
+            "description": "Gateway address",
+            "type": "string",
+            "format": "ip"
+          },
+          "name": {
+            "description": "Name of this static route entry",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          },
+          "rib_priority": {
+            "nullable": true,
+            "description": "Route RIB priority. Higher priority indicates precedence within and across protocols.",
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
+          },
+          "vlan_id": {
+            "nullable": true,
+            "description": "VLAN ID for 802.1Q tagged L2 segment the gateway is reachable over",
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "dst",
+          "gw",
+          "name"
         ]
       },
       "SubnetPool": {

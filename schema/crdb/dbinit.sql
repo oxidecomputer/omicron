@@ -3996,6 +3996,94 @@ CREATE TABLE IF NOT EXISTS omicron.public.bgp_announcement (
     PRIMARY KEY (announce_set_id, network)
 );
 
+/*
+ * A router configuration: a named collection of rack routing configuration.
+ * The BGP configuration sub-resource is stored inline in the `bgp_*` columns;
+ * either all of them are null (no BGP configuration) or all of them are set.
+ */
+CREATE TABLE IF NOT EXISTS omicron.public.router_configuration (
+    id UUID PRIMARY KEY,
+    name STRING(63) NOT NULL,
+    description STRING(512) NOT NULL,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    time_deleted TIMESTAMPTZ,
+
+    bgp_asn INT8,
+    bgp_max_paths INT2 CHECK (
+        bgp_max_paths IS NULL
+        OR (bgp_max_paths > 0 AND bgp_max_paths <= 32)
+    ),
+    bgp_announce_set_id UUID,
+
+    CONSTRAINT bgp_config_set_together CHECK (
+        (
+            bgp_asn IS NULL
+            AND bgp_max_paths IS NULL
+            AND bgp_announce_set_id IS NULL
+        )
+        OR
+        (
+            bgp_asn IS NOT NULL
+            AND bgp_max_paths IS NOT NULL
+            AND bgp_announce_set_id IS NOT NULL
+        )
+    )
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_router_configuration_by_name ON omicron.public.router_configuration (
+    name
+) WHERE
+    time_deleted IS NULL;
+
+/*
+ * A BGP peer within a router configuration. Peers are identified by name
+ * within their parent router configuration. A null `addr` means the peer is
+ * unnumbered. A null `allowed_import`/`allowed_export` means no filtering.
+ */
+CREATE TABLE IF NOT EXISTS omicron.public.router_configuration_bgp_peer (
+    router_configuration_id UUID NOT NULL,
+    name STRING(63) NOT NULL,
+    addr INET,
+    port_name TEXT NOT NULL,
+    remote_asn INT8 NOT NULL,
+    allowed_import INET[],
+    allowed_export INET[],
+    hold_time INT8 NOT NULL,
+    keepalive INT8 NOT NULL,
+    connect_retry INT8 NOT NULL,
+    delay_open INT8 NOT NULL,
+    idle_hold_time INT8 NOT NULL,
+    local_pref INT8,
+    communities INT8[] NOT NULL,
+    multi_exit_discriminator INT8,
+    enforce_first_as BOOL NOT NULL,
+    md5_auth_key TEXT,
+    min_ttl INT2,
+    vlan_id INT4,
+    router_lifetime INT4 NOT NULL CHECK (
+        router_lifetime >= 0 AND router_lifetime <= 9000
+    ),
+
+    PRIMARY KEY (router_configuration_id, name)
+);
+
+/*
+ * A static route within a router configuration, identified by name within
+ * its parent router configuration.
+ */
+CREATE TABLE IF NOT EXISTS omicron.public.router_configuration_static_route (
+    router_configuration_id UUID NOT NULL,
+    name STRING(63) NOT NULL,
+    dst INET NOT NULL,
+    gw INET NOT NULL,
+    rib_priority INT2,
+    vlan_id INT4,
+
+    PRIMARY KEY (router_configuration_id, name)
+);
+
+
 CREATE TABLE IF NOT EXISTS omicron.public.switch_port_settings_address_config (
     port_settings_id UUID,
     address_lot_block_id UUID NOT NULL,
@@ -6411,6 +6499,25 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_bfd_session ON omicron.public.bfd_sessi
     remote,
     switch_slot
 ) WHERE time_deleted IS NULL;
+
+/*
+ * A BFD peer within a router configuration, identified by name within its
+ * parent router configuration. This table lives here rather than with the
+ * other router configuration tables because it must be created after the
+ * `bfd_mode` enum.
+ */
+CREATE TABLE IF NOT EXISTS omicron.public.router_configuration_bfd_peer (
+    router_configuration_id UUID NOT NULL,
+    name STRING(63) NOT NULL,
+    remote INET NOT NULL,
+    local INET,
+    mode omicron.public.bfd_mode NOT NULL,
+    detection_threshold INT2 NOT NULL,
+    required_rx INT8 NOT NULL,
+    switch omicron.public.switch_slot NOT NULL,
+
+    PRIMARY KEY (router_configuration_id, name)
+);
 
 
 CREATE TABLE IF NOT EXISTS omicron.public.probe (
@@ -8965,7 +9072,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '274.0.0', NULL)
+    (TRUE, NOW(), NOW(), '275.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

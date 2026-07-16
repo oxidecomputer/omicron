@@ -196,6 +196,14 @@ pub async fn make_resources(
         LookupType::ById(bgp_announce_set_id.into_untyped_uuid()),
     ));
 
+    let router_configuration_id =
+        "e4f2c8b6-7a5d-4e3c-9b1f-8d6a5c4e3b2a".parse().unwrap();
+    builder.new_resource(authz::RouterConfiguration::new(
+        authz::FLEET,
+        router_configuration_id,
+        LookupType::ById(router_configuration_id.into_untyped_uuid()),
+    ));
+
     let loopback_address_id =
         "9efbf1b1-16f9-45ab-864a-f7ebe501ae5b".parse().unwrap();
     builder.new_resource(authz::LoopbackAddress::new(

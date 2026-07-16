@@ -1554,6 +1554,14 @@ authz_resource! {
 }
 
 authz_resource! {
+    name = "RouterConfiguration",
+    parent = "Fleet",
+    primary_key = { uuid_kind = RouterConfigurationKind },
+    roles_allowed = false,
+    polar_snippet = FleetChild,
+}
+
+authz_resource! {
     name = "AddressLotBlock",
     parent = "Fleet",
     primary_key = Uuid,
