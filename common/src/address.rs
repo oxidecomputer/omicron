@@ -529,6 +529,30 @@ impl<'de, const N: u8> Deserialize<'de> for Ipv6Subnet<N> {
     }
 }
 
+impl Ipv6Subnet<AZ_PREFIX> {
+    pub fn check_external_ip(
+        &self,
+        ip: IpAddr,
+    ) -> Result<IpAddr, UnexpectedUnderlayIpError> {
+        match ip {
+            IpAddr::V6(v6) if self.net().contains(v6) => {
+                Err(UnexpectedUnderlayIpError { ip, az_subnet: *self })
+            }
+            _ => Ok(ip),
+        }
+    }
+}
+
+#[derive(Debug, Clone, thiserror::Error)]
+#[error(
+    "expected an external IP, but address ({ip}) is within the AZ underlay \
+     subnet ({az_subnet})"
+)]
+pub struct UnexpectedUnderlayIpError {
+    ip: IpAddr,
+    az_subnet: Ipv6Subnet<AZ_PREFIX>,
+}
+
 /// Represents a subnet which may be used for contacting DNS services.
 #[derive(
     Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq, PartialOrd, Ord,

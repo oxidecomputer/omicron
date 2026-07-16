@@ -2,8 +2,11 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use std::error::Error;
 use std::net::IpAddr;
 use std::net::SocketAddr;
+use std::sync::Arc;
+use std::sync::OnceLock;
 
 use hickory_resolver::TokioResolver;
 use hickory_resolver::config::NameServerConfig;
@@ -12,15 +15,24 @@ use hickory_resolver::config::ResolverConfig;
 use hickory_resolver::config::ResolverOpts;
 use hickory_resolver::name_server::TokioConnectionProvider;
 use hickory_resolver::proto::xfer::Protocol;
+use omicron_common::address::AZ_PREFIX;
 use omicron_common::address::DNS_PORT;
+use omicron_common::address::Ipv6Subnet;
+use omicron_common::address::RACK_PREFIX;
 use reqwest::dns::Name;
 
 /// Wrapper around hickory-resolver to provide name resolution
 /// using a given set of DNS servers for use with reqwest.
-pub struct Resolver(TokioResolver);
+pub struct Resolver {
+    resolver: TokioResolver,
+    rack_subnet: Arc<OnceLock<Ipv6Subnet<RACK_PREFIX>>>,
+}
 
 impl Resolver {
-    pub fn new(dns_servers: &[IpAddr]) -> Resolver {
+    pub fn new(
+        dns_servers: &[IpAddr],
+        rack_subnet: Arc<OnceLock<Ipv6Subnet<RACK_PREFIX>>>,
+    ) -> Resolver {
         assert!(!dns_servers.is_empty());
         let mut rc = ResolverConfig::new();
         for addr in dns_servers {
@@ -58,31 +70,50 @@ impl Resolver {
         opts.use_hosts_file = ResolveHosts::Never;
         // Do as many requests in parallel as we have configured servers
         opts.num_concurrent_reqs = dns_servers.len();
-        Resolver(
-            TokioResolver::builder_with_config(
+        Resolver {
+            resolver: TokioResolver::builder_with_config(
                 rc,
                 TokioConnectionProvider::default(),
             )
             .with_options(opts)
             .build(),
-        )
+            rack_subnet,
+        }
     }
 }
 
 impl reqwest::dns::Resolve for Resolver {
     fn resolve(&self, name: Name) -> reqwest::dns::Resolving {
-        let resolver = self.0.clone();
+        let resolver = self.resolver.clone();
+        let rack_subnet = self.rack_subnet.clone();
         Box::pin(async move {
             let ips = resolver.lookup_ip(name.as_str()).await?;
+
+            // NOTE(eliza): this certainly *could* be a `tokio::sync::watch`,
+            // and we _could_ wait for it to be set here, instead of failing
+            // fast if we don't know the rack subnet yet. Maybe this is actually
+            // the wrong thing and we should wait for it instead, I dunno...
+            let rack_subnet = rack_subnet.get().ok_or_else(|| {
+                anyhow::anyhow!("cannot resolve external DNS names before RSS!")
+            })?;
+            let az_subnet =
+                Ipv6Subnet::<AZ_PREFIX>::new(rack_subnet.net().addr());
             let addrs = ips
                 .into_iter()
-                // hickory-resolver returns `IpAddr`s but reqwest wants
-                // `SocketAddr`s (useful if you have a custom resolver that
-                // returns a scoped IPv6 address). The port provided here
-                // is ignored in favour of the scheme default (http/80,
-                // https/443) or any custom port provided in the URL.
-                .map(|ip| SocketAddr::new(ip, 0));
-            Ok(Box::new(addrs) as Box<_>)
+                .map(|ip| {
+                    // We expect this domain to resolve to an external IP
+                    // address, *not* one within the underlay network. Reject
+                    // any unexpected underlay addresses here.
+                    let ip = az_subnet.check_external_ip(ip)?;
+                    // hickory-resolver returns `IpAddr`s but reqwest wants
+                    // `SocketAddr`s (useful if you have a custom resolver that
+                    // returns a scoped IPv6 address). The port provided here
+                    // is ignored in favour of the scheme default (http/80,
+                    // https/443) or any custom port provided in the URL.
+                    Ok(SocketAddr::new(ip, 0))
+                })
+                .collect::<Result<Vec<_>, Box<dyn Error + Send + Sync>>>()?;
+            Ok(Box::new(addrs.into_iter()) as Box<_>)
         })
     }
 }
