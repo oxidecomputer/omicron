@@ -1026,7 +1026,12 @@ mod tests {
             ))
         });
         let mut builder = fmtest
-            .input_builder(parent, collection.into(), Arc::new(IdOrdMap::new()))
+            .input_builder(
+                parent,
+                collection.into(),
+                Arc::new(IdOrdMap::new()),
+                Arc::new(IdOrdMap::new()),
+            )
             .expect("input builder should accept fresh inventory");
         builder.add_unmarked_ereports(new_ereports);
         let (input, report) = builder.build();

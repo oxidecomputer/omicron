@@ -318,7 +318,7 @@ impl Builder {
                         s.saga_id,
                         fm::analysis_reports::ObservedSagaReport {
                             saga_name: s.saga_name.clone(),
-                            saga_state: s.saga_state,
+                            saga_state: s.saga_state.clone(),
                             last_event_time: s.last_event_time,
                             owner_state: s.owner_state,
                         },

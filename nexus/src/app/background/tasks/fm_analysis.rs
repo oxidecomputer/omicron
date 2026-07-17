@@ -12,6 +12,7 @@ use futures::future::BoxFuture;
 use iddqd::IdOrdMap;
 use nexus_db_model::DbMetadataNexusState;
 use nexus_db_model::PhysicalDiskPolicy;
+use nexus_db_model::SagaReasonAbandoned;
 use nexus_db_model::SagaState;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
@@ -24,7 +25,8 @@ use nexus_types::internal_api::background::FmAnalysisStatus;
 use nexus_types::internal_api::background::fm_analysis as status;
 use nexus_types::inventory;
 use nexus_types::observed_saga::{
-    ObservedSaga, ObservedSagaState, SagaOwnerState,
+    ObservedSaga, ObservedSagaState, SagaAbandonInfo, SagaAbandonReason,
+    SagaOwnerState,
 };
 use omicron_uuid_kinds::AlertUuid;
 use omicron_uuid_kinds::GenericUuid;
@@ -395,7 +397,31 @@ impl FmAnalysis {
             let saga_state = match saga.saga_state {
                 SagaState::Running => ObservedSagaState::Running,
                 SagaState::Unwinding => ObservedSagaState::Unwinding,
-                SagaState::Abandoned => ObservedSagaState::Abandoned,
+                SagaState::Abandoned => {
+                    // `SagaSummary` is validated at load against the saga
+                    // table's CHECK constraints: an abandoned summary always
+                    // carries its metadata.
+                    let metadata =
+                        saga.abandon_metadata.with_context(|| {
+                            format!(
+                                "abandoned saga {} has no abandonment \
+                                 metadata",
+                                saga.id.0,
+                            )
+                        })?;
+                    ObservedSagaState::Abandoned(SagaAbandonInfo {
+                        time: metadata.time,
+                        reason: match metadata.reason {
+                            SagaReasonAbandoned::Omdb => {
+                                SagaAbandonReason::Omdb
+                            }
+                            SagaReasonAbandoned::Unrecoverable => {
+                                SagaAbandonReason::Unrecoverable
+                            }
+                        },
+                        comment: metadata.comment,
+                    })
+                }
                 // The query filters to unfinished states; defend anyway.
                 SagaState::Done => continue,
             };

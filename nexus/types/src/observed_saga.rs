@@ -16,20 +16,47 @@ use serde::{Deserialize, Serialize};
 ///
 /// `done` is deliberately excluded: a saga that completed (including a
 /// completed unwind) needs no attention, and its case, if any, is closed.
-/// `abandoned` is *included*: Nexus has permanently given up on the saga
-/// without completing it, so it may be holding partially-allocated
+/// `abandoned` is *included*: the control plane has permanently given up on
+/// the saga without completing it, so it may be holding partially-allocated
 /// resources and needs saga-specific manual remediation (see
 /// omicron#10581 / RFD 555).
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ObservedSagaState {
     /// The saga is executing forward actions.
     Running,
     /// One or more actions failed and the saga is executing undo actions.
     Unwinding,
-    /// Nexus failed to recover the saga for a non-transient reason and has
-    /// permanently given up on running it.
-    Abandoned,
+    /// The saga was permanently given up on without completing: either saga
+    /// recovery failed for a non-transient reason, or an operator abandoned
+    /// it via omdb. Carries the abandonment metadata recorded in the `saga`
+    /// row, which the DB constrains to be present exactly when a saga is
+    /// abandoned.
+    Abandoned(SagaAbandonInfo),
+}
+
+/// When, why, and with what explanation a saga was abandoned (the `saga`
+/// table's `abandon_time`, `abandon_reason`, and `abandon_comment` columns).
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct SagaAbandonInfo {
+    /// When the saga was marked abandoned.
+    pub time: DateTime<Utc>,
+    /// Which path abandoned the saga.
+    pub reason: SagaAbandonReason,
+    /// Human-readable explanation recorded at abandonment: the recovery
+    /// error message (`unrecoverable`) or the operator's comment (`omdb`).
+    pub comment: String,
+}
+
+/// Which path abandoned a saga (the `saga_abandon_reason` DB enum).
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SagaAbandonReason {
+    /// An operator abandoned the saga via `omdb db saga abandon`.
+    Omdb,
+    /// The saga-recovery background task failed to recover the saga with a
+    /// non-transient error and gave up on it.
+    Unrecoverable,
 }
 
 /// The execution state of a *live* (running or unwinding) saga. This is the

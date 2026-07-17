@@ -659,12 +659,17 @@ impl fmt::Display for InputReportMultilineDisplay<'_> {
                     last_event_time,
                     owner_state,
                 } = saga;
-                write!(
-                    f,
-                    "{:indent$}* saga {saga_id} ({saga_name}): \
-                     {saga_state:?}, last event: ",
-                    ""
-                )?;
+                write!(f, "{:indent$}* saga {saga_id} ({saga_name}): ", "")?;
+                match saga_state {
+                    ObservedSagaState::Running => write!(f, "Running")?,
+                    ObservedSagaState::Unwinding => write!(f, "Unwinding")?,
+                    ObservedSagaState::Abandoned(info) => write!(
+                        f,
+                        "Abandoned at {} ({:?}: {})",
+                        info.time, info.reason, info.comment,
+                    )?,
+                }
+                write!(f, ", last event: ")?;
                 match last_event_time {
                     Some(t) => write!(f, "{t}")?,
                     None => write!(f, "<none recorded>")?,
@@ -685,6 +690,7 @@ mod tests {
     use super::super::DiagnosisEngineKind;
     use super::super::case;
     use super::*;
+    use crate::observed_saga::{SagaAbandonInfo, SagaAbandonReason};
     use ereport_types::{Ena, EreportId};
     use omicron_uuid_kinds::{
         CaseUuid, CollectionUuid, EreporterRestartUuid, PhysicalDiskUuid,
@@ -832,7 +838,11 @@ mod tests {
             ),
             ObservedSagaReport {
                 saga_name: "another-fake-saga".to_string(),
-                saga_state: ObservedSagaState::Abandoned,
+                saga_state: ObservedSagaState::Abandoned(SagaAbandonInfo {
+                    time: DateTime::from_timestamp(0, 0).unwrap(),
+                    reason: SagaAbandonReason::Unrecoverable,
+                    comment: "fake recovery error".to_string(),
+                }),
                 last_event_time: None,
                 owner_state: None,
             },

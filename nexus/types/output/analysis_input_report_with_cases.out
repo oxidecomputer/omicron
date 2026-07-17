@@ -39,4 +39,4 @@ in-service control plane disks (2 total):
 
 non-terminal sagas observed (2 total):
   * saga 5a9a0001-5a9a-45a9-85a9-5a9a5a9a5a9a (fake-saga): Unwinding, last event: 1970-01-01 00:00:00 UTC, owner: Quiesced
-  * saga 5a9a0002-5a9a-45a9-85a9-5a9a5a9a5a9a (another-fake-saga): Abandoned, last event: <none recorded>, owner: <no current SEC>
+  * saga 5a9a0002-5a9a-45a9-85a9-5a9a5a9a5a9a (another-fake-saga): Abandoned at 1970-01-01 00:00:00 UTC (Unrecoverable: fake recovery error), last event: <none recorded>, owner: <no current SEC>

@@ -324,18 +324,25 @@ impl DataStore {
         while let Some(p) = paginator.next() {
             use nexus_db_schema::schema::saga::dsl;
 
-            let mut batch =
-                paginated(dsl::saga, dsl::id, &p.current_pagparams())
-                    .filter(dsl::saga_state.eq_any(UNFINISHED_STATES))
-                    .select(db::saga_types::SagaSummary::as_select())
-                    .load_async(&*conn)
-                    .await
-                    .map_err(|e| {
-                        public_error_from_diesel(e, ErrorHandler::Server)
-                    })?;
+            let batch = paginated(dsl::saga, dsl::id, &p.current_pagparams())
+                .filter(dsl::saga_state.eq_any(UNFINISHED_STATES))
+                .select(db::saga_types::SagaSummaryRow::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
 
-            paginator = p.found_batch(&batch, &|row| row.id);
-            sagas.append(&mut batch);
+            paginator = p.found_batch(&batch, &|row| row.id());
+
+            // Fail the whole listing on a row whose abandonment metadata is
+            // inconsistent with its state, rather than skipping it the way
+            // saga recovery does: a saga silently missing from this listing
+            // looks to fault management like the saga was removed, which
+            // would wrongly close its case.
+            for row in batch {
+                sagas.push(db::saga_types::SagaSummary::try_from(row)?);
+            }
         }
         Ok(sagas)
     }
@@ -603,7 +610,12 @@ mod test {
             .await
             .expect("Failed to access db connection");
         diesel::insert_into(nexus_db_schema::schema::saga::dsl::saga)
-            .values(inserted_sagas.clone())
+            .values(
+                inserted_sagas
+                    .iter()
+                    .map(db::saga_types::SagaRow::from)
+                    .collect::<Vec<_>>(),
+            )
             .execute_async(&*conn)
             .await
             .expect("Failed to insert test setup data");
@@ -626,16 +638,22 @@ mod test {
                     time_created: s.time_created,
                     saga_state: s.saga_state,
                     current_sec: s.current_sec,
+                    abandon_metadata: s.abandon_metadata,
                 })
                 .collect();
 
         // Timestamps can change slightly when we insert them.
         //
-        // Sanitize them to make input/output equality checks easier.
+        // Sanitize them to make input/output equality checks easier. The
+        // abandonment reason and comment are left alone so this test still
+        // checks that they round-trip through the summary projection.
         let sanitize_timestamps =
             |sagas: &mut Vec<db::saga_types::SagaSummary>| {
                 for saga in sagas {
                     saga.time_created = chrono::DateTime::UNIX_EPOCH;
+                    if let Some(metadata) = &mut saga.abandon_metadata {
+                        metadata.time = chrono::DateTime::UNIX_EPOCH;
+                    }
                 }
             };
         sanitize_timestamps(&mut observed_sagas);

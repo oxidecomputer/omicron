@@ -25,7 +25,8 @@ use nexus_types::fm::{
     SagaOwnerNotCurrentFactPayload,
 };
 use nexus_types::observed_saga::{
-    ObservedSaga, ObservedSagaState, SagaProgressState,
+    ObservedSaga, ObservedSagaState, SagaAbandonInfo, SagaAbandonReason,
+    SagaProgressState,
 };
 use omicron_uuid_kinds::{CaseUuid, FactUuid};
 use std::collections::BTreeMap;
@@ -177,13 +178,12 @@ pub(super) fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
             }
             Entry::Occupied(kept) => {
                 let kept_case_id = *kept.get();
-                slog::warn!(
-                    &builder.log,
-                    "closing duplicate Saga case";
-                    "case_id" => %case_id,
-                    "kept_case_id" => %kept_case_id,
-                    "saga_id" => %parsed_case.saga_id,
-                );
+                builder
+                    .log_warning("closing duplicate Saga case")
+                    .kv("case_id", case_id)
+                    .kv("kept_case_id", kept_case_id)
+                    .kv("saga_id", parsed_case.saga_id)
+                    .finish();
                 builder
                     .cases
                     .case_mut(case_id)
@@ -246,15 +246,13 @@ pub(super) fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
                 .cases
                 .case_mut(&case_id)
                 .expect("case_id came from builder's open cases"),
-            None => {
-                let mut new_case =
-                    builder.cases.open_case(DiagnosisEngineKind::Saga);
-                new_case.set_comment(format!(
+            None => builder.cases.open_case(
+                DiagnosisEngineKind::Saga,
+                format!(
                     "saga {} ({}) needs attention",
                     obs.saga_id, obs.saga_name,
-                ));
-                new_case
-            }
+                ),
+            ),
         };
 
         // Duplicate facts carry no information the kept fact doesn't; remove
@@ -315,22 +313,35 @@ pub(super) fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
         // Abandoned: same reconciliation. The payload has no fields that can
         // change, so it only ever drops when the condition clears.
         let carried_abandoned = parent.and_then(|(_, p)| p.abandoned.as_ref());
-        if carried_abandoned.map(|(_, p)| p) != desired_abandoned.as_ref() {
+        if carried_abandoned.map(|(_, p)| p)
+            != desired_abandoned.as_ref().map(|(payload, _)| payload)
+        {
             if let Some((fact_id, _)) = carried_abandoned {
                 case_mut.remove_fact(
                     *fact_id,
                     "Abandoned fact no longer matches the current saga state",
                 );
             }
-            if let Some(payload) = desired_abandoned {
+            if let Some((payload, info)) = desired_abandoned {
                 // Human-readable context (which a promoted problem would
                 // otherwise look up from the saga row) goes in the comment,
                 // not the payload.
+                let abandoned_how = match info.reason {
+                    SagaAbandonReason::Omdb => format!(
+                        "abandoned by an operator via omdb at {} ({})",
+                        info.time, info.comment,
+                    ),
+                    SagaAbandonReason::Unrecoverable => format!(
+                        "abandoned by saga recovery at {} (non-transient \
+                         recovery failure: {})",
+                        info.time, info.comment,
+                    ),
+                };
                 let comment = format!(
-                    "saga {} ({}) abandoned by Nexus; created at {}, last \
-                     node event: {}",
+                    "saga {} ({}) {}; created at {}, last node event: {}",
                     obs.saga_id,
                     obs.saga_name,
+                    abandoned_how,
                     obs.time_created,
                     obs.last_event_time
                         .map(|t| t.to_string())
@@ -358,7 +369,7 @@ fn desired_not_progressing(
     let saga_state = match obs.saga_state {
         ObservedSagaState::Running => SagaProgressState::Running,
         ObservedSagaState::Unwinding => SagaProgressState::Unwinding,
-        ObservedSagaState::Abandoned => return None,
+        ObservedSagaState::Abandoned(_) => return None,
     };
     let last_progress = obs.last_event_time.unwrap_or(obs.time_created);
     if reference_time.signed_duration_since(last_progress)
@@ -384,7 +395,7 @@ fn desired_not_progressing(
 fn desired_owner_not_current(
     obs: &ObservedSaga,
 ) -> Option<SagaOwnerNotCurrentFactPayload> {
-    if obs.saga_state == ObservedSagaState::Abandoned {
+    if matches!(obs.saga_state, ObservedSagaState::Abandoned(_)) {
         return None;
     }
     let reason = obs.owner_state?.orphaned_reason()?;
@@ -396,13 +407,19 @@ fn desired_owner_not_current(
     })
 }
 
-/// The `Abandoned` fact this saga should carry now, if any. The condition is
-/// boolean, so the payload never changes and the fact never rotates; the case
-/// stays open, carrying this fact, until the saga row is removed from the
-/// database.
-fn desired_abandoned(obs: &ObservedSaga) -> Option<SagaAbandonedFactPayload> {
-    (obs.saga_state == ObservedSagaState::Abandoned)
-        .then(|| SagaAbandonedFactPayload { saga_id: obs.saga_id })
+/// The `Abandoned` fact this saga should carry now, if any, along with the
+/// abandonment metadata for the fact's comment. The condition is boolean, so
+/// the payload never changes and the fact never rotates; the case stays open,
+/// carrying this fact, until the saga row is removed from the database.
+fn desired_abandoned(
+    obs: &ObservedSaga,
+) -> Option<(SagaAbandonedFactPayload, &SagaAbandonInfo)> {
+    match &obs.saga_state {
+        ObservedSagaState::Abandoned(info) => {
+            Some((SagaAbandonedFactPayload { saga_id: obs.saga_id }, info))
+        }
+        ObservedSagaState::Running | ObservedSagaState::Unwinding => None,
+    }
 }
 
 #[cfg(test)]
@@ -1199,11 +1216,26 @@ mod tests {
         ObservedSaga {
             saga_id: id,
             saga_name: "test-saga".to_string(),
-            saga_state: ObservedSagaState::Abandoned,
+            saga_state: ObservedSagaState::Abandoned(SagaAbandonInfo {
+                time: Utc::now() - TimeDelta::hours(1),
+                reason: SagaAbandonReason::Unrecoverable,
+                comment: "test-recovery-error".to_string(),
+            }),
             time_created: Utc::now() - TimeDelta::days(1),
             current_sec: None,
             last_event_time: None,
             owner_state: None,
+        }
+    }
+
+    fn mk_abandoned_via_omdb(id: steno::SagaId) -> ObservedSaga {
+        ObservedSaga {
+            saga_state: ObservedSagaState::Abandoned(SagaAbandonInfo {
+                time: Utc::now() - TimeDelta::hours(1),
+                reason: SagaAbandonReason::Omdb,
+                comment: "test-operator-comment".to_string(),
+            }),
+            ..mk_abandoned(id)
         }
     }
 
@@ -1240,6 +1272,33 @@ mod tests {
             SagaFact::Abandoned(p) => assert_eq!(p.saga_id, id),
             other => panic!("expected Abandoned, got {other:?}"),
         }
+        let comment = &facts[0].fact.metadata.comment;
+        assert!(
+            comment.contains("abandoned by saga recovery")
+                && comment.contains("test-recovery-error"),
+            "comment records the abandonment source and message: {comment}",
+        );
+        logctx.cleanup_successful();
+    }
+
+    /// An omdb-abandoned saga's fact comment attributes the abandonment to
+    /// an operator rather than to saga recovery.
+    #[test]
+    fn abandoned_comment_attributes_omdb() {
+        let (logctx, collection) = setup("saga_abandoned_omdb");
+        let id = saga_id(1);
+        let observed = observed_map([mk_abandoned_via_omdb(id)]);
+        let input = build_input(collection, None, observed);
+        let (sitrep, _report) = run_analyze(&logctx.log, &input);
+
+        let facts = saga_facts(&sitrep, true);
+        assert_eq!(facts.len(), 1);
+        let comment = &facts[0].fact.metadata.comment;
+        assert!(
+            comment.contains("abandoned by an operator via omdb")
+                && comment.contains("test-operator-comment"),
+            "comment attributes the abandonment to the operator: {comment}",
+        );
         logctx.cleanup_successful();
     }
 
