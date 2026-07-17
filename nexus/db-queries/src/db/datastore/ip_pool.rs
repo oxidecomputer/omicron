@@ -582,10 +582,10 @@ impl DataStore {
 
         let (authz_pool, pool_version) = match pool {
             Some(authz_pool) => {
-                self.ip_pool_fetch_link(opctx, authz_pool.id())
-                    .await
-                    .map_err(|_| authz_pool.not_found())?;
-
+                // We intentionally skip checking the silo / pool link here.
+                // That's now done in the `NextExternalIp` allocation query
+                // itself, which has a CTE arm that ensures the link exists. We
+                // do still fetch the pool to validate its type and IP version.
                 let pool_record = {
                     ip_pool::table
                         .filter(ip_pool::id.eq(authz_pool.id()))
