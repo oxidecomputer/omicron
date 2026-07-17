@@ -353,6 +353,7 @@ impl CurrentRssConfig {
             ddm_discovered_sleds,
             log,
         )?;
+
         self.ntp_servers = config.ntp_servers;
         self.dns_servers = config.dns_servers;
         self.internal_services_ip_pool_ranges =
@@ -798,6 +799,93 @@ mod tests {
         }
         validate_rack_network_config(&valid_router_lifetime, &bgp_auth_keys)
             .expect("numbered with zero router_lifetime is ok");
+    }
+
+    // An upload must be treated as atomic -- either fully accepted or fully
+    // rejected.
+    #[test]
+    fn rejected_update_is_all_or_nothing() {
+        let logctx = dev::test_setup_log("rejected_update_is_all_or_nothing");
+        let example = ExampleRackSetupData::non_empty();
+
+        let mut config = CurrentRssConfig::default();
+        config
+            .update(
+                example.put_insensitive.clone(),
+                example.our_baseboard.as_ref(),
+                &example.inventory,
+                &example.ddm_discovered_sleds,
+                &logctx.log,
+            )
+            .expect("config A accepted");
+
+        for key_id in &example.bgp_auth_keys {
+            config
+                .common
+                .set_bgp_auth_key(
+                    key_id.clone(),
+                    BgpAuthKey::TcpMd5 { key: "dummy".to_owned() },
+                )
+                .expect("key uploaded for config A");
+        }
+
+        // Snapshot the full user-visible config and inventory.
+        let before = CurrentRssUserConfig::from(&config);
+        let inventory_before = config.common.inventory.clone();
+
+        // Now attempt to upload a new config with a bunch of issues that should
+        // cause the config to be rejected:
+        //
+        // * drop all BGP peers
+        // * reference a bootstrap sled that's not in inventory
+        //
+        // These changes don't fail deserialization but do fail post-deserialize
+        // validation.
+        let mut config_b = example.put_insensitive.clone();
+        config_b.ntp_servers = vec!["ntp.config-b.example.com".to_owned()];
+        for (_, _, port) in config_b.rack_network_config.iter_uplinks_mut() {
+            if let Some(manual) = port.manual_mut() {
+                manual.bgp_peers.clear();
+            }
+        }
+        config_b.bootstrap_sleds.insert(999);
+
+        let err = config
+            .update(
+                config_b,
+                example.our_baseboard.as_ref(),
+                &example.inventory,
+                &example.ddm_discovered_sleds,
+                &logctx.log,
+            )
+            .expect_err("config B rejected");
+        assert!(
+            err.contains("cannot add unknown sled 999 to bootstrap_sleds"),
+            "unexpected error: {err}"
+        );
+
+        // Ensure the config was unchanged.
+        assert_eq!(
+            CurrentRssUserConfig::from(&config),
+            before,
+            "stored config unchanged by the rejected upload"
+        );
+        assert_eq!(
+            config.common.inventory, inventory_before,
+            "stored sled inventory unchanged by the rejected upload"
+        );
+
+        validate_rack_network_config(
+            before
+                .insensitive
+                .rack_network_config
+                .as_ref()
+                .expect("config A stored a rack network config"),
+            &config.common.bgp_auth_keys,
+        )
+        .expect("stored config A still validates against the key map");
+
+        logctx.cleanup_successful();
     }
 
     #[test]
