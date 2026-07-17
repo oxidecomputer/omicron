@@ -44,8 +44,8 @@ impl Styles {
         if self.colored { f(Style::new()) } else { Style::new() }
     }
 
-    /// Headings: field labels (e.g. "sitrep ID:"), section titles, item
-    /// headers (e.g. "case <uuid>"), and the keys of key-value pairs.
+    /// Headings: field labels (e.g. `sitrep ID:`), section titles, item
+    /// headers (e.g. `case <uuid>`), and the keys of key-value pairs.
     pub(crate) fn heading(self) -> Style {
         self.style(|s| s.bold())
     }
@@ -65,12 +65,12 @@ impl Styles {
         self.style(|s| s)
     }
 
-    /// Annotations pointing at a value of note (e.g. "<-- this sitrep").
+    /// Annotations pointing at a value of note (e.g. `<!-- this sitrep`).
     pub(crate) fn annotation(self) -> Style {
         self.style(|s| s.cyan())
     }
 
-    /// Placeholders for missing values ("<none>", "<UNKNOWN>") appearing on
+    /// Placeholders for missing values (`<none>`, `<UNKNOWN>`) appearing on
     /// the value side of a key-value pair. Not for standalone notes that a
     /// section is empty; those are [headings](Self::heading).
     pub(crate) fn missing(self) -> Style {
