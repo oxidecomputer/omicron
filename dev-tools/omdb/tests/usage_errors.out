@@ -339,14 +339,19 @@ Options:
           output.
 
           Possible values:
-          - probe:             Synthetic events sent for webhook receiver liveness probes.
+          - probe:                           Synthetic events sent for webhook receiver liveness
+            probes.
             Receivers should return 2xx HTTP responses for these events, but they should NOT be
             treated as notifications of an actual event in the system.
-          - test.foo:          This is a test of the emergency alert system
-          - test.foo.bar:      This is a test of the emergency alert system
-          - test.foo.baz:      This is a test of the emergency alert system
-          - test.quux.bar:     This is a test of the emergency alert system
-          - test.quux.bar.baz: This is a test of the emergency alert system
+          - test.foo:                        This is a test of the emergency alert system
+          - test.foo.bar:                    This is a test of the emergency alert system
+          - test.foo.baz:                    This is a test of the emergency alert system
+          - test.quux.bar:                   This is a test of the emergency alert system
+          - test.quux.bar.baz:               This is a test of the emergency alert system
+          - hardware.power_shelf.psu.insert: A power supply unit (PSU) has been inserted into a
+            power shelf
+          - hardware.power_shelf.psu.remove: A power supply unit (PSU) has been removed from a power
+            shelf
 
   -d, --dispatched <DISPATCHED>
           If `true`, include only alerts that have been fully dispatched. If `false`, include only
@@ -391,7 +396,7 @@ stdout:
 ---------------------------------------------
 stderr:
 error: invalid value 'test.foo.box' for '--classes <CLASSES>...'
-  [possible values: probe, test.foo, test.foo.bar, test.foo.baz, test.quux.bar, test.quux.bar.baz]
+  [possible values: probe, test.foo, test.foo.bar, test.foo.baz, test.quux.bar, test.quux.bar.baz, hardware.power_shelf.psu.insert, hardware.power_shelf.psu.remove]
 
   tip: a similar value exists: 'test.foo.baz'
 

@@ -6,8 +6,8 @@
 //! analysis.
 
 use super::case;
+use super::display;
 use super::ereport::EreportId;
-use super::json_display::fmt_json_value;
 use iddqd::IdOrdMap;
 use omicron_uuid_kinds::{
     AlertUuid, CaseUuid, CollectionUuid, PhysicalDiskUuid, SitrepUuid,
@@ -23,6 +23,8 @@ pub struct AnalysisReport {
     pub sitrep_id: SitrepUuid,
     pub comment: String,
     pub cases: IdOrdMap<CaseReport>,
+    #[serde(default)]
+    pub log: DebugLog,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -57,8 +59,59 @@ pub struct LogEntry {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(default)]
     comment: Option<String>,
+    #[serde(default)]
+    level: LogLevel,
     #[serde(flatten)]
     kvs: BTreeMap<String, serde_json::Value>,
+}
+
+impl slog::KV for LogEntry {
+    fn serialize(
+        &self,
+        _record: &slog::Record<'_>,
+        serializer: &mut dyn slog::Serializer,
+    ) -> Result<(), slog::Error> {
+        for (k, v) in &self.kvs {
+            let key = slog::Key::from(k.clone());
+            match v {
+                serde_json::Value::String(s) => {
+                    serializer.emit_str(key, s)?;
+                }
+                serde_json::Value::Null => serializer.emit_none(key)?,
+                serde_json::Value::Bool(b) => {
+                    serializer.emit_bool(key, *b)?;
+                }
+                serde_json::Value::Number(n) => {
+                    if let Some(n) = n.as_i64() {
+                        serializer.emit_i64(key, n)?;
+                    } else if let Some(n) = n.as_u64() {
+                        serializer.emit_u64(key, n)?;
+                    } else if let Some(n) = n.as_f64() {
+                        serializer.emit_f64(key, n)?;
+                    } else if let Some(n) = n.as_i128() {
+                        serializer.emit_i128(key, n)?;
+                    } else if let Some(n) = n.as_u128() {
+                        serializer.emit_u128(key, n)?;
+                    } else {
+                        serializer.emit_arguments(key, &format_args!("{n}"))?;
+                    }
+                }
+                // Everything else gets fmt::Displayed
+                v => {
+                    serializer.emit_arguments(key, &format_args!("{v}"))?;
+                }
+            }
+        }
+
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub enum LogLevel {
+    #[default]
+    Info,
+    Warn,
 }
 
 impl iddqd::IdOrdItem for CaseReport {
@@ -80,14 +133,13 @@ impl AnalysisReport {
         impl<'a> fmt::Display for AnalysisReportDisplayer<'a> {
             fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
                 let &Self {
-                    report: AnalysisReport { cases, sitrep_id, comment },
+                    report: AnalysisReport { cases, sitrep_id, comment, log },
                     indent,
                 } = self;
 
-                for line in comment.lines() {
-                    writeln!(f, "{:indent$}// {line}", "")?;
-                }
+                display::Comment::from(comment).indent(indent).fmt(f)?;
                 writeln!(f, "{:indent$}sitrep ID: {sitrep_id}", "")?;
+                log.display_multiline(indent).titled("analysis log").fmt(f)?;
                 if cases.is_empty() {
                     writeln!(
                         f,
@@ -129,7 +181,7 @@ impl CaseReport {
         impl<'a> fmt::Display for CaseReportDisplayer<'a> {
             fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
                 let &Self {
-                    report: CaseReport { id, metadata, log: DebugLog(log) },
+                    report: CaseReport { id, metadata, log },
                     indent,
                     this_sitrep,
                 } = self;
@@ -137,15 +189,9 @@ impl CaseReport {
                 writeln!(f, "{:indent$}{bullet}case {id}", "")?;
                 let indent = indent + 2;
                 metadata.display_multiline(indent, this_sitrep).fmt(f)?;
-                if !log.is_empty() {
-                    writeln!(f, "{:indent$}activity in this analysis:", "")?;
-                    let indent = indent + 2;
-                    for entry in &log[..] {
-                        entry.display_indented(indent).fmt(f)?;
-                    }
-                } else {
-                    writeln!(f, "{:indent$}no activity in this analysis", "")?;
-                }
+                log.display_multiline(indent)
+                    .titled("activity in this analysis")
+                    .fmt(f)?;
                 Ok(())
             }
         }
@@ -154,32 +200,155 @@ impl CaseReport {
     }
 }
 
+pub struct LogEntryBuilder<'log> {
+    slog_log: &'log slog::Logger,
+    analysis_log: &'log mut DebugLog,
+    entry: LogEntry,
+}
+
 impl DebugLog {
-    pub fn entry(&mut self, event: impl ToString) -> &mut LogEntry {
-        self.0.push(LogEntry::new(event));
-        self.0.last_mut().expect("we just pushed it")
+    pub fn entry<'a>(
+        &'a mut self,
+        log: &'a slog::Logger,
+        event: impl ToString,
+    ) -> LogEntryBuilder<'a> {
+        LogEntryBuilder {
+            slog_log: log,
+            analysis_log: self,
+            entry: LogEntry::new(event, LogLevel::Info),
+        }
+    }
+
+    pub fn warning<'a>(
+        &'a mut self,
+        log: &'a slog::Logger,
+        event: impl ToString,
+    ) -> LogEntryBuilder<'a> {
+        LogEntryBuilder {
+            slog_log: log,
+            analysis_log: self,
+            entry: LogEntry::new(event, LogLevel::Warn),
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    fn display_multiline(&self, indent: usize) -> DebugLogDisplayer<'_> {
+        DebugLogDisplayer { log: self, indent, title: None }
     }
 }
 
-impl LogEntry {
-    pub fn new(event: impl ToString) -> Self {
-        Self { event: event.to_string(), comment: None, kvs: BTreeMap::new() }
-    }
+struct DebugLogDisplayer<'a> {
+    log: &'a DebugLog,
+    indent: usize,
+    title: Option<&'a str>,
+}
 
-    pub fn comment(&mut self, comment: impl ToString) -> &mut Self {
-        self.comment = Some(comment.to_string());
+impl<'a> DebugLogDisplayer<'a> {
+    fn titled(self, title: &'a str) -> Self {
+        Self { title: Some(title), ..self }
+    }
+}
+
+impl fmt::Display for DebugLogDisplayer<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let &Self { log, indent, title } = self;
+        let mut indent = indent;
+        if let Some(title) = title {
+            if log.is_empty() {
+                return writeln!(f, "{:<indent$}no {title}", "");
+            } else {
+                writeln!(f, "{:<indent$}{title}:", "")?;
+                // log entries will be indented under the title
+                indent += 2;
+            }
+        }
+        if log.is_empty() {
+            return writeln!(f, "{:<indent$}(no log entries)", "");
+        }
+
+        for entry in &log.0 {
+            entry.display_indented(indent).fmt(f)?;
+        }
+
+        Ok(())
+    }
+}
+
+impl LogEntryBuilder<'_> {
+    pub fn comment(mut self, comment: impl ToString) -> Self {
+        self.entry.comment(comment);
         self
     }
 
-    pub fn kv(
-        &mut self,
-        key: impl ToString,
-        value: impl Serialize,
-    ) -> &mut Self {
+    pub fn kv(self, key: impl ToString, value: impl Serialize) -> Self {
         self.kvs(std::iter::once((key, value)))
     }
 
     pub fn kvs(
+        mut self,
+        kvs: impl IntoIterator<Item = (impl ToString, impl Serialize)>,
+    ) -> Self {
+        self.entry.kvs(kvs);
+        self
+    }
+
+    pub fn finish(self) {
+        drop(self)
+    }
+}
+
+impl Drop for LogEntryBuilder<'_> {
+    fn drop(&mut self) {
+        // The comment will be formatted as part of the slog `msg` field, rather
+        // than as a separate field, because it is likely to contain newlines,
+        // and that's the only part of the log record that `looker` will
+        // un-escape newlines in...
+        let comment =
+            display::Comment::from(&self.entry.comment).with_leading_newline();
+        match self.entry.level {
+            LogLevel::Info => {
+                slog::info!(
+                    &self.slog_log,
+                    "{}{comment}",
+                    self.entry.event;
+                    &self.entry
+                )
+            }
+            LogLevel::Warn => {
+                slog::warn!(
+                    &self.slog_log,
+                    "{}{comment}",
+                    self.entry.event;
+                    &self.entry
+                )
+            }
+        }
+        self.analysis_log.0.push(std::mem::replace(
+            &mut self.entry,
+            LogEntry::new(String::new(), LogLevel::Info),
+        ));
+    }
+}
+
+impl LogEntry {
+    fn new(event: impl ToString, level: LogLevel) -> Self {
+        Self {
+            event: event.to_string(),
+            comment: None,
+            level,
+            kvs: BTreeMap::new(),
+        }
+    }
+
+    fn comment(&mut self, comment: impl ToString) -> &mut Self {
+        self.comment = Some(comment.to_string());
+        self
+    }
+
+    fn kvs(
         &mut self,
         kvs: impl IntoIterator<Item = (impl ToString, impl Serialize)>,
     ) -> &mut Self {
@@ -199,18 +368,21 @@ impl LogEntry {
 
         impl<'a> fmt::Display for LogEntryDisplayer<'a> {
             fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                let &Self { entry: LogEntry { event, comment, kvs }, indent } =
-                    self;
+                let &Self {
+                    entry: LogEntry { event, comment, kvs, level },
+                    indent,
+                } = self;
                 let bullet = if indent > 0 { "* " } else { "" };
                 let colon = if kvs.is_empty() { "" } else { ":" };
-                writeln!(f, "{:indent$}{bullet}{event}{colon}", "")?;
-                if let Some(comment) = comment {
-                    for line in comment.lines() {
-                        writeln!(f, "{:indent$}  // {line}", "")?;
-                    }
-                }
+                let lvl = match level {
+                    LogLevel::Info => "",
+                    LogLevel::Warn => "/!\\ WARNING: ",
+                };
+
+                writeln!(f, "{:indent$}{bullet}{lvl}{event}{colon}", "")?;
+                display::Comment::from(comment).indent(indent + 2).fmt(f)?;
                 for (k, v) in kvs {
-                    fmt_json_value(f, k, v, indent + 2)?;
+                    display::fmt_json_value(f, k, v, indent + 2)?;
                 }
                 Ok(())
             }
@@ -687,12 +859,12 @@ mod tests {
     /// equivalent `LogEntry`.
     #[test]
     fn test_log_entry_roundtrip() {
-        let mut entry = LogEntry::new("test event");
+        let mut entry = LogEntry::new("test event", LogLevel::Info);
         entry
             .comment("a comment")
-            .kv("simple", "value")
-            .kv("number", 123)
-            .kv("flag", true);
+            .kvs([("simple", "value")])
+            .kvs([("number", 123)])
+            .kvs([("flag", true)]);
 
         let serialized = serde_json::to_value(&entry).unwrap();
         let deserialized: LogEntry =
