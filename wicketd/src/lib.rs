@@ -47,6 +47,7 @@ use std::{
     sync::Arc,
 };
 use transceivers::Manager as TransceiverManager;
+use update_engine::merge_anyhow_list;
 pub use update_tracker::{StartUpdateError, UpdateTracker};
 use wicketd_client::ClientInfo as _;
 
@@ -262,14 +263,26 @@ impl Server {
 
     /// Close all running dropshot servers.
     pub async fn close(mut self) -> Result<()> {
-        self.wicketd_server.close().await.map_err(|error| {
-            anyhow!("error closing wicketd server: {error}")
-        })?;
-        self.installinator_server.close().await.map_err(|error| {
-            anyhow!("error closing artifact server: {error}")
-        })?;
+        // Close the servers concurrently and shut down the proxy, then report
+        // every error that occurred.
+        let (wicketd, installinator) = tokio::join!(
+            self.wicketd_server.close(),
+            self.installinator_server.close(),
+        );
         self.nexus_tcp_proxy.shutdown();
-        Ok(())
+
+        let errors: Vec<anyhow::Error> = [
+            wicketd.map_err(|error| {
+                anyhow!("error closing wicketd server: {error}")
+            }),
+            installinator.map_err(|error| {
+                anyhow!("error closing artifact server: {error}")
+            }),
+        ]
+        .into_iter()
+        .filter_map(Result::err)
+        .collect();
+        if errors.is_empty() { Ok(()) } else { Err(merge_anyhow_list(errors)) }
     }
 
     pub async fn wait_for_finish(self) -> Result<(), String> {
