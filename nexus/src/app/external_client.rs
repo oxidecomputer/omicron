@@ -125,6 +125,15 @@ pub enum ExternalUrlError {
     Localhost { host: String },
 }
 
+/// Errors returned by [`ExternalHttpClient::execute`].
+#[derive(thiserror::Error, Debug)]
+pub enum ExecuteExternalRequestError {
+    #[error(transparent)]
+    Reqwest(#[from] reqwest::Error),
+    #[error(transparent)]
+    ExternalUrl(#[from] ExternalUrlError),
+}
+
 impl ExternalHttpClient {
     /// Constructs a new `ExternalHttpClient` from the provided
     /// [`ExternalHttpClientConfig`], using the provided
@@ -274,15 +283,74 @@ impl ExternalHttpClient {
         url: U,
     ) -> Result<reqwest::RequestBuilder, ExternalUrlError> {
         let url = url.into_url()?;
-        let url = ensure_external_url(url, &self.ip_policy)?;
+        ensure_external_url(&url, &self.ip_policy)?;
         Ok(self.client.request(method, url))
+    }
+
+    /// Executes a `Request`.
+    ///
+    /// A `Request` can be built manually with `Request::new()` or obtained
+    /// from a RequestBuilder with `RequestBuilder::build()`.
+    ///
+    /// The `reqwest` documentation tells us that we "should prefer to use the
+    /// `RequestBuilder` and `RequestBuilder::send()`". I disagree with them,
+    /// because doing so returns both errors that occurred while *building* the
+    /// request, which are likely to be programmer errors, and errors that
+    /// occurred while *sending* the request, which are generally runtime
+    /// errors, in the same function call, and forces you to manually go through
+    /// all the different error variants that `reqwest` is liable to return and
+    /// figure out what to do with them yourself. But I will repeat their
+    /// guidance here nonetheless, with a heavy sigh of frustration.
+    ///
+    /// # Errors
+    ///
+    /// This method fails if there was an error while sending request,
+    /// redirect loop was detected or redirect limit was exhausted.
+    pub fn execute(
+        &self,
+        request: reqwest::Request,
+    ) -> impl Future<Output = Result<reqwest::Response, ExecuteExternalRequestError>>
+    {
+        // ...and here we arrive at one of my least favorite things about
+        // `reqwest`'s API. It has this `execute` method, which takes an
+        // arbitrary `Request`, and...executes it. Like it says on the tin. But
+        // it _also_ has a `RequestBuilder::send` method, which is on the
+        // `RequestBuilder` type, and which builds the `Request` *and goes and
+        // sends it*. This works because the `RequestBuilder` owns a clone of
+        // the `Client` that it uses to send the request if you call
+        // `RequestBuilder::send`.
+        //
+        // I assume all of this was done to make it so you could feel slightly
+        // more like you were writing JavaScript, or something, but it makes
+        // wrapping the `reqwest::Client` in a thing that performs validation of
+        // the request (which is what this whole module is) infinitely more
+        // painful. Now, because one can send a request either by having the
+        // `RequestBuilder` build the request and pass it to `Client::execute`,
+        // *or* by calling `RequestBuilder::send`, which internally calls
+        // `Client::execute`, you have two different ways to send the request.
+        // If we don't validate the URL in *both* locations, you can
+        // (accidentally or on purpose) smuggle a request past the validation we
+        // want to do here. So we have to check the URL in both the
+        // `ExternalClient::request` method, which gives you a `RequestBuilder`,
+        // and *again* in `ExternalClient::execute`, even though the `Request`
+        // you are trying to `execute` *may* have come from
+        // `ExternalClient::request` in the first place, and therefore been
+        // validated *twice*. Have I mentioned that `reqwest`'s API is not
+        // really my favorite thing?
+        //
+        // Sigh. Whatever. It's fine.
+        let this = self.clone();
+        async move {
+            ensure_external_url(request.url(), &this.ip_policy)?;
+            Ok(this.client.execute(request).await?)
+        }
     }
 }
 
 fn ensure_external_url(
-    url: Url,
+    url: &Url,
     policy: &ExternalIpPolicy,
-) -> Result<Url, ExternalUrlError> {
+) -> Result<(), ExternalUrlError> {
     match url.host() {
         // Domain names are mostly allowed here: if the name *resolves* to a
         // non-external IP, that will be rejected by `external_dns::Resolver`,
@@ -318,7 +386,7 @@ fn ensure_external_url(
         None => {}
     }
 
-    Ok(url)
+    Ok(())
 }
 
 #[cfg(test)]
