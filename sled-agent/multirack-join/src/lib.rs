@@ -18,15 +18,17 @@ extern crate slog;
 use bootstrap_agent_lockstep_types::{MultirackJoinRequest, MultirackJoinStep};
 use omicron_uuid_kinds::RackUuid;
 use sled_agent_bootstrap_common::{RssContext, RunRssError};
+use sled_hardware_types::BaseboardId;
 use slog::{Logger, info};
 use slog_error_chain::{InlineErrorChain, SlogInlineError};
-use std::time::Duration;
+use std::{collections::BTreeSet, time::Duration};
 use thiserror::Error;
 use tokio::sync::watch;
 use trust_quorum::{NodeApiError, ProxyError};
 use trust_quorum_protocol::CommitError;
 use trust_quorum_types::{
     messages::ReconfigureMsg as TqReconfigureMsg, status::CoordinatorStatus,
+    types::Epoch,
 };
 
 /// Describes errors which may occur while operating the multirack join service.
@@ -145,36 +147,64 @@ impl MultirackJoinServiceTask {
     ) -> Result<(), MultirackJoinServiceError> {
         self.step(MultirackJoinStep::InitTrustQuorum);
 
-        let initial_members =
+        let members =
             self.input_rx.borrow_and_update().trust_quorum_peers.clone();
+        let epoch = trust_quorum_types::types::Epoch(1);
+        let last_committed_epoch = None;
 
+        self.tq_reconfigure(
+            rack_id,
+            members.clone(),
+            epoch,
+            last_committed_epoch,
+        )
+        .await?;
+
+        self.tq_prepare(rack_id, members, epoch, last_committed_epoch).await?;
+
+        // TODO: Commit phase
+
+        Ok(())
+    }
+
+    async fn tq_reconfigure(
+        &mut self,
+        rack_id: RackUuid,
+        members: BTreeSet<BaseboardId>,
+        epoch: Epoch,
+        last_committed_epoch: Option<Epoch>,
+    ) -> Result<(), MultirackJoinServiceError> {
         let threshold = trust_quorum_types::types::Threshold(
-            u8::try_from(initial_members.len()).unwrap() / 2 + 1,
+            u8::try_from(members.len()).unwrap() / 2 + 1,
         );
-
-        let initial_epoch = trust_quorum_types::types::Epoch(1);
 
         let msg = TqReconfigureMsg {
             rack_id,
-            epoch: initial_epoch,
-            last_committed_epoch: None,
-            members: initial_members.clone(),
+            epoch,
+            last_committed_epoch,
+            members,
             threshold,
         };
 
         // Start the initial configuration with this node as coordinator
         self.ctx.trust_quorum_handle.reconfigure(msg).await?;
 
-        // Wait for all nodes to prepare or for a new configuration in case
-        // nodes are not responding.
         info!(
             self.log,
-            "Starting to prepare trust quorum initial configuration"
+            "Trust quorum reconfiguration started";
+            "epoch" => %epoch
         );
 
-        // These might change below if we need to issue a reconfiguration
-        let mut members = initial_members;
-        let mut epoch = initial_epoch;
+        Ok(())
+    }
+
+    async fn tq_prepare(
+        &mut self,
+        rack_id: RackUuid,
+        mut members: BTreeSet<BaseboardId>,
+        mut epoch: Epoch,
+        last_committed_epoch: Option<Epoch>,
+    ) -> Result<(), MultirackJoinServiceError> {
         loop {
             let status = self
                 .ctx
@@ -225,22 +255,13 @@ impl MultirackJoinServiceTask {
                     members = new_members;
                     epoch = epoch.next();
 
-                    let msg = TqReconfigureMsg {
+                    self.tq_reconfigure(
                         rack_id,
+                        members.clone(),
                         epoch,
-                        last_committed_epoch: None,
-                        members: members.clone(),
-                        threshold,
-                    };
-
-                    // Start the reconfiguration with this node as coordinator
-                    self.ctx.trust_quorum_handle.reconfigure(msg).await?;
-
-                    info!(
-                        self.log,
-                        "Starting to prepare trust quorum reconfiguration";
-                        "epoch" => %epoch
-                    );
+                        last_committed_epoch,
+                    )
+                    .await?;
 
                     // We want to start reconfiguring immediately.
                     // Skip the sleep at the bottom of the loop.
@@ -250,8 +271,6 @@ impl MultirackJoinServiceTask {
 
             tokio::time::sleep(Duration::from_millis(500)).await;
         }
-
-        // TODO: Commit phase
 
         Ok(())
     }
