@@ -4,7 +4,7 @@
 
 //! Fetching transceiver state from the SP.
 
-use gateway_client::types::SpIdentifier;
+use gateway_types::component::SpIdentifier;
 use sled_agent_types::early_networking::SwitchSlot;
 use slog::{Logger, debug, error};
 use slog_error_chain::InlineErrorChain;
@@ -68,7 +68,7 @@ impl Handle {
     /// This panics if called with an `SpIdentifier` that doesn't have an
     /// `SpType::Switch`.
     pub(crate) fn set_local_switch_id(&self, switch: SpIdentifier) {
-        let SpIdentifier { slot, type_: SpType::Switch } = switch else {
+        let SpIdentifier { slot, typ: SpType::Switch } = switch else {
             panic!("Should only be called with SpType::Switch");
         };
         let slot = match slot {

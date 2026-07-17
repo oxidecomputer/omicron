@@ -4,8 +4,6 @@
 
 //! The `get` plan node, for fetching data from the ClickHouse database.
 
-// Copyright 2024 Oxide Computer Company
-
 use crate::oxql::ast::table_ops::filter;
 use crate::oxql::ast::table_ops::limit;
 use crate::oxql::schema::TableSchema;

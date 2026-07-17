@@ -91,3 +91,9 @@ pub mod v2026_05_20_00;
 pub mod v2026_06_04_00;
 #[path = "external_jumbo_frames/mod.rs"]
 pub mod v2026_06_05_00;
+#[path = "instance_cpu_type_turin_v2/mod.rs"]
+pub mod v2026_06_08_00;
+#[path = "bgp_configuration_update/mod.rs"]
+pub mod v2026_06_10_00;
+#[path = "add_system_ip_pool_apis/mod.rs"]
+pub mod v2026_06_11_00;

@@ -37,11 +37,15 @@ use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::datastore::InstanceAndActiveVmm;
-use nexus_db_queries::db::datastore::InstanceStateComputer;
 use nexus_db_queries::db::identity::Resource;
+use nexus_db_queries::db::model::InstanceStateComputer;
 use nexus_types::external_api::disk;
 use nexus_types::external_api::external_ip;
 use nexus_types::external_api::instance;
+// We'll use `InstanceState` frequently, and the code that uses it is already
+// subtle enough: break from the pattern of external API types being referenced
+// by `topic::Name` to help legibility and keep line wrapping under control..
+use nexus_types::external_api::instance::InstanceState;
 use nexus_types::external_api::ip_pool;
 use nexus_types::external_api::multicast;
 use nexus_types::external_api::project;
@@ -53,8 +57,6 @@ use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::Hostname;
-use omicron_common::api::external::InstanceCpuCount;
-use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::IpVersion;
 use omicron_common::api::external::ListResultVec;
@@ -1396,6 +1398,7 @@ impl super::Nexus {
             &requested,
         )? {
             InstanceStateChangeRequestAction::AlreadyDone => Ok(()),
+
             InstanceStateChangeRequestAction::UpdateRuntime(new_runtime) => {
                 let instance_id =
                     InstanceUuid::from_untyped_uuid(prev_instance_state.id());
@@ -1416,6 +1419,7 @@ impl super::Nexus {
                     Ok(())
                 }
             }
+
             InstanceStateChangeRequestAction::SendToSled {
                 sled_id,
                 propolis_id,
@@ -2864,7 +2868,7 @@ pub(crate) async fn process_vmm_update(
 /// Determines whether the supplied instance sizes (CPU count and memory size)
 /// are acceptable.
 fn check_instance_cpu_memory_sizes(
-    ncpus: InstanceCpuCount,
+    ncpus: instance::InstanceCpuCount,
     memory: ByteCount,
 ) -> Result<(), Error> {
     if ncpus.0 > MAX_VCPU_PER_INSTANCE {
@@ -3028,8 +3032,9 @@ mod tests {
         Instance as DbInstance, InstanceState as DbInstanceState,
         VmmCpuPlatform, VmmState as DbVmmState,
     };
+    use nexus_types::external_api::instance;
     use omicron_common::api::external::{
-        Hostname, IdentityMetadataCreateParams, InstanceCpuCount, Name,
+        Hostname, IdentityMetadataCreateParams, Name,
     };
     use omicron_test_utils::dev::test_setup_log;
     use propolis_client::support::tungstenite::protocol::Role;
@@ -3139,7 +3144,7 @@ mod tests {
                 name: Name::try_from("elysium".to_owned()).unwrap(),
                 description: "this instance is disco".to_owned(),
             },
-            ncpus: InstanceCpuCount(1),
+            ncpus: instance::InstanceCpuCount(1),
             memory: ByteCount::from_gibibytes_u32(1),
             hostname: Hostname::try_from("elysium").unwrap(),
             user_data: vec![],
@@ -3296,7 +3301,7 @@ mod tests {
                 name: Name::try_from("jumbo".to_owned()).unwrap(),
                 description: "instance under jumbo-frames test".to_owned(),
             },
-            ncpus: InstanceCpuCount(1),
+            ncpus: instance::InstanceCpuCount(1),
             memory: ByteCount::from_gibibytes_u32(1),
             hostname: Hostname::try_from("jumbo").unwrap(),
             user_data: vec![],

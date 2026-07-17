@@ -28,13 +28,13 @@ impl From<ComponentId> for SpIdentifier {
     fn from(id: ComponentId) -> Self {
         match id {
             ComponentId::Sled(i) => {
-                SpIdentifier { type_: SpType::Sled, slot: u16::from(i) }
+                SpIdentifier { typ: SpType::Sled, slot: u16::from(i) }
             }
             ComponentId::Psc(i) => {
-                SpIdentifier { type_: SpType::Power, slot: u16::from(i) }
+                SpIdentifier { typ: SpType::Power, slot: u16::from(i) }
             }
             ComponentId::Switch(i) => {
-                SpIdentifier { type_: SpType::Switch, slot: u16::from(i) }
+                SpIdentifier { typ: SpType::Switch, slot: u16::from(i) }
             }
         }
     }
@@ -199,7 +199,7 @@ impl WicketdManager {
                 create_wicketd_client(&log, addr, WICKETD_TIMEOUT);
             let sp: SpIdentifier = component_id.into();
             let response = match update_client
-                .post_abort_update(&sp.type_, sp.slot, &options)
+                .post_abort_update(&sp.typ, sp.slot, &options)
                 .await
             {
                 Ok(_) => Ok(()),
@@ -266,7 +266,7 @@ impl WicketdManager {
             let client = create_wicketd_client(&log, addr, WICKETD_TIMEOUT);
             let sp: SpIdentifier = component_id.into();
             let res =
-                client.post_ignition_command(&sp.type_, sp.slot, command).await;
+                client.post_ignition_command(&sp.typ, sp.slot, command).await;
             // We don't return errors or success values, as there's nobody to
             // return them to. How do we relay this result to the user?
             slog::info!(

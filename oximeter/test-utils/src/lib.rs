@@ -1,5 +1,3 @@
-// Copyright 2024 Oxide Computer Company
-
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
@@ -171,7 +169,9 @@ pub async fn wait_for_keepers(
                 }
             }
             if !done {
-                Err(poll::CondCheckError::<KeeperError>::NotYet)
+                Err(poll::CondCheckError::<KeeperError>::NotYet {
+                    status: None,
+                })
             } else {
                 Ok(())
             }
@@ -193,10 +193,11 @@ pub async fn wait_for_ping(
 ) -> anyhow::Result<()> {
     poll::wait_for_condition(
         || async {
-            client
-                .ping()
-                .await
-                .map_err(|_| poll::CondCheckError::<oximeter_db::Error>::NotYet)
+            client.ping().await.map_err(|_| poll::CondCheckError::<
+                oximeter_db::Error,
+            >::NotYet {
+                status: None,
+            })
         },
         &Duration::from_millis(100),
         &Duration::from_secs(90),

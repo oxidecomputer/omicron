@@ -92,8 +92,6 @@ We track issues on Github using the following labels:
 
 However, the following are general areas of improvement for the Sled Agent:
 
-* (Correctness) Plumbing of Nexus-customizable InstanceProperties, such as
-image, bootrom, memory, vcpus.
 * (Correctness) Integration of OPTE to manage the network and apply policy
 changes as requested by Nexus.
 * (Resilience) On initialization of the `InstanceManager`, the Sled Agent

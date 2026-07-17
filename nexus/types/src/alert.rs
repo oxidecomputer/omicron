@@ -4,7 +4,29 @@
 
 //! Internal alert types.
 
+use schemars::JsonSchema;
+use serde::Serialize;
 use std::fmt;
+
+pub mod power_shelf;
+
+/// Trait implemented by alerts.
+pub trait AlertPayload: Serialize + JsonSchema + std::fmt::Debug {
+    const CLASS: AlertClass;
+    const VERSION: u32;
+}
+
+/// A webhook receiver liveness probe.
+///
+/// Probes are synthetic alerts of the [`AlertClass::Probe`] class, used to
+/// check whether a webhook receiver endpoint is reachable. They carry no data.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, JsonSchema)]
+pub struct Probe {}
+
+impl AlertPayload for Probe {
+    const CLASS: AlertClass = AlertClass::Probe;
+    const VERSION: u32 = 0;
+}
 
 /// Alert classes.
 ///
@@ -52,6 +74,10 @@ pub enum AlertClass {
     TestQuuxBar,
     #[strum(serialize = "test.quux.bar.baz")]
     TestQuuxBarBaz,
+    #[strum(serialize = "hardware.power_shelf.psu.insert")]
+    PsuInserted,
+    #[strum(serialize = "hardware.power_shelf.psu.remove")]
+    PsuRemoved,
 }
 
 impl AlertClass {
@@ -89,6 +115,12 @@ impl AlertClass {
             | Self::TestQuuxBarBaz => {
                 "This is a test of the emergency alert system"
             }
+            Self::PsuInserted => {
+                "A power supply unit (PSU) has been inserted into a power shelf"
+            }
+            Self::PsuRemoved => {
+                "A power supply unit (PSU) has been removed from a power shelf"
+            }
         }
     }
 
@@ -101,6 +133,20 @@ impl From<AlertClass> for crate::external_api::alert::AlertClass {
             name: class.to_string(),
             description: class.description().to_string(),
         }
+    }
+}
+
+/// Alert classes are sorted lexicographically by the class string.
+impl Ord for AlertClass {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.as_str().cmp(&other.as_str())
+    }
+}
+
+/// Alert classes are sorted lexicographically by the class string.
+impl PartialOrd for AlertClass {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
     }
 }
 
@@ -131,9 +177,66 @@ impl AlertClassParseError {
 
 impl std::error::Error for AlertClassParseError {}
 
-#[cfg(test)]
-mod tests {
+/// Test alert types.
+///
+/// These wrap an arbitrary JSON payload so that tests of the alert subsystem
+/// may construct alerts with whatever data they like, while implementing the
+/// [`AlertPayload`] trait. These should not be used outside of tests.
+pub mod test_alerts {
     use super::*;
+
+    macro_rules! impl_test_alerts {
+        ($( $(#[$m:meta])* $Name:ident($Class:ident)),+ $(,)?) => {
+            $(
+                $(#[$m])*
+                #[derive(Clone, Debug, PartialEq, Serialize, JsonSchema)]
+                #[serde(transparent)]
+                pub struct $Name(pub serde_json::Value);
+
+                impl AlertPayload for $Name {
+                    const CLASS: AlertClass = AlertClass::$Class;
+                    const VERSION: u32 = 0;
+                }
+            )+
+        };
+    }
+
+    impl_test_alerts! {
+        Foo(TestFoo),
+        FooBar(TestFooBar),
+        FooBaz(TestFooBaz),
+        QuuxBar(TestQuuxBar),
+        QuuxBarBaz(TestQuuxBarBaz),
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod tests {
+    use super::*;
+
+    #[track_caller]
+    pub(crate) fn expectorate_alert_schema<T: AlertPayload>() {
+        let schema = schemars::schema_for!(T);
+        let schema_json = match serde_json::to_string_pretty(&schema) {
+            Ok(json) => json,
+            Err(e) => panic!(
+                "Failed to serialize schema for {} v{}: {e}",
+                T::CLASS,
+                T::VERSION
+            ),
+        };
+        let dir = camino::Utf8Path::new("output")
+            .join("alert_schemas")
+            .join(T::CLASS.as_str());
+        if let Err(e) = std::fs::create_dir_all(&dir) {
+            panic!(
+                "Failed to create schema directory {dir} for alert class {}: {e}",
+                T::CLASS,
+            );
+        }
+        let path = dir.join(format!("v{}.json", T::VERSION));
+        expectorate::assert_contents(&path, &schema_json);
+    }
 
     #[test]
     fn test_from_str_roundtrips() {

@@ -79,6 +79,7 @@ swrite.workspace = true
 tough.workspace = true
 
 [dev-dependencies]
+camino.workspace = true
 expectorate.workspace = true
 gateway-types = { workspace = true, features = ["testing"] }
 iddqd = { workspace = true, features = ["proptest"] }

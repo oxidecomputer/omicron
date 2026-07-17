@@ -24,6 +24,7 @@ impl_enum_type!(
     pub enum DiagnosisEngine;
 
     PowerShelf => b"power_shelf"
+    PhysicalDisk => b"physical_disk"
 
 );
 
@@ -31,6 +32,9 @@ impl From<DiagnosisEngine> for fm::DiagnosisEngineKind {
     fn from(de: DiagnosisEngine) -> Self {
         match de {
             DiagnosisEngine::PowerShelf => fm::DiagnosisEngineKind::PowerShelf,
+            DiagnosisEngine::PhysicalDisk => {
+                fm::DiagnosisEngineKind::PhysicalDisk
+            }
         }
     }
 }
@@ -39,6 +43,9 @@ impl From<fm::DiagnosisEngineKind> for DiagnosisEngine {
     fn from(fm_de: fm::DiagnosisEngineKind) -> Self {
         match fm_de {
             fm::DiagnosisEngineKind::PowerShelf => DiagnosisEngine::PowerShelf,
+            fm::DiagnosisEngineKind::PhysicalDisk => {
+                DiagnosisEngine::PhysicalDisk
+            }
         }
     }
 }

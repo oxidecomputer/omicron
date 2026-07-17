@@ -29,7 +29,6 @@ use nexus_types::external_api::sled as sled_types;
 use nexus_types::inventory::SpType;
 use nexus_types::silo::silo_dns_name;
 use omicron_common::address::{Ipv6Subnet, RACK_PREFIX, get_64_subnet};
-use omicron_common::api::external::AddressLotKind;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::IdentityMetadataCreateParams;
@@ -39,6 +38,8 @@ use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::ResourceType;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::SledUuid;
 use oxnet::IpNet;
 use sled_agent_client::types::AddSledRequest;
@@ -67,7 +68,7 @@ impl super::Nexus {
     pub(crate) async fn rack_lookup(
         &self,
         opctx: &OpContext,
-        rack_id: &Uuid,
+        rack_id: &RackUuid,
     ) -> LookupResult<db::model::Rack> {
         let (.., db_rack) = LookupPath::new(opctx, &self.db_datastore)
             .rack_id(*rack_id)
@@ -82,7 +83,7 @@ impl super::Nexus {
     pub(crate) async fn rack_initialize(
         &self,
         opctx: &OpContext,
-        rack_id: Uuid,
+        rack_id: RackUuid,
         request: RackInitializationRequest,
         blueprint_execution_enabled: bool,
     ) -> Result<(), Error> {
@@ -312,7 +313,7 @@ impl super::Nexus {
             description: "initial infrastructure ip address lot".to_string(),
         };
 
-        let kind = AddressLotKind::Infra;
+        let kind = networking::AddressLotKind::Infra;
 
         let first_address = rack_network_config.infra_ip_first;
         let last_address = rack_network_config.infra_ip_last;
@@ -364,7 +365,7 @@ impl super::Nexus {
                                 bgp_config.asn
                             ),
                         },
-                        kind: AddressLotKind::Infra,
+                        kind: networking::AddressLotKind::Infra,
                         blocks: bgp_config
                             .originate
                             .iter()
@@ -759,7 +760,7 @@ impl super::Nexus {
                                 part: k.part_number.clone(),
                                 revision: v.baseboard_revision,
                             },
-                            rack_id: self.rack_id,
+                            rack_id: self.rack_id.into_untyped_uuid(),
                             cubby: v.sp_slot,
                         })
                     } else {
@@ -829,7 +830,7 @@ impl super::Nexus {
                 schema_version: 1,
                 body: StartSledAgentRequestBody {
                     id: allocation.sled_id.into(),
-                    rack_id: allocation.rack_id,
+                    rack_id: allocation.rack_id.into(),
                     use_trust_quorum: true,
                     is_lrtq_learner: true,
                     subnet: sled_agent_client::types::Ipv6Subnet {

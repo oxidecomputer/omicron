@@ -12,11 +12,14 @@ pub mod ereport;
 pub use ereport::{Ereport, EreportId};
 pub mod case;
 pub use case::Case;
-pub(crate) mod json_display;
+pub mod fact;
+pub use fact::{DiskFact, FactPayload, ZpoolUnhealthyFactPayload};
+pub mod display;
 
 use case::AlertRequest;
 use chrono::{DateTime, Utc};
 use iddqd::IdOrdMap;
+use omicron_common::api::external::Generation;
 use omicron_uuid_kinds::{
     CaseUuid, CollectionUuid, OmicronZoneUuid, SitrepUuid,
 };
@@ -67,6 +70,12 @@ impl Sitrep {
 
     pub fn parent_id(&self) -> Option<SitrepUuid> {
         self.metadata.parent_sitrep_id
+    }
+
+    /// Returns the inventory collection ID of the collection that was used as
+    /// input to this sitrep.
+    pub fn inv_id(&self) -> CollectionUuid {
+        self.metadata.inv_collection_id
     }
 
     /// Iterate over all the open cases in this sitrep.
@@ -159,6 +168,19 @@ pub struct SitrepMetadata {
 
     /// The time at which this sitrep was created.
     pub time_created: DateTime<Utc>,
+
+    /// `SitrepBuilder` increments this each time it builds a sitrep whose alert
+    /// request set differs from its parent's. Alert creation is guarded on this
+    /// value: a rendezvous task working from a sitrep whose generation no
+    /// longer matches the current sitrep's has its inserts rejected as stale.
+    pub alert_generation: Generation,
+
+    /// `SitrepBuilder` increments this each time it builds a sitrep whose
+    /// support bundle request set differs from its parent's. Support bundle
+    /// creation is guarded on this value: a rendezvous task working from
+    /// a sitrep whose generation no longer matches the current sitrep's has
+    /// its inserts rejected as stale.
+    pub support_bundle_generation: Generation,
 }
 
 pub struct SitrepStateComparison<'sitrep> {
@@ -217,4 +239,5 @@ pub struct SitrepVersion {
 #[strum(serialize_all = "snake_case")]
 pub enum DiagnosisEngineKind {
     PowerShelf,
+    PhysicalDisk,
 }

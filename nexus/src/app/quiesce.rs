@@ -554,7 +554,9 @@ mod test {
                 if matches!(rv.state, QuiesceState::Quiesced { .. }) {
                     Ok(rv)
                 } else {
-                    Err(CondCheckError::<NexusClientError>::NotYet)
+                    Err(CondCheckError::<NexusClientError>::NotYet {
+                        status: None,
+                    })
                 }
             },
             &Duration::from_millis(50),
@@ -750,7 +752,7 @@ mod test {
                 if saga_state == nexus_db_model::SagaState::Done {
                     Ok(())
                 } else {
-                    Err(CondCheckError::<()>::NotYet)
+                    Err(CondCheckError::<()>::NotYet { status: None })
                 }
             },
             &Duration::from_millis(50),
@@ -770,7 +772,9 @@ mod test {
                     .into_inner();
                 debug!(log, "found quiesce state"; "state" => ?rv);
                 if !matches!(rv.state, QuiesceState::DrainingDb { .. }) {
-                    return Err(CondCheckError::<NexusClientError>::NotYet);
+                    return Err(CondCheckError::<NexusClientError>::NotYet {
+                        status: None,
+                    });
                 }
                 assert!(rv.sagas.sagas_pending.is_empty());
                 // The database claim we took is still held.
@@ -995,7 +999,7 @@ mod test {
                     .iter()
                     .all(|q| matches!(q.state(), QuiesceState::Quiesced { .. }))
                 {
-                    return Err(CondCheckError::<()>::NotYet);
+                    return Err(CondCheckError::<()>::NotYet { status: None });
                 }
 
                 Ok(())

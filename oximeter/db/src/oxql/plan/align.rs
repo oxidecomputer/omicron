@@ -4,8 +4,6 @@
 
 //! OxQL query plan node for aligning tables.
 
-// Copyright 2024 Oxide Computer Company
-
 use oxql_types::point::DataType;
 use oxql_types::point::MetricType;
 

@@ -12,6 +12,7 @@ use crate::app::sagas::{
 };
 use nexus_db_lookup::LookupPath;
 use nexus_db_model::VmmCpuPlatform;
+use nexus_db_queries::db::datastore::sled::SledReservationReason;
 use nexus_db_queries::db::identity::Resource;
 use nexus_db_queries::{authn, authz, db};
 use nexus_types::internal_api::params::InstanceMigrateRequest;
@@ -241,6 +242,7 @@ async fn sim_reserve_sled_resources(
         u32::from(params.instance.ncpus.0.0),
         params.instance.memory,
         constraints,
+        SledReservationReason::MigrationTarget,
     )
     .await?;
 
@@ -624,9 +626,10 @@ mod tests {
     };
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::external_api::instance as instance_types;
+    use nexus_types::external_api::instance::InstanceCpuCount;
     use nexus_types_versions::latest;
     use omicron_common::api::external::{
-        ByteCount, IdentityMetadataCreateParams, InstanceCpuCount,
+        ByteCount, IdentityMetadataCreateParams,
     };
 
     type ControlPlaneTestContext =

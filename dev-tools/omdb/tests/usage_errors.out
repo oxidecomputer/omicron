@@ -252,6 +252,255 @@ Safety Options:
 ---------------------------------------------
 stderr:
 =============================================
+EXECUTING COMMAND: omdb ["db", "alert"]
+termination: Exited(2)
+---------------------------------------------
+stdout:
+---------------------------------------------
+stderr:
+Print information about alerts
+
+Usage: omdb db alert [OPTIONS] <COMMAND>
+
+Commands:
+  list     List alerts
+  info     Show details on an alert
+  webhook  Commands relating to webhook alerts
+  help     Print this message or the help of the given subcommand(s)
+
+Options:
+      --log-level <LOG_LEVEL>  log level filter [env: LOG_LEVEL=] [default: warn]
+      --color <COLOR>          Color output [default: auto] [possible values: auto, always, never]
+  -h, --help                   Print help
+
+Connection Options:
+      --db-url <DB_URL>          URL of the database SQL interface [env: OMDB_DB_URL=]
+      --dns-server <DNS_SERVER>  [env: OMDB_DNS_SERVER=]
+
+Database Options:
+      --fetch-limit <FETCH_LIMIT>  limit to apply to queries that fetch rows [env:
+                                   OMDB_FETCH_LIMIT=] [default: 500]
+      --include-deleted            whether to include soft-deleted records when enumerating objects
+                                   that can be soft-deleted
+
+Safety Options:
+  -w, --destructive  Allow potentially-destructive subcommands
+=============================================
+EXECUTING COMMAND: omdb ["db", "alert", "list", "--help"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+List alerts
+
+Usage: omdb db alert list [OPTIONS]
+
+Options:
+      --log-level <LOG_LEVEL>
+          log level filter
+          
+          [env: LOG_LEVEL=]
+          [default: warn]
+
+  -p, --payload
+          If set, include alert JSON payloads in the output.
+          
+          Note that this results in very wide output.
+
+  -b, --before <BEFORE>
+          Include only alerts created before this timestamp
+
+  -a, --after <AFTER>
+          Include only alerts created after this timestamp
+
+      --color <COLOR>
+          Color output
+          
+          [default: auto]
+          [possible values: auto, always, never]
+
+      --dispatched-before <DISPATCHED_BEFORE>
+          Include only alerts fully dispatched before this timestamp
+
+      --dispatched-after <DISPATCHED_AFTER>
+          Include only alerts fully dispatched after this timestamp
+
+      --cases <CASES>...
+          Include only alerts requested by the fault management case(s) with the specified UUIDs.
+          
+          If multiple case IDs are provided, alerts requested by any of those cases will be included
+          in the output.
+          
+          Note that not all alerts are requested by fault management cases.
+
+      --classes <CLASSES>...
+          Include only alerts with the specified alert classes.
+          
+          If multiple values are provided, alerts with any of those classes will be included in the
+          output.
+
+          Possible values:
+          - probe:                           Synthetic events sent for webhook receiver liveness
+            probes.
+            Receivers should return 2xx HTTP responses for these events, but they should NOT be
+            treated as notifications of an actual event in the system.
+          - test.foo:                        This is a test of the emergency alert system
+          - test.foo.bar:                    This is a test of the emergency alert system
+          - test.foo.baz:                    This is a test of the emergency alert system
+          - test.quux.bar:                   This is a test of the emergency alert system
+          - test.quux.bar.baz:               This is a test of the emergency alert system
+          - hardware.power_shelf.psu.insert: A power supply unit (PSU) has been inserted into a
+            power shelf
+          - hardware.power_shelf.psu.remove: A power supply unit (PSU) has been removed from a power
+            shelf
+
+  -d, --dispatched <DISPATCHED>
+          If `true`, include only alerts that have been fully dispatched. If `false`, include only
+          alerts that have not been fully dispatched.
+          
+          If this argument is not provided, both dispatched and un-dispatched events are included.
+          
+          [possible values: true, false]
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+Connection Options:
+      --db-url <DB_URL>
+          URL of the database SQL interface
+          
+          [env: OMDB_DB_URL=]
+
+      --dns-server <DNS_SERVER>
+          [env: OMDB_DNS_SERVER=]
+
+Database Options:
+      --fetch-limit <FETCH_LIMIT>
+          limit to apply to queries that fetch rows
+          
+          [env: OMDB_FETCH_LIMIT=]
+          [default: 500]
+
+      --include-deleted
+          whether to include soft-deleted records when enumerating objects that can be soft-deleted
+
+Safety Options:
+  -w, --destructive
+          Allow potentially-destructive subcommands
+---------------------------------------------
+stderr:
+=============================================
+EXECUTING COMMAND: omdb ["db", "alert", "list", "--classes", "test.foo.bar", "test.foo.box"]
+termination: Exited(2)
+---------------------------------------------
+stdout:
+---------------------------------------------
+stderr:
+error: invalid value 'test.foo.box' for '--classes <CLASSES>...'
+  [possible values: probe, test.foo, test.foo.bar, test.foo.baz, test.quux.bar, test.quux.bar.baz, hardware.power_shelf.psu.insert, hardware.power_shelf.psu.remove]
+
+  tip: a similar value exists: 'test.foo.baz'
+
+For more information, try '--help'.
+=============================================
+EXECUTING COMMAND: omdb ["db", "alert", "webhook", "delivery", "list", "--help"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+List webhook deliveries
+
+Usage: omdb db alert webhook delivery list [OPTIONS]
+
+Options:
+      --log-level <LOG_LEVEL>
+          log level filter
+          
+          [env: LOG_LEVEL=]
+          [default: warn]
+
+  -r, --receiver <RECEIVER>
+          If present, show only deliveries to this receiver
+
+  -A, --alert <ALERT>
+          If present, select only deliveries for the given alert
+
+  -s, --state <STATES>...
+          If present, select only deliveries in the provided state(s)
+          
+          If multiple values are provided, deliveries in any of those states will be included in the
+          output.
+          
+          [possible values: pending, delivered, failed]
+
+      --color <COLOR>
+          Color output
+          
+          [default: auto]
+          [possible values: auto, always, never]
+
+  -t, --trigger <TRIGGERS>...
+          If present, select only deliveries with the provided trigger(s)
+          
+          If multiple values are provided, deliveries with any of those triggers will be included in
+          the output.
+          
+          [possible values: alert, resend, probe]
+
+  -b, --before <BEFORE>
+          Include only delivery entries created before this timestamp
+
+  -a, --after <AFTER>
+          Include only delivery entries created after this timestamp
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+Connection Options:
+      --db-url <DB_URL>
+          URL of the database SQL interface
+          
+          [env: OMDB_DB_URL=]
+
+      --dns-server <DNS_SERVER>
+          [env: OMDB_DNS_SERVER=]
+
+Database Options:
+      --fetch-limit <FETCH_LIMIT>
+          limit to apply to queries that fetch rows
+          
+          [env: OMDB_FETCH_LIMIT=]
+          [default: 500]
+
+      --include-deleted
+          whether to include soft-deleted records when enumerating objects that can be soft-deleted
+
+Safety Options:
+  -w, --destructive
+          Allow potentially-destructive subcommands
+---------------------------------------------
+stderr:
+=============================================
+EXECUTING COMMAND: omdb ["db", "alert", "webhook", "delivery", "list", "--state", "bogus"]
+termination: Exited(2)
+---------------------------------------------
+stdout:
+---------------------------------------------
+stderr:
+error: invalid value 'bogus' for '--state <STATES>...'
+  [possible values: pending, delivered, failed]
+
+For more information, try '--help'.
+=============================================
+EXECUTING COMMAND: omdb ["db", "alert", "webhook", "delivery", "list", "--trigger", "bogus"]
+termination: Exited(2)
+---------------------------------------------
+stdout:
+---------------------------------------------
+stderr:
+error: invalid value 'bogus' for '--trigger <TRIGGERS>...'
+  [possible values: alert, resend, probe]
+
+For more information, try '--help'.
+=============================================
 EXECUTING COMMAND: omdb ["db", "disks"]
 termination: Exited(2)
 ---------------------------------------------
@@ -650,15 +899,13 @@ termination: Exited(0)
 stdout:
 List ereport reporters
 
-Usage: omdb db ereport reporters [OPTIONS] [SERIAL]
-
-Arguments:
-  [SERIAL]  
+Usage: omdb db ereport reporters [OPTIONS]
 
 Options:
       --log-level <LOG_LEVEL>  log level filter [env: LOG_LEVEL=] [default: warn]
   -t, --type <SLOT_TYPE>       
   -s, --slot <SLOT>            
+      --serial <SERIAL>        
       --color <COLOR>          Color output [default: auto] [possible values: auto, always, never]
   -h, --help                   Print help
 
@@ -823,10 +1070,11 @@ Commands for querying and interacting with fault management situation reports
 Usage: omdb db sitrep [OPTIONS] <COMMAND>
 
 Commands:
-  history  List the current situation report history
-  current  Show the current situation report
-  info     Show details on a situation report
-  help     Print this message or the help of the given subcommand(s)
+  history          List the current situation report history
+  current          Show the current situation report
+  info             Show details on a situation report
+  analysis-report  Show the analysis report for the requested sitrep, if one exists
+  help             Print this message or the help of the given subcommand(s)
 
 Options:
       --log-level <LOG_LEVEL>  log level filter [env: LOG_LEVEL=] [default: warn]
@@ -847,6 +1095,147 @@ Safety Options:
   -w, --destructive  Allow potentially-destructive subcommands
 ---------------------------------------------
 stderr:
+=============================================
+EXECUTING COMMAND: omdb ["db", "sitrep", "show", "--help"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+Show details on a situation report
+
+Usage: omdb db sitrep info [OPTIONS] <UUID|VERSION|current>
+
+Arguments:
+  <UUID|VERSION|current>
+          The sitrep to show, identified by UUID, version number, or "current".
+          
+          A value of "current" selects the current sitrep. An integer (optionally prefixed with "v",
+          e.g. "3" or "v3") selects the sitrep with that version number in the sitrep history. Any
+          other value is parsed as a sitrep UUID.
+
+Options:
+  -j, --json
+          
+
+      --log-level <LOG_LEVEL>
+          log level filter
+          
+          [env: LOG_LEVEL=]
+          [default: warn]
+
+      --color <COLOR>
+          Color output
+          
+          [default: auto]
+          [possible values: auto, always, never]
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+Connection Options:
+      --db-url <DB_URL>
+          URL of the database SQL interface
+          
+          [env: OMDB_DB_URL=]
+
+      --dns-server <DNS_SERVER>
+          [env: OMDB_DNS_SERVER=]
+
+Database Options:
+      --fetch-limit <FETCH_LIMIT>
+          limit to apply to queries that fetch rows
+          
+          [env: OMDB_FETCH_LIMIT=]
+          [default: 500]
+
+      --include-deleted
+          whether to include soft-deleted records when enumerating objects that can be soft-deleted
+
+Safety Options:
+  -w, --destructive
+          Allow potentially-destructive subcommands
+---------------------------------------------
+stderr:
+=============================================
+EXECUTING COMMAND: omdb ["db", "sitrep", "analysis-report", "--help"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+Show the analysis report for the requested sitrep, if one exists
+
+Usage: omdb db sitrep analysis-report [OPTIONS] <UUID|VERSION|current>
+
+Arguments:
+  <UUID|VERSION|current>
+          The sitrep whose analysis report to show, identified by UUID, version number, or
+          "current".
+          
+          A value of "current" selects the current sitrep. An integer (optionally prefixed with "v",
+          e.g. "3" or "v3") selects the sitrep with that version number in the sitrep history. Any
+          other value is parsed as a sitrep UUID.
+
+Options:
+  -j, --json
+          
+
+      --log-level <LOG_LEVEL>
+          log level filter
+          
+          [env: LOG_LEVEL=]
+          [default: warn]
+
+      --color <COLOR>
+          Color output
+          
+          [default: auto]
+          [possible values: auto, always, never]
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+Connection Options:
+      --db-url <DB_URL>
+          URL of the database SQL interface
+          
+          [env: OMDB_DB_URL=]
+
+      --dns-server <DNS_SERVER>
+          [env: OMDB_DNS_SERVER=]
+
+Database Options:
+      --fetch-limit <FETCH_LIMIT>
+          limit to apply to queries that fetch rows
+          
+          [env: OMDB_FETCH_LIMIT=]
+          [default: 500]
+
+      --include-deleted
+          whether to include soft-deleted records when enumerating objects that can be soft-deleted
+
+Safety Options:
+  -w, --destructive
+          Allow potentially-destructive subcommands
+---------------------------------------------
+stderr:
+=============================================
+EXECUTING COMMAND: omdb ["db", "sitrep", "show", "not-a-sitrep"]
+termination: Exited(2)
+---------------------------------------------
+stdout:
+---------------------------------------------
+stderr:
+error: invalid value 'not-a-sitrep' for '<UUID|VERSION|current>': expected a sitrep UUID, a version number, or "current"
+
+For more information, try '--help'.
+=============================================
+EXECUTING COMMAND: omdb ["db", "sitrep", "show", "v1.2.3"]
+termination: Exited(2)
+---------------------------------------------
+stdout:
+---------------------------------------------
+stderr:
+error: invalid value 'v1.2.3' for '<UUID|VERSION|current>': a sitrep version (prefixed with 'v' or 'V') must be a valid 32-bit unsigned integer
+
+For more information, try '--help'.
 =============================================
 EXECUTING COMMAND: omdb ["db", "saga"]
 termination: Exited(2)

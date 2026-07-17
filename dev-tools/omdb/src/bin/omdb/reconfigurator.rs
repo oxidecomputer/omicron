@@ -412,7 +412,7 @@ async fn cmd_reconfigurator_config_history(
             .await
             .context("batch of reconfigurator configs")?;
         paginator = p.found_batch(&batch, &|b| SqlU32::new(b.version));
-        history.extend(batch.into_iter());
+        history.extend(batch);
     }
 
     #[derive(Tabled)]
@@ -421,6 +421,7 @@ async fn cmd_reconfigurator_config_history(
         version: String,
         planner_enabled: String,
         tuf_repo_pruner_enabled: String,
+        disruption_policy: String,
         time_modified: String,
     }
 
@@ -434,6 +435,7 @@ async fn cmd_reconfigurator_config_history(
                         planner_enabled,
                         planner_config: PlannerConfig {},
                         tuf_repo_pruner_enabled,
+                        disruption_policy,
                     },
                 time_modified,
             } = s;
@@ -441,6 +443,7 @@ async fn cmd_reconfigurator_config_history(
                 version: version.to_string(),
                 planner_enabled: planner_enabled.to_string(),
                 tuf_repo_pruner_enabled: tuf_repo_pruner_enabled.to_string(),
+                disruption_policy: disruption_policy.to_string(),
                 time_modified: time_modified.to_string(),
             }
         })

@@ -225,6 +225,27 @@ async fn test_iam_roles_behavior() {
         ),
     )));
 
+    // The built-in constant actors. Their privileges come from fixed Polar
+    // rules (db-init, internal-api) and seeded fleet role assignments
+    // (external-authn) rather than per-resource role grants, so the role users
+    // above never exercise them.
+    for (name, authn) in [
+        ("db-init", authn::Context::internal_db_init()),
+        ("internal-api", authn::Context::internal_api()),
+        ("external-authn", authn::Context::external_authn()),
+    ] {
+        let user_log = logctx.log.new(o!("actor" => name));
+        user_contexts.push(Arc::new((
+            String::from(name),
+            OpContext::for_background(
+                user_log,
+                Arc::clone(&authz),
+                authn,
+                Arc::clone(&datastore) as Arc<dyn nexus_auth::storage::Storage>,
+            ),
+        )));
+    }
+
     // Create an output stream that writes to stdout as well as an in-memory
     // buffer.  The test run will write a textual summary to the stream.  Then
     // we'll use  use expectorate to verify it.  We do this rather than assert
@@ -336,9 +357,10 @@ async fn authorize_one_resource(
                     "result" => ?result,
                 );
                 let summary = match result {
-                    Ok(_) => '\u{2714}', // ✔
-                    Err(Error::Forbidden)
-                    | Err(Error::ObjectNotFound { .. }) => '\u{2718}', // ✘
+                    Ok(_) => '\u{2714}',                 // ✔
+                    Err(Error::Forbidden) => '\u{2718}', // ✘ 403, visible
+                    // ∅ 404, hidden
+                    Err(Error::ObjectNotFound { .. }) => '\u{2205}',
                     Err(Error::Unauthenticated { .. }) => '!',
                     Err(_) => '\u{26a0}', // ⚠
                 };
@@ -426,6 +448,19 @@ async fn test_conferred_roles() {
         ResourceBuilder::new(&opctx, &datastore, &mut coverage, main_silo_id);
     builder.new_resource(authz::FLEET);
     builder.new_resource(authz::IP_POOL_LIST);
+    // A second Silo, distinct from the conferring users' own (main) Silo. A user
+    // whose main-Silo role confers a Fleet role is effectively a Fleet-level
+    // principal and must be able to reach OTHER Silos too; the Fleet-only
+    // resources above can't exercise that cross-Silo path. This also exercises
+    // the 404-vs-403 distinction: a user with no path to this Silo can't even
+    // see it, so it gets a 404 (∅) rather than a 403 (✘).
+    let other_silo_id: Uuid =
+        "22222222-2222-4222-8222-222222222222".parse().unwrap();
+    builder.new_resource(authz::Silo::new(
+        authz::FLEET,
+        other_silo_id,
+        LookupType::ByName("other-silo".to_string()),
+    ));
     let test_resources = builder.build();
 
     // We also create a Silo because the ResourceBuilder will create for us

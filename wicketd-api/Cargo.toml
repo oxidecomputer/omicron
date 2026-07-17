@@ -8,6 +8,7 @@ workspace = true
 
 [dependencies]
 bootstrap-agent-lockstep-client.workspace = true
+bootstrap-agent-lockstep-types.workspace = true
 dropshot.workspace = true
 gateway-client.workspace = true
 omicron-common.workspace = true
@@ -21,3 +22,4 @@ sled-hardware-types.workspace = true
 slog.workspace = true
 tufaceous-artifact.workspace = true
 wicket-common.workspace = true
+wicketd-commission-types.workspace = true

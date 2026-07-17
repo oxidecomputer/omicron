@@ -7,8 +7,10 @@ mod helios;
 mod hubris;
 mod job;
 mod tuf;
+mod tuf_v2;
 
 use std::collections::BTreeMap;
+use std::fmt::Write;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::LazyLock;
@@ -18,22 +20,28 @@ use std::time::Instant;
 use anyhow::Context;
 use anyhow::Result;
 use anyhow::bail;
+use anyhow::ensure;
 use camino::Utf8Path;
 use camino::Utf8PathBuf;
 use chrono::Utc;
 use clap::Parser;
+use dev_tools_common::XtaskConfig;
+use dev_tools_common::verify_executable_libraries;
 use fs_err::tokio as fs;
 use omicron_zone_package::config::Config;
 use omicron_zone_package::config::PackageName;
+use omicron_zone_package::package::PackageSource;
 use semver::Version;
 use slog::Drain;
 use slog::Logger;
 use slog::debug;
 use slog::error;
 use slog::info;
+use slog::warn;
 use slog_term::FullFormat;
 use slog_term::TermDecorator;
 use tokio::sync::Semaphore;
+use tufaceous_artifact_v2::OsVariant;
 
 use crate::cmd::Command;
 use crate::job::Jobs;
@@ -46,7 +54,7 @@ use crate::job::Jobs;
 /// to as "v8", "version 8", or "release 8" to customers). The use of semantic
 /// versioning is mostly to hedge for perhaps wanting something more granular in
 /// the future.
-const BASE_VERSION: Version = Version::new(20, 0, 0);
+const BASE_VERSION: Version = Version::new(22, 0, 0);
 
 const RETRY_ATTEMPTS: usize = 3;
 
@@ -170,6 +178,13 @@ struct Args {
     /// tools/pins.toml.
     #[clap(long, conflicts_with("helios_local"))]
     mkincorp: bool,
+
+    /// Verify binaries against the dynamic library linking rules in
+    /// .cargo/xtask.toml.
+    ///
+    /// This is run in CI.
+    #[clap(long)]
+    verify_debug_libraries: bool,
 }
 
 impl Args {
@@ -236,11 +251,10 @@ async fn main() -> Result<()> {
     // Read pins.toml.
     let pins = omicron_pins::Pins::read_from_dir(&metadata.workspace_root)?;
 
-    let permits = Arc::new(Semaphore::new(
-        std::thread::available_parallelism()
-            .context("couldn't get available parallelism")?
-            .into(),
-    ));
+    let threads = std::thread::available_parallelism()
+        .context("couldn't get available parallelism")?
+        .into();
+    let permits = Arc::new(Semaphore::new(threads));
 
     let commit = Command::new(&args.git_bin)
         .args(["rev-parse", "HEAD"])
@@ -249,20 +263,16 @@ async fn main() -> Result<()> {
         .trim()
         .to_owned();
 
-    let mut version = BASE_VERSION.clone();
-    // Differentiate between CI and local builds. We use `0.word` as the
-    // prerelease field because it comes before `alpha`.
-    version.pre =
-        if std::env::var_os("CI").is_some() { "0.ci" } else { "0.local" }
-            .parse()?;
-    // Set the build metadata to the current commit hash.
-    let mut build = String::with_capacity(14);
-    build.push_str("git");
-    build.extend(commit.chars().take(11));
-    version.build = build.parse()?;
-    let version_str = version.to_string();
-    info!(logger, "version: {}", version_str);
+    let version = generate_version(&commit)?;
+    info!(logger, "version: {}", version);
 
+    let xtask_config: Arc<XtaskConfig> = Arc::new(
+        toml::from_str(
+            &fs::read_to_string(WORKSPACE_DIR.join(".cargo/xtask.toml"))
+                .await?,
+        )
+        .context("failed to parse .cargo/xtask.toml")?,
+    );
     let manifest = Arc::new(omicron_zone_package::config::parse_manifest(
         &fs::read_to_string(WORKSPACE_DIR.join("package-manifest.toml"))
             .await?,
@@ -423,6 +433,24 @@ async fn main() -> Result<()> {
         }
     }
 
+    // Check that the local console assets match the pinned console version and
+    // were generated against the current nexus external API version. The
+    // console routinely lags the API on main, so a mismatch is only fatal on
+    // release branches (identified by the presence of a helios pin in
+    // tools/pins.toml); on other branches it is logged as a warning.
+    if let Err(err) = check_console_assets(&logger).await {
+        if pins.helios.is_some() {
+            error!(logger, "console asset check failed: {err:#}");
+            preflight_ok = false;
+        } else {
+            warn!(
+                logger,
+                "console asset check failed (not fatal outside a \
+                release branch): {err:#}"
+            );
+        }
+    }
+
     if !preflight_ok {
         bail!("some preflight checks failed");
     }
@@ -430,6 +458,7 @@ async fn main() -> Result<()> {
     fs::create_dir_all(&args.output_dir).await?;
 
     // DEFINE JOBS ============================================================
+    let editor_v2 = tuf_v2::SharedEditor::new(version.clone())?;
     let tempdir = camino_tempfile::tempdir()
         .context("failed to create temporary directory")?;
     let mut jobs = Jobs::new(&logger, permits.clone(), &args.output_dir);
@@ -526,7 +555,7 @@ async fn main() -> Result<()> {
                             $target.artifacts_path(&args).as_str(),
                             "stamp",
                             package.as_str(),
-                            &version_str,
+                            &version.to_string(),
                         ])
                         .env_remove("CARGO_MANIFEST_DIR"),
                 );
@@ -593,6 +622,17 @@ async fn main() -> Result<()> {
         )
         .after(format!("{}-target", target));
 
+        // verify libraries built by omicron-package
+        jobs.push(
+            format!("{}-libraries", target),
+            target.verify_libraries(
+                xtask_config.clone(),
+                manifest.clone(),
+                target_dir.clone(),
+            ),
+        )
+        .after(format!("{}-package", target));
+
         // omicron-package stamp
         stamp_packages!(
             format!("{}-stamp", target),
@@ -621,13 +661,13 @@ async fn main() -> Result<()> {
             commit.chars().take(7).collect::<String>(),
             Utc::now().format("%Y-%m-%d %H:%M")
         );
-
+        let output_dir = args.output_dir.join(format!("os-{}", target));
         let mut image_cmd = Command::new("ptime")
             .arg("-m")
             .arg(args.helios_dir.join("helios-build"))
             .arg("experiment-image")
             .arg("-o") // output directory for image
-            .arg(args.output_dir.join(format!("os-{}", target)))
+            .arg(&output_dir)
             .arg("-F") // pass extra image builder features
             .arg(format!("optever={opte_version}"))
             .arg("-P") // include all files from extra proto area
@@ -696,13 +736,16 @@ async fn main() -> Result<()> {
                 download_opte_p5p(&logger, &client, &ov.commit, &p5p_path),
             );
 
-            image_cmd = image_cmd
-                .arg("-p")
-                .arg(format!("helios-dev=file://{p5p_path}"));
+            // The OPTE CI p5p publishes under the "helios" publisher, so
+            // this adds it as an extra origin alongside the incorporation
+            // and the helios pkg repo.
+            image_cmd =
+                image_cmd.arg("-p").arg(format!("helios=file://{p5p_path}"));
         }
 
+        let image_job_name = format!("{target}-image");
         let image_job = jobs
-            .push_command(format!("{target}-image"), image_cmd)
+            .push_command(&image_job_name, image_cmd)
             .after("helios-setup")
             .after("helios-incorp")
             .after(format!("{target}-proto"));
@@ -710,12 +753,23 @@ async fn main() -> Result<()> {
         if opte_override.is_some() {
             image_job.after(format!("{target}-opte-p5p"));
         }
+
+        let editor = editor_v2.clone();
+        jobs.push(format!("tuf-v2-{target}"), async move {
+            let os_variant = match target {
+                Target::Host => OsVariant::Host,
+                Target::Recovery => OsVariant::Recovery,
+            };
+            editor.add_os_image_dir(os_variant, output_dir).await
+        })
+        .after(image_job_name);
     }
-    // Build the recovery target after we build the host target. Only one
-    // of these will build at a time since Cargo locks its target directory;
-    // since host-package and host-image both take longer than their recovery
-    // counterparts, this should be the fastest option to go first.
-    jobs.select("recovery-package").after("host-package");
+    // Build the recovery target after we build the host target (and have
+    // finished verifying its binaries). Only one of these will build at a time
+    // since Cargo locks its target directory; since host-package and host-image
+    // both take longer than their recovery counterparts, this should be the
+    // fastest option to go first.
+    jobs.select("recovery-package").after("host-libraries");
     if args.host_dataset == args.recovery_dataset {
         // If the datasets are the same, we can't parallelize these.
         jobs.select("recovery-image").after("host-image");
@@ -732,38 +786,61 @@ async fn main() -> Result<()> {
     stamp_packages!("tuf-stamp", Target::Host, TUF_PACKAGES)
         .after("host-stamp")
         .after("recovery-stamp");
+    {
+        let editor = editor_v2.clone();
+        let manifest = manifest.clone();
+        jobs.push("tuf-v2-zones", async move {
+            let stamped_dir = crate::WORKSPACE_DIR.join("out/versioned");
+            for package_name in TUF_PACKAGES {
+                let path = stamped_dir.join(format!("{}.tar.gz", package_name));
+                // Rename to the file name we actually want in the repo; this
+                // is load-bearing for getting the right file name into the
+                // Installinator document.
+                let package = manifest
+                    .packages
+                    .get(package_name)
+                    .expect("checked in preflight");
+                let correct_path = stamped_dir
+                    .join(format!("{}.tar.gz", package.service_name));
+                if path != correct_path {
+                    fs::copy(&path, &correct_path).await?;
+                }
+                editor.add_zone_image(correct_path).await?;
+            }
+            Ok(())
+        })
+        .after("tuf-stamp");
+    }
 
-    // Run `cargo xtask verify-libraries --release`. (This was formerly run in
-    // the build-and-test Buildomat job, but this fits better here where we've
-    // already built most of the binaries.)
-    jobs.push_command(
-        "verify-libraries",
-        Command::new(&cargo).args(["xtask", "verify-libraries", "--release"]),
-    )
-    .after("host-package")
-    .after("recovery-package");
+    if args.verify_debug_libraries {
+        // Run `cargo xtask verify-libraries`. This builds *all* binaries in
+        // the workspace in debug mode and verifies them against the rules in
+        // .cargo/xtask.toml.
+        //
+        // This does not directly contribute to building or verifying the TUF
+        // repo and is hence optional; this check runs in CI beause we want to
+        // ensure that if you build a debug binary, you can copy it onto a test
+        // rack without unexpected dependencies, and it lives here because we
+        // are essentially using unused CPU while waiting for the OS images to
+        // build. (Adding this to other jobs would make them take longer but not
+        // save this job any time.)
+        jobs.push_command(
+            "verify-libraries",
+            Command::new(&cargo).args(["xtask", "verify-libraries"]),
+        )
+        .after("host-libraries")
+        .after("recovery-libraries");
+    }
 
-    for (name, base_url, name_check) in [
-        (
-            "staging",
-            "https://permslip-staging.corp.oxide.computer",
-            "staging-devel",
-        ),
-        (
-            "production",
-            "https://signer-us-west.corp.oxide.computer",
-            "production-release",
-        ),
-    ] {
+    for env in hubris::Environment::ALL {
         jobs.push(
-            format!("hubris-{}", name),
+            format!("hubris-{}", env.short_name),
             hubris::fetch_hubris_artifacts(
                 logger.clone(),
-                base_url,
+                env,
                 client.clone(),
-                WORKSPACE_DIR.join(format!("tools/permslip_{}", name)),
-                args.output_dir.join(format!("hubris-{}", name)),
-                name_check,
+                args.output_dir.clone(),
+                editor_v2.clone(),
             ),
         );
     }
@@ -776,11 +853,27 @@ async fn main() -> Result<()> {
             version,
             manifest,
             args.extra_manifest,
+            threads,
         ),
     )
     .after("tuf-stamp")
     .after("host-image")
     .after("recovery-image")
+    .after("hubris-staging")
+    .after("hubris-production");
+
+    jobs.push(
+        "tuf-v2-repo",
+        tuf_v2::build_tuf_repo(
+            logger.clone(),
+            args.output_dir.clone(),
+            editor_v2,
+            threads,
+        ),
+    )
+    .after("tuf-v2-host")
+    .after("tuf-v2-recovery")
+    .after("tuf-v2-zones")
     .after("hubris-staging")
     .after("hubris-production");
 
@@ -847,6 +940,60 @@ impl Target {
                 "-R", // recovery image
             ],
         }
+    }
+
+    async fn verify_libraries(
+        self,
+        xtask_config: Arc<XtaskConfig>,
+        package_manifest: Arc<Config>,
+        target_dir: Utf8PathBuf,
+    ) -> Result<()> {
+        // `verify_executable_libraries` uses std::process::Command, so run this
+        // in a blocking task.
+        tokio::task::spawn_blocking(move || {
+            let preset_name =
+                self.as_str().parse().context("could not parse preset name")?;
+            let preset = package_manifest
+                .target
+                .presets
+                .get(&preset_name)
+                .with_context(|| {
+                    format!("preset {preset_name} not found in config")
+                })?;
+            let mut errors = BTreeMap::new();
+            for package in package_manifest.packages_to_build(preset).0.values()
+            {
+                let PackageSource::Local { rust: Some(p), .. } =
+                    &package.source
+                else {
+                    continue;
+                };
+                let dir = if p.release { "release" } else { "debug" };
+                let dir = target_dir.join(dir);
+                for bin in &p.binary_names {
+                    verify_executable_libraries(
+                        &xtask_config,
+                        &dir.join(bin),
+                        &mut errors,
+                    )
+                    .with_context(|| {
+                        format!("failed to verify libraries for {bin}")
+                    })?;
+                }
+            }
+            ensure!(
+                errors.is_empty(),
+                "Found library issues:\n{concat}",
+                concat = errors
+                    .iter()
+                    .flat_map(|(bin, es)| es.iter().map(move |e| (bin, e)))
+                    .map(|(bin, e)| format!("- {bin}: {e}"))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            );
+            Ok(())
+        })
+        .await?
     }
 }
 
@@ -1010,6 +1157,120 @@ async fn host_add_root_profile(host_proto_root: Utf8PathBuf) -> Result<()> {
         "# Add opteadm, ddadm, oxlog to PATH\n\
         export PATH=$PATH:/opt/oxide/opte/bin:/opt/oxide/mg-ddm:/opt/oxide/oxlog\n",
     ).await?;
+    Ok(())
+}
+
+fn generate_version(commit: &str) -> Result<Version> {
+    const PADDED_WIDTH: usize = 8;
+
+    let mut version = BASE_VERSION.clone();
+    // Differentiate between CI and local builds. We use `0.word` as the
+    // prerelease field because it comes before `alpha`.
+    version.pre =
+        if std::env::var_os("CI").is_some() { "0.ci" } else { "0.local" }
+            .parse()?;
+    // Set the build metadata to the current commit hash.
+    let mut build = String::with_capacity(14);
+    build.push_str("git");
+    build.extend(commit.chars().take(11));
+    version.build = build.parse()?;
+
+    // Verify that this version can fit in the database. Nexus converts SemVer
+    // to a zero-padded version in order to use lexicographic sorting in the
+    // database, and the database column is limited to 64 Unicode code points.
+    ensure!(
+        version.major.to_string().len() <= PADDED_WIDTH
+            && version.major.to_string().len() <= PADDED_WIDTH
+            && version.major.to_string().len() <= PADDED_WIDTH,
+        "major, minor, and patch versions may not be longer than {PADDED_WIDTH} digits"
+    );
+    let mut version_str = format!(
+        "{:0>0PADDED_WIDTH$}.{:0>0PADDED_WIDTH$}.{:0>0PADDED_WIDTH$}",
+        version.major, version.minor, version.patch,
+    );
+    if !version.pre.is_empty() {
+        write!(version_str, "-{}", version.pre).unwrap();
+    }
+    if !version.build.is_empty() {
+        write!(version_str, "+{}", version.build).unwrap();
+    }
+    // Avoid bothering with "what does Cockroach mean by Unicode code points"
+    // and just assume the version is entirely ASCII.
+    ensure!(version_str.is_ascii(), "{version_str} is not ASCII");
+    ensure!(version_str.len() <= 64, "{version_str} is longer than 64 bytes");
+
+    Ok(version)
+}
+
+/// Check that the local console assets match the pinned console version and
+/// were built against the current nexus external API version.
+async fn check_console_assets(logger: &Logger) -> Result<()> {
+    let console_version_path = WORKSPACE_DIR.join("tools/console_version");
+    let console_version = fs::read_to_string(&console_version_path).await?;
+    let pinned_commit = console_version
+        .lines()
+        .find_map(|line| {
+            line.trim().strip_prefix("COMMIT=\"")?.strip_suffix('"')
+        })
+        .with_context(|| {
+            format!("failed to parse COMMIT from {console_version_path}")
+        })?;
+
+    // The console records its source commit in a top-level `VERSION` file in
+    // its asset tarball, which `cargo xtask download console` has already
+    // unpacked into `out/console-assets`.
+    let assets_dir = WORKSPACE_DIR.join("out/console-assets");
+    let asset_commit = fs::read_to_string(assets_dir.join("VERSION"))
+        .await
+        .context("run `cargo xtask download console` to fetch console assets")?
+        .trim()
+        .to_owned();
+
+    if asset_commit != pinned_commit {
+        bail!(
+            "the console assets in out/console-assets were built from \
+            commit {asset_commit}, but tools/console_version pins \
+            {pinned_commit}; run `cargo xtask download console`"
+        );
+    }
+    info!(
+        logger,
+        "console assets match pinned console commit ({pinned_commit})"
+    );
+
+    // The current API version is the `info.version` field of the spec
+    // `nexus-latest.json` points to.
+    let spec_path = WORKSPACE_DIR.join("openapi/nexus/nexus-latest.json");
+    let spec: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&spec_path).await?)
+            .with_context(|| format!("failed to parse {spec_path}"))?;
+    let nexus_version = spec
+        .pointer("/info/version")
+        .and_then(serde_json::Value::as_str)
+        .with_context(|| {
+            format!("failed to read info.version from {spec_path}")
+        })?;
+
+    // The console records its API version next to the source commit.
+    let console_api_version =
+        fs::read_to_string(assets_dir.join("API_VERSION"))
+            .await?
+            .trim()
+            .to_owned();
+
+    if console_api_version != nexus_version {
+        bail!(
+            "the console assets in out/console-assets were generated \
+            against API version {console_api_version}, but the current nexus \
+            API version is {nexus_version}; the console needs a client \
+            regen and tools/console_version needs a bump"
+        );
+    }
+    info!(
+        logger,
+        "console client API version matches nexus API version \
+        ({nexus_version})"
+    );
     Ok(())
 }
 

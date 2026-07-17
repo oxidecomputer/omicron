@@ -954,8 +954,8 @@ fn push_cte_to_select_next_subnet_from_pool(
                         family(subnet_end) = 4, \
                         '255.255.255.254'::INET,
                         'ffff:ffff:ffff:ffff:ffff:ffff:ffff:fffe'::INET\
-                    ) + 1\
-                )\
+                    )\
+                ) + 1 \
             END AS gap_start, \
             CASE \
                 WHEN next_subnet_start IS NULL THEN member_end \
@@ -1161,14 +1161,27 @@ pub fn decode_insert_external_subnet_error(
                 public_error_from_diesel(e, ErrorHandler::Server)
             }
         }
-        DieselError::DatabaseError(DatabaseErrorKind::UniqueViolation, _) => {
-            public_error_from_diesel(
-                e,
-                ErrorHandler::Conflict(
-                    ResourceType::ExternalSubnet,
-                    subnet_name,
-                ),
-            )
+        DieselError::DatabaseError(
+            DatabaseErrorKind::UniqueViolation,
+            info,
+        ) => {
+            match info.constraint_name() {
+                Some(EXTERNAL_SUBNET_NAME_CONSTRAINT) => {
+                    public_error_from_diesel(
+                        e,
+                        ErrorHandler::Conflict(
+                            ResourceType::ExternalSubnet,
+                            subnet_name,
+                        ),
+                    )
+                }
+                Some(EXTERNAL_SUBNET_SUBNET_CONSTRAINT)
+                | Some(EXTERNAL_SUBNET_ADDRESS_CONSTRAINT) => {
+                    Error::invalid_request(SUBNET_OVERLAPS_EXISTING_ERR_MSG)
+                }
+                // Any other unique violation is unexpected and indicates a bug.
+                _ => public_error_from_diesel(e, ErrorHandler::Server),
+            }
         }
         DieselError::NotFound => report_exhaustion(subnet),
         _ => public_error_from_diesel(e, ErrorHandler::Server),
@@ -1285,6 +1298,22 @@ The requested IP subnet is not contained in \
 const SUBNET_OVERLAPS_EXISTING_SENTINEL: &str = "overlap-existing";
 pub const SUBNET_OVERLAPS_EXISTING_ERR_MSG: &'static str =
     "The requested IP subnet overlaps with an existing external subnet";
+
+// Unique index names from `dbinit.sql`. CockroachDB reports these as the
+// constraint name on a unique violation, allowing us to match against them for
+// better error messaging.
+
+/// Uniqueness of (`project_id`, `name`).
+const EXTERNAL_SUBNET_NAME_CONSTRAINT: &str =
+    "external_subnet_project_id_name_key";
+
+/// Uniqueness of (`subnet`).
+const EXTERNAL_SUBNET_SUBNET_CONSTRAINT: &str =
+    "lookup_external_subnet_by_subnet";
+
+/// Uniqueness of (`first_address`, `last_address`).
+const EXTERNAL_SUBNET_ADDRESS_CONSTRAINT: &str =
+    "lookup_external_subnet_by_first_and_last_address";
 
 // Error sentinel emitted when we try to insert a subnet into a project that
 // has now been deleted.

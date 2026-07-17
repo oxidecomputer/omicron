@@ -9,12 +9,14 @@ use crate::check_allow_destructive::DestructiveOperationToken;
 use clap::ArgAction;
 use clap::Args;
 use clap::Subcommand;
+use clap::ValueEnum;
 use daft::Diffable;
 use http::StatusCode;
 use indent_write::io::IndentWriter;
 use nexus_types::deployment::PlannerConfig;
 use nexus_types::deployment::ReconfiguratorConfig;
 use nexus_types::deployment::ReconfiguratorConfigParam;
+use nexus_types::deployment::ReconfiguratorDisruptionPolicy;
 use std::io;
 use std::io::Write;
 use std::num::ParseIntError;
@@ -52,6 +54,9 @@ pub struct ReconfiguratorConfigOpts {
 
     #[clap(long, action = ArgAction::Set)]
     tuf_repo_pruner_enabled: Option<bool>,
+
+    #[clap(long)]
+    disruption_policy: Option<ReconfiguratorDisruptionPolicyOpt>,
 }
 
 impl ReconfiguratorConfigOpts {
@@ -66,6 +71,10 @@ impl ReconfiguratorConfigOpts {
             tuf_repo_pruner_enabled: self
                 .tuf_repo_pruner_enabled
                 .unwrap_or(current.tuf_repo_pruner_enabled),
+            disruption_policy: self
+                .disruption_policy
+                .map(|p| p.into())
+                .unwrap_or(current.disruption_policy),
         }
     }
 
@@ -81,6 +90,27 @@ impl ReconfiguratorConfigOpts {
             version: next_version,
             config: new,
         })
+    }
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub enum ReconfiguratorDisruptionPolicyOpt {
+    Terminate,
+    MigrateOrTerminate,
+    MigrateOnly,
+}
+
+impl From<ReconfiguratorDisruptionPolicyOpt>
+    for ReconfiguratorDisruptionPolicy
+{
+    fn from(value: ReconfiguratorDisruptionPolicyOpt) -> Self {
+        match value {
+            ReconfiguratorDisruptionPolicyOpt::Terminate => Self::Terminate,
+            ReconfiguratorDisruptionPolicyOpt::MigrateOrTerminate => {
+                Self::MigrateOrTerminate
+            }
+            ReconfiguratorDisruptionPolicyOpt::MigrateOnly => Self::MigrateOnly,
+        }
     }
 }
 

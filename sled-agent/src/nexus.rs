@@ -700,7 +700,7 @@ mod test {
                 if status.nexus_known_info.is_some() {
                     Ok(status)
                 } else {
-                    Err(CondCheckError::NotYet)
+                    Err(CondCheckError::NotYet { status: None })
                 }
             },
             &Duration::from_millis(2),
@@ -720,7 +720,7 @@ mod test {
                 if !status.has_pending_notification {
                     Ok(status)
                 } else {
-                    Err(CondCheckError::NotYet)
+                    Err(CondCheckError::NotYet { status: None })
                 }
             },
             &Duration::from_millis(2),
@@ -752,7 +752,7 @@ mod test {
                 if status.cancelled_pending_notifications == 2 {
                     Ok(status)
                 } else {
-                    Err(CondCheckError::NotYet)
+                    Err(CondCheckError::NotYet { status: None })
                 }
             },
             &Duration::from_millis(2),
@@ -786,7 +786,7 @@ mod test {
                 if !status.has_pending_notification {
                     Ok(status)
                 } else {
-                    Err(CondCheckError::NotYet)
+                    Err(CondCheckError::NotYet { status: None })
                 }
             },
             &Duration::from_millis(2),
@@ -826,7 +826,7 @@ mod test {
                 {
                     Ok(status)
                 } else {
-                    Err(CondCheckError::NotYet)
+                    Err(CondCheckError::NotYet { status: None })
                 }
             },
             &Duration::from_millis(2),
@@ -870,7 +870,7 @@ mod test {
                 {
                     Ok(status)
                 } else {
-                    Err(CondCheckError::NotYet)
+                    Err(CondCheckError::NotYet { status: None })
                 }
             },
             &Duration::from_millis(2),
@@ -912,7 +912,7 @@ mod test {
                 {
                     Ok(status)
                 } else {
-                    Err(CondCheckError::NotYet)
+                    Err(CondCheckError::NotYet { status: None })
                 }
             },
             &Duration::from_millis(2),
