@@ -307,7 +307,7 @@ impl WicketdApi for WicketdApiImpl {
         let op_status = client
             .rack_initialization_status()
             .await
-            .map_err(|err| ba_lockstep_error_to_http(err, "rack setup"))?
+            .map_err(|err| ba_lockstep_error_to_http(err, "rack setup state"))?
             .into_inner();
 
         Ok(HttpResponseOk(op_status))
