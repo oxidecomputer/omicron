@@ -3723,7 +3723,7 @@ fn cmd_load(
     let mut s = String::new();
     let count = inputs.len();
     let plural = if count == 1 { "" } else { "s" };
-    let loaded = UnstableReconfiguratorState::read_series(inputs.into_iter())
+    let loaded = UnstableReconfiguratorState::read_series(inputs)
         .with_context(|| format!("loading {count} input{plural}"))?;
     for warning in loaded.warnings {
         swriteln!(s, "  {}", warning);
