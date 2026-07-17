@@ -1446,7 +1446,7 @@ impl DbArgs {
                         args.exec(&omdb, &opctx, &datastore).await
                     }
                     DbCommands::Sitrep(args) => {
-                        sitrep::cmd_db_sitrep(&opctx, &datastore, &fetch_opts, args).await
+                        sitrep::cmd_db_sitrep(&omdb, &opctx, &datastore, &fetch_opts, args).await
                     }
                     DbCommands::Sitreps(args) => {
                         sitrep::cmd_db_sitrep_history(&opctx, &datastore, &fetch_opts, args).await
