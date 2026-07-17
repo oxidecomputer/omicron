@@ -69,6 +69,7 @@ use omicron_common::api::external::http_pagination::PaginatedBy;
 use ref_cast::RefCast;
 use std::collections::HashSet;
 use std::net::IpAddr;
+use std::num::NonZeroU32;
 use uuid::Uuid;
 
 /// Helper type with both an authz IP Pool and the actual DB record.
@@ -97,6 +98,11 @@ impl ServiceIpPools {
             IpVersion::V4 => &self.ipv4,
             IpVersion::V6 => &self.ipv6,
         }
+    }
+
+    /// Return any one system-service pool, regardless of IP version.
+    pub fn any_pool(&self) -> Option<&ServiceIpPool> {
+        self.ipv4.first().or_else(|| self.ipv6.first())
     }
 }
 
@@ -485,6 +491,41 @@ impl DataStore {
         Ok(ServiceIpPools { ipv4, ipv6 })
     }
 
+    /// Look up the system-service IP pools of a single IP version.
+    ///
+    /// Returns every pool assigned to system services with the given IP
+    /// version, up to `limit`.
+    pub async fn ip_pools_service_lookup_by_version(
+        &self,
+        opctx: &OpContext,
+        ip_version: IpVersion,
+        limit: NonZeroU32,
+    ) -> LookupResult<Vec<ServiceIpPool>> {
+        let pagparams = PaginatedBy::Id(DataPageParams {
+            marker: None,
+            direction: dropshot::PaginationOrder::Ascending,
+            limit,
+        });
+        let pools = self
+            .ip_pools_list_paginated(
+                opctx,
+                Some(IpPoolAssignment::SystemServices),
+                Some(ip_version),
+                None,
+                &pagparams,
+            )
+            .await?;
+        Ok(pools
+            .into_iter()
+            .map(|db_pool| {
+                let id = db_pool.id();
+                let authz_pool =
+                    authz::IpPool::new(authz::FLEET, id, LookupType::ById(id));
+                ServiceIpPool { authz_pool, db_pool }
+            })
+            .collect())
+    }
+
     /// Fetch all default unicast IP pools for the current silo, one per IP
     /// version. Returns a [`DefaultIpPools`] where each version field is
     /// `Some` if a default pool of that version is linked to the silo, or
@@ -700,10 +741,11 @@ impl DataStore {
     ///
     /// This method may require an index by Availability Zone in the future.
     //
-    // TODO-remove: Use ip_pools_list_paginated with the right enum type
-    // instead.
-    //
-    // See https://github.com/oxidecomputer/omicron/issues/8947.
+    // The only remaining callers are the deprecated `ip-pools-service` API
+    // handlers. Everything else resolves system-service pools by assignment via
+    // `ip_pools_service_lookup_by_version` / `_both_versions`. This method and
+    // the well-known name constants are removed once those handlers move off
+    // the builtin names. See https://github.com/oxidecomputer/omicron/issues/8950.
     pub async fn ip_pools_service_lookup(
         &self,
         opctx: &OpContext,
@@ -2822,14 +2864,22 @@ mod test {
 
         for version in [IpVersion::V4, IpVersion::V6] {
             // confirm system services pools are identified correctly
-            let (authz_pool, pool) = datastore
-                .ip_pools_service_lookup(&opctx, version)
+            let service_pools = datastore
+                .ip_pools_service_lookup_by_version(
+                    &opctx,
+                    version,
+                    NonZeroU32::new(1).unwrap(),
+                )
                 .await
                 .unwrap();
-            assert_eq!(pool.ip_version, version);
+            let service_pool = service_pools.first().unwrap();
+            assert_eq!(service_pool.db_pool.ip_version, version);
 
             let is_internal = datastore
-                .ip_pool_is_assigned_to_system_services(&opctx, &authz_pool)
+                .ip_pool_is_assigned_to_system_services(
+                    &opctx,
+                    &service_pool.authz_pool,
+                )
                 .await;
             assert_eq!(is_internal, Ok(true));
 

@@ -64,6 +64,7 @@ use ref_cast::RefCast;
 use sled_agent_types::inventory::ZoneKind;
 use slog::debug;
 use std::net::IpAddr;
+use std::num::NonZeroU32;
 use uuid::Uuid;
 
 /// Ephemeral IPs for an instance, with one slot per IP version.
@@ -482,17 +483,32 @@ impl DataStore {
         external_ip: OmicronZoneExternalIp,
     ) -> CreateResult<ExternalIp> {
         let version = IpVersion::from(external_ip.ip_version());
-        let (authz_pool, pool) =
-            self.ip_pools_service_lookup(opctx, version).await?;
-        opctx.authorize(authz::Action::CreateChild, &authz_pool).await?;
+        // TODO(#8949): There could be multiple valid IP pools for a given
+        // service, even for a single IP version. For now, use the first such
+        // pool to match existing behavior.
+        let service_pools = self
+            .ip_pools_service_lookup_by_version(
+                opctx,
+                version,
+                NonZeroU32::new(1).unwrap(),
+            )
+            .await?;
+        let service_pool = service_pools.first().ok_or_else(|| {
+            Error::internal_error(&format!(
+                "no system services IP pool for IP version {version}"
+            ))
+        })?;
+        opctx
+            .authorize(authz::Action::CreateChild, &service_pool.authz_pool)
+            .await?;
+        let pool_id = service_pool.db_pool.id();
         let data = IncompleteExternalIp::for_omicron_zone(
-            pool.id(),
+            pool_id,
             external_ip,
             zone_id,
             zone_kind,
         );
-        self.allocate_external_ip(opctx, data, LookupType::ById(pool.id()))
-            .await
+        self.allocate_external_ip(opctx, data, LookupType::ById(pool_id)).await
     }
 
     /// Variant of [Self::external_ip_allocate_omicron_zone] which may be called
@@ -527,13 +543,18 @@ impl DataStore {
     ) -> ListResultVec<ExternalIp> {
         use nexus_db_schema::schema::external_ip::dsl;
 
-        // Note the IP version used here isn't important. It's just for the
-        // authz check to list children, and not used for the actual database
-        // query below, which filters on is_service to get external IPs from
-        // either pool.
-        let (authz_pool, _pool) =
-            self.ip_pools_service_lookup(opctx, IpVersion::V4).await?;
-        opctx.authorize(authz::Action::ListChildren, &authz_pool).await?;
+        // We only need a system-service pool for the authz check; the IP
+        // version is irrelevant (both versions have the same permissions), and
+        // a v6-only rack may have no v4 pool.
+        let service_pools =
+            self.ip_pools_service_lookup_both_versions(opctx).await?;
+        let authz_pool = &service_pools
+            .any_pool()
+            .ok_or_else(|| {
+                Error::internal_error("no system services IP pool found")
+            })?
+            .authz_pool;
+        opctx.authorize(authz::Action::ListChildren, authz_pool).await?;
 
         paginated(dsl::external_ip, dsl::id, pagparams)
             .filter(dsl::is_service)
@@ -1432,12 +1453,22 @@ mod tests {
             Ipv4Addr::new(10, 0, 0, 10),
         ))
         .unwrap();
-        let (service_ip_pool, db_pool) = datastore
-            .ip_pools_service_lookup(opctx, IpVersion::V4)
+        let service_pools = datastore
+            .ip_pools_service_lookup_by_version(
+                opctx,
+                IpVersion::V4,
+                NonZeroU32::new(1).unwrap(),
+            )
             .await
-            .expect("lookup service ip pool");
+            .expect("lookup service ip pools");
+        let service_pool = service_pools.first().expect("v4 service ip pool");
         datastore
-            .ip_pool_add_range(opctx, &service_ip_pool, &db_pool, &ip_range)
+            .ip_pool_add_range(
+                opctx,
+                &service_pool.authz_pool,
+                &service_pool.db_pool,
+                &ip_range,
+            )
             .await
             .expect("add range to service ip pool");
 
@@ -1515,12 +1546,22 @@ mod tests {
         // Set up an service IP pool range with one IP in it.
         let ip = Ipv4Addr::new(10, 0, 0, 1);
         let ip_range = IpRange::try_from((ip, ip)).unwrap();
-        let (service_ip_pool, db_pool) = datastore
-            .ip_pools_service_lookup(opctx, IpVersion::V4)
+        let service_pools = datastore
+            .ip_pools_service_lookup_by_version(
+                opctx,
+                IpVersion::V4,
+                NonZeroU32::new(1).unwrap(),
+            )
             .await
-            .expect("lookup service ip pool");
+            .expect("lookup service ip pools");
+        let service_pool = service_pools.first().expect("v4 service ip pool");
         datastore
-            .ip_pool_add_range(opctx, &service_ip_pool, &db_pool, &ip_range)
+            .ip_pool_add_range(
+                opctx,
+                &service_pool.authz_pool,
+                &service_pool.db_pool,
+                &ip_range,
+            )
             .await
             .expect("add range to service ip pool");
 
