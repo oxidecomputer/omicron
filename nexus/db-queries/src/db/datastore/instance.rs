@@ -2764,7 +2764,7 @@ mod tests {
             .instance_updater_inherit_lock(
                 &opctx,
                 &authz_instance,
-                parent_lock,
+                &parent_lock,
                 Uuid::new_v4(),
             )
             .await
