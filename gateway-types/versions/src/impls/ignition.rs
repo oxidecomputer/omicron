@@ -47,6 +47,14 @@ impl SpIgnition {
             Self::Absent => false,
         }
     }
+
+    /// Returns `true` if an SP is present in this slot.
+    pub fn is_present(&self) -> bool {
+        match self {
+            Self::Present { .. } => true,
+            Self::Absent => false,
+        }
+    }
 }
 
 impl From<gateway_messages::ignition::SystemType> for SpIgnitionSystemType {

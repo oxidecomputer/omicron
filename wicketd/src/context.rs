@@ -272,7 +272,14 @@ impl RssOrMultirackJoinConfig {
 
 /// Shared state used by API handlers
 pub struct ServerContext {
+    /// The main wicketd API address, stored as `config.address` in the SMF
+    /// configuration.
+    ///
+    /// This address is used to reject SMF updates which attempt to change it.
     pub(crate) bind_address: SocketAddrV6,
+    // TODO-RAINCLAUDE: parallel to bind_address; the commission API address
+    // TODO-RAINCLAUDE: (config.commission-address), also rejected on SMF refresh.
+    pub(crate) commission_bind_address: SocketAddrV6,
     pub mgs_handle: MgsHandle,
     pub mgs_client: gateway_client::Client,
     pub transceiver_handle: TransceiverHandle,

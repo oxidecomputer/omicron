@@ -3,9 +3,19 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use std::net::{Ipv6Addr, SocketAddr, SocketAddrV6};
+use std::time::Duration;
 
 use dropshot::test_util::ClientTestContext;
 use gateway_test_utils::setup::GatewayTestContext;
+use http::StatusCode;
+use omicron_test_utils::dev::poll::{CondCheckError, wait_for_condition};
+use wicketd_commission_client::Error;
+use wicketd_commission_types_versions::latest::inventory::{
+    SpIdentifier, SpType,
+};
+use wicketd_commission_types_versions::latest::update::{
+    SpUpdateProgress, SpUpdateProgressEntry,
+};
 
 pub struct WicketdTestContext {
     pub wicketd_addr: SocketAddrV6,
@@ -19,6 +29,8 @@ pub struct WicketdTestContext {
     // this way.
     #[allow(dead_code)]
     pub artifact_client: installinator_client::Client,
+    pub commission_addr: SocketAddrV6,
+    pub commission_client: wicketd_commission_client::Client,
     pub server: wicketd::Server,
     pub gateway: GatewayTestContext,
 }
@@ -42,6 +54,7 @@ impl WicketdTestContext {
         let args = wicketd::Args {
             address: LOCALHOST_PORT_0,
             artifact_address: LOCALHOST_PORT_0,
+            commission_address: LOCALHOST_PORT_0,
             mgs_address,
             nexus_proxy_address: LOCALHOST_PORT_0,
             baseboard: None,
@@ -84,12 +97,28 @@ impl WicketdTestContext {
             log.new(slog::o!("component" => "wicketd test, raw client")),
         );
 
+        let commission_addr =
+            assert_ipv6(server.commission_server.local_addr());
+        let commission_client = {
+            let endpoint = format!(
+                "http://[{}]:{}",
+                commission_addr.ip(),
+                commission_addr.port()
+            );
+            wicketd_commission_client::Client::new(
+                &endpoint,
+                log.new(slog::o!("component" => "commission test client")),
+            )
+        };
+
         Self {
             wicketd_addr,
             wicketd_client,
             wicketd_raw_client,
             artifact_addr,
             artifact_client,
+            commission_addr,
+            commission_client,
             server,
             gateway,
         }
@@ -111,5 +140,70 @@ fn assert_ipv6(addr: SocketAddr) -> SocketAddrV6 {
         SocketAddr::V4(addr) => {
             panic!("expected v6 address, got v4: {addr}")
         }
+    }
+}
+
+pub type ClientError = Error<wicketd_commission_client::types::Error>;
+pub type Cond<T> = Result<T, CondCheckError<ClientError>>;
+
+/// Poll get_update_progress until sled 0's entry satisfies `reached`.
+///
+/// Panics on failure with `expect_msg`.
+pub async fn wait_for_sled0_progress(
+    ctx: &WicketdTestContext,
+    expect_msg: &str,
+    reached: impl Fn(&SpUpdateProgress) -> bool,
+) -> SpUpdateProgressEntry {
+    wait_for_condition(
+        || async {
+            let result: Cond<SpUpdateProgressEntry> =
+                match ctx.commission_client.get_update_progress().await {
+                    Ok(resp) => {
+                        match resp
+                            .into_inner()
+                            .get(&SpIdentifier { typ: SpType::Sled, slot: 0 })
+                        {
+                            Some(entry) if reached(&entry.progress) => {
+                                Ok(entry.clone())
+                            }
+                            _ => Err(CondCheckError::NotYet { status: None }),
+                        }
+                    }
+                    Err(err) => Err(CondCheckError::Failed(err)),
+                };
+            result
+        },
+        &Duration::from_millis(50),
+        &Duration::from_secs(30),
+    )
+    .await
+    .expect(expect_msg)
+}
+
+pub fn assert_client_error(err: &ClientError, expected: StatusCode) {
+    match err {
+        Error::ErrorResponse(rv) => {
+            assert_eq!(rv.status(), expected, "unexpected status: {err:?}");
+            assert!(!rv.message.is_empty(), "error carries a message: {err:?}");
+        }
+        other => panic!("expected an error response, got {other:?}"),
+    }
+}
+
+pub fn assert_client_error_message(
+    err: &ClientError,
+    expected: StatusCode,
+    needle: &str,
+) {
+    match err {
+        Error::ErrorResponse(rv) => {
+            assert_eq!(rv.status(), expected, "unexpected status: {err:?}");
+            assert!(
+                rv.message.contains(needle),
+                "error message {:?} should contain {needle:?}",
+                rv.message,
+            );
+        }
+        other => panic!("expected an error response, got {other:?}"),
     }
 }

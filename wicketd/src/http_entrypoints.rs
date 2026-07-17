@@ -307,7 +307,7 @@ impl WicketdApi for WicketdApiImpl {
         let op_status = client
             .rack_initialization_status()
             .await
-            .map_err(|err| ba_lockstep_error_to_http(err, "rack setup"))?
+            .map_err(|err| ba_lockstep_error_to_http(err, "rack setup state"))?
             .into_inner();
 
         Ok(HttpResponseOk(op_status))
@@ -702,6 +702,13 @@ impl WicketdApi for WicketdApiImpl {
             return Err(HttpError::for_bad_request(
                 None,
                 "listening address cannot be reconfigured".to_string(),
+            ));
+        }
+        if rqctx.commission_bind_address != smf_values.commission_address {
+            return Err(HttpError::for_bad_request(
+                None,
+                "commission listening address cannot be reconfigured"
+                    .to_string(),
             ));
         }
 

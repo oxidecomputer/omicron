@@ -114,6 +114,7 @@ pub struct SpState {
     Copy,
     PartialEq,
     Eq,
+    Hash,
     PartialOrd,
     Ord,
     Serialize,

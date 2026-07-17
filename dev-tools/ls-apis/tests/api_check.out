@@ -20,6 +20,7 @@ Server-managed APIs:
     Propolis (propolis-client, exposed by propolis-server)
     Sled Agent (sled-agent-client, exposed by omicron-sled-agent)
     Wicketd (wicketd-client, exposed by wicketd)
+    Wicketd Commission (wicketd-commission-client, exposed by wicketd)
 
 
 Client-managed API:

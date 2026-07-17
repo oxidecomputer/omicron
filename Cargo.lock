@@ -8940,6 +8940,7 @@ dependencies = [
  "serde_json",
  "sled-agent-api",
  "wicketd-api",
+ "wicketd-commission-api",
 ]
 
 [[package]]
@@ -17448,6 +17449,7 @@ dependencies = [
  "http-body-util",
  "hubtools 0.4.7 (git+https://github.com/oxidecomputer/hubtools.git?rev=2b1ef9b38d75563ea800baa3b17327eec17b1b7a)",
  "hyper",
+ "iddqd",
  "illumos-utils",
  "installinator",
  "installinator-api",
@@ -17503,14 +17505,16 @@ dependencies = [
  "wicket-common",
  "wicketd-api",
  "wicketd-client",
+ "wicketd-commission-api",
+ "wicketd-commission-client",
  "wicketd-commission-types",
+ "wicketd-commission-types-versions",
 ]
 
 [[package]]
 name = "wicketd-api"
 version = "0.1.0"
 dependencies = [
- "bootstrap-agent-lockstep-client",
  "bootstrap-agent-lockstep-types",
  "dropshot",
  "gateway-client",
@@ -17555,6 +17559,35 @@ dependencies = [
 ]
 
 [[package]]
+name = "wicketd-commission-api"
+version = "0.1.0"
+dependencies = [
+ "dropshot",
+ "dropshot-api-manager-types",
+ "iddqd",
+ "omicron-uuid-kinds",
+ "omicron-workspace-hack",
+ "wicketd-commission-types-versions",
+]
+
+[[package]]
+name = "wicketd-commission-client"
+version = "0.1.0"
+dependencies = [
+ "iddqd",
+ "omicron-uuid-kinds",
+ "omicron-workspace-hack",
+ "oxnet",
+ "progenitor 0.14.0",
+ "regress 0.10.5",
+ "reqwest 0.13.2",
+ "schemars 0.8.22",
+ "serde",
+ "slog",
+ "wicketd-commission-types-versions",
+]
+
+[[package]]
 name = "wicketd-commission-types"
 version = "0.1.0"
 dependencies = [
@@ -17566,10 +17599,14 @@ dependencies = [
 name = "wicketd-commission-types-versions"
 version = "0.1.0"
 dependencies = [
+ "gateway-types-versions",
+ "iddqd",
  "omicron-common",
+ "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "oxnet",
  "schemars 0.8.22",
+ "semver 1.0.28",
  "serde",
  "serde_json",
  "sled-agent-types-versions",

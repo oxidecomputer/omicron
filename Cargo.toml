@@ -25,6 +25,7 @@ members = [
     "clients/repo-depot-client",
     "clients/sled-agent-client",
     "clients/wicketd-client",
+    "clients/wicketd-commission-client",
     "cockroach-admin",
     "cockroach-admin/api",
     "cockroach-admin/types",
@@ -184,6 +185,7 @@ members = [
     "wicket",
     "wicketd",
     "wicketd-api",
+    "wicketd-commission-api",
     "wicketd-commission-types",
     "wicketd-commission-types/versions",
     "workspace-hack",
@@ -217,6 +219,7 @@ default-members = [
     "clients/repo-depot-client",
     "clients/sled-agent-client",
     "clients/wicketd-client",
+    "clients/wicketd-commission-client",
     "cockroach-admin",
     "cockroach-admin/api",
     "cockroach-admin/types",
@@ -378,6 +381,7 @@ default-members = [
     "wicket",
     "wicketd",
     "wicketd-api",
+    "wicketd-commission-api",
     "wicketd-commission-types",
     "wicketd-commission-types/versions",
     "workspace-hack",
@@ -895,6 +899,8 @@ wicket = { path = "wicket" }
 wicket-common = { path = "wicket-common" }
 wicketd-api = { path = "wicketd-api" }
 wicketd-client = { path = "clients/wicketd-client" }
+wicketd-commission-api = { path = "wicketd-commission-api" }
+wicketd-commission-client = { path = "clients/wicketd-commission-client" }
 wicketd-commission-types = { path = "wicketd-commission-types" }
 wicketd-commission-types-versions = { path = "wicketd-commission-types/versions" }
 x509-cert = { version = "0.2.5", default-features = false }
