@@ -15,7 +15,7 @@ use wicket_common::inventory::SledInventory;
 use wicket_common::multirack_setup::CurrentMultirackJoinUserConfig;
 use wicket_common::multirack_setup::MultirackJoinConfigBaseUserInput;
 use wicket_common::rack_setup::GetBgpAuthKeyInfoResponse;
-use wicket_common::rack_setup::UserSpecifiedRackNetworkConfig;
+use wicketd_commission_types::rack_setup::UserSpecifiedRackNetworkConfig;
 
 pub(crate) struct CurrentMultirackJoinConfig {
     pub common: RssOrMultirackJoinConfigCommon,

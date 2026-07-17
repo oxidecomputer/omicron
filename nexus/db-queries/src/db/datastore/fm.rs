@@ -2648,6 +2648,7 @@ mod tests {
             observed_sagas: Default::default(),
         };
         let analysis_report = AnalysisReport {
+            log: Default::default(),
             sitrep_id: sitrep.id(),
             comment: format!(
                 "{} (totally fake analysis report)",
@@ -3271,6 +3272,7 @@ mod tests {
                 observed_sagas: Default::default(),
             };
             let analysis_report = AnalysisReport {
+                log: Default::default(),
                 sitrep_id: ghost_sitrep_id,
                 comment: "spooky ghost analysis report".to_string(),
                 cases: Default::default(),

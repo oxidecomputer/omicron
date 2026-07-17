@@ -9,12 +9,12 @@ use std::fmt;
 
 /// Recursively format a JSON value as a bulleted list entry, nesting any
 /// object or array children as indented sub-bullets.
-pub struct Displayer<'json> {
+pub struct Json<'json> {
     json: &'json serde_json::Value,
     indent: usize,
 }
 
-impl<'json> Displayer<'json> {
+impl<'json> Json<'json> {
     pub fn new(json: &'json serde_json::Value) -> Self {
         Self { json, indent: 0 }
     }
@@ -25,7 +25,7 @@ impl<'json> Displayer<'json> {
     }
 }
 
-impl fmt::Display for Displayer<'_> {
+impl fmt::Display for Json<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let indent = self.indent;
         match self.json {
@@ -132,5 +132,67 @@ pub(crate) fn fmt_json_array_item(
         serde_json::Value::Number(num) => {
             writeln!(f, "{:indent$}{n}. {num}", "")
         }
+    }
+}
+
+/// Displays a (potentially multi-line) `comment` string with configurable
+/// indentation and leading `// ` delimiters.
+pub struct Comment<'c> {
+    comment: &'c str,
+    indent: usize,
+    leading_newline: bool,
+}
+
+impl<'c> Comment<'c> {
+    pub fn new(comment: &'c str, indent: usize) -> Self {
+        Self { comment, indent, leading_newline: false }
+    }
+
+    pub fn indent(self, indent: usize) -> Self {
+        Self { indent, ..self }
+    }
+
+    pub fn with_leading_newline(self) -> Self {
+        Self { leading_newline: true, ..self }
+    }
+}
+
+impl<'c> From<&'c String> for Comment<'c> {
+    fn from(comment: &'c String) -> Self {
+        Self::new(comment.as_str(), 0)
+    }
+}
+
+impl<'c> From<&'c Option<String>> for Comment<'c> {
+    fn from(comment: &'c Option<String>) -> Self {
+        Self::from(comment.as_deref())
+    }
+}
+
+impl<'c> From<Option<&'c String>> for Comment<'c> {
+    fn from(comment: Option<&'c String>) -> Self {
+        Self::from(comment.map(String::as_str))
+    }
+}
+
+impl<'c> From<Option<&'c str>> for Comment<'c> {
+    fn from(comment: Option<&'c str>) -> Self {
+        Self::new(comment.unwrap_or(""), 0)
+    }
+}
+
+impl std::fmt::Display for Comment<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let &Self { comment, indent, leading_newline } = self;
+        if comment.is_empty() {
+            return Ok(());
+        }
+        if leading_newline {
+            writeln!(f, "")?;
+        }
+        for line in comment.lines() {
+            writeln!(f, "{:indent$}// {line}", "",)?;
+        }
+        Ok(())
     }
 }

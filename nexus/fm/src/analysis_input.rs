@@ -43,10 +43,10 @@ pub struct Input {
     inv: Arc<inventory::Collection>,
     /// Ereports which are new and should be input to analysis in the next
     /// sitrep.
-    new_ereports: IdOrdMap<fm::Ereport>,
+    new_ereports: IdOrdMap<Arc<fm::Ereport>>,
     open_cases: IdOrdMap<fm::Case>,
     closed_cases_copied_forward: IdOrdMap<fm::Case>,
-    ereporter_restarts: IdOrdMap<EreporterRestart>,
+    ereporter_restarts: IdOrdMap<Arc<EreporterRestart>>,
     /// Indicates whether `Builder::build` dropped any closed case
     /// from the carry-forward list whose alert request set was non-empty.
     /// ORed with [`crate::builder::AllCases::alert_set_changed`] in
@@ -75,7 +75,7 @@ impl Input {
         &self.inv
     }
 
-    pub fn new_ereports(&self) -> &IdOrdMap<fm::Ereport> {
+    pub fn new_ereports(&self) -> &IdOrdMap<Arc<fm::Ereport>> {
         &self.new_ereports
     }
 
@@ -86,7 +86,7 @@ impl Input {
         &self.open_cases
     }
 
-    pub fn ereporter_restarts(&self) -> &IdOrdMap<EreporterRestart> {
+    pub fn ereporter_restarts(&self) -> &IdOrdMap<Arc<EreporterRestart>> {
         &self.ereporter_restarts
     }
 
@@ -179,7 +179,7 @@ pub struct Builder {
     observed_sagas: Arc<IdOrdMap<ObservedSaga>>,
     /// Ereports which are new and should be input to analysis in the next
     /// sitrep.
-    new_ereports: IdOrdMap<fm::Ereport>,
+    new_ereports: IdOrdMap<Arc<fm::Ereport>>,
 
     /// The IDs of any ereports which have been included in the parent sitrep,
     /// but which have *not* yet been marked as seen in the database.
@@ -188,7 +188,7 @@ pub struct Builder {
     /// copied forwards due to containing unmarked ereports.
     unmarked_seen_ereports: BTreeSet<fm::EreportId>,
 
-    ereporter_restarts: IdOrdMap<nexus_db_model::EreporterRestart>,
+    ereporter_restarts: IdOrdMap<Arc<nexus_db_model::EreporterRestart>>,
     /// The IDs of alert requests on the parent sitrep's closed cases that
     /// already have a marker row in `rendezvous_alert_created`. A closed-case
     /// request absent from this set is outstanding work, and (like an unmarked
@@ -237,7 +237,7 @@ impl Builder {
                 }
             }
 
-            Some(ereport)
+            Some(Arc::new(ereport))
         }))
     }
 
@@ -269,15 +269,17 @@ impl Builder {
     }
 
     /// Adds a set of ereport restart IDs to the input.
-    pub fn add_ereporter_restarts(
+    pub fn add_ereporter_restarts<I>(
         &mut self,
-        restarts: impl IntoIterator<Item = EreporterRestart>,
-    ) {
-        self.ereporter_restarts.extend(restarts)
+        restarts: impl IntoIterator<Item = I>,
+    ) where
+        Arc<EreporterRestart>: From<I>,
+    {
+        self.ereporter_restarts.extend(restarts.into_iter().map(Arc::from))
     }
 
     /// Borrows the map of known ereport reporter restart IDs.
-    pub fn ereporter_restarts(&self) -> &IdOrdMap<EreporterRestart> {
+    pub fn ereporter_restarts(&self) -> &IdOrdMap<Arc<EreporterRestart>> {
         &self.ereporter_restarts
     }
 
@@ -789,8 +791,10 @@ mod tests {
         sitrep_builder.comment_mut().push_str("my cool sitrep");
 
         let new_case_id = {
-            let mut new_case =
-                sitrep_builder.cases.open_case(DiagnosisEngineKind::PowerShelf);
+            let mut new_case = sitrep_builder.cases.open_case(
+                DiagnosisEngineKind::PowerShelf,
+                "my cool test case",
+            );
             new_case.add_ereport(
                 &ereport_new,
                 "this ereport is important to the case somehow",

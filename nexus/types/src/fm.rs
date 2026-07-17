@@ -18,7 +18,7 @@ pub use fact::{
     SagaNotProgressingFactPayload, SagaOwnerNotCurrentFactPayload,
     ZpoolUnhealthyFactPayload,
 };
-pub mod json_display;
+pub mod display;
 
 use case::AlertRequest;
 use chrono::{DateTime, Utc};
