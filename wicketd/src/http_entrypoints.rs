@@ -7,14 +7,15 @@
 use crate::SmfConfigValues;
 use crate::context::CommonConfigContainer;
 use crate::context::RssOrMultirackJoinConfig;
-use crate::helpers::SpIdentifierDisplay;
-use crate::helpers::sps_to_string;
-use crate::mgs::GetInventoryError as GetMgsInventoryError;
+use crate::http_helpers::ba_lockstep_client;
+use crate::http_helpers::ba_lockstep_error_to_http;
+use crate::http_helpers::inventory_err_to_http;
+use crate::http_helpers::mgs_inventory_or_unavail;
+use crate::http_helpers::start_update;
 use crate::mgs::GetInventoryResponse as GetMgsInventoryResponse;
-use crate::mgs::MgsHandle;
-use crate::mgs::ShutdownInProgress;
 use crate::multirack_config::CurrentMultirackJoinConfig;
 use crate::transceivers::GetTransceiversResponse;
+use bootstrap_agent_lockstep_client::ClientInfo as _;
 use bootstrap_agent_lockstep_types::RackOperationStatus;
 use dropshot::ApiDescription;
 use dropshot::HttpError;
@@ -30,12 +31,7 @@ use omicron_uuid_kinds::RackResetUuid;
 use sled_agent_types::early_networking::SwitchSlot;
 use sled_hardware_types::Baseboard;
 use slog::o;
-use slog_error_chain::InlineErrorChain;
-use std::collections::BTreeMap;
-use std::collections::BTreeSet;
 use std::sync::Arc;
-use wicket_common::WICKETD_TIMEOUT;
-use wicket_common::inventory::MgsV1Inventory;
 use wicket_common::inventory::MgsV1InventorySnapshot;
 use wicket_common::inventory::RackV1Inventory;
 use wicket_common::inventory::SpIdentifier;
@@ -306,42 +302,12 @@ impl WicketdApi for WicketdApiImpl {
     ) -> Result<HttpResponseOk<RackOperationStatus>, HttpError> {
         let ctx = rqctx.context();
 
-        let lockstep_addr =
-            ctx.bootstrap_agent_lockstep_addr().map_err(|err| {
-                HttpError::for_bad_request(None, format!("{err:#}"))
-            })?;
-
-        let client = bootstrap_agent_lockstep_client::Client::new(
-            &format!("http://{}", lockstep_addr),
-            ctx.log.new(slog::o!("component" => "bootstrap lockstep client")),
-        );
+        let client = ba_lockstep_client(ctx)?;
 
         let op_status = client
             .rack_initialization_status()
             .await
-            .map_err(|err| {
-                use bootstrap_agent_lockstep_client::Error as BaError;
-                match err {
-                    BaError::CommunicationError(err) => {
-                        let message = format!(
-                            "Failed to send rack setup request: {}",
-                            InlineErrorChain::new(&err)
-                        );
-                        HttpError {
-                            status_code:
-                                dropshot::ErrorStatusCode::SERVICE_UNAVAILABLE,
-                            error_code: None,
-                            external_message: message.clone(),
-                            internal_message: message,
-                            headers: None,
-                        }
-                    }
-                    other => HttpError::for_bad_request(
-                        None,
-                        format!("Rack setup request failed: {other}"),
-                    ),
-                }
-            })?
+            .map_err(|err| ba_lockstep_error_to_http(err, "rack setup state"))?
             .into_inner();
 
         Ok(HttpResponseOk(op_status))
@@ -353,10 +319,7 @@ impl WicketdApi for WicketdApiImpl {
         let ctx = rqctx.context();
         let log = &rqctx.log;
 
-        let lockstep_addr =
-            ctx.bootstrap_agent_lockstep_addr().map_err(|err| {
-                HttpError::for_bad_request(None, format!("{err:#}"))
-            })?;
+        let client = ba_lockstep_client(ctx)?;
 
         let request = {
             let mut config = ctx.rss_or_multirack_join_config.lock().unwrap();
@@ -373,39 +336,13 @@ impl WicketdApi for WicketdApiImpl {
         slog::info!(
             ctx.log,
             "Sending RSS initialize request to {}",
-            lockstep_addr
-        );
-        let client = bootstrap_agent_lockstep_client::Client::new(
-            &format!("http://{}", lockstep_addr),
-            ctx.log.new(slog::o!("component" => "bootstrap lockstep client")),
+            client.baseurl()
         );
 
         let init_id = client
             .rack_initialize(&request)
             .await
-            .map_err(|err| {
-                use bootstrap_agent_lockstep_client::Error as BaError;
-                match err {
-                    BaError::CommunicationError(err) => {
-                        let message = format!(
-                            "Failed to send rack setup request: {}",
-                            InlineErrorChain::new(&err)
-                        );
-                        HttpError {
-                            status_code:
-                                dropshot::ErrorStatusCode::SERVICE_UNAVAILABLE,
-                            error_code: None,
-                            external_message: message.clone(),
-                            internal_message: message,
-                            headers: None,
-                        }
-                    }
-                    other => HttpError::for_bad_request(
-                        None,
-                        format!("Rack setup request failed: {other}"),
-                    ),
-                }
-            })?
+            .map_err(|err| ba_lockstep_error_to_http(err, "rack setup"))?
             .into_inner();
 
         Ok(HttpResponseOk(init_id))
@@ -416,43 +353,18 @@ impl WicketdApi for WicketdApiImpl {
     ) -> Result<HttpResponseOk<RackResetUuid>, HttpError> {
         let ctx = rqctx.context();
 
-        let lockstep_addr =
-            ctx.bootstrap_agent_lockstep_addr().map_err(|err| {
-                HttpError::for_bad_request(None, format!("{err:#}"))
-            })?;
+        let client = ba_lockstep_client(ctx)?;
 
-        slog::info!(ctx.log, "Sending RSS reset request to {}", lockstep_addr);
-        let client = bootstrap_agent_lockstep_client::Client::new(
-            &format!("http://{}", lockstep_addr),
-            ctx.log.new(slog::o!("component" => "bootstrap lockstep client")),
+        slog::info!(
+            ctx.log,
+            "Sending RSS reset request to {}",
+            client.baseurl()
         );
 
         let reset_id = client
             .rack_reset()
             .await
-            .map_err(|err| {
-                use bootstrap_agent_lockstep_client::Error as BaError;
-                match err {
-                    BaError::CommunicationError(err) => {
-                        let message = format!(
-                            "Failed to send rack reset request: {}",
-                            InlineErrorChain::new(&err)
-                        );
-                        HttpError {
-                            status_code:
-                                dropshot::ErrorStatusCode::SERVICE_UNAVAILABLE,
-                            error_code: None,
-                            external_message: message.clone(),
-                            internal_message: message,
-                            headers: None,
-                        }
-                    }
-                    other => HttpError::for_bad_request(
-                        None,
-                        format!("Rack setup request failed: {other}"),
-                    ),
-                }
-            })?
+            .map_err(|err| ba_lockstep_error_to_http(err, "rack reset"))?
             .into_inner();
 
         Ok(HttpResponseOk(reset_id))
@@ -476,17 +388,8 @@ impl WicketdApi for WicketdApiImpl {
                 mgs_last_seen,
             }) => Some((inventory, mgs_last_seen)),
             Ok(GetMgsInventoryResponse::Unavailable) => None,
-            Err(GetMgsInventoryError::InvalidSpIdentifier) => {
-                return Err(HttpError::for_unavail(
-                    None,
-                    "Invalid SP identifier in request".into(),
-                ));
-            }
-            Err(GetMgsInventoryError::ShutdownInProgress) => {
-                return Err(HttpError::for_unavail(
-                    None,
-                    "Server is shutting down".into(),
-                ));
+            Err(err) => {
+                return Err(inventory_err_to_http(err));
             }
         };
 
@@ -603,196 +506,8 @@ impl WicketdApi for WicketdApiImpl {
         let rqctx = rqctx.context();
         let params = params.into_inner();
 
-        if params.targets.is_empty() {
-            return Err(HttpError::for_bad_request(
-                None,
-                "No update targets specified".into(),
-            ));
-        }
-
-        // Can we update the target SPs? We refuse to update if, for any target SP:
-        //
-        // 1. We haven't pulled its state in our inventory (most likely cause: the
-        //    cubby is empty; less likely cause: the SP is misbehaving, which will
-        //    make updating it very unlikely to work anyway)
-        // 2. We have pulled its state but our hardware manager says we can't
-        //    update it (most likely cause: the target is the sled we're currently
-        //    running on; less likely cause: our hardware manager failed to get our
-        //    local identifying information, and it refuses to update this target
-        //    out of an abundance of caution).
-        //
-        // First, get our most-recently-cached inventory view. (Only wait 80% of
-        // WICKETD_TIMEOUT for this: if even a cached inventory isn't available,
-        // it's because we've never established contact with MGS. In that case, we
-        // should produce a useful error message rather than timing out on the
-        // client.)
-        let inventory = match tokio::time::timeout(
-            WICKETD_TIMEOUT.mul_f32(0.8),
-            rqctx.mgs_handle.get_cached_inventory(),
-        )
-        .await
-        {
-            Ok(Ok(inventory)) => inventory,
-            Ok(Err(ShutdownInProgress)) => {
-                return Err(HttpError::for_unavail(
-                    None,
-                    "Server is shutting down".into(),
-                ));
-            }
-            Err(_) => {
-                // Have to construct an HttpError manually because
-                // HttpError::for_unavail doesn't accept an external message.
-                let message =
-                    "Rack inventory not yet available (is MGS alive?)"
-                        .to_owned();
-                return Err(HttpError {
-                    status_code: dropshot::ErrorStatusCode::SERVICE_UNAVAILABLE,
-                    error_code: None,
-                    external_message: message.clone(),
-                    internal_message: message,
-                    headers: None,
-                });
-            }
-        };
-
-        // Error cases.
-        let mut inventory_absent = BTreeSet::new();
-        let mut self_update = None;
-        let mut maybe_self_update = BTreeSet::new();
-
-        // Next, do we have the states of the target SP?
-        let sp_states = match inventory {
-            GetMgsInventoryResponse::Response { inventory, .. } => inventory
-                .sps
-                .into_iter()
-                .filter_map(|sp| {
-                    if params.targets.contains(&sp.id) {
-                        if let Some(sp_state) = sp.state {
-                            Some((sp.id, sp_state))
-                        } else {
-                            None
-                        }
-                    } else {
-                        None
-                    }
-                })
-                .collect(),
-            GetMgsInventoryResponse::Unavailable => BTreeMap::new(),
-        };
-
-        for target in &params.targets {
-            let sp_state = match sp_states.get(target) {
-                Some(sp_state) => sp_state,
-                None => {
-                    // The state isn't present, so add to inventory_absent.
-                    inventory_absent.insert(*target);
-                    continue;
-                }
-            };
-
-            // If we have the state of the SP, are we allowed to update it? We
-            // refuse to try to update our own sled.
-            match &rqctx.baseboard {
-                Some(baseboard) => {
-                    if baseboard.identifier() == sp_state.serial_number
-                        && baseboard.model() == sp_state.model
-                        && baseboard.revision() == sp_state.revision
-                    {
-                        self_update = Some(*target);
-                        continue;
-                    }
-                }
-                None => {
-                    // We don't know our own baseboard, which is a very questionable
-                    // state to be in! For now, we will hard-code the possibly
-                    // locations where we could be running: scrimlets can only be in
-                    // cubbies 14 or 16, so we refuse to update either of those.
-                    let target_is_scrimlet = matches!(
-                        (target.typ, target.slot),
-                        (SpType::Sled, 14 | 16)
-                    );
-                    if target_is_scrimlet {
-                        maybe_self_update.insert(*target);
-                        continue;
-                    }
-                }
-            }
-        }
-
-        // Do we have any errors?
-        let mut errors = Vec::new();
-        if !inventory_absent.is_empty() {
-            errors.push(format!(
-                "cannot update sleds (no inventory state present for {})",
-                sps_to_string(&inventory_absent)
-            ));
-        }
-        if let Some(self_update) = self_update {
-            errors.push(format!(
-                "cannot update sled where wicketd is running ({})",
-                SpIdentifierDisplay(self_update)
-            ));
-        }
-        if !maybe_self_update.is_empty() {
-            errors.push(format!(
-                "wicketd does not know its own baseboard details: \
-             refusing to update either scrimlet ({})",
-                sps_to_string(&inventory_absent)
-            ));
-        }
-
-        if let Some(test_error) = &params.options.test_error {
-            errors.push(
-                test_error.into_error_string(log, "starting update").await,
-            );
-        }
-
-        let start_update_errors = if errors.is_empty() {
-            // No errors: we can try and proceed with this update.
-            match rqctx
-                .update_tracker
-                .start(params.targets, params.options)
-                .await
-            {
-                Ok(()) => return Ok(HttpResponseUpdatedNoContent {}),
-                Err(errors) => errors,
-            }
-        } else {
-            // We've already found errors, so all we want to do is to check whether
-            // the update tracker thinks there are any errors as well.
-            match rqctx.update_tracker.update_pre_checks(params.targets).await {
-                Ok(()) => Vec::new(),
-                Err(errors) => errors,
-            }
-        };
-
-        errors
-            .extend(start_update_errors.iter().map(|error| error.to_string()));
-
-        // If we get here, we have errors to report.
-
-        match errors.len() {
-            0 => {
-                unreachable!(
-                    "we already returned Ok(_) above if there were no errors"
-                )
-            }
-            1 => {
-                return Err(HttpError::for_bad_request(
-                    None,
-                    errors.pop().unwrap(),
-                ));
-            }
-            _ => {
-                return Err(HttpError::for_bad_request(
-                    None,
-                    format!(
-                        "multiple errors encountered:\n - {}",
-                        itertools::join(errors, "\n - ")
-                    ),
-                ));
-            }
-        }
+        start_update(rqctx, log, params.targets, params.options).await?;
+        Ok(HttpResponseUpdatedNoContent {})
     }
 
     async fn get_update_sp(
@@ -1006,32 +721,6 @@ impl WicketdApi for WicketdApiImpl {
         }
 
         Ok(HttpResponseUpdatedNoContent())
-    }
-}
-
-// Get the current inventory or return a 503 Unavailable.
-//
-// Note that 503 is returned if we can't get the MGS-based inventory. If we fail
-// to get the transceivers, that's not considered a fatal 503.
-async fn mgs_inventory_or_unavail(
-    mgs_handle: &MgsHandle,
-) -> Result<MgsV1Inventory, HttpError> {
-    match mgs_handle.get_cached_inventory().await {
-        Ok(GetMgsInventoryResponse::Response { inventory, .. }) => {
-            Ok(inventory)
-        }
-        Ok(GetMgsInventoryResponse::Unavailable) => {
-            return Err(HttpError::for_unavail(
-                None,
-                "Rack inventory not yet available".into(),
-            ));
-        }
-        Err(ShutdownInProgress) => {
-            return Err(HttpError::for_unavail(
-                None,
-                "Server is shutting down".into(),
-            ));
-        }
     }
 }
 

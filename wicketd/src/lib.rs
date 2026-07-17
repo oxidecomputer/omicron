@@ -9,6 +9,7 @@ mod config;
 mod context;
 mod helpers;
 mod http_entrypoints;
+mod http_helpers;
 mod installinator_progress;
 pub mod mgs;
 mod multirack_config;
