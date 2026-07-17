@@ -23,6 +23,7 @@ use omicron_common::api::external::PaginationOrder;
 use omicron_git_version::GitVersion;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SitrepUuid;
+use std::fmt;
 use tabled::Tabled;
 use uuid::Uuid;
 
@@ -48,9 +49,15 @@ enum Commands {
     /// Show details on a situation report.
     #[clap(alias = "show")]
     Info {
-        /// The UUID of the sitrep to show, or "current" to show the current
-        /// sitrep.
-        sitrep: SitrepIdOrCurrent,
+        /// The sitrep to show, identified by UUID, version number, or
+        /// "current".
+        ///
+        /// A value of "current" selects the current sitrep. An integer
+        /// (optionally prefixed with "v", e.g. "3" or "v3") selects the
+        /// sitrep with that version number in the sitrep history. Any other
+        /// value is parsed as a sitrep UUID.
+        #[clap(value_name = "UUID|VERSION|current")]
+        sitrep: SitrepSelector,
 
         #[clap(flatten)]
         opts: ShowOptions,
@@ -65,9 +72,15 @@ enum Commands {
     /// would be problematic for the fault management subsystem to consume.
     #[clap(alias = "lint")]
     Slippy {
-        /// The UUID of the sitrep to lint, or "current" to lint the current
-        /// sitrep.
-        sitrep: SitrepIdOrCurrent,
+        /// The sitrep to lint, identified by UUID, version number, or
+        /// "current".
+        ///
+        /// A value of "current" selects the current sitrep. An integer
+        /// (optionally prefixed with "v", e.g. "3" or "v3") selects the
+        /// sitrep with that version number in the sitrep history. Any other
+        /// value is parsed as a sitrep UUID.
+        #[clap(value_name = "UUID|VERSION|current")]
+        sitrep: SitrepSelector,
     },
 }
 
@@ -84,9 +97,15 @@ pub(super) struct SitrepHistoryArgs {
 
 #[derive(Debug, Args, Clone)]
 struct AnalysisReportArgs {
-    /// The UUID of the sitrep to show, or "current" to show the current
-    /// sitrep.
-    sitrep: SitrepIdOrCurrent,
+    /// The sitrep whose analysis report to show, identified by UUID, version
+    /// number, or "current".
+    ///
+    /// A value of "current" selects the current sitrep. An integer
+    /// (optionally prefixed with "v", e.g. "3" or "v3") selects the sitrep
+    /// with that version number in the sitrep history. Any other value is
+    /// parsed as a sitrep UUID.
+    #[clap(value_name = "UUID|VERSION|current")]
+    sitrep: SitrepSelector,
 
     #[clap(flatten)]
     opts: ShowOptions,
@@ -98,22 +117,140 @@ struct ShowOptions {
     json: bool,
 }
 
+/// Selects a sitrep by UUID, by version number, or the current one.
 #[derive(Debug, Clone, Copy)]
-enum SitrepIdOrCurrent {
+enum SitrepSelector {
     Current,
     Id(SitrepUuid),
+    Version(u32),
 }
 
-impl std::str::FromStr for SitrepIdOrCurrent {
-    type Err = omicron_uuid_kinds::ParseError;
+impl std::str::FromStr for SitrepSelector {
+    type Err = anyhow::Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let s = s.trim();
         if s.eq_ignore_ascii_case("current") {
-            Ok(Self::Current)
-        } else {
-            let id = s.parse()?;
-            Ok(Self::Id(id))
+            return Ok(Self::Current);
+        }
+        // Accept an optional leading 'v', since `omdb db sitrep history`
+        // displays versions as "v1", "v2", etc.
+        let (s, is_definitely_version) = match s.strip_prefix(['v', 'V']) {
+            Some(rest) => (rest, true),
+            None => (s, false),
+        };
+        // A value which parses as a `u32` will not also parse as a valid UUID,
+        // since a `u32` is at most 10 decimal digits, while a UUID requires 32
+        // hex digits. Even if a valid UUID value omits dashes, `u32::from_str`
+        // will not accept it, as there are insufficient digits.
+        match s.parse::<u32>() {
+            Ok(version) => return Ok(Self::Version(version)),
+            // If the value doesn't parse as a u32 but had the version prefix,
+            // bail out now.
+            Err(e) if is_definitely_version => {
+                return Err(anyhow::Error::from(e).context(
+                    "a sitrep version (prefixed with 'v' or 'V') must be a \
+                     valid 32-bit unsigned integer",
+                ));
+            }
+            // Otherwise, fall back to parsing as a UUID.
+            Err(_) => {}
+        }
+        match s.parse() {
+            Ok(id) => Ok(Self::Id(id)),
+            Err(_) => Err(anyhow::anyhow!(
+                "expected a sitrep UUID, a version number, or \"current\""
+            )),
+        }
+    }
+}
+
+impl SitrepSelector {
+    fn display_for_error<'a>(
+        &'a self,
+        id: &'a SitrepUuid,
+    ) -> impl fmt::Display + 'a {
+        struct Displayer<'a> {
+            sel: &'a SitrepSelector,
+            id: &'a SitrepUuid,
+        }
+        impl fmt::Display for Displayer<'_> {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                let Self { sel, id } = self;
+                match sel {
+                    SitrepSelector::Current => {
+                        write!(f, "the current fault-management sitrep ({id})")
+                    }
+                    SitrepSelector::Version(v) => {
+                        write!(f, "fault-management sitrep v{v} ({id})")
+                    }
+                    SitrepSelector::Id(id) => {
+                        write!(f, "fault-management sitrep {id}")
+                    }
+                }
+            }
+        }
+        Displayer { sel: &self, id }
+    }
+
+    /// Determine the sitrep UUID, and optional version number, for this
+    /// selector.
+    ///
+    /// The version number is optional because selecting a sitrep by its UUID
+    /// may refer to a sitrep which has not been committed to the history table.
+    /// When selecting by UUID, we attempt to resolve the version record from
+    /// the `fm_sitrep_history` table if one exists, but return `None` if the
+    /// sitrep is not part of the history.
+    async fn resolve(
+        &self,
+        datastore: &DataStore,
+        opctx: &OpContext,
+    ) -> anyhow::Result<(Option<fm::SitrepVersion>, SitrepUuid)> {
+        match self {
+            SitrepSelector::Current => {
+                let version = datastore
+                    .fm_current_sitrep_version(&opctx)
+                    .await
+                    .context("failed to look up the current sitrep version")?
+                    .ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "no current sitrep version exists at this time!"
+                        )
+                    })?;
+
+                let id = version.id;
+                Ok((Some(version), id))
+            }
+            SitrepSelector::Version(v) => {
+                let version = history_dsl::fm_sitrep_history
+                    .filter(history_dsl::version.eq(model::SqlU32::new(*v)))
+                    .select(model::SitrepVersion::as_select())
+                    .first_async(&*datastore.pool_connection_for_tests().await?)
+                    .await
+                    .optional()
+                    .with_context(|| {
+                        format!("failed to look up sitrep version v{v}")
+                    })?
+                    .map(fm::SitrepVersion::from)
+                    .ok_or_else(|| anyhow::anyhow!("no sitrep v{v} exists"))?;
+                let id = version.id;
+                Ok((Some(version), id))
+            }
+            SitrepSelector::Id(id) => {
+                // If we are looking up a sitrep by UUID, it may or may not
+                // exist in the history. Let's see if it does!
+                let maybe_version = history_dsl::fm_sitrep_history
+                    .filter(history_dsl::sitrep_id.eq(id.into_untyped_uuid()))
+                    .select(model::SitrepVersion::as_select())
+                    .first_async(&*datastore.pool_connection_for_tests().await?)
+                    .await
+                    .optional()
+                    .with_context(|| {
+                        format!("failed to look up sitrep version for ID {id}")
+                    })?
+                    .map(Into::into);
+                Ok((maybe_version, *id))
+            }
         }
     }
 }
@@ -137,7 +274,7 @@ pub(super) async fn cmd_db_sitrep(
                 datastore,
                 fetch_opts,
                 args,
-                SitrepIdOrCurrent::Current,
+                SitrepSelector::Current,
             )
             .await
         }
@@ -229,53 +366,25 @@ async fn cmd_db_sitrep_show(
     datastore: &DataStore,
     _fetch_opts: &DbFetchOptions,
     opts: &ShowOptions,
-    sitrep: SitrepIdOrCurrent,
+    sitrep_selector: SitrepSelector,
 ) -> anyhow::Result<()> {
-    let ctx = || match sitrep {
-        SitrepIdOrCurrent::Current => {
-            "looking up the current fault management sitrep".to_string()
-        }
-        SitrepIdOrCurrent::Id(id) => {
-            format!("looking up fault management sitrep {id:?}")
-        }
-    };
-
     let current_version = datastore
         .fm_current_sitrep_version(&opctx)
         .await
         .context("failed to look up the current sitrep version")?;
 
     let conn = datastore.pool_connection_for_tests().await?;
-    let (maybe_version, sitrep) = match sitrep {
-        SitrepIdOrCurrent::Id(id) => {
-            let sitrep =
-                datastore.fm_sitrep_read(opctx, id).await.with_context(ctx)?;
-            let version = history_dsl::fm_sitrep_history
-                .filter(history_dsl::sitrep_id.eq(id.into_untyped_uuid()))
-                .select(model::SitrepVersion::as_select())
-                .first_async(&*conn)
-                .await
-                .optional()
-                .with_context(ctx)?
-                .map(Into::into);
-            (version, sitrep)
-        }
-        SitrepIdOrCurrent::Current => {
-            let Some(version) = current_version.clone() else {
-                anyhow::bail!("no current sitrep exists at this time");
-            };
-
-            let sitrep = datastore
-                .fm_sitrep_read(opctx, version.id)
-                .await
-                .with_context(ctx)?;
-            (Some(version), sitrep)
-        }
-    };
+    let (maybe_version, id) =
+        sitrep_selector.resolve(&datastore, &opctx).await?;
+    let err_ctx = sitrep_selector.display_for_error(&id);
+    let sitrep = datastore
+        .fm_sitrep_read(&opctx, id)
+        .await
+        .with_context(|| format!("failed to look up {err_ctx}"))?;
 
     if opts.json {
         serde_json::to_writer_pretty(std::io::stdout(), &sitrep)
-            .context("failed to serialize sitrep")?;
+            .with_context(|| format!("failed to serialize {err_ctx}"))?;
         return Ok(());
     }
 
@@ -420,25 +529,14 @@ async fn cmd_db_sitrep_show(
 async fn cmd_db_sitrep_slippy(
     opctx: &OpContext,
     datastore: &DataStore,
-    sitrep: SitrepIdOrCurrent,
+    selector: SitrepSelector,
 ) -> anyhow::Result<()> {
-    let id = match sitrep {
-        SitrepIdOrCurrent::Current => {
-            datastore
-                .fm_current_sitrep_version(&opctx)
-                .await
-                .context("failed to look up the current sitrep version")?
-                .ok_or_else(|| {
-                    anyhow::anyhow!("no current sitrep exists at this time")
-                })?
-                .id
-        }
-        SitrepIdOrCurrent::Id(id) => id,
-    };
+    let (_, id) = selector.resolve(&datastore, &opctx).await?;
+    let err_ctx = selector.display_for_error(&id);
     let sitrep = datastore
         .fm_sitrep_read(opctx, id)
         .await
-        .with_context(|| format!("failed to read sitrep {id}"))?;
+        .with_context(|| format!("failed to read {err_ctx}"))?;
 
     // Lint against the parent sitrep too when it still exists; it may have
     // been GC'd, in which case only the sitrep-internal checks run.
@@ -473,34 +571,12 @@ async fn cmd_db_sitrep_analysis_report(
     args: &AnalysisReportArgs,
 ) -> anyhow::Result<()> {
     let &AnalysisReportArgs { sitrep, ref opts } = args;
-    let id = match sitrep {
-        SitrepIdOrCurrent::Current => {
-            datastore
-                .fm_current_sitrep_version(&opctx)
-                .await
-                .context("failed to look up the current sitrep version")?
-                .ok_or_else(|| {
-                    anyhow::anyhow!("no current sitrep exists at this time")
-                })?
-                .id
-        }
-        SitrepIdOrCurrent::Id(id) => id,
-    };
-
-    let ctx = || match sitrep {
-        SitrepIdOrCurrent::Current => {
-            "looking up analysis report for the current fault management \
-             sitrep"
-                .to_string()
-        }
-        SitrepIdOrCurrent::Id(id) => {
-            format!(
-                "looking up analysis report for fault management sitrep {id}"
-            )
-        }
-    };
-
-    let report = load_analysis_report(datastore, id).await.with_context(ctx)?;
+    let (_, id) = sitrep.resolve(&datastore, &opctx).await?;
+    let err_ctx = sitrep.display_for_error(&id);
+    let report =
+        load_analysis_report(datastore, id).await.with_context(|| {
+            format!("failed to load analysis report for {err_ctx}",)
+        })?;
     print_analysis_report(&report, opts.json)?;
 
     Ok(())
@@ -554,9 +630,8 @@ fn print_analysis_report(
                 "WARNING: failed to parse input report; falling back to \
                 less structured output: {e}"
             );
-            let displayer =
-                nexus_types::fm::json_display::Displayer::new(&input_report);
-            println!("{displayer}",);
+            let displayer = nexus_types::fm::display::Json::new(&input_report);
+            println!("{displayer}");
         }
     }
 
@@ -569,8 +644,8 @@ fn print_analysis_report(
                 less structured output: {e}"
             );
             let displayer =
-                nexus_types::fm::json_display::Displayer::new(&analysis_report);
-            println!("{displayer}",);
+                nexus_types::fm::display::Json::new(&analysis_report);
+            println!("{displayer}");
         }
     }
 

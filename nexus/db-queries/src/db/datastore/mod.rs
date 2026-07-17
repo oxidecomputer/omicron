@@ -183,6 +183,8 @@ pub use region::RegionAllocationFor;
 pub use region::RegionAllocationParameters;
 pub use region_snapshot_replacement::NewRegionVolumeId;
 pub use region_snapshot_replacement::OldSnapshotVolumeId;
+pub use saga::NewSagaState;
+pub use saga::SagaStateDbFields;
 pub use scim_provider_store::CrdbScimProviderStore;
 pub use silo::Discoverability;
 pub use silo_group::SiloGroup;
