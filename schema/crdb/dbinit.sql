@@ -7131,7 +7131,9 @@ CREATE TYPE IF NOT EXISTS omicron.public.alert_class AS ENUM (
     'test.foo.bar',
     'test.foo.baz',
     'test.quux.bar',
-    'test.quux.bar.baz'
+    'test.quux.bar.baz',
+    'hardware.power_shelf.psu.insert',
+    'hardware.power_shelf.psu.remove'
     -- Add new alert classes here!
 );
 
@@ -9025,7 +9027,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '277.0.0', NULL)
+    (TRUE, NOW(), NOW(), '278.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

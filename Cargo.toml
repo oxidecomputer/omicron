@@ -774,7 +774,7 @@ regress = "0.10.4"
 repo-depot-api = { path = "sled-agent/repo-depot-api" }
 repo-depot-client = { path = "clients/repo-depot-client" }
 reqwest = { version = "0.13", default-features = false }
-rpassword = "7.4.0"
+rpassword = "7.5.0"
 rstest = "0.25.0"
 rustfmt-wrapper = "0.2"
 rustls = "0.23.40"
