@@ -1644,6 +1644,17 @@
             "$ref": "#/components/schemas/GetBgpAuthKeyInfoResponse"
           },
           "bootstrap_sleds": {
+            "title": "IdOrdMap",
+            "x-rust-type": {
+              "crate": "iddqd",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/BootstrapSledDescription"
+                }
+              ],
+              "path": "iddqd::IdOrdMap",
+              "version": "*"
+            },
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/BootstrapSledDescription"
@@ -1688,6 +1699,17 @@
             ]
           },
           "bootstrap_sleds": {
+            "title": "IdOrdMap",
+            "x-rust-type": {
+              "crate": "iddqd",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/BootstrapSledDescription"
+                }
+              ],
+              "path": "iddqd::IdOrdMap",
+              "version": "*"
+            },
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/BootstrapSledDescription"
@@ -2620,10 +2642,22 @@
         "type": "object",
         "properties": {
           "sps": {
+            "title": "IdOrdMap",
+            "x-rust-type": {
+              "crate": "iddqd",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/SpInventory"
+                }
+              ],
+              "path": "iddqd::IdOrdMap",
+              "version": "*"
+            },
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/SpInventory"
-            }
+            },
+            "uniqueItems": true
           }
         },
         "required": [
