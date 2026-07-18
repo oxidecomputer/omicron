@@ -146,6 +146,7 @@ use super::tasks::vpc_routes;
 use super::tasks::webhook_deliverator;
 use crate::Nexus;
 use crate::app::background::tasks::populate_switch_ports;
+use crate::app::external_client::ExternalHttpClient;
 use crate::app::oximeter::PRODUCER_LEASE_DURATION;
 use crate::app::quiesce::NexusQuiesceHandle;
 use crate::app::saga::StartSaga;
@@ -1334,11 +1335,11 @@ pub struct BackgroundTasksData {
     pub tuf_artifact_replication_rx: mpsc::Receiver<ArtifactsWithPlan>,
     /// Channel for exposing the latest loaded blueprint
     pub blueprint_load_tx: watch::Sender<Option<LoadedTargetBlueprint>>,
-    /// `reqwest::Client` for webhook delivery requests.
+    /// [`ExternalHttpClient`] for webhook delivery requests.
     ///
     /// This is shared with the external API as it's also used when sending
     /// webhook liveness probe requests from the API.
-    pub webhook_delivery_client: reqwest::Client,
+    pub webhook_delivery_client: ExternalHttpClient,
     /// Channel for configuring pending MGS updates
     pub mgs_updates_tx: watch::Sender<PendingMgsUpdates>,
     /// handle for controlling Nexus quiesce

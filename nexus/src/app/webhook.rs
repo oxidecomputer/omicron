@@ -29,6 +29,7 @@
 
 use crate::Nexus;
 use crate::app::external_client::ExternalHttpClient;
+use crate::app::external_dns;
 use anyhow::Context;
 use chrono::TimeDelta;
 use chrono::Utc;
@@ -70,6 +71,7 @@ use omicron_uuid_kinds::WebhookDeliveryUuid;
 use omicron_uuid_kinds::WebhookSecretUuid;
 use sha2::Sha256;
 use slog_error_chain::InlineErrorChain;
+use std::sync::Arc;
 use std::sync::LazyLock;
 use std::time::Duration;
 use std::time::Instant;
@@ -509,8 +511,40 @@ impl<'a> ReceiverClient<'a> {
             }
             Ok(r) => r,
         };
+        // The external IP policy check happens synchronously, when
+        // `ExternalHttpClient::execute` is called, rather than inside the
+        // returned future. If the receiver's URL is rejected by the policy,
+        // the request was never sent at all, so record the delivery attempt
+        // as having failed with no response status or duration, rather than
+        // trying to classify it as a wire-level error below.
+        let request_fut = match self.client.execute(request) {
+            Ok(request_fut) => request_fut,
+            Err(error) => {
+                slog::warn!(
+                    &opctx.log,
+                    "webhook receiver URL was rejected by the external IP \
+                     policy";
+                    "alert_id" => %delivery.alert_id,
+                    "alert_class" => %alert_class,
+                    "delivery_id" => %delivery.id,
+                    "delivery_trigger" => %delivery.triggered_by,
+                    "error" => InlineErrorChain::new(&error),
+                );
+                return Ok(WebhookDeliveryAttempt {
+                    id: WebhookDeliveryAttemptUuid::new_v4().into(),
+                    delivery_id: delivery.id,
+                    rx_id: delivery.rx_id,
+                    attempt: SqlU8::new(delivery.attempts.0 + 1),
+                    result: WebhookDeliveryAttemptResult::FailedUnreachable,
+                    response_status: None,
+                    response_duration: None,
+                    time_created: chrono::Utc::now(),
+                    deliverator_id: self.nexus_id.into(),
+                });
+            }
+        };
         let t0 = Instant::now();
-        let result = self.client.execute(request).await;
+        let result = request_fut.await;
         let duration = t0.elapsed();
         let (delivery_result, status) = match result {
             // Builder errors are our fault, that's weird!

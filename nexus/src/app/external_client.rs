@@ -10,7 +10,6 @@ use omicron_common::address::UNDERLAY_MULTICAST_SUBNET;
 use omicron_common::address::UnderlaySubnets;
 use oxnet::Ipv6Net;
 
-use qorb::resolver;
 use reqwest::IntoUrl;
 use reqwest::Method;
 use std::net::IpAddr;
@@ -125,15 +124,6 @@ pub enum ExternalUrlError {
     Localhost { host: String },
 }
 
-/// Errors returned by [`ExternalHttpClient::execute`].
-#[derive(thiserror::Error, Debug)]
-pub enum ExecuteExternalRequestError {
-    #[error(transparent)]
-    Reqwest(#[from] reqwest::Error),
-    #[error(transparent)]
-    ExternalUrl(#[from] ExternalUrlError),
-}
-
 impl ExternalHttpClient {
     /// Constructs a new `ExternalHttpClient` from the provided
     /// [`ExternalHttpClientConfig`], using the provided
@@ -143,6 +133,7 @@ impl ExternalHttpClient {
     ///
     /// This method fails if the [`reqwest::Client`] could not be built, such
     /// as if a TLS backend cannot be initialized.
+    #[allow(dead_code)] // may be used later
     pub fn new(
         config: &ExternalHttpClientConfig,
         resolver: &Arc<external_dns::Resolver>,
@@ -188,6 +179,7 @@ impl ExternalHttpClient {
     ///
     /// This method returns an error under the same conditions as
     /// [`ExternalHttpClient::request`].
+    #[allow(dead_code)] // Added for completeness, may be used later
     pub fn get<U: IntoUrl>(
         &self,
         url: U,
@@ -214,6 +206,7 @@ impl ExternalHttpClient {
     ///
     /// This method returns an error under the same conditions as
     /// [`ExternalHttpClient::request`].
+    #[allow(dead_code)] // Added for completeness, may be used later
     pub fn put<U: IntoUrl>(
         &self,
         url: U,
@@ -227,6 +220,7 @@ impl ExternalHttpClient {
     ///
     /// This method returns an error under the same conditions as
     /// [`ExternalHttpClient::request`].
+    #[allow(dead_code)] // Added for completeness, may be used later
     pub fn patch<U: IntoUrl>(
         &self,
         url: U,
@@ -240,6 +234,7 @@ impl ExternalHttpClient {
     ///
     /// This method returns an error under the same conditions as
     /// [`ExternalHttpClient::request`].
+    #[allow(dead_code)] // Added for completeness, may be used later
     pub fn delete<U: IntoUrl>(
         &self,
         url: U,
@@ -253,6 +248,7 @@ impl ExternalHttpClient {
     ///
     /// This method returns an error under the same conditions as
     /// [`ExternalHttpClient::request`].
+    #[allow(dead_code)] // Added for completeness, may be used later
     pub fn head<U: IntoUrl>(
         &self,
         url: U,
@@ -269,8 +265,8 @@ impl ExternalHttpClient {
     ///
     /// This method returns an error under the following conditions:
     ///
-    /// * [`UrlError::IntoUrl`] if the provided `url` could not be parsed into a
-    ///   URL.
+    /// * [`ExternalUrlError::IntoUrl`] if the provided `url` could not be
+    ///   parsed into a URL.
     /// * [`ExternalUrlError::NotExternalIp`] if the URL's host is an IP
     ///   address that is not external --- an underlay network address, or
     ///   (unless the policy permits it) a loopback address --- or if the
@@ -292,6 +288,19 @@ impl ExternalHttpClient {
     /// A `Request` can be built manually with `Request::new()` or obtained
     /// from a RequestBuilder with `RequestBuilder::build()`.
     ///
+    /// This method's API is somewhat different from that of
+    /// [`reqwest::Client::execute`], which it is intended to replicate.
+    /// Reqwest's `execute` function returns a [`Future`]`<Output = `[`Result`]
+    /// `<`[`reqwest::Response`]`, `[`reqwest::Error`]`>>`, while this method
+    /// *synchronously* returns a [`Result`]* containing a similar [`Future`].
+    /// The outer `Result` will be an [`ExternalUrlError`] if the request's URL
+    /// is not allowed by the external IP policy, while the inner [`Future`]
+    /// outputs the underlying [`reqwest::Response`] or [`reqwest::Error`]
+    /// returned by `reqwest` upon actually executing the HTTP request. Callers
+    /// can therefore handle "this URL is not allowed" and "the request failed
+    /// on the wire" at two different points, rather than having to dig both out
+    /// of a combined error type after the fact.
+    ///
     /// The `reqwest` documentation tells us that we "should prefer to use the
     /// `RequestBuilder` and `RequestBuilder::send()`". I disagree with them,
     /// because doing so returns both errors that occurred while *building* the
@@ -304,13 +313,20 @@ impl ExternalHttpClient {
     ///
     /// # Errors
     ///
-    /// This method fails if there was an error while sending request,
-    /// redirect loop was detected or redirect limit was exhausted.
+    /// This method returns an [`ExternalUrlError`] if the request's URL is
+    /// rejected by the external IP policy, under the same conditions as
+    /// [`ExternalHttpClient::request`].
+    ///
+    /// The returned future fails if there was an error while sending the
+    /// request, a redirect loop was detected, or the redirect limit was
+    /// exhausted.
     pub fn execute(
         &self,
         request: reqwest::Request,
-    ) -> impl Future<Output = Result<reqwest::Response, ExecuteExternalRequestError>>
-    {
+    ) -> Result<
+        impl Future<Output = Result<reqwest::Response, reqwest::Error>>,
+        ExternalUrlError,
+    > {
         // ...and here we arrive at one of my least favorite things about
         // `reqwest`'s API. It has this `execute` method, which takes an
         // arbitrary `Request`, and...executes it. Like it says on the tin. But
@@ -339,11 +355,9 @@ impl ExternalHttpClient {
         // really my favorite thing?
         //
         // Sigh. Whatever. It's fine.
-        let this = self.clone();
-        async move {
-            ensure_external_url(request.url(), &this.ip_policy)?;
-            Ok(this.client.execute(request).await?)
-        }
+        ensure_external_url(request.url(), &self.ip_policy)?;
+        let client = self.client.clone();
+        Ok(async move { client.execute(request).await })
     }
 }
 
@@ -412,7 +426,8 @@ mod test {
         let url = url
             .parse::<Url>()
             .unwrap_or_else(|e| panic!("test URL {url:?} must parse: {e}"));
-        ensure_external_url(url, &test_policy(TreatLoopbackAsExternal::No))
+        ensure_external_url(&url, &test_policy(TreatLoopbackAsExternal::No))
+            .map(|()| url)
     }
 
     #[track_caller]
@@ -421,9 +436,10 @@ mod test {
             .parse::<Url>()
             .unwrap_or_else(|e| panic!("test URL {url:?} must parse: {e}"));
         ensure_external_url(
-            url,
+            &url,
             &test_policy(TreatLoopbackAsExternal::YesForTestPurposesOnly),
         )
+        .map(|()| url)
     }
 
     // Until the rack is initialized, no determination can be made about IP
@@ -437,7 +453,7 @@ mod test {
             TreatLoopbackAsExternal::No,
         );
         let url = "http://[2001:db8::1]/".parse::<Url>().unwrap();
-        let result = ensure_external_url(url, &policy);
+        let result = ensure_external_url(&url, &policy);
         assert!(
             matches!(
                 &result,
