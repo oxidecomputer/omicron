@@ -238,7 +238,7 @@ pub struct Nexus {
     /// This lives on the Nexus struct as we would like to use the same client
     /// pool for the webhook deliverator background task and the webhook probe
     /// API.
-    webhook_delivery_client: reqwest::Client,
+    webhook_delivery_client: external_client::ExternalHttpClient,
 
     /// The tunable parameters from a configuration file
     tunables: Tunables,
@@ -498,21 +498,19 @@ impl Nexus {
             ))
         };
 
-        let webhook_delivery_client = {
-            // The webhook delivery HTTP client will send requests to endpoints
-            // external to the rack, so apply the configuration for external
-            // HTTP clients.
-            let builder = external_client::external_http_client_builder(
-                &config.deployment.external_http_clients,
-                &external_resolver,
-            );
-            webhook::delivery_client(builder).map_err(|e| {
-                format!(
-                    "failed to build webhook delivery client: {}",
-                    InlineErrorChain::new(&e)
-                )
-            })?
-        };
+        // The webhook delivery HTTP client will send requests to endpoints
+        // external to the rack, so apply the configuration for external
+        // HTTP clients.
+        let webhook_delivery_client = webhook::delivery_client(
+            &config.deployment.external_http_clients,
+            &external_resolver,
+        )
+        .map_err(|e| {
+            format!(
+                "failed to build webhook delivery client: {}",
+                InlineErrorChain::new(&e)
+            )
+        })?;
 
         let mut mgs_resolver =
             qorb_resolver.for_service(ServiceName::ManagementGatewayService);
