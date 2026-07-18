@@ -15,6 +15,7 @@ pub use oximeter::Measurement;
 pub use oximeter::Sample;
 pub use oximeter::schema::FieldSchema;
 pub use oximeter::schema::FieldSource;
+use oximeter::InternedString;
 use oximeter::schema::TimeseriesKey;
 pub use oximeter::schema::TimeseriesName;
 pub use oximeter::schema::TimeseriesSchema;
@@ -51,6 +52,37 @@ pub use client::TestDbWrite;
 #[cfg(any(feature = "oxql", test))]
 pub use client::oxql::OxqlResult;
 pub use model::OXIMETER_VERSION;
+
+/// Benchmark-only entry points to crate-private sample-unrolling internals.
+///
+/// Not public API: exists so `benches/unroll.rs` (an external crate, like
+/// all criterion benches) can measure the pure-CPU per-sample insert work
+/// without a ClickHouse connection. See plans/oximeter-alloc-bench.md.
+#[doc(hidden)]
+pub mod bench {
+    use crate::Sample;
+    use crate::native::block::Block;
+    use oximeter::schema::TimeseriesKey;
+    use std::collections::BTreeMap;
+
+    pub fn timeseries_key(sample: &Sample) -> TimeseriesKey {
+        crate::timeseries_key(sample)
+    }
+
+    pub fn extract_fields_as_block(
+        sample: &Sample,
+    ) -> BTreeMap<String, Block> {
+        crate::model::fields::extract_fields_as_block(sample)
+    }
+
+    pub fn extract_measurement_as_block(sample: &Sample) -> (String, Block) {
+        crate::model::measurements::extract_measurement_as_block(sample)
+    }
+
+    pub fn concat_blocks(dst: &mut Block, src: Block) {
+        dst.concat(src).expect("all blocks for a table must match");
+    }
+}
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -261,8 +293,8 @@ fn canonicalize<T: Serialize + ?Sized>(what: &str, value: &T) -> Vec<u8> {
 
 fn timeseries_key_for(
     timeseries_name: &str,
-    target_fields: &BTreeMap<String, Field>,
-    metric_fields: &BTreeMap<String, Field>,
+    target_fields: &BTreeMap<InternedString, Field>,
+    metric_fields: &BTreeMap<InternedString, Field>,
     datum_type: DatumType,
 ) -> TimeseriesKey {
     // We use HighwayHasher primarily for stability - it should provide a stable
@@ -381,8 +413,8 @@ mod tests {
         let mut output = vec![];
         for (name, value) in values {
             let target_fields = BTreeMap::from([(
-                "field".to_string(),
-                Field { name: name.to_string(), value },
+                "field".into(),
+                Field { name: name.into(), value },
             )]);
             let metric_fields = BTreeMap::new();
             let key = timeseries_key_for(

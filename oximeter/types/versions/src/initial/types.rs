@@ -6,6 +6,7 @@
 
 use super::histogram;
 use super::schema::TimeseriesName;
+use crate::impls::interned::InternedString;
 use crate::impls::traits::Producer;
 use bytes::Bytes;
 use chrono::DateTime;
@@ -138,7 +139,7 @@ pub enum FieldValue {
     Clone, Debug, Hash, PartialEq, Eq, JsonSchema, Serialize, Deserialize,
 )]
 pub struct Field {
-    pub name: String,
+    pub name: InternedString,
     pub value: FieldValue,
 }
 
@@ -262,8 +263,8 @@ pub struct Cumulative<T> {
 // A helper type for representing the name and fields derived from targets and metrics
 #[derive(Clone, Debug, PartialEq, JsonSchema, Deserialize, Serialize)]
 pub(crate) struct FieldSet {
-    pub name: String,
-    pub fields: BTreeMap<String, Field>,
+    pub name: InternedString,
+    pub fields: BTreeMap<InternedString, Field>,
 }
 
 /// A concrete type representing a single, timestamped measurement from a timeseries.
@@ -282,10 +283,16 @@ pub struct Sample {
     pub timeseries_version: NonZeroU8,
 
     // Target name and fields
-    pub(crate) target: FieldSet,
+    //
+    // Stored behind an `Arc` so that re-samples of a recurring series can share
+    // a single parsed label set (see `crate::impls::parse_cache`), and so that
+    // cloning a `Sample` to fan out to multiple sinks is a refcount bump rather
+    // than a deep copy of the field map. Serde's `rc` feature makes the derived
+    // Serialize/Deserialize round-trip the inner `FieldSet` transparently.
+    pub(crate) target: Arc<FieldSet>,
 
     // Metric name and fields
-    pub(crate) metric: FieldSet,
+    pub(crate) metric: Arc<FieldSet>,
 }
 
 type ProducerList = Vec<Box<dyn Producer>>;

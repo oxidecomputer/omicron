@@ -64,6 +64,8 @@ pub mod traits {
 }
 
 pub mod types {
+    pub use crate::impls::interned::InternedString;
+    pub use crate::impls::parse_cache::SampleCache;
     pub use crate::v1::types::Cumulative;
     pub use crate::v1::types::Datum;
     pub use crate::v1::types::DatumType;

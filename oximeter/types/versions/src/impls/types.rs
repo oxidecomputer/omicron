@@ -4,6 +4,7 @@
 
 //! Functional code for the types.
 
+use crate::impls::interned::InternedString;
 use crate::latest::histogram;
 use crate::latest::traits;
 use crate::latest::traits::Producer;
@@ -588,7 +589,7 @@ impl FieldSet {
             .cloned()
             .map(|f| (f.name.clone(), f))
             .collect();
-        Self { name: target.name().to_string(), fields }
+        Self { name: target.name().into(), fields }
     }
 
     fn from_metric(metric: &impl traits::Metric) -> Self {
@@ -598,7 +599,7 @@ impl FieldSet {
             .cloned()
             .map(|f| (f.name.clone(), f))
             .collect();
-        Self { name: metric.name().to_string(), fields }
+        Self { name: metric.name().into(), fields }
     }
 }
 
@@ -644,8 +645,8 @@ impl Sample {
         Ok(Self {
             timeseries_name,
             timeseries_version: target.version(),
-            target: target_fields,
-            metric: metric_fields,
+            target: Arc::new(target_fields),
+            metric: Arc::new(metric_fields),
             measurement: metric.measure(timestamp),
         })
     }
@@ -676,8 +677,8 @@ impl Sample {
         Ok(Self {
             timeseries_name,
             timeseries_version: target.version(),
-            target: target_fields,
-            metric: metric_fields,
+            target: Arc::new(target_fields),
+            metric: Arc::new(metric_fields),
             measurement: Measurement { timestamp, datum },
         })
     }
@@ -732,7 +733,7 @@ impl Sample {
     }
 
     /// Return the sorted fields of this sample's target.
-    pub fn sorted_target_fields(&self) -> &BTreeMap<String, Field> {
+    pub fn sorted_target_fields(&self) -> &BTreeMap<InternedString, Field> {
         &self.target.fields
     }
 
@@ -747,7 +748,7 @@ impl Sample {
     }
 
     /// Return the sorted fields of this sample's metric
-    pub fn sorted_metric_fields(&self) -> &BTreeMap<String, Field> {
+    pub fn sorted_metric_fields(&self) -> &BTreeMap<InternedString, Field> {
         &self.metric.fields
     }
 
@@ -938,9 +939,9 @@ mod tests {
     fn test_verify_field_names() {
         let mut fields = BTreeMap::new();
         let field =
-            Field { name: "n".to_string(), value: FieldValue::from(0i64) };
+            Field { name: "n".into(), value: FieldValue::from(0i64) };
         fields.insert(field.name.clone(), field);
-        let fields = FieldSet { name: "t".to_string(), fields };
+        let fields = FieldSet { name: "t".into(), fields };
         assert!(matches!(
             Sample::verify_field_names(&fields, &fields),
             Err(MetricsError::DuplicateFieldName { .. })

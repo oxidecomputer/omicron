@@ -48,6 +48,7 @@ members = [
     "dev-tools/omicron-dev-lib",
     "dev-tools/omicron-deployment-graph",
     "dev-tools/oxlog",
+    "dev-tools/perf-run",
     "dev-tools/pins",
     "dev-tools/reconfigurator-cli",
     "dev-tools/reconfigurator-exec-unsafe",
@@ -240,6 +241,7 @@ default-members = [
     "dev-tools/omicron-dev-lib",
     "dev-tools/omicron-deployment-graph",
     "dev-tools/oxlog",
+    "dev-tools/perf-run",
     "dev-tools/pins",
     "dev-tools/reconfigurator-cli",
     "dev-tools/reconfigurator-exec-unsafe",
@@ -530,6 +532,7 @@ float-ord = "0.3.2"
 flume = "0.11.1"
 fmd-adm = { git = "https://github.com/oxidecomputer/fmd-adm", rev = "846361bf0a698a8c7efefd97b2828b9aa74858c4" }
 fmd-adm-sys = { git = "https://github.com/oxidecomputer/fmd-adm", rev = "846361bf0a698a8c7efefd97b2828b9aa74858c4" }
+foldhash = "0.2.0"
 foreign-types = "0.3.2"
 fs-err = "3.1.1"
 futures = "0.3.31"

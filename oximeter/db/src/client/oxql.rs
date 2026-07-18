@@ -709,7 +709,7 @@ impl Client {
                     .fields
                     .iter()
                     .chain(metric.fields.iter())
-                    .map(|field| (field.name.clone(), field.value.clone())),
+                    .map(|field| (field.name.to_string(), field.value.clone())),
                 oxql_types::point::DataType::try_from(schema.datum_type)?,
                 if schema.datum_type.is_cumulative() {
                     oxql_types::point::MetricType::Delta

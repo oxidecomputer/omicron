@@ -12,6 +12,7 @@ use chrono::Utc;
 use omicron_common::api::internal::nexus::ProducerEndpoint;
 use oximeter::types::ProducerResults;
 use oximeter::types::ProducerResultsItem;
+use oximeter::types::SampleCache;
 use oximeter_types::producer::FailedCollection;
 use oximeter_types::producer::ProducerDetails;
 use oximeter_types::producer::SuccessfulCollection;
@@ -22,6 +23,8 @@ use slog::o;
 use slog::trace;
 use slog::warn;
 use slog_error_chain::InlineErrorChain;
+use std::sync::Arc;
+use std::sync::Mutex;
 use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::error::TrySendError;
@@ -82,6 +85,7 @@ async fn perform_collection(
     log: Logger,
     client: reqwest::Client,
     producer: ProducerEndpoint,
+    cache: Arc<Mutex<SampleCache>>,
 ) -> SingleCollectionResult {
     let start = Instant::now();
     debug!(log, "collecting from producer");
@@ -96,29 +100,39 @@ async fn perform_collection(
     let result = match res {
         Ok(res) => {
             if res.status().is_success() {
-                match res.json::<ProducerResults>().await {
-                    Ok(results) => {
-                        let n_samples: usize = results
-                            .iter()
-                            .map(|r| match r {
-                                ProducerResultsItem::Ok(samples) => {
-                                    samples.len()
-                                }
-                                ProducerResultsItem::Err(_) => 0,
-                            })
-                            .sum();
-                        debug!(
-                            log,
-                            "collected results from producer";
-                            "n_results" => results.len(),
-                            "n_samples" => n_samples,
-                        );
-                        Ok(results)
-                    }
+                match res.bytes().await {
+                    Ok(body) => match cache.lock().unwrap().parse(&body) {
+                        Ok(results) => {
+                            let n_samples: usize = results
+                                .iter()
+                                .map(|r| match r {
+                                    ProducerResultsItem::Ok(samples) => {
+                                        samples.len()
+                                    }
+                                    ProducerResultsItem::Err(_) => 0,
+                                })
+                                .sum();
+                            debug!(
+                                log,
+                                "collected results from producer";
+                                "n_results" => results.len(),
+                                "n_samples" => n_samples,
+                            );
+                            Ok(results)
+                        }
+                        Err(e) => {
+                            warn!(
+                                log,
+                                "failed to parse results from producer";
+                                InlineErrorChain::new(&e),
+                            );
+                            Err(self_stats::FailureReason::Deserialization)
+                        }
+                    },
                     Err(e) => {
                         warn!(
                             log,
-                            "failed to collect results from producer";
+                            "failed to read results body from producer";
                             InlineErrorChain::new(&e),
                         );
                         Err(self_stats::FailureReason::Deserialization)
@@ -237,6 +251,15 @@ async fn collection_loop(
         // Safety: `build()` only fails if TLS couldn't be initialized or the
         // system DNS configuration could not be loaded.
         .unwrap();
+
+    // Per-producer cache of parsed label sets. Because a producer re-emits the
+    // same series every interval, this lets re-samples reuse a shared
+    // `Arc<FieldSet>` instead of re-parsing and re-allocating the label maps.
+    // Wrapped in `Arc<Mutex<_>>` so an owned handle can be moved into each
+    // `perform_collection` future, including when it is recreated on a producer
+    // update. The lock is uncontended (one collection at a time) and is never
+    // held across an `.await`.
+    let cache = Arc::new(Mutex::new(SampleCache::new()));
     loop {
         // Wait for notification that we have a collection to perform, from
         // either the forced- or timer-collection queue.
@@ -282,6 +305,7 @@ async fn collection_loop(
             log.clone(),
             client.clone(),
             *producer_info_rx.borrow_and_update(),
+            cache.clone(),
         ));
 
         // Wait for that collection to complete or fail, or for an update to the
@@ -313,6 +337,7 @@ async fn collection_loop(
                                 log.new(o!("address" => update.address)),
                                 client.clone(),
                                 update,
+                                cache.clone(),
                             ));
                             continue 'collection;
                         }

@@ -68,7 +68,7 @@ pub trait Target {
         self.field_names()
             .iter()
             .zip(self.field_values())
-            .map(|(name, value)| Field { name: name.to_string(), value })
+            .map(|(name, value)| Field { name: (*name).into(), value })
             .collect()
     }
 }
@@ -141,7 +141,7 @@ pub trait Metric {
         self.field_names()
             .iter()
             .zip(self.field_values())
-            .map(|(name, value)| Field { name: name.to_string(), value })
+            .map(|(name, value)| Field { name: (*name).into(), value })
             .collect()
     }
 

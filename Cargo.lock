@@ -10235,12 +10235,14 @@ dependencies = [
  "anyhow",
  "chrono",
  "clap",
+ "criterion",
  "omicron-workspace-hack",
  "oximeter-macro-impl",
  "oximeter-schema",
  "oximeter-timeseries-macro",
  "oximeter-types",
  "prettyplease",
+ "serde_json",
  "syn 2.0.117",
  "toml 0.8.23",
  "uuid",
@@ -10544,6 +10546,7 @@ dependencies = [
  "bytes",
  "chrono",
  "float-ord",
+ "foldhash 0.2.0",
  "num",
  "omicron-common",
  "omicron-workspace-hack",
@@ -10553,6 +10556,7 @@ dependencies = [
  "rstest",
  "schemars 0.8.22",
  "serde",
+ "serde_json",
  "strum 0.27.2",
  "thiserror 2.0.18",
  "uuid",
@@ -10945,6 +10949,16 @@ name = "percent-encoding"
 version = "2.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220"
+
+[[package]]
+name = "perf-run"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "clap",
+ "omicron-workspace-hack",
+]
 
 [[package]]
 name = "pest"
