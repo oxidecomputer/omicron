@@ -17368,6 +17368,7 @@ dependencies = [
  "dropshot",
  "gateway-client",
  "gateway-types",
+ "iddqd",
  "maplit",
  "omicron-common",
  "omicron-workspace-hack",

@@ -2620,10 +2620,22 @@
         "type": "object",
         "properties": {
           "sps": {
+            "title": "IdOrdMap",
+            "x-rust-type": {
+              "crate": "iddqd",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/SpInventory"
+                }
+              ],
+              "path": "iddqd::IdOrdMap",
+              "version": "*"
+            },
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/SpInventory"
-            }
+            },
+            "uniqueItems": true
           }
         },
         "required": [
