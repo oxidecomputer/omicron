@@ -1783,7 +1783,7 @@ dependencies = [
 [[package]]
 name = "common"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/dendrite?rev=ab6c1a4326abbcb9f98a459ae74da4995e6b41af#ab6c1a4326abbcb9f98a459ae74da4995e6b41af"
+source = "git+https://github.com/oxidecomputer/dendrite?rev=96483d0c52f0cfc4e22e70229466798254a99b6c#96483d0c52f0cfc4e22e70229466798254a99b6c"
 dependencies = [
  "anyhow",
  "chrono",
@@ -3350,11 +3350,11 @@ dependencies = [
 [[package]]
 name = "dpd-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/dendrite?rev=ab6c1a4326abbcb9f98a459ae74da4995e6b41af#ab6c1a4326abbcb9f98a459ae74da4995e6b41af"
+source = "git+https://github.com/oxidecomputer/dendrite?rev=96483d0c52f0cfc4e22e70229466798254a99b6c#96483d0c52f0cfc4e22e70229466798254a99b6c"
 dependencies = [
  "async-trait",
  "chrono",
- "common 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=ab6c1a4326abbcb9f98a459ae74da4995e6b41af)",
+ "common 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=96483d0c52f0cfc4e22e70229466798254a99b6c)",
  "crc8",
  "futures",
  "http",
@@ -8174,7 +8174,7 @@ dependencies = [
  "chrono",
  "crucible-agent-client",
  "dns-service-client",
- "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=ab6c1a4326abbcb9f98a459ae74da4995e6b41af)",
+ "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=96483d0c52f0cfc4e22e70229466798254a99b6c)",
  "dropshot",
  "fmd-adm-sys",
  "futures",
@@ -9159,7 +9159,7 @@ dependencies = [
  "display-error-chain",
  "dns-server",
  "dns-service-client",
- "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=ab6c1a4326abbcb9f98a459ae74da4995e6b41af)",
+ "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=96483d0c52f0cfc4e22e70229466798254a99b6c)",
  "dropshot",
  "ereport-types",
  "expectorate",
@@ -17403,7 +17403,7 @@ name = "wicket-common"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=ab6c1a4326abbcb9f98a459ae74da4995e6b41af)",
+ "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=96483d0c52f0cfc4e22e70229466798254a99b6c)",
  "dropshot",
  "gateway-client",
  "gateway-types",
@@ -17469,7 +17469,7 @@ dependencies = [
  "clap",
  "debug-ignore",
  "display-error-chain",
- "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=ab6c1a4326abbcb9f98a459ae74da4995e6b41af)",
+ "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=96483d0c52f0cfc4e22e70229466798254a99b6c)",
  "dropshot",
  "either",
  "expectorate",
