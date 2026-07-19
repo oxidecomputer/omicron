@@ -319,7 +319,7 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
                 bgp_config: NameOrId::Name("as47".parse().unwrap()),
                 addr: RouterPeerType::Numbered {
                     ip: "1.2.3.4".parse().unwrap(),
-                    src_addr: Some("1.2.3.5".parse().unwrap()),
+                    src_addr: None,
                 },
                 hold_time: 6,
                 idle_hold_time: 6,
@@ -390,9 +390,9 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
         numbered_peer.addr,
         RouterPeerType::Numbered {
             ip: "1.2.3.4".parse().unwrap(),
-            src_addr: Some("1.2.3.5".parse().unwrap())
+            src_addr: None
         },
-        "Numbered peer should have addr 1.2.3.4 and src_addr of 1.2.3.5"
+        "Numbered peer should have addr 1.2.3.4"
     );
 
     // Find the unnumbered peer (no address)

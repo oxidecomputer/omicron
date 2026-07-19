@@ -737,9 +737,9 @@ pub struct SwitchPortBgpPeerConfig {
     pub allow_import_list_active: bool,
     pub allow_export_list_active: bool,
     pub vlan_id: Option<SqlU16>,
+    pub src_addr: Option<IpNetwork>,
     pub id: Uuid,
     router_lifetime: SqlU16,
-    pub src_addr: Option<IpNetwork>,
 }
 
 #[derive(Debug, thiserror::Error)]

@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "2026060600.0.0"
+    "version": "2026060500.0.0"
   },
   "paths": {
     "/device/auth": {
@@ -26836,37 +26836,8 @@
         "maximum": 9000
       },
       "RouterPeerType": {
-        "description": "The peer address for a BGP session, supporting both numbered and unnumbered peers. For numbered peers, an optional source address can be specified to control the local IP used when establishing the session.",
         "oneOf": [
           {
-            "description": "A numbered BGP peer, identified by a routable IP address.",
-            "type": "object",
-            "properties": {
-              "ip": {
-                "description": "IP address for numbered BGP peers.",
-                "type": "string",
-                "format": "ip"
-              },
-              "src_addr": {
-                "nullable": true,
-                "description": "Optional source IP address for the BGP session. When set, mgd will bind to this address when establishing the TCP connection to the peer.",
-                "type": "string",
-                "format": "ip"
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "numbered"
-                ]
-              }
-            },
-            "required": [
-              "ip",
-              "type"
-            ]
-          },
-          {
-            "description": "An unnumbered BGP peer, identified by the interface it is reachable on.",
             "type": "object",
             "properties": {
               "router_lifetime": {
@@ -26886,6 +26857,26 @@
             },
             "required": [
               "router_lifetime",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "ip": {
+                "description": "IP address for numbered BGP peers.",
+                "type": "string",
+                "format": "ip"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "numbered"
+                ]
+              }
+            },
+            "required": [
+              "ip",
               "type"
             ]
           }
