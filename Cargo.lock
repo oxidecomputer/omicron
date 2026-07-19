@@ -8230,6 +8230,7 @@ dependencies = [
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "openssl",
+ "owo-colors 4.3.0",
  "oximeter-db",
  "oxnet",
  "oxql-types",
