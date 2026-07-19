@@ -7,7 +7,7 @@
 //! Changes in this version:
 //!
 //! * [`BgpPeer::addr`] is now a new local [`RouterPeerType`] that extends the
-//!   [`RouterPeerType::Numbered`] variant with an optional `src_addr` field.
+//!   [`RouterPeerType::Numbered`] variant with an optional [`src_addr`] field.
 //!   This allows callers to specify the local IP address that mgd should use
 //!   when establishing a BGP session.
 //! * Define new versions of types that transitively include [`BgpPeer`]:
