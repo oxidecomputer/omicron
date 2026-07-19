@@ -69,7 +69,7 @@ impl RouterPeerTypeDbRepresentation for RouterPeerType {
     fn ip_db_repr(&self) -> Option<IpNetwork> {
         match self {
             Self::Unnumbered { .. } => None,
-            Self::Numbered { ip, .. } => Some((*ip).into()),
+            Self::Numbered { ip } => Some((*ip).into()),
         }
     }
 
@@ -80,7 +80,7 @@ impl RouterPeerTypeDbRepresentation for RouterPeerType {
         match ip.map(|ip| ip.ip()) {
             Some(ip) => {
                 let ip = RouterPeerIpAddr::try_from(ip)?;
-                Ok(Self::Numbered { ip, src_addr: None })
+                Ok(Self::Numbered { ip })
             }
             None => Ok(Self::Unnumbered { router_lifetime }),
         }
@@ -784,7 +784,7 @@ impl SwitchPortBgpPeerConfig {
                             err,
                         }
                     })?;
-                Ok(RouterPeerType::Numbered { ip, src_addr: None })
+                Ok(RouterPeerType::Numbered { ip })
             }
             None => {
                 let router_lifetime = RouterLifetimeConfig::new(
@@ -1046,7 +1046,7 @@ mod tests {
     fn router_peer_repr_round_trip_numbered_v4() {
         let ip_addr = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1));
         let ip = RouterPeerIpAddr::try_from(ip_addr).unwrap();
-        let original = RouterPeerType::Numbered { ip, src_addr: None };
+        let original = RouterPeerType::Numbered { ip };
 
         let db_repr = original.ip_db_repr();
         assert_eq!(db_repr, Some(IpNetwork::from(ip_addr)));
@@ -1063,7 +1063,7 @@ mod tests {
     fn router_peer_repr_round_trip_numbered_v6() {
         let ip_addr = IpAddr::V6(Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 1));
         let ip = RouterPeerIpAddr::try_from(ip_addr).unwrap();
-        let original = RouterPeerType::Numbered { ip, src_addr: None };
+        let original = RouterPeerType::Numbered { ip };
 
         let db_repr = original.ip_db_repr();
         assert_eq!(db_repr, Some(IpNetwork::from(ip_addr)));
@@ -1161,7 +1161,7 @@ mod tests {
         assert_eq!(db_peer.src_addr, None);
         assert_eq!(
             db_peer.peer_type().unwrap(),
-            RouterPeerType::Numbered { ip, src_addr: None }
+            RouterPeerType::Numbered { ip }
         );
     }
 

@@ -116,7 +116,7 @@ impl BgpPeerFromDbBuilder<'_> {
             E::internal_error(InlineErrorChain::new(&err).to_string())
         })?;
         let addr = match peer_type {
-            RouterPeerType::Numbered { ip, .. } => {
+            RouterPeerType::Numbered { ip } => {
                 let src_addr = p
                     .src_addr
                     .map(|n| RouterPeerIpAddr::try_from(n.ip()))
@@ -2163,7 +2163,6 @@ mod test {
                         bgp_config: bgp_config.identity.name.clone().into(),
                         addr: RouterPeerType::Numbered {
                             ip: "192.168.1.1".parse().unwrap(),
-                            src_addr: None,
                         }
                         .into(),
                         hold_time: 0,

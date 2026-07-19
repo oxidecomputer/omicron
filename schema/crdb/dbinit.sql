@@ -6419,7 +6419,6 @@ SELECT
  sp.switch_slot,
  sp.port_name,
  bpc.addr,
- bpc.src_addr,
  bpc.hold_time,
  bpc.idle_hold_time,
  bpc.delay_open,

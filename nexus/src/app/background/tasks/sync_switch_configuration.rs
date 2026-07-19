@@ -70,7 +70,6 @@ use sled_agent_types::early_networking::ImportExportPolicy;
 use sled_agent_types::early_networking::InvalidIpAddrError;
 use sled_agent_types::early_networking::LldpAdminStatus;
 use sled_agent_types::early_networking::LldpPortConfig;
-use sled_agent_types::early_networking::LoopbackAddress as SledLoopbackAddress;
 use sled_agent_types::early_networking::MaxPathConfig;
 use sled_agent_types::early_networking::PortConfig;
 use sled_agent_types::early_networking::RackNetworkConfig;
@@ -469,57 +468,38 @@ impl BackgroundTask for SwitchPortSettingsManager {
                 // calculate and apply loopback address changes
                 //
 
-                // Fetch once; reuse for both DPD configuration and bootstore.
                 info!(&log, "checking for changes to loopback addresses");
-                let desired_loopback_addresses =
-                    match self.db_loopback_addresses(opctx).await {
-                        Ok(addrs) => addrs,
-                        Err(e) => {
-                            error!(
-                                log,
-                                "error fetching loopback addresses from db, \
-                                 skipping loopback config";
-                                "error" => %DisplayErrorChain::new(&e)
-                            );
-                            HashSet::new()
-                        }
-                    };
+                match self.db_loopback_addresses(opctx).await {
+                    Ok(desired_loopback_addresses) => {
+                        let current_loopback_addresses = switch_loopback_addresses(&dpd_clients, &log).await;
 
-                {
-                    let current_loopback_addresses =
-                        switch_loopback_addresses(&dpd_clients, &log).await;
-
-                    let loopbacks_to_add: Vec<(SwitchSlot, IpAddr)> =
-                        desired_loopback_addresses
+                        let loopbacks_to_add: Vec<(SwitchSlot, IpAddr)> = desired_loopback_addresses
                             .difference(&current_loopback_addresses)
                             .map(|i| (i.0, i.1))
                             .collect();
-                    let loopbacks_to_del: Vec<(SwitchSlot, IpAddr)> =
-                        current_loopback_addresses
+                        let loopbacks_to_del: Vec<(SwitchSlot, IpAddr)> = current_loopback_addresses
                             .difference(&desired_loopback_addresses)
                             .map(|i| (i.0, i.1))
                             .collect();
 
-                    if !loopbacks_to_del.is_empty() {
-                        info!(&log, "deleting loopback addresses"; "addresses" => ?loopbacks_to_del);
-                        delete_loopback_addresses_from_switch(
-                            &loopbacks_to_del,
-                            &dpd_clients,
-                            &log,
-                        )
-                        .await;
-                    }
+                        if !loopbacks_to_del.is_empty() {
+                            info!(&log, "deleting loopback addresses"; "addresses" => ?loopbacks_to_del);
+                            delete_loopback_addresses_from_switch(&loopbacks_to_del, &dpd_clients, &log).await;
+                        }
 
-                    if !loopbacks_to_add.is_empty() {
-                        info!(&log, "adding loopback addresses"; "addresses" => ?loopbacks_to_add);
-                        add_loopback_addresses_to_switch(
-                            &loopbacks_to_add,
-                            dpd_clients,
-                            &log,
-                        )
-                        .await;
-                    }
-                }
+                        if !loopbacks_to_add.is_empty() {
+                            info!(&log, "adding loopback addresses"; "addresses" => ?loopbacks_to_add);
+                            add_loopback_addresses_to_switch(&loopbacks_to_add, dpd_clients, &log).await;
+                        }
+                    },
+                    Err(e) => {
+                        error!(
+                            log,
+                            "error fetching loopback addresses from db, skipping loopback config";
+                            "error" => %DisplayErrorChain::new(&e)
+                        );
+                    },
+                };
 
                 //
                 // calculate and apply switch zone SMF changes
@@ -1059,15 +1039,50 @@ impl BackgroundTask for SwitchPortSettingsManager {
                     }
                 };
 
-                let mut bgp: Vec<SledBgpConfig> = switch_bgp_config
-                    .iter()
-                    .filter_map(|(_location, (_id, config))| {
-                        let announce_prefixes = bgp_announce_prefixes
-                            .get(&config.bgp_announce_set_id)
-                            .expect("bgp config is present but announce set is not populated");
-                        bgp_config_to_sled(config, announce_prefixes, &log)
+                // TODO: is this correct? Do we place the BgpConfig for both switches in a single Vec to send to the bootstore?
+                let mut bgp: Vec<SledBgpConfig> = switch_bgp_config.iter().filter_map(|(_location, (_id, config))| {
+                    let announcements = bgp_announce_prefixes
+                        .get(&config.bgp_announce_set_id)
+                        .expect("bgp config is present but announce set is not populated")
+                        .iter()
+                        .map(|prefix| {
+                            match prefix {
+                                Prefix::V4(prefix4) => {
+                                    let net = Ipv4Net::new(prefix4.value, prefix4.length)
+                                        .expect("Prefix4 and Ipv4Net's value types have diverged");
+                                    IpNet::V4(net)
+                                },
+                                Prefix::V6(prefix6) => {
+                                    let net = Ipv6Net::new(prefix6.value, prefix6.length)
+                                        .expect("Prefix6 and Ipv6Net's value types have diverged");
+                                    IpNet::V6(net)
+                                },
+                            }
+                        }).collect();
+
+                    let max_paths = match MaxPathConfig::new(*config.max_paths)
+                    {
+                        Ok(max_paths) => max_paths,
+                        Err(err) => {
+                            // This should be impossible - our db constraints
+                            // should ensure legal values.
+                            error!(
+                                log,
+                                "database contains illegal max_paths value";
+                                InlineErrorChain::new(&err),
+                            );
+                            return None;
+                        }
+                    };
+
+                    Some(SledBgpConfig {
+                        asn: config.asn.0,
+                        originate: announcements,
+                        checker: config.checker.clone(),
+                        shaper: config.shaper.clone(),
+                        max_paths,
                     })
-                    .collect();
+                }).collect();
 
                 bgp.dedup();
 
@@ -1092,6 +1107,19 @@ impl BackgroundTask for SwitchPortSettingsManager {
                         },
                     };
 
+                    // TODO https://github.com/oxidecomputer/omicron/issues/3062
+                    let tx_eq = if let Some(c) = info.tx_eq.get(0) {
+                        Some(TxEqConfig {
+                            pre1: c.pre1,
+                            pre2: c.pre2,
+                            main: c.main,
+                            post2: c.post2,
+                            post1: c.post1,
+                        })
+                    } else {
+                        None
+                    };
+
                     let bgp_peers = match peer_configs
                         .into_iter()
                         .map(SledBgpPeerConfig::try_from)
@@ -1111,18 +1139,24 @@ impl BackgroundTask for SwitchPortSettingsManager {
                         }
                     };
 
-                    let mut port_config = match port_settings_to_port_config(
-                        info,
-                        bgp_peers,
-                        *switch_slot,
-                        &port.port_name.to_string(),
-                    ) {
-                        Ok(pc) => pc,
+                    let addresses = match info
+                        .addresses
+                        .iter()
+                        .map(|a| {
+                             let address = UplinkAddress::try_from_ip_net_treating_unspecified_as_addrconf(a.address)?;
+                             Ok(UplinkAddressConfig {
+                                 address,
+                                 vlan_id: a.vlan_id
+                             })
+                        })
+                        .collect::<Result<_, InvalidIpAddrError>>()
+                    {
+                        Ok(addresses) => addresses,
                         Err(err) => {
                             error!(
                                 log,
-                                "failed to convert database port settings to \
-                                 API port config";
+                                "failed to convert database uplink addresses \
+                                 to API uplink addresses";
                                 "switch_slot" => ?switch_slot,
                                 "port" => &port.port_name.to_string(),
                                 InlineErrorChain::new(&err),
@@ -1130,6 +1164,56 @@ impl BackgroundTask for SwitchPortSettingsManager {
                             continue;
                         }
                     };
+
+                    let mut port_config = PortConfig {
+                        addresses,
+                        autoneg: info
+                            .links
+                            .get(0) //TODO breakout support
+                            .map(|l| l.autoneg)
+                            .unwrap_or(false),
+                        bgp_peers,
+                        port: port.port_name.to_string(),
+                        routes: info
+                            .routes
+                            .iter()
+                            .map(|r| SledRouteConfig {
+                                destination: r.dst.into(),
+                                nexthop: r.gw.ip(),
+                                vlan_id: r.vid.map(|x| x.0),
+                                rib_priority: r.rib_priority.map(|x| x.0),
+                            })
+                            .collect(),
+                        switch: *switch_slot,
+                        uplink_port_fec: info
+                            .links
+                            .get(0) //TODO https://github.com/oxidecomputer/omicron/issues/3062
+                            .map(|l| l.fec.map(|fec| fec.into()))
+                            .unwrap_or(None),
+                        uplink_port_speed: info
+                            .links
+                            .get(0) //TODO https://github.com/oxidecomputer/omicron/issues/3062
+                            .map(|l| l.speed)
+                            .unwrap_or(SwitchLinkSpeed::Speed100G)
+                            .into(),
+			lldp: info
+			    .link_lldp
+			    .get(0) //TODO https://github.com/oxidecomputer/omicron/issues/3062
+			    .map(|c|  LldpPortConfig {
+				status: match c.enabled {
+				    true => LldpAdminStatus::Enabled,
+				    false=> LldpAdminStatus::Disabled,
+				},
+				port_id: c.link_name.clone().map(|p| p.to_string()),
+				port_description: c.link_description.clone(),
+				chassis_id: c.chassis_id.clone(),
+				system_name: c.system_name.clone(),
+				system_description: c.system_description.clone(),
+				management_addrs:c.management_ip.map(|a| vec![a.ip()]),
+			    }),
+			    tx_eq,
+		    }
+                    ;
 
                     for peer in port_config.bgp_peers.iter_mut() {
                         peer.communities = match self
@@ -1280,12 +1364,6 @@ impl BackgroundTask for SwitchPortSettingsManager {
                         ports,
                         bgp,
                         bfd,
-                        loopback_addresses: desired_loopback_addresses
-                            .iter()
-                            .map(|&(switch, address)| {
-                                SledLoopbackAddress { switch, address }
-                            })
-                            .collect(),
                     },
                     blueprint_external_networking_config: None,
                 };
@@ -2497,7 +2575,6 @@ fn does_bootstore_need_update(
             ports: current_ports,
             bgp: current_bgp,
             bfd: current_bfd,
-            loopback_addresses: current_loopback_addresses,
         } = &current_contents.rack_network_config;
 
         let RackNetworkConfig {
@@ -2507,16 +2584,11 @@ fn does_bootstore_need_update(
             ports: desired_ports,
             bgp: desired_bgp,
             bfd: desired_bfd,
-            loopback_addresses: desired_loopback_addresses_rnc,
         } = desired_rack_network_config;
 
         let rnc_differs = !hashset_eq(current_bgp, desired_bgp)
             || !hashset_eq(current_bfd, desired_bfd)
             || !hashset_eq(current_ports, desired_ports)
-            || !hashset_eq(
-                current_loopback_addresses,
-                desired_loopback_addresses_rnc,
-            )
             || current_subnet != desired_subnet
             || current_infra_ip_first != desired_infra_ip_first
             || current_infra_ip_last != desired_infra_ip_last;
@@ -2588,163 +2660,6 @@ fn does_bootstore_need_update(
     }
 }
 
-/// Convert a database [`BgpConfig`] and its resolved `announce_prefixes` into
-/// the sled-agent [`SledBgpConfig`] type expected by the bootstore.
-///
-/// Returns `None` and logs an error if the database contains invalid data
-/// (which CHECK constraints should prevent).
-///
-/// Exhaustive destructuring of `BgpConfig` ensures the compiler rejects this
-/// function if a new DB column is added without an explicit decision about
-/// whether to propagate it to the bootstore.
-fn bgp_config_to_sled(
-    config: &BgpConfig,
-    announce_prefixes: &[Prefix],
-    log: &Logger,
-) -> Option<SledBgpConfig> {
-    let BgpConfig {
-        identity: _, // identity fields are not in SledBgpConfig
-        asn,
-        bgp_announce_set_id: _, // join key; not propagated to bootstore
-        vrf: _,                 // not propagated (mgd picks it up separately)
-        shaper,
-        checker,
-        max_paths,
-    } = config;
-
-    let originate = announce_prefixes
-        .iter()
-        .map(|prefix| match prefix {
-            Prefix::V4(prefix4) => {
-                let net = Ipv4Net::new(prefix4.value, prefix4.length)
-                    .expect("Prefix4 and Ipv4Net's value types have diverged");
-                IpNet::V4(net)
-            }
-            Prefix::V6(prefix6) => {
-                let net = Ipv6Net::new(prefix6.value, prefix6.length)
-                    .expect("Prefix6 and Ipv6Net's value types have diverged");
-                IpNet::V6(net)
-            }
-        })
-        .collect();
-
-    let max_paths = match MaxPathConfig::new(**max_paths) {
-        Ok(max_paths) => max_paths,
-        Err(err) => {
-            // This should be impossible: our db constraints enforce legal values.
-            error!(
-                log,
-                "database contains illegal max_paths value";
-                InlineErrorChain::new(&err),
-            );
-            return None;
-        }
-    };
-
-    Some(SledBgpConfig {
-        asn: asn.0,
-        originate,
-        checker: checker.clone(),
-        shaper: shaper.clone(),
-        max_paths,
-    })
-}
-
-/// Convert a database [`SwitchPortSettingsCombinedResult`] and
-/// already-converted `bgp_peers` into the sled-agent [`PortConfig`].
-///
-/// The `bgp_peers` parameter is populated from a separate per-port DB query
-/// and passed in pre-converted so that this function contains no I/O.
-///
-/// Returns `Err` if any uplink address cannot be converted to the sled-agent
-/// representation.
-///
-/// Exhaustive destructuring of `SwitchPortSettingsCombinedResult` ensures the
-/// compiler rejects this function if a new DB column is added without an
-/// explicit decision about whether to propagate it to the bootstore.
-fn port_settings_to_port_config(
-    info: &SwitchPortSettingsCombinedResult,
-    bgp_peers: Vec<SledBgpPeerConfig>,
-    switch_slot: SwitchSlot,
-    port_name: &str,
-) -> Result<PortConfig, InvalidIpAddrError> {
-    let SwitchPortSettingsCombinedResult {
-        settings: _, // identity; not in PortConfig
-        groups: _,   // port settings groups; not in PortConfig
-        port: _,     // port-level config; not in PortConfig
-        links,
-        link_lldp,
-        tx_eq,
-        interfaces: _,      // interface config; not in PortConfig
-        vlan_interfaces: _, // vlan config; not in PortConfig
-        routes,
-        bgp_peers: _, // caller passes pre-converted bgp_peers
-        addresses,
-    } = info;
-
-    // TODO https://github.com/oxidecomputer/omicron/issues/3062
-    let tx_eq_cfg = tx_eq.first().map(|c| TxEqConfig {
-        pre1: c.pre1,
-        pre2: c.pre2,
-        main: c.main,
-        post2: c.post2,
-        post1: c.post1,
-    });
-
-    let addresses = addresses
-        .iter()
-        .map(|a| {
-            let address = UplinkAddress::try_from_ip_net_treating_unspecified_as_addrconf(a.address)?;
-            Ok(UplinkAddressConfig { address, vlan_id: a.vlan_id })
-        })
-        .collect::<Result<_, InvalidIpAddrError>>()?;
-
-    Ok(PortConfig {
-        addresses,
-        autoneg: links
-            .first() // TODO breakout support
-            .map(|l| l.autoneg)
-            .unwrap_or(false),
-        bgp_peers,
-        port: port_name.to_string(),
-        routes: routes
-            .iter()
-            .map(|r| SledRouteConfig {
-                destination: r.dst.into(),
-                nexthop: r.gw.ip(),
-                vlan_id: r.vid.map(|x| x.0),
-                rib_priority: r.rib_priority.map(|x| x.0),
-            })
-            .collect(),
-        switch: switch_slot,
-        uplink_port_fec: links
-            .first() // TODO https://github.com/oxidecomputer/omicron/issues/3062
-            .map(|l| l.fec.map(|fec| fec.into()))
-            .unwrap_or(None),
-        uplink_port_speed: links
-            .first() // TODO https://github.com/oxidecomputer/omicron/issues/3062
-            .map(|l| l.speed)
-            .unwrap_or(SwitchLinkSpeed::Speed100G)
-            .into(),
-        lldp: link_lldp
-            .first() // TODO https://github.com/oxidecomputer/omicron/issues/3062
-            .map(|c| LldpPortConfig {
-                status: if c.enabled {
-                    LldpAdminStatus::Enabled
-                } else {
-                    LldpAdminStatus::Disabled
-                },
-                port_id: c.link_name.clone().map(|p| p.to_string()),
-                port_description: c.link_description.clone(),
-                chassis_id: c.chassis_id.clone(),
-                system_name: c.system_name.clone(),
-                system_description: c.system_description.clone(),
-                management_addrs: c.management_ip.map(|a| vec![a.ip()]),
-            }),
-        tx_eq: tx_eq_cfg,
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2765,7 +2680,6 @@ mod tests {
             ports: vec![],
             bgp: vec![],
             bfd: vec![],
-            loopback_addresses: vec![],
         }
     }
 
@@ -2993,260 +2907,5 @@ mod tests {
         ));
 
         logctx.cleanup_successful();
-    }
-
-    // -----------------------------------------------------------------------
-    // Tests for bgp_config_to_sled
-    // -----------------------------------------------------------------------
-
-    #[test]
-    fn bgp_config_to_sled_preserves_all_fields() {
-        use nexus_db_model::SqlU8;
-        use omicron_common::api::external::IdentityMetadataCreateParams;
-
-        let logctx = test_setup_log("bgp_config_to_sled_preserves_all_fields");
-
-        let announce_set_id = Uuid::new_v4();
-        let db_config = BgpConfig::from_config_create(
-            &networking::BgpConfigCreate {
-                identity: IdentityMetadataCreateParams {
-                    name: "test-bgp".parse().unwrap(),
-                    description: "a test BGP config".to_string(),
-                },
-                asn: 65001,
-                bgp_announce_set_id: announce_set_id.into(),
-                vrf: None,
-                shaper: Some("some-shaper".to_string()),
-                checker: Some("some-checker".to_string()),
-                max_paths: MaxPathConfig::new(4).unwrap(),
-            },
-            announce_set_id,
-        );
-
-        let announce_prefixes = vec![
-            Prefix::V4(Prefix4 {
-                value: std::net::Ipv4Addr::new(10, 0, 0, 0),
-                length: 8,
-            }),
-            Prefix::V6(Prefix6 {
-                value: "fd00::".parse().unwrap(),
-                length: 48,
-            }),
-        ];
-
-        let result =
-            bgp_config_to_sled(&db_config, &announce_prefixes, &logctx.log)
-                .expect("conversion should succeed");
-
-        assert_eq!(result.asn, 65001, "asn should match");
-        assert_eq!(
-            result.shaper.as_deref(),
-            Some("some-shaper"),
-            "shaper should match"
-        );
-        assert_eq!(
-            result.checker.as_deref(),
-            Some("some-checker"),
-            "checker should match"
-        );
-        assert_eq!(
-            result.max_paths,
-            MaxPathConfig::new(4).unwrap(),
-            "max_paths should match"
-        );
-        assert_eq!(result.originate.len(), 2, "should have 2 prefixes");
-        assert!(
-            result.originate.iter().any(|p| p.to_string() == "10.0.0.0/8"),
-            "should contain 10.0.0.0/8"
-        );
-        assert!(
-            result.originate.iter().any(|p| p.to_string() == "fd00::/48"),
-            "should contain fd00::/48"
-        );
-
-        // Exhaustive check: verify that our SqlU8 max_paths field dereferences
-        // correctly and that a known-bad value returns None.
-        let bad_config = BgpConfig::from_config_create(
-            &networking::BgpConfigCreate {
-                identity: IdentityMetadataCreateParams {
-                    name: "bad-bgp".parse().unwrap(),
-                    description: "has invalid max_paths".to_string(),
-                },
-                asn: 65002,
-                bgp_announce_set_id: announce_set_id.into(),
-                vrf: None,
-                shaper: None,
-                checker: None,
-                max_paths: MaxPathConfig::new(4).unwrap(),
-            },
-            announce_set_id,
-        );
-        // Manually override max_paths to an invalid value (0 is disallowed)
-        // to verify the error path returns None.
-        let mut bad = bad_config;
-        bad.max_paths = SqlU8(0);
-        assert!(
-            bgp_config_to_sled(&bad, &[], &logctx.log).is_none(),
-            "invalid max_paths should return None"
-        );
-
-        logctx.cleanup_successful();
-    }
-
-    // -----------------------------------------------------------------------
-    // Tests for port_settings_to_port_config
-    // -----------------------------------------------------------------------
-
-    #[test]
-    fn port_settings_to_port_config_preserves_all_fields() {
-        use nexus_db_model::{
-            LldpLinkConfig, Name, SqlU16, SwitchLinkFec, SwitchPortConfig,
-            SwitchPortGeometry, SwitchPortRouteConfig, SwitchPortSettings,
-            TxEqConfig,
-        };
-        use nexus_db_queries::db::datastore::LinkConfigCombinedResult;
-        use omicron_common::api::external::{
-            IdentityMetadataCreateParams, SwitchPortAddressView,
-        };
-
-        let settings_id = Uuid::new_v4();
-        let lot_id = Uuid::new_v4();
-        let lot_block_id = Uuid::new_v4();
-
-        // Construct the settings/port fields that are intentionally not used
-        // by port_settings_to_port_config (they are destructured as `_`).
-        let settings = SwitchPortSettings::new(&IdentityMetadataCreateParams {
-            name: "test-settings".parse().unwrap(),
-            description: "test".to_string(),
-        });
-        let port =
-            SwitchPortConfig::new(settings_id, SwitchPortGeometry::Qsfp28x1);
-
-        // One link with distinctive autoneg / fec / speed values.
-        let link = LinkConfigCombinedResult {
-            port_settings_id: settings_id,
-            link_name: Name("phy0".parse().unwrap()),
-            mtu: SqlU16(9000),
-            fec: Some(SwitchLinkFec::Rs),
-            speed: SwitchLinkSpeed::Speed100G,
-            autoneg: true,
-            lldp_link_config: None,
-            tx_eq_config: None,
-        };
-
-        // One LLDP config.
-        let lldp = LldpLinkConfig::new(
-            true,
-            Some("phy0".to_string()),
-            Some("test port".to_string()),
-            Some("test-chassis-001".to_string()),
-            Some("test-system-1".to_string()),
-            Some("A thing to test".to_string()),
-            Some(ipnetwork::IpNetwork::from(std::net::IpAddr::V4(
-                std::net::Ipv4Addr::new(10, 0, 0, 1),
-            ))),
-        );
-
-        // One TX-EQ config.
-        let tx_eq =
-            TxEqConfig::new(Some(-3), Some(-1), Some(20), Some(-2), Some(-4));
-
-        // One route.
-        let route = SwitchPortRouteConfig::new(
-            settings_id,
-            Name("lo0".parse().unwrap()),
-            ipnetwork::IpNetwork::from(std::net::IpAddr::V4(
-                std::net::Ipv4Addr::new(0, 0, 0, 0),
-            )),
-            ipnetwork::IpNetwork::from(std::net::IpAddr::V4(
-                std::net::Ipv4Addr::new(10, 0, 0, 1),
-            )),
-            Some(SqlU16(100)), // vlan_id
-            None,
-        );
-
-        // One uplink address.
-        let address = SwitchPortAddressView {
-            port_settings_id: settings_id,
-            address_lot_id: lot_id,
-            address_lot_name: "infra-lot".parse().unwrap(),
-            address_lot_block_id: lot_block_id,
-            address: "10.0.0.1/24".parse().unwrap(),
-            vlan_id: Some(42),
-            interface_name: "phy0".parse().unwrap(),
-        };
-
-        // Build the combined result.
-        let info = SwitchPortSettingsCombinedResult {
-            settings,
-            groups: vec![],
-            port,
-            links: vec![link],
-            link_lldp: vec![lldp],
-            tx_eq: vec![tx_eq],
-            interfaces: vec![],
-            vlan_interfaces: vec![],
-            routes: vec![route],
-            bgp_peers: vec![],
-            addresses: vec![address],
-        };
-
-        let result = port_settings_to_port_config(
-            &info,
-            vec![], // no BGP peers in this test
-            SwitchSlot::Switch0,
-            "phy0",
-        )
-        .expect("conversion should succeed");
-
-        // Assert all expected fields are present.
-        assert_eq!(result.port, "phy0", "port name should match");
-        assert_eq!(result.switch, SwitchSlot::Switch0, "switch slot");
-        assert!(result.autoneg, "autoneg should be true");
-        assert_eq!(result.addresses.len(), 1, "should have 1 address");
-        assert_eq!(result.routes.len(), 1, "should have 1 route");
-        assert_eq!(result.bgp_peers.len(), 0, "no BGP peers");
-
-        // Check FEC and speed are propagated.
-        assert_eq!(
-            result.uplink_port_fec,
-            Some(sled_agent_types::early_networking::LinkFec::Rs),
-            "fec should be Rs"
-        );
-        assert_eq!(
-            result.uplink_port_speed,
-            sled_agent_types::early_networking::LinkSpeed::Speed100G,
-            "speed should be 100G"
-        );
-
-        // Check LLDP config.
-        let lldp_out = result.lldp.expect("lldp should be present");
-        assert_eq!(
-            lldp_out.status,
-            LldpAdminStatus::Enabled,
-            "lldp should be enabled"
-        );
-        assert_eq!(lldp_out.chassis_id.as_deref(), Some("test-chassis-001"));
-        assert_eq!(lldp_out.system_name.as_deref(), Some("test-system-1"));
-        assert_eq!(
-            lldp_out.system_description.as_deref(),
-            Some("A thing to test")
-        );
-
-        // Check TX-EQ config.
-        let tx_eq_out = result.tx_eq.expect("tx_eq should be present");
-        assert_eq!(tx_eq_out.pre1, Some(-3));
-        assert_eq!(tx_eq_out.pre2, Some(-1));
-        assert_eq!(tx_eq_out.main, Some(20));
-        assert_eq!(tx_eq_out.post2, Some(-2));
-        assert_eq!(tx_eq_out.post1, Some(-4));
-
-        // Check route fields.
-        let route_out = &result.routes[0];
-        assert_eq!(
-            route_out.nexthop,
-            std::net::IpAddr::V4(std::net::Ipv4Addr::new(10, 0, 0, 1))
-        );
-        assert_eq!(route_out.vlan_id, Some(100));
     }
 }

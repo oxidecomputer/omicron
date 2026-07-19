@@ -327,7 +327,6 @@ table! {
         switch_slot -> crate::enums::SwitchSlotEnum,
         port_name -> Text,
         addr -> Nullable<Inet>,
-        src_addr -> Nullable<Inet>,
         hold_time -> Int8,
         idle_hold_time -> Int8,
         delay_open -> Int8,

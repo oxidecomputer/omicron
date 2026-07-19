@@ -98,39 +98,6 @@ impl From<RouterPeerType>
     }
 }
 
-impl From<sled_agent_types_versions::v42::early_networking::RouterPeerType>
-    for RouterPeerType
-{
-    fn from(
-        value: sled_agent_types_versions::v42::early_networking::RouterPeerType,
-    ) -> Self {
-        match value {
-            sled_agent_types_versions::v42::early_networking::RouterPeerType::Numbered {
-                ip,
-                src_addr,
-            } => Self::Numbered { ip, src_addr },
-            sled_agent_types_versions::v42::early_networking::RouterPeerType::Unnumbered {
-                router_lifetime,
-            } => Self::Unnumbered { router_lifetime },
-        }
-    }
-}
-
-impl From<RouterPeerType>
-    for sled_agent_types_versions::v42::early_networking::RouterPeerType
-{
-    fn from(value: RouterPeerType) -> Self {
-        match value {
-            RouterPeerType::Numbered { ip, src_addr } => {
-                Self::Numbered { ip, src_addr }
-            }
-            RouterPeerType::Unnumbered { router_lifetime } => {
-                Self::Unnumbered { router_lifetime }
-            }
-        }
-    }
-}
-
 /// A BGP peer configuration for an interface. Includes the set of
 /// announcements that will be advertised to the peer. The `bgp_config`
 /// parameter is a reference to global BGP parameters.

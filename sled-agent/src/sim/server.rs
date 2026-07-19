@@ -655,7 +655,6 @@ pub async fn run_standalone_server(
             ports: Vec::new(),
             bgp: Vec::new(),
             bfd: Vec::new(),
-            loopback_addresses: Vec::new(),
         },
         allowed_source_ips: AllowedSourceIps::Any,
         initial_trust_quorum_configuration: None,

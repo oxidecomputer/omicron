@@ -7,8 +7,7 @@
 use anyhow::{Context, anyhow};
 use dpd_client::Client as DpdClient;
 use dpd_client::types::{
-    Ipv4Entry, Ipv6Entry, LinkCreate, LinkId, LinkSettings, PortId,
-    PortSettings, TxEq,
+    LinkCreate, LinkId, LinkSettings, PortId, PortSettings, TxEq,
 };
 use futures::future;
 use gateway_client::Client as MgsClient;
@@ -45,7 +44,7 @@ use omicron_ddm_admin_client::DdmError;
 use oxnet::IpNet;
 use sled_agent_types::early_networking::{
     BfdMode, BgpConfig, BgpPeerConfig, ImportExportPolicy, LinkFec, LinkSpeed,
-    LoopbackAddress, PortConfig, RouterPeerType, SwitchSlot, UplinkAddress,
+    PortConfig, RouterPeerType, SwitchSlot, UplinkAddress,
 };
 use sled_agent_types::sled::ThisSledSwitchZoneUnderlayIpAddr;
 use sled_agent_types::system_networking::SystemNetworkingConfig;
@@ -572,7 +571,7 @@ impl<'a> EarlyNetworkSetup<'a> {
 
                 match peer.addr {
                     // Numbered peer - identified by address
-                    RouterPeerType::Numbered { ip: addr, src_addr } => {
+                    RouterPeerType::Numbered { ip: addr } => {
                         let bpc = MgBgpPeerConfig {
                             name: format!("{}", addr),
                             host: format!("{}:179", addr),
@@ -610,7 +609,7 @@ impl<'a> EarlyNetworkSetup<'a> {
                             }),
                             deterministic_collision_resolution: false,
                             idle_hold_jitter: None,
-                            src_addr: src_addr.map(std::net::IpAddr::from),
+                            src_addr: None,
                             src_port: None,
                         };
                         match bgp_peer_configs.get_mut(&port.port) {
@@ -851,41 +850,6 @@ impl<'a> EarlyNetworkSetup<'a> {
                     "configuration" => ?cfg,
                 );
             };
-        }
-
-        // Configure loopback addresses from bootstore
-        for loopback in rack_network_config
-            .loopback_addresses
-            .iter()
-            .filter(|l| l.switch == switch_slot)
-        {
-            let LoopbackAddress { address, .. } = loopback;
-            let result = match address {
-                std::net::IpAddr::V4(a) => dpd
-                    .loopback_ipv4_create(&Ipv4Entry {
-                        addr: *a,
-                        tag: OMICRON_DPD_TAG.into(),
-                    })
-                    .await
-                    .map(|_| ()),
-                std::net::IpAddr::V6(a) => dpd
-                    .loopback_ipv6_create(&Ipv6Entry {
-                        addr: *a,
-                        tag: OMICRON_DPD_TAG.into(),
-                    })
-                    .await
-                    .map(|_| ()),
-            };
-            if let Err(e) = result {
-                if e.status() != Some(StatusCode::CONFLICT) {
-                    error!(
-                        self.log,
-                        "loopback address configuration failed";
-                        "address" => ?address,
-                        "error" => ?e,
-                    );
-                }
-            }
         }
 
         Ok(our_ports)

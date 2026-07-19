@@ -234,7 +234,6 @@ fn current_config_example() -> (&'static str, EarlyNetworkConfigEnvelope) {
                         port: "qsfp18".to_owned(),
                         addr: RouterPeerType::Numbered {
                             ip: "172.20.15.43".parse().unwrap(),
-                            src_addr: None,
                         },
                         hold_time: Some(6),
                         idle_hold_time: Some(0),
@@ -311,7 +310,6 @@ fn current_config_example() -> (&'static str, EarlyNetworkConfigEnvelope) {
                 max_paths: MaxPathConfig::default(),
             }],
             bfd: vec![],
-            loopback_addresses: vec![],
         },
         blueprint_external_networking_config: Some(
             BlueprintExternalNetworkingConfig {

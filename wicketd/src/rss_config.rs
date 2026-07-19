@@ -725,7 +725,6 @@ fn validate_rack_network_config(
             .collect(),
         //TODO bfd config in wicket
         bfd: vec![],
-        loopback_addresses: vec![],
     })
 }
 
@@ -817,7 +816,7 @@ fn build_port_config(
                         }
                     }
                     UserSpecifiedRouterPeerAddr::Numbered(ip) => {
-                        RouterPeerType::Numbered { ip, src_addr: None }
+                        RouterPeerType::Numbered { ip }
                     }
                 };
 

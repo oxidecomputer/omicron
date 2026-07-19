@@ -839,29 +839,6 @@
           "status"
         ]
       },
-      "LoopbackAddress": {
-        "description": "A loopback address to configure on a switch.\n\nThe `anycast` flag present on the database model is intentionally omitted here: the DPD `loopback_ipv4_create`/`loopback_ipv6_create` API does not accept it, so the sync task already discards it.",
-        "type": "object",
-        "properties": {
-          "address": {
-            "description": "The loopback IP address.",
-            "type": "string",
-            "format": "ip"
-          },
-          "switch": {
-            "description": "The switch on which this loopback address should be configured.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/SwitchSlot"
-              }
-            ]
-          }
-        },
-        "required": [
-          "address",
-          "switch"
-        ]
-      },
       "MaxPathConfig": {
         "type": "integer",
         "format": "uint8",
@@ -1108,14 +1085,6 @@
             "description": "Last ip address to be used for configuring network infrastructure",
             "type": "string",
             "format": "ip"
-          },
-          "loopback_addresses": {
-            "description": "Loopback addresses to configure on each switch",
-            "default": [],
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/LoopbackAddress"
-            }
           },
           "ports": {
             "description": "Uplinks for connecting the rack to external networks",
@@ -1415,7 +1384,6 @@
         "maximum": 9000
       },
       "RouterPeerType": {
-        "description": "A BGP peer address: either a numbered (IP) peer or an unnumbered (interface) peer.",
         "oneOf": [
           {
             "type": "object",
@@ -1445,12 +1413,6 @@
             "properties": {
               "ip": {
                 "description": "IP address for numbered BGP peers.",
-                "type": "string",
-                "format": "ip"
-              },
-              "src_addr": {
-                "nullable": true,
-                "description": "Optional source address to use for the BGP session.",
                 "type": "string",
                 "format": "ip"
               },

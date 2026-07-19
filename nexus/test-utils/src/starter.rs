@@ -925,7 +925,6 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
                     infra_ip_last: "192.0.2.100".parse().unwrap(),
                     ports: Vec::new(),
                     rack_subnet: "fd00:1122:3344:0100::/56".parse().unwrap(),
-                    loopback_addresses: Vec::new(),
                 },
                 // TODO-correctness Can we fill this in for tests?
                 blueprint_external_networking_config: None,
