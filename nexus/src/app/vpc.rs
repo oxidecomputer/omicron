@@ -192,6 +192,12 @@ impl super::Nexus {
             params.clone(),
         )?;
 
+        // Reject cross-VPC references before writing anything. The same check
+        // happens again when resolving rules for sled-agents, but that runs
+        // after the write, so without this the rules would be persisted even
+        // though the request fails (omicron#10561).
+        nexus_networking::ensure_no_cross_vpc_references(&db_vpc, &rules)?;
+
         let rules = self
             .db_datastore
             .vpc_update_firewall_rules(opctx, &authz_vpc, rules)

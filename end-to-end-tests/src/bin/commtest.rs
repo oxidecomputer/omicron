@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 use anyhow::{Result, anyhow};
 use clap::{Parser, Subcommand};
 use end_to_end_tests::helpers::icmp::ping4_test_run;
@@ -7,9 +11,9 @@ use oxide_client::{
     ClientSystemHardwareExt, ClientSystemIpPoolsExt, ClientSystemStatusExt,
     ClientVpcsExt,
     types::{
-        IpPoolCreate, IpPoolLinkSilo, IpPoolType, IpRange, IpVersion, Name,
-        NameOrId, PingStatus, PoolSelector, ProbeCreate, ProbeInfo,
-        ProjectCreate, UsernamePasswordCredentials,
+        IpPoolAssignment, IpPoolCreate, IpPoolLinkSilo, IpPoolType, IpRange,
+        IpVersion, Name, NameOrId, PingStatus, PoolSelector, ProbeCreate,
+        ProbeInfo, ProjectCreate, UsernamePasswordCredentials,
     },
 };
 use std::{
@@ -297,6 +301,7 @@ async fn rack_prepare(
                     description: "Default IP pool".to_string(),
                     ip_version,
                     pool_type: IpPoolType::Unicast,
+                    assignment: IpPoolAssignment::Silos,
                 })
                 .send()
                 .await?;

@@ -148,6 +148,7 @@ mod disk_type_local_storage;
 mod dns;
 mod downstairs;
 pub mod ereport;
+mod ereporter_restart;
 mod ereporter_type;
 mod external_ip;
 mod external_subnet;
@@ -301,6 +302,7 @@ pub use disk_type_local_storage::*;
 pub use dns::*;
 pub use downstairs::*;
 pub use ereport::Ereport;
+pub use ereporter_restart::*;
 pub use ereporter_type::*;
 pub use external_ip::*;
 pub use external_subnet::*;
@@ -470,6 +472,7 @@ pub(crate) use impl_enum_wrapper;
 /// our database into our model types. See [`VpcRouterKind`] for a sample usage.
 macro_rules! impl_enum_type {
     (
+        $(#[doc = $doc:expr])*
         $diesel_type:ident:
 
         $(#[$model_meta:meta])*
@@ -477,6 +480,7 @@ macro_rules! impl_enum_type {
 
         $($enum_item:ident => $sql_value:literal)+
     ) => {
+        $(#[doc = $doc])*
         $(#[$model_meta])*
         #[diesel(sql_type = ::nexus_db_schema::enums::$diesel_type)]
         pub enum $model_type {

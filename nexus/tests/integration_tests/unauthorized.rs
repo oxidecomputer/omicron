@@ -70,6 +70,15 @@ async fn test_unauthorized() {
             .start::<omicron_nexus::Server>()
             .await;
 
+    // Some endpoints, such as `/v1/system/update/status`, return errors until the
+    // inventory watch channel is populated, so wait for that here to avoid a
+    // flake under contention.
+    cptestctx
+        .wait_for_at_least_one_inventory_collection(
+            std::time::Duration::from_secs(60),
+        )
+        .await;
+
     let mut disk_test = DiskTest::new(&cptestctx).await;
     let sled_id = cptestctx.first_sled_id();
     disk_test
@@ -350,7 +359,7 @@ static SETUP_REQUESTS: LazyLock<Vec<SetupReq>> = LazyLock::new(|| {
         SetupReq::Post {
             url: &DEMO_IP_POOLS_URL,
             body: serde_json::to_value(&*DEMO_IP_POOL_CREATE).unwrap(),
-            id_routes: vec!["/v1/ip-pools/{id}"],
+            id_routes: vec!["/v1/system/ip-pools/{id}"],
         },
         // Create an IP pool range
         SetupReq::Post {
@@ -363,6 +372,16 @@ static SETUP_REQUESTS: LazyLock<Vec<SetupReq>> = LazyLock::new(|| {
             url: &DEMO_IP_POOL_SILOS_URL,
             body: serde_json::to_value(&*DEMO_IP_POOL_SILOS_BODY).unwrap(),
             id_routes: vec![],
+        },
+        // Create a default services IP pool.
+        //
+        // This is just another IP Pool that the operator can control, but it's
+        // assigned to Oxide system services. See the create-parameters for
+        // details.
+        SetupReq::Post {
+            url: &DEMO_IP_POOLS_URL,
+            body: serde_json::to_value(&*DEMO_SERVICES_IP_POOL_CREATE).unwrap(),
+            id_routes: vec!["/v1/system/ip-pools/{id}"],
         },
         // Create a Project in the Organization
         SetupReq::Post {

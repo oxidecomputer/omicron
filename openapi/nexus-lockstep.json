@@ -5372,7 +5372,7 @@
         "minimum": 0
       },
       "InstanceCpuPlatform": {
-        "description": "A required CPU platform for an instance.\n\nWhen an instance specifies a required CPU platform:\n\n- The system may expose (to the VM) new CPU features that are only present on that platform (or on newer platforms of the same lineage that also support those features). - The instance must run on hosts that have CPUs that support all the features of the supplied platform.\n\nThat is, the instance is restricted to hosts that have the CPUs which support all features of the required platform, but in exchange the CPU features exposed by the platform are available for the guest to use. Note that this may prevent an instance from starting (if the hosts that could run it are full but there is capacity on other incompatible hosts).\n\nIf an instance does not specify a required CPU platform, then when it starts, the control plane selects a host for the instance and then supplies the guest with the \"minimum\" CPU platform supported by that host. This maximizes the number of hosts that can run the VM if it later needs to migrate to another host.\n\nIn all cases, the CPU features presented by a given CPU platform are a subset of what the corresponding hardware may actually support; features which cannot be used from a virtual environment or do not have full hypervisor support may be masked off. See RFD 314 for specific CPU features in a CPU platform.",
+        "description": "A required CPU platform for an instance.\n\nWhen an instance specifies a required CPU platform:\n\n- The system may expose (to the VM) new CPU features that are only present on that platform (or on newer platforms of the same lineage that also support those features). - The instance must run on hosts that have CPUs that support all the features of the supplied platform.\n\nThat is, the instance is restricted to hosts that have the CPUs which support all features of the required platform, but in exchange the CPU features exposed by the platform are available for the guest to use. Note that this may prevent an instance from starting (if the hosts that could run it are full but there is capacity on other incompatible hosts).\n\nIf an instance does not specify a required CPU platform, then when it starts, the control plane selects a host for the instance and then supplies the guest with the \"minimum\" CPU platform supported by that host. This maximizes the number of hosts that can run the VM if it later needs to migrate to another host.\n\nIn all cases, the CPU features presented by a given CPU platform are a subset of what the corresponding hardware may actually support; features which cannot be used from a virtual environment or do not have full hypervisor support may be masked off.",
         "oneOf": [
           {
             "description": "An AMD Milan-like CPU platform.",
@@ -5382,10 +5382,17 @@
             ]
           },
           {
-            "description": "An AMD Turin-like CPU platform.",
+            "description": "An AMD Turin-like CPU platform. Prefer `amd_turin_v2` over this; this CPU platform is retained for instances that specifically requested it before `amd_turin_v2` was added.\n\nThis initial version of the Turin CPU platform includes no cache or TLB information in CPUID leaf `8000_0006`. While this was intentional, Oxide later discovered some guest software interprets the zeroed leaves as reporting cache sizes of 0 bytes and behaves incorrectly and unpredictably as a result (see [Propolis#1152](https://github.com/oxidecomputer/propolis/issues/1152)).",
             "type": "string",
             "enum": [
               "amd_turin"
+            ]
+          },
+          {
+            "description": "An AMD Turin-like CPU platform.\n\nThis version of the Turin CPU platform includes cache and TLB information in CPUID leaf `8000_0006`, similar to the cache information included in the initial Milan-like CPU platform.",
+            "type": "string",
+            "enum": [
+              "amd_turin_v2"
             ]
           }
         ]
@@ -8394,10 +8401,11 @@
           },
           "ports": {
             "description": "Uplinks for connecting the rack to external networks",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/PortConfig"
-            }
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/UplinkPorts"
+              }
+            ]
           },
           "rack_subnet": {
             "$ref": "#/components/schemas/Ipv6Net"
@@ -8423,6 +8431,9 @@
       "ReconfiguratorConfig": {
         "type": "object",
         "properties": {
+          "disruption_policy": {
+            "$ref": "#/components/schemas/ReconfiguratorDisruptionPolicy"
+          },
           "planner_config": {
             "default": {},
             "allOf": [
@@ -8439,6 +8450,7 @@
           }
         },
         "required": [
+          "disruption_policy",
           "planner_enabled",
           "tuf_repo_pruner_enabled"
         ]
@@ -8480,6 +8492,32 @@
           "config",
           "time_modified",
           "version"
+        ]
+      },
+      "ReconfiguratorDisruptionPolicy": {
+        "description": "Controls how instances are disrupted during updates.",
+        "oneOf": [
+          {
+            "description": "Terminate instances during updates -- do not attempt to migrate instances. This is currently the default.",
+            "type": "string",
+            "enum": [
+              "terminate"
+            ]
+          },
+          {
+            "description": "Attempt to live-migrate instances, and terminate instances if migration is not possible.",
+            "type": "string",
+            "enum": [
+              "migrate_or_terminate"
+            ]
+          },
+          {
+            "description": "Live-migrate any potentially migratable instances, and block reconfigurator progress if migration is not currently possible for operational reasons.\n\nThis will still cause instances to be terminated if it is impossible for them to be live-migrated, such as if they use local storage.",
+            "type": "string",
+            "enum": [
+              "migrate_only"
+            ]
+          }
         ]
       },
       "RecoverySiloConfig": {
@@ -9764,6 +9802,13 @@
         "required": [
           "address"
         ]
+      },
+      "UplinkPorts": {
+        "type": "array",
+        "items": {
+          "$ref": "#/components/schemas/PortConfig"
+        },
+        "minItems": 1
       },
       "UserId": {
         "title": "A username for a local-only user",

@@ -6,8 +6,6 @@
 //!
 //! Tests queries that retrieve measurement data within specified time windows.
 
-// Copyright 2026 Oxide Computer Company
-
 mod common;
 
 use common::{bench_metric, bench_oxql_query, get_client};

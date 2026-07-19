@@ -8,11 +8,16 @@ use super::external_ips::floating_ip_get;
 use super::external_ips::get_floating_ip_by_id_url;
 use super::metrics::{assert_silo_metrics, assert_system_metrics};
 
+use async_bb8_diesel::AsyncRunQueryDsl;
+use diesel::prelude::*;
 use http::StatusCode;
 use http::method::Method;
 use itertools::Itertools;
 use nexus_auth::authz::Action;
+use nexus_db_lookup::AsyncConnection;
 use nexus_db_lookup::LookupPath;
+use nexus_db_model::SledResourceVmm;
+use nexus_db_model::to_db_typed_uuid;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
@@ -54,6 +59,10 @@ use nexus_types::external_api::instance::IpAssignment;
 use nexus_types::external_api::instance::PrivateIpStackCreate;
 use nexus_types::external_api::instance::PrivateIpv4StackCreate;
 use nexus_types::external_api::instance::PrivateIpv6StackCreate;
+use nexus_types::external_api::instance::{
+    Instance, InstanceAutoRestartPolicy, InstanceCpuCount, InstanceCpuPlatform,
+    InstanceState,
+};
 use nexus_types::external_api::ip_pool::{
     self, IpRange, Ipv4Range, PoolSelector,
 };
@@ -68,21 +77,14 @@ use nexus_types::external_api::vpc::VpcSubnet;
 use nexus_types::identity::Resource;
 use nexus_types::internal_api::params::InstanceMigrateRequest;
 use nexus_types::silo::DEFAULT_SILO_ID;
-use nexus_types_versions::latest::instance::Instance;
 use omicron_common::address::IpVersion;
-use omicron_common::api::external::AffinityPolicy;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Disk;
 use omicron_common::api::external::DiskState;
 use omicron_common::api::external::Error;
-use omicron_common::api::external::FailureDomain;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
-use omicron_common::api::external::InstanceAutoRestartPolicy;
-use omicron_common::api::external::InstanceCpuCount;
-use omicron_common::api::external::InstanceCpuPlatform;
 use omicron_common::api::external::InstanceNetworkInterface;
-use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::Nullable;
@@ -747,6 +749,35 @@ async fn test_instance_start_creates_networking_state(
     assert!(checked);
 }
 
+/// Fetch the source and target VMMs' `sled_resource_vmm` records, returning `None`
+/// if the corresponding record is not found.
+///
+/// To avoid torn reads, this function reads the records in a single query.
+///
+/// Panics if a database error occurs.
+async fn fetch_sled_resource_vmm_records(
+    src_propolis_id: PropolisUuid,
+    dst_propolis_id: PropolisUuid,
+    conn: &AsyncConnection,
+) -> (Option<SledResourceVmm>, Option<SledResourceVmm>) {
+    use nexus_db_schema::schema::sled_resource_vmm::dsl;
+
+    let records: Vec<SledResourceVmm> = dsl::sled_resource_vmm
+        .filter(dsl::id.eq_any([
+            to_db_typed_uuid(src_propolis_id),
+            to_db_typed_uuid(dst_propolis_id),
+        ]))
+        .select(SledResourceVmm::as_select())
+        .get_results_async(conn)
+        .await
+        .expect("querying for sled_resource_vmm records should not fail");
+
+    let find = |propolis_id: PropolisUuid| {
+        records.iter().find(|record| record.id() == propolis_id).cloned()
+    };
+    (find(src_propolis_id), find(dst_propolis_id))
+}
+
 #[nexus_test(extra_sled_agents = 1)]
 async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
     use nexus_db_model::{Migration, MigrationState};
@@ -754,8 +785,6 @@ async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
         cptestctx: &ControlPlaneTestContext,
         migration_id: Uuid,
     ) -> Migration {
-        use async_bb8_diesel::AsyncRunQueryDsl;
-        use diesel::prelude::*;
         use nexus_db_schema::schema::migration::dsl;
 
         let datastore =
@@ -944,6 +973,480 @@ async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
     let migration = dbg!(migration_fetch(cptestctx, migration_id).await);
     assert_eq!(migration.target_state, MigrationState::COMPLETED);
     assert_eq!(migration.source_state, MigrationState::COMPLETED);
+
+    // Wait for the source sled_resource_vmm record to be cleaned up and the
+    // target record to switch to active.
+    //
+    // Both changes happen after the saga node that commits the instance's new
+    // runtime state (which is what makes the instance externally `Running`), so
+    // we must wait until the condition is true (level-triggered) rather than
+    // assert immediately.
+    //
+    // However, if an update saga commits the active-VMM swap before the
+    // source VMM's `Destroyed` state is observed, no update saga ever cleans
+    // up the source record: the source becomes an *abandoned* VMM, whose
+    // record is instead deleted by the `abandoned_vmm_reaper` background
+    // task. Activate that task on each poll so this test does not have to
+    // wait out the task's periodic activation interval. (See "Relying on
+    // periodic background-task activation" in docs/flake-patterns.adoc.)
+    {
+        use nexus_db_model::SledResourceVmmState;
+
+        wait_for_condition(
+            || async {
+                nexus_test_utils::background::run_abandoned_vmm_reaper(
+                    &cptestctx.lockstep_client,
+                )
+                .await;
+
+                let datastore = apictx.nexus.datastore();
+                let conn = datastore.pool_connection_for_tests().await.unwrap();
+
+                let (maybe_source_record, maybe_target_record) =
+                    fetch_sled_resource_vmm_records(
+                        src_propolis_id,
+                        dst_propolis_id,
+                        &conn,
+                    )
+                    .await;
+
+                let target_record = maybe_target_record.expect(
+                    "sled_resource_vmm record for the migration target \
+                     VMM record should exist, since the instance is running \
+                     on that VMM",
+                );
+
+                let source_state =
+                    maybe_source_record.map(|record| record.state);
+                match (source_state, target_record.state) {
+                    (None, SledResourceVmmState::Active) => Ok(()),
+
+                    // Not done yet. The valid transient states are:
+                    //
+                    // * `(Some(Active), Target)`: the swap node has not run
+                    //   yet, so the reservation records still show the
+                    //   pre-swap state even though the instance record
+                    //   already points at the target VMM.
+                    //
+                    // * `(None, Target)`: the instance stops referencing the
+                    //   source VMM at the instance-record commit, which runs
+                    //   before the `sled_resource_vmm` swap, so the reaper
+                    //   may delete the source record before the later swap
+                    //   node activates the target record.
+                    //
+                    // * `(Some(Tombstoned), Active)`: the swap has committed,
+                    //   but the source record has not yet been deleted (by
+                    //   either the destroy-VMM subsaga or the reaper).
+                    (
+                        None | Some(SledResourceVmmState::Active),
+                        SledResourceVmmState::Target,
+                    )
+                    | (
+                        Some(SledResourceVmmState::Tombstoned),
+                        SledResourceVmmState::Active,
+                    ) => {
+                        let source_record_status = match source_state {
+                            Some(state) => format!("still present ({state})"),
+                            None => "deleted".to_string(),
+                        };
+                        Err(CondCheckError::<()>::NotYet {
+                            status: Some(format!(
+                                "source record: {}, target record state: {}",
+                                source_record_status, target_record.state,
+                            )),
+                        })
+                    }
+
+                    // States that should never occur.
+                    (Some(SledResourceVmmState::Target), _) => panic!(
+                        "source sled_resource_vmm record should never be in \
+                         the `target` state: its VMM was never a migration \
+                         target",
+                    ),
+                    (_, SledResourceVmmState::Tombstoned) => panic!(
+                        "target sled_resource_vmm record should never be \
+                         tombstoned: the instance is running on its VMM",
+                    ),
+                    (
+                        Some(SledResourceVmmState::Active),
+                        SledResourceVmmState::Active,
+                    ) => panic!(
+                        "source and target sled_resource_vmm records should \
+                         never both be `active`",
+                    ),
+                    (
+                        Some(SledResourceVmmState::Tombstoned),
+                        SledResourceVmmState::Target,
+                    ) => panic!(
+                        "source sled_resource_vmm record should never be \
+                         `tombstoned` while the target is still `target`",
+                    ),
+                }
+            },
+            &Duration::from_millis(50),
+            &Duration::from_secs(60),
+        )
+        .await
+        .expect(
+            "source sled_resource_vmm record should be deleted and target \
+             record should become active",
+        );
+    }
+}
+
+#[nexus_test(extra_sled_agents = 1)]
+async fn test_instance_migrate_target_finishes_first(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    use nexus_db_model::{Migration, MigrationState};
+    async fn migration_fetch(
+        cptestctx: &ControlPlaneTestContext,
+        migration_id: Uuid,
+    ) -> Migration {
+        use nexus_db_schema::schema::migration::dsl;
+
+        let datastore =
+            cptestctx.server.server_context().nexus.datastore().clone();
+        let db_state = dsl::migration
+            // N.B. that for the purposes of this test, we explicitly should
+            // *not* filter out migrations that are marked as deleted, as the
+            // migration record is marked as deleted once the migration completes.
+            .filter(dsl::id.eq(migration_id))
+            .select(Migration::as_select())
+            .get_results_async::<Migration>(
+                &*datastore.pool_connection_for_tests().await.unwrap(),
+            )
+            .await
+            .unwrap();
+
+        info!(&cptestctx.logctx.log, "refetched migration info from db";
+                "migration" => ?db_state);
+
+        db_state.into_iter().next().unwrap()
+    }
+
+    let client = &cptestctx.external_client;
+    let lockstep_client = &cptestctx.lockstep_client;
+    let apictx = &cptestctx.server.server_context();
+    let nexus = &apictx.nexus;
+    let instance_name = "bird-ecology";
+
+    // Get the second sled to migrate to/from.
+    let default_sled_id = cptestctx.first_sled_id();
+    let other_sled_id = cptestctx.second_sled_id();
+
+    create_project_and_pool(&client).await;
+    let instance_url = get_instance_url(instance_name);
+
+    // Explicitly create an instance with no disks. Simulated sled agent assumes
+    // that disks are co-located with their instances.
+    let instance = nexus_test_utils::resource_helpers::create_instance_with(
+        client,
+        PROJECT_NAME,
+        instance_name,
+        &instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
+        Vec::<instance::InstanceDiskAttachment>::new(),
+        Vec::<ExternalIpCreate>::new(),
+        true,
+        Default::default(),
+        None,
+        Vec::new(),
+    )
+    .await;
+    let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
+
+    // Poke the instance into an active state.
+    instance_simulate(nexus, &instance_id).await;
+    let instance_next = instance_get(&client, &instance_url).await;
+    assert_eq!(instance_next.runtime.run_state, InstanceState::Running);
+
+    let sled_info = nexus
+        .active_instance_info(&instance_id, None)
+        .await
+        .unwrap()
+        .expect("running instance should have a sled");
+
+    let original_sled = sled_info.sled_id;
+    let dst_sled_id = if original_sled == default_sled_id {
+        other_sled_id
+    } else {
+        default_sled_id
+    };
+
+    let migrate_url =
+        format!("/instances/{}/migrate", &instance_id.to_string());
+    let instance = NexusRequest::new(
+        RequestBuilder::new(lockstep_client, Method::POST, &migrate_url)
+            .body(Some(&InstanceMigrateRequest { dst_sled_id }))
+            .expect_status(Some(StatusCode::OK)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body::<Instance>()
+    .unwrap();
+
+    let new_sled_info = nexus
+        .active_instance_info(&instance_id, None)
+        .await
+        .unwrap()
+        .expect("running instance should have a sled");
+
+    let current_sled = new_sled_info.sled_id;
+    assert_eq!(current_sled, original_sled);
+
+    // Ensure that both sled agents report that the migration is in progress.
+    let migration_id = {
+        let datastore = apictx.nexus.datastore();
+        let opctx = OpContext::for_tests(
+            cptestctx.logctx.log.new(o!()),
+            datastore.clone(),
+        );
+        let (.., authz_instance) = LookupPath::new(&opctx, datastore)
+            .instance_id(instance.identity.id)
+            .lookup_for(nexus_db_queries::authz::Action::Read)
+            .await
+            .unwrap();
+        datastore
+            .instance_refetch(&opctx, &authz_instance)
+            .await
+            .unwrap()
+            .migration_id
+            .expect(
+                "since we've started a migration, the instance record must \
+                have a migration id!",
+            )
+    };
+    let migration = dbg!(migration_fetch(cptestctx, migration_id).await);
+    assert_eq!(migration.target_state, MigrationState::PENDING);
+    assert_eq!(migration.source_state, MigrationState::PENDING);
+
+    let info = nexus
+        .active_instance_info(&instance_id, None)
+        .await
+        .unwrap()
+        .expect("instance should be on a sled");
+    let src_propolis_id = info.propolis_id;
+    let dst_propolis_id =
+        info.dst_propolis_id.expect("instance should have a migration target");
+
+    // Simulate the migration. We will use `instance_single_step_on_sled` to
+    // single-step both sled-agents through the migration state machine and
+    // ensure that the migration state looks nice at each step.
+    instance_simulate_migration_source(
+        cptestctx,
+        nexus,
+        original_sled,
+        src_propolis_id,
+        migration_id,
+    )
+    .await;
+
+    // Move source to "migrating".
+    vmm_single_step_on_sled(cptestctx, nexus, original_sled, src_propolis_id)
+        .await;
+    vmm_single_step_on_sled(cptestctx, nexus, original_sled, src_propolis_id)
+        .await;
+
+    let migration = dbg!(migration_fetch(cptestctx, migration_id).await);
+    assert_eq!(migration.source_state, MigrationState::IN_PROGRESS);
+    assert_eq!(migration.target_state, MigrationState::PENDING);
+    let instance = instance_get(&client, &instance_url).await;
+    assert_eq!(instance.runtime.run_state, InstanceState::Migrating);
+
+    // Move target to "migrating".
+    vmm_single_step_on_sled(cptestctx, nexus, dst_sled_id, dst_propolis_id)
+        .await;
+    vmm_single_step_on_sled(cptestctx, nexus, dst_sled_id, dst_propolis_id)
+        .await;
+
+    let migration = dbg!(migration_fetch(cptestctx, migration_id).await);
+    assert_eq!(migration.source_state, MigrationState::IN_PROGRESS);
+    assert_eq!(migration.target_state, MigrationState::IN_PROGRESS);
+    let instance = instance_get(&client, &instance_url).await;
+    assert_eq!(instance.runtime.run_state, InstanceState::Migrating);
+
+    // Move the target to "completed" before the source.
+    vmm_simulate_on_sled(cptestctx, nexus, dst_sled_id, dst_propolis_id).await;
+
+    instance_wait_for_state(&client, instance_id, InstanceState::Running).await;
+
+    let current_sled = nexus
+        .active_instance_info(&instance_id, None)
+        .await
+        .unwrap()
+        .expect("migrated instance should still have a sled")
+        .sled_id;
+
+    assert_eq!(current_sled, dst_sled_id);
+
+    let migration = dbg!(migration_fetch(cptestctx, migration_id).await);
+    assert_eq!(migration.target_state, MigrationState::COMPLETED);
+    assert_eq!(migration.source_state, MigrationState::IN_PROGRESS);
+
+    // Wait for the source sled_resource_vmm record to be tombstoned and the
+    // target record to switch to active.
+    //
+    // Both changes are made by an instance-update saga node that runs *after*
+    // the node that commits the instance's new runtime state (which is what
+    // makes the instance externally `Running`), so we must wait until the
+    // condition is true (level-triggered) rather than assert immediately. The
+    // source record cannot be deleted outright at this point: its VMM is still
+    // migrating, so it is neither cleaned up by a destroy-VMM subsaga nor
+    // eligible for the `abandoned_vmm_reaper`.
+    {
+        use nexus_db_model::SledResourceVmmState;
+
+        wait_for_condition(
+            || async {
+                let datastore = apictx.nexus.datastore();
+                let conn = datastore.pool_connection_for_tests().await.unwrap();
+
+                let (maybe_source_record, maybe_target_record) =
+                    fetch_sled_resource_vmm_records(
+                        src_propolis_id,
+                        dst_propolis_id,
+                        &conn,
+                    )
+                    .await;
+
+                let source_record = maybe_source_record.expect(
+                    "source sled_resource_vmm record should exist: \
+                     its VMM is still migrating, so nothing may delete \
+                     it yet",
+                );
+                let target_record = maybe_target_record.expect(
+                    "sled_resource_vmm record for the migration target \
+                     VMM record should exist: the instance is running \
+                     on that VMM",
+                );
+
+                match (source_record.state, target_record.state) {
+                    (
+                        SledResourceVmmState::Tombstoned,
+                        SledResourceVmmState::Active,
+                    ) => Ok(()),
+
+                    // Not done yet: the swap node has not run yet, so the
+                    // reservation records still show the pre-swap state even
+                    // though the instance record already points at the target
+                    // VMM. The source record cannot be deleted here (its VMM
+                    // is still migrating), and the tombstone-and-activate swap
+                    // is a single transaction, so the only retryable state is
+                    // `(Active, Target)`.
+                    (
+                        SledResourceVmmState::Active,
+                        SledResourceVmmState::Target,
+                    ) => Err(CondCheckError::<()>::NotYet {
+                        status: Some(format!(
+                            "source record state: {}, target record state: {}",
+                            source_record.state, target_record.state,
+                        )),
+                    }),
+
+                    // States that should never occur.
+                    (SledResourceVmmState::Target, _) => panic!(
+                        "source sled_resource_vmm record should never be in \
+                         the `target` state: its VMM was never a migration \
+                         target",
+                    ),
+                    (_, SledResourceVmmState::Tombstoned) => panic!(
+                        "target sled_resource_vmm record should never be \
+                         tombstoned: the instance is running on its VMM",
+                    ),
+                    (
+                        SledResourceVmmState::Active,
+                        SledResourceVmmState::Active,
+                    ) => panic!(
+                        "source and target sled_resource_vmm records should \
+                         never both be `active`",
+                    ),
+                    (
+                        SledResourceVmmState::Tombstoned,
+                        SledResourceVmmState::Target,
+                    ) => panic!(
+                        "source sled_resource_vmm record should never be \
+                         `tombstoned` while the target is still `target`",
+                    ),
+                }
+            },
+            &Duration::from_millis(50),
+            &Duration::from_secs(60),
+        )
+        .await
+        .expect(
+            "source sled_resource_vmm record should be tombstoned and target \
+             record should become active",
+        );
+    }
+
+    // Now, move the source to "completed"
+
+    vmm_simulate_on_sled(cptestctx, nexus, original_sled, src_propolis_id)
+        .await;
+
+    let migration = dbg!(migration_fetch(cptestctx, migration_id).await);
+    assert_eq!(migration.source_state, MigrationState::COMPLETED);
+    assert_eq!(migration.target_state, MigrationState::COMPLETED);
+
+    // Wait for the source sled_resource_vmm record to be cleaned up.
+    //
+    // Now that the source VMM is destroyed and no longer referenced by the
+    // instance, it is an *abandoned* VMM: its (tombstoned) record is deleted
+    // by the `abandoned_vmm_reaper` background task. Activate that task on
+    // each poll so this test does not have to wait out the task's periodic
+    // activation interval. (See "Relying on periodic background-task
+    // activation" in docs/flake-patterns.adoc.) Until the reaper deletes the
+    // record, it must remain tombstoned; any other state is a bug, so fail
+    // fast rather than timing out.
+
+    wait_for_condition(
+        || async {
+            use nexus_db_model::SledResourceVmmState;
+
+            nexus_test_utils::background::run_abandoned_vmm_reaper(
+                &cptestctx.lockstep_client,
+            )
+            .await;
+
+            let datastore = apictx.nexus.datastore();
+            let conn = datastore.pool_connection_for_tests().await.unwrap();
+
+            // We're just waiting for the source record to be cleaned up, so we
+            // don't care about the target record.
+            let (maybe_source_record, _) = fetch_sled_resource_vmm_records(
+                src_propolis_id,
+                dst_propolis_id,
+                &conn,
+            )
+            .await;
+
+            match maybe_source_record.map(|record| record.state) {
+                None => Ok(()),
+                Some(SledResourceVmmState::Tombstoned) => {
+                    Err(CondCheckError::<()>::NotYet {
+                        status: Some(
+                            "source record still tombstoned; the reaper has \
+                             not deleted it"
+                                .to_string(),
+                        ),
+                    })
+                }
+                Some(
+                    state @ (SledResourceVmmState::Active
+                    | SledResourceVmmState::Target),
+                ) => panic!(
+                    "source sled_resource_vmm record should be tombstoned \
+                     until the reaper deletes it, but its state is {state}",
+                ),
+            }
+        },
+        &Duration::from_millis(50),
+        &Duration::from_secs(60),
+    )
+    .await
+    .expect("source sled_resource_vmm record should be deleted");
 }
 
 #[nexus_test(extra_sled_agents = 3)]
@@ -6431,8 +6934,8 @@ async fn create_anti_affinity_groups(
                     name: name.parse().unwrap(),
                     description: String::from("This is a description"),
                 },
-                policy: AffinityPolicy::Allow,
-                failure_domain: FailureDomain::Sled,
+                policy: affinity::AffinityPolicy::Allow,
+                failure_domain: affinity::FailureDomain::Sled,
             },
         )
         .await;
@@ -7181,7 +7684,7 @@ async fn start_sled_and_wait(
             if items.len() == initial_sled_count + 1 {
                 Ok(())
             } else {
-                Err(CondCheckError::<()>::NotYet)
+                Err(CondCheckError::<()>::NotYet { status: None })
             }
         },
         &Duration::from_secs(5),
@@ -7306,6 +7809,39 @@ async fn test_can_start_instance_with_cpu_platform(
         .sled_id;
 
     assert_eq!(instance_sled, new_sled_id);
+
+    // We're free to switch this instance from the initial AmdTurin to AmdTurinV2, which has
+    // identical placement constraints and should land on the same simulated Turin sled.
+    expect_instance_stop_ok(client, instance.identity.name.as_str()).await;
+    instance_simulate(nexus, &instance_id).await;
+    instance_wait_for_state(client, instance_id, InstanceState::Stopped).await;
+
+    let instance = expect_instance_reconfigure_ok(
+        &client,
+        &instance.identity.id,
+        instance::InstanceUpdate {
+            boot_disk: Nullable(None),
+            auto_restart_policy: Nullable(None),
+            cpu_platform: Nullable(Some(InstanceCpuPlatform::AmdTurinV2)),
+            ncpus: InstanceCpuCount::try_from(1).unwrap(),
+            memory: ByteCount::from_gibibytes_u32(4),
+            multicast_groups: None,
+            enable_jumbo_frames: false,
+        },
+    )
+    .await;
+
+    expect_instance_start_ok(client, instance.identity.name.as_str()).await;
+
+    // The VMM should still be on our new fake Turin sled.
+    let instance_sled = nexus
+        .active_instance_info(&instance_id, None)
+        .await
+        .unwrap()
+        .expect("running instance should have a sled")
+        .sled_id;
+
+    assert_eq!(instance_sled, new_sled_id);
 }
 
 #[nexus_test]
@@ -7411,7 +7947,7 @@ async fn test_instance_serial(cptestctx: &ControlPlaneTestContext) {
             if instance_next.runtime.run_state == InstanceState::Running {
                 Ok(instance_next)
             } else {
-                Err(CondCheckError::<()>::NotYet)
+                Err(CondCheckError::<()>::NotYet { status: None })
             }
         },
         &Duration::from_secs(5),
@@ -8773,7 +9309,7 @@ async fn test_instance_v2p_mappings(cptestctx: &ControlPlaneTestContext) {
             if v2p_mappings.is_empty() {
                 Ok(())
             } else {
-                Err(CondCheckError::NotYet::<()>)
+                Err(CondCheckError::<()>::NotYet { status: None })
             }
         };
         wait_for_condition(
@@ -8827,7 +9363,7 @@ pub enum InstanceOp {
 pub async fn instance_wait_for_state(
     client: &ClientTestContext,
     instance_id: InstanceUuid,
-    state: omicron_common::api::external::InstanceState,
+    state: instance::InstanceState,
 ) -> Instance {
     instance_wait_for_state_as(
         client,
@@ -8844,7 +9380,7 @@ pub async fn instance_wait_for_state_as(
     client: &ClientTestContext,
     authn_as: AuthnMode,
     instance_id: InstanceUuid,
-    state: omicron_common::api::external::InstanceState,
+    state: instance::InstanceState,
 ) -> Instance {
     const MAX_WAIT: Duration = Duration::from_secs(320);
 
@@ -8869,7 +9405,7 @@ pub async fn instance_wait_for_state_as(
                     "instance_id" => %instance.identity.id,
                     "instance_runtime_state" => ?instance.runtime,
                 );
-                Err(CondCheckError::<anyhow::Error>::NotYet)
+                Err(CondCheckError::<anyhow::Error>::NotYet { status: None })
             }
         },
         &Duration::from_secs(1),
@@ -8938,7 +9474,7 @@ pub async fn instance_wait_for_vmm_registration(
                             it will soon...";
                         "instance_id" => %instance_id,
                     );
-                    return Err(CondCheckError::<Error>::NotYet);
+                    return Err(CondCheckError::<Error>::NotYet { status: None });
                 }
             };
 
@@ -8948,7 +9484,7 @@ pub async fn instance_wait_for_vmm_registration(
                     "instance's active VMM is still Creating";
                     "instance_id" => %instance_id,
                 );
-                Err(poll::CondCheckError::<Error>::NotYet)
+                Err(poll::CondCheckError::<Error>::NotYet { status: None })
             } else {
                 info!(
                     log,
@@ -9063,7 +9599,7 @@ async fn assert_sled_v2p_mappings(
         if have_needed_ipv4_mappings && have_needed_ipv6_mappings {
             Ok(())
         } else {
-            Err(CondCheckError::NotYet::<()>)
+            Err(CondCheckError::<()>::NotYet { status: None })
         }
     };
     wait_for_condition(
@@ -9163,7 +9699,7 @@ pub async fn assert_sled_vpc_routes(
                 "custom diff (+): {:?}\n-----",
                 found_custom.routes.difference(&custom_routes)
             );
-            Err(CondCheckError::NotYet::<()>)
+            Err(CondCheckError::<()>::NotYet { status: None })
         }
     };
     wait_for_condition(
@@ -9291,7 +9827,7 @@ async fn instance_wait_for_simulated_transition(
                 );
                 instance_simulate(&cptestctx.server.server_context().nexus, id)
                     .await;
-                Err(CondCheckError::<anyhow::Error>::NotYet)
+                Err(CondCheckError::<anyhow::Error>::NotYet { status: None })
             }
         },
         &Duration::from_secs(1),

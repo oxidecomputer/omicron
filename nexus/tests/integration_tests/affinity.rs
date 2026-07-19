@@ -25,14 +25,14 @@ use nexus_test_utils::resource_helpers::objects_list_page_authz;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::affinity;
 use nexus_types::external_api::affinity::AffinityGroup;
+use nexus_types::external_api::affinity::AffinityGroupMember;
 use nexus_types::external_api::affinity::AntiAffinityGroup;
+use nexus_types::external_api::affinity::AntiAffinityGroupMember;
 use nexus_types::external_api::instance;
 use nexus_types::external_api::sled::Sled;
 use nexus_types::external_api::sled::SledInstance;
 use nexus_types_versions::latest;
 use omicron_common::api::external;
-use omicron_common::api::external::AffinityGroupMember;
-use omicron_common::api::external::AntiAffinityGroupMember;
 use omicron_common::api::external::ObjectIdentity;
 use std::collections::BTreeSet;
 use std::marker::PhantomData;
@@ -365,8 +365,8 @@ impl AffinityGroupish for AffinityType {
                 name: group_name.parse().unwrap(),
                 description: String::from("This is a description"),
             },
-            policy: external::AffinityPolicy::Fail,
-            failure_domain: external::FailureDomain::Sled,
+            policy: affinity::AffinityPolicy::Fail,
+            failure_domain: affinity::FailureDomain::Sled,
         }
     }
 
@@ -397,8 +397,8 @@ impl AffinityGroupish for AntiAffinityType {
                 name: group_name.parse().unwrap(),
                 description: String::from("This is a description"),
             },
-            policy: external::AffinityPolicy::Fail,
-            failure_domain: external::FailureDomain::Sled,
+            policy: affinity::AffinityPolicy::Fail,
+            failure_domain: affinity::FailureDomain::Sled,
         }
     }
 

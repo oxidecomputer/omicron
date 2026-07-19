@@ -7,10 +7,10 @@
 use std::net::IpAddr;
 
 use api_identity::ObjectIdentity;
+use chrono::{DateTime, Utc};
 use omicron_common::api::external::{
-    ByteCount, Hostname, IdentityMetadata, IdentityMetadataCreateParams,
-    InstanceAutoRestartPolicy, InstanceAutoRestartStatus, InstanceCpuCount,
-    InstanceCpuPlatform, InstanceRuntimeState, Name, NameOrId, ObjectIdentity,
+    ByteCount, Hostname, IdentityMetadata, IdentityMetadataCreateParams, Name,
+    NameOrId, ObjectIdentity,
 };
 use oxnet::IpNet;
 use schemars::JsonSchema;
@@ -153,6 +153,51 @@ pub enum InstanceDiskAttachment {
 
     /// During instance creation, attach this disk
     Attach(InstanceDiskAttach),
+}
+
+/// A required CPU platform for an instance.
+///
+/// When an instance specifies a required CPU platform:
+///
+/// - The system may expose (to the VM) new CPU features that are only present
+///   on that platform (or on newer platforms of the same lineage that also
+///   support those features).
+/// - The instance must run on hosts that have CPUs that support all the
+///   features of the supplied platform.
+///
+/// That is, the instance is restricted to hosts that have the CPUs which
+/// support all features of the required platform, but in exchange the CPU
+/// features exposed by the platform are available for the guest to use. Note
+/// that this may prevent an instance from starting (if the hosts that could run
+/// it are full but there is capacity on other incompatible hosts).
+///
+/// If an instance does not specify a required CPU platform, then when
+/// it starts, the control plane selects a host for the instance and then
+/// supplies the guest with the "minimum" CPU platform supported by that host.
+/// This maximizes the number of hosts that can run the VM if it later needs to
+/// migrate to another host.
+///
+/// In all cases, the CPU features presented by a given CPU platform are a
+/// subset of what the corresponding hardware may actually support; features
+/// which cannot be used from a virtual environment or do not have full
+/// hypervisor support may be masked off. See RFD 314 for specific CPU features
+/// in a CPU platform
+#[derive(
+    Copy, Clone, Debug, Deserialize, Serialize, JsonSchema, Eq, PartialEq,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum InstanceCpuPlatform {
+    /// An AMD Milan-like CPU platform.
+    AmdMilan,
+
+    /// An AMD Turin-like CPU platform.
+    // Note that there is only Turin, not Turin Dense - feature-wise there are
+    // collapsed together as the guest-visible platform is the same.
+    // If the two must be distinguished for instance placement, we'll want to
+    // track whatever the motivating constraint is more explicitly. CPU
+    // families, and especially the vendor code names, don't necessarily promise
+    // details about specific processor packaging choices.
+    AmdTurin,
 }
 
 /// Create-time parameters for an `Instance`
@@ -433,6 +478,132 @@ pub struct InstanceSerialConsoleData {
     /// The absolute offset since boot (suitable for use as `byte_offset` in a subsequent request)
     /// of the last byte returned in `data`.
     pub last_byte_offset: u64,
+}
+
+/// Running state of an Instance (primarily: booted or stopped)
+///
+/// This typically reflects whether it's starting, running, stopping, or stopped,
+/// but also includes states related to the Instance's lifecycle
+#[derive(
+    Copy,
+    Clone,
+    Debug,
+    Deserialize,
+    Eq,
+    Hash,
+    Ord,
+    PartialEq,
+    PartialOrd,
+    Serialize,
+    JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+// TODO-polish: RFD 315
+pub enum InstanceState {
+    /// The instance is being created.
+    Creating,
+    /// The instance is currently starting up.
+    Starting,
+    /// The instance is currently running.
+    Running,
+    /// The instance has been requested to stop and a transition to "Stopped" is imminent.
+    Stopping,
+    /// The instance is currently stopped.
+    Stopped,
+    /// The instance is in the process of rebooting - it will remain
+    /// in the "rebooting" state until the VM is starting once more.
+    Rebooting,
+    /// The instance is in the process of migrating - it will remain
+    /// in the "migrating" state until the migration process is complete
+    /// and the destination propolis is ready to continue execution.
+    Migrating,
+    /// The instance is attempting to recover from a failure.
+    Repairing,
+    /// The instance has encountered a failure.
+    Failed,
+    /// The instance has been deleted.
+    Destroyed,
+}
+
+/// The number of CPUs in an Instance
+#[derive(
+    Copy, Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq,
+)]
+pub struct InstanceCpuCount(pub u16);
+
+/// The state of an `Instance`
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct InstanceRuntimeState {
+    pub run_state: InstanceState,
+    pub time_run_state_updated: DateTime<Utc>,
+    /// The timestamp of the most recent time this instance was automatically
+    /// restarted by the control plane.
+    ///
+    /// If this is not present, then this instance has not been automatically
+    /// restarted.
+    pub time_last_auto_restarted: Option<DateTime<Utc>>,
+}
+
+/// Status of control-plane driven automatic failure recovery for this instance.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct InstanceAutoRestartStatus {
+    /// `true` if this instance's auto-restart policy will permit the control
+    /// plane to automatically restart it if it enters the `Failed` state.
+    //
+    // Rename this field, as the struct is `#[serde(flatten)]`ed into the
+    // `Instance` type, and we would like the field to be prefixed with
+    // `auto_restart`.
+    #[serde(rename = "auto_restart_enabled")]
+    pub enabled: bool,
+
+    /// The auto-restart policy configured for this instance, or `null` if no
+    /// explicit policy has been configured.
+    ///
+    /// This policy determines whether the instance should be automatically
+    /// restarted by the control plane on failure. If this is `null`, the
+    /// control plane will use the default policy when determining whether or
+    /// not to automatically restart this instance, which may or may not allow
+    /// it to be restarted. The value of the `auto_restart_enabled` field
+    /// indicates whether the instance will be auto-restarted, based on its
+    /// current policy or the default if it has no configured policy.
+    //
+    // Rename this field, as the struct is `#[serde(flatten)]`ed into the
+    // `Instance` type, and we would like the field to be prefixed with
+    // `auto_restart`.
+    #[serde(rename = "auto_restart_policy")]
+    pub policy: Option<InstanceAutoRestartPolicy>,
+
+    /// The time at which the auto-restart cooldown period for this instance
+    /// completes, permitting it to be automatically restarted again. If the
+    /// instance enters the `Failed` state, it will not be restarted until after
+    /// this time.
+    ///
+    /// If this is not present, then either the instance has never been
+    /// automatically restarted, or the cooldown period has already expired,
+    /// allowing the instance to be restarted immediately if it fails.
+    //
+    // Rename this field, as the struct is `#[serde(flatten)]`ed into the
+    // `Instance` type, and we would like the field to be prefixed with
+    // `auto_restart`.
+    #[serde(rename = "auto_restart_cooldown_expiration")]
+    pub cooldown_expiration: Option<DateTime<Utc>>,
+}
+
+/// A policy determining when an instance should be automatically restarted by
+/// the control plane.
+#[derive(
+    Copy, Clone, Debug, Deserialize, Serialize, JsonSchema, Eq, PartialEq,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum InstanceAutoRestartPolicy {
+    /// The instance should not be automatically restarted by the control plane
+    /// if it fails.
+    Never,
+    /// If this instance is running and unexpectedly fails (e.g. due to a host
+    /// software crash or unexpected host reboot), the control plane will make a
+    /// best-effort attempt to restart it. The control plane may choose not to
+    /// restart the instance to preserve the overall availability of the system.
+    BestEffort,
 }
 
 /// View of an Instance

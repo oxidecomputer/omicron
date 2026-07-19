@@ -887,7 +887,9 @@ mod tests {
             || async {
                 match context.retention_policy().await {
                     Err(e) if e.internal_message.contains("is full") => {
-                        Err(dev::poll::CondCheckError::<()>::NotYet)
+                        Err(dev::poll::CondCheckError::<()>::NotYet {
+                            status: None,
+                        })
                     }
                     Err(_) | Ok(_) => Ok(()),
                 }
@@ -958,7 +960,9 @@ mod tests {
             || async {
                 match context.init_db(false).await {
                     Err(e) if e.internal_message.contains("channel full") => {
-                        Err(dev::poll::CondCheckError::<()>::NotYet)
+                        Err(dev::poll::CondCheckError::<()>::NotYet {
+                            status: None,
+                        })
                     }
                     Err(_) | Ok(_) => Ok(()),
                 }
@@ -983,12 +987,16 @@ mod tests {
                 match &usage.last_success {
                     Some(success) => {
                         if success.tables.len() < N_EXPECTED_TABLES {
-                            Err(dev::poll::CondCheckError::<()>::NotYet)
+                            Err(dev::poll::CondCheckError::<()>::NotYet {
+                                status: None,
+                            })
                         } else {
                             Ok(usage)
                         }
                     }
-                    None => Err(dev::poll::CondCheckError::<()>::NotYet),
+                    None => Err(dev::poll::CondCheckError::<()>::NotYet {
+                        status: None,
+                    }),
                 }
             },
             &std::time::Duration::from_millis(50),
@@ -1058,16 +1066,22 @@ mod tests {
                         let Some(usage) = success.tables.get(&version_table)
                         else {
                             return Err(
-                                dev::poll::CondCheckError::<()>::NotYet,
+                                dev::poll::CondCheckError::<()>::NotYet {
+                                    status: None,
+                                },
                             );
                         };
                         if usage.n_rows > version_usage.n_rows {
                             Ok(usage.clone())
                         } else {
-                            Err(dev::poll::CondCheckError::<()>::NotYet)
+                            Err(dev::poll::CondCheckError::<()>::NotYet {
+                                status: None,
+                            })
                         }
                     }
-                    None => Err(dev::poll::CondCheckError::<()>::NotYet),
+                    None => Err(dev::poll::CondCheckError::<()>::NotYet {
+                        status: None,
+                    }),
                 }
             },
             &std::time::Duration::from_millis(50),
@@ -1085,7 +1099,9 @@ mod tests {
                 let usage = context.database_usage();
                 match &usage.last_error {
                     Some(_) => Ok(usage),
-                    None => Err(dev::poll::CondCheckError::<()>::NotYet),
+                    None => Err(dev::poll::CondCheckError::<()>::NotYet {
+                        status: None,
+                    }),
                 }
             },
             &std::time::Duration::from_millis(100),

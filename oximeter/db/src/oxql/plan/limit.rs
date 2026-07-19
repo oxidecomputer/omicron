@@ -4,8 +4,6 @@
 
 //! OxQL query plan node for limiting data.
 
-// Copyright 2024 Oxide Computer Company
-
 use crate::oxql::ast::table_ops::limit;
 use crate::oxql::plan::plan::TableOpOutput;
 

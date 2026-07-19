@@ -4,6 +4,10 @@
 
 //! TCP proxy to expose Nexus's external API via the techport.
 
+// A similar test-only TCP proxy lives in omicron-test-utils's dev::tcp_proxy.
+// If we need this pattern in the future, it might be worth extracting a shared
+// implementation. (Or not, since the proxy is quite straightforward.)
+
 use internal_dns_resolver::Resolver;
 use internal_dns_types::names::ServiceName;
 use omicron_common::address::NEXUS_TECHPORT_EXTERNAL_PORT;

@@ -34,9 +34,9 @@ derive_more.workspace = true
 dice-verifier = { workspace = true, features = ["ipcc", "mock"] }
 display-error-chain.workspace = true
 # XXX NOTE this is due to https://github.com/oxidecomputer/omicron/issues/9704
-# This is the R17 dpd client
+# This is the R20 dpd client
 # dpd-client.workspace = true
-dpd-client = { git = "https://github.com/oxidecomputer/dendrite", rev = "cc8e02a0800034c431c8cf96b889ea638da3d194" }
+dpd-client = { git = "https://github.com/oxidecomputer/dendrite", rev = "cc0c307c617f2988aafdca4e3bd35ea178b64801" }
 dropshot.workspace = true
 flate2.workspace = true
 flume.workspace = true
@@ -158,7 +158,6 @@ reqwest = { workspace = true, features = ["blocking"] }
 subprocess.workspace = true
 slog-async.workspace = true
 slog-term.workspace = true
-tempfile.workspace = true
 tokio-stream.workspace = true
 tokio-util.workspace = true
 zfs-test-harness.workspace = true

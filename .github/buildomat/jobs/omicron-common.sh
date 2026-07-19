@@ -1,4 +1,7 @@
 #!/bin/bash
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
 #:
 #: name = "omicron-common (helios)"
 #: variety = "basic"
@@ -23,7 +26,7 @@ rustc --version
 cd /tmp
 cargo new --lib test-project
 cd test-project
-cargo add omicron-common --path /work/oxidecomputer/omicron/common
+cargo add omicron-common --path "/work/$GITHUB_REPOSITORY/common"
 # Bootstrap `test-project`'s dependencies from the checked-in Cargo.lock.
 # This means that `test-project` builds with the same commits as the main repo
 # for any dependencies referenced as `{ git = "...", ref = "<branch>" }`. If we
@@ -34,6 +37,6 @@ cargo add omicron-common --path /work/oxidecomputer/omicron/common
 # The extra dependencies in `omicron` will get pruned by Cargo when it
 # recalculates dependencies, but any dependencies that match will stay at the
 # commit/version/etc already indicated in the lockfile.
-cp /work/oxidecomputer/omicron/Cargo.lock Cargo.lock
+cp "/work/$GITHUB_REPOSITORY/Cargo.lock" Cargo.lock
 cargo check
 cargo build --release

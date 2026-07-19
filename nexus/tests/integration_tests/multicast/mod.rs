@@ -35,7 +35,8 @@ use nexus_types::external_api::instance::{
     InstanceCreate, InstanceNetworkInterfaceAttachment,
 };
 use nexus_types::external_api::ip_pool::{
-    IpPool, IpPoolCreate, IpPoolRange, IpRange, IpVersion, Ipv4Range,
+    IpPool, IpPoolAssignment, IpPoolCreate, IpPoolRange, IpPoolType, IpRange,
+    IpVersion, Ipv4Range,
 };
 use nexus_types::external_api::multicast::{
     InstanceMulticastGroupJoin, MulticastGroup, MulticastGroupIdentifier,
@@ -136,13 +137,15 @@ pub(crate) async fn create_multicast_ip_pool_with_range(
     range_start: (u8, u8, u8, u8),
     range_end: (u8, u8, u8, u8),
 ) -> IpPool {
-    let pool_params = IpPoolCreate::new_multicast(
-        IdentityMetadataCreateParams {
+    let pool_params = IpPoolCreate {
+        identity: IdentityMetadataCreateParams {
             name: pool_name.parse().unwrap(),
             description: "Multicast IP pool for testing".to_string(),
         },
-        IpVersion::V4,
-    );
+        ip_version: IpVersion::V4,
+        pool_type: IpPoolType::Multicast,
+        assignment: IpPoolAssignment::Silos,
+    };
 
     let pool: IpPool =
         object_create(client, "/v1/system/ip-pools", &pool_params).await;
@@ -182,13 +185,15 @@ pub(crate) async fn create_multicast_ip_pool_v6(
     use nexus_types::external_api::ip_pool::Ipv6Range;
     use std::net::Ipv6Addr;
 
-    let pool_params = IpPoolCreate::new_multicast(
-        IdentityMetadataCreateParams {
+    let pool_params = IpPoolCreate {
+        identity: IdentityMetadataCreateParams {
             name: pool_name.parse().unwrap(),
             description: "IPv6 multicast IP pool for testing".to_string(),
         },
-        IpVersion::V6,
-    );
+        ip_version: IpVersion::V6,
+        pool_type: IpPoolType::Multicast,
+        assignment: IpPoolAssignment::Silos,
+    };
 
     let pool: IpPool =
         object_create(client, "/v1/system/ip-pools", &pool_params).await;
@@ -331,13 +336,15 @@ pub(crate) async fn ensure_inventory_ready(
                 Ok(sleds) => sleds,
                 Err(e) => {
                     warn!(log, "failed to list sleds: {e}");
-                    return Err(CondCheckError::<String>::NotYet);
+                    return Err(CondCheckError::<String>::NotYet {
+                        status: None,
+                    });
                 }
             };
 
             if sleds.is_empty() {
                 warn!(log, "no in-service sleds found yet");
-                return Err(CondCheckError::<String>::NotYet);
+                return Err(CondCheckError::<String>::NotYet { status: None });
             }
 
             // Get latest inventory
@@ -346,11 +353,15 @@ pub(crate) async fn ensure_inventory_ready(
                     Ok(Some(inv)) => inv,
                     Ok(None) => {
                         debug!(log, "no inventory collection yet");
-                        return Err(CondCheckError::<String>::NotYet);
+                        return Err(CondCheckError::<String>::NotYet {
+                            status: None,
+                        });
                     }
                     Err(e) => {
                         warn!(log, "failed to get inventory: {e}");
-                        return Err(CondCheckError::<String>::NotYet);
+                        return Err(CondCheckError::<String>::NotYet {
+                            status: None,
+                        });
                     }
                 };
 
@@ -382,7 +393,7 @@ pub(crate) async fn ensure_inventory_ready(
                     missing_sleds.len(),
                     missing_sleds
                 );
-                Err(CondCheckError::<String>::NotYet)
+                Err(CondCheckError::<String>::NotYet { status: None })
             }
         },
         &Duration::from_millis(500), // Check every 500ms
@@ -393,7 +404,7 @@ pub(crate) async fn ensure_inventory_ready(
         Ok(_) => {
             info!(log, "inventory ready with SP data for all sleds");
         }
-        Err(poll::Error::TimedOut(elapsed)) => {
+        Err(poll::Error::TimedOut { elapsed, .. }) => {
             panic!(
                 "inventory did not get SP data for all sleds within {elapsed:?}"
             );
@@ -444,7 +455,7 @@ pub(crate) async fn ensure_dpd_ready(cptestctx: &ControlPlaneTestContext) {
                         "DPD not ready yet";
                         "error" => %e
                     );
-                    Err(CondCheckError::<String>::NotYet)
+                    Err(CondCheckError::<String>::NotYet { status: None })
                 }
             }
         },
@@ -456,7 +467,7 @@ pub(crate) async fn ensure_dpd_ready(cptestctx: &ControlPlaneTestContext) {
         Ok(_) => {
             info!(log, "DPD/switch infrastructure is ready");
         }
-        Err(poll::Error::TimedOut(elapsed)) => {
+        Err(poll::Error::TimedOut { elapsed, .. }) => {
             panic!(
                 "DPD/switch infrastructure did not become ready within {elapsed:?}"
             );
@@ -517,7 +528,7 @@ pub(crate) async fn wait_for_group_state(
             if group.state == expected_state_as_str {
                 Ok(group)
             } else {
-                Err(CondCheckError::<()>::NotYet)
+                Err(CondCheckError::<()>::NotYet { status: None })
             }
         },
         &POLL_INTERVAL,
@@ -526,7 +537,7 @@ pub(crate) async fn wait_for_group_state(
     .await
     {
         Ok(group) => group,
-        Err(poll::Error::TimedOut(elapsed)) => {
+        Err(poll::Error::TimedOut { elapsed, .. }) => {
             panic!(
                 "group {group_name} did not reach state '{expected_state_as_str}' within {elapsed:?}",
             );
@@ -588,11 +599,11 @@ pub(crate) async fn wait_for_member_state(
                     "Joined" => Ok(member.clone()),
                     "Joining" => {
                         // Member exists and is in transition - wait a bit more
-                        Err(CondCheckError::NotYet)
+                        Err(CondCheckError::NotYet { status: None })
                     }
                     "Left" => {
                         // Member in Left state, reconciler needs to process instance start - wait more
-                        Err(CondCheckError::NotYet)
+                        Err(CondCheckError::NotYet { status: None })
                     }
                     other_state => Err(CondCheckError::Failed(format!(
                         "Member {instance_id} in group {group_name} has unexpected state '{other_state}', expected 'Left', 'Joining' or 'Joined'"
@@ -600,7 +611,7 @@ pub(crate) async fn wait_for_member_state(
                 }
             } else {
                 // Member doesn't exist yet - wait for it to be created
-                Err(CondCheckError::NotYet)
+                Err(CondCheckError::NotYet { status: None })
             }
         } else {
             // For other states, just look for exact match
@@ -610,10 +621,10 @@ pub(crate) async fn wait_for_member_state(
                 if member.state == expected_state_as_str {
                     Ok(member.clone())
                 } else {
-                    Err(CondCheckError::NotYet)
+                    Err(CondCheckError::NotYet { status: None })
                 }
             } else {
-                Err(CondCheckError::NotYet)
+                Err(CondCheckError::NotYet { status: None })
             }
         }
     };
@@ -640,7 +651,7 @@ pub(crate) async fn wait_for_member_state(
 
     match res {
         Ok(member) => member,
-        Err(poll::Error::TimedOut(elapsed)) => {
+        Err(poll::Error::TimedOut { elapsed, .. }) => {
             panic!(
                 "member {instance_id} in group {group_name} did not reach state '{expected_state_as_str}' within {elapsed:?}",
             );
@@ -708,7 +719,7 @@ pub(crate) async fn wait_for_instance_sled_assignment(
                         "instance_id" => %instance_id,
                         "instance_state" => ?instance.nexus_state.state()
                     );
-                    Err(CondCheckError::<String>::NotYet)
+                    Err(CondCheckError::<String>::NotYet { status: None })
                 }
             } else {
                 warn!(
@@ -716,7 +727,7 @@ pub(crate) async fn wait_for_instance_sled_assignment(
                     "instance not found in batch fetch";
                     "instance_id" => %instance_id
                 );
-                Err(CondCheckError::<String>::NotYet)
+                Err(CondCheckError::<String>::NotYet { status: None })
             }
         },
         &POLL_INTERVAL,
@@ -731,7 +742,7 @@ pub(crate) async fn wait_for_instance_sled_assignment(
                 "instance_id" => %instance_id
             );
         }
-        Err(poll::Error::TimedOut(elapsed)) => {
+        Err(poll::Error::TimedOut { elapsed, .. }) => {
             panic!(
                 "instance {instance_id} did not get sled_id assigned within {elapsed:?}"
             );
@@ -781,7 +792,7 @@ pub(crate) async fn instance_wait_for_running_with_simulation(
             if instance.runtime.run_state == expected_state {
                 Ok(instance)
             } else {
-                Err(CondCheckError::<String>::NotYet)
+                Err(CondCheckError::<String>::NotYet { status: None })
             }
         },
         &POLL_INTERVAL,
@@ -790,7 +801,7 @@ pub(crate) async fn instance_wait_for_running_with_simulation(
     .await
     {
         Ok(instance) => instance,
-        Err(poll::Error::TimedOut(elapsed)) => {
+        Err(poll::Error::TimedOut { elapsed, .. }) => {
             panic!(
                 "instance {instance_id} did not reach {expected_state:?} within {elapsed:?}"
             );
@@ -856,7 +867,7 @@ pub(crate) async fn wait_for_instance_stopped(
                         .await;
                 }
 
-                Err(CondCheckError::<anyhow::Error>::NotYet)
+                Err(CondCheckError::<anyhow::Error>::NotYet { status: None })
             }
         },
         &POLL_INTERVAL,
@@ -871,7 +882,7 @@ pub(crate) async fn wait_for_instance_stopped(
                 "instance_id" => %instance_id,
             );
         }
-        Err(poll::Error::TimedOut(elapsed)) => {
+        Err(poll::Error::TimedOut { elapsed, .. }) => {
             panic!(
                 "instance {instance_name} ({instance_id}) did not stop \
                  within {elapsed:?}"
@@ -1033,7 +1044,7 @@ pub(crate) async fn wait_for_member_count(
             if members.len() == expected_count {
                 Ok(())
             } else {
-                Err(CondCheckError::<String>::NotYet)
+                Err(CondCheckError::<String>::NotYet { status: None })
             }
         },
         &POLL_INTERVAL,
@@ -1042,7 +1053,7 @@ pub(crate) async fn wait_for_member_count(
     .await
     {
         Ok(_) => {}
-        Err(poll::Error::TimedOut(elapsed)) => {
+        Err(poll::Error::TimedOut { elapsed, .. }) => {
             panic!(
                 "group {group_name} did not reach member count {expected_count} within {elapsed:?}",
             );
@@ -1076,7 +1087,7 @@ pub(crate) async fn wait_for_group_deleted(
                     if response.status == StatusCode::NOT_FOUND {
                         Ok(())
                     } else {
-                        Err(CondCheckError::<()>::NotYet)
+                        Err(CondCheckError::<()>::NotYet { status: None })
                     }
                 }
                 Err(_) => Ok(()), // Assume 404 or similar error means deleted
@@ -1088,7 +1099,7 @@ pub(crate) async fn wait_for_group_deleted(
     .await
     {
         Ok(_) => {}
-        Err(poll::Error::TimedOut(elapsed)) => {
+        Err(poll::Error::TimedOut { elapsed, .. }) => {
             panic!("group {group_name} was not deleted within {elapsed:?}",);
         }
         Err(poll::Error::PermanentError(err)) => {
@@ -1116,7 +1127,7 @@ pub(crate) async fn wait_for_group_deleted_from_dpd(
             match dpd_client.multicast_group_get(&multicast_ip).await {
                 Ok(_) => {
                     // Group still exists in DPD - not yet deleted
-                    Err(CondCheckError::<()>::NotYet)
+                    Err(CondCheckError::<()>::NotYet { status: None })
                 }
                 Err(_) => Ok(()), // Group doesn't exist - deleted
             }
@@ -1127,7 +1138,7 @@ pub(crate) async fn wait_for_group_deleted_from_dpd(
     .await
     {
         Ok(_) => {}
-        Err(poll::Error::TimedOut(elapsed)) => {
+        Err(poll::Error::TimedOut { elapsed, .. }) => {
             panic!(
                 "group with IP {multicast_ip} was not deleted from DPD within {elapsed:?}",
             );

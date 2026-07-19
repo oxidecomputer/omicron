@@ -423,7 +423,7 @@ async fn start_sled_agent(
     let ddm_reconciler = service_manager.ddm_reconciler();
     ddm_reconciler.set_underlay_subnet(request.body.subnet);
     ddm_reconciler.enable_stats(EnableStatsRequest {
-        rack_id: request.body.rack_id,
+        rack_id: request.body.rack_id.into_untyped_uuid(),
         sled_id: request.body.id.into_untyped_uuid(),
     });
 
@@ -779,10 +779,10 @@ mod tests {
     use super::*;
     use omicron_common::address::Ipv6Subnet;
     use omicron_test_utils::dev::test_setup_log;
+    use omicron_uuid_kinds::RackUuid;
     use omicron_uuid_kinds::SledUuid;
     use sled_agent_types::sled::StartSledAgentRequestBody;
     use std::net::Ipv6Addr;
-    use uuid::Uuid;
 
     #[tokio::test]
     async fn start_sled_agent_request_serialization() {
@@ -795,7 +795,7 @@ mod tests {
             schema_version: 1,
             body: StartSledAgentRequestBody {
                 id: SledUuid::new_v4(),
-                rack_id: Uuid::new_v4(),
+                rack_id: RackUuid::new_v4(),
                 use_trust_quorum: false,
                 is_lrtq_learner: false,
                 subnet: Ipv6Subnet::new(Ipv6Addr::LOCALHOST),
