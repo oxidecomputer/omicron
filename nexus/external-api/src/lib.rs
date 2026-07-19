@@ -36,7 +36,6 @@ use nexus_types_versions::v2026_01_30_01;
 use nexus_types_versions::v2026_01_31_00;
 use nexus_types_versions::v2026_02_13_01;
 use nexus_types_versions::v2026_04_16_00;
-use nexus_types_versions::v2026_05_07_00;
 use omicron_common::address::IpRange;
 use omicron_common::api::external::{
     http_pagination::{
@@ -86,7 +85,6 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyy_mm_dd_nn, IDENT),
-    (2026_06_06_00, BGP_PEER_SRC_ADDR),
     (2026_06_05_00, EXTERNAL_JUMBO_FRAMES),
     (2026_06_04_00, IMAGE_BLOCK_SIZE_TYPE),
     (2026_06_03_00, DISK_BLOCK_SIZE_TYPE),
@@ -4959,7 +4957,7 @@ pub trait NexusExternalApi {
         method = POST,
         path = "/v1/system/networking/switch-port-settings",
         tags = ["system/networking"],
-        versions = VERSION_BGP_PEER_SRC_ADDR..,
+        versions = VERSION_REMOVE_DUPLICATED_NETWORKING_TYPES..,
     }]
     async fn networking_switch_port_settings_create(
         rqctx: RequestContext<Self::Context>,
@@ -4968,30 +4966,6 @@ pub trait NexusExternalApi {
         HttpResponseCreated<latest::networking::SwitchPortSettings>,
         HttpError,
     >;
-
-    #[endpoint {
-        operation_id = "networking_switch_port_settings_create",
-        method = POST,
-        path = "/v1/system/networking/switch-port-settings",
-        tags = ["system/networking"],
-        versions = VERSION_REMOVE_DUPLICATED_NETWORKING_TYPES..VERSION_BGP_PEER_SRC_ADDR,
-    }]
-    async fn networking_switch_port_settings_create_v2026_05_07_00(
-        rqctx: RequestContext<Self::Context>,
-        new_settings: TypedBody<
-            v2026_04_16_00::networking::SwitchPortSettingsCreate,
-        >,
-    ) -> Result<
-        HttpResponseCreated<v2026_05_07_00::networking::SwitchPortSettings>,
-        HttpError,
-    > {
-        Self::networking_switch_port_settings_create(
-            rqctx,
-            new_settings.map(From::from),
-        )
-        .await
-        .map(|response| response.map(From::from))
-    }
 
     #[endpoint {
         operation_id = "networking_switch_port_settings_create",
@@ -5009,9 +4983,14 @@ pub trait NexusExternalApi {
         HttpResponseCreated<v2026_04_16_00::networking::SwitchPortSettings>,
         HttpError,
     > {
-        Self::networking_switch_port_settings_create_v2026_05_07_00(
+        Self::networking_switch_port_settings_create(
             rqctx,
-            new_settings,
+            new_settings.try_map(TryFrom::try_from).map_err(|err| {
+                HttpError::for_bad_request(
+                    None,
+                    InlineErrorChain::new(&err).to_string(),
+                )
+            })?,
         )
         .await
         .map(|response| response.map(From::from))
@@ -5110,31 +5089,12 @@ pub trait NexusExternalApi {
         method = GET,
         path = "/v1/system/networking/switch-port-settings/{port}",
         tags = ["system/networking"],
-        versions = VERSION_BGP_PEER_SRC_ADDR..,
+        versions = VERSION_REMOVE_DUPLICATED_NETWORKING_TYPES..,
     }]
     async fn networking_switch_port_settings_view(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<latest::networking::SwitchPortSettingsInfoSelector>,
     ) -> Result<HttpResponseOk<latest::networking::SwitchPortSettings>, HttpError>;
-
-    #[endpoint {
-        operation_id = "networking_switch_port_settings_view",
-        method = GET,
-        path = "/v1/system/networking/switch-port-settings/{port}",
-        tags = ["system/networking"],
-        versions = VERSION_REMOVE_DUPLICATED_NETWORKING_TYPES..VERSION_BGP_PEER_SRC_ADDR,
-    }]
-    async fn networking_switch_port_settings_view_v2026_05_07_00(
-        rqctx: RequestContext<Self::Context>,
-        path_params: Path<latest::networking::SwitchPortSettingsInfoSelector>,
-    ) -> Result<
-        HttpResponseOk<v2026_05_07_00::networking::SwitchPortSettings>,
-        HttpError,
-    > {
-        Self::networking_switch_port_settings_view(rqctx, path_params)
-            .await
-            .map(|response| response.map(From::from))
-    }
 
     #[endpoint {
         operation_id = "networking_switch_port_settings_view",
@@ -5150,12 +5110,9 @@ pub trait NexusExternalApi {
         HttpResponseOk<v2026_04_16_00::networking::SwitchPortSettings>,
         HttpError,
     > {
-        Self::networking_switch_port_settings_view_v2026_05_07_00(
-            rqctx,
-            path_params,
-        )
-        .await
-        .map(|response| response.map(From::from))
+        Self::networking_switch_port_settings_view(rqctx, path_params)
+            .await
+            .map(|response| response.map(From::from))
     }
 
     #[endpoint {

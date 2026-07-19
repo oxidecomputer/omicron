@@ -269,7 +269,6 @@ table! {
         allow_import_list_active -> Bool,
         allow_export_list_active -> Bool,
         vlan_id -> Nullable<Int4>,
-        src_addr -> Nullable<Inet>,
         id -> Uuid,
         router_lifetime -> Int4,
     }

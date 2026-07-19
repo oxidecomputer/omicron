@@ -737,7 +737,6 @@ pub struct SwitchPortBgpPeerConfig {
     pub allow_import_list_active: bool,
     pub allow_export_list_active: bool,
     pub vlan_id: Option<SqlU16>,
-    pub src_addr: Option<IpNetwork>,
     pub id: Uuid,
     router_lifetime: SqlU16,
 }
@@ -934,25 +933,18 @@ impl SwitchPortBgpPeerConfig {
         interface_name: Name,
         p: &networking_types::BgpPeer,
     ) -> Self {
-        // Extract peer address, router_lifetime, and src_addr from the peer
-        // type. Unnumbered peers have a `router_lifetime`; for numbered peers,
-        // we must use the default (0). This is enforced by a CHECK constraint.
-        let (addr, router_lifetime, src_addr) = match p.addr {
-            networking_types::RouterPeerType::Numbered { ip, src_addr } => {
-                let peer_ip: IpNetwork = ip.into();
-                let src: Option<IpNetwork> = src_addr.map(|a| a.into());
-                (Some(peer_ip), RouterLifetimeConfig::default(), src)
-            }
-            networking_types::RouterPeerType::Unnumbered {
-                router_lifetime,
-            } => (None, router_lifetime, None),
+        // Unnumbered peers have a `router_lifetime`; for numbered peers, we
+        // must use the default (0). This is enforced by a CHECK constraint.
+        let router_lifetime = match p.addr {
+            RouterPeerType::Numbered { .. } => RouterLifetimeConfig::default(),
+            RouterPeerType::Unnumbered { router_lifetime } => router_lifetime,
         };
         Self {
             id: Uuid::new_v4(),
             port_settings_id,
             bgp_config_id,
             interface_name,
-            addr,
+            addr: p.addr.ip_db_repr(),
             hold_time: p.hold_time.into(),
             idle_hold_time: p.idle_hold_time.into(),
             delay_open: p.delay_open.into(),
@@ -975,7 +967,6 @@ impl SwitchPortBgpPeerConfig {
                 _ => true,
             },
             vlan_id: p.vlan_id.map(|x| x.into()),
-            src_addr,
             router_lifetime: router_lifetime.as_u16().into(),
         }
     }
@@ -1115,9 +1106,7 @@ mod tests {
         }
     }
 
-    fn make_bgp_peer(
-        addr: networking_types::RouterPeerType,
-    ) -> networking_types::BgpPeer {
+    fn make_bgp_peer(addr: RouterPeerType) -> networking_types::BgpPeer {
         networking_types::BgpPeer {
             bgp_config: external::NameOrId::Name("test-bgp".parse().unwrap()),
             addr,
@@ -1144,13 +1133,12 @@ mod tests {
         let ip =
             RouterPeerIpAddr::try_from(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)))
                 .unwrap();
-        let addr =
-            networking_types::RouterPeerType::Numbered { ip, src_addr: None };
+        let original = RouterPeerType::Numbered { ip };
         let db_peer = SwitchPortBgpPeerConfig::new(
             Uuid::new_v4(),
             Uuid::new_v4(),
             "phy0".parse::<external::Name>().unwrap().into(),
-            &make_bgp_peer(addr),
+            &make_bgp_peer(original),
         );
         // Numbered peers store Some(ip) in the DB and router_lifetime = 0.
         assert_eq!(
@@ -1158,31 +1146,22 @@ mod tests {
             Some(IpNetwork::from(IpAddr::from(ip)))
         );
         assert_eq!(db_peer.router_lifetime, SqlU16(0));
-        assert_eq!(db_peer.src_addr, None);
-        assert_eq!(
-            db_peer.peer_type().unwrap(),
-            RouterPeerType::Numbered { ip }
-        );
+        assert_eq!(db_peer.peer_type().unwrap(), original);
     }
 
     #[test]
     fn peer_type_round_trip_unnumbered() {
         let lifetime = RouterLifetimeConfig::new(300).unwrap();
-        let addr = networking_types::RouterPeerType::Unnumbered {
-            router_lifetime: lifetime,
-        };
+        let original = RouterPeerType::Unnumbered { router_lifetime: lifetime };
         let db_peer = SwitchPortBgpPeerConfig::new(
             Uuid::new_v4(),
             Uuid::new_v4(),
             "phy0".parse::<external::Name>().unwrap().into(),
-            &make_bgp_peer(addr),
+            &make_bgp_peer(original),
         );
         // Unnumbered peers store NULL addr in the DB.
         assert_eq!(db_peer.raw_ip_in_db_repr(), None);
         assert_eq!(db_peer.router_lifetime, SqlU16(lifetime.as_u16()));
-        assert_eq!(
-            db_peer.peer_type().unwrap(),
-            RouterPeerType::Unnumbered { router_lifetime: lifetime }
-        );
+        assert_eq!(db_peer.peer_type().unwrap(), original);
     }
 }

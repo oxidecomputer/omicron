@@ -526,7 +526,7 @@ impl super::Nexus {
                     bgp_config: NameOrId::Name(
                         format!("as{}", r.asn).parse().unwrap(),
                     ),
-                    addr: r.addr.into(),
+                    addr: r.addr,
                     hold_time: r.hold_time() as u32,
                     idle_hold_time: r.idle_hold_time() as u32,
                     delay_open: r.delay_open() as u32,

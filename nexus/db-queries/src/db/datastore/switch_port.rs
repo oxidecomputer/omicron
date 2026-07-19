@@ -40,7 +40,6 @@ use omicron_common::api::external::{
 use ref_cast::RefCast;
 use serde::{Deserialize, Serialize};
 use sled_agent_types::early_networking::ImportExportPolicy;
-use sled_agent_types::early_networking::RouterPeerIpAddr;
 use sled_agent_types::early_networking::RouterPeerType;
 use sled_agent_types::early_networking::SwitchSlot;
 use slog_error_chain::InlineErrorChain;
@@ -110,28 +109,10 @@ impl BgpPeerFromDbBuilder<'_> {
             allowed_export,
         } = self;
 
-        // Construct the peer address, incorporating src_addr from the DB.
         // This only fails if we have invalid data in the database.
-        let peer_type = p.peer_type().map_err(|err| {
+        let addr = p.peer_type().map_err(|err| {
             E::internal_error(InlineErrorChain::new(&err).to_string())
         })?;
-        let addr = match peer_type {
-            RouterPeerType::Numbered { ip } => {
-                let src_addr = p
-                    .src_addr
-                    .map(|n| RouterPeerIpAddr::try_from(n.ip()))
-                    .transpose()
-                    .map_err(|err| {
-                        E::internal_error(
-                            InlineErrorChain::new(&err).to_string(),
-                        )
-                    })?;
-                networking::RouterPeerType::Numbered { ip, src_addr }
-            }
-            RouterPeerType::Unnumbered { router_lifetime } => {
-                networking::RouterPeerType::Unnumbered { router_lifetime }
-            }
-        };
 
         Ok(BgpPeerFromDb {
             port_settings_id: p.port_settings_id,
@@ -1586,9 +1567,6 @@ async fn do_switch_port_settings_create(
                 }
             };
 
-            // Convert to sled-agent RouterPeerType for DB-repr operations.
-            let addr_for_db: RouterPeerType = p.addr.into();
-
             if let ImportExportPolicy::Allow(list) = &p.allowed_import {
                 let id = port_settings.identity.id;
                 let to_insert: Vec<SwitchPortBgpPeerConfigAllowImport> = list
@@ -1597,7 +1575,7 @@ async fn do_switch_port_settings_create(
                         SwitchPortBgpPeerConfigAllowImport::new(
                             id,
                             peer_config.link_name.clone().into(),
-                            addr_for_db,
+                            p.addr,
                             x,
                         )
                     })
@@ -1617,7 +1595,7 @@ async fn do_switch_port_settings_create(
                         SwitchPortBgpPeerConfigAllowExport::new(
                             id,
                             peer_config.link_name.clone().into(),
-                            addr_for_db,
+                            p.addr,
                             x,
                         )
                     })
@@ -1638,7 +1616,7 @@ async fn do_switch_port_settings_create(
                         SwitchPortBgpPeerConfigCommunity::new(
                             id,
                             peer_config.link_name.clone().into(),
-                            addr_for_db,
+                            p.addr,
                             x,
                         )
                     })
@@ -1791,10 +1769,10 @@ impl<'a> BgpPeerProperties<'a> {
         peer: &'a networking::BgpPeer,
     ) -> Result<(), SwitchPortSettingsCreateError> {
         let prev = match peer.addr {
-            networking::RouterPeerType::Unnumbered { .. } => {
+            RouterPeerType::Unnumbered { .. } => {
                 self.unnumbered_peers.insert(link_name, peer)
             }
-            networking::RouterPeerType::Numbered { ip, .. } => {
+            RouterPeerType::Numbered { ip } => {
                 self.numbered_peers.insert(ip.into(), peer)
             }
         };
@@ -1806,10 +1784,10 @@ impl<'a> BgpPeerProperties<'a> {
             Ok(())
         } else {
             let (kind, duplication) = match peer.addr {
-                networking::RouterPeerType::Unnumbered { .. } => {
+                RouterPeerType::Unnumbered { .. } => {
                     ("unnumbered", format!("link {link_name}"))
                 }
-                networking::RouterPeerType::Numbered { ip, .. } => {
+                RouterPeerType::Numbered { ip } => {
                     ("numbered", format!("address {ip}"))
                 }
             };
@@ -2163,8 +2141,7 @@ mod test {
                         bgp_config: bgp_config.identity.name.clone().into(),
                         addr: RouterPeerType::Numbered {
                             ip: "192.168.1.1".parse().unwrap(),
-                        }
-                        .into(),
+                        },
                         hold_time: 0,
                         idle_hold_time: 0,
                         delay_open: 0,
@@ -2189,8 +2166,7 @@ mod test {
                         addr: RouterPeerType::Unnumbered {
                             router_lifetime: RouterLifetimeConfig::new(123)
                                 .unwrap(),
-                        }
-                        .into(),
+                        },
                         hold_time: 0,
                         idle_hold_time: 0,
                         delay_open: 0,
@@ -2532,8 +2508,7 @@ mod test {
             bgp_config: NameOrId::Name("bgp-cfg".parse().unwrap()),
             addr: RouterPeerType::Unnumbered {
                 router_lifetime: RouterLifetimeConfig::new(100).unwrap(),
-            }
-            .into(),
+            },
             hold_time: 0,
             idle_hold_time: 0,
             delay_open: 0,
@@ -2556,8 +2531,7 @@ mod test {
         let peer_phy1 = BgpPeer {
             addr: RouterPeerType::Unnumbered {
                 router_lifetime: RouterLifetimeConfig::new(200).unwrap(),
-            }
-            .into(),
+            },
             communities: vec![30, 40],
             allowed_export: ImportExportPolicy::NoFiltering,
             allowed_import: ImportExportPolicy::Allow(vec![

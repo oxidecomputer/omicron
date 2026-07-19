@@ -1238,7 +1238,7 @@ mod tests {
         };
         BgpPeer {
             bgp_config: bgp_config_id.into(),
-            addr: addr.into(),
+            addr,
             hold_time: 0,
             idle_hold_time: 0,
             delay_open: 0,

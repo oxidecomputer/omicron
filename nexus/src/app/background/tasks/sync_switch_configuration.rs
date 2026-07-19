@@ -662,15 +662,11 @@ impl BackgroundTask for SwitchPortSettingsManager {
                         }
 
                         //TODO consider awaiting in parallel and joining
-                        // Convert to the sled-agent RouterPeerType for DB
-                        // queries (which use ip_db_repr for filtering).
-                        let peer_addr_for_db: RouterPeerType =
-                            peer.addr.into();
                         let communities = match self.datastore.communities_for_peer(
                             opctx,
                             port_settings_id,
                             interface_name,
-                            peer_addr_for_db,
+                            peer.addr,
                         ).await {
                             Ok(cs) => cs,
                             Err(e) => {
@@ -694,7 +690,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                             opctx,
                             port_settings_id,
                             interface_name,
-                            peer_addr_for_db,
+                            peer.addr,
                         ).await {
                             Ok(cs) => cs,
                             Err(e) => {
@@ -762,7 +758,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                             opctx,
                             port_settings_id,
                             interface_name,
-                            peer_addr_for_db,
+                            peer.addr,
                         ).await {
                             Ok(cs) => cs,
                             Err(e) => {
@@ -828,7 +824,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
 
                         match peer.addr {
                             // Numbered peer - identified by address
-                            networking::RouterPeerType::Numbered { ip, src_addr } => {
+                            RouterPeerType::Numbered { ip } => {
                                 // now that the peer passes the above validations, add it to the list for configuration
                                 let peer_config = BgpPeerConfig {
                                     name: format!("{ip}"),
@@ -866,7 +862,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                                     deterministic_collision_resolution: false,
                                     idle_hold_jitter: None,
                                     src_port: None,
-                                    src_addr: src_addr.map(|a| IpAddr::from(a)),
+                                    src_addr: None,
                                 };
 
                                 // update the stored vec if it exists, create a new on if it doesn't exist
@@ -880,7 +876,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                                 }
                             }
                             // Unnumbered peer - identified by interface
-                            networking::RouterPeerType::Unnumbered { router_lifetime } => {
+                            RouterPeerType::Unnumbered { router_lifetime } => {
                                 let peer_config = MgUnnumberedBgpPeerConfig {
                                     name: format!("unnumbered-{}", port.port_name),
                                     interface: format!("tfport{}_0", port.port_name),

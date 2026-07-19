@@ -91,5 +91,3 @@ pub mod v2026_05_20_00;
 pub mod v2026_06_04_00;
 #[path = "external_jumbo_frames/mod.rs"]
 pub mod v2026_06_05_00;
-#[path = "bgp_peer_src_addr/mod.rs"]
-pub mod v2026_06_06_00;

@@ -12,9 +12,8 @@ use nexus_types::external_api::networking::{
     Address, AddressConfig, AddressLotBlockCreate, AddressLotCreate,
     BgpAnnounceSetCreate, BgpAnnouncementCreate, BgpConfigCreate, BgpPeer,
     BgpPeerConfig, LinkConfigCreate, LldpLinkConfigCreate, Route, RouteConfig,
-    RouterPeerType, SwitchInterfaceConfigCreate, SwitchInterfaceKind,
-    SwitchPort, SwitchPortApplySettings, SwitchPortSettings,
-    SwitchPortSettingsCreate,
+    SwitchInterfaceConfigCreate, SwitchInterfaceKind, SwitchPort,
+    SwitchPortApplySettings, SwitchPortSettings, SwitchPortSettingsCreate,
 };
 use nexus_types::external_api::rack::Rack;
 use omicron_common::api::external::Name;
@@ -26,6 +25,7 @@ use sled_agent_types::early_networking::ImportExportPolicy;
 use sled_agent_types::early_networking::LinkFec;
 use sled_agent_types::early_networking::LinkSpeed;
 use sled_agent_types::early_networking::RouterLifetimeConfig;
+use sled_agent_types::early_networking::RouterPeerType;
 use sled_agent_types::early_networking::SwitchSlot;
 use std::str::FromStr;
 
@@ -319,7 +319,6 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
                 bgp_config: NameOrId::Name("as47".parse().unwrap()),
                 addr: RouterPeerType::Numbered {
                     ip: "1.2.3.4".parse().unwrap(),
-                    src_addr: None,
                 },
                 hold_time: 6,
                 idle_hold_time: 6,
@@ -388,10 +387,7 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
         .expect("Should have a numbered peer");
     assert_eq!(
         numbered_peer.addr,
-        RouterPeerType::Numbered {
-            ip: "1.2.3.4".parse().unwrap(),
-            src_addr: None
-        },
+        RouterPeerType::Numbered { ip: "1.2.3.4".parse().unwrap() },
         "Numbered peer should have addr 1.2.3.4"
     );
 
