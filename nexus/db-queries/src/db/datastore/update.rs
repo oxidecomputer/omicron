@@ -4,7 +4,9 @@
 
 //! [`DataStore`] methods related to updates and artifacts.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
+use std::collections::BTreeSet;
+use std::collections::HashMap;
 
 use super::DataStore;
 use crate::authz;
@@ -35,6 +37,7 @@ use omicron_common::api::external::{
 use omicron_common::api::external::{Error, InternalContext};
 use omicron_uuid_kinds::{GenericUuid, TufRepoUuid};
 use semver::Version;
+use sled_agent_types::artifact::ArtifactConfig;
 use swrite::{SWrite, swrite};
 use tufaceous_artifact_v2::{Artifact, ArtifactSet};
 use uuid::Uuid;
@@ -290,6 +293,49 @@ impl DataStore {
             rv.extend(batch);
         }
         Ok(rv)
+    }
+
+    /// Generate an [`ArtifactConfig`] from the current set of unpruned TUF
+    /// repos, making as many queries as needed to list them all.
+    ///
+    /// This should not be used from contexts that shouldn't make lots of
+    /// database queries (e.g., API endpoints).
+    ///
+    /// In addition to the usual error cases, this may return an error if
+    /// the TUF repo generation changes while reading the list of unpruned
+    /// repositories.
+    pub async fn tuf_list_artifacts_unpruned_batched(
+        &self,
+        opctx: &OpContext,
+    ) -> LookupResult<ArtifactConfig> {
+        opctx.check_complex_operations_allowed()?;
+
+        let generation = self.tuf_get_generation(opctx).await?;
+        let repos = self.tuf_list_repos_unpruned_batched(opctx).await?;
+        // `tuf_list_repos_unpruned_batched` performs pagination internally,
+        // so check that the generation hasn't changed during our pagination to
+        // ensure we got a consistent read.
+        {
+            let generation_now = self.tuf_get_generation(opctx).await?;
+            if generation != generation_now {
+                return Err(Error::internal_error(format!(
+                    "generation changed from {generation} \
+                    to {generation_now}, bailing"
+                )));
+            }
+        }
+
+        let mut config =
+            ArtifactConfig { generation, artifacts: BTreeSet::new() };
+        for repo in repos {
+            config.artifacts.extend(
+                self.tuf_list_repo_artifacts_without_tags(opctx, repo.id())
+                    .await?
+                    .into_iter()
+                    .map(|artifact| artifact.sha256.0),
+            );
+        }
+        Ok(config)
     }
 
     /// Marks the given TUF repo as eligible for pruning

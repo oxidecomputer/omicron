@@ -28,6 +28,7 @@ crucible-pantry-client.workspace = true
 csv.workspace = true
 daft.workspace = true
 diesel.workspace = true
+display-error-chain.workspace = true
 dropshot.workspace = true
 dyn-clone.workspace = true
 erebor = { workspace = true, features = ["pmbus"] }
@@ -72,6 +73,7 @@ oximeter-db = { workspace = true, default-features = false, features = [
     "oxql",
 ] }
 oxnet.workspace = true
+parallel-task-set.workspace = true
 petgraph = { workspace = true, features = ["serde-1"] }
 # See omicron-rpaths for more about the "pq-sys" dependency.
 pq-sys = "*"

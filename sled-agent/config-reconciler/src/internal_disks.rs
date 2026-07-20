@@ -338,7 +338,7 @@ impl InternalDisks {
     ) -> Option<Result<Utf8PathBuf, Arc<PooledDiskError>>> {
         self.disks.iter().find_map(|disk| {
             if disk.slot == Some(slot) {
-                disk.boot_image_raw_devfs_path.clone()
+                Some(disk.boot_image_raw_devfs_path.clone())
             } else {
                 None
             }
@@ -477,7 +477,7 @@ mod internal_disk_details {
         // disks.
         pub(super) slot: Option<M2Slot>,
         pub(super) boot_image_raw_devfs_path:
-            Option<Result<Utf8PathBuf, Arc<PooledDiskError>>>,
+            Result<Utf8PathBuf, Arc<PooledDiskError>>,
     }
 
     // Special ID type for `InternalDiskDetails` that lets us guarantee we sort
@@ -537,20 +537,6 @@ impl From<&'_ Disk> for InternalDiskDetails {
                 );
             }
         };
-        // Synthetic disks panic if asked for their `slot()`, so filter
-        // them out first.
-        let slot = if disk.is_synthetic() {
-            None
-        } else {
-            M2Slot::try_from(disk.slot()).ok()
-        };
-
-        // Same story for devfs path.
-        let raw_devfs_path = if disk.is_synthetic() {
-            None
-        } else {
-            Some(disk.boot_image_devfs_path(true).map_err(Arc::new))
-        };
 
         Self {
             id: InternalDiskDetailsId {
@@ -558,8 +544,10 @@ impl From<&'_ Disk> for InternalDiskDetails {
                 is_boot_disk: disk.is_boot_disk(),
             },
             zpool_id,
-            slot,
-            boot_image_raw_devfs_path: raw_devfs_path,
+            slot: M2Slot::try_from(disk.slot()).ok(),
+            boot_image_raw_devfs_path: disk
+                .boot_image_devfs_path(true)
+                .map_err(Arc::new),
         }
     }
 }
@@ -586,7 +574,12 @@ impl InternalDiskDetails {
             },
             zpool_id,
             slot,
-            boot_image_raw_devfs_path: boot_image_raw_devfs_path.map(|p| Ok(p)),
+            // Treat `None` as a synthetic disk and insert an error here. Tests
+            // generally don't care about raw devfs paths, and those that do
+            // will need to pass in `Some(_)`.
+            boot_image_raw_devfs_path: boot_image_raw_devfs_path.ok_or_else(
+                || Arc::new(PooledDiskError::SyntheticDiskNoDevfsPath),
+            ),
         }
     }
 
@@ -922,15 +915,12 @@ mod tests {
         serial: String,
     }
 
-    impl From<ArbitraryInternalDiskDetailsId> for InternalDiskDetailsId {
+    impl From<ArbitraryInternalDiskDetailsId> for DiskIdentity {
         fn from(id: ArbitraryInternalDiskDetailsId) -> Self {
-            InternalDiskDetailsId {
-                identity: Arc::new(DiskIdentity {
-                    vendor: id.vendor,
-                    model: id.model,
-                    serial: id.serial,
-                }),
-                is_boot_disk: id.is_boot_disk,
+            DiskIdentity {
+                vendor: id.vendor,
+                model: id.model,
+                serial: id.serial,
             }
         }
     }
@@ -943,11 +933,15 @@ mod tests {
     ) {
         let disk_map: IdOrdMap<_> = values
             .into_iter()
-            .map(|id| InternalDiskDetails {
-                id: id.into(),
-                zpool_id: InternalZpoolUuid::new_v4(),
-                slot: None,
-                boot_image_raw_devfs_path: None,
+            .map(|id| {
+                let is_boot_disk = id.is_boot_disk;
+                InternalDiskDetails::fake_details(
+                    id.into(),
+                    InternalZpoolUuid::new_v4(),
+                    is_boot_disk,
+                    None,
+                    None,
+                )
             })
             .collect();
 
@@ -1000,7 +994,6 @@ mod tests {
                     dev_path: None,
                 },
                 slot: raw_disk.slot(),
-                variant: raw_disk.variant(),
                 identity: raw_disk.identity().clone(),
                 is_boot_disk: raw_disk.is_boot_disk(),
                 partitions: vec![],

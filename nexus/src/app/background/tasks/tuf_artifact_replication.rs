@@ -63,7 +63,7 @@ use std::ops::ControlFlow;
 use std::str::FromStr;
 use std::sync::Arc;
 
-use anyhow::{Context, Result, ensure};
+use anyhow::{Context, Result};
 use chrono::Utc;
 use futures::future::{BoxFuture, FutureExt};
 use futures::stream::{FuturesUnordered, Stream, StreamExt};
@@ -82,7 +82,7 @@ use omicron_uuid_kinds::SledUuid;
 use rand::seq::{IndexedRandom, SliceRandom};
 use serde_json::json;
 use sled_agent_client::ClientInfo as _;
-use sled_agent_client::types::ArtifactConfig;
+use sled_agent_types::artifact::ArtifactConfig;
 use slog_error_chain::InlineErrorChain;
 use tokio::sync::mpsc::error::TryRecvError;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore, mpsc};
@@ -111,7 +111,7 @@ struct Sled {
     depot_base_url: String,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 struct ArtifactPresence {
     /// The count of this artifact stored on each sled.
     sleds: BTreeMap<SledUuid, u32>,
@@ -449,14 +449,23 @@ impl BackgroundTask for ArtifactReplication {
                 Ok(sleds) => sleds,
                 Err(err) => return json!({"error": format!("{err:#}")}),
             };
-            let (config, inventory) = match self
-                .list_artifacts_from_database(opctx)
+            let config = match self
+                .datastore
+                .tuf_list_artifacts_unpruned_batched(opctx)
                 .await
                 .context("failed to list artifacts from database")
             {
                 Ok(inventory) => inventory,
                 Err(err) => return json!({"error": format!("{err:#}")}),
             };
+            let inventory = Inventory(
+                config
+                    .artifacts
+                    .iter()
+                    .copied()
+                    .zip(std::iter::repeat_with(ArtifactPresence::default))
+                    .collect(),
+            );
 
             // Create a channel to receive request ringbuf entries.
             let (ringbuf_tx_owned, mut rx) =
@@ -584,45 +593,6 @@ impl ArtifactReplication {
                 ),
             })
             .collect())
-    }
-
-    async fn list_artifacts_from_database(
-        &self,
-        opctx: &OpContext,
-    ) -> Result<(ArtifactConfig, Inventory)> {
-        let generation = self.datastore.tuf_get_generation(opctx).await?;
-        let repos =
-            self.datastore.tuf_list_repos_unpruned_batched(opctx).await?;
-        // `tuf_list_repos_unpruned_batched` performs pagination internally,
-        // so check that the generation hasn't changed during our pagination to
-        // ensure we got a consistent read.
-        {
-            let generation_now =
-                self.datastore.tuf_get_generation(opctx).await?;
-            ensure!(
-                generation == generation_now,
-                "generation changed from {generation} \
-                to {generation_now}, bailing"
-            );
-        }
-
-        let mut inventory = Inventory::default();
-        for repo in repos {
-            for artifact in self
-                .datastore
-                .tuf_list_repo_artifacts_without_tags(opctx, repo.id())
-                .await?
-            {
-                inventory.0.entry(artifact.sha256.0).or_insert_with(|| {
-                    ArtifactPresence { sleds: BTreeMap::new(), local: None }
-                });
-            }
-        }
-        let config = ArtifactConfig {
-            generation,
-            artifacts: inventory.0.keys().map(|h| h.to_string()).collect(),
-        };
-        Ok((config, inventory))
     }
 
     /// Put `config` to `sled`, then query `sled` for a list of its artifacts.
