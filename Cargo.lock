@@ -9260,6 +9260,7 @@ dependencies = [
  "tokio-postgres",
  "tokio-util",
  "tough",
+ "transient-dns-server",
  "trust-quorum-types",
  "tufaceous 0.1.0",
  "tufaceous-artifact 0.1.0",

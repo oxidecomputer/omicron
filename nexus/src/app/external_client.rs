@@ -12,6 +12,7 @@ use oxnet::Ipv6Net;
 
 use reqwest::IntoUrl;
 use reqwest::Method;
+use reqwest::redirect;
 use std::net::IpAddr;
 use std::sync::Arc;
 use std::sync::OnceLock;
@@ -124,6 +125,128 @@ pub enum ExternalUrlError {
     Localhost { host: String },
 }
 
+/// A builder for [`ExternalHttpClient`]s, wrapping a
+/// [`reqwest::ClientBuilder`].
+///
+/// All client options *except* the redirect policy and DNS resolver are set
+/// using the wrapped [`reqwest::ClientBuilder`], which is then converted into
+/// an `ExternalClientBuilder` using its [`From`]`<reqwest::ClientBuilder>`
+/// impl.
+///
+/// ## Overwritten `reqwest::ClientBuilder` options
+///
+/// The redirect policy must be set using [`ExternalClientBuilder::redirect`],
+/// and *not* using [`reqwest::ClientBuilder::redirect`]. This is because the
+/// built client checks the target of every redirect against the external IP
+/// policy before consulting the redirect policy, which requires wrapping the
+/// redirect policy in [our own](redirect::Policy::custom), and `reqwest`
+/// provides no way to get a previously-set redirect policy back out of its
+/// builder in order to wrap it. Unfortunately, there isn't any way to detect
+/// whether we would be clobbering a policy provided by the caller, so...just
+/// make sure not to do that, I guess. Sigh.
+///
+/// Any DNS resolver set on the wrapped builder using
+/// [`reqwest::ClientBuilder::dns_resolver`] is ignored, since this builder
+/// always uses the [`external_dns::Resolver`].
+#[must_use = "builders do nothing unless, well...built"]
+pub struct ExternalClientBuilder {
+    builder: reqwest::ClientBuilder,
+    redirect: Option<redirect::Policy>,
+}
+
+impl From<reqwest::ClientBuilder> for ExternalClientBuilder {
+    fn from(builder: reqwest::ClientBuilder) -> Self {
+        Self { builder, redirect: None }
+    }
+}
+
+impl Default for ExternalClientBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl ExternalClientBuilder {
+    /// Returns a new `ExternalClientBuilder` with default options.
+    pub fn new() -> Self {
+        Self::from(reqwest::ClientBuilder::new())
+    }
+
+    /// Sets the [`redirect::Policy`] for the built client.
+    ///
+    /// The provided policy is consulted only for redirect targets that are
+    /// permitted by the external IP policy. A redirect target that is not
+    /// external (i.e., an underlay or loopback address, or a domain name that
+    /// resolves to one) fails the request with an [`ExternalUrlError`], without
+    /// consulting the provided policy at all. Note that this means a redirect
+    /// to a non-external target fails with an error even if the provided policy
+    /// is [`redirect::Policy::none`], which would otherwise stop and return the
+    /// redirect response itself.
+    ///
+    /// If this method is not called, the built client uses `reqwest`'s
+    /// default redirect policy (following up to 10 redirects), wrapped in the
+    /// same external IP policy check.
+    pub fn redirect(mut self, policy: redirect::Policy) -> Self {
+        self.redirect = Some(policy);
+        self
+    }
+
+    /// Constructs a new [`ExternalHttpClient`] from the provided
+    /// [`ExternalHttpClientConfig`], using the provided
+    /// [`external_dns::Resolver`] for name resolution.
+    ///
+    /// # Errors
+    ///
+    /// This method fails if the [`reqwest::Client`] could not be built, such
+    /// as if a TLS backend cannot be initialized.
+    pub fn build(
+        self,
+        config: &ExternalHttpClientConfig,
+        resolver: &Arc<external_dns::Resolver>,
+    ) -> Result<ExternalHttpClient, reqwest::Error> {
+        #[allow(unused_mut)] // `mut` is unused on non-unix targets
+        let ExternalClientBuilder { mut builder, redirect } = self;
+
+        // If we are configured to only bind external TCP connections on a
+        // specific interface, do so.
+        #[cfg(any(
+            target_os = "linux",
+            target_os = "macos",
+            target_os = "illumos",
+        ))]
+        {
+            if let Some(ref interface) = config.interface {
+                builder = builder.interface(interface);
+            }
+        }
+
+        let ip_policy = resolver.ip_policy().clone();
+
+        // Wrap the provided redirect policy (or reqwest's default, if none was
+        // provided) in one that checks redirect targets against the external IP
+        // policy before delegating to it. The check must come first, since
+        // `redirect::Action` is opaque, so we cannot ask the wrapped policy
+        // what it would do and check only the targets it would actually follow.
+        let redirect_policy = {
+            let inner = redirect.unwrap_or_default();
+            let ip_policy = ip_policy.clone();
+            redirect::Policy::custom(move |attempt| {
+                match ensure_external_url(attempt.url(), &ip_policy) {
+                    Ok(()) => inner.redirect(attempt),
+                    Err(error) => attempt.error(error),
+                }
+            })
+        };
+
+        let client = builder
+            .redirect(redirect_policy)
+            .dns_resolver(resolver.clone())
+            .build()?;
+
+        Ok(ExternalHttpClient { client, ip_policy })
+    }
+}
+
 impl ExternalHttpClient {
     /// Constructs a new `ExternalHttpClient` from the provided
     /// [`ExternalHttpClientConfig`], using the provided
@@ -138,39 +261,7 @@ impl ExternalHttpClient {
         config: &ExternalHttpClientConfig,
         resolver: &Arc<external_dns::Resolver>,
     ) -> Result<Self, reqwest::Error> {
-        Self::from_builder(config, resolver, reqwest::ClientBuilder::new())
-    }
-
-    /// Constructs a new `ExternalHttpClient` from the provided
-    /// [`reqwest::ClientBuilder`] and [`ExternalHttpClientConfig`], using the
-    /// provided [`external_dns::Resolver`] for name resolution.
-    ///
-    /// # Errors
-    ///
-    /// This method fails if the [`reqwest::Client`] could not be built, such
-    /// as if a TLS backend cannot be initialized.
-    pub fn from_builder(
-        config: &ExternalHttpClientConfig,
-        resolver: &Arc<external_dns::Resolver>,
-        mut builder: reqwest::ClientBuilder,
-    ) -> Result<Self, reqwest::Error> {
-        // If we are configured to only bind external TCP connections on a
-        // specific interface, do so.
-        #[cfg(any(
-            target_os = "linux",
-            target_os = "macos",
-            target_os = "illumos",
-        ))]
-        {
-            if let Some(ref interface) = config.interface {
-                builder = builder.interface(interface);
-            }
-        }
-
-        let client = builder.dns_resolver(resolver.clone()).build()?;
-        let ip_policy = resolver.ip_policy().clone();
-
-        Ok(Self { client, ip_policy })
+        ExternalClientBuilder::new().build(config, resolver)
     }
 
     /// Convenience method to make a `GET` request to a URL.
@@ -406,7 +497,10 @@ fn ensure_external_url(
 #[cfg(test)]
 mod test {
     use super::*;
+    use internal_dns_types::config::DnsRecord;
     use omicron_common::address::{Ipv6Subnet, RACK_PREFIX};
+    use std::collections::HashMap;
+    use transient_dns_server::TransientDnsServer;
 
     fn test_policy(
         loopback_policy: TreatLoopbackAsExternal,
@@ -702,5 +796,318 @@ mod test {
                  (reqwest will reject it at send time), but got: {result:?}"
             );
         }
+    }
+
+    // A redirect to an underlay address fails the request, using the default
+    // (wrapped) redirect policy.
+    #[tokio::test]
+    async fn test_redirect_to_underlay_is_rejected() {
+        let server = httpmock::MockServer::start_async().await;
+        let mock =
+            mock_redirect(&server, "http://[fd00:1122:3344:100::1]/").await;
+        let client = client_without_dns(ExternalClientBuilder::new());
+        let error = client
+            .get(server.url("/redirect"))
+            .expect("the initial URL is permitted")
+            .send()
+            .await
+            .expect_err("a redirect to an underlay address must fail");
+        assert!(
+            error.is_redirect(),
+            "the failure should be a redirect error, but got: {error:?}"
+        );
+        let chain = slog_error_chain::InlineErrorChain::new(&error).to_string();
+        assert!(
+            chain.contains("underlay"),
+            "the error chain should mention the underlay, but got: {chain}"
+        );
+        // The initial request must have been sent exactly once (i.e., the
+        // rejected redirect must not be retried).
+        mock.assert_async().await;
+    }
+
+    // A redirect to a permitted target is delegated to the configured redirect
+    // policy: reqwest's default policy follows it to the final 200.
+    #[tokio::test]
+    async fn test_redirect_to_permitted_target_is_followed() {
+        let server = httpmock::MockServer::start_async().await;
+        let ok_mock = server
+            .mock_async(|when, then| {
+                when.method(httpmock::Method::GET).path("/ok");
+                then.status(200);
+            })
+            .await;
+        let redirect_mock = mock_redirect(&server, &server.url("/ok")).await;
+        let client = client_without_dns(ExternalClientBuilder::new());
+        let rsp = client
+            .get(server.url("/redirect"))
+            .expect("the initial URL is permitted")
+            .send()
+            .await
+            .expect("a redirect to a permitted target must be followed");
+        assert_eq!(rsp.status(), reqwest::StatusCode::OK);
+        redirect_mock.assert_async().await;
+        ok_mock.assert_async().await;
+    }
+
+    // A `redirect::Policy::none` is honored for permitted targets: the 3xx
+    // response itself is returned, and the redirect target is never
+    // requested.
+    #[tokio::test]
+    async fn test_wrapped_policy_none_stops_at_permitted_target() {
+        let server = httpmock::MockServer::start_async().await;
+        let ok_mock = server
+            .mock_async(|when, then| {
+                when.method(httpmock::Method::GET).path("/ok");
+                then.status(200);
+            })
+            .await;
+        let redirect_mock = mock_redirect(&server, &server.url("/ok")).await;
+        let client = client_without_dns(
+            ExternalClientBuilder::new().redirect(redirect::Policy::none()),
+        );
+        let rsp = client
+            .get(server.url("/redirect"))
+            .expect("the initial URL is permitted")
+            .send()
+            .await
+            .expect("`Policy::none` returns the 3xx response itself");
+        assert_eq!(rsp.status(), reqwest::StatusCode::MOVED_PERMANENTLY);
+        redirect_mock.assert_async().await;
+        // The wrapped policy stopped the redirect, so the target must never
+        // be requested.
+        ok_mock.assert_calls_async(0).await;
+    }
+
+    // A URL whose domain name *resolves* to an underlay address is rejected
+    // at resolution time by `external_dns::Resolver`: the URL-level check
+    // passes domain names through (it can't know what they resolve to), and
+    // the resolver applies the IP policy to the resolved addresses.
+    #[tokio::test]
+    async fn test_domain_resolving_to_underlay_is_rejected() {
+        use internal_dns_types::config::DnsRecord;
+
+        let logctx = omicron_test_utils::dev::test_setup_log(
+            "test_domain_resolving_to_underlay_is_rejected",
+        );
+        let records = std::collections::HashMap::from([(
+            "underlay".to_string(),
+            vec![DnsRecord::Aaaa("fd00:1122:3344:100::1".parse().unwrap())],
+        )]);
+        let (_dns, client) = client_with_dns_server(
+            &logctx.log,
+            records,
+            ExternalClientBuilder::new(),
+        )
+        .await;
+
+        let error = client
+            .get("http://underlay.example.com/")
+            .expect("a domain-host URL passes the URL-level check")
+            .send()
+            .await
+            .expect_err("a domain resolving to an underlay address must fail");
+        let chain =
+            dbg!(slog_error_chain::InlineErrorChain::new(&error).to_string());
+        assert!(
+            chain.contains("underlay"),
+            "the error chain should mention the underlay, but got: {chain}"
+        );
+        logctx.cleanup_successful();
+    }
+
+    // A *redirect* to a URL whose domain name resolves to an underlay
+    // address is also rejected: the redirect-policy check passes domain
+    // names through (like the URL-level check), the redirect is followed,
+    // and the resolver then rejects the resolved address.
+    #[tokio::test]
+    async fn test_redirect_to_domain_resolving_to_underlay_is_rejected() {
+        use internal_dns_types::config::DnsRecord;
+
+        let logctx = omicron_test_utils::dev::test_setup_log(
+            "test_redirect_to_domain_resolving_to_underlay_is_rejected",
+        );
+        let records = std::collections::HashMap::from([(
+            "underlay".to_string(),
+            vec![DnsRecord::Aaaa("fd00:1122:3344:100::1".parse().unwrap())],
+        )]);
+        let (_dns, client) = client_with_dns_server(
+            &logctx.log,
+            records,
+            ExternalClientBuilder::new(),
+        )
+        .await;
+
+        let server = httpmock::MockServer::start_async().await;
+        let mock = mock_redirect(&server, "http://underlay.example.com/").await;
+
+        let error = client
+            .get(server.url("/redirect"))
+            .expect("the initial URL is permitted")
+            .send()
+            .await
+            .expect_err(
+                "a redirect to a domain resolving to an underlay address \
+                 must fail",
+            );
+        let chain =
+            dbg!(slog_error_chain::InlineErrorChain::new(&error).to_string());
+        assert!(
+            chain.contains("underlay"),
+            "the error chain should mention the underlay, but got: {chain}"
+        );
+        // The redirecting endpoint must have been requested exactly once.
+        mock.assert_async().await;
+        logctx.cleanup_successful();
+    }
+
+    // The `external_dns::Resolver` policy does *not* reject domains that
+    // resolve to addresses that aren't on the underlay (in this case, including
+    // loopback, since we are configured to permit it for tests).
+    #[tokio::test]
+    async fn test_domain_resolving_to_permitted_address_is_connected() {
+        let logctx = omicron_test_utils::dev::test_setup_log(
+            "test_domain_resolving_to_permitted_address_is_connected",
+        );
+        let records = std::collections::HashMap::from([(
+            "ok".to_string(),
+            vec![DnsRecord::A(std::net::Ipv4Addr::LOCALHOST)],
+        )]);
+        let (_dns, client) = client_with_dns_server(
+            &logctx.log,
+            records,
+            ExternalClientBuilder::new(),
+        )
+        .await;
+
+        let server = httpmock::MockServer::start_async().await;
+        let ok_mock = server
+            .mock_async(|when, then| {
+                when.method(httpmock::Method::GET).path("/ok");
+                then.status(200);
+            })
+            .await;
+
+        let rsp = client
+            .get(format!("http://ok.example.com:{}/ok", server.port()))
+            .expect("a domain-host URL passes the URL-level check")
+            .send()
+            .await
+            .expect("a domain resolving to a permitted address must work");
+        assert_eq!(rsp.status(), reqwest::StatusCode::OK);
+        ok_mock.assert_async().await;
+        logctx.cleanup_successful();
+    }
+
+    // The external IP policy check runs *before* the wrapped policy: a
+    // redirect to an underlay address fails with an error even when the
+    // wrapped policy is `Policy::none`, which would otherwise stop and
+    // return the 3xx response, as in the test above.
+    #[tokio::test]
+    async fn test_underlay_redirect_rejected_even_with_policy_none() {
+        let server = httpmock::MockServer::start_async().await;
+        let mock =
+            mock_redirect(&server, "http://[fd00:1122:3344:100::1]/").await;
+        let client = client_without_dns(
+            ExternalClientBuilder::new().redirect(redirect::Policy::none()),
+        );
+        let error = client
+            .get(server.url("/redirect"))
+            .expect("the initial URL is permitted")
+            .send()
+            .await
+            .expect_err(
+                "a redirect to an underlay address must fail even with \
+                 `Policy::none`",
+            );
+        assert!(
+            error.is_redirect(),
+            "the failure should be a redirect error, but got: {error:?}"
+        );
+        mock.assert_async().await;
+    }
+
+    /// Mocks `GET /redirect` on `server` to respond with a 301 to
+    /// `redirect_to`.
+    async fn mock_redirect<'a>(
+        server: &'a httpmock::MockServer,
+        redirect_to: &str,
+    ) -> httpmock::Mock<'a> {
+        server
+            .mock_async(|when, then| {
+                when.method(httpmock::Method::GET).path("/redirect");
+                then.status(301).header("location", redirect_to);
+            })
+            .await
+    }
+
+    /// Builds an `ExternalHttpClient` from `builder` using the provided
+    /// resolver, with loopback treated as external so that the test servers
+    /// on localhost are reachable.
+    fn client_with_resolver(
+        builder: ExternalClientBuilder,
+        resolver: Arc<external_dns::Resolver>,
+    ) -> ExternalHttpClient {
+        let config = ExternalHttpClientConfig {
+            interface: None,
+            treat_loopback_as_external:
+                TreatLoopbackAsExternal::YesForTestPurposesOnly,
+        };
+        builder.build(&config, &resolver).expect("client must build")
+    }
+
+    /// Builds an `ExternalHttpClient` from `builder` for tests that use only
+    /// IP-literal URLs.
+    fn client_without_dns(
+        builder: ExternalClientBuilder,
+    ) -> ExternalHttpClient {
+        // The DNS server address is never actually queried, since the tests
+        // using this helper use IP-literal URLs; the resolver just needs to
+        // exist in order to build the client.
+        let resolver = Arc::new(external_dns::Resolver::new(
+            &[IpAddr::V4(std::net::Ipv4Addr::LOCALHOST)],
+            test_policy(TreatLoopbackAsExternal::YesForTestPurposesOnly),
+        ));
+        client_with_resolver(builder, resolver)
+    }
+
+    /// Spawns a `TransientDnsServer` serving the given `records` in the
+    /// `example.com` zone, and returns it along with an
+    /// `ExternalHttpClient` whose resolver points at it.
+    ///
+    /// The server is returned so that it stays alive for the duration of the
+    /// test.
+    async fn client_with_dns_server(
+        log: &slog::Logger,
+        records: HashMap<String, Vec<DnsRecord>>,
+        builder: ExternalClientBuilder,
+    ) -> (TransientDnsServer, ExternalHttpClient) {
+        use internal_dns_types::config::DnsConfigParams;
+        use internal_dns_types::config::DnsConfigZone;
+        use omicron_common::api::external::Generation;
+
+        let dns =
+            TransientDnsServer::new(log).await.expect("DNS server must start");
+        dns.initialize_with_config(
+            log,
+            &DnsConfigParams {
+                generation: Generation::new(),
+                serial: 0,
+                time_created: chrono::Utc::now(),
+                zones: vec![DnsConfigZone {
+                    zone_name: "example.com".to_string(),
+                    records,
+                }],
+            },
+        )
+        .await
+        .expect("DNS server must accept its config");
+
+        let resolver = Arc::new(external_dns::Resolver::new_from_addr(
+            dns.dns_server.local_address(),
+            test_policy(TreatLoopbackAsExternal::YesForTestPurposesOnly),
+        ));
+        let client = client_with_resolver(builder, resolver);
+        (dns, client)
     }
 }

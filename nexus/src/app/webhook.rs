@@ -28,6 +28,7 @@
 //! [RFD 538]: https://rfd.shared.oxide.computer/538
 
 use crate::Nexus;
+use crate::app::external_client::ExternalClientBuilder;
 use crate::app::external_client::ExternalHttpClient;
 use crate::app::external_dns;
 use anyhow::Context;
@@ -319,17 +320,13 @@ impl Nexus {
     }
 }
 
-/// Construct a [`reqwest::Client`] configured for webhook delivery requests.
+/// Construct an [`ExternalHttpClient`] configured for webhook delivery
+/// requests.
 pub(super) fn delivery_client(
     external_client_config: &ExternalHttpClientConfig,
     resolver: &Arc<external_dns::Resolver>,
 ) -> Result<ExternalHttpClient, reqwest::Error> {
-    let builder = reqwest::ClientBuilder::new()
-        // Per [RFD 538 § 4.3.1][1], webhook delivery does *not* follow
-        // redirects.
-        //
-        // [1]: https://rfd.shared.oxide.computer/rfd/538#_success
-        .redirect(reqwest::redirect::Policy::none())
+    let builder: ExternalClientBuilder = reqwest::ClientBuilder::new()
         // Per [RFD 538 § 4.3.2][1], the client must be able to connect to a
         // webhook receiver endpoint within 10 seconds, or the delivery is
         // considered failed.
@@ -340,8 +337,19 @@ pub(super) fn delivery_client(
         // each webhook delivery request.
         //
         // [1]: https://rfd.shared.oxide.computer/rfd/538#delivery-failure
-        .timeout(Duration::from_secs(30));
-    ExternalHttpClient::from_builder(external_client_config, resolver, builder)
+        .timeout(Duration::from_secs(30))
+        .into();
+    builder
+        // Per [RFD 538 § 4.3.1][1], webhook delivery does *not* follow
+        // redirects.
+        //
+        // N.B. that the redirect policy must be set on the
+        // `ExternalClientBuilder`, *not* the `reqwest::ClientBuilder`, or it
+        // will be silently overwritten.
+        //
+        // [1]: https://rfd.shared.oxide.computer/rfd/538#_success
+        .redirect(reqwest::redirect::Policy::none())
+        .build(external_client_config, resolver)
 }
 
 /// Everything necessary to send a delivery request to a webhook receiver.

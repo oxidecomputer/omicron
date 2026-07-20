@@ -211,6 +211,7 @@ sp-sim.workspace = true
 strum.workspace = true
 subprocess.workspace = true
 term.workspace = true
+transient-dns-server.workspace = true
 tufaceous.workspace = true
 tufaceous-artifact.workspace = true
 tufaceous-lib.workspace = true
