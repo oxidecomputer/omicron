@@ -2,6 +2,71 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+//! A [client](ExternalHttpClient) for requests to endpoints external to the
+//! rack, and related machinery.
+//!
+//! ## Motivation
+//!
+//! In some cases, such as delivering webhook alerts, Nexus must communicate to
+//! external endpoints whose URLs are provided by user configuration. When doing
+//! so, it is important to ensure that the user-provided endpoint does not
+//! resolve to an IP address on the underlay network. This is necessary to
+//! prevent the risk of server-side request forgery (SSRF) attacks, in which
+//! Nexus is used to smuggle an external request onto an underlay network
+//! service which should otherwise not be exposed externally. In addition, a
+//! non-malicious operator could inadvertantly misconfigure things so that the
+//! IPv6 ULA address assigned to an external service collides with an underlay
+//! network address, with confusing results. In such cases, it is better to fail
+//! loudly than to accidentally send the request to an underlay service which is
+//! not its intended destination.
+//!
+//! ## Theory of Operation
+//!
+//! We take a defense-in-depth approach to avoid accidentally sending external
+//! requests to the underlay network. First, in the production control plane, we
+//! configure the clients which are used to send external requests to bind
+//! sockets only on the OPTE interface. The name of the interface in a given
+//! Nexus zone is provided by the sled-agent through the
+//! [`ExternalHttpClientConfig`].
+//!
+//! Binding to the OPTE interface is in and of itself sufficient to provide
+//! network-level isolation from the underlay for external clients. However, the
+//! client type in this module also enforces external requests at the software
+//! layer by rejecting any URL which either contains an underlay network address
+//! as its host, or whose host is a domain name that resolves to underlay
+//! network address(es). One reason we enforce this policy both at the client
+//! and at the network level is for defense-in-depth; if either layer fails to
+//! enforce the policy, we expect that the other will still ensure that external
+//! requests are not sent to the underlay. In addition, checking at the client
+//! level allows us to record better errors than the generic connection-level
+//! errors that would otherwise be reported if the OPTE-level enforcement
+//! prevents us from connecting to an address. This way, we can provide a more
+//! useful error message for operators who are troubleshooting why a request was
+//! not sent to the expected endpoint, and record when we prevented a potential
+//! SSRF attack.
+//!
+//! The determination of which IP addresses are considered "external" is done by
+//! the [`ExternalIpPolicy`] type, which is configured with the rack's
+//! [`UnderlaySubnets`] once they are loaded from the database, or when rack is
+//! initialized (if RSS has not yet run). This policy is used by the
+//! [`ExternalHttpClient`] type in this module, which is a wrapper around a
+//! [`reqwest::Client`] that enforces that all requested URLs are checked
+//! against this policy before allowing a request to be sent. Unfortunately,
+//! `reqwest` does not provide an integration point for a middleware that
+//! decides which IP addresses are okay to connect to, so we have to wrap the
+//! client and implement this on top of it. The policy is also passed to the
+//! [`external_dns`] resolver, which is used when the client resolves a domain
+//! name to IP addresses, and rejects any names that resolve to disallowed IPs.
+//! Finally, we also wrap the redirect policy for the `reqwest` client to ensure
+//! that following redirects also checks that the redirect does not point us at
+//! an underlay address.
+//!
+//! Since we must construct this wrapper around the `reqwest::Client` API, we
+//! also provide an [`ExternalClientBuilder`] to configure our client wrapper.
+//! This is necessary because we must wrap the redirect policy used by the
+//! client, as described above, and some external clients may need to follow
+//! redirects, while others may not.
+
 use super::external_dns;
 
 use nexus_config::ExternalHttpClientConfig;
@@ -28,12 +93,9 @@ pub struct ExternalIpPolicy {
 /// Errors returned by [`ExternalIpPolicy::ensure_external_ip`].
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum ExternalIpError {
-    #[error(
-        "expected an external IP, but address {ip} is within the underlay \
-         subnet {subnet}"
-    )]
+    #[error("address {ip} is within the underlay subnet {subnet}")]
     Underlay { ip: IpAddr, subnet: Ipv6Net },
-    #[error("expected an external IP, but {ip} is a loopback address")]
+    #[error("address {ip} is a loopback address")]
     Loopback { ip: IpAddr },
     #[error(
         "cannot check whether {ip} is an external IP address before the \
@@ -114,7 +176,10 @@ pub enum ExternalUrlError {
     /// The URL's host is an IP address which is not external, such as an
     /// underlay network address or a loopback address --- or the rack is not
     /// yet initialized, so no determination can be made.
-    #[error(transparent)]
+    #[error(
+        "IP addresses in URLs for external requests must be external to the \
+         underlay network"
+    )]
     NotExternalIp(#[from] ExternalIpError),
     /// The URL's host is a name in the special-use `localhost.` zone, which
     /// resolves to loopback addresses.
@@ -498,43 +563,13 @@ fn ensure_external_url(
 mod test {
     use super::*;
     use internal_dns_types::config::DnsRecord;
-    use omicron_common::address::{Ipv6Subnet, RACK_PREFIX};
+    use omicron_common::address::{
+        Ipv6Subnet, RACK_PREFIX, ReservedRackSubnet, UNDERLAY_MULTICAST_SUBNET,
+        UNDERLAY_MULTICAST_SUBNET_LAST,
+    };
     use std::collections::HashMap;
+    use std::net::Ipv6Addr;
     use transient_dns_server::TransientDnsServer;
-
-    fn test_policy(
-        loopback_policy: TreatLoopbackAsExternal,
-    ) -> ExternalIpPolicy {
-        let rack_subnet: ipnetwork::Ipv6Network =
-            nexus_test_utils::RACK_SUBNET.parse().unwrap();
-        let subnets =
-            UnderlaySubnets::new(Ipv6Subnet::<RACK_PREFIX>::from(rack_subnet));
-        ExternalIpPolicy::new(
-            Arc::new(OnceLock::from(subnets)),
-            loopback_policy,
-        )
-    }
-
-    #[track_caller]
-    fn test_url(url: &str) -> Result<Url, ExternalUrlError> {
-        let url = url
-            .parse::<Url>()
-            .unwrap_or_else(|e| panic!("test URL {url:?} must parse: {e}"));
-        ensure_external_url(&url, &test_policy(TreatLoopbackAsExternal::No))
-            .map(|()| url)
-    }
-
-    #[track_caller]
-    fn test_url_loopback_allowed(url: &str) -> Result<Url, ExternalUrlError> {
-        let url = url
-            .parse::<Url>()
-            .unwrap_or_else(|e| panic!("test URL {url:?} must parse: {e}"));
-        ensure_external_url(
-            &url,
-            &test_policy(TreatLoopbackAsExternal::YesForTestPurposesOnly),
-        )
-        .map(|()| url)
-    }
 
     // Until the rack is initialized, no determination can be made about IP
     // hosts, so they are rejected. Domain hosts still pass, since their
@@ -562,39 +597,57 @@ mod test {
 
     #[test]
     fn test_ensure_external_url_rejects_underlay_ipv6_hosts() {
-        const CASES: &[&str] = &[
-            // An address within this rack's subnet.
-            "http://[fd00:1122:3344:100::1]/",
+        let subnets = underlay_subnets();
+        let az = subnets.az_subnet.net();
+        let rack = subnets.rack_subnet.net();
+        // An arbitrary host address on this rack's subnet.
+        let rack_ip = underlay_ip();
+        // An address in a sled subnet (the rack's second /64).
+        let sled_ip = nth_addr(rack, (1 << 64) + 5);
+        // An address in a different rack's /56, in the same AZ.
+        let other_rack_ip = {
+            let rack_size = 1u128 << (128 - RACK_PREFIX);
+            let rack_offset =
+                u128::from(rack.first_addr()) - u128::from(az.first_addr());
+            nth_addr(az, rack_offset + rack_size + 5)
+        };
+        // An internal DNS server address, derived from the reserved rack
+        // subnet the same way production does.
+        let dns_ip = ReservedRackSubnet::from_subnet(subnets.rack_subnet)
+            .get_dns_subnets()[0]
+            .dns_address();
+        // An address in the middle of the underlay multicast subnet.
+        let multicast_ip = nth_addr(UNDERLAY_MULTICAST_SUBNET, (1 << 16) + 2);
+
+        let cases = vec![
+            format!("http://[{rack_ip}]/"),
             // Explicit port, path, query, and fragment don't change the answer.
-            "http://[fd00:1122:3344:100::1]:12345/some/path?q=1#frag",
+            format!("http://[{rack_ip}]:12345/some/path?q=1#frag"),
             // Neither does the scheme...
-            "https://[fd00:1122:3344:100::1]/",
+            format!("https://[{rack_ip}]/"),
             // ...nor userinfo.
-            "http://user:pass@[fd00:1122:3344:100::1]/",
-            // A sled subnet within this rack.
-            "http://[fd00:1122:3344:101::5]/",
-            // A different rack in the same AZ.
-            "http://[fd00:1122:3344:200::5]/",
-            // An internal DNS server address (in the reserved rack subnet).
-            "http://[fd00:1122:3344:1::1]/",
-            // The very first address in the AZ /48...
-            "http://[fd00:1122:3344::]/",
+            format!("http://user:pass@[{rack_ip}]/"),
+            format!("http://[{sled_ip}]/"),
+            format!("http://[{other_rack_ip}]/"),
+            format!("http://[{dns_ip}]/"),
+            // The very first address in the AZ subnet...
+            format!("http://[{}]/", az.first_addr()),
             // ...and the very last.
-            "http://[fd00:1122:3344:ffff:ffff:ffff:ffff:ffff]/",
-            // The underlay multicast subnet (ff04::/64) is also part of the
-            // underlay network: first address...
-            "http://[ff04::]/",
+            format!("http://[{}]/", az.last_addr()),
+            // The underlay multicast subnet is also part of the underlay
+            // network: first address...
+            format!("http://[{}]/", UNDERLAY_MULTICAST_SUBNET.first_addr()),
             // ...one in the middle...
-            "http://[ff04::1:2]/",
-            // ...and the last (`UNDERLAY_MULTICAST_SUBNET_LAST`).
-            "http://[ff04::ffff:ffff:ffff:ffff]/",
+            format!("http://[{multicast_ip}]/"),
+            // ...and the last.
+            format!("http://[{UNDERLAY_MULTICAST_SUBNET_LAST}]/"),
             // Non-canonical textual forms are normalized by the URL parser
             // before we see them: uppercase/verbose...
-            "http://[FD00:1122:3344:0100:0000:0000:0000:0001]/",
+            format!("http://[{}]/", verbose_upper(rack_ip)),
             // ...and an embedded dotted-quad tail.
-            "http://[fd00:1122:3344:100::1.2.3.4]/",
+            format!("http://[{}]/", dotted_quad_tail(rack)),
         ];
-        for url in CASES {
+        for url in &cases {
             let result = test_url(url);
             assert!(
                 result.is_err(),
@@ -606,27 +659,40 @@ mod test {
 
     #[test]
     fn test_ensure_external_url_allows_external_ipv6_hosts() {
-        const CASES: &[&str] = &[
+        let az = underlay_subnets().az_subnet.net();
+        // The addresses immediately below and above the AZ subnet: the
+        // tightest possible off-by-one boundary cases.
+        let below_az = Ipv6Addr::from(u128::from(az.first_addr()) - 1);
+        let above_az = Ipv6Addr::from(u128::from(az.last_addr()) + 1);
+        // The address immediately after the underlay multicast subnet.
+        let after_multicast =
+            Ipv6Addr::from(u128::from(UNDERLAY_MULTICAST_SUBNET_LAST) + 1);
+        // A ULA that is *not* the underlay (e.g. a guest VPC prefix).
+        // ULA-ness alone must not be the discriminator.
+        let other_ula: Ipv6Addr = "fd12:3456:789a::1".parse().unwrap();
+        assert!(
+            !az.contains(other_ula),
+            "the test's \"non-underlay ULA\" ({other_ula}) is within the \
+             test AZ subnet ({az}); pick a different one"
+        );
+
+        let cases = vec![
             // Global unicast.
-            "http://[2001:db8::1]/",
-            // A ULA that is *not* the underlay (e.g. a guest VPC prefix).
-            // ULA-ness alone must not be the discriminator.
-            "http://[fd12:3456:789a::1]/",
-            // Adjacent /48s: one below the AZ subnet...
-            "http://[fd00:1122:3343:ffff::1]/",
-            // ...and one above.
-            "http://[fd00:1122:3345::1]/",
+            "http://[2001:db8::1]/".to_string(),
+            format!("http://[{other_ula}]/"),
+            format!("http://[{below_az}]/"),
+            format!("http://[{above_az}]/"),
             // Link-local.
-            "http://[fe80::1]/",
+            "http://[fe80::1]/".to_string(),
             // Admin-scoped multicast just *outside* the underlay multicast
-            // /64 subnet...
-            "http://[ff04:0:0:1::1]/",
+            // subnet...
+            format!("http://[{after_multicast}]/"),
             // ...and multicast in a different scope entirely (site-local).
-            "http://[ff05::1:2]/",
+            "http://[ff05::1:2]/".to_string(),
             // IPv4-mapped IPv6.
-            "http://[::ffff:1.2.3.4]/",
+            "http://[::ffff:1.2.3.4]/".to_string(),
         ];
-        for url in CASES {
+        for url in &cases {
             let result = test_url(url);
             assert!(
                 result.is_ok(),
@@ -736,12 +802,14 @@ mod test {
     // policy: it must never weaken the underlay check.
     #[test]
     fn test_loopback_policy_does_not_weaken_underlay_check() {
-        const CASES: &[&str] = &[
-            "http://[fd00:1122:3344:100::1]/",
-            "http://[fd00:1122:3344:1::1]/",
-            "http://[ff04::1:2]/",
+        let cases = vec![
+            format!("http://[{}]/", underlay_ip()),
+            format!(
+                "http://[{}]/",
+                nth_addr(UNDERLAY_MULTICAST_SUBNET, (1 << 16) + 2)
+            ),
         ];
-        for url in CASES {
+        for url in &cases {
             let result = test_url_loopback_allowed(url);
             assert!(
                 result.is_err(),
@@ -802,9 +870,9 @@ mod test {
     // (wrapped) redirect policy.
     #[tokio::test]
     async fn test_redirect_to_underlay_is_rejected() {
+        let target = underlay_ip();
         let server = httpmock::MockServer::start_async().await;
-        let mock =
-            mock_redirect(&server, "http://[fd00:1122:3344:100::1]/").await;
+        let mock = mock_redirect(&server, &format!("http://[{target}]/")).await;
         let client = client_without_dns(ExternalClientBuilder::new());
         let error = client
             .get(server.url("/redirect"))
@@ -816,11 +884,7 @@ mod test {
             error.is_redirect(),
             "the failure should be a redirect error, but got: {error:?}"
         );
-        let chain = slog_error_chain::InlineErrorChain::new(&error).to_string();
-        assert!(
-            chain.contains("underlay"),
-            "the error chain should mention the underlay, but got: {chain}"
-        );
+        assert_underlay_rejection(&error, target);
         // The initial request must have been sent exactly once (i.e., the
         // rejected redirect must not be retried).
         mock.assert_async().await;
@@ -890,9 +954,10 @@ mod test {
         let logctx = omicron_test_utils::dev::test_setup_log(
             "test_domain_resolving_to_underlay_is_rejected",
         );
+        let target = underlay_ip();
         let records = std::collections::HashMap::from([(
             "underlay".to_string(),
-            vec![DnsRecord::Aaaa("fd00:1122:3344:100::1".parse().unwrap())],
+            vec![DnsRecord::Aaaa(target)],
         )]);
         let (_dns, client) = client_with_dns_server(
             &logctx.log,
@@ -907,12 +972,7 @@ mod test {
             .send()
             .await
             .expect_err("a domain resolving to an underlay address must fail");
-        let chain =
-            dbg!(slog_error_chain::InlineErrorChain::new(&error).to_string());
-        assert!(
-            chain.contains("underlay"),
-            "the error chain should mention the underlay, but got: {chain}"
-        );
+        assert_underlay_rejection(&error, target);
         logctx.cleanup_successful();
     }
 
@@ -927,9 +987,10 @@ mod test {
         let logctx = omicron_test_utils::dev::test_setup_log(
             "test_redirect_to_domain_resolving_to_underlay_is_rejected",
         );
+        let target = underlay_ip();
         let records = std::collections::HashMap::from([(
             "underlay".to_string(),
-            vec![DnsRecord::Aaaa("fd00:1122:3344:100::1".parse().unwrap())],
+            vec![DnsRecord::Aaaa(target)],
         )]);
         let (_dns, client) = client_with_dns_server(
             &logctx.log,
@@ -950,12 +1011,7 @@ mod test {
                 "a redirect to a domain resolving to an underlay address \
                  must fail",
             );
-        let chain =
-            dbg!(slog_error_chain::InlineErrorChain::new(&error).to_string());
-        assert!(
-            chain.contains("underlay"),
-            "the error chain should mention the underlay, but got: {chain}"
-        );
+        assert_underlay_rejection(&error, target);
         // The redirecting endpoint must have been requested exactly once.
         mock.assert_async().await;
         logctx.cleanup_successful();
@@ -1005,9 +1061,9 @@ mod test {
     // return the 3xx response, as in the test above.
     #[tokio::test]
     async fn test_underlay_redirect_rejected_even_with_policy_none() {
+        let target = underlay_ip();
         let server = httpmock::MockServer::start_async().await;
-        let mock =
-            mock_redirect(&server, "http://[fd00:1122:3344:100::1]/").await;
+        let mock = mock_redirect(&server, &format!("http://[{target}]/")).await;
         let client = client_without_dns(
             ExternalClientBuilder::new().redirect(redirect::Policy::none()),
         );
@@ -1024,7 +1080,122 @@ mod test {
             error.is_redirect(),
             "the failure should be a redirect error, but got: {error:?}"
         );
+        assert_underlay_rejection(&error, target);
         mock.assert_async().await;
+    }
+
+    // === various test utilities ===
+
+    fn test_policy(
+        loopback_policy: TreatLoopbackAsExternal,
+    ) -> ExternalIpPolicy {
+        ExternalIpPolicy::new(
+            Arc::new(OnceLock::from(underlay_subnets())),
+            loopback_policy,
+        )
+    }
+
+    /// Returns the `UnderlaySubnets` for the test rack subnet
+    /// (`nexus_test_utils::RACK_SUBNET`).
+    ///
+    /// Test addresses are derived from this rather than hardcoded, so that
+    /// they remain on the underlay if the test rack subnet ever changes.
+    fn underlay_subnets() -> UnderlaySubnets {
+        let rack_subnet: ipnetwork::Ipv6Network =
+            nexus_test_utils::RACK_SUBNET.parse().unwrap();
+        UnderlaySubnets::new(Ipv6Subnet::<RACK_PREFIX>::from(rack_subnet))
+    }
+
+    /// Returns the `n`th address in `net`, asserting that it is actually
+    /// within `net` (i.e., that `n` doesn't overflow the subnet's host
+    /// bits).
+    fn nth_addr(net: Ipv6Net, n: u128) -> Ipv6Addr {
+        let addr = Ipv6Addr::from(u128::from(net.first_addr()) + n);
+        assert!(net.contains(addr), "address {addr} must be within {net}");
+        addr
+    }
+
+    /// An arbitrary host address on the test rack's subnet, used wherever a
+    /// test just needs "some underlay address".
+    fn underlay_ip() -> Ipv6Addr {
+        nth_addr(underlay_subnets().rack_subnet.net(), 1)
+    }
+
+    /// Renders `addr` in fully-expanded, uppercase textual form (e.g.
+    /// `FD00:1122:3344:0100:0000:0000:0000:0001`), for exercising the URL
+    /// parser's normalization of non-canonical spellings.
+    fn verbose_upper(addr: Ipv6Addr) -> String {
+        addr.segments().map(|segment| format!("{segment:04X}")).join(":")
+    }
+
+    /// Formats an address within `net` (whose bits 64..96 must be zero) in
+    /// the embedded dotted-quad textual form (e.g.
+    /// `fd00:1122:3344:100::1.2.3.4`), for exercising the URL parser's
+    /// normalization of non-canonical spellings.
+    fn dotted_quad_tail(net: Ipv6Net) -> String {
+        let s = net.first_addr().segments();
+        assert_eq!(
+            s[4..6],
+            [0, 0],
+            "the `::` in the dotted-quad form requires bits 64..96 of {net} \
+             to be zero"
+        );
+        format!("{:x}:{:x}:{:x}:{:x}::1.2.3.4", s[0], s[1], s[2], s[3])
+    }
+
+    /// Asserts that `error`'s cause chain contains an
+    /// [`ExternalIpError::Underlay`] rejection of `ip`.
+    #[track_caller]
+    fn assert_underlay_rejection(
+        error: &(dyn std::error::Error + 'static),
+        expected_ip: Ipv6Addr,
+    ) {
+        let mut found_ip_error = None;
+        let mut next = Some(error);
+        while let Some(error) = dbg!(next) {
+            if let Some(e) = dbg!(error.downcast_ref::<ExternalIpError>()) {
+                found_ip_error = Some(e);
+                break;
+            }
+            next = error.source();
+        }
+        match found_ip_error {
+            Some(ExternalIpError::Underlay { ip, .. }) => assert_eq!(
+                *ip,
+                IpAddr::V6(expected_ip),
+                "the underlay rejection should be for {expected_ip}",
+            ),
+            other => panic!(
+                "the error chain should contain an underlay rejection, but \
+                 found {other:?} (chain: {})",
+                slog_error_chain::InlineErrorChain::new(error),
+            ),
+        }
+    }
+
+    #[track_caller]
+    fn test_url(url: &str) -> Result<Url, ExternalUrlError> {
+        let url = dbg!(url)
+            .parse::<Url>()
+            .unwrap_or_else(|e| panic!("test URL {url:?} must parse: {e}"));
+        let result = ensure_external_url(
+            &url,
+            &test_policy(TreatLoopbackAsExternal::No),
+        )
+        .map(|()| url);
+        dbg!(result)
+    }
+
+    #[track_caller]
+    fn test_url_loopback_allowed(url: &str) -> Result<Url, ExternalUrlError> {
+        let url = url
+            .parse::<Url>()
+            .unwrap_or_else(|e| panic!("test URL {url:?} must parse: {e}"));
+        ensure_external_url(
+            &url,
+            &test_policy(TreatLoopbackAsExternal::YesForTestPurposesOnly),
+        )
+        .map(|()| url)
     }
 
     /// Mocks `GET /redirect` on `server` to respond with a 301 to
