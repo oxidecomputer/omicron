@@ -726,6 +726,7 @@ mod test {
     use nexus_types::inventory::SpType;
     use nexus_types::support_bundle::BundleDataSelection;
     use omicron_common::api::external::ByteCount;
+    use omicron_common::api::external::Generation;
     use omicron_common::api::internal::shared::DatasetKind;
     use omicron_common::disk::DatasetConfig;
     use omicron_common::disk::DatasetName;
@@ -1060,11 +1061,12 @@ mod test {
                 })
                 .collect();
 
-            // Read current sled config generation from zones (this will change
-            // slightly once the simulator knows how to keep the unified config
-            // and be a little less weird)
-            let current_generation =
-                cptestctx.first_sled_agent().omicron_zones_list().generation;
+            // Read current config generation (this will change slightly once
+            // the simulator stops exposing operations on just datasets)
+            let current_generation = cptestctx
+                .first_sled_agent()
+                .omicron_sled_config()
+                .map_or(Generation::new(), |config| config.generation);
 
             let dataset_config = DatasetsConfig {
                 generation: current_generation.next(),

@@ -35,7 +35,7 @@ use omicron_common::api::internal::shared::{
 };
 use omicron_common::disk::{
     DatasetsConfig, DatasetsManagementResult, DiskIdentity, DiskVariant,
-    DisksManagementResult, OmicronPhysicalDisksConfig,
+    OmicronPhysicalDisksConfig,
 };
 use omicron_uuid_kinds::{
     DatasetUuid, GenericUuid, PhysicalDiskUuid, PropolisUuid, SledUuid,
@@ -63,10 +63,9 @@ use sled_agent_types::instance::{
 };
 use sled_agent_types::inventory::{
     ConfigReconcilerInventory, ConfigReconcilerInventoryResult,
-    ConfigReconcilerInventoryStatus, FmdInventory, HostPhase2DesiredSlots,
-    Inventory, InventoryDataset, InventoryDisk, InventoryZpool,
-    OmicronFileSourceResolverInventory, OmicronSledConfig, OmicronZonesConfig,
-    SingleMeasurementInventory, SledRole, ZpoolHealth,
+    ConfigReconcilerInventoryStatus, FmdInventory, Inventory, InventoryDataset,
+    InventoryDisk, InventoryZpool, OmicronFileSourceResolverInventory,
+    OmicronSledConfig, SingleMeasurementInventory, SledRole, ZpoolHealth,
 };
 use sled_agent_types::support_bundle::SupportBundleMetadata;
 use sled_agent_types::system_networking::SystemNetworkingConfig;
@@ -112,7 +111,6 @@ pub struct SledAgent {
         Mutex<HashMap<PropolisUuid, HashSet<InstanceMulticastMembership>>>,
     pub vpc_routes: Mutex<HashMap<RouterId, RouteSet>>,
     config: Config,
-    fake_zones: Mutex<OmicronZonesConfig>,
     instance_ensure_state_error: Mutex<Option<Error>>,
     /// Number of remaining local storage operation failures to inject.
     /// When > 0, local storage ensure/delete operations decrement this
@@ -202,10 +200,6 @@ impl SledAgent {
             vpc_routes: Mutex::new(HashMap::new()),
             mock_propolis: futures::lock::Mutex::new(None),
             config: config.clone(),
-            fake_zones: Mutex::new(OmicronZonesConfig {
-                generation: Generation::new(),
-                zones: vec![],
-            }),
             instance_ensure_state_error: Mutex::new(None),
             local_storage_error_count: AtomicU32::new(0),
             repo_depot,
@@ -893,23 +887,9 @@ impl SledAgent {
 
         let storage = self.storage.lock();
 
-        let disks_config =
-            storage.omicron_physical_disks_list().unwrap_or_default();
-        let datasets_config =
-            storage.datasets_config_list().unwrap_or_default();
-        let zones_config = self.fake_zones.lock().unwrap().clone();
+        let maybe_sled_config = storage.omicron_sled_config();
         let smf_services_enabled_not_online =
             self.health_monitor.to_inventory();
-
-        let sled_config = OmicronSledConfig {
-            generation: zones_config.generation,
-            disks: disks_config.disks.into_iter().collect(),
-            datasets: datasets_config.datasets.into_values().collect(),
-            zones: zones_config.zones.into_iter().collect(),
-            remove_mupdate_override: None,
-            host_phase_2: HostPhase2DesiredSlots::current_contents(),
-            measurements: Default::default(),
-        };
 
         let reference_measurements = vec![
             SingleMeasurementInventory {
@@ -971,14 +951,14 @@ impl SledAgent {
             // to lie here, but this information should be taken with a
             // particularly careful grain-of-salt -- it's supposed to
             // represent the "real" datasets the sled agent can observe.
-            datasets: storage
-                .datasets_config_list()
-                .map(|config| {
-                    config
+            datasets: maybe_sled_config.as_ref().map_or(
+                Vec::new(),
+                |sled_config| {
+                    sled_config
                         .datasets
-                        .into_iter()
-                        .map(|(id, config)| InventoryDataset {
-                            id: Some(id),
+                        .iter()
+                        .map(|config| InventoryDataset {
+                            id: Some(config.id),
                             name: config.name.full_name(),
                             available: ByteCount::from_kibibytes_u32(0),
                             used: ByteCount::from_kibibytes_u32(0),
@@ -986,17 +966,16 @@ impl SledAgent {
                             reservation: config.inner.reservation,
                             compression: config.inner.compression.to_string(),
                         })
-                        .collect::<Vec<_>>()
-                })
-                .unwrap_or_else(|_| vec![]),
-            ledgered_sled_config: Some(sled_config.clone()),
+                        .collect()
+                },
+            ),
+            ledgered_sled_config: maybe_sled_config.clone(),
             reconciler_status: ConfigReconcilerInventoryStatus::Idle {
                 completed_at: Utc::now() - Duration::from_secs(10),
                 ran_for: Duration::from_secs(3),
             },
-            last_reconciliation: Some(
-                ConfigReconcilerInventory::debug_assume_success(sled_config),
-            ),
+            last_reconciliation: maybe_sled_config
+                .map(ConfigReconcilerInventory::debug_assume_success),
             // TODO: simulate the file source resolver with greater fidelity
             file_source_resolver: OmicronFileSourceResolverInventory::new_fake(
             ),
@@ -1120,47 +1099,20 @@ impl SledAgent {
         self.storage.lock().omicron_physical_disks_list()
     }
 
-    pub fn omicron_physical_disks_ensure(
-        &self,
-        config: OmicronPhysicalDisksConfig,
-    ) -> Result<DisksManagementResult, HttpError> {
-        self.storage.lock().omicron_physical_disks_ensure(config)
-    }
-
     pub fn set_omicron_config(
         &self,
         config: OmicronSledConfig,
     ) -> Result<(), HttpError> {
-        // TODO Update the simulator to work on `OmicronSledConfig` instead of
-        // the three separate legacy configs
-        let disks_config = OmicronPhysicalDisksConfig {
-            generation: config.generation,
-            disks: config.disks.into_iter().collect(),
-        };
-        let datasets_config = DatasetsConfig {
-            generation: config.generation,
-            datasets: config.datasets.into_iter().map(|d| (d.id, d)).collect(),
-        };
-        let zones_config = OmicronZonesConfig {
-            generation: config.generation,
-            zones: config.zones.into_iter().collect(),
-        };
-
-        let mut storage = self.storage.lock();
-        let _ = storage.omicron_physical_disks_ensure(disks_config)?;
-        let _ = storage.datasets_ensure(datasets_config)?;
-        *self.fake_zones.lock().unwrap() = zones_config;
-        //*self.sled_config.lock().unwrap() = Some(config);
-
-        Ok(())
+        // It's a little weird that `self.storage` holds the full
+        // `OmicronSledConfig` (including zones); this is largely an artifact of
+        // history (when sim-sled-agent was originally written, we had separate
+        // zone / storage configs; after unifying them, it was simplest to keep
+        // the full config inside the sim storage system).
+        self.storage.lock().set_omicron_config(config)
     }
 
-    pub fn omicron_zones_list(&self) -> OmicronZonesConfig {
-        self.fake_zones.lock().unwrap().clone()
-    }
-
-    pub fn omicron_zones_ensure(&self, requested_zones: OmicronZonesConfig) {
-        *self.fake_zones.lock().unwrap() = requested_zones;
+    pub fn omicron_sled_config(&self) -> Option<OmicronSledConfig> {
+        self.storage.lock().omicron_sled_config()
     }
 
     pub fn drop_dataset(&self, zpool_id: ZpoolUuid, dataset_id: DatasetUuid) {
