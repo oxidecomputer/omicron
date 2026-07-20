@@ -24,6 +24,7 @@ nexus-reconfigurator-execution.workspace = true
 nexus-types.workspace = true
 omicron-common.workspace = true
 omicron-uuid-kinds.workspace = true
+omicron-workspace-hack.workspace = true
 oxide-tokio-rt.workspace = true
 # See omicron-rpaths for more about the "pq-sys" dependency.
 pq-sys = "*"
@@ -32,10 +33,9 @@ repo-depot-client.workspace = true
 serde_json.workspace = true
 slog.workspace = true
 supports-color.workspace = true
-tokio = { workspace = true, features = [ "full" ] }
+tokio = { workspace = true, features = ["full"] }
 update-engine.workspace = true
 uuid.workspace = true
-omicron-workspace-hack.workspace = true
 
 [[bin]]
 name = "reconfigurator-exec-unsafe"

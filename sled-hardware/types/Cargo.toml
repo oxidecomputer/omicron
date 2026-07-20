@@ -9,13 +9,13 @@ workspace = true
 
 [dependencies]
 daft.workspace = true
+omicron-workspace-hack.workspace = true
+proptest = { workspace = true, optional = true }
 schemars.workspace = true
 serde.workspace = true
 slog.workspace = true
-thiserror.workspace = true
-omicron-workspace-hack.workspace = true
 test-strategy = { workspace = true, optional = true }
-proptest = { workspace = true, optional = true }
+thiserror.workspace = true
 
 [dev-dependencies]
 proptest.workspace = true

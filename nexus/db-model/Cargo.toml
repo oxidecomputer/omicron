@@ -17,12 +17,19 @@ chrono.workspace = true
 clickhouse-admin-types.workspace = true
 cockroach-admin-types.workspace = true
 derive-where.workspace = true
-diesel = { workspace = true, features = ["postgres", "r2d2", "chrono", "serde_json", "network-address", "uuid"] }
+diesel = { workspace = true, features = [
+    "postgres",
+    "r2d2",
+    "chrono",
+    "serde_json",
+    "network-address",
+    "uuid"
+] }
 hex.workspace = true
 iddqd.workspace = true
+illumos-utils.workspace = true
 ipnetwork.workspace = true
 itertools.workspace = true
-illumos-utils.workspace = true
 macaddr.workspace = true
 newtype_derive.workspace = true
 omicron-cockroach-metrics.workspace = true
@@ -44,22 +51,22 @@ slog-error-chain.workspace = true
 steno.workspace = true
 strum.workspace = true
 thiserror.workspace = true
-trust-quorum-protocol.workspace = true
 tokio.workspace = true
+trust-quorum-protocol.workspace = true
 uuid.workspace = true
 
 db-macros.workspace = true
 ereport-types.workspace = true
-omicron-certificates.workspace = true
-omicron-common.workspace = true
 nexus-config.workspace = true
 nexus-db-schema.workspace = true
 nexus-defaults.workspace = true
 nexus-types.workspace = true
+omicron-certificates.workspace = true
+omicron-common.workspace = true
 omicron-passwords.workspace = true
+omicron-workspace-hack.workspace = true
 sled-agent-client.workspace = true
 sled-agent-types.workspace = true
-omicron-workspace-hack.workspace = true
 tufaceous-artifact.workspace = true
 
 [dev-dependencies]

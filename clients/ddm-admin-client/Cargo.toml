@@ -8,17 +8,17 @@ license = "MPL-2.0"
 workspace = true
 
 [dependencies]
+ddm-admin-client.workspace = true
 either.workspace = true
+omicron-common.workspace = true
+omicron-workspace-hack.workspace = true
 oxnet.workspace = true
 progenitor-client.workspace = true
 reqwest = { workspace = true, features = ["json", "stream", "rustls"] }
 serde.workspace = true
+sled-hardware-types.workspace = true
 slog.workspace = true
+slog-error-chain.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
-omicron-common.workspace = true
-sled-hardware-types.workspace = true
-omicron-workspace-hack.workspace = true
-ddm-admin-client.workspace = true
 uuid.workspace = true
-slog-error-chain.workspace = true

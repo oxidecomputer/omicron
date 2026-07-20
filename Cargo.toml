@@ -429,22 +429,26 @@ declare_interior_mutable_const = "warn"
 cast_lossless = "warn"
 
 [workspace.dependencies]
-anyhow = "1.0"
 anstyle = "1.0.11"
+anyhow = "1.0"
 api_identity = { path = "api_identity" }
 approx = "0.5.1"
-assert_matches = "1.5.0"
 assert_cmd = "2.0.17"
+assert_matches = "1.5.0"
 async-bb8-diesel = "0.2"
 async-recursion = "1.1.1"
 async-trait = "0.1.89"
-attest-mock = { git = "https://github.com/oxidecomputer/dice-util", rev = "10952e8d9599b735b85d480af3560a11700e5b64" }
 atomicwrites = "0.4.4"
+attest-mock = { git = "https://github.com/oxidecomputer/dice-util", rev = "10952e8d9599b735b85d480af3560a11700e5b64" }
 authz-macros = { path = "nexus/authz-macros" }
-backoff = { version = "0.4.0", features = [ "tokio" ] }
+backoff = { version = "0.4.0", features = ["tokio"] }
 backon = { version = "1.6", default-features = false }
 base64 = "0.22.1"
 bcs = "0.1.6"
+# NOTE: if you change the pinned revision of the `bhyve_api` and propolis
+# dependencies, you must also update the references in package-manifest.toml to
+# match the new revision.
+bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "979b72896bc39a876c98fb32fe706da37a4fc408" }
 bincode = "1.3.3"
 bootstore = { path = "bootstore" }
 bootstrap-agent-api = { path = "sled-agent/bootstrap-agent-api" }
@@ -453,18 +457,18 @@ bootstrap-agent-lockstep-api = { path = "sled-agent/bootstrap-agent-lockstep-api
 bootstrap-agent-lockstep-client = { path = "clients/bootstrap-agent-lockstep-client" }
 bootstrap-agent-lockstep-types = { path = "sled-agent/bootstrap-agent-lockstep-types" }
 buf-list = { version = "1.0.3", features = ["tokio1"] }
-byteorder = "1.5.0"
 byte-wrapper = { version = "0.1.0", features = ["serde", "schemars08"] }
+byteorder = "1.5.0"
 bytes = "1.10.1"
 camino = { version = "1.2.0", features = ["serde1"] }
 camino-tempfile = "1.4.1"
 camino-tempfile-ext = { version = "0.3.2", features = ["assert-color"] }
 cancel-safe-futures = "0.1.5"
 cargo_metadata = "0.23.1"
-chacha20poly1305 = "0.10.1"
 cfg-if = "1.0"
-chrono = { version = "0.4", features = [ "serde" ] }
-chrono-tz = { version = "0.10.4", features = [ "serde" ] }
+chacha20poly1305 = "0.10.1"
+chrono = { version = "0.4", features = ["serde"] }
+chrono-tz = { version = "0.10.4", features = ["serde"] }
 ciborium = "0.2.2"
 clap = { version = "4.6", features = ["cargo", "derive", "env", "wrap_help"] }
 clickana = { path = "dev-tools/clickana" }
@@ -472,9 +476,9 @@ clickhouse-admin-api = { path = "clickhouse-admin/api" }
 clickhouse-admin-keeper-client = { path = "clients/clickhouse-admin-keeper-client" }
 clickhouse-admin-server-client = { path = "clients/clickhouse-admin-server-client" }
 clickhouse-admin-single-client = { path = "clients/clickhouse-admin-single-client" }
+clickhouse-admin-test-utils = { path = "clickhouse-admin/test-utils" }
 clickhouse-admin-types = { path = "clickhouse-admin/types" }
 clickhouse-admin-types-versions = { path = "clickhouse-admin/types/versions" }
-clickhouse-admin-test-utils = { path = "clickhouse-admin/test-utils" }
 clickward = { git = "https://github.com/oxidecomputer/clickward", rev = "e3d9a1c35cf3cd04f9cb2e997b0ad88324d30737" }
 cockroach-admin-api = { path = "cockroach-admin/api" }
 cockroach-admin-client = { path = "clients/cockroach-admin-client" }
@@ -483,39 +487,53 @@ cockroach-admin-types-versions = { path = "cockroach-admin/types/versions" }
 colored = "2.1"
 const_format = "0.2.34"
 cookie = "0.18"
-criterion = { version = "0.7.0", features = [ "async_tokio" ] }
+criterion = { version = "0.7.0", features = ["async_tokio"] }
 crossbeam = "0.8"
 crossterm = { version = "0.29.0", features = ["event-stream"] }
 # NOTE: if you change the pinned revision of the `crucible` dependencies, you
 # must also update the references in package-manifest.toml to match the new
 # revision.
 crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "2bfe090eb5318ec8c467157018db2429d4df535b" }
+crucible-client-types = { git = "https://github.com/oxidecomputer/crucible", rev = "2bfe090eb5318ec8c467157018db2429d4df535b" }
+crucible-common = { git = "https://github.com/oxidecomputer/crucible", rev = "2bfe090eb5318ec8c467157018db2429d4df535b" }
 crucible-pantry-client = { git = "https://github.com/oxidecomputer/crucible", rev = "2bfe090eb5318ec8c467157018db2429d4df535b" }
 crucible-smf = { git = "https://github.com/oxidecomputer/crucible", rev = "2bfe090eb5318ec8c467157018db2429d4df535b" }
-crucible-common = { git = "https://github.com/oxidecomputer/crucible", rev = "2bfe090eb5318ec8c467157018db2429d4df535b" }
-crucible-client-types = { git = "https://github.com/oxidecomputer/crucible", rev = "2bfe090eb5318ec8c467157018db2429d4df535b" }
-# NOTE: See above!
+# NOTE: See above! Scope of "if you change the pinned revision of the `crucible`
+# dependencies" ends here.
 csv = "1.3.1"
 curve25519-dalek = "4"
-daft = { version = "0.1.7", features = ["derive", "newtype-uuid1", "oxnet01", "uuid1"] }
-display-error-chain = "0.2.2"
-omicron-ddm-admin-client = { path = "clients/ddm-admin-client" }
+daft = { version = "0.1.7", features = [
+    "derive",
+    "newtype-uuid1",
+    "oxnet01",
+    "uuid1"
+] }
 datatest-stable = "0.3.2"
 db-macros = { path = "nexus/db-macros" }
+ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "65cc70aa5507f779551a1d33c0089bb0a9b7ac72" }
 debug-ignore = "1.0.5"
 derive_more = "0.99.20"
 derive-where = "1.5.0"
 dev-tools-common = { path = "dev-tools/common" }
 dice-verifier = { git = "https://github.com/oxidecomputer/dice-util", branch = "main", default-features = false }
 # Having the i-implement-... feature here makes diesel go away from the workspace-hack
-diesel = { version = "2.3.7", features = ["i-implement-a-third-party-backend-and-opt-into-breaking-changes", "postgres", "r2d2", "chrono", "serde_json", "network-address", "uuid"] }
+diesel = { version = "2.3.7", features = [
+    "i-implement-a-third-party-backend-and-opt-into-breaking-changes",
+    "postgres",
+    "r2d2",
+    "chrono",
+    "serde_json",
+    "network-address",
+    "uuid"
+] }
 diesel-dtrace = "0.5.0"
 digest = "0.10.7"
+display-error-chain = "0.2.2"
 dns-server = { path = "dns-server" }
 dns-server-api = { path = "dns-server-api" }
 dns-service-client = { path = "clients/dns-service-client" }
 dpd-client = { git = "https://github.com/oxidecomputer/dendrite", rev = "cc0c307c617f2988aafdca4e3bd35ea178b64801" }
-dropshot = { version = "0.17.1", features = [ "usdt-probes" ] }
+dropshot = { version = "0.17.1", features = ["usdt-probes"] }
 dropshot-api-manager = "0.7.2"
 dropshot-api-manager-types = "0.7.2"
 dyn-clone = "1.0.20"
@@ -544,19 +562,18 @@ gateway-client = { path = "clients/gateway-client" }
 # compatibility, but will mean that faux-mgs might be missing new
 # functionality.)
 #
-gateway-ereport-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "6c0aca2545a73fd75536e149d29faa7108be5862", default-features = false, features = ["debug-impls"] }
-gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "6c0aca2545a73fd75536e149d29faa7108be5862", default-features = false, features = ["std"] }
+gateway-ereport-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "6c0aca2545a73fd75536e149d29faa7108be5862", default-features = false, features = [
+    "debug-impls"
+] }
+gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "6c0aca2545a73fd75536e149d29faa7108be5862", default-features = false, features = [
+    "std"
+] }
 gateway-sp-comms = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "6c0aca2545a73fd75536e149d29faa7108be5862" }
 gateway-test-utils = { path = "gateway-test-utils" }
 gateway-types = { path = "gateway-types" }
 gateway-types-versions = { path = "gateway-types/versions" }
 gethostname = "0.5.0"
 gfss = { path = "trust-quorum/gfss" }
-trust-quorum = { path = "trust-quorum" }
-trust-quorum-protocol = { path = "trust-quorum/protocol" }
-trust-quorum-test-utils = { path = "trust-quorum/test-utils" }
-trust-quorum-types = { path = "trust-quorum/types" }
-trust-quorum-types-versions = { path = "trust-quorum/types/versions" }
 git-stub-vcs = "0.1.0"
 glob = "0.3.2"
 guppy = "0.17.20"
@@ -580,12 +597,12 @@ httptest = "0.16.3"
 hubtools = { git = "https://github.com/oxidecomputer/hubtools.git", rev = "2b1ef9b38d75563ea800baa3b17327eec17b1b7a" }
 humantime = "2.2.0"
 hyper = "1.6.0"
-hyper-util = "0.1.16"
 hyper-rustls = "0.27.7"
 hyper-staticfile = "0.10.1"
+hyper-util = "0.1.16"
+iana-time-zone = "0.1.63"
 iddqd = { version = "0.4.2", features = ["daft", "serde", "schemars08"] }
 illumos-utils = { path = "illumos-utils" }
-iana-time-zone = "0.1.63"
 indent_write = "2.2.0"
 indexmap = "2.10.0"
 indicatif = { version = "0.18.0", features = ["rayon"] }
@@ -598,39 +615,33 @@ installinator-common-versions = { path = "installinator-common/versions" }
 internal-dns-resolver = { path = "internal-dns/resolver" }
 internal-dns-types = { path = "internal-dns/types" }
 internal-dns-types-versions = { path = "internal-dns/types/versions" }
+internet-checksum = "0.2"
 ipcc = { path = "ipcc" }
 ipnet = "2.9"
-itertools = "0.14.0"
-internet-checksum = "0.2"
 ipnetwork = { version = "0.21", features = ["schemars", "serde"] }
 ispf = { git = "https://github.com/oxidecomputer/ispf" }
+itertools = "0.14.0"
 jiff = "0.2.15"
 key-manager = { path = "key-manager" }
 key-manager-types = { path = "key-manager/types" }
 kstat-rs = "0.2.4"
 libc = "0.2.174"
-linkme = "0.3"
 libipcc = { git = "https://github.com/oxidecomputer/ipcc-rs", rev = "524eb8f125003dff50b9703900c6b323f00f9e1b" }
 libnvme = { git = "https://github.com/oxidecomputer/libnvme", rev = "dd5bb221d327a1bc9287961718c3c10d6bd37da0" }
+libsw = { version = "3.5.0", features = ["tokio"] }
 linear-map = "1.2.0"
+linkme = "0.3"
 live-tests-macros = { path = "live-tests/macros" }
-lldpd_client = { git = "https://github.com/oxidecomputer/lldp", rev = "54b266174d4de9628bca9c97b0db176e16f12154", package = "lldpd-client" }
 lldp_protocol = { git = "https://github.com/oxidecomputer/lldp", rev = "54b266174d4de9628bca9c97b0db176e16f12154", package = "protocol" }
-omicron-deployment-graph = { path = "dev-tools/omicron-deployment-graph" }
+lldpd_client = { git = "https://github.com/oxidecomputer/lldp", rev = "54b266174d4de9628bca9c97b0db176e16f12154", package = "lldpd-client" }
 macaddr = { version = "1.0.1", features = ["serde_std"] }
 maplit = "1.0.2"
-newtype_derive = "0.1.6"
-ntp-admin-api = { path = "ntp-admin/api" }
-ntp-admin-client = { path = "clients/ntp-admin-client" }
-ntp-admin-types = { path = "ntp-admin/types" }
-ntp-admin-types-versions = { path = "ntp-admin/types/versions" }
 mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "65cc70aa5507f779551a1d33c0089bb0a9b7ac72" }
-ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "65cc70aa5507f779551a1d33c0089bb0a9b7ac72" }
+mg-api-types = { git = "https://github.com/oxidecomputer/maghemite", rev = "65cc70aa5507f779551a1d33c0089bb0a9b7ac72" }
 multimap = "0.10.1"
+newtype_derive = "0.1.6"
 nexus-auth = { path = "nexus/auth" }
 nexus-background-task-interface = { path = "nexus/background-task-interface" }
-nexus-switch-config = { path = "nexus/switch-config" }
-nexus-switch-config-preparation = { path = "nexus/switch-config/preparation" }
 nexus-client = { path = "clients/nexus-client" }
 nexus-config = { path = "nexus-config" }
 nexus-db-errors = { path = "nexus/db-errors" }
@@ -642,8 +653,8 @@ nexus-db-schema = { path = "nexus/db-schema" }
 nexus-defaults = { path = "nexus/defaults" }
 nexus-external-api = { path = "nexus/external-api" }
 nexus-fm = { path = "nexus/fm" }
-nexus-inventory = { path = "nexus/inventory" }
 nexus-internal-api = { path = "nexus/internal-api" }
+nexus-inventory = { path = "nexus/inventory" }
 nexus-lockstep-api = { path = "nexus/lockstep-api" }
 nexus-lockstep-client = { path = "clients/nexus-lockstep-client" }
 nexus-macros-common = { path = "nexus/macros-common" }
@@ -657,25 +668,33 @@ nexus-reconfigurator-preparation = { path = "nexus/reconfigurator/preparation" }
 nexus-reconfigurator-rendezvous = { path = "nexus/reconfigurator/rendezvous" }
 nexus-reconfigurator-simulation = { path = "nexus/reconfigurator/simulation" }
 nexus-saga-recovery = { path = "nexus/saga-recovery" }
+nexus-switch-config = { path = "nexus/switch-config" }
+nexus-switch-config-preparation = { path = "nexus/switch-config/preparation" }
 nexus-test-interface = { path = "nexus/test-interface" }
-nexus-test-utils-macros = { path = "nexus/test-utils-macros" }
 nexus-test-utils = { path = "nexus/test-utils" }
+nexus-test-utils-macros = { path = "nexus/test-utils-macros" }
 nexus-types = { path = "nexus/types" }
 nexus-types-versions = { path = "nexus/types/versions" }
 nix = { version = "0.31", features = ["fs", "net"] }
 nom = "7.1.3"
 nonempty = "0.12.0"
+ntp-admin-api = { path = "ntp-admin/api" }
+ntp-admin-client = { path = "clients/ntp-admin-client" }
+ntp-admin-types = { path = "ntp-admin/types" }
+ntp-admin-types-versions = { path = "ntp-admin/types/versions" }
+num = { version = "0.4.3", default-features = false, features = ["libm"] }
 num-integer = "0.1.46"
-num = { version = "0.4.3", default-features = false, features = [ "libm" ] }
-omicron-clickhouse-admin = { path = "clickhouse-admin" }
 omicron-certificates = { path = "certificates" }
+omicron-clickhouse-admin = { path = "clickhouse-admin" }
 omicron-cockroach-admin = { path = "cockroach-admin" }
 omicron-cockroach-metrics = { path = "cockroach-metrics" }
 omicron-common = { path = "common" }
+omicron-ddm-admin-client = { path = "clients/ddm-admin-client" }
+omicron-deployment-graph = { path = "dev-tools/omicron-deployment-graph" }
 omicron-dev-lib = { path = "dev-tools/omicron-dev-lib" }
-omicron-ledger = { path = "ledger" }
 omicron-gateway = { path = "gateway" }
 omicron-git-version = { path = "git-version" }
+omicron-ledger = { path = "ledger" }
 omicron-nexus = { path = "nexus" }
 omicron-ntp-admin = { path = "ntp-admin" }
 omicron-omdb = { path = "dev-tools/omdb" }
@@ -688,11 +707,6 @@ omicron-sled-agent = { path = "sled-agent" }
 omicron-test-utils = { path = "test-utils" }
 omicron-workspace-hack = "0.1.0"
 omicron-zone-package = "0.12.3"
-oxide-client = { path = "clients/oxide-client" }
-oxide-tokio-rt = "0.1.4"
-oxide-vpc = { git = "https://github.com/oxidecomputer/opte", rev = "ab2941cdf2ab067429a4a68ab2389d2960620b57", features = [ "api", "std" ] }
-oxlog = { path = "dev-tools/oxlog" }
-oxnet = "0.1.5"
 once_cell = "1.21.3"
 openapi-lint = { git = "https://github.com/oxidecomputer/openapi-lint", branch = "main" }
 openapiv3 = "2.2.0"
@@ -702,11 +716,17 @@ openssl-sys = "0.9"
 opte-ioctl = { git = "https://github.com/oxidecomputer/opte", rev = "ab2941cdf2ab067429a4a68ab2389d2960620b57" }
 oso = "0.27"
 owo-colors = "4.2.2"
+oxide-client = { path = "clients/oxide-client" }
+oxide-tokio-rt = "0.1.4"
+oxide-vpc = { git = "https://github.com/oxidecomputer/opte", rev = "ab2941cdf2ab067429a4a68ab2389d2960620b57", features = [
+    "api",
+    "std"
+] }
 oximeter = { path = "oximeter/oximeter" }
 oximeter-api = { path = "oximeter/api" }
 oximeter-client = { path = "clients/oximeter-client" }
-oximeter-db = { path = "oximeter/db/", default-features = false }
 oximeter-collector = { path = "oximeter/collector" }
+oximeter-db = { path = "oximeter/db/", default-features = false }
 oximeter-instruments = { path = "oximeter/instruments" }
 oximeter-macro-impl = { path = "oximeter/oximeter-macro-impl" }
 oximeter-producer = { path = "oximeter/producer" }
@@ -716,21 +736,26 @@ oximeter-test-utils = { path = "oximeter/test-utils" }
 oximeter-timeseries-macro = { path = "oximeter/timeseries-macro" }
 oximeter-types = { path = "oximeter/types" }
 oximeter-types-versions = { path = "oximeter/types/versions" }
+oxlog = { path = "dev-tools/oxlog" }
+oxnet = "0.1.5"
 oxql-types = { path = "oximeter/oxql-types" }
 p256 = "0.13"
 parallel-task-set = { path = "parallel-task-set" }
 parse-display = "0.10.0"
-partial-io = { version = "0.5.4", features = ["proptest1", "tokio1"] }
 parse-size = "1.1.0"
+partial-io = { version = "0.5.4", features = ["proptest1", "tokio1"] }
 paste = "1.0.15"
-percent-encoding = "2.3.1"
 peg = "0.8.5"
 pem = "3.0"
+percent-encoding = "2.3.1"
+petgraph = "0.8.2"
 # petname's default features pull in clap for CLI parsing, which we don't need.
 # Note that if you depend on petname, you must also set default-features =
 # false: petname = { workspace = true, default-features = false }.
-petname = { version = "2.0.2", default-features = false, features = ["default-rng", "default-words"] }
-petgraph = "0.8.2"
+petname = { version = "2.0.2", default-features = false, features = [
+    "default-rng",
+    "default-words"
+] }
 port-file = { version = "0.1.0", features = ["tokio"] }
 postgres-protocol = "0.6.8"
 predicates = "3.1.3"
@@ -744,28 +769,30 @@ progenitor-extras = "0.2.0"
 # NOTE: if you change the pinned revision of the `bhyve_api` and propolis
 # dependencies, you must also update the references in package-manifest.toml to
 # match the new revision.
-bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "979b72896bc39a876c98fb32fe706da37a4fc408" }
-propolis-api-types-versions = { git = "https://github.com/oxidecomputer/propolis", rev = "979b72896bc39a876c98fb32fe706da37a4fc408" }
 propolis_api_types = { git = "https://github.com/oxidecomputer/propolis", rev = "979b72896bc39a876c98fb32fe706da37a4fc408" }
+propolis-api-types-versions = { git = "https://github.com/oxidecomputer/propolis", rev = "979b72896bc39a876c98fb32fe706da37a4fc408" }
 propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "979b72896bc39a876c98fb32fe706da37a4fc408" }
 propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "979b72896bc39a876c98fb32fe706da37a4fc408" }
-# NOTE: see above!
+# NOTE: See above! Scope of "if you change the pinned revision of the
+# `bhyve_api` and propolis dependencies" ends here.
 proptest = "1.7.0"
 qorb = "0.4.1"
 quote = "1.0"
-# Some dependencies still require rand 0.8.x.
-rand08 = { package = "rand", version = "0.8.6" }
 rand = "0.9.2"
 rand_core = "0.9.3"
 rand_distr = "0.5.1"
 rand_seeder = "0.4.0"
+# Some dependencies still require rand 0.8.x.
+rand08 = { package = "rand", version = "0.8.6" }
 range-requests = { path = "range-requests" }
 ratatui = "0.29.0"
 rats-corim = { git = "https://github.com/oxidecomputer/rats-corim.git", rev = "f0d5d5168d3d31487a56df32c676b0c6240bcc6b" }
 raw-cpuid = { git = "https://github.com/oxidecomputer/rust-cpuid.git", rev = "a4cf01df76f35430ff5d39dc2fe470bcb953503b" }
 rayon = "1.10"
-rcgen = { version = "0.12.1", default-features = false, features = ["aws_lc_rs", "pem"] }
-mg-api-types = { git = "https://github.com/oxidecomputer/maghemite", rev = "65cc70aa5507f779551a1d33c0089bb0a9b7ac72" }
+rcgen = { version = "0.12.1", default-features = false, features = [
+    "aws_lc_rs",
+    "pem"
+] }
 reconfigurator-cli = { path = "dev-tools/reconfigurator-cli" }
 reedline = "0.40.0"
 ref-cast = "1.0"
@@ -777,27 +804,30 @@ reqwest = { version = "0.13", default-features = false }
 rpassword = "7.5.0"
 rstest = "0.25.0"
 rustfmt-wrapper = "0.2"
+rustix = "1.1.2"
 rustls = "0.23.40"
 rustls-pemfile = "2.2.0"
 rustyline = "14.0.0"
-rustix = "1.1.2"
 samael = { version = "0.0.19", features = ["xmlsec"] }
 schemars = "0.8.22"
 scopeguard = "1.2.0"
 secrecy = "0.10.3"
 semver = { version = "1.0.26", features = ["std", "serde"] }
 seq-macro = "0.3.6"
-serde = { version = "1.0", default-features = false, features = [ "derive", "rc" ] }
+serde = { version = "1.0", default-features = false, features = ["derive", "rc"] }
 serde_cbor = "0.11.2"
 serde_json = "1.0.145"
 serde_tokenstream = "0.2"
 serde_urlencoded = "0.7.1"
-serde_with = { version = "3.14.0", default-features = false, features = ["alloc", "macros"] }
+serde_with = { version = "3.14.0", default-features = false, features = [
+    "alloc",
+    "macros"
+] }
 sha2 = "0.10.9"
 sha3 = "0.10.8"
 shell-words = "1.1.0"
 signal-hook = "0.3"
-signal-hook-tokio = { version = "0.3", features = [ "futures-v0_3" ] }
+signal-hook-tokio = { version = "0.3", features = ["futures-v0_3"] }
 sigpipe = "0.1.3"
 similar = { version = "2.7.0", features = ["bytes"] }
 similar-asserts = "1.7.0"
@@ -814,20 +844,26 @@ sled-agent-early-networking = { path = "sled-agent/early-networking" }
 sled-agent-health-monitor = { path = "sled-agent/health-monitor" }
 sled-agent-measurements = { path = "sled-agent/measurements" }
 sled-agent-rack-setup = { path = "sled-agent/rack-setup" }
-sled-agent-types = { path = "sled-agent/types" }
-sled-agent-types-versions = { path = "sled-agent/types/versions" }
 sled-agent-resolvable-files = { path = "sled-agent/resolvable-files" }
 sled-agent-resolvable-files-examples = { path = "sled-agent/resolvable-files-examples" }
+sled-agent-types = { path = "sled-agent/types" }
+sled-agent-types-versions = { path = "sled-agent/types/versions" }
 sled-diagnostics = { path = "sled-diagnostics" }
 sled-hardware = { path = "sled-hardware" }
 sled-hardware-types = { path = "sled-hardware/types" }
 sled-storage = { path = "sled-storage" }
-slog = { version = "2.7", features = [ "dynamic-keys", "max_level_trace", "release_max_level_debug" ] }
+slog = { version = "2.7", features = [
+    "dynamic-keys",
+    "max_level_trace",
+    "release_max_level_debug"
+] }
 slog-async = "2.8"
 slog-bunyan = "2.5"
 slog-dtrace = "0.3"
 slog-envlogger = "2.2"
-slog-error-chain = { git = "https://github.com/oxidecomputer/slog-error-chain", branch = "main", features = ["derive"] }
+slog-error-chain = { git = "https://github.com/oxidecomputer/slog-error-chain", branch = "main", features = [
+    "derive"
+] }
 slog-term = "2.9.1"
 smf = "0.2"
 socket2 = { version = "0.5", features = ["all"] }
@@ -835,33 +871,35 @@ sp-sim = { path = "sp-sim" }
 sprockets-tls = { git = "https://github.com/oxidecomputer/sprockets.git", rev = "68a4b3bf819722f9f57a3f0c99e1393ed01ba392" }
 sprockets-tls-test-utils = { git = "https://github.com/oxidecomputer/sprockets.git", rev = "68a4b3bf819722f9f57a3f0c99e1393ed01ba392" }
 sqlformat = "0.3.5"
-sqlparser = { version = "0.61.0", features = [ "visitor" ] }
+sqlparser = { version = "0.61.0", features = ["visitor"] }
 static_assertions = "1.1.0"
 # Please do not change the Steno version to a Git dependency.  It makes it
 # harder than expected to make breaking changes (even if you specify a specific
 # SHA).  Cut a new Steno release instead.  See omicron#2117.
 steno = "0.4.1"
-strum = { version = "0.27.2", features = [ "derive" ] }
+strum = { version = "0.27.2", features = ["derive"] }
 subprocess = "0.2.9"
 subtle = "2.6.1"
-supports-color = "3.0.2"
 support-bundle-collection = { path = "support-bundle-collection" }
 support-bundle-viewer = "0.1.2"
+supports-color = "3.0.2"
 swrite = "0.1.0"
-sync-ptr = "0.1.4"
-libsw = { version = "3.5.0", features = ["tokio"] }
 syn = { version = "2.0" }
+sync-ptr = "0.1.4"
 tabled = "0.15.0"
 tar = "0.4"
 term = "0.7"
 termios = "0.3"
 termtree = "0.5.1"
-textwrap = { version = "0.16.2", features = [ "terminal_size" ] }
 test-strategy = "0.4.3"
+textwrap = { version = "0.16.2", features = ["terminal_size"] }
 thiserror = "2.0"
 tofino = { git = "https://github.com/oxidecomputer/tofino" }
 tokio = "1.52.1"
-tokio-postgres = { version = "0.7", features = [ "with-chrono-0_4", "with-uuid-1" ] }
+tokio-postgres = { version = "0.7", features = [
+    "with-chrono-0_4",
+    "with-uuid-1"
+] }
 tokio-stream = "0.1.17"
 tokio-test = "0.4.5"
 tokio-tungstenite = "0.23.1"
@@ -869,15 +907,25 @@ tokio-util = { version = "0.7.15", features = ["io", "io-util", "time"] }
 toml = "0.8.23"
 toml_edit = "0.22.27"
 tough = { version = "0.22.0" }
-transceiver-controller = { git = "https://github.com/oxidecomputer/transceiver-control", features = [ "api-traits" ] }
+transceiver-controller = { git = "https://github.com/oxidecomputer/transceiver-control", features = [
+    "api-traits"
+] }
 transient-dns-server = { path = "dns-server/transient" }
+trust-quorum = { path = "trust-quorum" }
+trust-quorum-protocol = { path = "trust-quorum/protocol" }
+trust-quorum-test-utils = { path = "trust-quorum/test-utils" }
+trust-quorum-types = { path = "trust-quorum/types" }
+trust-quorum-types-versions = { path = "trust-quorum/types/versions" }
 trybuild = "1.0.106"
 tufaceous = { git = "https://github.com/oxidecomputer/tufaceous", branch = "v1" }
-tufaceous-artifact = { git = "https://github.com/oxidecomputer/tufaceous", branch = "v1", features = ["proptest", "schemars"] }
+tufaceous-artifact = { git = "https://github.com/oxidecomputer/tufaceous", branch = "v1", features = [
+    "proptest",
+    "schemars"
+] }
+tufaceous-artifact-v2 = { git = "https://github.com/oxidecomputer/tufaceous", branch = "main", package = "tufaceous-artifact" }
 tufaceous-brand-metadata = { git = "https://github.com/oxidecomputer/tufaceous", branch = "v1" }
 tufaceous-lib = { git = "https://github.com/oxidecomputer/tufaceous", branch = "v1" }
 tufaceous-v2 = { git = "https://github.com/oxidecomputer/tufaceous", branch = "main", package = "tufaceous" }
-tufaceous-artifact-v2 = { git = "https://github.com/oxidecomputer/tufaceous", branch = "main", package = "tufaceous-artifact" }
 tui-tree-widget = "0.23.1"
 typed-rng = { path = "typed-rng" }
 typify = "0.3.0"
@@ -902,7 +950,10 @@ xshell = "0.2.7"
 zerocopy = "0.8.26"
 zeroize = { version = "1.8.1", features = ["zeroize_derive", "std"] }
 zfs-test-harness = { path = "sled-storage/zfs-test-harness" }
-zip = { version = "4.2.0", default-features = false, features = ["deflate","bzip2"] }
+zip = { version = "4.2.0", default-features = false, features = [
+    "deflate",
+    "bzip2"
+] }
 zone = { version = "0.3.1", default-features = false, features = ["async"] }
 
 # newtype-uuid is set to default-features = false because we don't want to
@@ -912,7 +963,11 @@ zone = { version = "0.3.1", default-features = false, features = ["async"] }
 # omicron-uuid-kinds.workspace = true.
 newtype-uuid = { version = "1.3.2", default-features = false }
 newtype-uuid-macros = "0.1.0"
-omicron-uuid-kinds = { path = "uuid-kinds", features = ["serde", "schemars08", "uuid-v4"] }
+omicron-uuid-kinds = { path = "uuid-kinds", features = [
+    "serde",
+    "schemars08",
+    "uuid-v4"
+] }
 
 scim2-rs = { git = "https://github.com/oxidecomputer/scim2-rs", rev = "163606c052ee30b16dfab282fca721dd81e0868a" }
 scim2-test-client = { git = "https://github.com/oxidecomputer/scim2-rs", rev = "163606c052ee30b16dfab282fca721dd81e0868a" }
@@ -959,6 +1014,7 @@ opt-level = 3
 # with optimizations to significantly speed up tests.
 [profile.dev.package.argon2]
 opt-level = 3
+
 [profile.dev.package.rust-argon2]
 opt-level = 3
 
@@ -974,112 +1030,162 @@ opt-level = 3
 
 [profile.dev.package.trust-quorum]
 opt-level = 3
+
 [profile.dev.package.trust-quorum-test-utils]
 opt-level = 3
 
 # Crypto stuff always needs optimizations
 [profile.dev.package.sha3]
 opt-level = 3
+
 [profile.dev.package.sha2]
 opt-level = 3
+
 [profile.dev.package.hkdf]
 opt-level = 3
+
 [profile.dev.package.chacha20poly1305]
 opt-level = 3
+
 [profile.dev.package.chacha20]
 opt-level = 3
+
 [profile.dev.package.vsss-rs]
 opt-level = 3
+
 [profile.dev.package.curve25519-dalek]
 opt-level = 3
+
 [profile.dev.package.aead]
 opt-level = 3
+
 [profile.dev.package.aes]
 opt-level = 3
+
 [profile.dev.package.aes-gcm]
 opt-level = 3
+
 [profile.dev.package.aws-lc-sys]
 opt-level = 3
+
 [profile.dev.package.bcrypt-pbkdf]
 opt-level = 3
+
 [profile.dev.package.blake2]
 opt-level = 3
+
 [profile.dev.package.blake2b_simd]
 opt-level = 3
+
 [profile.dev.package.block-buffer]
 opt-level = 3
+
 [profile.dev.package.block-padding]
 opt-level = 3
+
 [profile.dev.package.blowfish]
 opt-level = 3
+
 [profile.dev.package.constant_time_eq]
 opt-level = 3
+
 [profile.dev.package.crypto-bigint]
 opt-level = 3
+
 [profile.dev.package.crypto-common]
 opt-level = 3
+
 [profile.dev.package.ctr]
 opt-level = 3
+
 [profile.dev.package.cbc]
 opt-level = 3
+
 [profile.dev.package.digest]
 opt-level = 3
+
 [profile.dev.package.ed25519]
 opt-level = 3
+
 [profile.dev.package.ed25519-dalek]
 opt-level = 3
+
 [profile.dev.package.elliptic-curve]
 opt-level = 3
+
 [profile.dev.package.generic-array]
 opt-level = 3
+
 [profile.dev.package.getrandom]
 opt-level = 3
+
 [profile.dev.package.hmac]
 opt-level = 3
+
 [profile.dev.package.lpc55_sign]
 opt-level = 3
+
 [profile.dev.package.md5]
 opt-level = 3
+
 [profile.dev.package.md-5]
 opt-level = 3
+
 [profile.dev.package.num-bigint]
 opt-level = 3
+
 [profile.dev.package.num-bigint-dig]
 opt-level = 3
+
 [profile.dev.package.rand]
 opt-level = 3
+
 [profile.dev.package.rand_chacha]
 opt-level = 3
+
 [profile.dev.package.rand_core]
 opt-level = 3
+
 [profile.dev.package.rand_xorshift]
 opt-level = 3
+
 [profile.dev.package.rsa]
 opt-level = 3
+
 [profile.dev.package.signature]
 opt-level = 3
+
 [profile.dev.package.subtle]
 opt-level = 3
+
 [profile.dev.package.tiny-keccak]
 opt-level = 3
+
 [profile.dev.package.uuid]
 opt-level = 3
+
 [profile.dev.package.cipher]
 opt-level = 3
+
 [profile.dev.package.cpufeatures]
 opt-level = 3
+
 [profile.dev.package.poly1305]
 opt-level = 3
+
 [profile.dev.package.inout]
 opt-level = 3
+
 [profile.dev.package.keccak]
 opt-level = 3
+
 [profile.dev.package.gfss]
 opt-level = 3
 
 # This speeds up `cargo xtask openapi generate` by ~2x.
 [profile.dev.package.drift]
 opt-level = 3
+
 [profile.dev.package.dropshot-api-manager]
 opt-level = 3
 
@@ -1129,7 +1235,7 @@ opt-level = 3
 # README.oxide.md in the "oxide" branch of our fork for details.
 #
 [patch.crates-io.pq-sys]
-git = 'https://github.com/oxidecomputer/pq-sys'
+git = "https://github.com/oxidecomputer/pq-sys"
 branch = "oxide/omicron"
 
 # Using the workspace-hack via this patch directive means that it only applies

@@ -18,8 +18,8 @@ clickhouse-admin-types.workspace = true
 cockroach-admin-types.workspace = true
 cookie.workspace = true
 daft.workspace = true
-derive-where.workspace = true
 derive_more.workspace = true
+derive-where.workspace = true
 dropshot.workspace = true
 either.workspace = true
 ereport-types.workspace = true
@@ -62,10 +62,10 @@ tufaceous-artifact.workspace = true
 
 newtype-uuid.workspace = true
 nexus-types-versions.workspace = true
-update-engine.workspace = true
 unicode-width.workspace = true
-uuid.workspace = true
+update-engine.workspace = true
 url = { workspace = true, features = ["serde"] }
+uuid.workspace = true
 
 api_identity.workspace = true
 gateway-client.workspace = true

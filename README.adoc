@@ -70,6 +70,13 @@ You can **format the code** using `cargo fmt`.  Make sure to run this before pus
 
 You can **run the https://github.com/rust-lang/rust-clippy[Clippy linter]** using `cargo xtask clippy`.  CI checks that code is clippy-clean.
 
+=== tombi for TOML formatting and linting
+
+This repository uses https://tombi-toml.github.io/tombi/docs/[tombi] for formatting and linting TOML files. Among other things, tombi ensures that `Cargo.toml` dependency lines are always in sorted order. Install it with `cargo xtask download tombi`.
+
+* Lint TOML files with `tombi lint`.
+* Autoformat TOML files with `tombi fmt`.
+
 == Working in Omicron
 
 Omicron is a pretty large repo containing a bunch of related components.  (Why?  See xref:docs/repo.adoc[].)  If you just build the whole thing with `cargo build` or `cargo nextest run`, it can take a while, even for incremental builds.  Since most people are only working on a few of these components at a time, it's helpful to be know about Cargo's tools for working with individual packages in a workspace.

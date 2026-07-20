@@ -49,7 +49,7 @@ sled-agent-types.workspace = true
 slog.workspace = true
 slog-error-chain.workspace = true
 socket2.workspace = true
-ssh-key = { version = "0.7.0-rc.10", features = ["ed25519"] } # matches russh
+ssh-key = { version = "0.7.0-rc.10", features = ["ed25519"] }  # matches russh
 thiserror.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 toml.workspace = true

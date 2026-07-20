@@ -5,12 +5,12 @@ edition.workspace = true
 
 [dependencies]
 dropshot.workspace = true
-thiserror.workspace = true
+omicron-uuid-kinds.workspace = true
+omicron-workspace-hack.workspace = true
 schemars.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-omicron-workspace-hack.workspace = true
-omicron-uuid-kinds.workspace = true
+thiserror.workspace = true
 
 [lints]
 workspace = true

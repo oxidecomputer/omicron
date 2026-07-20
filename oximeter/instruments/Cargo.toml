@@ -18,17 +18,17 @@ hyper = { workspace = true, optional = true }
 illumos-utils = { workspace = true, optional = true }
 kstat-rs = { workspace = true, optional = true }
 libc = { workspace = true, optional = true }
-omicron-common= { workspace = true, optional = true }
-omicron-uuid-kinds= { workspace = true, optional = true }
+omicron-common = { workspace = true, optional = true }
+omicron-uuid-kinds = { workspace = true, optional = true }
+omicron-workspace-hack.workspace = true
 oximeter = { workspace = true, optional = true }
 schemars = { workspace = true, optional = true }
 serde = { workspace = true, optional = true }
 slog = { workspace = true, optional = true }
 slog-error-chain = { workspace = true, optional = true }
-tokio = { workspace = true, optional = true }
 thiserror = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true }
 uuid = { workspace = true, optional = true }
-omicron-workspace-hack.workspace = true
 
 [features]
 default = ["http-instruments", "cpu", "datalink", "zfs", "zone"]
@@ -73,7 +73,7 @@ zfs = [
 zone = ["kstat"]
 
 [dev-dependencies]
+oximeter.workspace = true
 rand.workspace = true
 slog-async.workspace = true
 slog-term.workspace = true
-oximeter.workspace = true

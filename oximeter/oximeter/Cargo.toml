@@ -1,7 +1,6 @@
 [package]
 name = "oximeter"
 version = "0.1.0"
-authors = ["Benjamin Naecker <ben@oxide.computer>"]
 edition.workspace = true
 license = "MPL-2.0"
 
@@ -10,8 +9,8 @@ workspace = true
 
 [dependencies]
 anyhow.workspace = true
-clap.workspace = true
 chrono.workspace = true
+clap.workspace = true
 omicron-workspace-hack.workspace = true
 oximeter-macro-impl.workspace = true
 oximeter-schema.workspace = true

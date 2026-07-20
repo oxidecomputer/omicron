@@ -18,29 +18,30 @@ chrono.workspace = true
 clap.workspace = true
 colored.workspace = true
 daft.workspace = true
+gateway-types.workspace = true
 humantime.workspace = true
 iddqd.workspace = true
 indent_write.workspace = true
 internal-dns-types.workspace = true
 itertools.workspace = true
-gateway-types.workspace = true
 newtype-uuid.workspace = true
 nexus-inventory.workspace = true
 nexus-reconfigurator-blippy.workspace = true
 nexus-reconfigurator-planning.workspace = true
 nexus-reconfigurator-simulation.workspace = true
 nexus-types.workspace = true
-sled-agent-types.workspace = true
 omicron-common.workspace = true
 omicron-repl-utils.workspace = true
 omicron-uuid-kinds.workspace = true
+omicron-workspace-hack.workspace = true
 # See omicron-rpaths for more about the "pq-sys" dependency.
 pq-sys = "*"
 semver.workspace = true
 serde_json.workspace = true
+sled-agent-types.workspace = true
+slog.workspace = true
 slog-error-chain.workspace = true
 slog-term.workspace = true
-slog.workspace = true
 swrite.workspace = true
 tabled.workspace = true
 tokio.workspace = true
@@ -50,7 +51,6 @@ tufaceous-artifact.workspace = true
 tufaceous-lib.workspace = true
 update-common.workspace = true
 uuid.workspace = true
-omicron-workspace-hack.workspace = true
 
 [dev-dependencies]
 # To keep test iterations fast, please avoid a dependency on omicron-nexus or

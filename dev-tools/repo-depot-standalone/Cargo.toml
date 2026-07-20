@@ -24,7 +24,7 @@ serde_json.workspace = true
 signal-hook-tokio.workspace = true
 slog.workspace = true
 slog-error-chain.workspace = true
-tokio = { workspace = true, features = [ "full" ] }
+tokio = { workspace = true, features = ["full"] }
 tokio-util.workspace = true
 tufaceous-artifact.workspace = true
 update-common.workspace = true

@@ -2,7 +2,6 @@
 name = "api_identity"
 description = "macro used for Oxide control plane resources with an identity"
 version = "0.1.0"
-authors = ["David Pacheco <dap@oxidecomputer.com>"]
 edition.workspace = true
 repository = "https://github.com/oxidecomputer/omicron/"
 license = "MPL-2.0"
@@ -14,7 +13,7 @@ proc-macro = true
 workspace = true
 
 [dependencies]
+omicron-workspace-hack.workspace = true
 proc-macro2.workspace = true
 quote.workspace = true
 syn.workspace = true
-omicron-workspace-hack.workspace = true

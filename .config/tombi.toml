@@ -1,0 +1,49 @@
+# Tombi config to apply TOML lints and autoformatting:
+#
+# * Keep Cargo.toml dependency lines sorted.
+# * Standardize things like "" across our configs.
+
+# Cargo supports TOML 1.1, under which tombi wraps > 80-column dependency lines
+# into multiline inline tables. However, toml-cli in tools/ci_check_opte_ver.sh
+# doesn't currently (as of 2026-07) support that syntax, so we restrict
+# ourselves to TOML 1.0 here.
+toml-version = "v1.0.0"
+
+[files]
+# This controls which files a bare `tombi format`/`tombi lint` applies to.
+include = [
+    "**/Cargo.toml",
+    ".config/nextest.toml",
+    ".config/tombi.toml",
+]
+# workspace-hack/Cargo.toml is generated and owned by cargo-hakari, so we don't
+# try and fight that here.
+exclude = ["workspace-hack/Cargo.toml"]
+
+[format.rules]
+indent-width = 4
+
+[[schemas]]
+toml-version = "v1.0.0"
+# Use tombi's embedded cargo schema (tombi://), not the live schemastore URL, so
+# tombi can work without a network dependency.
+path = "tombi://www.schemastore.org/cargo.json"
+include = ["**/Cargo.toml"]
+
+# By default, tombi would sort most tables in Cargo.toml. We mostly care about
+# dependency tables, though.
+[schemas.format.rules]
+array-values-order.enabled = false
+table-keys-order.enabled = false
+
+[[schemas.overrides]]
+targets = [
+    "dependencies",
+    "dev-dependencies",
+    "build-dependencies",
+    "workspace.dependencies",
+    "target.*.dependencies",
+    "target.*.dev-dependencies",
+    "target.*.build-dependencies",
+]
+format.rules.table-keys-order = "version-sort"

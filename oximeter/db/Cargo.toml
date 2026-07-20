@@ -18,8 +18,8 @@ chrono.workspace = true
 chrono-tz.workspace = true
 clap.workspace = true
 clickhouse-admin-types.workspace = true
-const_format.workspace = true
 clickward.workspace = true
+const_format.workspace = true
 debug-ignore.workspace = true
 dropshot.workspace = true
 futures.workspace = true
@@ -55,7 +55,7 @@ uuid.workspace = true
 
 [dependencies.bytes]
 workspace = true
-features = [ "serde" ]
+features = ["serde"]
 
 [dependencies.crossterm]
 workspace = true
@@ -75,7 +75,7 @@ optional = true
 
 [dependencies.reqwest]
 workspace = true
-features = [ "json" ]
+features = ["json"]
 
 [dependencies.rustyline]
 workspace = true
@@ -83,7 +83,7 @@ optional = true
 
 [dependencies.schemars]
 workspace = true
-features = [ "uuid1", "bytes", "chrono" ]
+features = ["uuid1", "bytes", "chrono"]
 
 [dependencies.sqlformat]
 workspace = true
@@ -99,7 +99,7 @@ optional = true
 
 [dependencies.tokio]
 workspace = true
-features = [ "rt-multi-thread", "macros" ]
+features = ["rt-multi-thread", "macros"]
 
 [build-dependencies]
 anyhow.workspace = true
@@ -109,7 +109,7 @@ quote.workspace = true
 [dev-dependencies]
 assert_matches.workspace = true
 camino-tempfile.workspace = true
-criterion = { workspace = true, features = [ "async_tokio" ] }
+criterion = { workspace = true, features = ["async_tokio"] }
 expectorate.workspace = true
 itertools.workspace = true
 omicron-test-utils.workspace = true
@@ -121,7 +121,7 @@ sqlparser.workspace = true
 strum.workspace = true
 
 [features]
-default = [ "native-sql-shell", "oxql", "sql" ]
+default = ["native-sql-shell", "oxql", "sql"]
 sql = [
     "dep:reedline",
     "dep:rustyline",

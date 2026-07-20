@@ -21,6 +21,7 @@ hex.workspace = true
 hkdf.workspace = true
 iddqd.workspace = true
 omicron-uuid-kinds.workspace = true
+omicron-workspace-hack.workspace = true
 rand = { workspace = true, features = ["os_rng"] }
 secrecy.workspace = true
 serde.workspace = true
@@ -36,7 +37,6 @@ thiserror.workspace = true
 trust-quorum-types.workspace = true
 uuid.workspace = true
 zeroize.workspace = true
-omicron-workspace-hack.workspace = true
 
 [dev-dependencies]
 assert_matches.workspace = true
