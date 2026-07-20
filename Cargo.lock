@@ -17570,14 +17570,17 @@ dependencies = [
 name = "wicketd-commission-types-versions"
 version = "0.1.0"
 dependencies = [
+ "gateway-types-versions",
  "omicron-common",
  "omicron-workspace-hack",
  "oxnet",
+ "proptest",
  "schemars 0.8.22",
  "serde",
  "serde_json",
  "sled-agent-types-versions",
  "slog-error-chain",
+ "test-strategy",
  "toml 0.8.23",
 ]
 

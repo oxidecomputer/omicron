@@ -45,6 +45,7 @@ use wicketd_client::types::{
     ClearUpdateStateParams, GetArtifactsAndEventReportsResponse,
     StartUpdateParams,
 };
+use wicketd_commission_types::update::UpdateTargets;
 
 use super::command::CommandOutput;
 
@@ -153,10 +154,11 @@ impl StartRackUpdateArgs {
 
         let num_update_ids = update_ids.len();
 
-        let params = StartUpdateParams {
-            targets: update_ids.iter().copied().map(Into::into).collect(),
-            options,
-        };
+        let targets = UpdateTargets::new(
+            update_ids.iter().copied().map(Into::into).collect(),
+        )
+        .context("error starting update")?;
+        let params = StartUpdateParams { targets, options };
 
         slog::debug!(log, "Sending post_start_update"; "num_update_ids" => num_update_ids);
         match client.post_start_update(&params).await {
@@ -724,10 +726,11 @@ async fn do_clear_update_state(
 ) -> Result<ClearUpdateStateResponse> {
     let options =
         CreateClearUpdateStateOptions {}.to_clear_update_state_options()?;
-    let params = ClearUpdateStateParams {
-        targets: update_ids.iter().copied().map(Into::into).collect(),
-        options,
-    };
+    let targets = UpdateTargets::new(
+        update_ids.iter().copied().map(Into::into).collect(),
+    )
+    .context("error clearing update state")?;
+    let params = ClearUpdateStateParams { targets, options };
 
     let result = client
         .post_clear_update_state(&params)
