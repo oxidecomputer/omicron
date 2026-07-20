@@ -12,8 +12,8 @@
 //! appear in the generated document. See RFD 710 and RFD 619.
 
 use dropshot::{
-    HttpError, HttpResponseOk, HttpResponseUpdatedNoContent, Query,
-    RequestContext, StreamingBody, TypedBody,
+    HttpError, HttpResponseOk, HttpResponseUpdatedNoContent, RequestContext,
+    StreamingBody, TypedBody,
 };
 use dropshot_api_manager_types::api_versions;
 use iddqd::IdOrdMap;
@@ -37,7 +37,7 @@ pub trait WicketdCommissionApi {
     }]
     async fn get_sp_inventory(
         rqctx: RequestContext<Self::Context>,
-        query: Query<latest::inventory::SpInventoryParams>,
+        params: TypedBody<latest::inventory::SpInventoryParams>,
     ) -> Result<HttpResponseOk<IdOrdMap<latest::inventory::SpInfo>>, HttpError>;
 
     /// Report the physical location (switch and sled) wicketd is running at
@@ -95,7 +95,7 @@ pub trait WicketdCommissionApi {
     async fn get_update_progress(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<
-        HttpResponseOk<IdOrdMap<latest::update::SpUpdateProgressEntry>>,
+        HttpResponseOk<IdOrdMap<latest::update::SpUpdateProgress>>,
         HttpError,
     >;
 

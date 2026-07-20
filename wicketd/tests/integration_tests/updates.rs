@@ -26,6 +26,7 @@ use omicron_common::{
     },
 };
 use omicron_uuid_kinds::{InternalZpoolUuid, MupdateUuid};
+use oxide_update_engine_types::spec::SerializableError;
 use sled_agent_config_reconciler::{
     InternalDiskDetails, InternalDisksReceiver, InternalDisksWithBootDisk,
 };
@@ -35,7 +36,6 @@ use sled_storage::config::MountConfig;
 use tokio::sync::oneshot;
 use tufaceous_artifact::{ArtifactHashId, ArtifactKind, KnownArtifactKind};
 use update_common::artifacts::UpdatePlan;
-use update_engine::NestedError;
 use wicket::OutputKind;
 use wicket_common::{
     inventory::{SpIdentifier, SpType},
@@ -50,7 +50,7 @@ use wicketd_client::types::{
     GetInventoryParams, GetInventoryResponse, StartUpdateParams,
 };
 use wicketd_commission_types_versions::latest::update::{
-    ClearUpdateStateParams, SpUpdateProgress,
+    self, ClearUpdateStateParams, StepOutcome, UpdateStepStatus,
 };
 
 /// The list of zone file names defined in fake-non-semver.toml.
@@ -294,20 +294,25 @@ async fn test_updates() {
         assert!(filtered.components.is_empty());
     }
 
-    // TODO-RAINCLAUDE: the commission API surfaces the real Host-update failure
-    // TODO-RAINCLAUDE: as a Failed progress entry carrying a non-empty operator
-    // TODO-RAINCLAUDE: message.
+    // The commission API will report this as a Failed progress entry carrying a
+    // non-empty operator message.
     let entry = wait_for_sled0_progress(
         &wicketd_testctx,
         "sled 0 reached Failed",
-        |p| matches!(p, SpUpdateProgress::Failed { .. }),
+        |p| matches!(p.progress.state, update::UpdateState::Failed { .. }),
     )
     .await;
-    match entry.progress {
-        SpUpdateProgress::Failed { message } => {
-            assert!(
-                !message.is_empty(),
-                "the failed update carries an operator-facing message"
+    match entry.progress.state {
+        update::UpdateState::Failed { message } => {
+            // Assert the failure message:
+            //
+            // * The step that fails is "Get host type".
+            // * The step fails because the simulated gimlet reports model
+            //   "i86pc" (`FAKE_GIMLET_MODEL`), which is not a known Oxide host
+            //   type.
+            assert_eq!(
+                message, "Get host type: Unknown host type i86pc",
+                "the failed update carries the expected operator-facing message",
             );
         }
         other => panic!("expected Failed, got {other:?}"),
@@ -356,7 +361,7 @@ async fn test_updates() {
             .expect("wicket rack-update clear failed");
 
         // stdout should contain a JSON object.
-        let response: Result<ClearUpdateStateResponse, NestedError> =
+        let response: Result<ClearUpdateStateResponse, SerializableError> =
             serde_json::from_slice(&stdout).expect("stdout is valid JSON");
         assert_eq!(
             response.expect("expected Ok response"),
@@ -807,9 +812,8 @@ async fn test_update_races() {
         .await
         .expect("bytes read and archived");
 
-    // TODO-RAINCLAUDE: the commission API observes the just-uploaded repository
-    // TODO-RAINCLAUDE: (system version from the fake manifest) and reports no
-    // TODO-RAINCLAUDE: update progress yet.
+    // Also check that the repository is available via the commissioning API,
+    // and that there's no progress there yet.
     let repo = wicketd_testctx
         .commission_client
         .get_repository()
@@ -867,10 +871,9 @@ async fn test_update_races() {
         );
     }
 
-    // TODO-RAINCLAUDE: clearing a target whose update is still running (blocked
-    // TODO-RAINCLAUDE: on the oneshot) is rejected with a 400 naming the
-    // TODO-RAINCLAUDE: in-progress target. Deterministic: the update cannot
-    // TODO-RAINCLAUDE: finish until the oneshot fires below.
+    // Clearing a target whose update is still running (here, it is
+    // deterministically blocked on the oneshot channel passed into
+    // start_fake_update) is rejected with a 400 naming the in-progress target.
     let running = ClearUpdateStateParams {
         targets: std::iter::once(SpIdentifier { typ: SpType::Sled, slot: 0 })
             .collect(),
@@ -886,28 +889,36 @@ async fn test_update_races() {
         "targets are currently being updated",
     );
 
-    // TODO-RAINCLAUDE: the commission API reports sled 0 as InProgress with sane
-    // TODO-RAINCLAUDE: step counts while the fake update runs.
+    // Check that the commission API reports sled 0 as InProgress with
+    // reasonable step counts while the fake update is running.
     let entry = wait_for_sled0_progress(
         &wicketd_testctx,
         "sled 0 reached InProgress",
-        |p| matches!(p, SpUpdateProgress::InProgress { .. }),
+        |p| matches!(p.progress.state, update::UpdateState::Running),
     )
     .await;
-    match entry.progress {
-        SpUpdateProgress::InProgress { step, total_steps, description } => {
-            assert_eq!(step, 1, "one-based index of the single fake step");
-            assert_eq!(
-                total_steps, 1,
-                "the fake update has one top-level step"
-            );
-            assert!(
-                description.contains("Fake step"),
-                "description is the fake step: {description}"
-            );
-        }
-        other => panic!("expected InProgress, got {other:?}"),
-    }
+    assert!(
+        matches!(entry.progress.state, update::UpdateState::Running),
+        "sled 0 rolls up to Running: {:?}",
+        entry.progress.state,
+    );
+    assert_eq!(
+        entry.progress.steps.len(),
+        1,
+        "the fake update has one top-level step: {:?}",
+        entry.progress.steps,
+    );
+    let running: Vec<_> = entry.progress.innermost_running_steps().collect();
+    assert_eq!(
+        running.len(),
+        1,
+        "exactly one running step in the tree: {running:?}",
+    );
+    assert!(
+        running[0].description.contains("Fake step"),
+        "running step is the fake step: {}",
+        running[0].description,
+    );
 
     // Unblock the update, letting it run to completion.
     let (final_sender, final_receiver) = oneshot::channel();
@@ -926,22 +937,33 @@ async fn test_update_races() {
         "last event is execution completed: {last_event:#?}"
     );
 
-    // TODO-RAINCLAUDE: the commission API reports the fake update completed
-    // TODO-RAINCLAUDE: cleanly. The single fake step succeeds outright, so there
-    // TODO-RAINCLAUDE: are no skip/warning messages.
+    // Check that the commission API reports the fake update has having
+    // completed. The single fake step succeeds, so there are no skip/warning
+    // messages.
     let entry = wait_for_sled0_progress(
         &wicketd_testctx,
         "sled 0 reached Completed",
-        |p| matches!(p, SpUpdateProgress::Completed { .. }),
+        |p| matches!(p.progress.state, update::UpdateState::Completed),
     )
     .await;
     assert_eq!(
-        entry.progress,
-        SpUpdateProgress::Completed { warnings: Vec::new() },
-        "fake update completes cleanly with no warnings"
+        entry.progress.state,
+        update::UpdateState::Completed,
+        "fake update rolls up to Completed"
+    );
+    assert!(
+        entry.progress.iter_steps().all(|step| !matches!(
+            step.status,
+            UpdateStepStatus::Completed {
+                outcome: StepOutcome::Warning { .. }
+                    | StepOutcome::Skipped { .. }
+            }
+        )),
+        "the single fake step succeeds cleanly with no warnings or skips: {:?}",
+        entry.progress.steps,
     );
 
-    // TODO-RAINCLAUDE: clearing with no targets is a 400.
+    // Clearing an update with no targets is a 400.
     let empty = ClearUpdateStateParams { targets: BTreeSet::new() };
     let err = wicketd_testctx
         .commission_client
@@ -950,10 +972,7 @@ async fn test_update_races() {
         .expect_err("clearing with no targets is rejected");
     assert_client_error(&err, StatusCode::BAD_REQUEST);
 
-    // TODO-RAINCLAUDE: clearing sled 0 after the update completed drops its
-    // TODO-RAINCLAUDE: progress entry (seen through the commission API) and wipes
-    // TODO-RAINCLAUDE: its event buffer (seen through the wicketd API), even
-    // TODO-RAINCLAUDE: though the uploaded repository data is still present.
+    // Try clearing the state for sled 0.
     let params = ClearUpdateStateParams {
         targets: std::iter::once(SpIdentifier { typ: SpType::Sled, slot: 0 })
             .collect(),
@@ -982,10 +1001,9 @@ async fn test_update_races() {
         "event buffer cleared for sled 0: {event_buffer:#?}"
     );
 
-    // TODO-RAINCLAUDE: run a second fake update to completion so the event
-    // TODO-RAINCLAUDE: buffer is populated again -- otherwise the re-upload
-    // TODO-RAINCLAUDE: check below would be vacuous now that the clear emptied
-    // TODO-RAINCLAUDE: the buffer.
+    // Run a second fake update to completion so the event buffer is populated
+    // again -- otherwise the re-upload check below would be vacuous now that
+    // the clear emptied the buffer.
     let sps: BTreeSet<_> = std::iter::once(sp).collect();
     let (sender, receiver) = oneshot::channel();
     wicketd_testctx

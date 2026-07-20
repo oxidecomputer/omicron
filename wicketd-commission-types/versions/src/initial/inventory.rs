@@ -119,15 +119,14 @@ pub struct LocationInfo {
     pub sled_serial: Option<String>,
 }
 
-/// Query parameters for the SP inventory endpoint.
+/// Parameters for the SP inventory endpoint.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
 pub struct SpInventoryParams {
-    /// If true, re-poll the service processors currently known to the inventory
-    /// cache from MGS and return the refreshed state, instead of returning
-    /// cached data. If the inventory cache is not yet available, the request
-    /// fails with a 503 rather than returning possibly-unrefreshed data.
+    /// Refresh the state of these service processors from MGS before returning,
+    /// rather than returning their cached state. Service processors not listed
+    /// here are returned from the cache.
     #[serde(default)]
-    pub force_refresh: bool,
+    pub force_refresh: Vec<SpIdentifier>,
 }
 
 /// A sled as seen on the bootstrap network.
@@ -150,19 +149,19 @@ pub struct SpInventoryParams {
     JsonSchema,
 )]
 pub struct BootstrapSled {
-    /// The slot (cubby) the sled occupies.
-    pub slot: u16,
-    /// The sled's baseboard identifier (serial number).
-    pub identifier: String,
+    /// The service processor for this sled (its type and slot).
+    pub id: SpIdentifier,
+    /// The sled's baseboard serial number.
+    pub serial_number: String,
     /// The sled's bootstrap-network address, once it has been discovered.
     pub ip: Option<Ipv6Addr>,
 }
 
 impl IdOrdItem for BootstrapSled {
-    type Key<'a> = &'a str;
+    type Key<'a> = SpIdentifier;
 
     fn key(&self) -> Self::Key<'_> {
-        &self.identifier
+        self.id
     }
 
     id_upcast!();

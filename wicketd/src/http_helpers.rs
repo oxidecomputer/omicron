@@ -5,7 +5,8 @@
 //! Helper and utility code for the wicketd HTTP APIs.
 //!
 //! These helpers are shared by both the unstable wicketd API (defined in
-//! `http_entrypoints.rs`) and the stable commission API (RFD 710).
+//! `http_entrypoints.rs`) and the stable commission API (defined in the
+//! `commission` module).
 
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;

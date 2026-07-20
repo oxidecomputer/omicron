@@ -81,16 +81,16 @@
       "get": {
         "summary": "Get a projected inventory of all service processors visible to wicketd",
         "operationId": "get_sp_inventory",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "force_refresh",
-            "description": "If true, re-poll the service processors currently known to the inventory cache from MGS and return the refreshed state, instead of returning cached data. If the inventory cache is not yet available, the request fails with a 503 rather than returning possibly-unrefreshed data.",
-            "schema": {
-              "type": "boolean"
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SpInventoryParams"
+              }
             }
-          }
-        ],
+          },
+          "required": true
+        },
         "responses": {
           "200": {
             "description": "successful operation",
@@ -428,12 +428,12 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "title": "IdOrdMap_of_SpUpdateProgressEntry",
+                  "title": "IdOrdMap_of_SpUpdateProgress",
                   "x-rust-type": {
                     "crate": "iddqd",
                     "parameters": [
                       {
-                        "$ref": "#/components/schemas/SpUpdateProgressEntry"
+                        "$ref": "#/components/schemas/SpUpdateProgress"
                       }
                     ],
                     "path": "iddqd::IdOrdMap",
@@ -441,7 +441,7 @@
                   },
                   "type": "array",
                   "items": {
-                    "$ref": "#/components/schemas/SpUpdateProgressEntry"
+                    "$ref": "#/components/schemas/SpUpdateProgress"
                   },
                   "uniqueItems": true
                 }
@@ -557,9 +557,13 @@
         "description": "A sled as seen on the bootstrap network.\n\nA sled is reported here once its service processor's state has been read from MGS; a populated cubby whose state has not yet been polled is absent until it is. A sled's `ip` becomes `Some` once it has been discovered on the bootstrap network; sleds still missing an address report `None`, which lets callers see both ready and not-yet-ready sleds.",
         "type": "object",
         "properties": {
-          "identifier": {
-            "description": "The sled's baseboard identifier (serial number).",
-            "type": "string"
+          "id": {
+            "description": "The service processor for this sled (its type and slot).",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SpIdentifier"
+              }
+            ]
           },
           "ip": {
             "nullable": true,
@@ -567,16 +571,14 @@
             "type": "string",
             "format": "ipv6"
           },
-          "slot": {
-            "description": "The slot (cubby) the sled occupies.",
-            "type": "integer",
-            "format": "uint16",
-            "minimum": 0
+          "serial_number": {
+            "description": "The sled's baseboard serial number.",
+            "type": "string"
           }
         },
         "required": [
-          "identifier",
-          "slot"
+          "id",
+          "serial_number"
         ]
       },
       "Caboose": {
@@ -1556,7 +1558,7 @@
         "maximum": 9000
       },
       "RssStepInfo": {
-        "description": "Growth-tolerant information about the current RSS step.\n\nThe internal RSS-step enum grows over time; this projection reports the step as a 1-based position, total, and description so that new steps never break deserialization in pinned clients.",
+        "description": "Information about the current RSS step.",
         "type": "object",
         "properties": {
           "description": {
@@ -1662,6 +1664,20 @@
           "id"
         ]
       },
+      "SpInventoryParams": {
+        "description": "Parameters for the SP inventory endpoint.",
+        "type": "object",
+        "properties": {
+          "force_refresh": {
+            "description": "Refresh the state of these service processors from MGS before returning, rather than returning their cached state. Service processors not listed here are returned from the cache.",
+            "default": [],
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SpIdentifier"
+            }
+          }
+        }
+      },
       "SpType": {
         "type": "string",
         "enum": [
@@ -1671,151 +1687,19 @@
         ]
       },
       "SpUpdateProgress": {
-        "description": "The state of an update for a single service processor.\n\nA service processor appears in the update-progress response only once an update has been started for it; a service processor with no started update is absent from the response entirely.",
-        "oneOf": [
-          {
-            "description": "An update has been started, but no progress has been reported yet.",
-            "type": "object",
-            "properties": {
-              "status": {
-                "type": "string",
-                "enum": [
-                  "waiting"
-                ]
-              }
-            },
-            "required": [
-              "status"
-            ]
-          },
-          {
-            "description": "The update is in progress.",
-            "type": "object",
-            "properties": {
-              "description": {
-                "description": "A human-readable description of the innermost running step.",
-                "type": "string"
-              },
-              "status": {
-                "type": "string",
-                "enum": [
-                  "in_progress"
-                ]
-              },
-              "step": {
-                "description": "The 1-based index of the currently-running top-level step.",
-                "type": "integer",
-                "format": "uint32",
-                "minimum": 0
-              },
-              "total_steps": {
-                "description": "The total number of top-level steps in the update.",
-                "type": "integer",
-                "format": "uint32",
-                "minimum": 0
-              }
-            },
-            "required": [
-              "description",
-              "status",
-              "step",
-              "total_steps"
-            ]
-          },
-          {
-            "description": "The update ran to completion and at least one step did real work.",
-            "type": "object",
-            "properties": {
-              "status": {
-                "type": "string",
-                "enum": [
-                  "completed"
-                ]
-              },
-              "warnings": {
-                "description": "Messages from any steps that were skipped or completed with a warning while the update as a whole succeeded.\n\nA common example is skipping the RoT bootloader update because the service processor must be upgraded first. An empty list means the update completed with no skips or warnings.",
-                "type": "array",
-                "items": {
-                  "type": "string"
-                }
-              }
-            },
-            "required": [
-              "status",
-              "warnings"
-            ]
-          },
-          {
-            "description": "Every step of the update was skipped because there was nothing to do.",
-            "type": "object",
-            "properties": {
-              "status": {
-                "type": "string",
-                "enum": [
-                  "skipped"
-                ]
-              }
-            },
-            "required": [
-              "status"
-            ]
-          },
-          {
-            "description": "The update failed.",
-            "type": "object",
-            "properties": {
-              "message": {
-                "description": "A human-readable description of the failure, combining the failed step and its error message.",
-                "type": "string"
-              },
-              "status": {
-                "type": "string",
-                "enum": [
-                  "failed"
-                ]
-              }
-            },
-            "required": [
-              "message",
-              "status"
-            ]
-          },
-          {
-            "description": "The update was aborted.",
-            "type": "object",
-            "properties": {
-              "message": {
-                "description": "A human-readable description of the abort, combining the aborted step and its message.",
-                "type": "string"
-              },
-              "status": {
-                "type": "string",
-                "enum": [
-                  "aborted"
-                ]
-              }
-            },
-            "required": [
-              "message",
-              "status"
-            ]
-          }
-        ]
-      },
-      "SpUpdateProgressEntry": {
-        "description": "A single service processor's update progress.",
+        "description": "Update progress for a single service processor.\n\nAn SP's update progress is only provided once an update has been started for it.",
         "type": "object",
         "properties": {
           "progress": {
             "description": "The update progress for that service processor.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/SpUpdateProgress"
+                "$ref": "#/components/schemas/UpdateProgress"
               }
             ]
           },
           "sp": {
-            "description": "The service processor this entry describes.",
+            "description": "The service processor this progress describes.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/SpIdentifier"
@@ -1832,8 +1716,18 @@
         "description": "Options controlling how an update is performed.",
         "type": "object",
         "properties": {
-          "force": {
-            "description": "If true, update every targeted component even if it already appears to be at the desired version, skipping the usual version checks.",
+          "skip_rot_bootloader_version_check": {
+            "description": "If true, skip the check on the current RoT bootloader version and always update it regardless of whether the update appears to be needed.",
+            "default": false,
+            "type": "boolean"
+          },
+          "skip_rot_version_check": {
+            "description": "If true, skip the check on the current RoT version and always update it regardless of whether the update appears to be needed.",
+            "default": false,
+            "type": "boolean"
+          },
+          "skip_sp_version_check": {
+            "description": "If true, skip the check on the current SP version and always update it regardless of whether the update appears to be needed.",
             "default": false,
             "type": "boolean"
           }
@@ -1866,6 +1760,98 @@
           "targets"
         ],
         "additionalProperties": false
+      },
+      "StepOutcome": {
+        "description": "The outcome of a step that ran to completion.",
+        "oneOf": [
+          {
+            "description": "The step succeeded, optionally with a message.",
+            "type": "object",
+            "properties": {
+              "message": {
+                "nullable": true,
+                "description": "An optional message describing the success.",
+                "type": "string"
+              },
+              "outcome": {
+                "type": "string",
+                "enum": [
+                  "success"
+                ]
+              }
+            },
+            "required": [
+              "outcome"
+            ]
+          },
+          {
+            "description": "The step succeeded but produced a warning.",
+            "type": "object",
+            "properties": {
+              "message": {
+                "description": "The warning message.",
+                "type": "string"
+              },
+              "outcome": {
+                "type": "string",
+                "enum": [
+                  "warning"
+                ]
+              }
+            },
+            "required": [
+              "message",
+              "outcome"
+            ]
+          },
+          {
+            "description": "The step was skipped.",
+            "type": "object",
+            "properties": {
+              "message": {
+                "description": "The message describing why the step was skipped.",
+                "type": "string"
+              },
+              "outcome": {
+                "type": "string",
+                "enum": [
+                  "skipped"
+                ]
+              }
+            },
+            "required": [
+              "message",
+              "outcome"
+            ]
+          }
+        ]
+      },
+      "StepProgress": {
+        "description": "A step's progress towards completion.",
+        "type": "object",
+        "properties": {
+          "current": {
+            "description": "The current progress value.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "total": {
+            "nullable": true,
+            "description": "The total value this progress counts towards, if known.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "units": {
+            "description": "The units of `current` and `total` (for example, \"bytes\").",
+            "type": "string"
+          }
+        },
+        "required": [
+          "current",
+          "units"
+        ]
       },
       "TxEqConfig": {
         "description": "Per-port tx-eq overrides.  This can be used to fine-tune the transceiver equalization settings to improve signal integrity.",
@@ -1902,6 +1888,297 @@
             "format": "int32"
           }
         }
+      },
+      "UpdateProgress": {
+        "description": "The progress of a single update execution: its overall state and its steps.",
+        "type": "object",
+        "properties": {
+          "state": {
+            "description": "The overall rollup state of this execution.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/UpdateState"
+              }
+            ]
+          },
+          "steps": {
+            "description": "The steps of this execution, in order.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UpdateStep"
+            }
+          }
+        },
+        "required": [
+          "state",
+          "steps"
+        ]
+      },
+      "UpdateState": {
+        "description": "The state of an update execution.",
+        "oneOf": [
+          {
+            "description": "An update has been started, but execution has not begun yet.",
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "waiting"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          {
+            "description": "The update is currently running.",
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "running"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          {
+            "description": "The update ran to completion.\n\nWhether individual steps performed work or were skipped (for example, because a component was already at its target version) is recorded in the per-step outcomes.",
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "completed"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          {
+            "description": "The update engine determined there was nothing to do and defined no steps.",
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "skipped"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          {
+            "description": "The update failed.",
+            "type": "object",
+            "properties": {
+              "message": {
+                "description": "A human-readable description of the failure, combining the failed step and its error message (including any nested causes).",
+                "type": "string"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "failed"
+                ]
+              }
+            },
+            "required": [
+              "message",
+              "state"
+            ]
+          },
+          {
+            "description": "The update was aborted.",
+            "type": "object",
+            "properties": {
+              "message": {
+                "description": "A human-readable description of the abort, combining the aborted step and its message.",
+                "type": "string"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "aborted"
+                ]
+              }
+            },
+            "required": [
+              "message",
+              "state"
+            ]
+          }
+        ]
+      },
+      "UpdateStep": {
+        "description": "A single node in the update step tree.\n\nA step may spawn nested executions (for example, a per-component update that runs its own engine). Those executions appear in `children`.",
+        "type": "object",
+        "properties": {
+          "children": {
+            "description": "The nested executions this step spawned, in order. Empty if the step ran no nested engine.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UpdateProgress"
+            }
+          },
+          "description": {
+            "description": "A human-readable description of this step.",
+            "type": "string"
+          },
+          "status": {
+            "description": "The status of this step.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/UpdateStepStatus"
+              }
+            ]
+          }
+        },
+        "required": [
+          "children",
+          "description",
+          "status"
+        ]
+      },
+      "UpdateStepStatus": {
+        "description": "The status of a single step in the update step tree.",
+        "oneOf": [
+          {
+            "description": "The step has not started yet.",
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "not_started"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          {
+            "description": "The step is currently running.",
+            "type": "object",
+            "properties": {
+              "progress": {
+                "nullable": true,
+                "description": "The most recent progress reported by the step, if any.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/StepProgress"
+                  }
+                ]
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "running"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          {
+            "description": "The step completed.",
+            "type": "object",
+            "properties": {
+              "outcome": {
+                "description": "The outcome of the completed step.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/StepOutcome"
+                  }
+                ]
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "completed"
+                ]
+              }
+            },
+            "required": [
+              "outcome",
+              "status"
+            ]
+          },
+          {
+            "description": "The step failed.",
+            "type": "object",
+            "properties": {
+              "causes": {
+                "description": "The chain of underlying causes for the failure, outermost first.",
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "message": {
+                "description": "A human-readable description of the failure.",
+                "type": "string"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "failed"
+                ]
+              }
+            },
+            "required": [
+              "causes",
+              "message",
+              "status"
+            ]
+          },
+          {
+            "description": "The step was aborted while running.",
+            "type": "object",
+            "properties": {
+              "message": {
+                "description": "A human-readable description of the abort.",
+                "type": "string"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "aborted"
+                ]
+              }
+            },
+            "required": [
+              "message",
+              "status"
+            ]
+          },
+          {
+            "description": "The step will not be run because a prior step failed or was aborted.",
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "will_not_be_run"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          }
+        ]
       },
       "UserSpecifiedBgpPeerConfig": {
         "description": "User-specified configuration for a BGP peer.\n\nThis is similar to the internal BGP peer configuration, except it does not carry the sensitive `md5_auth_key`; the operator provides the key separately, referenced by `auth_key_id`.",

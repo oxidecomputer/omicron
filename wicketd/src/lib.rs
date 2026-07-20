@@ -38,6 +38,7 @@ pub(crate) use mgs::{MgsHandle, MgsManager};
 use nexus_proxy::NexusTcpProxy;
 use omicron_common::FileKv;
 use omicron_common::address::{AZ_PREFIX, Ipv6Subnet};
+use oxide_update_engine_types::spec::merge_anyhow_list;
 use preflight_check::PreflightCheckerHandler;
 use sled_hardware_types::Baseboard;
 use slog::{Drain, debug, error, o};
@@ -311,24 +312,30 @@ impl Server {
 
     /// Close all running dropshot servers.
     pub async fn close(mut self) -> Result<()> {
-        // TODO-RAINCLAUDE: attempt every close and always shut down the proxy
-        // TODO-RAINCLAUDE: even if an earlier close fails; report the first
-        // TODO-RAINCLAUDE: error afterwards.
-        let wicketd =
-            self.wicketd_server.close().await.map_err(|error| {
-                anyhow!("error closing wicketd server: {error}")
-            });
-        let commission =
-            self.commission_server.close().await.map_err(|error| {
-                anyhow!("error closing commission server: {error}")
-            });
-        let installinator =
-            self.installinator_server.close().await.map_err(|error| {
-                anyhow!("error closing artifact server: {error}")
-            });
+        // Close the servers concurrently and shut down the proxy, then report
+        // every error that occurred.
+        let (wicketd, commission, installinator) = tokio::join!(
+            self.wicketd_server.close(),
+            self.commission_server.close(),
+            self.installinator_server.close(),
+        );
         self.nexus_tcp_proxy.shutdown();
 
-        wicketd.and(commission).and(installinator)
+        let errors: Vec<anyhow::Error> = [
+            wicketd.map_err(|error| {
+                anyhow!("error closing wicketd server: {error}")
+            }),
+            commission.map_err(|error| {
+                anyhow!("error closing commission server: {error}")
+            }),
+            installinator.map_err(|error| {
+                anyhow!("error closing artifact server: {error}")
+            }),
+        ]
+        .into_iter()
+        .filter_map(Result::err)
+        .collect();
+        if errors.is_empty() { Ok(()) } else { Err(merge_anyhow_list(errors)) }
     }
 
     pub async fn wait_for_finish(self) -> Result<(), String> {

@@ -18,6 +18,7 @@ use anyhow::anyhow;
 use anyhow::bail;
 use dropshot::ClientErrorStatusCode;
 use dropshot::HttpError;
+use iddqd::IdOrdMap;
 use internal_dns_resolver::Resolver;
 use sled_hardware_types::Baseboard;
 use slog::info;
@@ -41,7 +42,7 @@ use wicketd_commission_types::rack_setup::BgpAuthKeyId;
 #[derive(Default)]
 pub(crate) struct RssOrMultirackJoinConfigCommon {
     pub inventory: SledInventory,
-    pub bootstrap_sleds: BTreeSet<BootstrapSledDescription>,
+    pub bootstrap_sleds: IdOrdMap<BootstrapSledDescription>,
     pub bgp_auth_keys: BgpAuthKeys,
 }
 
@@ -277,8 +278,10 @@ pub struct ServerContext {
     ///
     /// This address is used to reject SMF updates which attempt to change it.
     pub(crate) bind_address: SocketAddrV6,
-    // TODO-RAINCLAUDE: parallel to bind_address; the commission API address
-    // TODO-RAINCLAUDE: (config.commission-address), also rejected on SMF refresh.
+    /// The commission API address, stored as `config.commission-address` in the
+    /// SMF configuration.
+    ///
+    /// This address is used to reject SMF updates which attempt to change it.
     pub(crate) commission_bind_address: SocketAddrV6,
     pub mgs_handle: MgsHandle,
     pub mgs_client: gateway_client::Client,

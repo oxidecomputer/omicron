@@ -21,10 +21,10 @@ use wicket_common::rack_setup::{BgpAuthKey, CurrentRssUserConfigInsensitive};
 use wicketd_client::types::PutBgpAuthKeyBody;
 use wicketd_commission_types::rack_setup::PutRssUserConfigInsensitive;
 use wicketd_commission_types_versions::latest::inventory::{
-    LocationInfo, SpIdentifier, SpInfo, SpType,
+    LocationInfo, SpIdentifier, SpInfo, SpInventoryParams, SpType,
 };
 use wicketd_commission_types_versions::latest::update::{
-    SpUpdateProgress, StartUpdateOptions, StartUpdateParams,
+    StartUpdateOptions, StartUpdateParams, UpdateState,
 };
 
 /// Wait for the SP inventory to become ready.
@@ -34,23 +34,26 @@ async fn wait_for_sp_inventory(
 ) -> IdOrdMap<SpInfo> {
     wait_for_condition(
         || async {
-            let result: Cond<IdOrdMap<SpInfo>> =
-                match ctx.commission_client.get_sp_inventory(None).await {
-                    Ok(resp) => {
-                        let sps = resp.into_inner();
-                        if ready(&sps) {
-                            Ok(sps)
-                        } else {
-                            Err(CondCheckError::NotYet { status: None })
-                        }
-                    }
-                    // The main retryable error here is 503, meaning MGS
-                    // inventory isn't available yet.
-                    Err(err) if err.is_retryable() => {
+            let result: Cond<IdOrdMap<SpInfo>> = match ctx
+                .commission_client
+                .get_sp_inventory(&SpInventoryParams::default())
+                .await
+            {
+                Ok(resp) => {
+                    let sps = resp.into_inner();
+                    if ready(&sps) {
+                        Ok(sps)
+                    } else {
                         Err(CondCheckError::NotYet { status: None })
                     }
-                    Err(err) => Err(CondCheckError::Failed(err)),
-                };
+                }
+                // The main retryable error here is 503, meaning MGS
+                // inventory isn't available yet.
+                Err(err) if err.is_retryable() => {
+                    Err(CondCheckError::NotYet { status: None })
+                }
+                Err(err) => Err(CondCheckError::Failed(err)),
+            };
             result
         },
         &Duration::from_millis(100),
@@ -108,11 +111,12 @@ async fn test_commission_inventory() {
         );
     }
 
-    // TODO-RAINCLAUDE: exercise the force_refresh branch through the
-    // TODO-RAINCLAUDE: commission client.
+    // TODO-RAINCLAUDE: exercise the force_refresh branch by re-polling every
+    // TODO-RAINCLAUDE: currently-known SP through the commission client.
+    let force_refresh: Vec<_> = sps.iter().map(|sp| sp.id).collect();
     let refreshed = ctx
         .commission_client
-        .get_sp_inventory(Some(true))
+        .get_sp_inventory(&SpInventoryParams { force_refresh })
         .await
         .expect("get_sp_inventory with force_refresh succeeded")
         .into_inner();
@@ -132,11 +136,19 @@ async fn test_commission_inventory() {
         .await
         .expect("get_bootstrap_sleds succeeded")
         .into_inner();
-    // TODO-RAINCLAUDE: IdOrdMap iterates in key order (baseboard serial), so the
-    // TODO-RAINCLAUDE: identifiers come back sorted without an explicit sort.
-    let identifiers: Vec<_> =
-        bootstrap.iter().map(|s| s.identifier.clone()).collect();
-    assert_eq!(identifiers, vec!["SimGimlet00", "SimGimlet01"]);
+    // TODO-RAINCLAUDE: IdOrdMap iterates in key order (SP identifier), so the
+    // TODO-RAINCLAUDE: sleds come back ordered by slot.
+    let ids: Vec<_> = bootstrap.iter().map(|s| s.id).collect();
+    assert_eq!(
+        ids,
+        vec![
+            SpIdentifier { typ: SpType::Sled, slot: 0 },
+            SpIdentifier { typ: SpType::Sled, slot: 1 },
+        ],
+    );
+    let serial_numbers: Vec<_> =
+        bootstrap.iter().map(|s| s.serial_number.clone()).collect();
+    assert_eq!(serial_numbers, vec!["SimGimlet00", "SimGimlet01"]);
     assert!(
         bootstrap.iter().all(|s| s.ip.is_none()),
         "no bootstrap IPs discovered in the test environment"
@@ -269,19 +281,25 @@ async fn test_commission_start_update() {
 
     let entry =
         wait_for_sled0_progress(&ctx, "sled 0 reached InProgress", |p| {
-            matches!(p, SpUpdateProgress::InProgress { .. })
+            matches!(p.progress.state, UpdateState::Running)
         })
         .await;
-    match entry.progress {
-        SpUpdateProgress::InProgress { total_steps, description, .. } => {
-            assert!(total_steps >= 1, "at least one top-level step");
-            assert!(
-                !description.is_empty(),
-                "the running step has a description"
-            );
-        }
-        other => panic!("expected InProgress, got {other:?}"),
-    }
+    assert!(
+        matches!(entry.progress.state, UpdateState::Running),
+        "sled 0 rolls up to Running: {:?}",
+        entry.progress.state,
+    );
+    assert!(
+        entry.progress.steps.len() >= 1,
+        "at least one top-level step: {:?}",
+        entry.progress.steps,
+    );
+    let running: Vec<_> = entry.progress.innermost_running_steps().collect();
+    assert!(!running.is_empty(), "at least one running step: {running:?}");
+    assert!(
+        running.iter().all(|step| !step.description.is_empty()),
+        "each running step has a description: {running:?}",
+    );
 
     ctx.teardown().await;
 }

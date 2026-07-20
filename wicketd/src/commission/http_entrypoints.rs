@@ -7,7 +7,7 @@ use std::sync::Arc;
 use bootstrap_agent_lockstep_client::ClientInfo as _;
 use dropshot::{
     ApiDescription, HttpError, HttpResponseOk, HttpResponseUpdatedNoContent,
-    Query, RequestContext, StreamingBody, TypedBody,
+    RequestContext, StreamingBody, TypedBody,
 };
 use iddqd::IdOrdMap;
 use omicron_uuid_kinds::RackInitUuid;
@@ -23,7 +23,7 @@ use wicketd_commission_types::rack_setup::{
     PutRssUserConfigInsensitive, RackOperationStatus,
 };
 use wicketd_commission_types::update::{
-    ClearUpdateStateParams, RepositoryDescription, SpUpdateProgressEntry,
+    ClearUpdateStateParams, RepositoryDescription, SpUpdateProgress,
     StartUpdateParams,
 };
 
@@ -33,7 +33,7 @@ use crate::ServerContext;
 use crate::http_helpers::{
     ba_lockstep_client, ba_lockstep_error_to_http, http_error_with_message,
     inventory_err_to_http, inventory_unavailable, mgs_inventory_or_unavail,
-    shutdown_to_http, start_update,
+    start_update,
 };
 use crate::mgs::GetInventoryResponse as MgsInventoryResponse;
 
@@ -51,60 +51,24 @@ impl WicketdCommissionApi for WicketdCommissionApiImpl {
 
     async fn get_sp_inventory(
         rqctx: RequestContext<Self::Context>,
-        query: Query<SpInventoryParams>,
+        params: TypedBody<SpInventoryParams>,
     ) -> Result<HttpResponseOk<IdOrdMap<SpInfo>>, HttpError> {
         let ctx = rqctx.context();
-        let force_refresh = query.into_inner().force_refresh;
+        let force_refresh = params.into_inner().force_refresh;
 
-        let response = if force_refresh {
-            let cached = ctx
-                .mgs_handle
-                .get_cached_inventory()
-                .await
-                .map_err(shutdown_to_http)?;
-            // TODO-RAINCLAUDE: if the discovery read is Unavailable, fail
-            // TODO-RAINCLAUDE: rather than degrade to a plain cached read, which
-            // TODO-RAINCLAUDE: could return unrefreshed 200 data if the cache
-            // TODO-RAINCLAUDE: populates between the two awaits.
-            let ids = match cached {
-                MgsInventoryResponse::Response { inventory, .. } => {
-                    inventory.sps.iter().map(|sp| sp.id).collect()
-                }
-                MgsInventoryResponse::Unavailable => {
-                    return Err(inventory_unavailable());
-                }
-            };
-            ctx.mgs_handle
-                .get_inventory_refreshing_sps(ids)
-                .await
-                .map_err(inventory_err_to_http)?
-        } else {
-            ctx.mgs_handle
-                .get_cached_inventory()
-                .await
-                .map_err(shutdown_to_http)?
-        };
+        let response = ctx
+            .mgs_handle
+            .get_inventory_refreshing_sps(force_refresh)
+            .await
+            .map_err(inventory_err_to_http)?;
 
         match response {
             MgsInventoryResponse::Response { inventory, .. } => {
-                let mut sps = IdOrdMap::new();
-                for sp in inventory.sps {
-                    let sp = conversions::sp_info_to_v1(sp);
-                    // TODO-RAINCLAUDE: MGS inventory keys SPs uniquely by id, so
-                    // TODO-RAINCLAUDE: a duplicate is an invariant violation; surface
-                    // TODO-RAINCLAUDE: it as a 500 naming the id rather than dropping it.
-                    sps.insert_unique(sp).map_err(|err| {
-                        let id = err.new_item().id;
-                        http_error_with_message(
-                            dropshot::ErrorStatusCode::INTERNAL_SERVER_ERROR,
-                            Some("DuplicateSpId".to_string()),
-                            format!(
-                                "duplicate service processor id in inventory: \
-                                 {id:?}"
-                            ),
-                        )
-                    })?;
-                }
+                let sps: IdOrdMap<SpInfo> = inventory
+                    .sps
+                    .into_iter()
+                    .map(conversions::sp_info_to_ct)
+                    .collect();
                 Ok(HttpResponseOk(sps))
             }
             MgsInventoryResponse::Unavailable => Err(inventory_unavailable()),
@@ -152,26 +116,15 @@ impl WicketdCommissionApi for WicketdCommissionApiImpl {
         let sled_inventory =
             SledInventory::new(&inventory, &ddm_discovered_sleds, &ctx.log);
 
-        let mut sleds = IdOrdMap::new();
-        for desc in sled_inventory.sleds {
-            let sled = BootstrapSled {
-                slot: desc.id.slot,
-                identifier: desc.baseboard.identifier().to_string(),
+        let sleds: IdOrdMap<BootstrapSled> = sled_inventory
+            .sleds
+            .into_iter()
+            .map(|desc| BootstrapSled {
+                id: desc.id,
+                serial_number: desc.baseboard.identifier().to_string(),
                 ip: desc.bootstrap_ip,
-            };
-            // TODO-RAINCLAUDE: DDM discovery keys sleds uniquely by baseboard
-            // TODO-RAINCLAUDE: serial, so a duplicate is an invariant violation;
-            // TODO-RAINCLAUDE: surface it as a 500 naming the id rather than
-            // TODO-RAINCLAUDE: dropping it.
-            sleds.insert_unique(sled).map_err(|err| {
-                let id = &err.new_item().identifier;
-                http_error_with_message(
-                    dropshot::ErrorStatusCode::INTERNAL_SERVER_ERROR,
-                    Some("DuplicateBootstrapSled".to_string()),
-                    format!("duplicate bootstrap sled identifier: {id:?}"),
-                )
-            })?;
-        }
+            })
+            .collect();
 
         Ok(HttpResponseOk(sleds))
     }
@@ -195,33 +148,27 @@ impl WicketdCommissionApi for WicketdCommissionApiImpl {
 
     async fn get_update_progress(
         rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<IdOrdMap<SpUpdateProgressEntry>>, HttpError>
-    {
+    ) -> Result<HttpResponseOk<IdOrdMap<SpUpdateProgress>>, HttpError> {
         let ctx = rqctx.context();
         let event_reports = ctx.update_tracker.event_reports().await;
 
+        // event_reports is keyed by (sp_type, slot), so the derived
+        // SpIdentifiers are unique by construction.
+        //
+        // TODO: once rkdeploy is on the published API, we can make
+        // `event_reports` be an IdOrdMap and make this much simpler.
         let mut entries = IdOrdMap::new();
         for (sp_type, slots) in event_reports {
             for (slot, report) in slots {
-                let entry = SpUpdateProgressEntry {
-                    sp: SpIdentifier { typ: sp_type, slot },
-                    progress: progress::sp_update_progress(report),
-                };
-                // TODO-RAINCLAUDE: event reports are keyed by SP internally, so
-                // TODO-RAINCLAUDE: a duplicate is an invariant violation; surface
-                // TODO-RAINCLAUDE: it as a 500 naming the id rather than dropping
-                // TODO-RAINCLAUDE: it.
-                entries.insert_unique(entry).map_err(|err| {
-                    let id = err.new_item().sp;
-                    http_error_with_message(
-                        dropshot::ErrorStatusCode::INTERNAL_SERVER_ERROR,
-                        Some("DuplicateSpUpdateProgress".to_string()),
-                        format!(
-                            "duplicate service processor id in update \
-                             progress: {id:?}"
-                        ),
-                    )
-                })?;
+                entries
+                    .insert_unique(progress::sp_update_progress(
+                        SpIdentifier { typ: sp_type, slot },
+                        report,
+                    ))
+                    .expect(
+                        "event_reports is keyed by (sp_type, slot), so SP ids \
+                         are unique",
+                    );
             }
         }
 
@@ -277,7 +224,7 @@ impl WicketdCommissionApi for WicketdCommissionApiImpl {
             .map_err(|err| ba_lockstep_error_to_http(err, "rack setup"))?
             .into_inner();
 
-        Ok(HttpResponseOk(conversions::rack_operation_status_to_v1(op_status)))
+        Ok(HttpResponseOk(conversions::rack_operation_status_to_ct(op_status)))
     }
 
     async fn put_rss_config(

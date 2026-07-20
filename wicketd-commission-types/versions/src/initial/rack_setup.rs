@@ -4,18 +4,11 @@
 
 //! Rack setup (RSS) types for the commissioning API.
 //!
-//! The RSS configuration tree (rooted at [`PutRssUserConfigInsensitive`]) is the
-//! single source of truth for these types, moved here out of `wicket-common`.
-//! Its serde shape must stay compatible with the operator-supplied TOML and with
-//! the re-exported `sled-agent-types-versions` types it embeds (see the
-//! round-trip tests in `impls/rack_setup.rs`). The functional machinery of the
-//! originals (validation error types, inherent methods, and conversions to
-//! internal types) lives elsewhere: validation and conversion happen at the
-//! wicketd boundary.
-//!
-//! The rack-operation status types ([`RackOperationStatus`], [`RssStepInfo`],
-//! and so on) are fresh projections designed to tolerate the internal RSS-step
-//! enum growing without breaking pinned clients.
+//! The RSS configuration tree (rooted at [`PutRssUserConfigInsensitive`]) is
+//! the single source of truth for these types`. Its serde shape must stay
+//! compatible with the operator-supplied TOML and with the re-exported
+//! `sled-agent-types-versions` types it embeds (see the round-trip tests in
+//! `impls/rack_setup.rs`).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
@@ -610,11 +603,7 @@ pub struct PutRecoveryUserPasswordHash {
     pub hash: NewPasswordHash,
 }
 
-/// Growth-tolerant information about the current RSS step.
-///
-/// The internal RSS-step enum grows over time; this projection reports the step
-/// as a 1-based position, total, and description so that new steps never break
-/// deserialization in pinned clients.
+/// Information about the current RSS step.
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 pub struct RssStepInfo {
     /// The 1-based index of the current step.

@@ -55,7 +55,12 @@ pub mod update {
     pub use crate::v1::update::ClearUpdateStateParams;
     pub use crate::v1::update::RepositoryDescription;
     pub use crate::v1::update::SpUpdateProgress;
-    pub use crate::v1::update::SpUpdateProgressEntry;
     pub use crate::v1::update::StartUpdateOptions;
     pub use crate::v1::update::StartUpdateParams;
+    pub use crate::v1::update::StepOutcome;
+    pub use crate::v1::update::StepProgress;
+    pub use crate::v1::update::UpdateProgress;
+    pub use crate::v1::update::UpdateState;
+    pub use crate::v1::update::UpdateStep;
+    pub use crate::v1::update::UpdateStepStatus;
 }

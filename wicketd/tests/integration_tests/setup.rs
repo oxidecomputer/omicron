@@ -13,9 +13,7 @@ use wicketd_commission_client::Error;
 use wicketd_commission_types_versions::latest::inventory::{
     SpIdentifier, SpType,
 };
-use wicketd_commission_types_versions::latest::update::{
-    SpUpdateProgress, SpUpdateProgressEntry,
-};
+use wicketd_commission_types_versions::latest::update::SpUpdateProgress;
 
 pub struct WicketdTestContext {
     pub wicketd_addr: SocketAddrV6,
@@ -143,8 +141,8 @@ fn assert_ipv6(addr: SocketAddr) -> SocketAddrV6 {
     }
 }
 
-pub type ClientError = Error<wicketd_commission_client::types::Error>;
-pub type Cond<T> = Result<T, CondCheckError<ClientError>>;
+pub type CommissionClientError = Error<wicketd_commission_client::types::Error>;
+pub type Cond<T> = Result<T, CondCheckError<CommissionClientError>>;
 
 /// Poll get_update_progress until sled 0's entry satisfies `reached`.
 ///
@@ -153,19 +151,17 @@ pub async fn wait_for_sled0_progress(
     ctx: &WicketdTestContext,
     expect_msg: &str,
     reached: impl Fn(&SpUpdateProgress) -> bool,
-) -> SpUpdateProgressEntry {
+) -> SpUpdateProgress {
     wait_for_condition(
         || async {
-            let result: Cond<SpUpdateProgressEntry> =
+            let result: Cond<SpUpdateProgress> =
                 match ctx.commission_client.get_update_progress().await {
                     Ok(resp) => {
                         match resp
                             .into_inner()
                             .get(&SpIdentifier { typ: SpType::Sled, slot: 0 })
                         {
-                            Some(entry) if reached(&entry.progress) => {
-                                Ok(entry.clone())
-                            }
+                            Some(entry) if reached(entry) => Ok(entry.clone()),
                             _ => Err(CondCheckError::NotYet { status: None }),
                         }
                     }
@@ -180,18 +176,18 @@ pub async fn wait_for_sled0_progress(
     .expect(expect_msg)
 }
 
-pub fn assert_client_error(err: &ClientError, expected: StatusCode) {
+pub fn assert_client_error(err: &CommissionClientError, expected: StatusCode) {
     match err {
         Error::ErrorResponse(rv) => {
             assert_eq!(rv.status(), expected, "unexpected status: {err:?}");
             assert!(!rv.message.is_empty(), "error carries a message: {err:?}");
         }
-        other => panic!("expected an error response, got {other:?}"),
+        other => panic!("expected ErrorResponse, got {other:?}"),
     }
 }
 
 pub fn assert_client_error_message(
-    err: &ClientError,
+    err: &CommissionClientError,
     expected: StatusCode,
     needle: &str,
 ) {
