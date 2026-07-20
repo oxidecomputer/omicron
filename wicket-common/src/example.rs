@@ -9,7 +9,7 @@ use std::{collections::BTreeMap, net::Ipv6Addr};
 use gateway_types::component::{SpState, SpType};
 use gateway_types::rot::{RotSlot, RotState};
 use iddqd::id_ord_map;
-use maplit::{btreemap, btreeset};
+use maplit::btreemap;
 use sled_agent_types::early_networking::{
     BgpConfig, BgpPeerConfig, LinkFec, LinkSpeed, LldpAdminStatus,
     LldpPortConfig, MaxPathConfig, RouteConfig, RouterLifetimeConfig,
@@ -121,7 +121,7 @@ impl ExampleRackSetupData {
         .into_iter()
         .collect();
 
-        let bootstrap_sleds = btreeset![
+        let bootstrap_sleds = id_ord_map! {
             BootstrapSledDescription {
                 id: SpIdentifier { slot: 1, typ: SpType::Sled },
                 baseboard: our_baseboard.clone(),
@@ -136,7 +136,7 @@ impl ExampleRackSetupData {
                 },
                 bootstrap_ip: None
             },
-        ];
+        };
 
         let dns_servers =
             vec!["1.1.1.1".parse().unwrap(), "2.2.2.2".parse().unwrap()];

@@ -18,6 +18,7 @@ use anyhow::anyhow;
 use anyhow::bail;
 use dropshot::ClientErrorStatusCode;
 use dropshot::HttpError;
+use iddqd::IdOrdMap;
 use internal_dns_resolver::Resolver;
 use sled_hardware_types::Baseboard;
 use slog::info;
@@ -41,7 +42,7 @@ use wicketd_commission_types::rack_setup::BgpAuthKeyId;
 #[derive(Default)]
 pub(crate) struct RssOrMultirackJoinConfigCommon {
     pub inventory: SledInventory,
-    pub bootstrap_sleds: BTreeSet<BootstrapSledDescription>,
+    pub bootstrap_sleds: IdOrdMap<BootstrapSledDescription>,
     pub bgp_auth_keys: BgpAuthKeys,
 }
 
