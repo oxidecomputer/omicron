@@ -236,6 +236,18 @@ impl TryFrom<ExternalIp> for SourceNatConfigGeneric {
     }
 }
 
+/// The resource an external IP is being allocated for.
+#[derive(Debug, Clone)]
+pub enum IpAllocationTarget {
+    /// A silo-owned external IP: instance SNAT / ephemeral, probe ephemeral, or
+    /// a floating IP. Allocation verifies the pool is still linked to this silo
+    /// and assigned to silos.
+    Silo { silo_id: Uuid },
+    /// A system-service external IP, i.e., an Omicron zone. Allocation verifies
+    /// the pool is still assigned to system services.
+    SystemService,
+}
+
 /// An incomplete external IP, used to store state required for issuing the
 /// database query that selects an available IP and stores the resulting record.
 #[derive(Debug, Clone)]
@@ -245,7 +257,7 @@ pub struct IncompleteExternalIp {
     description: Option<String>,
     time_created: DateTime<Utc>,
     kind: IpKind,
-    is_service: bool,
+    target: IpAllocationTarget,
     is_probe: bool,
     parent_id: Option<Uuid>,
     pool_id: Uuid,
@@ -262,6 +274,7 @@ impl IncompleteExternalIp {
         id: Uuid,
         instance_id: Uuid,
         pool_id: Uuid,
+        silo_id: Uuid,
     ) -> Self {
         let kind = IpKind::SNat;
         Self {
@@ -270,7 +283,7 @@ impl IncompleteExternalIp {
             description: None,
             time_created: Utc::now(),
             kind,
-            is_service: false,
+            target: IpAllocationTarget::Silo { silo_id },
             is_probe: false,
             parent_id: Some(instance_id),
             pool_id,
@@ -281,7 +294,7 @@ impl IncompleteExternalIp {
         }
     }
 
-    pub fn for_ephemeral(id: Uuid, pool_id: Uuid) -> Self {
+    pub fn for_ephemeral(id: Uuid, pool_id: Uuid, silo_id: Uuid) -> Self {
         let kind = IpKind::Ephemeral;
         Self {
             id,
@@ -289,7 +302,7 @@ impl IncompleteExternalIp {
             description: None,
             time_created: Utc::now(),
             kind,
-            is_service: false,
+            target: IpAllocationTarget::Silo { silo_id },
             parent_id: None,
             is_probe: false,
             pool_id,
@@ -304,6 +317,7 @@ impl IncompleteExternalIp {
         id: Uuid,
         instance_id: Uuid,
         pool_id: Uuid,
+        silo_id: Uuid,
     ) -> Self {
         let kind = IpKind::Ephemeral;
         Self {
@@ -312,7 +326,7 @@ impl IncompleteExternalIp {
             description: None,
             time_created: Utc::now(),
             kind: IpKind::Ephemeral,
-            is_service: false,
+            target: IpAllocationTarget::Silo { silo_id },
             is_probe: true,
             parent_id: Some(instance_id),
             pool_id,
@@ -329,6 +343,7 @@ impl IncompleteExternalIp {
         description: &str,
         project_id: Uuid,
         pool_id: Uuid,
+        silo_id: Uuid,
     ) -> Self {
         let kind = IpKind::Floating;
         Self {
@@ -337,7 +352,7 @@ impl IncompleteExternalIp {
             description: Some(description.to_string()),
             time_created: Utc::now(),
             kind,
-            is_service: false,
+            target: IpAllocationTarget::Silo { silo_id },
             is_probe: false,
             parent_id: None,
             pool_id,
@@ -355,6 +370,7 @@ impl IncompleteExternalIp {
         project_id: Uuid,
         explicit_ip: IpAddr,
         pool_id: Uuid,
+        silo_id: Uuid,
     ) -> Self {
         let kind = IpKind::Floating;
         Self {
@@ -363,7 +379,7 @@ impl IncompleteExternalIp {
             description: Some(description.to_string()),
             time_created: Utc::now(),
             kind,
-            is_service: false,
+            target: IpAllocationTarget::Silo { silo_id },
             is_probe: false,
             parent_id: None,
             pool_id,
@@ -424,7 +440,7 @@ impl IncompleteExternalIp {
             description,
             time_created: Utc::now(),
             kind,
-            is_service: true,
+            target: IpAllocationTarget::SystemService,
             is_probe: false,
             parent_id: Some(zone_id.into_untyped_uuid()),
             pool_id,
@@ -455,8 +471,21 @@ impl IncompleteExternalIp {
         &self.kind
     }
 
-    pub fn is_service(&self) -> &bool {
-        &self.is_service
+    pub fn is_service(&self) -> bool {
+        match self.target {
+            IpAllocationTarget::Silo { .. } => false,
+            IpAllocationTarget::SystemService => true,
+        }
+    }
+
+    /// The silo that owns this external IP, if it is a silo-owned IP.
+    ///
+    /// Returns `None` for system-service IPs.
+    pub fn silo_id(&self) -> Option<&Uuid> {
+        match &self.target {
+            IpAllocationTarget::Silo { silo_id } => Some(silo_id),
+            IpAllocationTarget::SystemService => None,
+        }
     }
 
     pub fn is_probe(&self) -> &bool {

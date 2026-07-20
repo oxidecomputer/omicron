@@ -71,12 +71,22 @@ const NIC_IS_MISSING_IP_STACK_SENTINEL: &'static str = "nic-missing-ip-stack";
 const NIC_IS_MISSING_IP_STACK_ERROR_MESSAGE: &'static str = "Cannot assign an external IP address from this IP \
     Pool because the network interface does not have an \
     IP stack of the same IP version as the pool.";
+// Emitted by the allocation query's check that the pool is still linked to the
+// silo, since we resolve the pool in an earlier query.
+const POOL_NOT_ASSIGNABLE_SENTINEL: &'static str = "pool-not-assignable";
 
 /// Translates a generic pool error to an external error.
-pub fn from_diesel(e: DieselError) -> external::Error {
+///
+/// `pool_lookup` describes how the IP pool we're allocating from was looked up
+/// originally, so we can produce the right error message when it's not linked.
+pub fn from_diesel(
+    e: DieselError,
+    pool_lookup: external::LookupType,
+) -> external::Error {
     let sentinels = [
         REALLOCATION_WITH_DIFFERENT_IP_SENTINEL,
         NIC_IS_MISSING_IP_STACK_SENTINEL,
+        POOL_NOT_ASSIGNABLE_SENTINEL,
     ];
     if let Some(sentinel) = matches_sentinel(&e, &sentinels) {
         match sentinel {
@@ -89,6 +99,10 @@ pub fn from_diesel(e: DieselError) -> external::Error {
                 return external::Error::invalid_request(
                     NIC_IS_MISSING_IP_STACK_ERROR_MESSAGE,
                 );
+            }
+            POOL_NOT_ASSIGNABLE_SENTINEL => {
+                return pool_lookup
+                    .into_not_found(external::ResourceType::IpPool);
             }
             // Fall-through to the generic error conversion.
             _ => {}
@@ -210,13 +224,17 @@ pub struct NextExternalIp {
     // is snat.
     n_ports_per_chunk: i32,
     now: DateTime<Utc>,
+    // Cached projection of `ip`'s allocation target, stored here so that we can
+    // bind it as a query parameter with a lifetime tied to the query fragment.
+    is_service: bool,
 }
 
 impl NextExternalIp {
     pub fn new(ip: IncompleteExternalIp) -> Self {
         let now = Utc::now();
         let n_ports_per_chunk = i32::from(NUM_SOURCE_NAT_PORTS);
-        Self { ip, n_ports_per_chunk, now }
+        let is_service = ip.is_service();
+        Self { ip, n_ports_per_chunk, now, is_service }
     }
 
     // Push the top-level SELECT clauses used in the `next_external_ip` CTE.
@@ -281,7 +299,7 @@ impl NextExternalIp {
         out.push_sql(", ");
 
         // is_service flag
-        out.push_bind_param::<sql_types::Bool, bool>(self.ip.is_service())?;
+        out.push_bind_param::<sql_types::Bool, bool>(&self.is_service)?;
         out.push_sql(" AS ");
         out.push_identifier(dsl::is_service::NAME)?;
         out.push_sql(", ");
@@ -749,6 +767,74 @@ impl NextExternalIp {
         );
         Ok(())
     }
+
+    // Push a subquery that verifies the IP Pool we're allocating from is still
+    // available for this allocation, failing with a bool-cast error if not.
+    //
+    // The caller resolves the pool in a separate query before we run this one,
+    // so without this check, it's possible for the silo and pool to be unlinked
+    // before we actually insert the record with this query.
+    //
+    // For a silo-owned IP, the pool must still be linked to the owning silo and
+    // assigned to silos. For a system-service IP, it must still be assigned for
+    // system services.
+    fn push_verify_pool_still_assignable<'a>(
+        &'a self,
+        mut out: AstPass<'_, 'a, Pg>,
+    ) -> QueryResult<()> {
+        match self.ip.silo_id() {
+            Some(silo_id) => {
+                out.push_sql(
+                    "SELECT CAST(\
+                        CASE WHEN \
+                            EXISTS(\
+                                SELECT 1 FROM ip_pool_resource \
+                                WHERE ip_pool_id = ",
+                );
+                out.push_bind_param::<sql_types::Uuid, _>(self.ip.pool_id())?;
+                out.push_sql(" AND resource_type = 'silo' AND resource_id = ");
+                out.push_bind_param::<sql_types::Uuid, _>(silo_id)?;
+                out.push_sql(
+                    ") \
+                            AND (\
+                                SELECT assignment FROM ip_pool \
+                                WHERE id = ",
+                );
+                out.push_bind_param::<sql_types::Uuid, _>(self.ip.pool_id())?;
+                out.push_sql(
+                    " AND time_deleted IS NULL\
+                            ) = 'silos' \
+                        THEN 'TRUE' \
+                        ELSE ",
+                );
+                out.push_bind_param::<sql_types::Text, _>(
+                    POOL_NOT_ASSIGNABLE_SENTINEL,
+                )?;
+                out.push_sql(" END AS BOOL)");
+            }
+            None => {
+                out.push_sql(
+                    "SELECT CAST(\
+                        CASE WHEN \
+                            (\
+                                SELECT assignment FROM ip_pool \
+                                WHERE id = ",
+                );
+                out.push_bind_param::<sql_types::Uuid, _>(self.ip.pool_id())?;
+                out.push_sql(
+                    " AND time_deleted IS NULL\
+                            ) = 'system_services' \
+                        THEN 'TRUE' \
+                        ELSE ",
+                );
+                out.push_bind_param::<sql_types::Text, _>(
+                    POOL_NOT_ASSIGNABLE_SENTINEL,
+                )?;
+                out.push_sql(" END AS BOOL)");
+            }
+        }
+        Ok(())
+    }
 }
 
 impl QueryId for NextExternalIp {
@@ -862,6 +948,12 @@ impl QueryFragment<Pg> for NextExternalIp {
             out.push_sql(") ");
         }
 
+        // Push the subquery that verifies the IP Pool is still assignable to the
+        // resource we're allocating for.
+        out.push_sql(", pool_still_assignable AS MATERIALIZED(");
+        self.push_verify_pool_still_assignable(out.reborrow())?;
+        out.push_sql(") ");
+
         // Select the contents of the actual record that was created or updated.
         out.push_sql("SELECT * FROM external_ip");
 
@@ -879,6 +971,7 @@ impl RunQueryDsl<DbConnection> for NextExternalIp {}
 #[cfg(test)]
 mod tests {
     use crate::authz;
+    use crate::db::datastore::DataStore;
     use crate::db::datastore::SERVICE_IPV4_POOL_NAME;
     use crate::db::explain::ExplainableAsync as _;
     use crate::db::identity::Resource;
@@ -892,6 +985,7 @@ mod tests {
     use diesel::sql_types;
     use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
     use dropshot::test_util::LogContext;
+    use nexus_db_errors::TransactionError;
     use nexus_db_lookup::LookupPath;
     use nexus_db_model::ByteCount;
     use nexus_db_model::ExternalIp;
@@ -914,6 +1008,8 @@ mod tests {
     use omicron_common::address::NUM_SOURCE_NAT_PORTS;
     use omicron_common::api::external::Error;
     use omicron_common::api::external::IdentityMetadataCreateParams;
+    use omicron_common::api::external::LookupType;
+    use omicron_common::api::external::ResourceType;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::ExternalIpUuid;
     use omicron_uuid_kinds::GenericUuid;
@@ -1779,6 +1875,152 @@ mod tests {
         context.success().await;
     }
 
+    // The allocation query guards against a pool being unlinked from the silo
+    // between the caller's pool resolution and the allocation itself. This test
+    // simulates concurrently unlinking the pool between those two, to check
+    // that we fail to create the external IP correctly in that case.
+    #[tokio::test]
+    async fn next_external_ip_guard_rejects_unlinked_silo_pool() {
+        let context = TestContext::new(
+            "next_external_ip_guard_rejects_unlinked_silo_pool",
+        )
+        .await;
+
+        let range = IpRange::try_from((
+            Ipv4Addr::new(10, 0, 0, 1),
+            Ipv4Addr::new(10, 0, 0, 3),
+        ))
+        .unwrap();
+        let (_authz_pool, pool) =
+            context.create_ip_pool("default", range, true).await;
+        let silo_id = context.db.opctx().authn.silo_required().unwrap().id();
+        let conn = context
+            .db
+            .datastore()
+            .pool_connection_authorized(context.db.opctx())
+            .await
+            .unwrap();
+
+        // Query should succeed while the pool / silo are still linked.
+        let data = IncompleteExternalIp::for_ephemeral(
+            Uuid::new_v4(),
+            pool.id(),
+            silo_id,
+        );
+        DataStore::allocate_external_ip_on_connection(
+            &conn,
+            data,
+            LookupType::ById(pool.id()),
+        )
+        .await
+        .expect("should allocate while the pool is linked to the silo");
+
+        // Simulate concurrent unlink of the pool and silo.
+        {
+            use nexus_db_schema::schema::ip_pool_resource::dsl;
+            diesel::delete(dsl::ip_pool_resource)
+                .filter(dsl::ip_pool_id.eq(pool.id()))
+                .filter(dsl::resource_id.eq(silo_id))
+                .execute_async(&*conn)
+                .await
+                .expect("failed to unlink pool and silo");
+        }
+
+        // Now this should fail, since we've hit the TOCTTOU we're protecting
+        // against.
+        let data = IncompleteExternalIp::for_ephemeral(
+            Uuid::new_v4(),
+            pool.id(),
+            silo_id,
+        );
+        let result = DataStore::allocate_external_ip_on_connection(
+            &conn,
+            data,
+            LookupType::ById(pool.id()),
+        )
+        .await;
+        match result {
+            Err(TransactionError::CustomError(Error::ObjectNotFound {
+                type_name,
+                ..
+            })) => assert_eq!(type_name, ResourceType::IpPool),
+            other => panic!(
+                "expected ObjectNotFound for IpPool once unlinked, got {other:?}"
+            ),
+        }
+
+        context.success().await;
+    }
+
+    // Tests that we fail if the pool has been reassigned to system services
+    // between resolution and allocation.
+    #[tokio::test]
+    async fn next_external_ip_guard_rejects_reassigned_silo_pool() {
+        let context = TestContext::new(
+            "next_external_ip_guard_rejects_reassigned_silo_pool",
+        )
+        .await;
+
+        let range = IpRange::try_from((
+            Ipv4Addr::new(10, 0, 0, 1),
+            Ipv4Addr::new(10, 0, 0, 3),
+        ))
+        .unwrap();
+        let (authz_pool, pool) =
+            context.create_ip_pool("default", range, true).await;
+        let authz_silo = context.db.opctx().authn.silo_required().unwrap();
+        let silo_id = authz_silo.id();
+        let conn = context
+            .db
+            .datastore()
+            .pool_connection_authorized(context.db.opctx())
+            .await
+            .unwrap();
+
+        // Concurrently reassign to system services.
+        context
+            .db
+            .datastore()
+            .ip_pool_unlink_silo(context.db.opctx(), &authz_pool, &authz_silo)
+            .await
+            .unwrap();
+        context
+            .db
+            .datastore()
+            .ip_pool_assign(
+                context.db.opctx(),
+                &authz_pool,
+                &pool,
+                IpPoolAssignment::SystemServices,
+            )
+            .await
+            .expect("Should reassign to system services");
+
+        let data = IncompleteExternalIp::for_ephemeral(
+            Uuid::new_v4(),
+            pool.id(),
+            silo_id,
+        );
+        let result = DataStore::allocate_external_ip_on_connection(
+            &conn,
+            data,
+            LookupType::ById(pool.id()),
+        )
+        .await;
+        match result {
+            Err(TransactionError::CustomError(Error::ObjectNotFound {
+                type_name,
+                ..
+            })) => assert_eq!(type_name, ResourceType::IpPool),
+            other => panic!(
+                "expected ObjectNotFound for IpPool once reassigned, got \
+                 {other:?}"
+            ),
+        }
+
+        context.success().await;
+    }
+
     #[tokio::test]
     async fn test_ensure_pool_exhaustion_does_not_use_other_pool() {
         let context = TestContext::new(
@@ -1851,8 +2093,13 @@ mod tests {
         let db = TestDatabase::new_with_pool(&logctx.log).await;
         let conn = db.pool().claim().await.unwrap();
         let params = [
-            IncompleteExternalIp::for_ephemeral(Uuid::new_v4(), Uuid::new_v4()),
+            IncompleteExternalIp::for_ephemeral(
+                Uuid::new_v4(),
+                Uuid::new_v4(),
+                Uuid::new_v4(),
+            ),
             IncompleteExternalIp::for_instance_source_nat(
+                Uuid::new_v4(),
                 Uuid::new_v4(),
                 Uuid::new_v4(),
                 Uuid::new_v4(),
@@ -1879,6 +2126,7 @@ mod tests {
             "",
             uuid::uuid!("789fdb15-9790-4df1-9d06-c1ecd72c94ae"),
             uuid::uuid!("37bdd6f6-0adb-46ad-8e5b-083b928ace56"),
+            uuid::uuid!("6d97b968-93bd-42d4-84b3-2c8fbc47e2f8"),
         );
         let query = NextExternalIp::new(params);
         expectorate_query_contents(
@@ -1897,6 +2145,7 @@ mod tests {
             uuid::uuid!("789fdb15-9790-4df1-9d06-c1ecd72c94ae"),
             "10.0.0.1".parse().unwrap(),
             uuid::uuid!("37bdd6f6-0adb-46ad-8e5b-083b928ace56"),
+            uuid::uuid!("6d97b968-93bd-42d4-84b3-2c8fbc47e2f8"),
         );
         let query = NextExternalIp::new(params);
         expectorate_query_contents(
@@ -1912,6 +2161,7 @@ mod tests {
             uuid::uuid!("45633e04-3087-47eb-9d1e-8436fb090108"),
             uuid::uuid!("789fdb15-9790-4df1-9d06-c1ecd72c94ae"),
             uuid::uuid!("9fcfee03-173e-4aff-92a3-2fc9da49c008"),
+            uuid::uuid!("6d97b968-93bd-42d4-84b3-2c8fbc47e2f8"),
         );
         let query = NextExternalIp::new(params);
         expectorate_query_contents(

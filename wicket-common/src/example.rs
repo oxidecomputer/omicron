@@ -9,27 +9,23 @@ use std::{collections::BTreeMap, net::Ipv6Addr};
 use gateway_types::component::{SpState, SpType};
 use gateway_types::rot::{RotSlot, RotState};
 use maplit::{btreemap, btreeset};
-use omicron_common::{
-    address::{IpRange, Ipv4Range},
-    api::external::AllowedSourceIps,
-};
 use sled_agent_types::early_networking::{
     BgpConfig, BgpPeerConfig, LinkFec, LinkSpeed, LldpAdminStatus,
     LldpPortConfig, MaxPathConfig, RouteConfig, RouterLifetimeConfig,
-    TxEqConfig, UplinkAddress,
+    TxEqConfig,
 };
 use sled_hardware_types::Baseboard;
 
 use crate::{
     inventory::{MgsV1Inventory, SpIdentifier, SpInventory},
-    rack_setup::{
-        BgpAuthKeyId, BootstrapSledDescription,
-        CurrentRssUserConfigInsensitive, ManualPortConfig,
-        PutRssUserConfigInsensitive, UserSpecifiedBgpPeerConfig,
-        UserSpecifiedImportExportPolicy, UserSpecifiedPortConfig,
-        UserSpecifiedRackNetworkConfig, UserSpecifiedRouterPeerAddr,
-        UserSpecifiedUplinkAddressConfig,
-    },
+    rack_setup::{BootstrapSledDescription, CurrentRssUserConfigInsensitive},
+};
+use wicketd_commission_types::rack_setup::{
+    AllowedSourceIps, BgpAuthKeyId, IpRange, Ipv4Range, ManualPortConfig,
+    PutRssUserConfigInsensitive, UplinkAddress, UserSpecifiedBgpPeerConfig,
+    UserSpecifiedImportExportPolicy, UserSpecifiedPortConfig,
+    UserSpecifiedRackNetworkConfig, UserSpecifiedRouterPeerAddr,
+    UserSpecifiedUplinkAddressConfig,
 };
 
 /// A collection of example data structures.

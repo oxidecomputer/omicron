@@ -137,13 +137,15 @@ This tool is aimed at helping answer these questions related to online upgrade:
 * Why does any particular component depend on some other component?
 * Is there a way to sequence upgrades of some API servers so that clients can always assume that the corresponding servers have been upgraded?
 
-This tool combines **two sources of information:**
+This tool combines **three sources of information:**
 
+* The developer-maintained `package-manifest.toml`, which defines exactly what winds up on a deployed system
 * Cargo/Rust package metadata (including package names and dependencies)
 * Developer-maintained metadata about APIs and their dependencies, located in link:./api-manifest.toml[]
 
 This tool basically works as follows:
 
+. It loads `package-manifest.toml` and uses that to determine which Git commits are used to deploy components from all of the relevant Cargo workspaces.
 . It loads and validates information about all of the relevant Cargo workspaces by running `cargo metadata` using manifests from the local Git clones.
 . Using this information, it identifies all packages that _look_ like Progenitor-based clients for Dropshot APIs: these are packages that (1) depend directly on `progenitor` as a normal or build dependency, and (2) end in `-client`.  (A few non-client packages depend on Progenitor, like `omicron-common`.  These are ignored using a hardcoded ignore list.  Any other package that depends on Progenitor but does _not_ end in `-client` will produce a warning.)
 . Then, it loads and validates the developer-maintained metadata (`api-manifest.toml`).

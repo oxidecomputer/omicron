@@ -7,6 +7,7 @@
 use super::DataStore;
 use super::SQL_BATCH_SIZE;
 use crate::authz;
+use crate::authz::ApiResource;
 use crate::context::OpContext;
 use crate::db::collection_attach::AttachError;
 use crate::db::collection_attach::DatastoreAttachTarget;
@@ -52,6 +53,7 @@ use omicron_common::api::external::Error;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
+use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::http_pagination::PaginatedBy;
@@ -136,12 +138,14 @@ impl DataStore {
         instance_id: InstanceUuid,
         pool_id: Uuid,
     ) -> CreateResult<ExternalIp> {
+        let silo_id = opctx.authn.silo_required()?.id();
         let data = IncompleteExternalIp::for_instance_source_nat(
             ip_id,
             instance_id.into_untyped_uuid(),
             pool_id,
+            silo_id,
         );
-        self.allocate_external_ip(opctx, data).await
+        self.allocate_external_ip(opctx, data, LookupType::ById(pool_id)).await
     }
 
     /// Create an Ephemeral IP address for a probe.
@@ -161,12 +165,15 @@ impl DataStore {
                 ip_version,
             )
             .await?;
+        let silo_id = opctx.authn.silo_required()?.id();
+        let pool_lookup = authz_pool.lookup_type().clone();
         let data = IncompleteExternalIp::for_ephemeral_probe(
             ip_id,
             probe_id,
             authz_pool.id(),
+            silo_id,
         );
-        self.allocate_external_ip(opctx, data).await
+        self.allocate_external_ip(opctx, data, pool_lookup).await
     }
 
     /// Create an Ephemeral IP address for an instance.
@@ -206,11 +213,17 @@ impl DataStore {
             )
             .await?;
 
-        let data = IncompleteExternalIp::for_ephemeral(ip_id, authz_pool.id());
+        let silo_id = opctx.authn.silo_required()?.id();
+        let pool_lookup = authz_pool.lookup_type().clone();
+        let data = IncompleteExternalIp::for_ephemeral(
+            ip_id,
+            authz_pool.id(),
+            silo_id,
+        );
 
         // We might not be able to acquire a new IP, but in the event of an
         // idempotent or double attach this failure is allowed.
-        let temp_ip = self.allocate_external_ip(opctx, data).await;
+        let temp_ip = self.allocate_external_ip(opctx, data, pool_lookup).await;
         if let Err(e) = temp_ip {
             // Use the pool's version for lookup when the request didn't
             // specify one. This handles the case where an explicit pool was
@@ -327,6 +340,7 @@ impl DataStore {
             "project_id" => %project_id,
         );
 
+        let silo_id = opctx.authn.silo_required()?.id();
         let data = if let Some(ip) = explicit_ip {
             IncompleteExternalIp::for_floating_explicit(
                 ip_id,
@@ -335,6 +349,7 @@ impl DataStore {
                 project_id,
                 ip,
                 authz_pool.id(),
+                silo_id,
             )
         } else {
             IncompleteExternalIp::for_floating(
@@ -343,29 +358,39 @@ impl DataStore {
                 &identity.description,
                 project_id,
                 authz_pool.id(),
+                silo_id,
             )
         };
 
-        self.allocate_external_ip(opctx, data).await
+        let pool_lookup = authz_pool.lookup_type().clone();
+        self.allocate_external_ip(opctx, data, pool_lookup).await
     }
 
     async fn allocate_external_ip(
         &self,
         opctx: &OpContext,
         data: IncompleteExternalIp,
+        pool_lookup: LookupType,
     ) -> CreateResult<ExternalIp> {
         let conn = self.pool_connection_authorized(opctx).await?;
-        let ip = Self::allocate_external_ip_on_connection(&conn, data)
-            .await
-            .map_err(|err| err.into_public_ignore_retries())?;
+        let ip =
+            Self::allocate_external_ip_on_connection(&conn, data, pool_lookup)
+                .await
+                .map_err(|err| err.into_public_ignore_retries())?;
         Ok(ip)
     }
 
     /// Variant of [Self::allocate_external_ip] which may be called from a
     /// transaction context.
+    ///
+    /// `pool_lookup` describes how the pool being allocated from was looked up
+    /// originally. This is used to generate a correct error message when the
+    /// pool isn't found or is no longer linked, which depends on how the API
+    /// request specifed the pool in the first place.
     pub(crate) async fn allocate_external_ip_on_connection(
         conn: &async_bb8_diesel::Connection<DbConnection>,
         data: IncompleteExternalIp,
+        pool_lookup: LookupType,
     ) -> Result<ExternalIp, TransactionError<Error>> {
         // Name needs to be cloned out here (if present) to give users a
         // sensible error message on name collision.
@@ -426,7 +451,10 @@ impl DataStore {
                         ))
                     } else {
                         TransactionError::CustomError(
-                            crate::db::queries::external_ip::from_diesel(e),
+                            crate::db::queries::external_ip::from_diesel(
+                                e,
+                                pool_lookup.clone(),
+                            ),
                         )
                     }
                 }
@@ -435,7 +463,10 @@ impl DataStore {
                         return TransactionError::Database(e);
                     }
                     TransactionError::CustomError(
-                        crate::db::queries::external_ip::from_diesel(e),
+                        crate::db::queries::external_ip::from_diesel(
+                            e,
+                            pool_lookup.clone(),
+                        ),
                     )
                 }
             }
@@ -460,7 +491,8 @@ impl DataStore {
             zone_id,
             zone_kind,
         );
-        self.allocate_external_ip(opctx, data).await
+        self.allocate_external_ip(opctx, data, LookupType::ById(pool.id()))
+            .await
     }
 
     /// Variant of [Self::external_ip_allocate_omicron_zone] which may be called
@@ -479,7 +511,12 @@ impl DataStore {
             zone_id,
             zone_kind,
         );
-        Self::allocate_external_ip_on_connection(conn, data).await
+        Self::allocate_external_ip_on_connection(
+            conn,
+            data,
+            LookupType::ById(service_pool.id()),
+        )
+        .await
     }
 
     /// List one page of all external IPs allocated to internal services

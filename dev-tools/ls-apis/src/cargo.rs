@@ -81,6 +81,8 @@ impl Workspace {
             })?,
         };
         let workspace_root = metadata.workspace_root;
+        let workspace_member_ids: BTreeSet<PackageId> =
+            metadata.workspace_members.iter().cloned().collect();
 
         // Build an index of all packages by id.  Identify duplicates because we
         // assume there shouldn't be any but we want to know if that assumption
@@ -91,7 +93,7 @@ impl Workspace {
         let mut packages_by_id = BTreeMap::new();
         let mut workspace_packages_by_name = BTreeMap::new();
         for pkg in metadata.packages {
-            if pkg.source.is_none() {
+            if workspace_member_ids.contains(&pkg.id) {
                 if workspace_packages_by_name
                     .insert(pkg.name.to_string(), pkg.id.clone())
                     .is_some()

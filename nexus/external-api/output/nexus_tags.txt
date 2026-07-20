@@ -236,16 +236,13 @@ switch_view                              GET      /v1/system/hardware/switches/{
 
 API operations found with tag "system/ip-pools"
 OPERATION ID                             METHOD   URL PATH
+system_ip_pool_assign                    POST     /v1/system/ip-pools/{pool}/assignment
 system_ip_pool_create                    POST     /v1/system/ip-pools
 system_ip_pool_delete                    DELETE   /v1/system/ip-pools/{pool}
 system_ip_pool_list                      GET      /v1/system/ip-pools
 system_ip_pool_range_add                 POST     /v1/system/ip-pools/{pool}/ranges/add
 system_ip_pool_range_list                GET      /v1/system/ip-pools/{pool}/ranges
 system_ip_pool_range_remove              POST     /v1/system/ip-pools/{pool}/ranges/remove
-system_ip_pool_service_range_add         POST     /v1/system/ip-pools-service/ranges/add
-system_ip_pool_service_range_list        GET      /v1/system/ip-pools-service/ranges
-system_ip_pool_service_range_remove      POST     /v1/system/ip-pools-service/ranges/remove
-system_ip_pool_service_view              GET      /v1/system/ip-pools-service
 system_ip_pool_silo_link                 POST     /v1/system/ip-pools/{pool}/silos
 system_ip_pool_silo_list                 GET      /v1/system/ip-pools/{pool}/silos
 system_ip_pool_silo_unlink               DELETE   /v1/system/ip-pools/{pool}/silos/{silo}

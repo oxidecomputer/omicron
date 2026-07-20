@@ -6,10 +6,10 @@ use std::collections::BTreeMap;
 use std::collections::btree_map;
 use thiserror::Error;
 use wicket_common::rack_setup::BgpAuthKey;
-use wicket_common::rack_setup::BgpAuthKeyId;
 use wicket_common::rack_setup::BgpAuthKeyStatus;
 use wicket_common::rack_setup::DisplaySlice;
 use wicketd_api::SetBgpAuthKeyStatus;
+use wicketd_commission_types::rack_setup::BgpAuthKeyId;
 
 #[derive(Clone, Debug, PartialEq, Eq, Error)]
 pub(crate) enum BgpAuthKeyError {

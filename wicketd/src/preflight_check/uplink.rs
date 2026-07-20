@@ -53,9 +53,9 @@ use wicket_common::preflight_check::StepWarning;
 use wicket_common::preflight_check::UpdateEngine;
 use wicket_common::preflight_check::UplinkPreflightStepId;
 use wicket_common::preflight_check::UplinkPreflightTerminalError;
-use wicket_common::rack_setup::ManualPortConfig;
-use wicket_common::rack_setup::UserSpecifiedPortConfig;
-use wicket_common::rack_setup::UserSpecifiedRackNetworkConfig;
+use wicketd_commission_types::rack_setup::ManualPortConfig;
+use wicketd_commission_types::rack_setup::UserSpecifiedPortConfig;
+use wicketd_commission_types::rack_setup::UserSpecifiedRackNetworkConfig;
 
 const DNS_PORT: u16 = 53;
 
