@@ -13,6 +13,7 @@ dpd-client.workspace = true
 dropshot.workspace = true
 gateway-client.workspace = true
 gateway-types.workspace = true
+iddqd.workspace = true
 maplit.workspace = true
 omicron-common.workspace = true
 omicron-workspace-hack.workspace = true
@@ -30,7 +31,8 @@ thiserror.workspace = true
 tokio.workspace = true
 transceiver-controller.workspace = true
 tufaceous-artifact.workspace = true
-update-engine.workspace = true
+oxide-update-engine.workspace = true
+oxide-update-engine-types.workspace = true
 wicketd-commission-types.workspace = true
 
 [dev-dependencies]
