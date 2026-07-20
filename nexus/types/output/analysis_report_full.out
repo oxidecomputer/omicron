@@ -1,0 +1,14 @@
+// an example analysis report
+sitrep ID: ea7affb0-36eb-4a9a-b9bd-22e00f1bcc04
+analysis log:
+  * began analysis
+cases (1 with activity):
+  * case b0d36461-e3e7-4a53-9162-82414fb30088
+    // PSU 0 faulted
+    diagnosis engine: power_shelf
+    opened in sitrep: ea7affb0-36eb-4a9a-b9bd-22e00f1bcc04 <-- this sitrep
+    activity in this analysis:
+      * opened case
+      * /!\ WARNING: something suspicious:
+        // hmmm...
+        * key: value
