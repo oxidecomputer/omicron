@@ -5,14 +5,12 @@
 //! Types used for adopting an uninitialized rack into an existing regional
 //! cluster.
 
-use crate::rack_setup::{
-    BootstrapSledDescription, GetBgpAuthKeyInfoResponse,
-    UserSpecifiedRackNetworkConfig,
-};
+use crate::rack_setup::{BootstrapSledDescription, GetBgpAuthKeyInfoResponse};
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 use std::collections::BTreeSet;
+use wicketd_commission_types::rack_setup::UserSpecifiedRackNetworkConfig;
 
 /// Input from a user for adopting an uninitialized rack into an existing
 /// regional cluster.

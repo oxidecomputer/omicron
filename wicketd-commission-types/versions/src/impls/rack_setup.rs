@@ -53,14 +53,14 @@ impl UserSpecifiedRackNetworkConfig {
             UserSpecifiedPortConfig::Manual(cfg) => {
                 Some((SwitchSlot::Switch0, port.as_str(), cfg))
             }
-            UserSpecifiedPortConfig::DdmAutoPortConfig {} => None,
+            UserSpecifiedPortConfig::DdmAutoPortConfig => None,
         });
 
         let iter1 = self.switch1.iter().filter_map(|(port, cfg)| match cfg {
             UserSpecifiedPortConfig::Manual(cfg) => {
                 Some((SwitchSlot::Switch1, port.as_str(), cfg))
             }
-            UserSpecifiedPortConfig::DdmAutoPortConfig {} => None,
+            UserSpecifiedPortConfig::DdmAutoPortConfig => None,
         });
 
         iter0.chain(iter1)
@@ -89,14 +89,14 @@ impl UserSpecifiedPortConfig {
     pub fn manual(&self) -> Option<&ManualPortConfig> {
         match self {
             Self::Manual(cfg) => Some(cfg),
-            Self::DdmAutoPortConfig {} => None,
+            Self::DdmAutoPortConfig => None,
         }
     }
 
     pub fn manual_mut(&mut self) -> Option<&mut ManualPortConfig> {
         match self {
             Self::Manual(cfg) => Some(cfg),
-            Self::DdmAutoPortConfig {} => None,
+            Self::DdmAutoPortConfig => None,
         }
     }
 }
@@ -179,8 +179,9 @@ impl From<UserSpecifiedImportExportPolicy> for ImportExportPolicy {
 #[cfg(test)]
 mod tests {
     use crate::latest::rack_setup::{
-        UplinkAddress, UserSpecifiedImportExportPolicy,
-        UserSpecifiedRouterPeerAddr,
+        LinkFec, LinkSpeed, ManualPortConfig, UplinkAddress,
+        UserSpecifiedImportExportPolicy, UserSpecifiedPortConfig,
+        UserSpecifiedRouterPeerAddr, UserSpecifiedUplinkAddressConfig,
     };
     use crate::v1::rack_setup::uplink_address_serde;
     use serde::{Deserialize, Serialize};
@@ -266,10 +267,17 @@ mod tests {
 
     #[test]
     fn invalid_router_peer_address() {
-        let invalid_inputs =
-            ["foobar", "not-an-ip", "banana", "1.2.3.4.5", "hello world"];
+        const NOT_AN_IP: &str = "expected `unnumbered` or an IP address";
+        let invalid_inputs = [
+            ("foobar", NOT_AN_IP),
+            ("not-an-ip", NOT_AN_IP),
+            ("banana", NOT_AN_IP),
+            ("1.2.3.4.5", NOT_AN_IP),
+            ("hello world", NOT_AN_IP),
+            ("0.0.0.0", "unspecified address is not allowed"),
+        ];
 
-        for input in invalid_inputs {
+        for (input, expected_detail) in invalid_inputs {
             let toml_input = format!("addr = \"{input}\"\n");
             match toml::from_str::<RouterPeerAddressWrapper>(&toml_input) {
                 Ok(addr) => panic!("unexpected success: parsed {addr:?}"),
@@ -277,7 +285,8 @@ mod tests {
                     let err = err.to_string();
                     assert!(
                         err.contains(&format!(
-                            "invalid router peer address `{input}`"
+                            "invalid router peer address `{input}`: \
+                             {expected_detail}"
                         )),
                         "unexpected error for input `{input}`: {err}"
                     );
@@ -330,10 +339,17 @@ mod tests {
 
     #[test]
     fn invalid_uplink_address() {
-        let invalid_inputs =
-            ["foobar", "not-an-ipnet", "banana", "1.2.3.4.5", "hello world"];
+        const NOT_AN_IPNET: &str = "expected `addrconf` or an IP network";
+        let invalid_inputs = [
+            ("foobar", NOT_AN_IPNET),
+            ("not-an-ipnet", NOT_AN_IPNET),
+            ("banana", NOT_AN_IPNET),
+            ("1.2.3.4.5", NOT_AN_IPNET),
+            ("hello world", NOT_AN_IPNET),
+            ("0.0.0.0/8", "unspecified address is not allowed"),
+        ];
 
-        for input in invalid_inputs {
+        for (input, expected_detail) in invalid_inputs {
             let toml_input = format!("addr = \"{input}\"\n");
             match toml::from_str::<UplinkAddressWrapper>(&toml_input) {
                 Ok(addr) => panic!("unexpected success: parsed {addr:?}"),
@@ -341,7 +357,7 @@ mod tests {
                     let err = err.to_string();
                     assert!(
                         err.contains(&format!(
-                            "invalid uplink ipnet `{input}`"
+                            "invalid uplink ipnet `{input}`: {expected_detail}"
                         )),
                         "unexpected error for input `{input}`: {err}"
                     );
@@ -356,5 +372,102 @@ mod tests {
         // `UserSpecifiedUplinkAddressConfig::address` above.
         #[serde(with = "uplink_address_serde")]
         pub addr: UplinkAddress,
+    }
+
+    #[test]
+    fn empty_map_deserializes_to_ddm_auto() {
+        let from_json: UserSpecifiedPortConfig =
+            serde_json::from_str("{}").unwrap();
+        assert_eq!(from_json, UserSpecifiedPortConfig::DdmAutoPortConfig);
+
+        let from_toml: PortConfigWrapper =
+            toml::from_str("port = {}\n").unwrap();
+        assert_eq!(from_toml.port, UserSpecifiedPortConfig::DdmAutoPortConfig);
+    }
+
+    #[test]
+    fn ddm_auto_serializes_to_empty_map() {
+        let config = UserSpecifiedPortConfig::DdmAutoPortConfig;
+
+        let json = serde_json::to_string(&config).unwrap();
+        assert_eq!(json, "{}");
+        let roundtripped: UserSpecifiedPortConfig =
+            serde_json::from_str(&json).unwrap();
+        assert_eq!(roundtripped, config);
+
+        let wrapper = PortConfigWrapper { port: config.clone() };
+        let toml_str = toml::to_string(&wrapper).unwrap();
+        let roundtripped: PortConfigWrapper =
+            toml::from_str(&toml_str).unwrap();
+        assert_eq!(roundtripped.port, config);
+    }
+
+    #[test]
+    fn manual_config_roundtrips() {
+        let expected = UserSpecifiedPortConfig::Manual(ManualPortConfig {
+            routes: vec![],
+            addresses: vec![UserSpecifiedUplinkAddressConfig::without_vlan(
+                "1.1.1.0/24".parse().unwrap(),
+            )],
+            uplink_port_speed: LinkSpeed::Speed40G,
+            uplink_port_fec: Some(LinkFec::Rs),
+            autoneg: false,
+            bgp_peers: vec![],
+            lldp: None,
+            tx_eq: None,
+        });
+
+        eprintln!("** testing JSON round-trip");
+        let json = serde_json::to_string(&expected).unwrap();
+        eprintln!("serialized JSON: {json}");
+        let from_json: UserSpecifiedPortConfig =
+            serde_json::from_str(&json).unwrap();
+        assert_eq!(from_json, expected);
+        assert!(from_json.manual().is_some());
+
+        eprintln!("** testing TOML deserialization");
+        let toml_manual = r#"
+            routes = []
+            addresses = [{ address = "1.1.1.0/24" }]
+            uplink_port_speed = "speed40_g"
+            uplink_port_fec = "rs"
+            autoneg = false
+        "#;
+        let from_toml: UserSpecifiedPortConfig =
+            toml::from_str(toml_manual).unwrap();
+        assert_eq!(from_toml, expected);
+    }
+
+    #[test]
+    fn misspelled_field_names_unknown_field() {
+        let err =
+            serde_json::from_str::<UserSpecifiedPortConfig>(r#"{"route": []}"#)
+                .expect_err("misspelled field should fail to deserialize");
+        let err = err.to_string();
+        assert!(
+            err.contains("unknown field `route`"),
+            "error should name the unknown field, got: {err}"
+        );
+        assert!(
+            err.contains("expected one of"),
+            "error should list the expected fields, got: {err}"
+        );
+    }
+
+    #[test]
+    fn non_map_input_fails_cleanly() {
+        let err =
+            serde_json::from_str::<UserSpecifiedPortConfig>(r#""not-a-map""#)
+                .expect_err("a string is not a valid port configuration");
+        let err = err.to_string();
+        assert!(
+            err.contains("invalid type: string"),
+            "error should report an invalid type, got: {err}"
+        );
+    }
+
+    #[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
+    struct PortConfigWrapper {
+        port: UserSpecifiedPortConfig,
     }
 }

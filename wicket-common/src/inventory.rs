@@ -2,12 +2,12 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-// Re-export these types from gateway_client, so that users are oblivious to
-// where these types come from.
+// Re-export these types from gateway_client and gateway_types, so that users
+// are oblivious to where these types come from.
 pub use gateway_client::types::{
-    SpComponentCaboose, SpComponentInfo, SpComponentPresence, SpIdentifier,
+    SpComponentCaboose, SpComponentInfo, SpComponentPresence,
 };
-pub use gateway_types::component::{SpState, SpType};
+pub use gateway_types::component::{SpIdentifier, SpState, SpType};
 pub use gateway_types::ignition::{SpIgnition, SpIgnitionSystemType};
 pub use gateway_types::rot::{RotSlot, RotState};
 use omicron_common::snake_case_result;
@@ -56,7 +56,7 @@ impl From<BTreeSet<BootstrapSledDescription>> for SledInventory {
 }
 
 // Inventory about sleds derived from MGS inventory and DDM
-#[derive(Default, Clone)]
+#[derive(Default, Clone, Debug, PartialEq, Eq)]
 pub struct SledInventory {
     pub sleds: BTreeSet<BootstrapSledDescription>,
 }
@@ -71,7 +71,7 @@ impl SledInventory {
             .sps
             .iter()
             .filter_map(|sp| {
-                if sp.id.type_ != SpType::Sled {
+                if sp.id.typ != SpType::Sled {
                     return None;
                 }
 

@@ -120,6 +120,19 @@ WITH
               parent_id = $23 AND time_deleted IS NULL AND is_primary
           )
             AS nic
+    ),
+  pool_still_assignable
+    AS MATERIALIZED (
+      SELECT
+        CAST(
+          CASE
+          WHEN (SELECT assignment FROM ip_pool WHERE id = $24 AND time_deleted IS NULL)
+          = 'system_services'
+          THEN 'TRUE'
+          ELSE $25
+          END
+            AS BOOL
+        )
     )
 SELECT
   *
