@@ -2072,7 +2072,9 @@ impl ComponentUpdateListState {
             let mut item_spans = Vec::new();
             let nest_level = event_buffer
                 .get_execution_data(&step_key.execution_id)
-                .expect("step's execution is present in the buffer it came from")
+                .expect(
+                    "step's execution is present in the buffer it came from",
+                )
                 .nest_level();
             let indent = nest_level * 2;
             if indent > 0 {
