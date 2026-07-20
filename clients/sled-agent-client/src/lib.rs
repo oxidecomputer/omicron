@@ -88,7 +88,6 @@ progenitor::generate_api!(
         NetworkInterfaceKind = sled_agent_types_versions::latest::inventory::NetworkInterfaceKind,
         Nonce = sled_agent_types_versions::latest::rot::Nonce,
         OmicronPhysicalDiskConfig = omicron_common::disk::OmicronPhysicalDiskConfig,
-        OmicronPhysicalDisksConfig = omicron_common::disk::OmicronPhysicalDisksConfig,
         OmicronSledConfig = sled_agent_types_versions::latest::inventory::OmicronSledConfig,
         OmicronZoneConfig = sled_agent_types_versions::latest::inventory::OmicronZoneConfig,
         OmicronZoneDataset = sled_agent_types_versions::latest::inventory::OmicronZoneDataset,

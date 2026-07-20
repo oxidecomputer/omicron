@@ -25,10 +25,8 @@ use dropshot::HttpError;
 use illumos_utils::zfs::DatasetProperties;
 use omicron_common::api::external::ByteCount;
 use omicron_common::disk::DatasetName;
-use omicron_common::disk::DatasetsConfig;
 use omicron_common::disk::DiskIdentity;
 use omicron_common::disk::DiskVariant;
-use omicron_common::disk::OmicronPhysicalDisksConfig;
 use omicron_common::disk::SharedDatasetConfig;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::ExternalZpoolUuid;
@@ -1444,23 +1442,6 @@ impl StorageInner {
         self.sled_config.clone()
     }
 
-    pub fn datasets_config_list(&self) -> Result<DatasetsConfig, HttpError> {
-        let Some(config) = self.sled_config.as_ref() else {
-            return Err(HttpError::for_not_found(
-                None,
-                "No control plane datasets".into(),
-            ));
-        };
-        Ok(DatasetsConfig {
-            generation: config.generation,
-            datasets: config
-                .datasets
-                .iter()
-                .map(|dataset| (dataset.id, dataset.clone()))
-                .collect(),
-        })
-    }
-
     pub fn dataset_get(
         &self,
         dataset_name: &String,
@@ -1718,21 +1699,6 @@ impl StorageInner {
             None,
             "Nested Dataset not found".to_string(),
         ));
-    }
-
-    pub fn omicron_physical_disks_list(
-        &self,
-    ) -> Result<OmicronPhysicalDisksConfig, HttpError> {
-        let Some(config) = self.sled_config.as_ref() else {
-            return Err(HttpError::for_not_found(
-                None,
-                "No control plane disks".into(),
-            ));
-        };
-        Ok(OmicronPhysicalDisksConfig {
-            generation: config.generation,
-            disks: config.disks.iter().cloned().collect(),
-        })
     }
 
     pub fn insert_physical_disk(

@@ -33,9 +33,7 @@ use omicron_common::api::internal::shared::{
     ResolvedVpcRoute, ResolvedVpcRouteSet, ResolvedVpcRouteState, RouterId,
     RouterKind, RouterVersion, VirtualNetworkInterfaceHost,
 };
-use omicron_common::disk::{
-    DatasetsConfig, DiskIdentity, DiskVariant, OmicronPhysicalDisksConfig,
-};
+use omicron_common::disk::{DiskIdentity, DiskVariant};
 use omicron_uuid_kinds::{
     DatasetUuid, GenericUuid, PhysicalDiskUuid, PropolisUuid, SledUuid,
     SupportBundleUuid, ZpoolUuid,
@@ -1079,16 +1077,6 @@ impl SledAgent {
             .delete(zpool_id, dataset_id, support_bundle_id)
             .await
             .map_err(|err| err.into())
-    }
-
-    pub fn datasets_config_list(&self) -> Result<DatasetsConfig, HttpError> {
-        self.storage.lock().datasets_config_list()
-    }
-
-    pub fn omicron_physical_disks_list(
-        &self,
-    ) -> Result<OmicronPhysicalDisksConfig, HttpError> {
-        self.storage.lock().omicron_physical_disks_list()
     }
 
     pub fn set_omicron_config(
