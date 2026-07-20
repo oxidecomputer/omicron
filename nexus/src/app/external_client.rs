@@ -131,6 +131,9 @@ impl ExternalIpPolicy {
             .get()
             .ok_or(ExternalIpError::RackNotInitialized { ip })?;
         let az_subnet = subnets.az_subnet.net();
+        // If this is an IPv4-mapped IPv6 address, convert it to the canonical
+        // form before checking it.
+        let ip = ip.to_canonical();
         match ip {
             // IPv6 addresses that are within the AZ's underlay subnet are not
             // external to the rack.
@@ -145,9 +148,9 @@ impl ExternalIpPolicy {
                     subnet: UNDERLAY_MULTICAST_SUBNET,
                 })
             }
-            // Loopback addresses are not external, regardless of whether they
-            // are v6 or v4...
-            ip if ip.is_loopback()
+            // Loopback and unspecified addresses are not external, regardless of
+            // whether they are v6 or v4...
+            ip if (ip.is_loopback() || ip.is_unspecified())
                 // ...unless we are inside of an integration test, in which
                 // case, lol. lmao.
                 && self.loopback_policy == TreatLoopbackAsExternal::No =>
