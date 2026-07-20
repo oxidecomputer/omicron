@@ -10,6 +10,7 @@ pub use gateway_client::types::{
 pub use gateway_types::component::{SpIdentifier, SpState, SpType};
 pub use gateway_types::ignition::{SpIgnition, SpIgnitionSystemType};
 pub use gateway_types::rot::{RotSlot, RotState};
+use iddqd::{IdOrdItem, IdOrdMap, id_upcast};
 use omicron_common::snake_case_result;
 use omicron_common::snake_case_result::SnakeCaseResult;
 use schemars::JsonSchema;
@@ -46,7 +47,7 @@ pub struct MgsV1InventorySnapshot {
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "mgs_inventory", rename_all = "snake_case")]
 pub struct MgsV1Inventory {
-    pub sps: Vec<SpInventory>,
+    pub sps: IdOrdMap<SpInventory>,
 }
 
 impl From<BTreeSet<BootstrapSledDescription>> for SledInventory {
@@ -189,6 +190,16 @@ impl SpInventory {
             rot: None,
         }
     }
+}
+
+impl IdOrdItem for SpInventory {
+    type Key<'a> = SpIdentifier;
+
+    fn key(&self) -> Self::Key<'_> {
+        self.id
+    }
+
+    id_upcast!();
 }
 
 /// RoT-related data that isn't already supplied in [`SpState`].

@@ -8,6 +8,7 @@ use std::{collections::BTreeMap, net::Ipv6Addr};
 
 use gateway_types::component::{SpState, SpType};
 use gateway_types::rot::{RotSlot, RotState};
+use iddqd::id_ord_map;
 use maplit::{btreemap, btreeset};
 use sled_agent_types::early_networking::{
     BgpConfig, BgpPeerConfig, LinkFec, LinkSpeed, LldpAdminStatus,
@@ -68,14 +69,9 @@ impl ExampleRackSetupData {
             identifier: "serial 1 2 3".into(),
         };
 
-        let mut inventory = MgsV1Inventory {
-            sps: vec![
-                SpInventory::new(SpIdentifier { slot: 1, typ: SpType::Sled }),
-                SpInventory::new(SpIdentifier { slot: 5, typ: SpType::Sled }),
-            ],
-        };
-
-        inventory.sps[0].state = Some(SpState {
+        let mut sp0 =
+            SpInventory::new(SpIdentifier { slot: 1, typ: SpType::Sled });
+        sp0.state = Some(SpState {
             serial_number: "serial 1 2 3".into(),
             model: "model1".into(),
             revision: 3,
@@ -91,7 +87,9 @@ impl ExampleRackSetupData {
                 slot_b_sha3_256_digest: None,
             },
         });
-        inventory.sps[1].state = Some(SpState {
+        let mut sp1 =
+            SpInventory::new(SpIdentifier { slot: 5, typ: SpType::Sled });
+        sp1.state = Some(SpState {
             serial_number: "serial 4 5 6".into(),
             model: "model2".into(),
             revision: 5,
@@ -107,6 +105,7 @@ impl ExampleRackSetupData {
                 slot_b_sha3_256_digest: None,
             },
         });
+        let inventory = MgsV1Inventory { sps: id_ord_map! { sp0, sp1 } };
 
         let ddm_discovered_sleds: BTreeMap<_, _> = [
             (our_baseboard.clone(), Ipv6Addr::LOCALHOST),

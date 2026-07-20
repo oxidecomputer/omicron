@@ -13,6 +13,7 @@ dpd-client.workspace = true
 dropshot.workspace = true
 gateway-client.workspace = true
 gateway-types.workspace = true
+iddqd.workspace = true
 maplit.workspace = true
 omicron-common.workspace = true
 omicron-workspace-hack.workspace = true
