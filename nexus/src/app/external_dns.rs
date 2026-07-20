@@ -31,13 +31,35 @@ impl Resolver {
         dns_servers: &[IpAddr],
         ip_policy: ExternalIpPolicy,
     ) -> Resolver {
-        assert!(!dns_servers.is_empty());
+        let addrs =
+            dns_servers.iter().map(|&addr| SocketAddr::new(addr, DNS_PORT));
+        Self::new_from_addrs(addrs, ip_policy)
+    }
+
+    /// Constructs a `Resolver` using a single DNS server on an explicit socket
+    /// address, rather than from a set of IP addresses assuming the standard
+    /// DNS port.
+    ///
+    /// This is primarily useful for tests, where the DNS server is a
+    /// `transient_dns_server::TransientDnsServer` on an ephemeral port, since
+    /// an unprivileged test cannot bind port 53. Outside of tests, prefer
+    /// `Resolver::new`.
+    #[cfg(test)]
+    pub fn new_from_addr(
+        dns_server: SocketAddr,
+        ip_policy: ExternalIpPolicy,
+    ) -> Resolver {
+        Self::new_from_addrs(std::iter::once(dns_server), ip_policy)
+    }
+
+    fn new_from_addrs(
+        dns_servers: impl IntoIterator<Item = SocketAddr>,
+        ip_policy: ExternalIpPolicy,
+    ) -> Resolver {
         let mut rc = ResolverConfig::new();
+        let mut n_dns_servers = 0;
         for addr in dns_servers {
-            let mut ns_config = NameServerConfig::new(
-                SocketAddr::new(*addr, DNS_PORT),
-                Protocol::Udp,
-            );
+            let mut ns_config = NameServerConfig::new(addr, Protocol::Udp);
             // Explicltly set `trust_negative_responses` to false here to avoid
             // some churn.  It reasonably could be `true` here.
             //
@@ -61,13 +83,20 @@ impl Resolver {
             // builders to continue defaulting to trusting negative responses)
             ns_config.trust_negative_responses = false;
             rc.add_name_server(ns_config);
+            n_dns_servers += 1;
         }
+
+        assert!(
+            n_dns_servers > 0,
+            "there must be at least one external DNS server"
+        );
+
         let mut opts = ResolverOpts::default();
         // Enable edns for potentially larger records
         opts.edns0 = true;
         opts.use_hosts_file = ResolveHosts::Never;
         // Do as many requests in parallel as we have configured servers
-        opts.num_concurrent_reqs = dns_servers.len();
+        opts.num_concurrent_reqs = n_dns_servers;
         Resolver {
             resolver: TokioResolver::builder_with_config(
                 rc,
