@@ -683,42 +683,112 @@ impl DataStore {
     /// This searches all pools linked to the current silo for a range
     /// containing the given IP address. Since IP pool ranges cannot overlap,
     /// at most one pool can contain any given address.
-    pub async fn ip_pool_fetch_containing_address(
+    ///
+    /// NOTE: This also authorizes the CreateChild action on the pool.
+    pub async fn ip_pool_fetch_containing_address_in_current_silo(
         &self,
         opctx: &OpContext,
         ip: IpAddr,
         pool_type: IpPoolType,
     ) -> LookupResult<authz::IpPool> {
+        let silo_id = opctx.authn.silo_required()?.id();
+        self.lookup_ip_pool_containing_address_on_connection(
+            opctx,
+            &*self.pool_connection_authorized(opctx).await?,
+            ip,
+            pool_type,
+            Some(silo_id),
+        )
+        .await
+        .map(|(authz, _db)| authz)
+    }
+
+    /// Fetch the IP Pool assigned to services containing the provided address.
+    pub async fn ip_pool_fetch_containing_address_for_services(
+        &self,
+        opctx: &OpContext,
+        ip: IpAddr,
+    ) -> LookupResult<(authz::IpPool, IpPool)> {
+        self.ip_pool_fetch_containing_address_for_services_on_connection(
+            opctx,
+            &*self.pool_connection_authorized(opctx).await?,
+            ip,
+        )
+        .await
+    }
+
+    pub(crate) async fn ip_pool_fetch_containing_address_for_services_on_connection(
+        &self,
+        opctx: &OpContext,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        ip: IpAddr,
+    ) -> LookupResult<(authz::IpPool, IpPool)> {
+        self.lookup_ip_pool_containing_address_on_connection(
+            opctx,
+            conn,
+            ip,
+            // System services always use unicast addresses today.
+            IpPoolType::Unicast,
+            // And have no linked silo.
+            None,
+        )
+        .await
+    }
+
+    async fn lookup_ip_pool_containing_address_on_connection(
+        &self,
+        opctx: &OpContext,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        ip: IpAddr,
+        pool_type: IpPoolType,
+        silo_id: Option<Uuid>,
+    ) -> LookupResult<(authz::IpPool, IpPool)> {
         use nexus_db_schema::schema::ip_pool;
         use nexus_db_schema::schema::ip_pool_range;
         use nexus_db_schema::schema::ip_pool_resource;
-
         let ip_network: IpNetwork = ip.into();
-        let silo_id = opctx.authn.silo_required()?.id();
-
-        let pool = ip_pool_range::table
+        let ip_version =
+            if ip.is_ipv4() { IpVersion::V4 } else { IpVersion::V6 };
+        let mut query = ip_pool_range::table
             .inner_join(
                 ip_pool::table.on(ip_pool::id
                     .eq(ip_pool_range::ip_pool_id)
                     .and(ip_pool::time_deleted.is_null())),
             )
-            .inner_join(
-                ip_pool_resource::table.on(ip_pool_resource::ip_pool_id
-                    .eq(ip_pool::id)
-                    .and(
-                        ip_pool_resource::resource_type
-                            .eq(IpPoolResourceType::Silo),
-                    )
-                    .and(ip_pool_resource::resource_id.eq(silo_id))),
-            )
+            .into_boxed();
+
+        // We need to ensure the pool is linked to the provided silo, if it's
+        // Some(_). We can do that with an inner join, but that's difficult to
+        // express in Diesel. Instead, use a subquery that returns FALSE if
+        // there's no such link.
+        //
+        // NOTE: We don't do this at all for system services, and instead check
+        // that the pool itself is assigned for services.
+        if let Some(silo_id) = silo_id {
+            query = query.filter(diesel::dsl::exists(
+                ip_pool_resource::table.filter(
+                    ip_pool_resource::ip_pool_id
+                        .eq(ip_pool::id)
+                        .and(
+                            ip_pool_resource::resource_type
+                                .eq(IpPoolResourceType::Silo),
+                        )
+                        .and(ip_pool_resource::resource_id.eq(silo_id)),
+                ),
+            ));
+        } else {
+            query = query.filter(
+                ip_pool::assignment.eq(IpPoolAssignment::SystemServices),
+            );
+        }
+        let pool = query
             .filter(ip_pool_range::time_deleted.is_null())
             .filter(ip_pool_range::first_address.le(ip_network))
             .filter(ip_pool_range::last_address.ge(ip_network))
             .filter(ip_pool::pool_type.eq(pool_type))
+            .filter(ip_pool::ip_version.eq(ip_version))
             .select(IpPool::as_select())
-            .first_async::<IpPool>(
-                &*self.pool_connection_authorized(opctx).await?,
-            )
+            .first_async::<IpPool>(conn)
             .await
             .map_err(|e| {
                 public_error_from_diesel_lookup(
@@ -734,7 +804,7 @@ impl DataStore {
         let authz_pool =
             authz::IpPool::new(authz::FLEET, pool.id(), lookup_type);
         opctx.authorize(authz::Action::CreateChild, &authz_pool).await?;
-        Ok(authz_pool)
+        Ok((authz_pool, pool))
     }
 
     /// Look up system services IP pool by its well-known name.
@@ -6071,7 +6141,7 @@ mod test {
         // Case: IP within range should find the pool
         let ip_in_range = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 100));
         let result = datastore
-            .ip_pool_fetch_containing_address(
+            .ip_pool_fetch_containing_address_in_current_silo(
                 &opctx,
                 ip_in_range,
                 IpPoolType::Unicast,
@@ -6083,7 +6153,7 @@ mod test {
         // Case: IP at range boundaries should find the pool
         let ip_start = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 0));
         let result = datastore
-            .ip_pool_fetch_containing_address(
+            .ip_pool_fetch_containing_address_in_current_silo(
                 &opctx,
                 ip_start,
                 IpPoolType::Unicast,
@@ -6094,7 +6164,7 @@ mod test {
 
         let ip_end = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 255));
         let result = datastore
-            .ip_pool_fetch_containing_address(
+            .ip_pool_fetch_containing_address_in_current_silo(
                 &opctx,
                 ip_end,
                 IpPoolType::Unicast,
@@ -6106,7 +6176,7 @@ mod test {
         // Case: IP outside range should return NotFound error
         let ip_outside = IpAddr::V4(Ipv4Addr::new(10, 1, 0, 1));
         let result = datastore
-            .ip_pool_fetch_containing_address(
+            .ip_pool_fetch_containing_address_in_current_silo(
                 &opctx,
                 ip_outside,
                 IpPoolType::Unicast,
@@ -6119,7 +6189,7 @@ mod test {
 
         // Case: Wrong pool type should return NotFound error
         let result = datastore
-            .ip_pool_fetch_containing_address(
+            .ip_pool_fetch_containing_address_in_current_silo(
                 &opctx,
                 ip_in_range,
                 IpPoolType::Multicast,
@@ -6186,7 +6256,7 @@ mod test {
         // Case: Multicast IP should find the multicast pool
         let mcast_ip = IpAddr::V4(Ipv4Addr::new(239, 0, 0, 50));
         let result = datastore
-            .ip_pool_fetch_containing_address(
+            .ip_pool_fetch_containing_address_in_current_silo(
                 &opctx,
                 mcast_ip,
                 IpPoolType::Multicast,
@@ -6197,7 +6267,7 @@ mod test {
 
         // Case: Multicast IP should not be found when asking for unicast
         let result = datastore
-            .ip_pool_fetch_containing_address(
+            .ip_pool_fetch_containing_address_in_current_silo(
                 &opctx,
                 mcast_ip,
                 IpPoolType::Unicast,
@@ -6206,6 +6276,76 @@ mod test {
         assert!(
             result.is_err(),
             "Should not find multicast pool when asking for unicast"
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_ip_pool_fetch_containing_address_for_services() {
+        let logctx = dev::test_setup_log(
+            "test_ip_pool_fetch_containing_address_for_services",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // Create a pool assigned to system services. Note that we deliberately
+        // do not link it to a silo: system-services pools have no silo link,
+        // which is exactly the branch this method exercises.
+        let identity = IdentityMetadataCreateParams {
+            name: "service-pool".parse().unwrap(),
+            description: "Test system-services IP pool".to_string(),
+        };
+        let pool = datastore
+            .ip_pool_create(
+                &opctx,
+                IpPool::new(
+                    &identity,
+                    IpVersion::V4,
+                    IpPoolAssignment::SystemServices,
+                ),
+            )
+            .await
+            .expect("Should create system-services IP pool");
+
+        let authz_pool = authz::IpPool::new(
+            authz::FLEET,
+            pool.id(),
+            LookupType::ById(pool.id()),
+        );
+
+        // Add a range to the pool.
+        let range = IpRange::V4(
+            Ipv4Range::new(
+                Ipv4Addr::new(10, 0, 0, 0),
+                Ipv4Addr::new(10, 0, 0, 255),
+            )
+            .unwrap(),
+        );
+        datastore
+            .ip_pool_add_range(&opctx, &authz_pool, &pool, &range)
+            .await
+            .expect("Should add range to pool");
+
+        // Pick an address from that range and confirm the lookup finds our
+        // pool.
+        let ip = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 100));
+        let (found_authz, found_pool) = datastore
+            .ip_pool_fetch_containing_address_for_services(&opctx, ip)
+            .await
+            .expect("Should find system-services pool containing 10.0.0.100");
+        assert_eq!(found_authz.id(), pool.id());
+        assert_eq!(found_pool.id(), pool.id());
+
+        // An address outside the range should not be found.
+        let ip_outside = IpAddr::V4(Ipv4Addr::new(10, 1, 0, 1));
+        let result = datastore
+            .ip_pool_fetch_containing_address_for_services(&opctx, ip_outside)
+            .await;
+        assert!(
+            result.is_err(),
+            "Should not find a pool for an address outside all ranges"
         );
 
         db.terminate().await;

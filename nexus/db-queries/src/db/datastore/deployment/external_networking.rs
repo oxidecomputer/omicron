@@ -199,10 +199,6 @@ impl DataStore {
         opctx: &OpContext,
         zones_to_allocate: impl Iterator<Item = &BlueprintZoneConfig>,
     ) -> Result<(), TransactionError<Error>> {
-        // Looking up the service pools requires an opctx; we'll do this at most
-        // once inside the loop below, when we first need it.
-        let mut service_pools = None;
-
         for z in zones_to_allocate {
             let Some((external_ip, nic)) = z.zone_type.external_networking()
             else {
@@ -217,31 +213,20 @@ impl DataStore {
                 "nic" => format!("{nic:?}"),
             ));
 
-            // Look up the system-service pools once, lazily, and cache them.
-            let version = external_ip.ip_version();
-            if service_pools.is_none() {
-                service_pools = Some(
-                    self.ip_pools_service_lookup_both_versions(opctx).await?,
-                );
-            }
-            let service_pools = service_pools.as_ref().unwrap();
-            // TODO(#8949): There could be multiple valid IP pools for a given
-            // service, even for a single IP version. For now, use the first
-            // such pool to match existing behavior.
-            let pool = service_pools
-                .pools_for_version(version.into())
-                .first()
-                .ok_or_else(|| {
-                    Error::internal_error(&format!(
-                        "no system services IP pool for IP version {version:?}"
-                    ))
-                })?;
+            // Look up the system-service pool containing this address, if any.
+            let (_authz_pool, db_pool) = self
+                .ip_pool_fetch_containing_address_for_services_on_connection(
+                    opctx,
+                    conn,
+                    external_ip.ip(),
+                )
+                .await?;
 
             // Actually ensure the IP address.
             let kind = z.zone_type.kind();
             self.ensure_external_service_ip(
                 conn,
-                &pool.db_pool,
+                &db_pool,
                 kind,
                 z.id,
                 external_ip,
