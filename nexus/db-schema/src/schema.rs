@@ -1022,6 +1022,9 @@ table! {
         current_sec -> Nullable<Uuid>,
         adopt_generation -> Int8,
         adopt_time -> Timestamptz,
+        abandon_time -> Nullable<Timestamptz>,
+        abandon_reason -> Nullable<crate::enums::SagaAbandonReasonEnum>,
+        abandon_comment -> Nullable<Text>,
     }
 }
 

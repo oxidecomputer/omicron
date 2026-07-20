@@ -514,7 +514,7 @@ digest = "0.10.7"
 dns-server = { path = "dns-server" }
 dns-server-api = { path = "dns-server-api" }
 dns-service-client = { path = "clients/dns-service-client" }
-dpd-client = { git = "https://github.com/oxidecomputer/dendrite", rev = "ab6c1a4326abbcb9f98a459ae74da4995e6b41af" }
+dpd-client = { git = "https://github.com/oxidecomputer/dendrite", rev = "96483d0c52f0cfc4e22e70229466798254a99b6c" }
 dropshot = { version = "0.17.1", features = [ "usdt-probes" ] }
 dropshot-api-manager = "0.7.2"
 dropshot-api-manager-types = "0.7.2"
@@ -614,8 +614,8 @@ libipcc = { git = "https://github.com/oxidecomputer/ipcc-rs", rev = "524eb8f1250
 libnvme = { git = "https://github.com/oxidecomputer/libnvme", rev = "dd5bb221d327a1bc9287961718c3c10d6bd37da0" }
 linear-map = "1.2.0"
 live-tests-macros = { path = "live-tests/macros" }
-lldpd_client = { git = "https://github.com/oxidecomputer/lldp", package = "lldpd-client" }
-lldp_protocol = { git = "https://github.com/oxidecomputer/lldp", package = "protocol" }
+lldpd_client = { git = "https://github.com/oxidecomputer/lldp", rev = "54b266174d4de9628bca9c97b0db176e16f12154", package = "lldpd-client" }
+lldp_protocol = { git = "https://github.com/oxidecomputer/lldp", rev = "54b266174d4de9628bca9c97b0db176e16f12154", package = "protocol" }
 omicron-deployment-graph = { path = "dev-tools/omicron-deployment-graph" }
 macaddr = { version = "1.0.1", features = ["serde_std"] }
 maplit = "1.0.2"
@@ -775,7 +775,7 @@ regress = "0.10.4"
 repo-depot-api = { path = "sled-agent/repo-depot-api" }
 repo-depot-client = { path = "clients/repo-depot-client" }
 reqwest = { version = "0.13", default-features = false }
-rpassword = "7.4.0"
+rpassword = "7.5.0"
 rstest = "0.25.0"
 rustfmt-wrapper = "0.2"
 rustls = "0.23.40"

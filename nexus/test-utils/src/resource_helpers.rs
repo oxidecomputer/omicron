@@ -316,16 +316,18 @@ pub async fn create_ip_pool(
     pool_name: &str,
     ip_range: Option<IpRange>,
 ) -> (IpPool, IpPoolRange) {
-    let pool_params = ip_pool::IpPoolCreate::new(
-        IdentityMetadataCreateParams {
+    let pool_params = ip_pool::IpPoolCreate {
+        identity: IdentityMetadataCreateParams {
             name: pool_name.parse().unwrap(),
             description: String::from("an ip pool"),
         },
-        ip_range
+        ip_version: ip_range
             .as_ref()
             .map(|r| r.version())
             .unwrap_or_else(ip_pool::IpVersion::v4),
-    );
+        pool_type: ip_pool::IpPoolType::Unicast,
+        assignment: ip_pool::IpPoolAssignment::Silos,
+    };
     let pool = object_create(client, "/v1/system/ip-pools", &pool_params).await;
 
     let ip_range = ip_range.unwrap_or_else(|| {
@@ -354,15 +356,17 @@ pub async fn create_multicast_ip_pool(
     let pool = object_create(
         client,
         "/v1/system/ip-pools",
-        &ip_pool::IpPoolCreate::new_multicast(
-            IdentityMetadataCreateParams {
+        &ip_pool::IpPoolCreate {
+            identity: IdentityMetadataCreateParams {
                 name: pool_name.parse().unwrap(),
                 description: String::from("a multicast ip pool"),
             },
-            ip_range
+            ip_version: ip_range
                 .map(|r| r.version())
                 .unwrap_or_else(|| ip_pool::IpVersion::V4),
-        ),
+            pool_type: ip_pool::IpPoolType::Multicast,
+            assignment: ip_pool::IpPoolAssignment::Silos,
+        },
     )
     .await;
 

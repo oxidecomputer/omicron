@@ -103,6 +103,7 @@ define_enums! {
     RotImageErrorEnum => "rot_image_error",
     RotPageWhichEnum => "root_of_trust_page_which",
     RouterRouteKindEnum => "router_route_kind",
+    SagaAbandonReasonEnum => "saga_abandon_reason",
     SagaStateEnum => "saga_state",
     ServiceKindEnum => "service_kind",
     SledCpuFamilyEnum => "sled_cpu_family",
