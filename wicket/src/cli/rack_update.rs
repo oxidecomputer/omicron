@@ -26,13 +26,14 @@ use anyhow::{Context, Result, anyhow, bail};
 use camino::Utf8PathBuf;
 use clap::{Args, Subcommand, ValueEnum};
 use omicron_common::update::ArtifactId;
+use oxide_update_engine_display::{GroupDisplay, LineDisplayStyles};
+use oxide_update_engine_types::buffer::{
+    AbortReason, EventBuffer, ExecutionStatus, FailureReason, StepKey,
+    TerminalKind,
+};
+use oxide_update_engine_types::spec::{EngineSpec, SerializableError};
 use slog::Logger;
 use tokio::{sync::watch, task::JoinHandle};
-use update_engine::{
-    AbortReason, EventBuffer, ExecutionStatus, FailureReason, NestedError,
-    StepKey, StepSpec, TerminalKind,
-    display::{GroupDisplay, LineDisplayStyles},
-};
 use wicket_common::{
     WICKETD_TIMEOUT,
     rack_update::{
@@ -390,7 +391,7 @@ impl StatusArgs {
     }
 }
 
-fn get_exit_message<S: StepSpec>(
+fn get_exit_message<S: EngineSpec>(
     buffer: &EventBuffer<S>,
     key: &StepKey,
 ) -> Option<ExitMessage> {
@@ -702,8 +703,8 @@ impl ClearArgs {
                 }
             }
             MessageFormat::Json => {
-                let response =
-                    response.map_err(|error| NestedError::new(error.as_ref()));
+                let response = response
+                    .map_err(|error| SerializableError::new(error.as_ref()));
                 // Return the response as a JSON object.
                 serde_json::to_writer_pretty(output.stdout, &response)
                     .context("error writing to output")?;
