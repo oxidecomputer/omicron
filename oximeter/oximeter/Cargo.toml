@@ -9,8 +9,8 @@ workspace = true
 
 [dependencies]
 anyhow.workspace = true
-clap.workspace = true
 chrono.workspace = true
+clap.workspace = true
 omicron-workspace-hack.workspace = true
 oximeter-macro-impl.workspace = true
 oximeter-schema.workspace = true

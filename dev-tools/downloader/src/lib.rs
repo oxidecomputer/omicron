@@ -31,6 +31,8 @@ const BUILDOMAT_URL: &'static str =
     "https://buildomat.eng.oxide.computer/public/file";
 const CARGO_HACK_URL: &'static str =
     "https://github.com/taiki-e/cargo-hack/releases/download";
+const TOMBI_URL: &'static str =
+    "https://github.com/tombi-toml/tombi/releases/download";
 
 const RETRY_ATTEMPTS: usize = 3;
 
@@ -74,6 +76,9 @@ enum Target {
 
     /// SoftNPU, an admin program (scadm) and a pre-compiled P4 program.
     Softnpu,
+
+    /// tombi TOML formatter/linter binary.
+    Tombi,
 
     /// Transceiver Control binary
     TransceiverControl,
@@ -142,6 +147,7 @@ pub async fn run_cmd(args: DownloadArgs) -> Result<()> {
                     Target::MaghemiteMgd => downloader.download_maghemite_mgd().await,
                     Target::MaghemiteDdmd => downloader.download_maghemite_ddmd().await,
                     Target::Softnpu => downloader.download_softnpu().await,
+                    Target::Tombi => downloader.download_tombi().await,
                     Target::TransceiverControl => {
                         downloader.download_transceiver_control().await
                     }
@@ -363,7 +369,10 @@ async fn get_values_from_file<const N: usize>(
         }
     }
     if !keys.is_empty() {
-        bail!("Could not find keys: {:?}", keys.keys().collect::<Vec<_>>(),);
+        bail!(
+            "Could not find keys {:?} in {path}",
+            keys.keys().collect::<Vec<_>>(),
+        );
     }
     Ok(values)
 }
@@ -449,30 +458,21 @@ async fn unpack_gzip(
     task.await?
 }
 
-async fn clickhouse_confirm_binary_works(binary: &Utf8Path) -> Result<()> {
+async fn confirm_binary_works(binary: &Utf8Path, args: &[&str]) -> Result<()> {
     let mut cmd = Command::new(binary);
-    cmd.args(["server", "--version"]);
+    cmd.args(args);
 
-    let output =
-        cmd.output().await.context(format!("Failed to run {binary}"))?;
+    let output = cmd
+        .output()
+        .await
+        .with_context(|| format!("Failed to run {binary}"))?;
     if !output.status.success() {
-        let stderr =
-            String::from_utf8(output.stderr).unwrap_or_else(|_| String::new());
-        bail!("{binary} failed: {} (stderr: {stderr})", output.status);
-    }
-    Ok(())
-}
-
-async fn cockroach_confirm_binary_works(binary: &Utf8Path) -> Result<()> {
-    let mut cmd = Command::new(binary);
-    cmd.arg("version");
-
-    let output =
-        cmd.output().await.context(format!("Failed to run {binary}"))?;
-    if !output.status.success() {
-        let stderr =
-            String::from_utf8(output.stderr).unwrap_or_else(|_| String::new());
-        bail!("{binary} failed: {} (stderr: {stderr})", output.status);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        bail!(
+            "{binary} {args:?} failed: {} (stdout: {stdout}, stderr: {stderr})",
+            output.status
+        );
     }
     Ok(())
 }
@@ -566,6 +566,18 @@ async fn download_file_and_verify(
 }
 
 impl Downloader<'_> {
+    async fn read_version_file(&self, filename: &str) -> Result<String> {
+        let path = self.versions_dir.join(filename);
+        let contents = tokio::fs::read_to_string(&path)
+            .await
+            .with_context(|| format!("Failed to read version from {path}"))?;
+        let version = contents.trim();
+        if version.is_empty() {
+            bail!("version file {path} is empty; it should contain a version");
+        }
+        Ok(version.to_string())
+    }
+
     async fn download_cargo_hack(&self) -> Result<()> {
         let os = os_name()?;
         let arch = arch()?;
@@ -580,11 +592,7 @@ impl Downloader<'_> {
         )
         .await?;
 
-        let versions_path = self.versions_dir.join("cargo_hack_version");
-        let version = tokio::fs::read_to_string(&versions_path)
-            .await
-            .context("Failed to read version from {versions_path}")?;
-        let version = version.trim();
+        let version = self.read_version_file("cargo_hack_version").await?;
 
         let (platform, supported_arch) = match (os, arch) {
             (Os::Illumos, Arch::X86_64) => ("unknown-illumos", "x86_64"),
@@ -632,11 +640,7 @@ impl Downloader<'_> {
         )
         .await?;
 
-        let versions_path = self.versions_dir.join("clickhouse_version");
-        let version = tokio::fs::read_to_string(&versions_path)
-            .await
-            .context("Failed to read version from {versions_path}")?;
-        let version = version.trim();
+        let version = self.read_version_file("clickhouse_version").await?;
 
         const S3_BUCKET: &'static str =
             "https://oxide-clickhouse-build.s3.us-west-2.amazonaws.com";
@@ -668,7 +672,8 @@ impl Downloader<'_> {
         let clickhouse_binary = destination_dir.join("clickhouse");
 
         info!(self.log, "Checking that binary works");
-        clickhouse_confirm_binary_works(&clickhouse_binary).await?;
+        confirm_binary_works(&clickhouse_binary, &["server", "--version"])
+            .await?;
 
         Ok(())
     }
@@ -725,10 +730,12 @@ impl Downloader<'_> {
         let binary_dir = destination_dir.join("bin");
         tokio::fs::create_dir_all(&binary_dir).await?;
         let src = tarball_path.with_file_name("cockroach").join("cockroach");
-        tokio::fs::copy(src, &cockroach_binary).await?;
+        tokio::fs::copy(&src, &cockroach_binary).await.with_context(|| {
+            format!("Failed to copy {src} to {cockroach_binary}")
+        })?;
 
         info!(self.log, "Checking that binary works");
-        cockroach_confirm_binary_works(&cockroach_binary).await?;
+        confirm_binary_works(&cockroach_binary, &["version"]).await?;
 
         Ok(())
     }
@@ -1052,6 +1059,79 @@ impl Downloader<'_> {
         )
         .await?;
         set_permissions(&path, 0o755).await?;
+
+        Ok(())
+    }
+
+    async fn download_tombi(&self) -> Result<()> {
+        let download_dir = self.output_dir.join("downloads");
+        let destination_dir = self.output_dir.join("tombi");
+
+        let version = self.read_version_file("tombi_version").await?;
+
+        let (target_triple, checksum_key) = match (os_name()?, arch()?) {
+            (Os::Linux, Arch::X86_64) => {
+                ("x86_64-unknown-linux-musl", "CIDL_SHA256_LINUX_X86_64")
+            }
+            (Os::Linux, Arch::Aarch64) => {
+                ("aarch64-unknown-linux-musl", "CIDL_SHA256_LINUX_AARCH64")
+            }
+            (Os::Mac, Arch::X86_64) => {
+                ("x86_64-apple-darwin", "CIDL_SHA256_DARWIN_X86_64")
+            }
+            (Os::Mac, Arch::Aarch64) => {
+                ("aarch64-apple-darwin", "CIDL_SHA256_DARWIN_AARCH64")
+            }
+            (Os::Illumos, Arch::X86_64) => {
+                ("x86_64-unknown-illumos", "CIDL_SHA256_ILLUMOS")
+            }
+            (Os::Illumos, Arch::Aarch64) => {
+                bail!("tombi does not publish an aarch64 illumos binary")
+            }
+        };
+
+        let checksums_path = self.versions_dir.join("tombi_checksums");
+        let [checksum] =
+            get_values_from_file([checksum_key], &checksums_path).await?;
+
+        let tarball_dirname = format!("tombi-cli-{version}-{target_triple}");
+        let tarball_filename = format!("{tarball_dirname}.tar.gz");
+        let tarball_url = format!("{TOMBI_URL}/v{version}/{tarball_filename}");
+        let tarball_path = download_dir.join(&tarball_filename);
+
+        tokio::fs::create_dir_all(&download_dir).await.with_context(|| {
+            format!("Failed to create download directory {download_dir}")
+        })?;
+        tokio::fs::create_dir_all(&destination_dir).await.with_context(
+            || {
+                format!(
+                    "Failed to create destination directory {destination_dir}"
+                )
+            },
+        )?;
+
+        download_file_and_verify(
+            &self.log,
+            &tarball_path,
+            &tarball_url,
+            ChecksumAlgorithm::Sha2,
+            &checksum,
+        )
+        .await?;
+
+        unpack_tarball(&self.log, &tarball_path, &download_dir).await?;
+
+        // The tombi tarball unpacks to a per-artifact subdir holding a single
+        // `tombi` binary.
+        let unpacked_binary = download_dir.join(&tarball_dirname).join("tombi");
+        let tombi_binary = destination_dir.join("tombi");
+        tokio::fs::copy(&unpacked_binary, &tombi_binary).await.with_context(
+            || format!("Failed to copy {unpacked_binary} to {tombi_binary}"),
+        )?;
+        set_permissions(&tombi_binary, 0o755).await?;
+
+        info!(self.log, "Checking that binary works");
+        confirm_binary_works(&tombi_binary, &["--version"]).await?;
 
         Ok(())
     }

@@ -9,15 +9,15 @@ workspace = true
 
 [dependencies]
 anyhow.workspace = true
-omicron-workspace-hack.workspace = true
-omicron-common.workspace = true
-tufaceous-artifact.workspace = true
-sha2.workspace = true
-serde_json.workspace = true
-clap.workspace = true
 camino.workspace = true
-uuid.workspace = true
+clap.workspace = true
 iddqd.workspace = true
+omicron-common.workspace = true
+omicron-workspace-hack.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+tufaceous-artifact.workspace = true
+uuid.workspace = true
 
 [[bin]]
 name = "corpus-adjust"

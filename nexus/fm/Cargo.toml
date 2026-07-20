@@ -20,8 +20,8 @@ omicron-rpaths.workspace = true
 anyhow.workspace = true
 chrono.workspace = true
 iddqd.workspace = true
-nexus-types.workspace = true
 nexus-db-model.workspace = true
+nexus-types.workspace = true
 omicron-common.workspace = true
 omicron-uuid-kinds.workspace = true
 # See omicron-rpaths for more about the "pq-sys" dependency.
@@ -29,21 +29,21 @@ pq-sys = "*"
 rand.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-strum.workspace = true
 slog.workspace = true
 slog-error-chain.workspace = true
+strum.workspace = true
 thiserror.workspace = true
 typed-rng.workspace = true
 
+ereport-types = { workspace = true, optional = true }
+nexus-reconfigurator-planning = { workspace = true, optional = true }
 # deps for test utils
 omicron-test-utils = { workspace = true, optional = true }
-nexus-reconfigurator-planning = { workspace = true, optional = true }
-ereport-types = { workspace = true, optional = true }
 
 omicron-workspace-hack.workspace = true
 
 [dev-dependencies]
-omicron-test-utils.workspace = true
+ereport-types.workspace = true
 nexus-inventory.workspace = true
 nexus-reconfigurator-planning.workspace = true
-ereport-types.workspace = true
+omicron-test-utils.workspace = true

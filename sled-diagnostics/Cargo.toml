@@ -29,7 +29,7 @@ slog-error-chain.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["full"] }
 zfs-test-harness.workspace = true
-zip = { workspace = true, features = ["jiff-02","zstd"] }
+zip = { workspace = true, features = ["jiff-02", "zstd"] }
 
 [dev-dependencies]
 omicron-common.workspace = true

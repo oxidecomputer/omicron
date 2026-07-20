@@ -10,6 +10,7 @@ workspace = true
 
 [dependencies]
 digest.workspace = true
+omicron-workspace-hack.workspace = true
 rand.workspace = true
 schemars.workspace = true
 secrecy.workspace = true
@@ -17,18 +18,15 @@ serde.workspace = true
 subtle.workspace = true
 thiserror.workspace = true
 zeroize.workspace = true
-omicron-workspace-hack.workspace = true
 
 [dev-dependencies]
 proptest.workspace = true
 test-strategy.workspace = true
 
 [features]
-
-
 # Impl `PartialEq` and `Eq` for types implementing `subtle::ConstantTimeEq` when
 # this feature is enabled.
-# 
+#
 # This is of unknown risk. The rust compiler may obviate the security of using
 # subtle when we do this. On the other hand its very useful for testing and
 # debugging outside of production.

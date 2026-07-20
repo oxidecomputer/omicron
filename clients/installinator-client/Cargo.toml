@@ -10,6 +10,7 @@ workspace = true
 [dependencies]
 omicron-common.workspace = true
 omicron-uuid-kinds.workspace = true
+omicron-workspace-hack.workspace = true
 progenitor.workspace = true
 regress.workspace = true
 reqwest = { workspace = true, features = ["rustls", "stream"] }
@@ -18,4 +19,3 @@ serde.workspace = true
 serde_json.workspace = true
 slog.workspace = true
 update-engine.workspace = true
-omicron-workspace-hack.workspace = true

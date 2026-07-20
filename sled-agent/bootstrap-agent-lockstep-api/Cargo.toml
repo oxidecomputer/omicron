@@ -8,8 +8,8 @@ license = "MPL-2.0"
 workspace = true
 
 [dependencies]
-dropshot.workspace = true
 bootstrap-agent-lockstep-types.workspace = true
+dropshot.workspace = true
 omicron-uuid-kinds.workspace = true
 
 omicron-workspace-hack.workspace = true

@@ -15,8 +15,9 @@ clap.workspace = true
 iddqd.workspace = true
 indent_write.workspace = true
 itertools.workspace = true
-omicron-deployment-graph.workspace = true
 newtype_derive.workspace = true
+omicron-deployment-graph.workspace = true
+omicron-workspace-hack.workspace = true
 omicron-zone-package.workspace = true
 parse-display.workspace = true
 petgraph.workspace = true
@@ -24,7 +25,6 @@ serde.workspace = true
 swrite.workspace = true
 thiserror.workspace = true
 toml.workspace = true
-omicron-workspace-hack.workspace = true
 
 [dev-dependencies]
 expectorate.workspace = true

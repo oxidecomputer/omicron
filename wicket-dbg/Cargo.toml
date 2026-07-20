@@ -18,14 +18,14 @@ oxide-tokio-rt.workspace = true
 serde.workspace = true
 slog.workspace = true
 slog-async.workspace = true
-slog-term.workspace = true
 slog-envlogger.workspace = true
+slog-term.workspace = true
 tokio = { workspace = true, features = ["full"] }
 wicket.workspace = true
 
+omicron-workspace-hack.workspace = true
 # used only by wicket-dbg binary
 reedline.workspace = true
-omicron-workspace-hack.workspace = true
 slog-error-chain.workspace = true
 
 [[bin]]

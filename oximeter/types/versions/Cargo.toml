@@ -8,7 +8,7 @@ license = "MPL-2.0"
 workspace = true
 
 [dependencies]
-bytes = { workspace = true, features = [ "serde" ] }
+bytes = { workspace = true, features = ["serde"] }
 chrono.workspace = true
 float-ord.workspace = true
 num.workspace = true
@@ -16,7 +16,7 @@ omicron-common.workspace = true
 omicron-workspace-hack.workspace = true
 parse-display.workspace = true
 regex.workspace = true
-schemars = { workspace = true, features = [ "uuid1", "bytes", "chrono" ] }
+schemars = { workspace = true, features = ["uuid1", "bytes", "chrono"] }
 serde.workspace = true
 strum.workspace = true
 thiserror.workspace = true

@@ -16,24 +16,24 @@ chrono.workspace = true
 debug-ignore.workspace = true
 display-error-chain.workspace = true
 dropshot.workspace = true
+flate2.workspace = true
+fs-err = { workspace = true, features = ["tokio"] }
 futures.workspace = true
 hex.workspace = true
 hubtools.workspace = true
 omicron-common.workspace = true
+omicron-workspace-hack.workspace = true
+semver.workspace = true
 sha2.workspace = true
 slog.workspace = true
+tar.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
 tough.workspace = true
-tufaceous-lib.workspace = true
-omicron-workspace-hack.workspace = true
-tufaceous-brand-metadata.workspace = true
-tar.workspace = true
-flate2.workspace = true
-fs-err = { workspace = true, features = ["tokio"] }
-semver.workspace = true
 tufaceous-artifact.workspace = true
+tufaceous-brand-metadata.workspace = true
+tufaceous-lib.workspace = true
 
 [dev-dependencies]
 clap.workspace = true

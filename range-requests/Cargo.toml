@@ -13,11 +13,11 @@ bytes.workspace = true
 dropshot.workspace = true
 futures.workspace = true
 http.workspace = true
-http-range.workspace = true
 http-body-util.workspace = true
+http-range.workspace = true
 hyper.workspace = true
-thiserror.workspace = true
 omicron-workspace-hack.workspace = true
+thiserror.workspace = true
 
 [dev-dependencies]
 http-body.workspace = true

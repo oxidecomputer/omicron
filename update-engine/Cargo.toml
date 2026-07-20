@@ -19,18 +19,23 @@ indent_write.workspace = true
 indexmap.workspace = true
 libsw.workspace = true
 linear-map.workspace = true
+omicron-workspace-hack.workspace = true
 owo-colors.workspace = true
 petgraph.workspace = true
+schemars = { workspace = true, features = ["uuid1"] }
 serde.workspace = true
 serde_json.workspace = true
 serde_with.workspace = true
-schemars = { workspace = true, features = ["uuid1"] }
 slog.workspace = true
 swrite.workspace = true
-tokio = { workspace = true, features = ["macros", "sync", "time", "rt-multi-thread"] }
+tokio = { workspace = true, features = [
+    "macros",
+    "sync",
+    "time",
+    "rt-multi-thread"
+] }
 unicode-width.workspace = true
 uuid.workspace = true
-omicron-workspace-hack.workspace = true
 
 [dev-dependencies]
 buf-list.workspace = true

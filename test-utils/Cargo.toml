@@ -21,25 +21,25 @@ http.workspace = true
 libc.workspace = true
 nexus-config.workspace = true
 omicron-common.workspace = true
+omicron-workspace-hack.workspace = true
 oxide-tokio-rt.workspace = true
 pem.workspace = true
 port-file.workspace = true
+rcgen.workspace = true
 regex.workspace = true
+reqwest.workspace = true
 rustls.workspace = true
+sha2.workspace = true
 slog.workspace = true
+slog-error-chain.workspace = true
 subprocess.workspace = true
-thiserror.workspace = true
 tar.workspace = true
+thiserror.workspace = true
 tokio = { workspace = true, features = ["full"] }
 tokio-postgres.workspace = true
 usdt.workspace = true
-rcgen.workspace = true
-reqwest.workspace = true
-sha2.workspace = true
-walkdir.workspace = true
-omicron-workspace-hack.workspace = true
 uuid.workspace = true
-slog-error-chain.workspace = true
+walkdir.workspace = true
 
 [dev-dependencies]
 chrono.workspace = true

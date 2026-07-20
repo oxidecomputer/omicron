@@ -12,9 +12,9 @@ cockroach-admin-types.workspace = true
 futures.workspace = true
 parallel-task-set.workspace = true
 reqwest.workspace = true
+serde.workspace = true
 serde_json.workspace = true
 slog.workspace = true
-serde.workspace = true
 strum.workspace = true
 tokio.workspace = true
 

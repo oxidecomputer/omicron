@@ -12,6 +12,6 @@ workspace = true
 anyhow.workspace = true
 dropshot.workspace = true
 omicron-test-utils = { workspace = true, features = ["seed-gen"] }
+omicron-workspace-hack.workspace = true
 slog.workspace = true
 tokio.workspace = true
-omicron-workspace-hack.workspace = true

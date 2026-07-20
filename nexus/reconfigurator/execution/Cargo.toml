@@ -12,12 +12,12 @@ omicron-rpaths.workspace = true
 [dependencies]
 anyhow.workspace = true
 camino.workspace = true
+chrono.workspace = true
 clickhouse-admin-keeper-client.workspace = true
 clickhouse-admin-server-client.workspace = true
 clickhouse-admin-single-client.workspace = true
 clickhouse-admin-types.workspace = true
 cockroach-admin-client.workspace = true
-chrono.workspace = true
 futures.workspace = true
 iddqd.workspace = true
 internal-dns-resolver.workspace = true
@@ -61,9 +61,9 @@ ipnet.workspace = true
 ipnetwork.workspace = true
 nexus-db-queries = { workspace = true, features = ["testing"] }
 nexus-db-schema.workspace = true
+nexus-inventory.workspace = true
 nexus-reconfigurator-planning.workspace = true
 nexus-reconfigurator-preparation.workspace = true
-nexus-inventory.workspace = true
 nexus-test-utils.workspace = true
 nexus-test-utils-macros.workspace = true
 omicron-nexus.workspace = true

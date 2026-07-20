@@ -15,13 +15,15 @@ colored.workspace = true
 daft.workspace = true
 iddqd.workspace = true
 omicron-repl-utils.workspace = true
-reedline.workspace = true
 reconfigurator-cli.workspace = true
+reedline.workspace = true
 serde_json.workspace = true
 sled-hardware-types.workspace = true
 slog.workspace = true
 tabled.workspace = true
-trust-quorum-protocol = { workspace = true, features = ["danger_partial_eq_ct_wrapper"] }
+trust-quorum-protocol = { workspace = true, features = [
+    "danger_partial_eq_ct_wrapper"
+] }
 trust-quorum-test-utils.workspace = true
 
 omicron-workspace-hack.workspace = true

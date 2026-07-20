@@ -25,13 +25,14 @@ hkdf.workspace = true
 iddqd.workspace = true
 omicron-ledger.workspace = true
 omicron-uuid-kinds.workspace = true
+omicron-workspace-hack.workspace = true
 rand = { workspace = true, features = ["os_rng"] }
 secrecy.workspace = true
 serde.workspace = true
 serde_with.workspace = true
 sha3.workspace = true
-sled-agent-types.workspace = true
 sled-agent-measurements.workspace = true
+sled-agent-types.workspace = true
 sled-hardware-types.workspace = true
 slog.workspace = true
 slog-error-chain.workspace = true
@@ -44,7 +45,6 @@ trust-quorum-protocol.workspace = true
 trust-quorum-types.workspace = true
 uuid.workspace = true
 zeroize.workspace = true
-omicron-workspace-hack.workspace = true
 
 [dev-dependencies]
 assert_matches.workspace = true
@@ -54,7 +54,7 @@ omicron-test-utils.workspace = true
 proptest.workspace = true
 serde_json.workspace = true
 sled-hardware-types.workspace = true
+sprockets-tls-test-utils.workspace = true
 test-strategy.workspace = true
 trust-quorum-protocol = { workspace = true, features = ["testing"] }
 trust-quorum-test-utils.workspace = true
-sprockets-tls-test-utils.workspace = true

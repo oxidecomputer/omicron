@@ -11,9 +11,9 @@ omicron-rpaths.workspace = true
 
 [dependencies]
 ipnetwork.workspace = true
-nexus-switch-config.workspace = true
 nexus-db-model.workspace = true
 nexus-db-queries.workspace = true
+nexus-switch-config.workspace = true
 omicron-common.workspace = true
 omicron-uuid-kinds.workspace = true
 omicron-workspace-hack.workspace = true
