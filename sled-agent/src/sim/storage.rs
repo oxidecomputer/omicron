@@ -24,10 +24,8 @@ use dropshot::HandlerTaskMode;
 use dropshot::HttpError;
 use illumos_utils::zfs::DatasetProperties;
 use omicron_common::api::external::ByteCount;
-use omicron_common::disk::DatasetManagementStatus;
 use omicron_common::disk::DatasetName;
 use omicron_common::disk::DatasetsConfig;
-use omicron_common::disk::DatasetsManagementResult;
 use omicron_common::disk::DiskIdentity;
 use omicron_common::disk::DiskVariant;
 use omicron_common::disk::OmicronPhysicalDisksConfig;
@@ -472,12 +470,21 @@ impl CrucibleDataInner {
 #[cfg(test)]
 mod test {
     use super::*;
-    use omicron_common::api::external::Generation;
     use omicron_common::disk::DatasetConfig;
     use omicron_common::disk::DatasetKind;
     use omicron_common::disk::DatasetName;
     use omicron_common::zpool_name::ZpoolName;
     use omicron_test_utils::dev::test_setup_log;
+
+    fn append_dataset_to_config(
+        storage: &mut StorageInner,
+        dataset: DatasetConfig,
+    ) {
+        let mut config = storage.omicron_sled_config().unwrap_or_default();
+        config.datasets.insert_overwrite(dataset);
+        config.generation = config.generation.next();
+        storage.set_omicron_config(config).expect("set new config");
+    }
 
     /// Validate that the simulated Crucible agent reuses ports when regions are
     /// deleted.
@@ -786,21 +793,15 @@ mod test {
         let dataset_id = DatasetUuid::new_v4();
         let dataset_name = DatasetName::new(zpool_name, DatasetKind::Debug);
 
-        let config = DatasetsConfig {
-            generation: Generation::new(),
-            datasets: BTreeMap::from([(
-                dataset_id,
-                DatasetConfig {
-                    id: dataset_id,
-                    name: dataset_name.clone(),
-                    inner: SharedDatasetConfig::default(),
-                },
-            )]),
-        };
-
         // Create the debug dataset on which we'll store everything else.
-        let result = storage.datasets_ensure(config).unwrap();
-        assert!(!result.has_error());
+        append_dataset_to_config(
+            &mut storage,
+            DatasetConfig {
+                id: dataset_id,
+                name: dataset_name.clone(),
+                inner: SharedDatasetConfig::default(),
+            },
+        );
 
         // The list of nested datasets should only contain the root dataset.
         let nested_datasets = storage
@@ -895,21 +896,16 @@ mod test {
         let dataset_id = DatasetUuid::new_v4();
         let dataset_name = DatasetName::new(zpool_name, DatasetKind::Debug);
 
-        let config = DatasetsConfig {
-            generation: Generation::new(),
-            datasets: BTreeMap::from([(
-                dataset_id,
-                DatasetConfig {
-                    id: dataset_id,
-                    name: dataset_name.clone(),
-                    inner: SharedDatasetConfig::default(),
-                },
-            )]),
-        };
-
         // Create the debug dataset on which we'll store everything else.
-        let result = storage.datasets_ensure(config).unwrap();
-        assert!(!result.has_error());
+        append_dataset_to_config(
+            &mut storage,
+            DatasetConfig {
+                id: dataset_id,
+                name: dataset_name.clone(),
+                inner: SharedDatasetConfig::default(),
+            },
+        );
+
         let nested_dataset_root = NestedDatasetLocation {
             path: String::new(),
             root: dataset_name.clone(),
@@ -1520,33 +1516,6 @@ impl StorageInner {
         }
 
         return Err(HttpError::for_not_found(None, "Dataset not found".into()));
-    }
-
-    /// Splats a legacy `DatasetsConfig` onto the `OmicronSledConfig` held by
-    /// this sim sled-agent, preserving any ledgered disks and zones.
-    ///
-    /// This is a stepping stone for tests that still manage datasets
-    /// separately from the rest of the sled config; new callers should build
-    /// a full `OmicronSledConfig` and use `set_omicron_config()` instead.
-    pub fn datasets_ensure(
-        &mut self,
-        config: DatasetsConfig,
-    ) -> Result<DatasetsManagementResult, HttpError> {
-        let mut sled_config = self.sled_config.clone().unwrap_or_default();
-        sled_config.generation = config.generation;
-        sled_config.datasets = config.datasets.values().cloned().collect();
-        self.set_omicron_config(sled_config)?;
-
-        Ok(DatasetsManagementResult {
-            status: config
-                .datasets
-                .into_values()
-                .map(|config| DatasetManagementStatus {
-                    dataset_name: config.name,
-                    err: None,
-                })
-                .collect(),
-        })
     }
 
     pub fn nested_dataset_list(
