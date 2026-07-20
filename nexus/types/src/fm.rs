@@ -14,7 +14,7 @@ pub mod case;
 pub use case::Case;
 pub mod fact;
 pub use fact::{DiskFact, FactPayload, ZpoolUnhealthyFactPayload};
-pub mod json_display;
+pub mod display;
 
 use case::AlertRequest;
 use chrono::{DateTime, Utc};
