@@ -84,10 +84,8 @@ impl BiHashItem for ParsedDiskCase {
 /// sitrep with no path to closure.
 #[derive(Debug, Eq, PartialEq, thiserror::Error)]
 enum UninterpretableCase {
-    #[error(
-        "fact {fact_id} does not belong to the physical-disk diagnosis engine"
-    )]
-    ForeignFactPayload { fact_id: FactUuid },
+    #[error(transparent)]
+    ForeignFact(#[from] fm::case::ForeignFact),
     #[error(
         "facts reference different physical disks ({expected} and {found}, \
          1 expected)"
@@ -105,11 +103,7 @@ fn parse_case(case: &fm::Case) -> Result<ParsedDiskCase, UninterpretableCase> {
     for fact in case.facts.iter() {
         // Every fact on a physical-disk case must carry a physical-disk
         // payload; a foreign payload is a data-model violation.
-        let Some(disk_fact) = fact.payload.as_physical_disk() else {
-            return Err(UninterpretableCase::ForeignFactPayload {
-                fact_id: fact.metadata.id,
-            });
-        };
+        let disk_fact = fact.as_physical_disk()?;
         match disk_fact {
             DiskFact::ZpoolUnhealthy(payload) => {
                 let payload = *payload;
@@ -184,6 +178,11 @@ pub(super) fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
             Err(reason) => {
                 // Close the cases we couldn't interpret, so they don't ride
                 // along as open-but-unprocessable in every future sitrep.
+                builder
+                    .log_warning("closing uninterpretable Disk case")
+                    .kv("case_id", case.id)
+                    .kv("reason", reason.to_string())
+                    .finish();
                 builder
                     .cases
                     .case_mut(&case.id)
@@ -420,14 +419,11 @@ mod tests {
                 s,
             ))
         });
-        let builder = Input::builder(
-            parent,
-            Arc::new(collection),
-            Arc::new(in_service),
-            Arc::new(IdOrdMap::new()),
-        )
-        .expect("input builder should accept fresh inventory");
-        let (input, _report) = builder.build();
+        let builder = Input::builder(parent, Arc::new(collection))
+            .expect("input builder should accept fresh inventory")
+            .in_service_disks(Arc::new(in_service))
+            .with_empty_defaults();
+        let (input, _report) = builder.build().expect("all inputs provided");
         input
     }
 

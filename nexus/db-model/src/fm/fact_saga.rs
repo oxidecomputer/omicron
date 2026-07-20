@@ -83,12 +83,12 @@ fn saga_progress_state(state: SagaState) -> Result<SagaProgressState, Error> {
     match state {
         SagaState::Running => Ok(SagaProgressState::Running),
         SagaState::Unwinding => Ok(SagaProgressState::Unwinding),
-        SagaState::Done | SagaState::Abandoned => {
-            Err(Error::internal_error(&format!(
-                "fm_fact_saga row has saga_state {state:?}, which is never \
-                 recorded on a NotProgressing saga fact"
-            )))
-        }
+        SagaState::Done | SagaState::Abandoned => Err(Error::InternalError {
+            internal_message: format!(
+                "fm_fact_saga row has saga_state {state:?}, which is \
+                     never recorded on a NotProgressing saga fact"
+            ),
+        }),
     }
 }
 
@@ -218,8 +218,11 @@ impl FmFactSaga {
 }
 
 fn missing_column(kind: FmFactSagaKind, column: &str) -> Error {
-    Error::internal_error(&format!(
-        "fm_fact_saga row of kind {kind:?} has a NULL {column}, violating the \
-         CHECK constraint requiring it to be non-NULL for this kind"
-    ))
+    Error::InternalError {
+        internal_message: format!(
+            "fm_fact_saga row of kind {kind:?} has a NULL {column}, \
+             violating the CHECK constraint requiring it to be non-NULL for \
+             this kind"
+        ),
+    }
 }

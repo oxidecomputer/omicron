@@ -313,8 +313,6 @@ impl DataStore {
         &self,
         opctx: &OpContext,
     ) -> Result<Vec<db::saga_types::SagaSummary>, Error> {
-        const UNFINISHED_STATES: &[SagaState] =
-            &[SagaState::Running, SagaState::Unwinding, SagaState::Abandoned];
         let mut sagas = vec![];
         let mut paginator = Paginator::new(
             SQL_BATCH_SIZE,
@@ -325,7 +323,7 @@ impl DataStore {
             use nexus_db_schema::schema::saga::dsl;
 
             let batch = paginated(dsl::saga, dsl::id, &p.current_pagparams())
-                .filter(dsl::saga_state.eq_any(UNFINISHED_STATES))
+                .filter(dsl::saga_state.ne(SagaState::Done))
                 .select(db::saga_types::SagaSummaryRow::as_select())
                 .load_async(&*conn)
                 .await

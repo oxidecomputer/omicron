@@ -8096,7 +8096,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_fact_saga (
     -- not that others are NULL, so future kinds may share columns.
     CONSTRAINT not_progressing_columns_present CHECK (
         kind != 'not_progressing' OR (
-            saga_state IS NOT NULL
+            saga_state IN ('running', 'unwinding')
             AND last_event_time IS NOT NULL
         )
     ),

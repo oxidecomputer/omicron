@@ -188,6 +188,27 @@ impl FmAnalysis {
                 };
             }
             Err(PreparationError::InvalidInputs(
+                err @ InvalidInputs::MissingInput { .. },
+            )) => {
+                // A missing input is a bug in this task: `prepare_inputs`
+                // must provide every required input to the builder.
+                let error = InlineErrorChain::new(&err);
+                slog::error!(
+                    opctx.log,
+                    "fault management analysis preparation failed";
+                    &error,
+                );
+                return FmAnalysisStatus {
+                    parent_sitrep_id,
+                    inv_collection_id: Some(inv_collection_id),
+                    known_classes,
+                    outcome: status::Outcome::PreparationError(
+                        error.to_string(),
+                    ),
+                    warnings,
+                };
+            }
+            Err(PreparationError::InvalidInputs(
                 InvalidInputs::InventoryStale {
                     parent_inv_id,
                     next_inv_min_time_started,
@@ -251,12 +272,10 @@ impl FmAnalysis {
         let observed_sagas =
             Arc::new(self.prepare_observed_sagas(opctx).await?);
 
-        let mut builder = fm::analysis_input::Input::builder(
-            parent_sitrep.clone(),
-            inv,
-            in_service_disks,
-            observed_sagas,
-        )?;
+        let mut builder =
+            fm::analysis_input::Input::builder(parent_sitrep.clone(), inv)?
+                .in_service_disks(in_service_disks)
+                .observed_sagas(observed_sagas);
         self.load_ereporter_restarts(opctx, &mut builder)
             .await
             .context("failed to load ereporter restarts")?;
@@ -278,7 +297,7 @@ impl FmAnalysis {
         .await
         .context("failed to load existing support bundle markers")?;
 
-        let (input, report) = builder.build();
+        let (input, report) = builder.build()?;
         Ok((input, status::PreparationStatus { warnings, report }))
     }
 
@@ -380,11 +399,7 @@ impl FmAnalysis {
             self.datastore
                 .get_db_metadata_nexus_in_state(
                     opctx,
-                    vec![
-                        DbMetadataNexusState::Active,
-                        DbMetadataNexusState::NotYet,
-                        DbMetadataNexusState::Quiesced,
-                    ],
+                    DbMetadataNexusState::ALL.to_vec(),
                 )
                 .await
                 .context("failed to load db_metadata_nexus records")?

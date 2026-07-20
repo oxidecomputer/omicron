@@ -1034,7 +1034,7 @@ mod tests {
             )
             .expect("input builder should accept fresh inventory");
         builder.add_unmarked_ereports(new_ereports);
-        let (input, report) = builder.build();
+        let (input, report) = builder.build().expect("all inputs provided");
         eprintln!("\n--- inputs ---\n{}", report.display_multiline(0));
         input
     }

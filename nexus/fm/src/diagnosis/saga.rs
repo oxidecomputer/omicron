@@ -57,8 +57,8 @@ struct ParsedSagaCase {
 /// sitrep with no path to closure.
 #[derive(Debug, Eq, PartialEq, thiserror::Error)]
 enum UninterpretableCase {
-    #[error("fact {fact_id} does not belong to the saga diagnosis engine")]
-    ForeignFactPayload { fact_id: FactUuid },
+    #[error(transparent)]
+    ForeignFact(#[from] fm::case::ForeignFact),
     #[error(
         "facts reference different sagas ({expected} and {found}, 1 expected)"
     )]
@@ -82,11 +82,7 @@ fn parse_case(case: &fm::Case) -> Result<ParsedSagaCase, UninterpretableCase> {
     // `case.facts` iterates in fact UUID order, so the kept fact for
     // each kind is deterministically the one with the lowest UUID.
     for fact in case.facts.iter() {
-        let Some(saga_fact) = fact.payload.as_saga() else {
-            return Err(UninterpretableCase::ForeignFactPayload {
-                fact_id: fact.metadata.id,
-            });
-        };
+        let saga_fact = fact.as_saga()?;
         let this_saga = saga_fact.saga_id();
         let expected = *saga_id.get_or_insert(this_saga);
         if expected != this_saga {
@@ -133,9 +129,9 @@ fn parse_case(case: &fm::Case) -> Result<ParsedSagaCase, UninterpretableCase> {
 
 pub(super) fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
     let input = builder.input();
-    // Reference the latest inventory for a concept of "now" when determining
-    // staleness. This makes analysis deterministic and reproducible in tests.
-    let reference_time = input.inventory().time_done;
+    // Staleness is judged against the input's deterministic "now"; see
+    // `Input::reference_time`.
+    let reference_time = input.reference_time();
     let observed_sagas = input.observed_sagas();
 
     // Parse the Saga cases copied forward from the parent sitrep. Every case
@@ -156,6 +152,11 @@ pub(super) fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
                 parent_cases.insert(case.id, parsed_case);
             }
             Err(reason) => {
+                builder
+                    .log_warning("closing uninterpretable Saga case")
+                    .kv("case_id", case.id)
+                    .kv("reason", reason.to_string())
+                    .finish();
                 builder
                     .cases
                     .case_mut(&case.id)
@@ -310,8 +311,13 @@ pub(super) fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
             }
         }
 
-        // Abandoned: same reconciliation. The payload has no fields that can
-        // change, so it only ever drops when the condition clears.
+        // Ensure we have attached "saga has been abandoned" facts to
+        // cases which need them.
+        //
+        // Note that we don't try to replace abandonment facts with newer ones:
+        // these facts only include the saga ID, so they can't change for the
+        // duration of the case. That said, we still need to add/remove them in
+        // their entirety if the state changes.
         let carried_abandoned = parent.and_then(|(_, p)| p.abandoned.as_ref());
         if carried_abandoned.map(|(_, p)| p)
             != desired_abandoned.as_ref().map(|(payload, _)| payload)
@@ -323,9 +329,6 @@ pub(super) fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
                 );
             }
             if let Some((payload, info)) = desired_abandoned {
-                // Human-readable context (which a promoted problem would
-                // otherwise look up from the saga row) goes in the comment,
-                // not the payload.
                 let abandoned_how = match info.reason {
                     SagaAbandonReason::Omdb => format!(
                         "abandoned by an operator via omdb at {} ({})",
@@ -493,14 +496,11 @@ mod tests {
                 s,
             ))
         });
-        let builder = Input::builder(
-            parent,
-            Arc::new(collection),
-            Arc::new(IdOrdMap::new()),
-            Arc::new(observed),
-        )
-        .expect("input builder should accept fresh inventory");
-        builder.build().0
+        let builder = Input::builder(parent, Arc::new(collection))
+            .expect("input builder should accept fresh inventory")
+            .observed_sagas(Arc::new(observed))
+            .with_empty_defaults();
+        builder.build().expect("all inputs provided").0
     }
 
     fn run_analyze(

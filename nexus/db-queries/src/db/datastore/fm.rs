@@ -45,6 +45,7 @@ use nexus_types::fm::Sitrep;
 use nexus_types::support_bundle::{BundleData, BundleDataSelection};
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
+use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::ListResultVec;
 use omicron_uuid_kinds::AlertKind;
 use omicron_uuid_kinds::AlertUuid;
@@ -138,11 +139,13 @@ fn insert_fact_for_case(
     fact: fm::case::Fact,
 ) -> Result<(), Error> {
     let id = fact.metadata.id;
-    by_case.entry(case_id).or_default().insert_unique(fact).map_err(|_| {
+    by_case.entry(case_id).or_default().insert_unique(fact).map_err(|err| {
         let internal_message = format!(
             "encountered multiple case facts for case {case_id} with the same \
              fact UUID {id}. this should really not be possible, as the fact \
-             UUID is a primary key!",
+             UUID is a primary key! existing fact: {:?}; new fact: {:?}",
+            err.duplicates()[0].payload,
+            err.new_item().payload,
         );
         Error::InternalError { internal_message }
     })
@@ -568,7 +571,10 @@ impl DataStore {
             paginator = p.found_batch(&batch, &|f| f.id);
             for row in batch {
                 let case_id: CaseUuid = row.case_id.into();
-                let fact = row.into_fact()?;
+                let fact_id = row.id;
+                let fact = row.into_fact().with_internal_context(|| {
+                    format!("failed to read fact {fact_id} on case {case_id}")
+                })?;
                 insert_fact_for_case(&mut by_case, case_id, fact)?;
             }
         }
@@ -594,7 +600,10 @@ impl DataStore {
             paginator = p.found_batch(&batch, &|f| f.id);
             for row in batch {
                 let case_id: CaseUuid = row.case_id.into();
-                let fact = row.into_fact()?;
+                let fact_id = row.id;
+                let fact = row.into_fact().with_internal_context(|| {
+                    format!("failed to read fact {fact_id} on case {case_id}")
+                })?;
                 insert_fact_for_case(&mut by_case, case_id, fact)?;
             }
         }

@@ -12,6 +12,7 @@
 //! [`Case`]: super::case::Case
 //! [`Metadata::de`]: super::case::Metadata::de
 
+use crate::fm::DiagnosisEngineKind;
 use crate::inventory::ZpoolHealth;
 use crate::observed_saga::{OrphanedReason, SagaProgressState};
 use chrono::{DateTime, Utc};
@@ -47,6 +48,14 @@ impl From<SagaFact> for FactPayload {
 }
 
 impl FactPayload {
+    /// The diagnosis engine that owns this payload's variant.
+    pub fn engine(&self) -> DiagnosisEngineKind {
+        match self {
+            FactPayload::PhysicalDisk(_) => DiagnosisEngineKind::PhysicalDisk,
+            FactPayload::Saga(_) => DiagnosisEngineKind::Saga,
+        }
+    }
+
     /// The physical-disk payload, or `None` if this fact belongs to a
     /// different diagnosis engine.
     pub fn as_physical_disk(&self) -> Option<&DiskFact> {
@@ -143,11 +152,11 @@ impl SagaFact {
 
 /// Payload of a [`SagaFact::NotProgressing`] fact.
 ///
-/// Payloads carry only the fields that define the condition: the subject's
-/// ID, plus the parameters whose change means the condition itself changed
-/// (which rotates the fact). Anything a human wants for presentation (e.g.,
-/// the saga's name) is looked up from the database when a case is acted on;
-/// a case is only open while its saga row still exists.
+/// Since we carry the saga ID here, we can infer a lot of extra information
+/// from the saga itself (e.g., the name) by looking the saga up by ID. For this
+/// fact, we only carry that minimal data, plus "what state has it been observed
+/// in" and "when", which are values that might change in subsequent iterations
+/// of sitrep generation.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct SagaNotProgressingFactPayload {
     /// The saga this fact (and its parent case) is about.
@@ -164,8 +173,8 @@ pub struct SagaNotProgressingFactPayload {
 
 /// Payload of a [`SagaFact::OwnerNotCurrentGeneration`] fact.
 ///
-/// See [`SagaNotProgressingFactPayload`] for why payloads carry only
-/// condition-defining fields.
+/// See [`SagaNotProgressingFactPayload`] for why we're storing the saga
+/// ID and as little else as possible.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct SagaOwnerNotCurrentFactPayload {
     /// The saga this fact (and its parent case) is about.

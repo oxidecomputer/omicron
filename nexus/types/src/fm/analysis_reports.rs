@@ -659,24 +659,28 @@ impl fmt::Display for InputReportMultilineDisplay<'_> {
                     last_event_time,
                     owner_state,
                 } = saga;
-                write!(f, "{:indent$}* saga {saga_id} ({saga_name}): ", "")?;
+                writeln!(f, "{:indent$}* saga {saga_id} ({saga_name}):", "")?;
+                let indent = indent + 2;
+                write!(f, "{:indent$}state: ", "")?;
                 match saga_state {
-                    ObservedSagaState::Running => write!(f, "Running")?,
-                    ObservedSagaState::Unwinding => write!(f, "Unwinding")?,
-                    ObservedSagaState::Abandoned(info) => write!(
+                    ObservedSagaState::Running => writeln!(f, "Running")?,
+                    ObservedSagaState::Unwinding => writeln!(f, "Unwinding")?,
+                    ObservedSagaState::Abandoned(info) => writeln!(
                         f,
                         "Abandoned at {} ({:?}: {})",
                         info.time, info.reason, info.comment,
                     )?,
                 }
-                write!(f, ", last event: ")?;
+                write!(f, "{:indent$}last event: ", "")?;
                 match last_event_time {
-                    Some(t) => write!(f, "{t}")?,
-                    None => write!(f, "<none recorded>")?,
+                    Some(t) => writeln!(f, "{t}")?,
+                    None => writeln!(f, "<none recorded>")?,
                 }
                 match owner_state {
-                    Some(s) => writeln!(f, ", owner: {s:?}")?,
-                    None => writeln!(f, ", owner: <no current SEC>")?,
+                    Some(s) => writeln!(f, "{:indent$}owner: {s:?}", "")?,
+                    None => {
+                        writeln!(f, "{:indent$}owner: <no current SEC>", "")?
+                    }
                 }
             }
         }
