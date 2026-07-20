@@ -110,67 +110,6 @@ impl DataStore {
                         BgpAnnounceSetUuid::from_untyped_uuid(announce_set_id),
                     );
 
-                    let BgpConfig {
-                        identity,
-                        asn,
-                        bgp_announce_set_id,
-                        vrf,
-                        shaper,
-                        checker,
-                        max_paths,
-                    } = config.clone();
-
-                    // Idempotency:
-                    // Check to see if an exact match for the config already exists
-                    let query = dsl::bgp_config
-                        .filter(dsl::name.eq(identity.name.to_string()))
-                        .filter(dsl::description.eq(identity.description.to_string()))
-                        .filter(dsl::asn.eq(asn))
-                        .filter(dsl::bgp_announce_set_id.eq(bgp_announce_set_id))
-                        .filter(dsl::max_paths.eq(max_paths))
-                        .into_boxed();
-
-                    let query = match vrf {
-                        Some(v) => query.filter(dsl::vrf.eq(v)),
-                        None => query.filter(dsl::vrf.is_null()),
-                    };
-
-                    let query = match shaper {
-                        Some(v) => query.filter(dsl::shaper.eq(v)),
-                        None => query.filter(dsl::shaper.is_null()),
-                    };
-
-                    let query = match checker {
-                        Some(v) => query.filter(dsl::checker.eq(v)),
-                        None => query.filter(dsl::checker.is_null()),
-                    };
-
-                    let matching_config = match query
-                        .filter(dsl::time_deleted.is_null())
-                        .select(BgpConfig::as_select())
-                        .first_async::<BgpConfig>(&conn)
-                        .await {
-                            Ok(v)  => Ok(Some(v)),
-                            Err(e) => {
-                                match e {
-                                    diesel::result::Error::NotFound => {
-                                        info!(opctx.log, "no matching bgp config found");
-                                        Ok(None)
-                                    }
-                                    _ => {
-                                        let msg = "error while checking if bgp config exists";
-                                        error!(opctx.log, "{msg}"; "error" => ?e);
-                                        Err(err.bail(Error::internal_error(msg)))
-                                    }
-                                }
-                            }
-                        }?;
-
-                    // If so, we're done!
-                    if let Some(existing_config) = matching_config {
-                        return Ok(existing_config);
-                    }
-
                     // TODO: remove once per-switch-multi-asn support is added
                     // Bail if a conflicting config for this ASN already exists.
                     // This is a temporary measure until multi-asn-per-switch is supported.
@@ -204,8 +143,13 @@ impl DataStore {
                             match e {
                                 diesel::result::Error::DatabaseError(kind, _) => {
                                     match kind {
+                                        // The only unique index on active rows is the
+                                        // name index, so this is a name collision.
                                         diesel::result::DatabaseErrorKind::UniqueViolation => {
-                                            err.bail(Error::conflict("a field that must be unique conflicts with an existing record"))
+                                            err.bail(Error::ObjectAlreadyExists {
+                                                type_name: ResourceType::BgpConfig,
+                                                object_name: config.name().to_string(),
+                                            })
                                         },
                                         // technically we don't use Foreign Keys but it doesn't hurt to match on them
                                         // instead of returning a 500 by default in the event that we do switch to Foreign Keys
@@ -241,6 +185,36 @@ impl DataStore {
                     public_error_from_diesel(e, ErrorHandler::Server)
                 }
             })
+    }
+
+    /// Creates a BGP config, or returns the active config with the requested
+    /// name. Rack initialization uses deterministic names and may replay this
+    /// step after a previous create committed but before handoff completed.
+    pub async fn bgp_config_ensure(
+        &self,
+        opctx: &OpContext,
+        config: &networking::BgpConfigCreate,
+    ) -> CreateResult<BgpConfig> {
+        let conflict = match self.bgp_config_create(opctx, config).await {
+            Ok(created) => return Ok(created),
+            Err(
+                error @ (Error::Conflict { .. }
+                | Error::ObjectAlreadyExists { .. }),
+            ) => error,
+            Err(error) => return Err(error),
+        };
+
+        match self
+            .bgp_config_get(
+                opctx,
+                &NameOrId::Name(config.identity.name.clone()),
+            )
+            .await
+        {
+            Ok(existing) => Ok(existing),
+            Err(Error::ObjectNotFound { .. }) => Err(conflict),
+            Err(error) => Err(error),
+        }
     }
 
     pub async fn bgp_config_update(
@@ -1082,7 +1056,6 @@ mod tests {
     use crate::db::pub_test_utils::TestDatabase;
     use nexus_db_lookup::LookupPath;
     use nexus_db_model::SwitchPortBgpPeerConfig;
-    use nexus_types::external_api::networking::BgpConfigCreate;
     use nexus_types::external_api::networking::BgpConfigSelector;
     use nexus_types::external_api::networking::BgpPeer;
     use omicron_common::api::external::IdentityMetadataCreateParams;
@@ -1114,6 +1087,109 @@ mod tests {
             checker: None,
             max_paths: Default::default(),
         }
+    }
+
+    #[tokio::test]
+    async fn test_bgp_config_create_conflicts() {
+        let logctx = dev::test_setup_log("test_bgp_config_create_conflicts");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let announce_set_id = datastore
+            .bgp_create_announce_set(
+                &opctx,
+                &networking::BgpAnnounceSetCreate {
+                    identity: IdentityMetadataCreateParams {
+                        name: "announce-set".parse().unwrap(),
+                        description: String::from("a test announce set"),
+                    },
+                    announcement: Vec::new(),
+                },
+            )
+            .await
+            .expect("create BGP announce set")
+            .0
+            .identity
+            .id;
+
+        let config = networking::BgpConfigCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "config".parse().unwrap(),
+                description: String::from("a test config"),
+            },
+            asn: 47,
+            bgp_announce_set_id: NameOrId::Id(
+                announce_set_id.into_untyped_uuid(),
+            ),
+            vrf: None,
+            shaper: None,
+            checker: None,
+            max_paths: Default::default(),
+        };
+
+        let created = datastore
+            .bgp_config_create(&opctx, &config)
+            .await
+            .expect("create BGP config");
+
+        // The identical and duplicate-ASN cases hit the ASN guard, which runs
+        // before the insert, so only the duplicate-name case reaches the
+        // unique name index.
+        let conflicting_configs = [
+            ("identical config", config.clone(), false),
+            (
+                "duplicate name",
+                networking::BgpConfigCreate { asn: 48, ..config.clone() },
+                true,
+            ),
+            (
+                "duplicate ASN",
+                networking::BgpConfigCreate {
+                    identity: IdentityMetadataCreateParams {
+                        name: "other-config".parse().unwrap(),
+                        description: String::from("another test config"),
+                    },
+                    ..config.clone()
+                },
+                false,
+            ),
+        ];
+
+        for (description, conflicting_config, expect_already_exists) in
+            conflicting_configs
+        {
+            let error = datastore
+                .bgp_config_create(&opctx, &conflicting_config)
+                .await
+                .expect_err(description);
+            let matched = if expect_already_exists {
+                matches!(error, Error::ObjectAlreadyExists { .. })
+            } else {
+                matches!(error, Error::Conflict { .. })
+            };
+            assert!(matched, "unexpected error for {description}: {error}");
+        }
+
+        let ensured = datastore
+            .bgp_config_ensure(&opctx, &config)
+            .await
+            .expect("ensure existing BGP config");
+        assert_eq!(ensured.identity.id, created.identity.id);
+
+        let different_name = networking::BgpConfigCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "ensure-other-config".parse().unwrap(),
+                description: String::from("another test config"),
+            },
+            ..config
+        };
+        assert!(matches!(
+            datastore.bgp_config_ensure(&opctx, &different_name).await,
+            Err(Error::Conflict { .. }),
+        ));
+
+        db.terminate().await;
+        logctx.cleanup_successful();
     }
 
     #[tokio::test]
@@ -1904,119 +1980,6 @@ mod tests {
             panic!("expected ObjectNotFound by id, got {by_id:#?}");
         };
         assert_eq!(*type_name, ResourceType::BgpConfig);
-
-        db.terminate().await;
-        logctx.cleanup_successful();
-    }
-
-    #[tokio::test]
-    async fn test_bgp_config_create_idempotency() {
-        let logctx = dev::test_setup_log("test_bgp_config_create_idempotency");
-        let db = TestDatabase::new_with_datastore(&logctx.log).await;
-        let (opctx, datastore) = (db.opctx(), db.datastore());
-
-        let bgp_announce_set_id = datastore
-            .bgp_create_announce_set(
-                &opctx,
-                &networking::BgpAnnounceSetCreate {
-                    identity: IdentityMetadataCreateParams {
-                        name: "announce-set".parse().unwrap(),
-                        description: String::from("the first announce set"),
-                    },
-                    announcement: Vec::default(),
-                },
-            )
-            .await
-            .expect("create bgp announce set")
-            .0
-            .identity
-            .id;
-
-        datastore
-            .bgp_create_announce_set(
-                &opctx,
-                &networking::BgpAnnounceSetCreate {
-                    identity: IdentityMetadataCreateParams {
-                        name: "other-announce-set".parse().unwrap(),
-                        description: String::from("another announce set"),
-                    },
-                    announcement: Vec::default(),
-                },
-            )
-            .await
-            .expect("create other bgp announce set");
-
-        let bgp_config = networking::BgpConfigCreate {
-            identity: IdentityMetadataCreateParams {
-                name: "config-name".parse().unwrap(),
-                description: String::from("a test config"),
-            },
-            asn: 47,
-            bgp_announce_set_id: NameOrId::Id(
-                bgp_announce_set_id.into_untyped_uuid(),
-            ),
-            vrf: None,
-            shaper: None,
-            checker: None,
-            max_paths: MaxPathConfig::new(1).unwrap(),
-        };
-
-        let created = datastore
-            .bgp_config_create(&opctx, &bgp_config)
-            .await
-            .expect("create bgp config");
-
-        // Subsequent creates should succeed if all fields match
-        let replayed = datastore
-            .bgp_config_create(&opctx, &bgp_config)
-            .await
-            .expect("replay identical bgp config create");
-        assert_eq!(created.identity.id, replayed.identity.id);
-
-        // Subsequent creates should fail if any field is different
-        type Mutation = (&'static str, fn(&mut BgpConfigCreate));
-        let mutations: &[Mutation] = &[
-            ("identity.name", |config| {
-                config.identity.name = "other-config-name".parse().unwrap();
-            }),
-            ("identity.description", |config| {
-                config.identity.description =
-                    String::from("another description");
-            }),
-            ("asn", |config| {
-                config.asn = 48;
-            }),
-            ("bgp_announce_set_id", |config| {
-                config.bgp_announce_set_id =
-                    NameOrId::Name("other-announce-set".parse().unwrap());
-            }),
-            ("vrf", |config| {
-                config.vrf = Some("other-vrf".parse().unwrap());
-            }),
-            ("shaper", |config| {
-                config.shaper = Some(String::from("other shaper"));
-            }),
-            ("checker", |config| {
-                config.checker = Some(String::from("other checker"));
-            }),
-            ("max_paths", |config| {
-                config.max_paths = MaxPathConfig::new(2).unwrap();
-            }),
-        ];
-
-        for &(field, mutate) in mutations {
-            let mut conflicting_config = bgp_config.clone();
-            mutate(&mut conflicting_config);
-
-            let error = datastore
-                .bgp_config_create(&opctx, &conflicting_config)
-                .await
-                .expect_err(&format!("{field} should affect idempotency"));
-            assert!(
-                matches!(error, Error::Conflict { .. }),
-                "changing {field} returned an unexpected error: {error:?}"
-            );
-        }
 
         db.terminate().await;
         logctx.cleanup_successful();

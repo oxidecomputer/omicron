@@ -423,9 +423,8 @@ impl super::Nexus {
                 },
             }?;
 
-            match self
-                .db_datastore
-                .bgp_config_create(
+            self.db_datastore
+                .bgp_config_ensure(
                     &opctx,
                     &networking::BgpConfigCreate {
                         identity: IdentityMetadataCreateParams {
@@ -444,16 +443,12 @@ impl super::Nexus {
                     },
                 )
                 .await
-            {
-                Ok(_) => Ok(()),
-                Err(e) => match e {
-                    Error::ObjectAlreadyExists { .. } => Ok(()),
-                    _ => Err(Error::internal_error(&format!(
-                        "unable to set bgp config for as {}: {e}",
+                .map_err(|error| {
+                    Error::internal_error(&format!(
+                        "unable to set bgp config for as {}: {error}",
                         bgp_config.asn
-                    ))),
-                },
-            }?;
+                    ))
+                })?;
         }
 
         for (idx, uplink_config) in rack_network_config.ports.iter().enumerate()

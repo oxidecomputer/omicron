@@ -113,6 +113,18 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
     .await
     .unwrap();
 
+    NexusRequest::expect_failure_with_body(
+        client,
+        StatusCode::CONFLICT,
+        Method::POST,
+        "/v1/system/networking/bgp",
+        &bgp_config,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+
     // Create port settings
     let mut settings =
         SwitchPortSettingsCreate::new(IdentityMetadataCreateParams {
