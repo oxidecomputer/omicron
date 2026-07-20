@@ -45,8 +45,8 @@ pub struct BgpConfig {
     #[diesel(embed)]
     pub identity: BgpConfigIdentity,
     pub asn: SqlU32,
-    pub bgp_announce_set_id: DbTypedUuid<BgpAnnounceSetKind>,
     pub vrf: Option<String>,
+    pub bgp_announce_set_id: DbTypedUuid<BgpAnnounceSetKind>,
     pub shaper: Option<String>,
     pub checker: Option<String>,
     pub max_paths: SqlU8,
@@ -194,11 +194,10 @@ pub struct BgpPeerView {
     pub switch_slot: DbSwitchSlot,
     pub port_name: String,
     pub addr: Option<IpNetwork>,
-    pub asn: SqlU32,
-    pub connect_retry: SqlU32,
-    pub delay_open: SqlU32,
     pub hold_time: SqlU32,
     pub idle_hold_time: SqlU32,
+    pub delay_open: SqlU32,
+    pub connect_retry: SqlU32,
     pub keepalive: SqlU32,
     pub remote_asn: Option<SqlU32>,
     pub min_ttl: Option<SqlU8>,
@@ -208,6 +207,7 @@ pub struct BgpPeerView {
     pub enforce_first_as: bool,
     pub vlan_id: Option<SqlU16>,
     pub router_lifetime: SqlU16,
+    pub asn: SqlU32,
 }
 
 #[derive(Debug, thiserror::Error)]

@@ -16,6 +16,7 @@ use diesel::query_source::Table;
 use diesel::result::Error as DieselError;
 use diesel::sql_types::Nullable;
 use nexus_db_lookup::DbConnection;
+use nexus_db_model::FullRowModel;
 use std::marker::PhantomData;
 
 /// A simple wrapper type for Diesel's [`UpdateStatement`], which
@@ -57,7 +58,17 @@ where
     /// Nests the existing update statement in a CTE which
     /// identifies if the row exists (by ID), even if the row
     /// cannot be successfully updated.
-    fn check_if_exists<Q>(self, key: K) -> UpdateAndQueryStatement<US, K, Q>;
+    ///
+    /// The found row is selected in the table's `AllColumns` order but
+    /// decoded positionally into `Q`, whose field order comes from its
+    /// `Selectable` derive. The type system doesn't tie the two orders
+    /// together, so `Q` is required to be a [`FullRowModel`] for the updated
+    /// table: implementing that trait (via `full_row_models!` in
+    /// nexus-db-model's `column_order` module) generates a test verifying the
+    /// field order.
+    fn check_if_exists<Q>(self, key: K) -> UpdateAndQueryStatement<US, K, Q>
+    where
+        Q: FullRowModel<Table = US::Table>;
 }
 
 // UpdateStatement has four generic parameters:
@@ -83,7 +94,10 @@ where
         QueryFragment<Pg> + Send + 'static,
     K: 'static + Copy + Send,
 {
-    fn check_if_exists<Q>(self, key: K) -> UpdateAndQueryStatement<US, K, Q> {
+    fn check_if_exists<Q>(self, key: K) -> UpdateAndQueryStatement<US, K, Q>
+    where
+        Q: FullRowModel<Table = US::Table>,
+    {
         let find_subquery = Box::new(US::Table::table().find(key));
         UpdateAndQueryStatement {
             update_statement: self.statement(),

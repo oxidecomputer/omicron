@@ -82,7 +82,6 @@ impl TufRepoDescription {
 pub struct TufRepo {
     pub id: DbTypedUuid<TufRepoKind>,
     pub time_created: DateTime<Utc>,
-    pub time_pruned: Option<DateTime<Utc>>,
     // XXX: We're overloading ArtifactHash here to also mean the hash of the
     // repository zip itself.
     pub sha256: ArtifactHash,
@@ -90,6 +89,7 @@ pub struct TufRepo {
     pub valid_until: DateTime<Utc>,
     pub system_version: SemverVersion,
     pub file_name: String,
+    pub time_pruned: Option<DateTime<Utc>>,
 }
 
 impl TufRepo {

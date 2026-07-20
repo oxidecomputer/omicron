@@ -184,9 +184,9 @@ pub struct VpcFirewallRule {
     pub targets: Vec<VpcFirewallRuleTarget>,
     pub filter_hosts: Option<Vec<VpcFirewallRuleHostFilter>>,
     pub filter_ports: Option<Vec<L4PortRange>>,
-    pub filter_protocols: Option<Vec<VpcFirewallRuleProtocol>>,
     pub action: VpcFirewallRuleAction,
     pub priority: VpcFirewallRulePriority,
+    pub filter_protocols: Option<Vec<VpcFirewallRuleProtocol>>,
 }
 
 /// Cap on the number of rules in a VPC

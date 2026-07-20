@@ -12,8 +12,8 @@ use uuid::Uuid;
 #[derive(Queryable, Insertable, Debug, Clone, PartialEq, Eq, Selectable)]
 #[diesel(table_name = sled_underlay_subnet_allocation)]
 pub struct SledUnderlaySubnetAllocation {
+    pub hw_baseboard_id: Uuid,
     pub rack_id: DbTypedUuid<RackKind>,
     pub sled_id: DbTypedUuid<SledKind>,
     pub subnet_octet: i16,
-    pub hw_baseboard_id: Uuid,
 }

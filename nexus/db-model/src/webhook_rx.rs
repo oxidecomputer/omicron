@@ -80,12 +80,12 @@ impl TryFrom<WebhookReceiverConfig> for alert::WebhookReceiver {
 pub struct AlertReceiver {
     #[diesel(embed)]
     pub identity: AlertReceiverIdentity,
-    pub endpoint: String,
 
     /// child resource generation number for secrets, per RFD 192
     pub secret_gen: Generation,
     /// child resource generation number for event subscriptions, per RFD 192
     pub subscription_gen: Generation,
+    pub endpoint: String,
 }
 
 impl DatastoreCollectionConfig<WebhookSecret> for AlertReceiver {
@@ -135,10 +135,10 @@ pub struct WebhookReceiverUpdate {
 pub struct WebhookSecret {
     #[diesel(embed)]
     pub identity: WebhookSecretIdentity,
+    pub time_deleted: Option<DateTime<Utc>>,
     #[diesel(column_name = rx_id)]
     pub alert_receiver_id: DbTypedUuid<AlertReceiverKind>,
     pub secret: String,
-    pub time_deleted: Option<DateTime<Utc>>,
 }
 
 impl WebhookSecret {

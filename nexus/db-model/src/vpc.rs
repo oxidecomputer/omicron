@@ -35,9 +35,9 @@ pub struct Vpc {
 
     pub project_id: Uuid,
     pub system_router_id: Uuid,
+    pub dns_name: Name,
     pub vni: Vni,
     pub ipv6_prefix: Ipv6Net,
-    pub dns_name: Name,
 
     /// firewall generation number, used as a child resource generation number
     /// per RFD 192
