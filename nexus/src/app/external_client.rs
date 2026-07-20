@@ -200,19 +200,25 @@ pub enum ExternalUrlError {
 ///
 /// ## Overwritten `reqwest::ClientBuilder` options
 ///
-/// The redirect policy must be set using [`ExternalClientBuilder::redirect`],
-/// and *not* using [`reqwest::ClientBuilder::redirect`]. This is because the
-/// built client checks the target of every redirect against the external IP
-/// policy before consulting the redirect policy, which requires wrapping the
-/// redirect policy in [our own](redirect::Policy::custom), and `reqwest`
-/// provides no way to get a previously-set redirect policy back out of its
-/// builder in order to wrap it. Unfortunately, there isn't any way to detect
-/// whether we would be clobbering a policy provided by the caller, so...just
-/// make sure not to do that, I guess. Sigh.
+/// * The redirect policy must be set using [`ExternalClientBuilder::redirect`],
+///   and *not* using [`reqwest::ClientBuilder::redirect`]. This is because the
+///   built client checks the target of every redirect against the external IP
+///   policy before consulting the redirect policy, which requires wrapping the
+///   redirect policy in [our own](redirect::Policy::custom), and `reqwest`
+///   does not provide a way to get a previously-set redirect policy back out of its
+///   builder in order to wrap it. Unfortunately, there isn't any way to detect
+///   whether we would be clobbering a policy provided by the caller, so...just
+///   make sure not to do that, I guess. Sigh.
 ///
-/// Any DNS resolver set on the wrapped builder using
-/// [`reqwest::ClientBuilder::dns_resolver`] is ignored, since this builder
-/// always uses the [`external_dns::Resolver`].
+/// * Any DNS resolver set on the wrapped builder using
+///   [`reqwest::ClientBuilder::dns_resolver`] is ignored, since this builder
+///   always uses the [`external_dns::Resolver`].
+///
+/// * This is not *technically* an "overwritten `reqwest::ClientBuilder`
+///   option", but I'm putting it here anyway: any
+///   `HTTP_PROXY`/`HTTPS_PROXY`/`ALL_PROXY` environment variables are ignored,
+///   since nobody should be setting those in an Omicron zone in the first
+///   place.
 #[must_use = "builders do nothing unless, well...built"]
 pub struct ExternalClientBuilder {
     builder: reqwest::ClientBuilder,
@@ -306,6 +312,15 @@ impl ExternalClientBuilder {
         let client = builder
             .redirect(redirect_policy)
             .dns_resolver(resolver.clone())
+            // Disable `reqwest`'s default behavior of honoring the
+            // `HTTP_PROXY`, `HTTPS_PROXY`, and `ALL_PROXY` environment
+            // variables. We don't ever expect these to be set in a real Omicron
+            // zone, and if they were to be set, they could cause us to send
+            // requests to underlay destinations despite all the work we go to
+            // not to do that here. If they're set on someone's dev box while
+            // running tests, honoring them would similarly screw up the test.
+            // So, turn this off.
+            .no_proxy()
             .build()?;
 
         Ok(ExternalHttpClient { client, ip_policy })
