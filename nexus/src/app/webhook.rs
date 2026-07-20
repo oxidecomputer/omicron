@@ -479,16 +479,40 @@ impl<'a> ReceiverClient<'a> {
                 return Err(e).context(MSG);
             }
         };
-        let mut request = self
-            .client
-            .post(&self.rx.endpoint).expect("TODO ELIZA YOU HAVE TO ACTUALLY HANDLE THE EXTERNAL CLIENT ERROR HERE LOL")
-            .header(HDR_RX_ID, self.hdr_rx_id.clone())
-            .header(HDR_DELIVERY_ID, delivery.id.to_string())
-            .header(HDR_ALERT_ID, delivery.alert_id.to_string())
-            .header(HDR_ALERT_CLASS, alert_class.to_string())
-            .header(HDR_ALERT_VERSION, alert_version.to_string())
-            .header(HDR_TIMESTAMP, &sent_at)
-            .header(http::header::CONTENT_TYPE, "application/json");
+        let mut request = match self.client.post(&self.rx.endpoint) {
+            Ok(req) => req,
+            Err(err) => {
+                slog::warn!(
+                    &opctx.log,
+                    "webhook receiver URL was rejected by the external IP \
+                     policy";
+                     "endpoint" => %self.rx.endpoint,
+                    "alert_id" => %delivery.alert_id,
+                    "alert_class" => %alert_class,
+                    "delivery_id" => %delivery.id,
+                    "delivery_trigger" => %delivery.triggered_by,
+                    "error" => InlineErrorChain::new(&err),
+                );
+                return Ok(WebhookDeliveryAttempt {
+                    id: WebhookDeliveryAttemptUuid::new_v4().into(),
+                    delivery_id: delivery.id,
+                    rx_id: delivery.rx_id,
+                    attempt: SqlU8::new(delivery.attempts.0 + 1),
+                    result: WebhookDeliveryAttemptResult::FailedUnreachable,
+                    response_status: None,
+                    response_duration: None,
+                    time_created: chrono::Utc::now(),
+                    deliverator_id: self.nexus_id.into(),
+                });
+            }
+        }
+        .header(HDR_RX_ID, self.hdr_rx_id.clone())
+        .header(HDR_DELIVERY_ID, delivery.id.to_string())
+        .header(HDR_ALERT_ID, delivery.alert_id.to_string())
+        .header(HDR_ALERT_CLASS, alert_class.to_string())
+        .header(HDR_ALERT_VERSION, alert_version.to_string())
+        .header(HDR_TIMESTAMP, &sent_at)
+        .header(http::header::CONTENT_TYPE, "application/json");
 
         // For each secret assigned to this webhook, calculate the HMAC and add a signature header.
         for (secret_id, mac) in &mut self.secrets {
@@ -532,6 +556,7 @@ impl<'a> ReceiverClient<'a> {
                     &opctx.log,
                     "webhook receiver URL was rejected by the external IP \
                      policy";
+                    "endpoint" => %self.rx.endpoint,
                     "alert_id" => %delivery.alert_id,
                     "alert_class" => %alert_class,
                     "delivery_id" => %delivery.id,
