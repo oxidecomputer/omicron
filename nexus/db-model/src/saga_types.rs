@@ -224,19 +224,17 @@ impl From<steno::SagaCachedState> for SagaState {
 /// Represents a raw row in the "saga" table.
 ///
 /// This is the type Diesel reads and writes directly. It can represent states
-/// that should never produced (for example, abandonment metadata columns set
-/// without the saga being `Abandoned`), so it isn't constructed directly.
-/// Reads produce it via `Queryable` and immediately validate it into [`Saga`]
-/// (`Saga::try_from`). Writes lower a validated [`Saga`] into it via
-/// `SagaRow::from(&saga)`.
+/// that should never be produced (for example, abandonment metadata columns
+/// set without the saga being `Abandoned`), so it shouldn't be constructed
+/// directly.
 ///
-/// This is `pub` only because Diesel needs to name the row type at query sites
-/// in other crates (like omdb). It's `#[doc(hidden)]` to signal that it's an
-/// internal type and not part of the supported API.
-#[doc(hidden)]
+/// Validated reads go through [`Saga`], and raw reads through [`LoadedSaga`]
+/// (both `Selectable`). Writes go through the `Insertable` impl on `&Saga`.
+/// All three route through `SagaRow` internally, validating via
+/// `Saga::try_from` and lowering via `SagaRow::from(&saga)`.
 #[derive(Queryable, Insertable, Clone, Debug, Selectable, PartialEq)]
 #[diesel(table_name = saga)]
-pub struct SagaRow {
+pub(crate) struct SagaRow {
     id: SagaId,
     creator: SecId,
     time_created: chrono::DateTime<chrono::Utc>,
@@ -255,24 +253,8 @@ pub struct SagaRow {
 }
 
 impl SagaRow {
-    pub fn id(&self) -> SagaId {
+    fn id(&self) -> SagaId {
         self.id
-    }
-
-    pub fn current_sec(&self) -> Option<SecId> {
-        self.current_sec
-    }
-
-    pub fn saga_state(&self) -> SagaState {
-        self.saga_state
-    }
-
-    pub fn creator(&self) -> SecId {
-        self.creator
-    }
-
-    pub fn adopt_generation(&self) -> super::Generation {
-        self.adopt_generation
     }
 
     fn is_abandon_metadata_empty(&self) -> bool {
@@ -486,6 +468,239 @@ impl From<&Saga> for SagaRow {
             abandon_reason,
             abandon_comment,
         }
+    }
+}
+
+// The `saga` table's columns, in the order `SagaRow` declares them. Named via
+// the public schema so `Saga`/`LoadedSaga` can use them as their
+// `Selectable::SelectExpression`. We do this to avoid making `SagaRow` public.
+type SagaColumns = (
+    saga::id,
+    saga::creator,
+    saga::time_created,
+    saga::name,
+    saga::saga_dag,
+    saga::saga_state,
+    saga::current_sec,
+    saga::adopt_generation,
+    saga::adopt_time,
+    saga::abandon_time,
+    saga::abandon_reason,
+    saga::abandon_comment,
+);
+
+fn saga_columns() -> SagaColumns {
+    (
+        saga::id,
+        saga::creator,
+        saga::time_created,
+        saga::name,
+        saga::saga_dag,
+        saga::saga_state,
+        saga::current_sec,
+        saga::adopt_generation,
+        saga::adopt_time,
+        saga::abandon_time,
+        saga::abandon_reason,
+        saga::abandon_comment,
+    )
+}
+
+// The Rust-side tuple that [`SagaColumns`] deserializes into, mirroring
+// `SagaRow`'s fields. Used as `Queryable::Row` for `Saga` and `LoadedSaga`.
+// Spelled out in public types so it doesn't leak the crate-private `SagaRow`.
+type SagaRowColumns = (
+    SagaId,
+    SecId,
+    DateTime<Utc>,
+    String,
+    serde_json::Value,
+    SagaState,
+    Option<SecId>,
+    super::Generation,
+    DateTime<Utc>,
+    Option<DateTime<Utc>>,
+    Option<SagaReasonAbandoned>,
+    Option<String>,
+);
+
+impl SagaRow {
+    // Reassemble a raw row from the loaded column tuple, so the (private)
+    // validation logic in `TryFrom<SagaRow>` can be reused by the `Queryable`
+    // impls without exposing `SagaRow` in any signature.
+    fn from_columns(columns: SagaRowColumns) -> Self {
+        let (
+            id,
+            creator,
+            time_created,
+            name,
+            saga_dag,
+            saga_state,
+            current_sec,
+            adopt_generation,
+            adopt_time,
+            abandon_time,
+            abandon_reason,
+            abandon_comment,
+        ) = columns;
+        SagaRow {
+            id,
+            creator,
+            time_created,
+            name,
+            saga_dag,
+            saga_state,
+            current_sec,
+            adopt_generation,
+            adopt_time,
+            abandon_time,
+            abandon_reason,
+            abandon_comment,
+        }
+    }
+}
+
+// Allow `Saga` to be selected and loaded directly, so query sites can use
+// `.select(Saga::as_select())` and `.load::<Saga>()` without naming the private
+// `SagaRow`. `Queryable::build` is fallible, so validation happens as part of
+// deserialization via `Saga::try_from`.
+//
+// Because validation happens in `build`, loading a `Saga` is all-or-nothing: a
+// row that fails validation fails the entire query. Callers that need to skip
+// individual invalid rows should load [`LoadedSaga`] instead.
+impl diesel::Selectable<Pg> for Saga {
+    type SelectExpression = SagaColumns;
+
+    fn construct_selection() -> Self::SelectExpression {
+        saga_columns()
+    }
+}
+
+impl<ST> diesel::deserialize::Queryable<ST, Pg> for Saga
+where
+    SagaRowColumns: diesel::deserialize::FromStaticSqlRow<ST, Pg>,
+{
+    type Row = SagaRowColumns;
+
+    fn build(row: Self::Row) -> deserialize::Result<Self> {
+        Ok(Saga::try_from(SagaRow::from_columns(row))?)
+    }
+}
+
+/// The `saga` column assignments produced when inserting a `Saga`.
+///
+/// This is the type of the `(col.eq(value), ...)` tuple built by
+/// `Saga::insert_values`. It's named via the public `diesel::dsl::Eq` so that
+/// the `Insertable` impl on `&Saga` can delegate its `Values` to it without
+/// naming the crate-private `SagaRow`.
+pub type SagaInsertValues = (
+    diesel::dsl::Eq<saga::id, SagaId>,
+    diesel::dsl::Eq<saga::creator, SecId>,
+    diesel::dsl::Eq<saga::time_created, DateTime<Utc>>,
+    diesel::dsl::Eq<saga::name, String>,
+    diesel::dsl::Eq<saga::saga_dag, serde_json::Value>,
+    diesel::dsl::Eq<saga::saga_state, SagaState>,
+    diesel::dsl::Eq<saga::current_sec, Option<SecId>>,
+    diesel::dsl::Eq<saga::adopt_generation, super::Generation>,
+    diesel::dsl::Eq<saga::adopt_time, DateTime<Utc>>,
+    diesel::dsl::Eq<saga::abandon_time, Option<DateTime<Utc>>>,
+    diesel::dsl::Eq<saga::abandon_reason, Option<SagaReasonAbandoned>>,
+    diesel::dsl::Eq<saga::abandon_comment, Option<String>>,
+);
+
+impl Saga {
+    // The column assignments for inserting this saga. `SagaRow::from(self)`
+    // expands the all-or-none `abandon_metadata` back into its three nullable
+    // columns. This backs the `Insertable` impl below; callers just use
+    // `.values(saga)`.
+    fn insert_values(&self) -> SagaInsertValues {
+        use diesel::ExpressionMethods;
+
+        let SagaRow {
+            id,
+            creator,
+            time_created,
+            name,
+            saga_dag,
+            saga_state,
+            current_sec,
+            adopt_generation,
+            adopt_time,
+            abandon_time,
+            abandon_reason,
+            abandon_comment,
+        } = SagaRow::from(self);
+        (
+            saga::id.eq(id),
+            saga::creator.eq(creator),
+            saga::time_created.eq(time_created),
+            saga::name.eq(name),
+            saga::saga_dag.eq(saga_dag),
+            saga::saga_state.eq(saga_state),
+            saga::current_sec.eq(current_sec),
+            saga::adopt_generation.eq(adopt_generation),
+            saga::adopt_time.eq(adopt_time),
+            saga::abandon_time.eq(abandon_time),
+            saga::abandon_reason.eq(abandon_reason),
+            saga::abandon_comment.eq(abandon_comment),
+        )
+    }
+}
+
+// Allow a validated `Saga` to be inserted directly. `Values` delegates to the
+// public `SagaInsertValues` tuple, which is what keeps `SagaRow` crate-private.
+// `UndecoratedInsertRecord` enables the batch form.
+impl diesel::Insertable<saga::table> for &Saga {
+    type Values = <SagaInsertValues as diesel::Insertable<saga::table>>::Values;
+
+    fn values(self) -> Self::Values {
+        <SagaInsertValues as diesel::Insertable<saga::table>>::values(
+            self.insert_values(),
+        )
+    }
+}
+
+// TODO-K: DO I really need this?
+impl diesel::query_builder::UndecoratedInsertRecord<saga::table> for &Saga {}
+
+/// A raw saga row loaded from the database that has not yet been validated into
+/// a [`Saga`].
+///
+/// Structural deserialization of the raw columns never fails here. Call
+/// [`LoadedSaga::validate`] to check that the abandon metadata is consistent
+/// with the saga state and obtain a [`Saga`]. This lets batch readers skip
+/// individual invalid rows instead of failing the whole load, which loading
+/// [`Saga`] directly would do.
+pub struct LoadedSaga(SagaRow);
+
+impl LoadedSaga {
+    pub fn id(&self) -> SagaId {
+        self.0.id()
+    }
+
+    /// Validate the loaded row into a [`Saga`], checking that the abandon
+    /// metadata is consistent with the saga state.
+    pub fn validate(self) -> Result<Saga, Error> {
+        Saga::try_from(self.0)
+    }
+}
+
+impl diesel::Selectable<Pg> for LoadedSaga {
+    type SelectExpression = SagaColumns;
+
+    fn construct_selection() -> Self::SelectExpression {
+        saga_columns()
+    }
+}
+
+impl<ST> diesel::deserialize::Queryable<ST, Pg> for LoadedSaga
+where
+    SagaRowColumns: diesel::deserialize::FromStaticSqlRow<ST, Pg>,
+{
+    type Row = SagaRowColumns;
+
+    fn build(row: Self::Row) -> deserialize::Result<Self> {
+        Ok(LoadedSaga(SagaRow::from_columns(row)))
     }
 }
 

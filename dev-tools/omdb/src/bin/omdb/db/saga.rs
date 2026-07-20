@@ -240,12 +240,11 @@ You should only do this if:
     if !args.bypass_sec_check {
         let saga: Saga = {
             use nexus_db_schema::schema::saga::dsl;
-            let row = dsl::saga
+            dsl::saga
                 .filter(dsl::id.eq(args.saga_id))
-                .select(nexus_db_model::SagaRow::as_select())
-                .first_async(&*conn)
-                .await?;
-            Saga::try_from(row)?
+                .select(Saga::as_select())
+                .first_async::<Saga>(&*conn)
+                .await?
         };
 
         let status = get_saga_sec_status(omdb, opctx, &saga).await;
@@ -377,14 +376,11 @@ async fn cmd_sagas_abandon(
     let should_print_color =
         should_colorize(omdb.output.color, supports_color::Stream::Stdout);
     let conn = datastore.pool_connection_for_tests().await?;
-    let saga: Saga = {
-        let row = dsl::saga
-            .filter(dsl::id.eq(args.saga_id))
-            .select(nexus_db_model::SagaRow::as_select())
-            .first_async(&*conn)
-            .await?;
-        Saga::try_from(row)?
-    };
+    let saga: Saga = dsl::saga
+        .filter(dsl::id.eq(args.saga_id))
+        .select(Saga::as_select())
+        .first_async::<Saga>(&*conn)
+        .await?;
 
     match saga.saga_state {
         SagaState::Done => {
@@ -424,14 +420,11 @@ execute even if it is abandoned. You should only proceed if:
     // Before doing anything: find the current SEC for the saga, and ping it to
     // ensure that the Nexus is down.
     if !args.bypass_sec_check {
-        let saga = {
-            let row = dsl::saga
-                .filter(dsl::id.eq(args.saga_id))
-                .select(nexus_db_model::SagaRow::as_select())
-                .first_async(&*conn)
-                .await?;
-            Saga::try_from(row)?
-        };
+        let saga = dsl::saga
+            .filter(dsl::id.eq(args.saga_id))
+            .select(Saga::as_select())
+            .first_async::<Saga>(&*conn)
+            .await?;
 
         let status = get_saga_sec_status(omdb, opctx, &saga).await;
         status.display_message(should_print_color);
@@ -481,22 +474,22 @@ async fn get_all_sagas_in_state(
         let records_batch =
             paginated(dsl::saga, dsl::id, &p.current_pagparams())
                 .filter(dsl::saga_state.eq(state))
-                .select(nexus_db_model::SagaRow::as_select())
-                .load_async::<nexus_db_model::SagaRow>(&**conn)
+                .select(nexus_db_model::LoadedSaga::as_select())
+                .load_async::<nexus_db_model::LoadedSaga>(&**conn)
                 .await
                 .context("fetching sagas")?;
 
         paginator = p
-            .found_batch(&records_batch, &|s: &nexus_db_model::SagaRow| s.id());
+            .found_batch(&records_batch, &|s: &nexus_db_model::LoadedSaga| {
+                s.id()
+            });
 
         for row in records_batch {
-            match Saga::try_from(row.clone()) {
-                Ok(saga_row) => sagas.push(saga_row),
+            let saga_id = row.id();
+            match row.validate() {
+                Ok(saga) => sagas.push(saga),
                 Err(e) => {
-                    eprintln!(
-                        "WARNING: Skipping saga with id {}: {e}",
-                        row.id()
-                    )
+                    eprintln!("WARNING: Skipping saga with id {saga_id}: {e}")
                 }
             };
         }
@@ -785,13 +778,12 @@ async fn cmd_sagas_show(
 
     let saga = {
         use nexus_db_schema::schema::saga::dsl;
-        let row = dsl::saga
+        dsl::saga
             .filter(dsl::id.eq(saga_id))
-            .select(nexus_db_model::SagaRow::as_select())
-            .first_async(&*conn)
+            .select(Saga::as_select())
+            .first_async::<Saga>(&*conn)
             .await
-            .with_context(|| format!("error fetching saga {saga_id}"))?;
-        Saga::try_from(row)?
+            .with_context(|| format!("error fetching saga {saga_id}"))?
     };
 
     print_saga_nodes(Some(saga), nodes);
