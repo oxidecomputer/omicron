@@ -736,9 +736,11 @@ async fn main() -> Result<()> {
                 download_opte_p5p(&logger, &client, &ov.commit, &p5p_path),
             );
 
-            image_cmd = image_cmd
-                .arg("-p")
-                .arg(format!("helios-dev=file://{p5p_path}"));
+            // The OPTE CI p5p publishes under the "helios" publisher, so
+            // this adds it as an extra origin alongside the incorporation
+            // and the helios pkg repo.
+            image_cmd =
+                image_cmd.arg("-p").arg(format!("helios=file://{p5p_path}"));
         }
 
         let image_job_name = format!("{target}-image");

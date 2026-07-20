@@ -72,6 +72,7 @@ sled-hardware-types.workspace = true
 update-engine.workspace = true
 wicket-common.workspace = true
 wicketd-api.workspace = true
+wicketd-commission-types.workspace = true
 wicketd-client.workspace = true
 omicron-workspace-hack.workspace = true
 semver.workspace = true

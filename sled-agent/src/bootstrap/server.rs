@@ -165,7 +165,7 @@ pub enum StartError {
 /// Server for the bootstrap agent.
 ///
 /// Wraps an inner tokio task that handles low-level operations like
-/// initializating and resetting this sled (and starting / stopping the
+/// initializing and resetting this sled (and starting / stopping the
 /// sled-agent server).
 pub struct Server {
     inner_task: JoinHandle<()>,
