@@ -545,7 +545,7 @@ impl ReservedRackSubnet {
     /// Returns the DNS addresses from this reserved rack subnet.
     ///
     /// These addresses will come from the first [`INTERNAL_DNS_REDUNDANCY`]
-    /// `/64s` of the [`RACK_PREFIX`] subnet.
+    /// `/64s` of this reserved rack subnet.
     pub fn get_dns_subnets(&self) -> Vec<DnsSubnet> {
         (0..INTERNAL_DNS_REDUNDANCY)
             .map(|idx| self.get_dns_subnet(u8::try_from(idx + 1).unwrap()))
@@ -569,7 +569,7 @@ const SWITCH_ZONE_ADDRESS_INDEX: usize = 2;
 
 /// Return the sled agent address for a subnet.
 ///
-/// This address will come from the first address of the [`SLED_PREFIX`] subnet.
+/// This address will come from the first address of the provided `sled_subnet`.
 pub fn get_sled_address(
     sled_subnet: Ipv6Subnet<SLED_PREFIX_LENGTH>,
 ) -> SocketAddrV6 {
@@ -580,7 +580,8 @@ pub fn get_sled_address(
 
 /// Return the switch zone address for a subnet.
 ///
-/// This address will come from the second address of the [`SLED_PREFIX`] subnet.
+/// This address will come from the second address of the provided
+/// `sled_subnet`.
 pub fn get_switch_zone_address(
     sled_subnet: Ipv6Subnet<SLED_PREFIX_LENGTH>,
 ) -> Ipv6Addr {
