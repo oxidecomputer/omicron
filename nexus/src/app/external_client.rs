@@ -595,7 +595,7 @@ mod test {
     use super::*;
     use internal_dns_types::config::DnsRecord;
     use omicron_common::address::{
-        Ipv6Subnet, RACK_PREFIX_LENGTH, ReservedRackSubnet,
+        BOOTSTRAP_PREFIX, Ipv6Subnet, RACK_PREFIX_LENGTH, ReservedRackSubnet,
         UNDERLAY_MULTICAST_SUBNET, UNDERLAY_MULTICAST_SUBNET_LAST,
     };
     use std::collections::HashMap;
@@ -722,6 +722,11 @@ mod test {
             "http://[ff05::1:2]/".to_string(),
             // IPv4-mapped IPv6.
             "http://[::ffff:1.2.3.4]/".to_string(),
+            // The addresses immediately below and above the bootstrap network
+            // (`fdb0::/16`): both are non-underlay ULAs, so the off-by-one
+            // boundaries of that /16 must pass.
+            "http://[fdaf:ffff:ffff:ffff:ffff:ffff:ffff:ffff]/".to_string(),
+            "http://[fdb1::]/".to_string(),
         ];
         for url in &cases {
             let result = test_url(url);
@@ -765,7 +770,11 @@ mod test {
     }
 
     // Loopback is not external, in any of its spellings: IPv6, IPv4 (the
-    // whole 127.0.0.0/8), or names in the special-use "localhost." zone.
+    // whole 127.0.0.0/8), IPv4-mapped IPv6 (which `ensure_external_ip`
+    // canonicalizes before checking), or names in the special-use
+    // "localhost." zone. The unspecified addresses (`0.0.0.0` and `::`) are
+    // rejected here too: they behave like loopback when establishing a
+    // connection, and therefore must also be rejected.
     //
     // NOTE: this means test environments cannot point an ExternalHttpClient
     // at a server on localhost; tests exercising webhook delivery et al.
@@ -776,10 +785,17 @@ mod test {
             // IPv6 loopback.
             "http://[::1]/",
             "https://[::1]:8443/receiver",
+            // IPv4-mapped IPv6 loopback, folded to the IPv4 loopback by
+            // `to_canonical()` before the check.
+            "http://[::ffff:127.0.0.1]/",
             // IPv4 loopback, including the rest of 127.0.0.0/8.
             "http://127.0.0.1/",
             "http://127.0.0.1:8080/webhooks",
             "http://127.255.255.254/",
+            // The unspecified address, v4...
+            "http://0.0.0.0/",
+            // ...and v6.
+            "http://[::]/",
             // The WHATWG URL parser canonicalizes non-dotted-quad IPv4 forms
             // into `Host::Ipv4` before we see them, so these hit the IPv4 arm
             // rather than sneaking through as "domains": hexadecimal...
@@ -813,6 +829,11 @@ mod test {
         const CASES: &[&str] = &[
             "http://[::1]/",
             "https://[::1]:8443/receiver",
+            // IPv4-mapped IPv6 loopback and the unspecified addresses are
+            // permitted too, when the policy treats loopback as external.
+            "http://[::ffff:127.0.0.1]/",
+            "http://0.0.0.0/",
+            "http://[::]/",
             "http://127.0.0.1/",
             "http://127.0.0.1:8080/webhooks",
             "http://localhost/",
@@ -846,6 +867,50 @@ mod test {
                 result.is_err(),
                 "URL {url:?} has an underlay IP host and should have been \
                  rejected even with loopback allowed, but got: {result:?}"
+            );
+        }
+    }
+
+    // Addresses in the bootstrap network (`fdb0::/16`) are internal to the
+    // rack and must be rejected. Like underlay addresses, this is regardless
+    // of whether we are using the test-only allow-loopback policy.
+    #[test]
+    fn test_ensure_external_url_rejects_bootstrap_network() {
+        let cases = vec![
+            // The very first address in the bootstrap network...
+            format!("http://[{BOOTSTRAP_PREFIX:04x}::]/"),
+            // ...a realistic sled bootstrap address (taken from
+            // https://rfd.shared.oxide.computer/rfd/0063#_bootstrap_network)
+            format!("http://[{BOOTSTRAP_PREFIX:04x}:a840:2510:0001::1]/"),
+            // ...and the very last possible bootstrap address.
+            format!(
+                "http://[{BOOTSTRAP_PREFIX:04x}:ffff:ffff:ffff:ffff:ffff:ffff:ffff]/"
+            ),
+        ];
+        for url in &cases {
+            // Rejected as `BootstrapNetwork` under the default policy...
+            let result = test_url(url);
+            assert!(
+                matches!(
+                    &result,
+                    Err(ExternalUrlError::NotExternalIp(
+                        ExternalIpError::BootstrapNetwork { .. }
+                    ))
+                ),
+                "URL {url:?} is in the bootstrap network and should have been \
+                 rejected as such, but got: {result:?}"
+            );
+            // ...and still rejected when the loopback policy is permissive.
+            let result = test_url_loopback_allowed(url);
+            assert!(
+                matches!(
+                    &result,
+                    Err(ExternalUrlError::NotExternalIp(
+                        ExternalIpError::BootstrapNetwork { .. }
+                    ))
+                ),
+                "URL {url:?} is in the bootstrap network and must be rejected \
+                 even with loopback allowed, but got: {result:?}"
             );
         }
     }
@@ -1208,15 +1273,7 @@ mod test {
 
     #[track_caller]
     fn test_url(url: &str) -> Result<Url, ExternalUrlError> {
-        let url = dbg!(url)
-            .parse::<Url>()
-            .unwrap_or_else(|e| panic!("test URL {url:?} must parse: {e}"));
-        let result = ensure_external_url(
-            &url,
-            &test_policy(TreatLoopbackAsExternal::No),
-        )
-        .map(|()| url);
-        dbg!(result)
+        test_url_with_policy(url, TreatLoopbackAsExternal::No)
     }
 
     #[track_caller]
