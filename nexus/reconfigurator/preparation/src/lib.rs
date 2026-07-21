@@ -6,6 +6,7 @@
 
 use anyhow::Context;
 use futures::StreamExt;
+use iddqd::IdOrdMap;
 use nexus_db_model::DbMetadataNexusState;
 use nexus_db_model::DnsGroup;
 use nexus_db_model::Generation;
@@ -543,7 +544,7 @@ pub async fn reconfigurator_state_load(
             // They can be removed since we fetched the list.
             read.ok()
         })
-        .collect::<Vec<Collection>>()
+        .collect::<IdOrdMap<Collection>>()
         .await;
 
     // Grab the latest target blueprint.
@@ -594,7 +595,7 @@ pub async fn reconfigurator_state_load(
             // They can be removed since we fetched the list.
             read.ok()
         })
-        .collect::<Vec<Blueprint>>()
+        .collect::<IdOrdMap<Blueprint>>()
         .await;
 
     // It's also useful to include information about any DNS generations

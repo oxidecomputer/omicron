@@ -88,6 +88,7 @@ newtype-uuid = { workspace = true, features = ["proptest1"] }
 omicron-common = { workspace = true, features = ["testing"] }
 omicron-test-utils.workspace = true
 proptest.workspace = true
+reconfigurator-cli.workspace = true
 sled-agent-types-versions = { workspace = true, features = ["testing"] }
 sled-hardware-types = { workspace = true, features = ["testing"] }
 test-strategy.workspace = true

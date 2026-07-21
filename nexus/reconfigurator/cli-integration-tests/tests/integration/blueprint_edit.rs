@@ -155,7 +155,12 @@ async fn test_blueprint_edit(cptestctx: &ControlPlaneTestContext) {
     // Write a reconfigurator-cli script to load the file, edit the
     // blueprint, and save the entire state to a new file.
     let mut s = String::new();
-    swriteln!(s, "load {} {}", saved_state1_path, collection.id);
+    swriteln!(
+        s,
+        "load {} --collection-id {}",
+        saved_state1_path,
+        collection.id
+    );
     swriteln!(
         s,
         "blueprint-edit {} add-nexus {} {}",
@@ -194,18 +199,25 @@ async fn test_blueprint_edit(cptestctx: &ControlPlaneTestContext) {
     let state2: UnstableReconfiguratorState =
         read_json(&saved_state2_path).unwrap();
     assert_eq!(state2.blueprints.len(), state1.blueprints.len() + 1);
-    let new_blueprint = state2.blueprints.into_iter().rev().next().unwrap();
+    // Find the new blueprint by its parent (the one we just edited).
+    let new_blueprint = state2
+        .blueprints
+        .into_iter()
+        .find(|b| b.parent_blueprint_id == Some(blueprint.id))
+        .expect("new blueprint should descend from the edited one");
     assert_ne!(new_blueprint.id, blueprint.id);
-
-    // While we're at it, smoke check the new blueprint.
-    assert_eq!(new_blueprint.parent_blueprint_id, Some(blueprint.id));
     assert_eq!(new_blueprint.creator, "reconfigurator-cli");
 
     // Now run reconfigurator-cli again just to save the new blueprint.  This is
     // a little unfortunate but it's hard to avoid if we want to test that
     // blueprint-save works.
     let mut s = String::new();
-    swriteln!(s, "load {} {}", saved_state2_path, collection.id);
+    swriteln!(
+        s,
+        "load {} --collection-id {}",
+        saved_state2_path,
+        collection.id
+    );
     swriteln!(s, "blueprint-save {} {}", new_blueprint.id, new_blueprint_path);
     std::fs::write(&script2_path, &s)
         .with_context(|| format!("write {}", &script2_path))

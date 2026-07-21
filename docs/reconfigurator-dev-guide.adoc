@@ -674,19 +674,12 @@ wrote reconfigurator.out
 
 ```
 
-You can copy that file around as needed and then import it into `reconfigurator-cli`.  For historical reasons (that should be fixed), when you do this, you need to pick an inventory collection to use as the basis for creating `reconfigurator-cli`'s model of the sleds in the system.  You can usually pick any one.  Usually, you can just try the import:
+You can copy that file around as needed and then import it into `reconfigurator-cli`:
 
 ```
 # ./reconfigurator-cli
 generated RNG seed: reportedly-vivacious-scad
 〉load reconfigurator.out
-error: no collection_id specified and file contains 4 collections: 1f397505-6ec3-4d23-9aae-bb331e2caf9f, 5febd3ec-e68d-48f5-966f-c88990d14ef3, 346d8c4d-7b99-4af7-a76e-f7a37c8780b5, 80ae5780-1806-438b-ad64-7a6b1d4e8543
-```
-
-then pick one of the ones from the error message:
-
-```
-〉load reconfigurator.out 80ae5780-1806-438b-ad64-7a6b1d4e8543
 loaded data from "reconfigurator.out"
 result:
   system:

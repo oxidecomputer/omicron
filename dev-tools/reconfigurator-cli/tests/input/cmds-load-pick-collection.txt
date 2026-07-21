@@ -1,0 +1,33 @@
+# Test how `load` picks the representative inventory collection.
+#
+# The loader picks the collection with the largest `time_started` when no
+# `--collection-id` is given; otherwise it uses the one specified.  An id that
+# isn't in the file is an error.
+
+# Build a system with three inventory collections.  load-example creates one;
+# we add two more.  Each inventory-generate happens at a slightly later time,
+# so the third one is the "latest by time_started".
+load-example --nsleds 3 --ndisks-per-sled 3
+inventory-generate
+inventory-generate
+inventory-list
+
+save saved.out
+
+# Case 1: no --collection-id.  Should pick the most recently generated
+# collection (the third one created above).
+wipe system
+load saved.out
+
+# Case 2: explicit --collection-id pointing at one of the earlier collections.
+# This proves the explicit argument overrides the "latest" picker.  We use
+# the first collection (created by load-example), whose id is deterministic
+# because the test harness fixes the RNG seed.
+wipe system
+load saved.out --collection-id f45ba181-4b56-42cc-a762-874d90184a43
+
+# Case 3: --collection-id that isn't present.  Expect an error and an
+# unchanged (empty) simulator state.
+wipe system
+load saved.out --collection-id 00000000-0000-0000-0000-000000000000
+show
