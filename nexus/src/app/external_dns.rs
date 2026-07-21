@@ -91,21 +91,16 @@ impl reqwest::dns::Resolve for Resolver {
             // and we _could_ wait for it to be set here, instead of failing
             // fast if we don't know the rack subnet yet. Maybe this is actually
             // the wrong thing and we should wait for it instead, I dunno...
-            let az_subnet = underlay_subnets
-                .get()
-                .ok_or_else(|| {
-                    anyhow::anyhow!(
-                        "cannot resolve external DNS names before RSS!"
-                    )
-                })?
-                .az_subnet;
+            let underlay = underlay_subnets.get().ok_or_else(|| {
+                anyhow::anyhow!("cannot resolve external DNS names before RSS!")
+            })?;
             let addrs = ips
                 .into_iter()
                 .map(|ip| {
                     // We expect this domain to resolve to an external IP
                     // address, *not* one within the underlay network. Reject
                     // any unexpected underlay addresses here.
-                    let ip = az_subnet.check_external_ip(ip)?;
+                    let ip = underlay.check_external_ip(ip)?;
                     // hickory-resolver returns `IpAddr`s but reqwest wants
                     // `SocketAddr`s (useful if you have a custom resolver that
                     // returns a scoped IPv6 address). The port provided here
