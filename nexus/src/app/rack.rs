@@ -28,7 +28,9 @@ use nexus_types::external_api::silo;
 use nexus_types::external_api::sled as sled_types;
 use nexus_types::inventory::SpType;
 use nexus_types::silo::silo_dns_name;
-use omicron_common::address::{Ipv6Subnet, RACK_PREFIX_LENGTH, get_64_subnet};
+use omicron_common::address::{
+    Ipv6Subnet, RACK_PREFIX_LENGTH, UnderlaySubnets, get_64_subnet,
+};
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::IdentityMetadataCreateParams;
@@ -702,9 +704,13 @@ impl super::Nexus {
                         match rack_subnet(rack.rack_subnet) {
                             Ok(subnet) => {
                                 info!(self.log, "Rack initialized");
-                                self.rack_subnet.set(
-                                    Ipv6Subnet::<RACK_PREFIX>::from(subnet),
-                                );
+                                let subnet =
+                                    Ipv6Subnet::<RACK_PREFIX>::from(subnet);
+                                // If the subnets were already set, the new
+                                // value is identical, so the `Err` is benign.
+                                let _ = self
+                                    .underlay_subnets
+                                    .set(UnderlaySubnets::new(subnet));
                                 return;
                             }
                             Err(e) => {
