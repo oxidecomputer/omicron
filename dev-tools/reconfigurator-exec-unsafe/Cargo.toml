@@ -33,7 +33,9 @@ serde_json.workspace = true
 slog.workspace = true
 supports-color.workspace = true
 tokio = { workspace = true, features = [ "full" ] }
-update-engine.workspace = true
+oxide-update-engine.workspace = true
+oxide-update-engine-types.workspace = true
+oxide-update-engine-display.workspace = true
 uuid.workspace = true
 omicron-workspace-hack.workspace = true
 
