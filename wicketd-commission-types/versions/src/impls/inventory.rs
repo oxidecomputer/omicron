@@ -165,9 +165,7 @@ mod tests {
             },
             CmisDatapath {
                 application: 2,
-                lanes: [lane(0, FaultFlag::Unsupported)]
-                    .into_iter()
-                    .collect(),
+                lanes: [lane(0, FaultFlag::Unsupported)].into_iter().collect(),
             },
         ]
         .into_iter()

@@ -16,6 +16,7 @@ pub mod inventory {
     pub use crate::v1::inventory::PowerState;
     pub use crate::v1::inventory::RotInfo;
     pub use crate::v1::inventory::RotSlot;
+    pub use crate::v1::inventory::Sff8636LaneFaults;
     pub use crate::v1::inventory::SlotCaboose;
     pub use crate::v1::inventory::SpIdentifier;
     pub use crate::v1::inventory::SpIgnitionInfo;
@@ -24,7 +25,6 @@ pub mod inventory {
     pub use crate::v1::inventory::SpInventoryParams;
     pub use crate::v1::inventory::SpStateInfo;
     pub use crate::v1::inventory::SpType;
-    pub use crate::v1::inventory::Sff8636LaneFaults;
     pub use crate::v1::inventory::Stage0Caboose;
     pub use crate::v1::inventory::SwitchSlot;
     pub use crate::v1::inventory::SwitchTransceivers;

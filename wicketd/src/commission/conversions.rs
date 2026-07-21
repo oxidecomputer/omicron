@@ -206,15 +206,16 @@ fn transceiver_vendor_to_ct(
     match vendor {
         Err(message) => ct_inv::TransceiverVendor::Error { message },
         Ok(VendorInfo {
-            vendor: Vendor {
-                name,
-                part,
-                serial,
-                // The remaining vendor fields are not projected.
-                oui: _,
-                revision: _,
-                date: _,
-            },
+            vendor:
+                Vendor {
+                    name,
+                    part,
+                    serial,
+                    // The remaining vendor fields are not projected.
+                    oui: _,
+                    revision: _,
+                    date: _,
+                },
             // The SFF-8024 identifier is not projected.
             identifier: _,
         }) => ct_inv::TransceiverVendor::Read { name, part, serial },
@@ -248,19 +249,11 @@ fn transceiver_datapath_to_ct(
 ) -> ct_inv::TransceiverDatapath {
     match datapath {
         Err(message) => ct_inv::TransceiverDatapath::Error { message },
-        Ok(Datapath::Sff8636 {
-            lanes,
-            connector: _,
-            specification: _,
-        }) => {
+        Ok(Datapath::Sff8636 { lanes, connector: _, specification: _ }) => {
             let lanes = lanes.map(sff8636_lane_to_ct);
             ct_inv::TransceiverDatapath::Sff8636 { lanes }
         }
-        Ok(Datapath::Cmis {
-            datapaths,
-            connector: _,
-            supported_lanes: _,
-        }) => {
+        Ok(Datapath::Cmis { datapaths, connector: _, supported_lanes: _ }) => {
             let datapaths = IdOrdMap::from_iter_unique(
                 datapaths.into_iter().map(|(application, datapath)| {
                     cmis_datapath_to_ct(application, datapath)
@@ -309,10 +302,7 @@ fn cmis_datapath_to_ct(
     ct_inv::CmisDatapath { application, lanes }
 }
 
-fn cmis_lane_to_ct(
-    lane: u8,
-    status: CmisLaneStatus,
-) -> ct_inv::CmisLaneStatus {
+fn cmis_lane_to_ct(lane: u8, status: CmisLaneStatus) -> ct_inv::CmisLaneStatus {
     let CmisLaneStatus {
         state,
         rx_los,
@@ -440,8 +430,8 @@ mod tests {
     use std::time::Duration;
     use transceiver_controller::{
         ApplicationDescriptor, CmisDatapathState, ConnectorType,
-        HostElectricalInterfaceId, Identifier, MediaInterfaceId, MediaType, Oui,
-        OutputStatus, ReceiverPower, SffComplianceCode,
+        HostElectricalInterfaceId, Identifier, MediaInterfaceId, MediaType,
+        Oui, OutputStatus, ReceiverPower, SffComplianceCode,
     };
 
     fn sample_application_descriptor() -> ApplicationDescriptor {
@@ -524,8 +514,9 @@ mod tests {
     #[test]
     fn transceiver_status_projects_flags() {
         assert_eq!(
-            transceiver_status_to_ct(Ok(ExtendedStatus::PRESENT
-                | ExtendedStatus::POWER_GOOD)),
+            transceiver_status_to_ct(Ok(
+                ExtendedStatus::PRESENT | ExtendedStatus::POWER_GOOD
+            )),
             ct_inv::TransceiverStatus::Read {
                 present: true,
                 enabled: false,
@@ -677,13 +668,25 @@ mod tests {
     #[test]
     fn cmis_datapath_state_maps_all_variants() {
         let cases = [
-            (CmisDatapathState::Deactivated, ct_inv::CmisDatapathState::Deactivated),
+            (
+                CmisDatapathState::Deactivated,
+                ct_inv::CmisDatapathState::Deactivated,
+            ),
             (CmisDatapathState::Init, ct_inv::CmisDatapathState::Init),
             (CmisDatapathState::Deinit, ct_inv::CmisDatapathState::Deinit),
-            (CmisDatapathState::Activated, ct_inv::CmisDatapathState::Activated),
+            (
+                CmisDatapathState::Activated,
+                ct_inv::CmisDatapathState::Activated,
+            ),
             (CmisDatapathState::TxTurnOn, ct_inv::CmisDatapathState::TxTurnOn),
-            (CmisDatapathState::TxTurnOff, ct_inv::CmisDatapathState::TxTurnOff),
-            (CmisDatapathState::Initialized, ct_inv::CmisDatapathState::Initialized),
+            (
+                CmisDatapathState::TxTurnOff,
+                ct_inv::CmisDatapathState::TxTurnOff,
+            ),
+            (
+                CmisDatapathState::Initialized,
+                ct_inv::CmisDatapathState::Initialized,
+            ),
         ];
         for (internal, expected) in cases {
             assert_eq!(cmis_datapath_state_to_ct(internal), expected);

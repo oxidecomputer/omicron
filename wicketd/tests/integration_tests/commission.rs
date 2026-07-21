@@ -101,7 +101,8 @@ async fn test_commission_inventory() {
         "sled 0 state as reported by sp-sim"
     );
 
-    let SlotCaboose::Read { caboose: sp_caboose } = &sled0.caboose_active else {
+    let SlotCaboose::Read { caboose: sp_caboose } = &sled0.caboose_active
+    else {
         panic!("sled 0 active SP caboose should be read: {sled0:?}");
     };
     assert_eq!(
