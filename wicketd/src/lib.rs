@@ -37,6 +37,7 @@ pub(crate) use mgs::{MgsHandle, MgsManager};
 use nexus_proxy::NexusTcpProxy;
 use omicron_common::FileKv;
 use omicron_common::address::{AZ_PREFIX, Ipv6Subnet};
+use oxide_update_engine_types::spec::merge_anyhow_list;
 use preflight_check::PreflightCheckerHandler;
 use sled_hardware_types::Baseboard;
 use slog::{Drain, debug, error, o};
@@ -47,7 +48,6 @@ use std::{
     sync::Arc,
 };
 use transceivers::Manager as TransceiverManager;
-use update_engine::merge_anyhow_list;
 pub use update_tracker::{StartUpdateError, UpdateTracker};
 use wicketd_client::ClientInfo as _;
 
