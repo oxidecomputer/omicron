@@ -5,3 +5,4 @@
 //! Version `INITIAL` of the wicketd commissioning API.
 
 pub mod rack_setup;
+pub mod update;
