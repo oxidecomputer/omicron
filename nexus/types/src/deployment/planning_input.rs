@@ -34,7 +34,7 @@ use omicron_common::address::IpRange;
 use omicron_common::address::Ipv4Range;
 use omicron_common::address::Ipv6Range;
 use omicron_common::address::Ipv6Subnet;
-use omicron_common::address::SLED_PREFIX;
+use omicron_common::address::SLED_PREFIX_LENGTH;
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::TufRepoDescription;
 use omicron_common::disk::DiskIdentity;
@@ -857,7 +857,7 @@ pub struct SledResources {
     ///
     /// (implicitly specifies the whole range of addresses that the planner can
     /// use for control plane components)
-    pub subnet: Ipv6Subnet<SLED_PREFIX>,
+    pub subnet: Ipv6Subnet<SLED_PREFIX_LENGTH>,
 }
 
 impl SledResources {
