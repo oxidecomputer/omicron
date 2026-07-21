@@ -284,8 +284,14 @@ impl TaskExec {
         // signal from the Driver, or for one of our dependencies ("watch"
         // channels) to trigger an activation.
         loop {
-            let mut dependencies: FuturesUnordered<_> =
-                deps.iter_mut().map(|w| w.wait_for_change()).collect();
+            let deps_len = deps.len();
+            let mut dependencies = deps
+                .iter_mut()
+                .map(|w| w.wait_for_change())
+                .collect::<FuturesUnordered<_>>()
+                // Wait for one changed dependency, then collapse any others
+                // that are also ready into the same activation.
+                .ready_chunks(deps_len.max(1));
 
             tokio::select! {
                 _ = interval.tick() => {
@@ -296,7 +302,7 @@ impl TaskExec {
                     self.activate(ActivationReason::Signaled).await;
                 }
 
-                _ = dependencies.next(), if !dependencies.is_empty() => {
+                _ = dependencies.next(), if deps_len > 0 => {
                     self.activate(ActivationReason::Dependency).await;
                 }
             }
@@ -768,5 +774,87 @@ mod test {
         // legitimate periodic activation.  It's hard to choose a period for
         // such a task that would allow us to reliably distinguish between these
         // two without also spending a lot of wall-clock time on this test.
+    }
+
+    // Verifies that when multiple distinct dependencies become ready while an
+    // activation is already running, the task is activated only once afterward
+    // instead of once per ready dependency.
+    //
+    // The general idea/flow for the test is:
+    //
+    //   1. timeout-based activation (1) starts and pauses
+    //      1.1. dependency 1 becomes ready
+    //      1.2. dependency 2 becomes ready
+    //   2. activation (1) finishes
+    //   3. one dependency-triggered activation (2) starts
+    //   4. activation (2) finishes
+    //   5. no activation (3) should start
+    #[nexus_test(server = crate::Server)]
+    async fn test_distinct_ready_dependencies_are_collapsed(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        let nexus = &cptestctx.server.server_context().nexus;
+        let datastore = nexus.datastore();
+        let opctx = OpContext::for_tests(
+            cptestctx.logctx.log.clone(),
+            datastore.clone(),
+        );
+
+        let mut driver = Driver::new();
+        let (wait_tx, wait_rx) = mpsc::channel(10);
+        let (task, mut ready_rx) = PausingTask::new(wait_rx);
+        let (dep_tx1, dep_rx1) = watch::channel(0);
+        let (dep_tx2, dep_rx2) = watch::channel(0);
+        let activator = Activator::new();
+        let task_handle = driver.register(TaskDefinition {
+            name: "t1",
+            description: "test task",
+            period: Duration::from_secs(300),
+            task_impl: Box::new(task),
+            opctx: opctx.child(std::collections::BTreeMap::new()),
+            watchers: vec![Box::new(dep_rx1), Box::new(dep_rx2)],
+            activator: &activator,
+        });
+
+        // Verify that the task started with the initial timeout-based
+        // activation.
+        assert_eq!(ready_rx.recv().await.unwrap(), 1);
+        let status = driver.task_status(&task_handle);
+        assert!(!status.last.has_completed());
+        let current = status.current.unwrap_running();
+        assert_eq!(current.iteration, 1);
+        assert_eq!(current.reason, ActivationReason::Timeout);
+
+        // While that activation is paused, make both dependencies ready.
+        dep_tx1.send_replace(1);
+        dep_tx2.send_replace(1);
+
+        // Unpause the task so that it completes and the select loop runs
+        // again.
+        wait_tx.send(()).await.unwrap();
+
+        // The two ready dependencies should be collapsed into one activation.
+        // First, verify that the next activation starts and was caused by a
+        // dependency.
+        assert_eq!(ready_rx.recv().await.unwrap(), 2);
+        let status = driver.task_status(&task_handle);
+        let current = status.current.unwrap_running();
+        assert_eq!(current.iteration, 2);
+        assert_eq!(current.reason, ActivationReason::Dependency);
+
+        // Next, unpause the task so that it completes and the select loop runs
+        // again.
+        wait_tx.send(()).await.unwrap();
+
+        // Finally, verify that no second dependency-triggered activation
+        // starts. We do that by waiting for a second and confirming that the
+        // task is idle and the last completed iteration is the same as in the
+        // previous step.
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        let status = driver.task_status(&task_handle);
+        assert!(status.current.is_idle());
+        assert!(status.last.has_completed());
+        assert_eq!(status.last.unwrap_completion().iteration, 2);
+        assert_matches!(ready_rx.try_recv(), Err(TryRecvError::Empty));
     }
 }
