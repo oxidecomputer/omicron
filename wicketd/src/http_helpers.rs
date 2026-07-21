@@ -163,7 +163,7 @@ pub(crate) fn ba_lockstep_error_to_http(
 ///
 /// This avoids using methods on `HttpError`, many of which don't expose the
 /// full message to clients for security reasons.
-fn http_error_with_message(
+pub(crate) fn http_error_with_message(
     status_code: dropshot::ErrorStatusCode,
     error_code: Option<String>,
     message: String,
