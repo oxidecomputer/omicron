@@ -964,6 +964,7 @@ opt-level = 3
 
 [profile.release]
 panic = "abort"
+lto = "thin"
 
 # proptest based test generation and shrinking is expensive. Let's optimize it.
 [profile.dev.package.proptest]
