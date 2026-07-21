@@ -1453,13 +1453,26 @@ impl UpdateDriver {
                 UpdateStepId::SettingInstallinatorImageId,
                 "Setting installinator image ID",
                 async move |_cx| {
-                    let tags = KnownArtifactTags::InstallinatorDocument;
-                    let artifact =
-                        repo.artifacts().get_only(&tags).map_err(|error| {
-                            UpdateTerminalError::MissingArtifact { tags, error }
-                        })?;
+                    let hash =
+                        if let Some(hash) = repo.installinator_v1_document() {
+                            // Set the installinator document hash to the
+                            // original v1 document, if one was present. This
+                            // allows older Installinators to function.
+                            hash
+                        } else {
+                            let tags = KnownArtifactTags::InstallinatorDocument;
+                            repo.artifacts()
+                                .get_only(&tags)
+                                .map_err(|error| {
+                                    UpdateTerminalError::MissingArtifact {
+                                        tags,
+                                        error,
+                                    }
+                                })?
+                                .hash
+                        };
                     let installinator_image_id = InstallinatorImageId {
-                        host_phase_2: artifact.hash.to_string(),
+                        host_phase_2: hash.to_string(),
                         control_plane: ArtifactHash([0; 32]).to_string(),
                         update_id: update_cx.update_id,
                     };

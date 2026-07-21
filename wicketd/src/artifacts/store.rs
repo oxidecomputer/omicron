@@ -40,6 +40,7 @@ impl WicketdArtifactStore {
         slog::debug!(self.log, "setting repository");
         let by_hash = repo
             .handles()
+            .chain(repo.installinator_v1_handles())
             .map(|handle| (handle.artifact().hash, handle))
             .collect();
         self.replace(Inner { by_hash, repo });
