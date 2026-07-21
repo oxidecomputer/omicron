@@ -71,6 +71,7 @@ use super::external_dns;
 
 use nexus_config::ExternalHttpClientConfig;
 use nexus_config::TreatLoopbackAsExternal;
+use omicron_common::address::BOOTSTRAP_NETWORK_SUBNET;
 use omicron_common::address::UNDERLAY_MULTICAST_SUBNET;
 use omicron_common::address::UnderlaySubnets;
 use oxnet::Ipv6Net;
@@ -95,6 +96,11 @@ pub struct ExternalIpPolicy {
 pub enum ExternalIpError {
     #[error("address {ip} is within the underlay subnet {subnet}")]
     Underlay { ip: IpAddr, subnet: Ipv6Net },
+    #[error(
+        "address {ip} is within the bootstrap network \
+         {BOOTSTRAP_NETWORK_SUBNET}"
+    )]
+    BootstrapNetwork { ip: IpAddr },
     #[error("address {ip} is a loopback address")]
     Loopback { ip: IpAddr },
     #[error(
@@ -119,6 +125,8 @@ impl ExternalIpPolicy {
     ///
     /// * [`ExternalIpError::Underlay`] if `ip` is within the AZ underlay
     ///   subnet or the underlay multicast subnet.
+    /// * [`ExternalIpError::BootstrapNetwork`] if `ip` is within the bootstrap
+    ///   network (and might be part of an individual sled's bootstrap subnet).
     /// * [`ExternalIpError::Loopback`] if `ip` is a loopback address
     /// * [`ExternalIpError::RackNotInitialized`] if the underlay subnets are
     ///   not yet known, in which case no determination can be made at all.
@@ -147,6 +155,11 @@ impl ExternalIpPolicy {
                     ip,
                     subnet: UNDERLAY_MULTICAST_SUBNET,
                 })
+            }
+            // IPv6 addresses that could be on a sled's bootstrap network are
+            // always disallowed.
+            IpAddr::V6(v6) if BOOTSTRAP_NETWORK_SUBNET.contains(v6) => {
+                Err(ExternalIpError::BootstrapNetwork { ip })
             }
             // Loopback and unspecified addresses are not external, regardless of
             // whether they are v6 or v4...
