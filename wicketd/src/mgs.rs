@@ -67,8 +67,8 @@ pub enum GetInventoryError {
     ShutdownInProgress,
 
     /// The client specified an invalid SP identifier in a `force_refresh`
-    /// request.
-    InvalidSpIdentifier,
+    /// request. Carries the offending identifier.
+    InvalidSpIdentifier { id: SpIdentifier },
 }
 
 impl MgsHandle {
@@ -80,10 +80,12 @@ impl MgsHandle {
             Err(GetInventoryError::ShutdownInProgress) => {
                 Err(ShutdownInProgress)
             }
-            Err(GetInventoryError::InvalidSpIdentifier) => {
+            Err(GetInventoryError::InvalidSpIdentifier { id }) => {
                 // We pass no SP identifiers to refresh, so it's not possible
                 // for one of them to be invalid.
-                unreachable!("empty SP list cannot contain an invalid ID");
+                unreachable!(
+                    "empty SP list cannot contain an invalid ID, but got {id:?}"
+                );
             }
         }
     }
@@ -311,7 +313,8 @@ impl MgsManager {
         // Trigger immediate refreshes for all SPs listed in `force_refresh`.
         for &id in &force_refresh {
             let Some(handle) = sp_handles.get(&id) else {
-                _ = reply_tx.send(Err(GetInventoryError::InvalidSpIdentifier));
+                _ = reply_tx
+                    .send(Err(GetInventoryError::InvalidSpIdentifier { id }));
                 return;
             };
 

@@ -79,7 +79,8 @@
     },
     "/inventory/sps": {
       "get": {
-        "summary": "Get a projected inventory of all service processors visible to wicketd",
+        "summary": "Get inventory of all service processors visible to wicketd",
+        "description": "If `force_refresh` is non-empty, the request will wait for the listed SPs to report fresh data, or return a 503 if they do not respond within the server-side timeout.",
         "operationId": "get_sp_inventory",
         "requestBody": {
           "content": {
@@ -97,22 +98,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "title": "IdOrdMap_of_SpInfo",
-                  "x-rust-type": {
-                    "crate": "iddqd",
-                    "parameters": [
-                      {
-                        "$ref": "#/components/schemas/SpInfo"
-                      }
-                    ],
-                    "path": "iddqd::IdOrdMap",
-                    "version": "*"
-                  },
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/SpInfo"
-                  },
-                  "uniqueItems": true
+                  "$ref": "#/components/schemas/SpInventory"
                 }
               }
             }
@@ -129,6 +115,7 @@
     "/location": {
       "get": {
         "summary": "Report the physical location (switch and sled) wicketd is running at",
+        "description": "Will return 503 if the location is not yet known (typically because wicketd hasn't been able to connect to MGS).",
         "operationId": "get_location",
         "responses": {
           "200": {
@@ -554,7 +541,7 @@
         ]
       },
       "BootstrapSled": {
-        "description": "A sled as seen on the bootstrap network.\n\nA sled is reported here once its service processor's state has been read from MGS; a populated cubby whose state has not yet been polled is absent until it is. A sled's `ip` becomes `Some` once it has been discovered on the bootstrap network; sleds still missing an address report `None`, which lets callers see both ready and not-yet-ready sleds.",
+        "description": "A sled as seen on the bootstrap network.\n\nA sled is reported here once its service processor's state has been read from MGS. (A populated cubby whose state has not yet been polled is absent until it is.)\n\nA sled's `ip` becomes `Some` once it has been discovered on the bootstrap network; sleds still missing an address report `None`.",
         "type": "object",
         "properties": {
           "id": {
@@ -681,6 +668,25 @@
           "targets"
         ],
         "additionalProperties": false
+      },
+      "Duration": {
+        "type": "object",
+        "properties": {
+          "nanos": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "secs": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "nanos",
+          "secs"
+        ]
       },
       "Error": {
         "description": "Error information from a response.",
@@ -1004,10 +1010,12 @@
             "type": "string"
           },
           "switch_slot": {
-            "description": "The slot (0 or 1) of the switch this sled is cabled to.",
-            "type": "integer",
-            "format": "uint16",
-            "minimum": 0
+            "description": "The slot of the switch this sled is cabled to.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SwitchSlot"
+              }
+            ]
           }
         },
         "required": [
@@ -1468,20 +1476,18 @@
             ]
           },
           "caboose_a": {
-            "nullable": true,
-            "description": "The caboose of the image in slot A, if it could be read.",
+            "description": "The caboose of the image in slot A.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/Caboose"
+                "$ref": "#/components/schemas/SlotCaboose"
               }
             ]
           },
           "caboose_b": {
-            "nullable": true,
-            "description": "The caboose of the image in slot B, if it could be read.",
+            "description": "The caboose of the image in slot B.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/Caboose"
+                "$ref": "#/components/schemas/SlotCaboose"
               }
             ]
           },
@@ -1504,6 +1510,8 @@
         },
         "required": [
           "active",
+          "caboose_a",
+          "caboose_b",
           "caboose_stage0",
           "caboose_stage0next"
         ]
@@ -1612,6 +1620,109 @@
           "total_steps"
         ]
       },
+      "RunningProgress": {
+        "description": "The most recent progress reported by a running step.",
+        "oneOf": [
+          {
+            "description": "The step is running but has not reported progress yet.",
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "no_progress"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          {
+            "description": "The step is running but has stalled without reporting further progress.",
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "waiting_for_progress"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          {
+            "description": "The step reported a progress counter.",
+            "type": "object",
+            "properties": {
+              "progress": {
+                "description": "The reported progress counter.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/StepProgress"
+                  }
+                ]
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "counter"
+                ]
+              }
+            },
+            "required": [
+              "progress",
+              "state"
+            ]
+          }
+        ]
+      },
+      "SlotCaboose": {
+        "description": "The caboose for a single firmware slot, including whether it was read.",
+        "oneOf": [
+          {
+            "description": "The caboose for this slot has not been read yet.",
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "not_read"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          {
+            "description": "The caboose for this slot was read.",
+            "type": "object",
+            "properties": {
+              "caboose": {
+                "description": "The caboose that was read.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Caboose"
+                  }
+                ]
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "read"
+                ]
+              }
+            },
+            "required": [
+              "caboose",
+              "state"
+            ]
+          }
+        ]
+      },
       "SpIdentifier": {
         "type": "object",
         "properties": {
@@ -1679,24 +1790,22 @@
         ]
       },
       "SpInfo": {
-        "description": "A projected view of a single service processor's inventory.",
+        "description": "A single service processor's inventory.",
         "type": "object",
         "properties": {
           "caboose_active": {
-            "nullable": true,
-            "description": "The caboose of the active service-processor firmware slot, if read.",
+            "description": "The caboose of the active service-processor firmware slot.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/Caboose"
+                "$ref": "#/components/schemas/SlotCaboose"
               }
             ]
           },
           "caboose_inactive": {
-            "nullable": true,
-            "description": "The caboose of the inactive service-processor firmware slot, if read.",
+            "description": "The caboose of the inactive service-processor firmware slot.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/Caboose"
+                "$ref": "#/components/schemas/SlotCaboose"
               }
             ]
           },
@@ -1737,7 +1846,46 @@
           }
         },
         "required": [
+          "caboose_active",
+          "caboose_inactive",
           "id"
+        ]
+      },
+      "SpInventory": {
+        "description": "Inventory across all service processors.",
+        "type": "object",
+        "properties": {
+          "mgs_last_seen": {
+            "description": "How long it has been since wicketd last heard from MGS.\n\nA large value indicates that MGS might be down.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Duration"
+              }
+            ]
+          },
+          "sps": {
+            "title": "IdOrdMap",
+            "description": "The inventory of each SP.",
+            "x-rust-type": {
+              "crate": "iddqd",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/SpInfo"
+                }
+              ],
+              "path": "iddqd::IdOrdMap",
+              "version": "*"
+            },
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SpInfo"
+            },
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "mgs_last_seen",
+          "sps"
         ]
       },
       "SpInventoryParams": {
@@ -2011,6 +2159,25 @@
           "units"
         ]
       },
+      "SwitchSlot": {
+        "description": "Identifies switch physical location",
+        "oneOf": [
+          {
+            "description": "Switch in upper slot",
+            "type": "string",
+            "enum": [
+              "switch0"
+            ]
+          },
+          {
+            "description": "Switch in lower slot",
+            "type": "string",
+            "enum": [
+              "switch1"
+            ]
+          }
+        ]
+      },
       "TxEqConfig": {
         "description": "Per-port tx-eq overrides.  This can be used to fine-tune the transceiver equalization settings to improve signal integrity.",
         "type": "object",
@@ -2215,11 +2382,10 @@
             "type": "object",
             "properties": {
               "progress": {
-                "nullable": true,
-                "description": "The most recent progress reported by the step, if any.",
+                "description": "The most recent progress reported by the step.",
                 "allOf": [
                   {
-                    "$ref": "#/components/schemas/StepProgress"
+                    "$ref": "#/components/schemas/RunningProgress"
                   }
                 ]
               },
@@ -2231,6 +2397,7 @@
               }
             },
             "required": [
+              "progress",
               "status"
             ]
           },
@@ -2310,6 +2477,10 @@
             "description": "The step will not be run because a prior step failed or was aborted.",
             "type": "object",
             "properties": {
+              "reason": {
+                "description": "A human-readable description of why the step will not be run, naming the causal step.",
+                "type": "string"
+              },
               "status": {
                 "type": "string",
                 "enum": [
@@ -2318,6 +2489,7 @@
               }
             },
             "required": [
+              "reason",
               "status"
             ]
           }

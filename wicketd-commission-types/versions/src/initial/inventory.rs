@@ -10,8 +10,9 @@
 //! not leak into this stable API.
 
 use std::net::Ipv6Addr;
+use std::time::Duration;
 
-use iddqd::{IdOrdItem, id_upcast};
+use iddqd::{IdOrdItem, IdOrdMap, id_upcast};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -20,6 +21,7 @@ pub use gateway_types_versions::v1::component::{
     PowerState, SpIdentifier, SpType,
 };
 pub use gateway_types_versions::v1::rot::RotSlot;
+pub use sled_agent_types_versions::v1::early_networking::SwitchSlot;
 
 /// A minimal projection of a firmware caboose.
 ///
@@ -70,6 +72,21 @@ pub enum Stage0Caboose {
     },
 }
 
+/// The caboose for a single firmware slot, including whether it was read.
+#[derive(
+    Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema,
+)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum SlotCaboose {
+    /// The caboose for this slot has not been read yet.
+    NotRead,
+    /// The caboose for this slot was read.
+    Read {
+        /// The caboose that was read.
+        caboose: Caboose,
+    },
+}
+
 /// Root-of-trust information for a single service processor.
 #[derive(
     Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema,
@@ -77,10 +94,10 @@ pub enum Stage0Caboose {
 pub struct RotInfo {
     /// The currently-active RoT image slot.
     pub active: RotSlot,
-    /// The caboose of the image in slot A, if it could be read.
-    pub caboose_a: Option<Caboose>,
-    /// The caboose of the image in slot B, if it could be read.
-    pub caboose_b: Option<Caboose>,
+    /// The caboose of the image in slot A.
+    pub caboose_a: SlotCaboose,
+    /// The caboose of the image in slot B.
+    pub caboose_b: SlotCaboose,
     /// The caboose of the stage0 bootloader.
     pub caboose_stage0: Stage0Caboose,
     /// The caboose of the pending stage0next bootloader.
@@ -134,7 +151,7 @@ pub enum SpIgnitionInfo {
     Absent,
 }
 
-/// A projected view of a single service processor's inventory.
+/// A single service processor's inventory.
 #[derive(
     Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema,
 )]
@@ -147,10 +164,10 @@ pub struct SpInfo {
     ///
     /// `None` means ignition state has not been read yet.
     pub ignition: Option<SpIgnitionInfo>,
-    /// The caboose of the active service-processor firmware slot, if read.
-    pub caboose_active: Option<Caboose>,
-    /// The caboose of the inactive service-processor firmware slot, if read.
-    pub caboose_inactive: Option<Caboose>,
+    /// The caboose of the active service-processor firmware slot.
+    pub caboose_active: SlotCaboose,
+    /// The caboose of the inactive service-processor firmware slot.
+    pub caboose_inactive: SlotCaboose,
     /// Root-of-trust information, if it has been read.
     pub rot: Option<RotInfo>,
 }
@@ -165,13 +182,24 @@ impl IdOrdItem for SpInfo {
     id_upcast!();
 }
 
+/// Inventory across all service processors.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct SpInventory {
+    /// How long it has been since wicketd last heard from MGS.
+    ///
+    /// A large value indicates that MGS might be down.
+    pub mgs_last_seen: Duration,
+    /// The inventory of each SP.
+    pub sps: IdOrdMap<SpInfo>,
+}
+
 /// The physical location of the sled wicketd is running on.
 #[derive(
     Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema,
 )]
 pub struct LocationInfo {
-    /// The slot (0 or 1) of the switch this sled is cabled to.
-    pub switch_slot: u16,
+    /// The slot of the switch this sled is cabled to.
+    pub switch_slot: SwitchSlot,
     /// The serial number of that switch's service processor, if known.
     pub switch_serial: Option<String>,
     /// The serial number of the sled wicketd is running on, if known.
@@ -192,10 +220,11 @@ pub struct SpInventoryParams {
 /// A sled as seen on the bootstrap network.
 ///
 /// A sled is reported here once its service processor's state has been read
-/// from MGS; a populated cubby whose state has not yet been polled is absent
-/// until it is. A sled's `ip` becomes `Some` once it has been discovered on
-/// the bootstrap network; sleds still missing an address report `None`, which
-/// lets callers see both ready and not-yet-ready sleds.
+/// from MGS. (A populated cubby whose state has not yet been polled is absent
+/// until it is.)
+///
+/// A sled's `ip` becomes `Some` once it has been discovered on the bootstrap
+/// network; sleds still missing an address report `None`.
 #[derive(
     Debug,
     Clone,

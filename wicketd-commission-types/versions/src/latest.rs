@@ -12,13 +12,16 @@ pub mod inventory {
     pub use crate::v1::inventory::PowerState;
     pub use crate::v1::inventory::RotInfo;
     pub use crate::v1::inventory::RotSlot;
+    pub use crate::v1::inventory::SlotCaboose;
     pub use crate::v1::inventory::SpIdentifier;
     pub use crate::v1::inventory::SpIgnitionInfo;
     pub use crate::v1::inventory::SpInfo;
+    pub use crate::v1::inventory::SpInventory;
     pub use crate::v1::inventory::SpInventoryParams;
     pub use crate::v1::inventory::SpStateInfo;
     pub use crate::v1::inventory::SpType;
     pub use crate::v1::inventory::Stage0Caboose;
+    pub use crate::v1::inventory::SwitchSlot;
 }
 
 pub mod rack_setup {
@@ -59,6 +62,7 @@ pub mod update {
     pub use crate::v1::update::ClearUpdateStateParams;
     pub use crate::v1::update::EmptyUpdateTargets;
     pub use crate::v1::update::RepositoryDescription;
+    pub use crate::v1::update::RunningProgress;
     pub use crate::v1::update::SpUpdateProgress;
     pub use crate::v1::update::StartUpdateOptions;
     pub use crate::v1::update::StartUpdateParams;

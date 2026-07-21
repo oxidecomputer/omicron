@@ -64,11 +64,16 @@ pub(crate) fn inventory_err_to_http(err: GetInventoryError) -> HttpError {
         GetInventoryError::ShutdownInProgress => {
             shutdown_to_http(ShutdownInProgress)
         }
-        GetInventoryError::InvalidSpIdentifier => http_error_with_message(
-            ErrorStatusCode::SERVICE_UNAVAILABLE,
-            None,
-            "Invalid SP identifier in request".to_owned(),
-        ),
+        GetInventoryError::InvalidSpIdentifier { id } => {
+            http_error_with_message(
+                ErrorStatusCode::BAD_REQUEST,
+                None,
+                format!(
+                    "invalid SP identifier in force_refresh request: {}",
+                    SpIdentifierDisplay(id)
+                ),
+            )
+        }
     }
 }
 

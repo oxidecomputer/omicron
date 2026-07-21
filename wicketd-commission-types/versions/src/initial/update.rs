@@ -226,8 +226,8 @@ pub enum UpdateStepStatus {
     NotStarted,
     /// The step is currently running.
     Running {
-        /// The most recent progress reported by the step, if any.
-        progress: Option<StepProgress>,
+        /// The most recent progress reported by the step.
+        progress: RunningProgress,
     },
     /// The step completed.
     Completed {
@@ -247,7 +247,26 @@ pub enum UpdateStepStatus {
         message: String,
     },
     /// The step will not be run because a prior step failed or was aborted.
-    WillNotBeRun,
+    WillNotBeRun {
+        /// A human-readable description of why the step will not be run,
+        /// naming the causal step.
+        reason: String,
+    },
+}
+
+/// The most recent progress reported by a running step.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum RunningProgress {
+    /// The step is running but has not reported progress yet.
+    NoProgress,
+    /// The step is running but has stalled without reporting further progress.
+    WaitingForProgress,
+    /// The step reported a progress counter.
+    Counter {
+        /// The reported progress counter.
+        progress: StepProgress,
+    },
 }
 
 /// The outcome of a step that ran to completion.

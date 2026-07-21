@@ -22,7 +22,7 @@ use wicketd_client::types::PutBgpAuthKeyBody;
 use wicketd_commission_types::rack_setup::PutRssUserConfigInsensitive;
 use wicketd_commission_types_versions::latest::inventory::{
     IgnitionFaults, LocationInfo, PowerState, SpIdentifier, SpIgnitionInfo,
-    SpInfo, SpInventoryParams, SpStateInfo, SpType,
+    SpInfo, SpInventoryParams, SpStateInfo, SpType, SwitchSlot,
 };
 use wicketd_commission_types_versions::latest::rack_setup::{
     NewPasswordHash, PutRecoveryUserPasswordHash,
@@ -44,7 +44,7 @@ async fn wait_for_sp_inventory(
                 .await
             {
                 Ok(resp) => {
-                    let sps = resp.into_inner();
+                    let sps = resp.into_inner().sps;
                     if ready(&sps) {
                         Ok(sps)
                     } else {
@@ -120,8 +120,19 @@ async fn test_commission_inventory() {
         .await
         .expect("get_sp_inventory with force_refresh succeeded")
         .into_inner();
-    assert_eq!(refreshed.len(), 4, "four simulated SPs after forced refresh");
+    assert!(
+        refreshed.mgs_last_seen < Duration::from_secs(30),
+        "a just-completed forced refresh implies MGS was seen recently, \
+         but mgs_last_seen is {:?}",
+        refreshed.mgs_last_seen,
+    );
+    assert_eq!(
+        refreshed.sps.len(),
+        4,
+        "four simulated SPs after forced refresh"
+    );
     let refreshed_sled0 = refreshed
+        .sps
         .get(&SpIdentifier { typ: SpType::Sled, slot: 0 })
         .expect("sled 0 present after forced refresh");
     assert_eq!(
@@ -129,6 +140,15 @@ async fn test_commission_inventory() {
         Some(sim_gimlet_state("SimGimlet00")),
         "sled 0 state after forced refresh: {refreshed:?}"
     );
+
+    let err = ctx
+        .commission_client
+        .get_sp_inventory(&SpInventoryParams {
+            force_refresh: vec![SpIdentifier { typ: SpType::Sled, slot: 99 }],
+        })
+        .await
+        .expect_err("force_refresh of a nonexistent SP is rejected");
+    assert_client_error_message(&err, StatusCode::BAD_REQUEST, "sled 99");
 
     let bootstrap = ctx
         .commission_client
@@ -170,7 +190,11 @@ async fn test_commission_inventory() {
     .await
     .expect("location became available");
 
-    assert_eq!(location.switch_slot, 0, "cabled to switch slot 0");
+    assert_eq!(
+        location.switch_slot,
+        SwitchSlot::Switch0,
+        "cabled to switch slot 0"
+    );
     assert_eq!(
         location.switch_serial.as_deref(),
         Some("SimSidecar0"),
@@ -264,9 +288,14 @@ async fn test_commission_start_update() {
         .await
         .expect("post_start_update on sled 0 succeeded");
 
-    let entry = wait_for_sled0_progress(&ctx, "sled 0 reached Running", |p| {
-        p.progress.state == UpdateState::Running
-    })
+    let entry = wait_for_sled0_progress(
+        &ctx,
+        "sled 0 reached Running with a running step",
+        |p| {
+            p.progress.state == UpdateState::Running
+                && p.progress.innermost_running_steps().next().is_some()
+        },
+    )
     .await;
     assert_eq!(
         entry.progress.state,

@@ -6,10 +6,11 @@ use std::collections::HashMap;
 
 use oxide_update_engine_types::buffer::{
     AbortReason, CompletionReason, ExecutionStatus, ExecutionSummary,
-    FailureReason, StepKey, StepStatus, TerminalKind,
+    FailureReason, StepKey, StepStatus, TerminalKind, WillNotBeRunReason,
 };
 use oxide_update_engine_types::events::{
-    ExecutionUuid, ProgressEventKind, StepOutcome as EngineStepOutcome,
+    ExecutionUuid, LeafProgress, ProgressCounter, ProgressEventKind,
+    StepOutcome as EngineStepOutcome,
 };
 use oxide_update_engine_types::spec::{EngineSpec, GenericSpec};
 use wicket_common::update_events::{
@@ -17,8 +18,8 @@ use wicket_common::update_events::{
 };
 use wicketd_commission_types::inventory::SpIdentifier;
 use wicketd_commission_types::update::{
-    SpUpdateProgress, StepOutcome, StepProgress, UpdateProgress, UpdateState,
-    UpdateStep, UpdateStepStatus,
+    RunningProgress, SpUpdateProgress, StepOutcome, StepProgress,
+    UpdateProgress, UpdateState, UpdateStep, UpdateStepStatus,
 };
 
 fn completed_outcome(reason: &CompletionReason) -> StepOutcome {
@@ -124,6 +125,64 @@ fn aborted_message(event_buffer: &EventBuffer, step_key: &StepKey) -> String {
     )
 }
 
+fn step_progress_from_counter(counter: &ProgressCounter) -> StepProgress {
+    StepProgress {
+        current: counter.current,
+        total: counter.total,
+        units: counter.units.0.to_string(),
+    }
+}
+
+fn running_progress<S: EngineSpec>(
+    kind: &ProgressEventKind<S>,
+) -> RunningProgress {
+    match kind.leaf_progress() {
+        LeafProgress::Progress(Some(counter)) => RunningProgress::Counter {
+            progress: step_progress_from_counter(counter),
+        },
+        LeafProgress::Progress(None) => RunningProgress::NoProgress,
+        LeafProgress::WaitingForProgress => RunningProgress::WaitingForProgress,
+        // Unknown means an event couldn't be deserialized. The EventBuffer
+        // drops these events so this branch is unreachable in practice.
+        LeafProgress::Unknown => RunningProgress::NoProgress,
+    }
+}
+
+fn step_description(
+    event_buffer: &EventBuffer,
+    step_key: &StepKey,
+) -> Option<String> {
+    event_buffer
+        .get(step_key)
+        .map(|data| data.step_info().description.to_string())
+}
+
+fn will_not_be_run_message(
+    event_buffer: &EventBuffer,
+    reason: &WillNotBeRunReason,
+) -> String {
+    let (relation, outcome, step) = match reason {
+        WillNotBeRunReason::PreviousStepFailed { step } => {
+            ("a previous", "failed", step)
+        }
+        WillNotBeRunReason::ParentStepFailed { step } => {
+            ("a parent", "failed", step)
+        }
+        WillNotBeRunReason::PreviousStepAborted { step } => {
+            ("a previous", "was aborted", step)
+        }
+        WillNotBeRunReason::ParentAborted { step } => {
+            ("a parent", "was aborted", step)
+        }
+    };
+    match step_description(event_buffer, step) {
+        Some(description) => format!(
+            "will not run because {relation} step (\"{description}\") {outcome}"
+        ),
+        None => format!("will not run because {relation} step {outcome}"),
+    }
+}
+
 struct ProgressBuilder<'a> {
     event_buffer: &'a EventBuffer,
     // A cache of the execution summary for each execution ID.
@@ -166,21 +225,9 @@ impl<'a> ProgressBuilder<'a> {
         match status {
             StepStatus::NotStarted => UpdateStepStatus::NotStarted,
             StepStatus::Running { progress_event, .. } => {
-                let progress = match &progress_event.kind {
-                    ProgressEventKind::Progress {
-                        progress: Some(counter),
-                        ..
-                    } => Some(StepProgress {
-                        current: counter.current,
-                        total: counter.total,
-                        units: counter.units.0.to_string(),
-                    }),
-                    ProgressEventKind::Progress { progress: None, .. }
-                    | ProgressEventKind::WaitingForProgress { .. }
-                    | ProgressEventKind::Nested { .. }
-                    | ProgressEventKind::Unknown => None,
-                };
-                UpdateStepStatus::Running { progress }
+                UpdateStepStatus::Running {
+                    progress: running_progress(&progress_event.kind),
+                }
             }
             StepStatus::Completed { reason } => UpdateStepStatus::Completed {
                 outcome: completed_outcome(reason),
@@ -211,7 +258,11 @@ impl<'a> ProgressBuilder<'a> {
                 };
                 UpdateStepStatus::Aborted { message }
             }
-            StepStatus::WillNotBeRun { .. } => UpdateStepStatus::WillNotBeRun,
+            StepStatus::WillNotBeRun { reason } => {
+                UpdateStepStatus::WillNotBeRun {
+                    reason: will_not_be_run_message(self.event_buffer, reason),
+                }
+            }
         }
     }
 
@@ -259,6 +310,7 @@ fn update_progress(report: EventReport) -> UpdateProgress {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use oxide_update_engine_types::events::ProgressUnits;
     use wicketd_commission_types::inventory::SpType;
 
     #[test]
@@ -271,6 +323,62 @@ mod tests {
             result.progress.steps.is_empty(),
             "an empty report doesn't have any steps, but these were found: {:?}",
             result.progress.steps,
+        );
+    }
+
+    #[test]
+    fn counter_projects_to_step_progress() {
+        let counter = ProgressCounter {
+            current: 3,
+            total: Some(10),
+            units: ProgressUnits::new("bytes"),
+        };
+        assert_eq!(
+            step_progress_from_counter(&counter),
+            StepProgress {
+                current: 3,
+                total: Some(10),
+                units: "bytes".to_string(),
+            },
+        );
+    }
+
+    fn fake_step_key() -> StepKey {
+        StepKey { execution_id: ExecutionUuid::nil(), index: 0 }
+    }
+
+    #[test]
+    fn will_not_be_run_messages_distinguish_reason_variants() {
+        let buffer = EventBuffer::default();
+        let step = fake_step_key();
+
+        assert_eq!(
+            will_not_be_run_message(
+                &buffer,
+                &WillNotBeRunReason::PreviousStepFailed { step },
+            ),
+            "will not run because a previous step failed",
+        );
+        assert_eq!(
+            will_not_be_run_message(
+                &buffer,
+                &WillNotBeRunReason::ParentStepFailed { step },
+            ),
+            "will not run because a parent step failed",
+        );
+        assert_eq!(
+            will_not_be_run_message(
+                &buffer,
+                &WillNotBeRunReason::PreviousStepAborted { step },
+            ),
+            "will not run because a previous step was aborted",
+        );
+        assert_eq!(
+            will_not_be_run_message(
+                &buffer,
+                &WillNotBeRunReason::ParentAborted { step },
+            ),
+            "will not run because a parent step was aborted",
         );
     }
 }

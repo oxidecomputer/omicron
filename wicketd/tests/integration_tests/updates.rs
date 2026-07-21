@@ -896,8 +896,11 @@ async fn test_update_races() {
     // reasonable step counts while the fake update is running.
     let entry = wait_for_sled0_progress(
         &wicketd_testctx,
-        "sled 0 reached Running",
-        |p| p.progress.state == update::UpdateState::Running,
+        "sled 0 reached Running with its single step running",
+        |p| {
+            p.progress.state == update::UpdateState::Running
+                && p.progress.innermost_running_steps().count() == 1
+        },
     )
     .await;
     assert_eq!(

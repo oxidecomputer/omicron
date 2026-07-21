@@ -459,7 +459,10 @@ impl WicketdApi for WicketdApiImpl {
         let rqctx = rqctx.context();
         let inventory = mgs_inventory_or_unavail(&rqctx.mgs_handle).await?;
 
-        let switch_id = rqctx.local_switch_id().await;
+        // We don't error out in get_location on the local switch ID not being
+        // available, so discard the error here (it's already logged in
+        // local_switch_id).
+        let switch_id = rqctx.local_switch_id().await.ok();
         let sled_baseboard = rqctx.baseboard.clone();
 
         let mut switch_baseboard = None;
@@ -592,7 +595,7 @@ impl WicketdApi for WicketdApiImpl {
         let options = body.into_inner();
 
         let our_switch_slot = match rqctx.local_switch_id().await {
-            Some(SpIdentifier { slot, typ: SpType::Switch }) => match slot {
+            Ok(SpIdentifier { slot, typ: SpType::Switch }) => match slot {
                 0 => SwitchSlot::Switch0,
                 1 => SwitchSlot::Switch1,
                 _ => {
@@ -601,16 +604,13 @@ impl WicketdApi for WicketdApiImpl {
                     )));
                 }
             },
-            Some(other) => {
+            Ok(other) => {
                 return Err(HttpError::for_internal_error(format!(
                     "unexpected switch SP identifier {other:?}"
                 )));
             }
-            None => {
-                return Err(HttpError::for_unavail(
-                    Some("UnknownSwitchSlot".to_string()),
-                    "local switch slot not yet determined".to_string(),
-                ));
+            Err(err) => {
+                return Err(err.to_http_error());
             }
         };
 

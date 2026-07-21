@@ -4,12 +4,7 @@
 
 //! The stable, versioned commissioning API served by wicketd.
 //!
-//! This is a small, hermetic surface intended for the rack commissioning tool
-//! (rkdeploy). Nearly every published type lives in
-//! [`wicketd_commission_types_versions`]; a few foundational types come from
-//! shared crates instead (`omicron-uuid-kinds`, `oxnet`, `semver`, and
-//! omicron-common's `Name`, referenced through `BgpAuthKeyId`), so those also
-//! appear in the generated document. See RFD 710 and RFD 619.
+//! This is a small surface intended for the rack commissioning tool (rkdeploy).
 
 use dropshot::{
     HttpError, HttpResponseOk, HttpResponseUpdatedNoContent, RequestContext,
@@ -22,7 +17,7 @@ use wicketd_commission_types_versions::latest;
 
 api_versions!([(1, INITIAL),]);
 
-/// Full release repositories are currently (2025) well over 1 GiB and continue
+/// Full release repositories are currently (2026) well over 1 GiB and continue
 /// to grow.
 const PUT_REPOSITORY_MAX_BYTES: usize = 4 * 1024 * 1024 * 1024;
 
@@ -30,7 +25,11 @@ const PUT_REPOSITORY_MAX_BYTES: usize = 4 * 1024 * 1024 * 1024;
 pub trait WicketdCommissionApi {
     type Context;
 
-    /// Get a projected inventory of all service processors visible to wicketd
+    /// Get inventory of all service processors visible to wicketd
+    ///
+    /// If `force_refresh` is non-empty, the request will wait for the listed SPs
+    /// to report fresh data, or return a 503 if they do not respond within the
+    /// server-side timeout.
     #[endpoint {
         method = GET,
         path = "/inventory/sps",
@@ -38,9 +37,12 @@ pub trait WicketdCommissionApi {
     async fn get_sp_inventory(
         rqctx: RequestContext<Self::Context>,
         params: TypedBody<latest::inventory::SpInventoryParams>,
-    ) -> Result<HttpResponseOk<IdOrdMap<latest::inventory::SpInfo>>, HttpError>;
+    ) -> Result<HttpResponseOk<latest::inventory::SpInventory>, HttpError>;
 
     /// Report the physical location (switch and sled) wicketd is running at
+    ///
+    /// Will return 503 if the location is not yet known (typically because
+    /// wicketd hasn't been able to connect to MGS).
     #[endpoint {
         method = GET,
         path = "/location",

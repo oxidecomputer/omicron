@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use bootstrap_agent_lockstep_client::ClientInfo as _;
 use dropshot::{
@@ -16,7 +17,8 @@ use wicketd_commission_api::{
     WicketdCommissionApi, wicketd_commission_api_mod,
 };
 use wicketd_commission_types::inventory::{
-    BootstrapSled, LocationInfo, SpIdentifier, SpInfo, SpInventoryParams,
+    BootstrapSled, LocationInfo, SpIdentifier, SpInventory, SpInventoryParams,
+    SwitchSlot,
 };
 use wicketd_commission_types::rack_setup::{
     CertificateUploadResponse, PutRecoveryUserPasswordHash,
@@ -30,12 +32,19 @@ use wicketd_commission_types::update::{
 use super::conversions;
 use super::progress;
 use crate::ServerContext;
+use crate::helpers::SpIdentifierDisplay;
 use crate::http_helpers::{
     ba_lockstep_client, ba_lockstep_error_to_http, http_error_with_message,
     inventory_err_to_http, inventory_unavailable, mgs_inventory_or_unavail,
     start_update,
 };
 use crate::mgs::GetInventoryResponse as MgsInventoryResponse;
+
+/// How long to wait for a forced SP refresh.
+///
+/// This is comfortably above the ~1s it takes to do a normal refresh, and below
+/// Progenitor's default 15s client timeout.
+const SP_REFRESH_TIMEOUT: Duration = Duration::from_secs(10);
 
 type CommissionApiDescription = ApiDescription<Arc<ServerContext>>;
 
@@ -52,24 +61,44 @@ impl WicketdCommissionApi for WicketdCommissionApiImpl {
     async fn get_sp_inventory(
         rqctx: RequestContext<Self::Context>,
         params: TypedBody<SpInventoryParams>,
-    ) -> Result<HttpResponseOk<IdOrdMap<SpInfo>>, HttpError> {
+    ) -> Result<HttpResponseOk<SpInventory>, HttpError> {
         let ctx = rqctx.context();
         let force_refresh = params.into_inner().force_refresh;
 
-        let response = ctx
-            .mgs_handle
-            .get_inventory_refreshing_sps(force_refresh)
-            .await
-            .map_err(inventory_err_to_http)?;
+        let response = tokio::time::timeout(
+            SP_REFRESH_TIMEOUT,
+            ctx.mgs_handle.get_inventory_refreshing_sps(force_refresh.clone()),
+        )
+        .await
+        .map_err(|_elapsed| {
+            http_error_with_message(
+                dropshot::ErrorStatusCode::SERVICE_UNAVAILABLE,
+                Some("SpRefreshTimeout".to_string()),
+                format!(
+                    "timed out after {}s waiting for refreshed state of [{}]; \
+                     the SPs may be unresponsive or MGS may be down (see \
+                     wicketd logs for details)",
+                    SP_REFRESH_TIMEOUT.as_secs(),
+                    force_refresh
+                        .iter()
+                        .map(|id| SpIdentifierDisplay(*id).to_string())
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                ),
+            )
+        })?
+        .map_err(inventory_err_to_http)?;
 
         match response {
-            MgsInventoryResponse::Response { inventory, .. } => {
-                let sps: IdOrdMap<SpInfo> = inventory
-                    .sps
-                    .into_iter()
-                    .map(conversions::sp_info_to_ct)
-                    .collect();
-                Ok(HttpResponseOk(sps))
+            MgsInventoryResponse::Response { inventory, mgs_last_seen } => {
+                let sps = IdOrdMap::from_iter_unique(
+                    inventory.sps.into_iter().map(conversions::sp_info_to_ct),
+                )
+                .expect(
+                    "MGS inventory holds at most one entry per SpIdentifier, \
+                     so the projected SpInfos have unique ids",
+                );
+                Ok(HttpResponseOk(SpInventory { mgs_last_seen, sps }))
             }
             MgsInventoryResponse::Unavailable => Err(inventory_unavailable()),
         }
@@ -81,13 +110,8 @@ impl WicketdCommissionApi for WicketdCommissionApiImpl {
         let ctx = rqctx.context();
         let inventory = mgs_inventory_or_unavail(&ctx.mgs_handle).await?;
 
-        let switch_id = ctx.local_switch_id().await.ok_or_else(|| {
-            http_error_with_message(
-                dropshot::ErrorStatusCode::SERVICE_UNAVAILABLE,
-                Some("UnknownSwitchSlot".to_string()),
-                "local switch slot not yet determined".to_string(),
-            )
-        })?;
+        let switch_id =
+            ctx.local_switch_id().await.map_err(|err| err.to_http_error())?;
 
         let switch_serial = inventory
             .sps
@@ -99,8 +123,23 @@ impl WicketdCommissionApi for WicketdCommissionApiImpl {
         let sled_serial =
             ctx.baseboard.as_ref().map(|b| b.identifier().to_string());
 
+        let switch_slot = match switch_id.slot {
+            0 => SwitchSlot::Switch0,
+            1 => SwitchSlot::Switch1,
+            other => {
+                return Err(http_error_with_message(
+                    dropshot::ErrorStatusCode::INTERNAL_SERVER_ERROR,
+                    None,
+                    format!(
+                        "wicketd derived an invalid local switch slot \
+                         ({other}); expected 0 or 1"
+                    ),
+                ));
+            }
+        };
+
         Ok(HttpResponseOk(LocationInfo {
-            switch_slot: switch_id.slot,
+            switch_slot,
             switch_serial,
             sled_serial,
         }))
@@ -116,15 +155,17 @@ impl WicketdCommissionApi for WicketdCommissionApiImpl {
         let sled_inventory =
             SledInventory::new(&inventory, &ddm_discovered_sleds, &ctx.log);
 
-        let sleds: IdOrdMap<BootstrapSled> = sled_inventory
-            .sleds
-            .into_iter()
-            .map(|desc| BootstrapSled {
+        let sleds = IdOrdMap::from_iter_unique(
+            sled_inventory.sleds.into_iter().map(|desc| BootstrapSled {
                 id: desc.id,
                 serial_number: desc.baseboard.identifier().to_string(),
                 ip: desc.bootstrap_ip,
-            })
-            .collect();
+            }),
+        )
+        .expect(
+            "SledInventory holds at most one sled per SpIdentifier, so the \
+             projected BootstrapSleds have unique ids",
+        );
 
         Ok(HttpResponseOk(sleds))
     }

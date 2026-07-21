@@ -15,7 +15,27 @@ use wicketd_commission_types::rack_setup::{
 use wicketd_commission_types::update::StartUpdateOptions;
 
 fn caboose_to_ct(caboose: SpComponentCaboose) -> ct_inv::Caboose {
-    ct_inv::Caboose { version: caboose.version, board: caboose.board }
+    let SpComponentCaboose {
+        version,
+        board,
+        // The remaining fields are not projected by the commission API.
+        git_commit: _,
+        name: _,
+        sign: _,
+        epoch: _,
+    } = caboose;
+    ct_inv::Caboose { version, board }
+}
+
+fn slot_caboose_to_ct(
+    caboose: Option<SpComponentCaboose>,
+) -> ct_inv::SlotCaboose {
+    match caboose {
+        None => ct_inv::SlotCaboose::NotRead,
+        Some(caboose) => {
+            ct_inv::SlotCaboose::Read { caboose: caboose_to_ct(caboose) }
+        }
+    }
 }
 
 fn stage0_caboose_to_ct(
@@ -31,12 +51,19 @@ fn stage0_caboose_to_ct(
 }
 
 fn rot_info_to_ct(rot: RotInventory) -> ct_inv::RotInfo {
+    let RotInventory {
+        active,
+        caboose_a,
+        caboose_b,
+        caboose_stage0,
+        caboose_stage0next,
+    } = rot;
     ct_inv::RotInfo {
-        active: rot.active,
-        caboose_a: rot.caboose_a.map(caboose_to_ct),
-        caboose_b: rot.caboose_b.map(caboose_to_ct),
-        caboose_stage0: stage0_caboose_to_ct(rot.caboose_stage0),
-        caboose_stage0next: stage0_caboose_to_ct(rot.caboose_stage0next),
+        active,
+        caboose_a: slot_caboose_to_ct(caboose_a),
+        caboose_b: slot_caboose_to_ct(caboose_b),
+        caboose_stage0: stage0_caboose_to_ct(caboose_stage0),
+        caboose_stage0next: stage0_caboose_to_ct(caboose_stage0next),
     }
 }
 
@@ -44,7 +71,15 @@ fn ignition_to_ct(ignition: SpIgnition) -> ct_inv::SpIgnitionInfo {
     match ignition {
         SpIgnition::Absent => ct_inv::SpIgnitionInfo::Absent,
         SpIgnition::Present {
-            power, flt_a3, flt_a2, flt_rot, flt_sp, ..
+            power,
+            flt_a3,
+            flt_a2,
+            flt_rot,
+            flt_sp,
+            // The remaining fields are not projected by the commission API.
+            id: _,
+            ctrl_detect_0: _,
+            ctrl_detect_1: _,
         } => ct_inv::SpIgnitionInfo::Present {
             power,
             faults: ct_inv::IgnitionFaults {
@@ -58,16 +93,26 @@ fn ignition_to_ct(ignition: SpIgnition) -> ct_inv::SpIgnitionInfo {
 }
 
 pub(crate) fn sp_info_to_ct(sp: SpInventory) -> ct_inv::SpInfo {
+    let SpInventory {
+        id,
+        ignition,
+        state,
+        caboose_active,
+        caboose_inactive,
+        rot,
+        // The raw MGS component list is not projected by the commission API.
+        components: _,
+    } = sp;
     ct_inv::SpInfo {
-        id: sp.id,
-        state: sp.state.map(|s| ct_inv::SpStateInfo {
+        id,
+        state: state.map(|s| ct_inv::SpStateInfo {
             serial_number: s.serial_number,
             power_state: s.power_state,
         }),
-        ignition: sp.ignition.map(ignition_to_ct),
-        caboose_active: sp.caboose_active.map(caboose_to_ct),
-        caboose_inactive: sp.caboose_inactive.map(caboose_to_ct),
-        rot: sp.rot.map(rot_info_to_ct),
+        ignition: ignition.map(ignition_to_ct),
+        caboose_active: slot_caboose_to_ct(caboose_active),
+        caboose_inactive: slot_caboose_to_ct(caboose_inactive),
+        rot: rot.map(rot_info_to_ct),
     }
 }
 
