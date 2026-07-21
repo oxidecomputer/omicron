@@ -98,6 +98,7 @@ use wicket_common::update_events::UpdateEngine;
 use wicket_common::update_events::UpdateStepId;
 use wicket_common::update_events::UpdateTerminalError;
 use wicketd_api::GetArtifactsAndEventReportsResponse;
+use wicketd_commission_types::update::UpdateTargets;
 
 #[derive(Debug)]
 struct SpUpdateData {
@@ -196,7 +197,7 @@ impl UpdateTracker {
 
     pub(crate) async fn start(
         &self,
-        sps: BTreeSet<SpIdentifier>,
+        sps: UpdateTargets,
         opts: StartUpdateOptions,
     ) -> Result<(), Vec<StartUpdateError>> {
         let imp = RealSpawnUpdateDriver { update_tracker: self, opts };
@@ -210,7 +211,7 @@ impl UpdateTracker {
     #[doc(hidden)]
     pub async fn start_fake_update(
         &self,
-        sps: BTreeSet<SpIdentifier>,
+        sps: UpdateTargets,
         fake_step_receiver: oneshot::Receiver<oneshot::Sender<()>>,
     ) -> Result<(), Vec<StartUpdateError>> {
         let imp = FakeUpdateDriver {
@@ -222,10 +223,10 @@ impl UpdateTracker {
 
     pub(crate) async fn clear_update_state(
         &self,
-        sps: BTreeSet<SpIdentifier>,
+        targets: UpdateTargets,
     ) -> Result<ClearUpdateStateResponse, ClearUpdateStateError> {
         let mut update_data = self.sp_update_data.lock().await;
-        update_data.clear_update_state(&sps)
+        update_data.clear_update_state(&targets)
     }
 
     pub(crate) async fn abort_update(
@@ -247,14 +248,14 @@ impl UpdateTracker {
     /// performs the same checks.
     pub(crate) async fn update_pre_checks(
         &self,
-        sps: BTreeSet<SpIdentifier>,
+        sps: UpdateTargets,
     ) -> Result<(), Vec<StartUpdateError>> {
         self.start_impl::<NeverUpdateDriver>(sps, None).await
     }
 
     async fn start_impl<Spawn>(
         &self,
-        sps: BTreeSet<SpIdentifier>,
+        sps: UpdateTargets,
         spawn_update_driver: Option<Spawn>,
     ) -> Result<(), Vec<StartUpdateError>>
     where
@@ -678,7 +679,7 @@ impl UpdateTrackerData {
 
     fn clear_update_state(
         &mut self,
-        sps: &BTreeSet<SpIdentifier>,
+        sps: &UpdateTargets,
     ) -> Result<ClearUpdateStateResponse, ClearUpdateStateError> {
         // Are any updates currently running? If so, then reject the request.
         let in_progress_updates = sps
