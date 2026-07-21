@@ -16,6 +16,7 @@
 #[macro_use]
 extern crate slog;
 use bootstrap_agent_lockstep_types::{MultirackJoinRequest, MultirackJoinStep};
+use nexus_types::trust_quorum::TrustQuorumConfig;
 use omicron_uuid_kinds::RackUuid;
 use sled_agent_bootstrap_common::{RssContext, RunRssError};
 use sled_hardware_types::BaseboardId;
@@ -27,12 +28,15 @@ use std::{
     time::Duration,
 };
 use thiserror::Error;
-use tokio::{sync::watch, task::JoinSet};
+use tokio::{
+    sync::watch,
+    task::{JoinError, JoinSet},
+};
 use trust_quorum::{NodeApiError, ProxyError};
 use trust_quorum_protocol::CommitError;
 use trust_quorum_types::{
     messages::ReconfigureMsg as TqReconfigureMsg, status::CoordinatorStatus,
-    types::Epoch,
+    types::Epoch, types::Threshold,
 };
 
 /// Describes errors which may occur while operating the multirack join service.
@@ -52,6 +56,12 @@ pub enum MultirackJoinServiceError {
 
     #[error("Failed to receive input from bootstrap agent")]
     InputRx(#[from] watch::error::RecvError),
+
+    #[error("Failed to join proxy commit task")]
+    ProxyCommit(#[from] JoinError),
+
+    #[error("Trust quorum commit cannot complete at epoch {0}")]
+    TrustQuorumCommitFailure(Epoch),
 }
 
 impl From<RunRssError> for MultirackJoinServiceError {
@@ -205,9 +215,8 @@ impl MultirackJoinServiceTask {
         epoch: Epoch,
         last_committed_epoch: Option<Epoch>,
     ) -> Result<(), MultirackJoinServiceError> {
-        let threshold = trust_quorum_types::types::Threshold(
-            u8::try_from(members.len()).unwrap() / 2 + 1,
-        );
+        let threshold =
+            TrustQuorumConfig::threshold(members.len().try_into().unwrap());
 
         let msg = TqReconfigureMsg {
             rack_id,
@@ -323,13 +332,14 @@ impl MultirackJoinServiceTask {
 
         // Peers that must proxy commit over sprockets
         let mut remote_peers = members.clone();
-        remote_peers.remove(self.ctx.trust_quorum_handle.baseboard_id());
+        let this_sled = self.ctx.trust_quorum_handle.baseboard_id().clone();
+        remote_peers.remove(&this_sled);
         let mut set = JoinSet::new();
 
         // Track and report the status of each remote peer
-        let mut acked = BTreeSet::<BaseboardId>::new();
-        let mut fatal_errors = Arc::new(Mutex::new(BTreeMap::new()));
-        let mut transient_errors = Arc::new(Mutex::new(BTreeMap::new()));
+        let mut acked = BTreeSet::from([this_sled]);
+        let mut fatal_errors = BTreeMap::new();
+        let transient_errors = Arc::new(Mutex::new(BTreeMap::new()));
 
         for peer in remote_peers {
             let proxy = self.ctx.trust_quorum_handle.proxy();
@@ -339,31 +349,95 @@ impl MultirackJoinServiceTask {
                 "epoch" => %epoch,
                 "baseboard_id" => %peer
             );
-            let fatal_errors = fatal_errors.clone();
             let transient_errors = transient_errors.clone();
             set.spawn(async move {
-                match proxy.commit(peer.clone(), rack_id, epoch).await {
-                    Ok(trust_quorum_types::status::CommitStatus::Committed) => {
-                    }
-                    Ok(trust_quorum_types::status::CommitStatus::Pending) => {}
-                    Err(e @ ProxyError::Inner(_))
-                    | Err(e @ ProxyError::InvalidResponse(_))
-                    | Err(e @ ProxyError::RecvError) => {
-                        fatal_errors.lock().unwrap().insert(peer, e);
-                    }
-                    Err(transient_err) => {
-                        transient_errors
-                            .lock()
-                            .unwrap()
-                            .insert(peer, transient_err);
+                loop {
+                    let peer = peer.clone();
+                    match proxy.commit(peer.clone(), rack_id, epoch).await {
+                        Ok(
+                            trust_quorum_types::status::CommitStatus::Committed,
+                        ) => {
+                            return Ok(peer);
+                        }
+                        Ok(
+                            trust_quorum_types::status::CommitStatus::Pending,
+                        ) => {
+                            let s = "unexpected CommitStatus::Pending \
+                            from prepared peer"
+                                .to_string();
+                            return Err((peer, s));
+                        }
+                        Err(e @ ProxyError::Inner(_))
+                        | Err(e @ ProxyError::InvalidResponse(_))
+                        | Err(e @ ProxyError::RecvError) => {
+                            let s = InlineErrorChain::new(&e).to_string();
+                            return Err((peer, s));
+                        }
+                        Err(e) => {
+                            let s = InlineErrorChain::new(&e).to_string();
+                            transient_errors.lock().unwrap().insert(peer, s);
+                            tokio::time::sleep(Duration::from_millis(500))
+                                .await;
+                        }
                     }
                 }
             });
         }
 
-        // TODO: Await each peer and also check for updates from `input_rx`
-        // TODO: Ensure that output_tx contains the threshold being waited for as well
-        // as safety factor, etc...
+        let threshold =
+            TrustQuorumConfig::threshold(members.len().try_into().unwrap());
+        let commit_crash_tolerance = TrustQuorumConfig::commit_crash_tolerance(
+            members.len().try_into().unwrap(),
+        );
+
+        let min_acks_to_commit =
+            (threshold.0 + commit_crash_tolerance) as usize;
+
+        loop {
+            tokio::select! {
+                Some(res) = set.join_next() => {
+                    match res? {
+                        Ok(peer_id) => {
+                            acked.insert(peer_id);
+                            if acked == members {
+                                // All nodes committed. We are done.
+                                break;
+                            }
+
+
+                    }
+                        Err((peer_id,err)) => {
+                            fatal_errors.insert(peer_id, err);
+
+                        }
+                    }
+                }
+                res = self.input_rx.changed() => {
+                    res?;
+                    // The operator changed the input
+                    // Did the membership change?
+                    let new_members =
+                        self.input_rx.borrow_and_update().trust_quorum_peers.clone();
+                    if members != new_members {
+                        if acked.len() > min_acks_to_commit {
+                            // We can commit this configuration safely and then try a reconfiguration
+                            // with the updated config.
+                            //
+                            // TODO: We need to also return the
+                            // last-committed-configuration (epoch).
+                            // TODO: What do we insert in Nexus, and when?
+                            return Ok(Some((new_members, epoch.next())));
+                        }
+                        // TODO: Add nodes which failed to ack
+                        return Err(MultirackJoinServiceError::TrustQuorumCommitFailure(epoch));
+
+                    } else {
+                        // Something other than membership changed, just move
+                        // ignore for now.
+                    }
+                }
+            }
+        }
 
         Ok(None)
     }

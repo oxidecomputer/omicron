@@ -13957,6 +13957,7 @@ dependencies = [
  "camino",
  "camino-tempfile",
  "itertools 0.14.0",
+ "nexus-types",
  "omicron-common",
  "omicron-ddm-admin-client",
  "omicron-ledger",
