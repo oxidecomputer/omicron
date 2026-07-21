@@ -47,7 +47,7 @@ control_plane_memory_earmark_mb = 45056
 #
 # We expect this should be higher, but currently a lack of long-uptime
 # varied-usage measurements leads us to be cautious.
-vmm_reservoir_percentage = 86.3
+vmm_reservoir_percentage = 91.0
 
 # Swap device size for the system. The device is a sparsely allocated zvol on
 # the internal zpool of the M.2 that we booted from.
@@ -58,6 +58,9 @@ vmm_reservoir_percentage = 86.3
 # We pick 256 GiB somewhat arbitrarily, since the device is sparsely
 # allocated.
 swap_device_size_gb = 256
+
+[external_disks]
+kind = "detect_physical"
 
 [data_links]
 kind = "physical"
@@ -75,3 +78,4 @@ if_exists = "append"
 resolve = { which = "ipcc" }
 attest = { which = "ipcc" }
 roots = ["/usr/share/oxide/idcerts/staging.pem", "/usr/share/oxide/idcerts/production.pem"]
+enforce = "Enforced"

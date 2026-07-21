@@ -79,22 +79,32 @@ impl TryFrom<diesel::pg::data_types::PgNumeric> for ByteCount {
     ) -> Result<Self, Self::Error> {
         match num {
             diesel::pg::data_types::PgNumeric::Positive {
-                weight: _,
+                // How many digits come before the decimal point?
+                weight,
+                // How many significant digits are there?
                 scale,
+                // The digits in this number, stored in base 10000
                 digits,
             } => {
                 // fail if there are digits to right of decimal place -
                 // ByteCount is a whole number
                 if scale != 0 {
-                    bail!("PgNumeric::Positive scale is {}", scale);
+                    bail!("PgNumeric::Positive scale is {scale}");
                 }
 
                 let mut result: i64 = 0;
-                let mut multiplier = 1;
 
-                for digit in digits.iter().rev() {
+                // `weight` stores how many "digits" come before the decimal
+                // point, but remember "digits" are stored in base 10000.
+                let Some(mut multiplier) =
+                    10000_i64.checked_pow(weight.try_into()?)
+                else {
+                    bail!("overflow for multiplier weight {weight}");
+                };
+
+                for digit in digits.iter() {
                     result += i64::from(*digit) * multiplier;
-                    multiplier *= 10000;
+                    multiplier /= 10000;
                 }
 
                 let result: external::ByteCount = result.try_into()?;
@@ -163,7 +173,7 @@ mod test {
         //   The digits in this number, stored in base 10000
 
         let result: IntoResult = diesel::pg::data_types::PgNumeric::Positive {
-            weight: 1,
+            weight: 0,
             scale: 0,
             digits: vec![1],
         }
@@ -171,7 +181,15 @@ mod test {
         assert_eq!(result.unwrap().to_bytes(), 1);
 
         let result: IntoResult = diesel::pg::data_types::PgNumeric::Positive {
-            weight: 5,
+            weight: 0,
+            scale: 0,
+            digits: vec![999],
+        }
+        .try_into();
+        assert_eq!(result.unwrap().to_bytes(), 999);
+
+        let result: IntoResult = diesel::pg::data_types::PgNumeric::Positive {
+            weight: 1,
             scale: 0,
             digits: vec![1, 0],
         }
@@ -179,7 +197,15 @@ mod test {
         assert_eq!(result.unwrap().to_bytes(), 10000);
 
         let result: IntoResult = diesel::pg::data_types::PgNumeric::Positive {
-            weight: 9,
+            weight: 1,
+            scale: 0,
+            digits: vec![1],
+        }
+        .try_into();
+        assert_eq!(result.unwrap().to_bytes(), 10000);
+
+        let result: IntoResult = diesel::pg::data_types::PgNumeric::Positive {
+            weight: 2,
             scale: 0,
             digits: vec![1, 0, 0],
         }
@@ -187,7 +213,15 @@ mod test {
         assert_eq!(result.unwrap().to_bytes(), 100000000);
 
         let result: IntoResult = diesel::pg::data_types::PgNumeric::Positive {
-            weight: 9,
+            weight: 2,
+            scale: 0,
+            digits: vec![1],
+        }
+        .try_into();
+        assert_eq!(result.unwrap().to_bytes(), 100000000);
+
+        let result: IntoResult = diesel::pg::data_types::PgNumeric::Positive {
+            weight: 2,
             scale: 0,
             digits: vec![1, 0, 9999],
         }
@@ -195,7 +229,7 @@ mod test {
         assert_eq!(result.unwrap().to_bytes(), 100009999);
 
         let result: IntoResult = diesel::pg::data_types::PgNumeric::Positive {
-            weight: 11,
+            weight: 2,
             scale: 0,
             digits: vec![512, 512, 512],
         }
@@ -203,12 +237,44 @@ mod test {
         assert_eq!(result.unwrap().to_bytes(), 51205120512);
 
         let result: IntoResult = diesel::pg::data_types::PgNumeric::Positive {
-            weight: 12,
+            weight: 2,
             scale: 0,
             digits: vec![9999, 9999, 9999],
         }
         .try_into();
         assert_eq!(result.unwrap().to_bytes(), 999999999999);
+
+        let result: IntoResult = diesel::pg::data_types::PgNumeric::Positive {
+            weight: 3,
+            scale: 0,
+            digits: vec![5, 7357, 1072, 0],
+        }
+        .try_into();
+        assert_eq!(result.unwrap().to_bytes(), 5735710720000);
+
+        let result: IntoResult = diesel::pg::data_types::PgNumeric::Positive {
+            weight: 3,
+            scale: 0,
+            digits: vec![5, 7357, 1072],
+        }
+        .try_into();
+        assert_eq!(result.unwrap().to_bytes(), 5735710720000);
+
+        let result: IntoResult = diesel::pg::data_types::PgNumeric::Positive {
+            weight: 2,
+            scale: 0,
+            digits: vec![1147, 1421, 4400],
+        }
+        .try_into();
+        assert_eq!(result.unwrap().to_bytes(), 114714214400);
+
+        let result: IntoResult = diesel::pg::data_types::PgNumeric::Positive {
+            weight: 2,
+            scale: 0,
+            digits: vec![183, 5427, 4304],
+        }
+        .try_into();
+        assert_eq!(result.unwrap().to_bytes(), 18354274304);
     }
 
     #[test]

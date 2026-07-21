@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use super::json_display::fmt_json_value;
+use super::display;
 use crate::alert::AlertClass;
 use crate::fm::DiagnosisEngineKind;
 use crate::fm::Ereport;
@@ -45,8 +45,8 @@ impl Case {
         &self,
         indent: usize,
         sitrep_id: Option<SitrepUuid>,
-    ) -> impl fmt::Display + '_ {
-        DisplayCase { case: self, indent, sitrep_id }
+    ) -> DisplayCase<'_> {
+        DisplayCase { case: self, indent, sitrep_id, colored: false }
     }
 }
 
@@ -85,60 +85,76 @@ impl Metadata {
         &self,
         indent: usize,
         sitrep: Option<SitrepUuid>,
-    ) -> impl fmt::Display + '_ {
-        struct DisplayMetadata<'a> {
-            meta: &'a Metadata,
-            indent: usize,
-            sitrep_id: Option<SitrepUuid>,
+    ) -> DisplayMetadata<'_> {
+        DisplayMetadata {
+            meta: self,
+            indent,
+            sitrep_id: sitrep,
+            colored: false,
+        }
+    }
+}
+
+/// Displays a case's [`Metadata`], as returned by
+/// [`Metadata::display_multiline`].
+#[must_use = "this struct does nothing unless displayed"]
+pub struct DisplayMetadata<'a> {
+    meta: &'a Metadata,
+    indent: usize,
+    sitrep_id: Option<SitrepUuid>,
+    colored: bool,
+}
+
+impl DisplayMetadata<'_> {
+    /// If `colored` is true, style the output with ANSI terminal colors.
+    pub fn colored(mut self, colored: bool) -> Self {
+        self.colored = colored;
+        self
+    }
+}
+
+impl fmt::Display for DisplayMetadata<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let DisplayMetadata {
+            meta: Metadata { de, created_sitrep_id, closed_sitrep_id, comment },
+            indent,
+            sitrep_id,
+            colored,
+        } = self;
+        let styles = display::Styles::new(*colored);
+        let sitrep_id = sitrep_id.as_ref();
+        let this_sitrep = move |s| {
+            styles.annotation_if(Some(s) == sitrep_id, " <-- this sitrep")
+        };
+
+        const DE: &str = "diagnosis engine:";
+        const OPENED_IN: &str = "opened in sitrep:";
+        const CLOSED_IN: &str = "closed in sitrep:";
+        const WIDTH: usize = const_max_len(&[DE, OPENED_IN, CLOSED_IN]);
+
+        display::Comment::from(comment)
+            .indent(*indent)
+            .colored(*colored)
+            .fmt(f)?;
+        writeln!(f, "{:>indent$}{} {de}", "", styles.label(DE, WIDTH))?;
+        writeln!(
+            f,
+            "{:>indent$}{} {created_sitrep_id}{}",
+            "",
+            styles.label(OPENED_IN, WIDTH),
+            this_sitrep(created_sitrep_id)
+        )?;
+        if let Some(closed_id) = closed_sitrep_id {
+            writeln!(
+                f,
+                "{:>indent$}{} {closed_id}{}",
+                "",
+                styles.label(CLOSED_IN, WIDTH),
+                this_sitrep(closed_id)
+            )?;
         }
 
-        impl fmt::Display for DisplayMetadata<'_> {
-            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                let DisplayMetadata {
-                    meta:
-                        Metadata {
-                            de,
-                            created_sitrep_id,
-                            closed_sitrep_id,
-                            comment,
-                        },
-                    indent,
-                    sitrep_id,
-                } = self;
-                let sitrep_id = sitrep_id.as_ref();
-                let this_sitrep = move |s| {
-                    if Some(s) == sitrep_id { " <-- this sitrep" } else { "" }
-                };
-
-                const DE: &str = "diagnosis engine:";
-                const OPENED_IN: &str = "opened in sitrep:";
-                const CLOSED_IN: &str = "closed in sitrep:";
-                const WIDTH: usize = const_max_len(&[DE, OPENED_IN, CLOSED_IN]);
-
-                for line in comment.lines() {
-                    writeln!(f, "{:>indent$}// {line}", "")?;
-                }
-                writeln!(f, "{:>indent$}{DE:<WIDTH$} {de}", "")?;
-                writeln!(
-                    f,
-                    "{:>indent$}{OPENED_IN:<WIDTH$} {created_sitrep_id}{}",
-                    "",
-                    this_sitrep(created_sitrep_id)
-                )?;
-                if let Some(closed_id) = closed_sitrep_id {
-                    writeln!(
-                        f,
-                        "{:>indent$}{CLOSED_IN:<WIDTH$} {closed_id}{}",
-                        "",
-                        this_sitrep(closed_id)
-                    )?;
-                }
-
-                Ok(())
-            }
-        }
-
-        DisplayMetadata { meta: self, indent, sitrep_id: sitrep }
+        Ok(())
     }
 }
 
@@ -207,49 +223,66 @@ impl Fact {
         &self,
         indent: usize,
         sitrep_id: Option<SitrepUuid>,
-    ) -> impl fmt::Display + '_ {
-        struct DisplayFact<'a> {
-            fact: &'a Fact,
-            indent: usize,
-            sitrep_id: Option<SitrepUuid>,
-        }
+    ) -> DisplayFact<'_> {
+        DisplayFact { fact: self, indent, sitrep_id, colored: false }
+    }
+}
 
-        impl fmt::Display for DisplayFact<'_> {
-            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                const BULLET: &str = "* ";
+/// Displays a [`Fact`], as returned by [`Fact::display_multiline`].
+#[must_use = "this struct does nothing unless displayed"]
+pub struct DisplayFact<'a> {
+    fact: &'a Fact,
+    indent: usize,
+    sitrep_id: Option<SitrepUuid>,
+    colored: bool,
+}
 
-                let &Self {
-                    fact:
-                        Fact {
-                            metadata:
-                                FactMetadata { id, created_sitrep_id, comment },
-                            payload,
-                        },
-                    indent,
-                    sitrep_id,
-                } = self;
-                let this_sitrep = |s| {
-                    if Some(s) == sitrep_id { " <-- this sitrep" } else { "" }
-                };
+impl DisplayFact<'_> {
+    /// If `colored` is true, style the output with ANSI terminal colors.
+    pub fn colored(mut self, colored: bool) -> Self {
+        self.colored = colored;
+        self
+    }
+}
 
-                writeln!(f, "{BULLET:>indent$}fact {id}")?;
-                for line in comment.lines() {
-                    writeln!(f, "{:>indent$}// {line}", "")?;
-                }
-                writeln!(
-                    f,
-                    "{:>indent$}added in: {created_sitrep_id}{}",
-                    "",
-                    this_sitrep(*created_sitrep_id),
-                )?;
-                let payload = serde_json::to_value(payload)
-                    .unwrap_or(serde_json::Value::Null);
-                fmt_json_value(f, "payload", &payload, indent)?;
-                writeln!(f)
-            }
-        }
+impl fmt::Display for DisplayFact<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        const BULLET: &str = "* ";
 
-        DisplayFact { fact: self, indent, sitrep_id }
+        let &Self {
+            fact:
+                Fact {
+                    metadata: FactMetadata { id, created_sitrep_id, comment },
+                    payload,
+                },
+            indent,
+            sitrep_id,
+            colored,
+        } = self;
+        let styles = display::Styles::new(colored);
+        let this_sitrep =
+            |s| styles.annotation_if(Some(s) == sitrep_id, " <-- this sitrep");
+
+        writeln!(
+            f,
+            "{BULLET:>indent$}{}",
+            styles.heading().style(format_args!("fact {id}"))
+        )?;
+        display::Comment::from(comment)
+            .indent(indent)
+            .colored(colored)
+            .fmt(f)?;
+        writeln!(
+            f,
+            "{:>indent$}{}: {created_sitrep_id}{}",
+            "",
+            styles.heading().style("added in"),
+            this_sitrep(*created_sitrep_id),
+        )?;
+        let payload =
+            serde_json::to_value(payload).unwrap_or(serde_json::Value::Null);
+        display::fmt_json_value(f, "payload", &payload, indent, styles)?;
+        writeln!(f)
     }
 }
 
@@ -294,10 +327,21 @@ impl iddqd::IdOrdItem for SupportBundleRequest {
     iddqd::id_upcast!();
 }
 
-struct DisplayCase<'a> {
+/// Displays a [`Case`], as returned by [`Case::display_indented`].
+#[must_use = "this struct does nothing unless displayed"]
+pub struct DisplayCase<'a> {
     case: &'a Case,
     indent: usize,
     sitrep_id: Option<SitrepUuid>,
+    colored: bool,
+}
+
+impl DisplayCase<'_> {
+    /// If `colored` is true, style the output with ANSI terminal colors.
+    pub fn colored(mut self, colored: bool) -> Self {
+        self.colored = colored;
+        self
+    }
 }
 
 impl fmt::Display for DisplayCase<'_> {
@@ -316,27 +360,35 @@ impl fmt::Display for DisplayCase<'_> {
                 },
             indent,
             sitrep_id,
+            colored,
         } = self;
 
+        let styles = display::Styles::new(colored);
+        let heading = styles.heading();
         let this_sitrep = move |s| {
-            if Some(s) == sitrep_id { " <-- this sitrep" } else { "" }
+            styles.annotation_if(Some(s) == sitrep_id, " <-- this sitrep")
         };
 
         writeln!(
             f,
-            "{:>indent$}case {id}",
+            "{:>indent$}{}",
             if indent > 0 { BULLET } else { "" },
+            heading.style(format_args!("case {id}")),
         )?;
         writeln!(
             f,
-            "{:>indent$}=========================================",
-            ""
+            "{:>indent$}{}",
+            "",
+            heading.style("=========================================")
         )?;
-        metadata.display_multiline(indent, sitrep_id).fmt(f)?;
+        metadata
+            .display_multiline(indent, sitrep_id)
+            .colored(colored)
+            .fmt(f)?;
 
         if !ereports.is_empty() {
-            writeln!(f, "\n{:>indent$}ereports:", "")?;
-            writeln!(f, "{:>indent$}---------", "")?;
+            writeln!(f, "\n{:>indent$}{}:", "", heading.style("ereports"))?;
+            writeln!(f, "{:>indent$}{}", "", heading.style("---------"))?;
 
             let indent = indent + 2;
             for CaseEreport { id, ereport, assigned_sitrep_id, comment } in
@@ -354,48 +406,75 @@ impl fmt::Display for DisplayCase<'_> {
                     ASSIGNMENT_ID,
                 ]);
 
-                let pn = ereport.part_number.as_deref().unwrap_or("<UNKNOWN>");
-                let sn =
-                    ereport.serial_number.as_deref().unwrap_or("<UNKNOWN>");
-                writeln!(f, "{BULLET:>indent$}ereport {}", ereport.id)?;
-                for line in comment.lines() {
-                    writeln!(f, "{:>indent$}// {line}", "")?;
-                }
+                let pn = styles
+                    .or_missing(ereport.part_number.as_deref(), "<UNKNOWN>");
+                let sn = styles
+                    .or_missing(ereport.serial_number.as_deref(), "<UNKNOWN>");
                 writeln!(
                     f,
-                    "{:>indent$}{CLASS:<WIDTH$} {}",
+                    "{BULLET:>indent$}{}",
+                    heading.style(format_args!("ereport {}", ereport.id))
+                )?;
+                display::Comment::from(comment)
+                    .indent(indent)
+                    .colored(colored)
+                    .fmt(f)?;
+                writeln!(
+                    f,
+                    "{:>indent$}{} {}",
                     "",
-                    ereport.class.as_deref().unwrap_or("<NONE>")
+                    styles.label(CLASS, WIDTH),
+                    styles.or_missing(ereport.class.as_deref(), "<NONE>")
                 )?;
                 writeln!(
                     f,
-                    "{:>indent$}{REPORTED_BY:<WIDTH$} {pn:>11}:{sn:<11} ({})",
-                    "", ereport.reporter
+                    "{:>indent$}{} {pn:>11}:{sn:<11} ({})",
+                    "",
+                    styles.label(REPORTED_BY, WIDTH),
+                    ereport.reporter
                 )?;
                 writeln!(
                     f,
-                    "{:>indent$}{ADDED_IN:<WIDTH$} {assigned_sitrep_id}{}",
+                    "{:>indent$}{} {assigned_sitrep_id}{}",
                     "",
+                    styles.label(ADDED_IN, WIDTH),
                     this_sitrep(*assigned_sitrep_id)
                 )?;
-                writeln!(f, "{:>indent$}{ASSIGNMENT_ID:<WIDTH$} {id}", "")?;
+                writeln!(
+                    f,
+                    "{:>indent$}{} {id}",
+                    "",
+                    styles.label(ASSIGNMENT_ID, WIDTH)
+                )?;
                 writeln!(f)?;
             }
         }
 
         if !facts.is_empty() {
-            writeln!(f, "\n{:>indent$}facts:", "")?;
-            writeln!(f, "{:>indent$}------", "")?;
+            writeln!(f, "\n{:>indent$}{}:", "", heading.style("facts"))?;
+            writeln!(f, "{:>indent$}{}", "", heading.style("------"))?;
 
             let indent = indent + 2;
             for fact in facts.iter() {
-                fact.display_multiline(indent, sitrep_id).fmt(f)?;
+                fact.display_multiline(indent, sitrep_id)
+                    .colored(colored)
+                    .fmt(f)?;
             }
         }
 
         if !alerts_requested.is_empty() {
-            writeln!(f, "\n{:>indent$}alerts requested:", "")?;
-            writeln!(f, "{:>indent$}-----------------", "")?;
+            writeln!(
+                f,
+                "\n{:>indent$}{}:",
+                "",
+                heading.style("alerts requested")
+            )?;
+            writeln!(
+                f,
+                "{:>indent$}{}",
+                "",
+                heading.style("-----------------")
+            )?;
 
             let indent = indent + 2;
             for AlertRequest {
@@ -412,19 +491,26 @@ impl fmt::Display for DisplayCase<'_> {
 
                 const WIDTH: usize = const_max_len(&[CLASS, REQUESTED_IN]);
 
-                writeln!(f, "{BULLET:>indent$}alert {id}",)?;
-                for line in comment.lines() {
-                    writeln!(f, "{:>indent$}// {line}", "")?;
-                }
                 writeln!(
                     f,
-                    "{:>indent$}{CLASS:<WIDTH$} {class}, v{version}",
+                    "{BULLET:>indent$}{}",
+                    heading.style(format_args!("alert {id}"))
+                )?;
+                display::Comment::from(comment)
+                    .indent(indent)
+                    .colored(colored)
+                    .fmt(f)?;
+                writeln!(
+                    f,
+                    "{:>indent$}{} {class}, v{version}",
                     "",
+                    styles.label(CLASS, WIDTH),
                 )?;
                 writeln!(
                     f,
-                    "{:>indent$}{REQUESTED_IN:<WIDTH$} {requested_sitrep_id}{}",
+                    "{:>indent$}{} {requested_sitrep_id}{}",
                     "",
+                    styles.label(REQUESTED_IN, WIDTH),
                     this_sitrep(*requested_sitrep_id)
                 )?;
                 writeln!(f)?;
@@ -432,8 +518,18 @@ impl fmt::Display for DisplayCase<'_> {
         }
 
         if !support_bundles_requested.is_empty() {
-            writeln!(f, "\n{:>indent$}support bundles requested:", "")?;
-            writeln!(f, "{:>indent$}-------------------------", "")?;
+            writeln!(
+                f,
+                "\n{:>indent$}{}:",
+                "",
+                heading.style("support bundles requested")
+            )?;
+            writeln!(
+                f,
+                "{:>indent$}{}",
+                "",
+                heading.style("-------------------------")
+            )?;
 
             let indent = indent + 2;
             for SupportBundleRequest {
@@ -447,18 +543,23 @@ impl fmt::Display for DisplayCase<'_> {
                 const DATA: &str = "data:";
                 const WIDTH: usize = const_max_len(&[REQUESTED_IN, DATA]);
 
-                writeln!(f, "{BULLET:>indent$}bundle {id}",)?;
-
-                for line in comment.lines() {
-                    writeln!(f, "{:>indent$}// {line}", "")?;
-                }
                 writeln!(
                     f,
-                    "{:>indent$}{REQUESTED_IN:<WIDTH$} {requested_sitrep_id}{}",
+                    "{BULLET:>indent$}{}",
+                    heading.style(format_args!("bundle {id}"))
+                )?;
+                display::Comment::from(comment)
+                    .indent(indent)
+                    .colored(colored)
+                    .fmt(f)?;
+                writeln!(
+                    f,
+                    "{:>indent$}{} {requested_sitrep_id}{}",
                     "",
+                    styles.label(REQUESTED_IN, WIDTH),
                     this_sitrep(*requested_sitrep_id)
                 )?;
-                writeln!(f, "{:>indent$}{DATA}", "")?;
+                writeln!(f, "{:>indent$}{}", "", styles.label(DATA, 0))?;
                 writeln!(f, "{}", data_selection.display(indent + 2))?;
                 writeln!(f)?;
             }
@@ -500,8 +601,7 @@ mod tests {
     use std::str::FromStr;
     use std::sync::Arc;
 
-    #[test]
-    fn test_case_display() {
+    fn example_case() -> (Case, SitrepUuid) {
         // Create UUIDs for the case
         let case_id =
             CaseUuid::from_str("b0d36461-e3e7-4a53-9162-82414fb30088").unwrap();
@@ -681,6 +781,13 @@ mod tests {
             facts,
         };
 
+        (case, closed_sitrep_id)
+    }
+
+    #[test]
+    fn test_case_display() {
+        let (case, closed_sitrep_id) = example_case();
+
         eprintln!("example case display:");
         eprintln!("=====================\n");
         eprintln!("{case}");
@@ -688,5 +795,17 @@ mod tests {
         eprintln!("example case display (indented by 4):");
         eprintln!("=====================================\n");
         eprintln!("{}", case.display_indented(4, Some(closed_sitrep_id)));
+    }
+
+    /// Checks that the colored and non-colored display outputs are the same
+    /// string, see: [`display::test_utils::check_colored_display`].
+    #[test]
+    fn test_case_display_colored() {
+        let (case, closed_sitrep_id) = example_case();
+        eprintln!("example case display (colored):");
+        eprintln!("===============================\n");
+        display::test_utils::check_colored_display(|colored| {
+            case.display_indented(4, Some(closed_sitrep_id)).colored(colored)
+        });
     }
 }
