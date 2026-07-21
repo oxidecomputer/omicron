@@ -7,8 +7,7 @@
 use std::{collections::BTreeSet, sync::Arc, time::Duration};
 
 use super::setup::{
-    WicketdTestContext, assert_client_error, assert_client_error_message,
-    wait_for_sled0_progress,
+    WicketdTestContext, assert_client_error_message, wait_for_sled0_progress,
 };
 use camino::Utf8Path;
 use camino_tempfile::Utf8TempDir;
@@ -50,7 +49,7 @@ use wicketd_client::types::{
     GetInventoryParams, GetInventoryResponse, StartUpdateParams,
 };
 use wicketd_commission_types_versions::latest::update::{
-    self, ClearUpdateStateParams, StepOutcome, UpdateStepStatus,
+    self, ClearUpdateStateParams, StepOutcome, UpdateStepStatus, UpdateTargets,
 };
 
 /// The list of zone file names defined in fake-non-semver.toml.
@@ -217,7 +216,10 @@ async fn test_updates() {
 
     // Now, try starting the update on SP 0.
     let options = StartUpdateOptions::default();
-    let params = StartUpdateParams { targets: vec![target_sp], options };
+    let params = StartUpdateParams {
+        targets: UpdateTargets::single(target_sp),
+        options,
+    };
     wicketd_testctx
         .wicketd_client
         .post_start_update(&params)
@@ -302,21 +304,19 @@ async fn test_updates() {
         |p| matches!(p.progress.state, update::UpdateState::Failed { .. }),
     )
     .await;
-    match entry.progress.state {
-        update::UpdateState::Failed { message } => {
-            // Assert the failure message:
-            //
-            // * The step that fails is "Get host type".
-            // * The step fails because the simulated gimlet reports model
-            //   "i86pc" (`FAKE_GIMLET_MODEL`), which is not a known Oxide host
-            //   type.
-            assert_eq!(
-                message, "Get host type: Unknown host type i86pc",
-                "the failed update carries the expected operator-facing message",
-            );
-        }
-        other => panic!("expected Failed, got {other:?}"),
-    }
+    // Assert the failure message:
+    //
+    // * The step that fails is "Get host type".
+    // * The step fails because the simulated gimlet reports model
+    //   "i86pc" (`FAKE_GIMLET_MODEL`), which is not a known Oxide host
+    //   type.
+    assert_eq!(
+        entry.progress.state,
+        update::UpdateState::Failed {
+            message: "Get host type: Unknown host type i86pc".to_string(),
+        },
+        "the failed update carries the expected operator-facing message",
+    );
 
     // Try starting the update again -- this should fail because we require that
     // update state is cleared before starting a new one.
@@ -836,7 +836,7 @@ async fn test_update_races() {
 
     // Now start an update.
     let sp = SpIdentifier { slot: 0, typ: SpType::Sled };
-    let sps: BTreeSet<_> = vec![sp].into_iter().collect();
+    let sps = UpdateTargets::single(sp);
 
     let (sender, receiver) = oneshot::channel();
     wicketd_testctx
@@ -875,8 +875,11 @@ async fn test_update_races() {
     // deterministically blocked on the oneshot channel passed into
     // start_fake_update) is rejected with a 400 naming the in-progress target.
     let running = ClearUpdateStateParams {
-        targets: std::iter::once(SpIdentifier { typ: SpType::Sled, slot: 0 })
-            .collect(),
+        targets: UpdateTargets::new(
+            std::iter::once(SpIdentifier { typ: SpType::Sled, slot: 0 })
+                .collect(),
+        )
+        .expect("a single target is non-empty"),
     };
     let err = wicketd_testctx
         .commission_client
@@ -893,14 +896,14 @@ async fn test_update_races() {
     // reasonable step counts while the fake update is running.
     let entry = wait_for_sled0_progress(
         &wicketd_testctx,
-        "sled 0 reached InProgress",
-        |p| matches!(p.progress.state, update::UpdateState::Running),
+        "sled 0 reached Running",
+        |p| p.progress.state == update::UpdateState::Running,
     )
     .await;
-    assert!(
-        matches!(entry.progress.state, update::UpdateState::Running),
-        "sled 0 rolls up to Running: {:?}",
+    assert_eq!(
         entry.progress.state,
+        update::UpdateState::Running,
+        "sled 0 rolls up to Running",
     );
     assert_eq!(
         entry.progress.steps.len(),
@@ -937,45 +940,37 @@ async fn test_update_races() {
         "last event is execution completed: {last_event:#?}"
     );
 
-    // Check that the commission API reports the fake update has having
-    // completed. The single fake step succeeds, so there are no skip/warning
-    // messages.
+    // Check that the commission API reports the fake update as having
+    // completed.
     let entry = wait_for_sled0_progress(
         &wicketd_testctx,
         "sled 0 reached Completed",
-        |p| matches!(p.progress.state, update::UpdateState::Completed),
+        |p| p.progress.state == update::UpdateState::Completed,
     )
     .await;
     assert_eq!(
-        entry.progress.state,
-        update::UpdateState::Completed,
-        "fake update rolls up to Completed"
+        entry.progress,
+        update::UpdateProgress {
+            state: update::UpdateState::Completed,
+            steps: vec![update::UpdateStep {
+                description: "Fake step that waits for receiver to resolve"
+                    .to_string(),
+                status: UpdateStepStatus::Completed {
+                    outcome: StepOutcome::Success { message: None },
+                },
+                children: Vec::new(),
+            }],
+        },
+        "the fake update rolls up to Completed with its single clean step",
     );
-    assert!(
-        entry.progress.iter_steps().all(|step| !matches!(
-            step.status,
-            UpdateStepStatus::Completed {
-                outcome: StepOutcome::Warning { .. }
-                    | StepOutcome::Skipped { .. }
-            }
-        )),
-        "the single fake step succeeds cleanly with no warnings or skips: {:?}",
-        entry.progress.steps,
-    );
-
-    // Clearing an update with no targets is a 400.
-    let empty = ClearUpdateStateParams { targets: BTreeSet::new() };
-    let err = wicketd_testctx
-        .commission_client
-        .post_clear_update_state(&empty)
-        .await
-        .expect_err("clearing with no targets is rejected");
-    assert_client_error(&err, StatusCode::BAD_REQUEST);
 
     // Try clearing the state for sled 0.
     let params = ClearUpdateStateParams {
-        targets: std::iter::once(SpIdentifier { typ: SpType::Sled, slot: 0 })
-            .collect(),
+        targets: UpdateTargets::new(
+            std::iter::once(SpIdentifier { typ: SpType::Sled, slot: 0 })
+                .collect(),
+        )
+        .expect("a single target is non-empty"),
     };
     wicketd_testctx
         .commission_client
@@ -1004,7 +999,8 @@ async fn test_update_races() {
     // Run a second fake update to completion so the event buffer is populated
     // again -- otherwise the re-upload check below would be vacuous now that
     // the clear emptied the buffer.
-    let sps: BTreeSet<_> = std::iter::once(sp).collect();
+    let sps = UpdateTargets::new(std::iter::once(sp).collect())
+        .expect("a single target is non-empty");
     let (sender, receiver) = oneshot::channel();
     wicketd_testctx
         .server

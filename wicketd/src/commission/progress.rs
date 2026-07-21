@@ -5,20 +5,79 @@
 use std::collections::HashMap;
 
 use oxide_update_engine_types::buffer::{
-    ExecutionStatus, ExecutionSummary, StepKey, StepStatus, TerminalKind,
+    AbortReason, CompletionReason, ExecutionStatus, ExecutionSummary,
+    FailureReason, StepKey, StepStatus, TerminalKind,
 };
 use oxide_update_engine_types::events::{
     ExecutionUuid, ProgressEventKind, StepOutcome as EngineStepOutcome,
 };
-use oxide_update_engine_types::spec::EngineSpec;
+use oxide_update_engine_types::spec::{EngineSpec, GenericSpec};
 use wicket_common::update_events::{
-    EventBuffer, EventBufferStepData, EventReport, StepEventKind,
+    EventBuffer, EventBufferStepData, EventReport,
 };
 use wicketd_commission_types::inventory::SpIdentifier;
 use wicketd_commission_types::update::{
     SpUpdateProgress, StepOutcome, StepProgress, UpdateProgress, UpdateState,
     UpdateStep, UpdateStepStatus,
 };
+
+fn completed_outcome(reason: &CompletionReason) -> StepOutcome {
+    match reason {
+        CompletionReason::StepCompleted(info) => engine_outcome(&info.outcome),
+        // The engine can't record an outcome for a step completed only because
+        // a later step started. Report success but say that the outcome was
+        // inferred.
+        CompletionReason::SubsequentStarted { .. } => StepOutcome::Success {
+            message: Some(
+                "step completed; exact outcome not recorded (inferred from a \
+                 subsequent step starting)"
+                    .to_string(),
+            ),
+        },
+        // Same for a step being marked completed because the parent was
+        // completed.
+        CompletionReason::ParentCompleted { parent_info, .. } => {
+            StepOutcome::Success {
+                message: Some(format!(
+                    "step completed; exact outcome not recorded (inferred \
+                     from parent completion; {})",
+                    parent_outcome_detail(&parent_info.outcome),
+                )),
+            }
+        }
+    }
+}
+
+fn engine_outcome(outcome: &EngineStepOutcome<GenericSpec>) -> StepOutcome {
+    match outcome {
+        EngineStepOutcome::Success { message, .. } => {
+            StepOutcome::Success { message: message.clone().map(Into::into) }
+        }
+        EngineStepOutcome::Warning { message, .. } => {
+            StepOutcome::Warning { message: message.to_string() }
+        }
+        EngineStepOutcome::Skipped { message, .. } => {
+            StepOutcome::Skipped { message: message.to_string() }
+        }
+    }
+}
+
+fn parent_outcome_detail(outcome: &EngineStepOutcome<GenericSpec>) -> String {
+    match outcome {
+        EngineStepOutcome::Success { message: Some(message), .. } => {
+            format!("parent succeeded: {message}")
+        }
+        EngineStepOutcome::Success { message: None, .. } => {
+            "parent succeeded".to_string()
+        }
+        EngineStepOutcome::Warning { message, .. } => {
+            format!("parent completed with warning: {message}")
+        }
+        EngineStepOutcome::Skipped { message, .. } => {
+            format!("parent was skipped: {message}")
+        }
+    }
+}
 
 fn terminal_message(
     description: &str,
@@ -33,77 +92,6 @@ fn terminal_message(
         format!("{description}: {detail}")
     };
     if line.is_empty() { empty_fallback.to_string() } else { line }
-}
-
-/// Maps a [`StepStatus`] to a published [`UpdateStepStatus`].
-fn map_status<S: EngineSpec>(status: &StepStatus<S>) -> UpdateStepStatus {
-    match status {
-        StepStatus::NotStarted => UpdateStepStatus::NotStarted,
-        StepStatus::Running { progress_event, .. } => {
-            let progress = match &progress_event.kind {
-                ProgressEventKind::Progress {
-                    progress: Some(counter), ..
-                } => Some(StepProgress {
-                    current: counter.current,
-                    total: counter.total,
-                    units: counter.units.0.to_string(),
-                }),
-                ProgressEventKind::Progress { progress: None, .. }
-                | ProgressEventKind::WaitingForProgress { .. }
-                | ProgressEventKind::Nested { .. }
-                | ProgressEventKind::Unknown => None,
-            };
-            UpdateStepStatus::Running { progress }
-        }
-        StepStatus::Completed { reason } => {
-            let outcome = reason
-                .step_completed_info()
-                .map(|info| match &info.outcome {
-                    EngineStepOutcome::Success { message, .. } => {
-                        StepOutcome::Success {
-                            message: message.clone().map(Into::into),
-                        }
-                    }
-                    EngineStepOutcome::Warning { message, .. } => {
-                        StepOutcome::Warning { message: message.to_string() }
-                    }
-                    EngineStepOutcome::Skipped { message, .. } => {
-                        StepOutcome::Skipped { message: message.to_string() }
-                    }
-                })
-                // A step completed via SubsequentStarted or ParentCompleted
-                // doesn't carry an explicit outcome, but is still successful.
-                // Treat it as a plain success.
-                .unwrap_or(StepOutcome::Success { message: None });
-            UpdateStepStatus::Completed { outcome }
-        }
-        StepStatus::Failed { reason } => {
-            let (message, causes) = reason
-                .step_failed_info()
-                .map(|info| (info.message.clone(), info.causes.clone()))
-                .unwrap_or_else(|| {
-                    (
-                        "step failed; no failure details were recorded in \
-                         the event buffer"
-                            .to_string(),
-                        Vec::new(),
-                    )
-                });
-            UpdateStepStatus::Failed { message, causes }
-        }
-        StepStatus::Aborted { reason, .. } => {
-            let message = reason
-                .step_aborted_info()
-                .map(|info| info.message.clone())
-                .unwrap_or_else(|| {
-                    "step aborted; no abort details were recorded in the \
-                     event buffer"
-                        .to_string()
-                });
-            UpdateStepStatus::Aborted { message }
-        }
-        StepStatus::WillNotBeRun { .. } => UpdateStepStatus::WillNotBeRun,
-    }
 }
 
 fn failed_message(event_buffer: &EventBuffer, step_key: &StepKey) -> String {
@@ -151,9 +139,6 @@ impl<'a> ProgressBuilder<'a> {
 
     fn build_execution(&self, execution_id: ExecutionUuid) -> UpdateProgress {
         let state = self.execution_state(execution_id);
-        // The root execution can legitimately be absent here, since an
-        // `ExecutionStarted` with an empty steps list sets root_execution_id
-        // without adding any steps.
         let steps = self
             .event_buffer
             .iter_steps_for_execution(execution_id)
@@ -164,13 +149,70 @@ impl<'a> ProgressBuilder<'a> {
 
     fn build_step(&self, data: &EventBufferStepData) -> UpdateStep {
         let description = data.step_info().description.to_string();
-        let status = map_status(data.step_status());
+        let status = self.map_status(data.step_status());
         let children = data
             .child_execution_ids()
             .iter()
             .map(|child_exec| self.build_execution(*child_exec))
             .collect();
         UpdateStep { description, status, children }
+    }
+
+    /// Maps a [`StepStatus`] to a published [`UpdateStepStatus`].
+    fn map_status<S: EngineSpec>(
+        &self,
+        status: &StepStatus<S>,
+    ) -> UpdateStepStatus {
+        match status {
+            StepStatus::NotStarted => UpdateStepStatus::NotStarted,
+            StepStatus::Running { progress_event, .. } => {
+                let progress = match &progress_event.kind {
+                    ProgressEventKind::Progress {
+                        progress: Some(counter),
+                        ..
+                    } => Some(StepProgress {
+                        current: counter.current,
+                        total: counter.total,
+                        units: counter.units.0.to_string(),
+                    }),
+                    ProgressEventKind::Progress { progress: None, .. }
+                    | ProgressEventKind::WaitingForProgress { .. }
+                    | ProgressEventKind::Nested { .. }
+                    | ProgressEventKind::Unknown => None,
+                };
+                UpdateStepStatus::Running { progress }
+            }
+            StepStatus::Completed { reason } => UpdateStepStatus::Completed {
+                outcome: completed_outcome(reason),
+            },
+            StepStatus::Failed { reason } => match reason {
+                FailureReason::StepFailed(info) => UpdateStepStatus::Failed {
+                    message: info.message.clone(),
+                    causes: info.causes.clone(),
+                },
+                FailureReason::ParentFailed { .. } => {
+                    UpdateStepStatus::Failed {
+                        // message_display names the parent and provides its
+                        // causes inline, so leave the `causes` list empty in
+                        // this case.
+                        message: reason
+                            .message_display(self.event_buffer)
+                            .to_string(),
+                        causes: Vec::new(),
+                    }
+                }
+            },
+            StepStatus::Aborted { reason, .. } => {
+                let message = match reason {
+                    AbortReason::StepAborted(info) => info.message.clone(),
+                    AbortReason::ParentAborted { .. } => {
+                        reason.message_display(self.event_buffer).to_string()
+                    }
+                };
+                UpdateStepStatus::Aborted { message }
+            }
+            StepStatus::WillNotBeRun { .. } => UpdateStepStatus::WillNotBeRun,
+        }
     }
 
     fn execution_state(&self, execution_id: ExecutionUuid) -> UpdateState {
@@ -201,23 +243,6 @@ pub(crate) fn sp_update_progress(
 }
 
 fn update_progress(report: EventReport) -> UpdateProgress {
-    // EventBuffer ignores NoStepsDefined, so we would report Waiting; preserve
-    // the prior Skipped classification with a narrow pre-check on that one
-    // variant.
-    let has_no_steps_defined = report.step_events.iter().any(|event| {
-        if let StepEventKind::NoStepsDefined = event.kind {
-            true
-        } else {
-            false
-        }
-    });
-    if has_no_steps_defined {
-        return UpdateProgress {
-            state: UpdateState::Skipped,
-            steps: Vec::new(),
-        };
-    }
-
     let mut event_buffer = EventBuffer::default();
     event_buffer.add_event_report(report);
 
@@ -236,9 +261,6 @@ mod tests {
     use super::*;
     use wicketd_commission_types::inventory::SpType;
 
-    // TODO-RAINCLAUDE: an empty report has no root execution, so the projection
-    // TODO-RAINCLAUDE: reports Waiting (an update was started but nothing has
-    // TODO-RAINCLAUDE: happened yet) with an empty step tree.
     #[test]
     fn empty_report_projects_waiting() {
         let sp = SpIdentifier { typ: SpType::Sled, slot: 0 };
@@ -247,7 +269,7 @@ mod tests {
         assert_eq!(result.progress.state, UpdateState::Waiting);
         assert!(
             result.progress.steps.is_empty(),
-            "an empty report projects no steps: {:?}",
+            "an empty report doesn't have any steps, but these were found: {:?}",
             result.progress.steps,
         );
     }

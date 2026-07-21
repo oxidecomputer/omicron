@@ -197,13 +197,6 @@ impl WicketdCommissionApi for WicketdCommissionApiImpl {
         let ctx = rqctx.context();
         let targets = params.into_inner().targets;
 
-        if targets.is_empty() {
-            return Err(HttpError::for_bad_request(
-                None,
-                "No update targets specified".into(),
-            ));
-        }
-
         ctx.update_tracker
             .clear_update_state(targets)
             .await

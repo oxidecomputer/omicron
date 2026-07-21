@@ -7,14 +7,18 @@
 pub mod inventory {
     pub use crate::v1::inventory::BootstrapSled;
     pub use crate::v1::inventory::Caboose;
+    pub use crate::v1::inventory::IgnitionFaults;
     pub use crate::v1::inventory::LocationInfo;
     pub use crate::v1::inventory::PowerState;
     pub use crate::v1::inventory::RotInfo;
     pub use crate::v1::inventory::RotSlot;
     pub use crate::v1::inventory::SpIdentifier;
+    pub use crate::v1::inventory::SpIgnitionInfo;
     pub use crate::v1::inventory::SpInfo;
     pub use crate::v1::inventory::SpInventoryParams;
+    pub use crate::v1::inventory::SpStateInfo;
     pub use crate::v1::inventory::SpType;
+    pub use crate::v1::inventory::Stage0Caboose;
 }
 
 pub mod rack_setup {
@@ -53,6 +57,7 @@ pub mod rack_setup {
 
 pub mod update {
     pub use crate::v1::update::ClearUpdateStateParams;
+    pub use crate::v1::update::EmptyUpdateTargets;
     pub use crate::v1::update::RepositoryDescription;
     pub use crate::v1::update::SpUpdateProgress;
     pub use crate::v1::update::StartUpdateOptions;
@@ -63,4 +68,5 @@ pub mod update {
     pub use crate::v1::update::UpdateState;
     pub use crate::v1::update::UpdateStep;
     pub use crate::v1::update::UpdateStepStatus;
+    pub use crate::v1::update::UpdateTargets;
 }

@@ -17631,12 +17631,14 @@ dependencies = [
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "oxnet",
+ "proptest",
  "schemars 0.8.22",
  "semver 1.0.28",
  "serde",
  "serde_json",
  "sled-agent-types-versions",
  "slog-error-chain",
+ "test-strategy",
  "toml 0.8.23",
 ]
 

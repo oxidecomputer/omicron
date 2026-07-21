@@ -18,23 +18,53 @@ fn caboose_to_ct(caboose: SpComponentCaboose) -> ct_inv::Caboose {
     ct_inv::Caboose { version: caboose.version, board: caboose.board }
 }
 
+fn stage0_caboose_to_ct(
+    caboose: Option<Option<SpComponentCaboose>>,
+) -> ct_inv::Stage0Caboose {
+    match caboose {
+        None => ct_inv::Stage0Caboose::Unsupported,
+        Some(None) => ct_inv::Stage0Caboose::NotRead,
+        Some(Some(caboose)) => {
+            ct_inv::Stage0Caboose::Read { caboose: caboose_to_ct(caboose) }
+        }
+    }
+}
+
 fn rot_info_to_ct(rot: RotInventory) -> ct_inv::RotInfo {
     ct_inv::RotInfo {
         active: rot.active,
         caboose_a: rot.caboose_a.map(caboose_to_ct),
         caboose_b: rot.caboose_b.map(caboose_to_ct),
-        caboose_stage0: rot.caboose_stage0.flatten().map(caboose_to_ct),
-        caboose_stage0next: rot.caboose_stage0next.flatten().map(caboose_to_ct),
+        caboose_stage0: stage0_caboose_to_ct(rot.caboose_stage0),
+        caboose_stage0next: stage0_caboose_to_ct(rot.caboose_stage0next),
+    }
+}
+
+fn ignition_to_ct(ignition: SpIgnition) -> ct_inv::SpIgnitionInfo {
+    match ignition {
+        SpIgnition::Absent => ct_inv::SpIgnitionInfo::Absent,
+        SpIgnition::Present {
+            power, flt_a3, flt_a2, flt_rot, flt_sp, ..
+        } => ct_inv::SpIgnitionInfo::Present {
+            power,
+            faults: ct_inv::IgnitionFaults {
+                a3: flt_a3,
+                a2: flt_a2,
+                rot: flt_rot,
+                sp: flt_sp,
+            },
+        },
     }
 }
 
 pub(crate) fn sp_info_to_ct(sp: SpInventory) -> ct_inv::SpInfo {
-    let state = sp.state.as_ref();
     ct_inv::SpInfo {
         id: sp.id,
-        serial_number: state.map(|s| s.serial_number.clone()),
-        power_state: state.map(|s| s.power_state),
-        ignition_present: sp.ignition.as_ref().map(SpIgnition::is_present),
+        state: sp.state.map(|s| ct_inv::SpStateInfo {
+            serial_number: s.serial_number,
+            power_state: s.power_state,
+        }),
+        ignition: sp.ignition.map(ignition_to_ct),
         caboose_active: sp.caboose_active.map(caboose_to_ct),
         caboose_inactive: sp.caboose_inactive.map(caboose_to_ct),
         rot: sp.rot.map(rot_info_to_ct),

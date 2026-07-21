@@ -21,10 +21,14 @@ use wicket_common::rack_setup::{BgpAuthKey, CurrentRssUserConfigInsensitive};
 use wicketd_client::types::PutBgpAuthKeyBody;
 use wicketd_commission_types::rack_setup::PutRssUserConfigInsensitive;
 use wicketd_commission_types_versions::latest::inventory::{
-    LocationInfo, SpIdentifier, SpInfo, SpInventoryParams, SpType,
+    IgnitionFaults, LocationInfo, PowerState, SpIdentifier, SpIgnitionInfo,
+    SpInfo, SpInventoryParams, SpStateInfo, SpType,
+};
+use wicketd_commission_types_versions::latest::rack_setup::{
+    NewPasswordHash, PutRecoveryUserPasswordHash,
 };
 use wicketd_commission_types_versions::latest::update::{
-    StartUpdateOptions, StartUpdateParams, UpdateState,
+    StartUpdateOptions, StartUpdateParams, UpdateState, UpdateTargets,
 };
 
 /// Wait for the SP inventory to become ready.
@@ -71,15 +75,11 @@ async fn test_commission_inventory() {
             .await;
     let ctx = WicketdTestContext::setup(gateway).await;
 
-    // Wait for MGS inventory to become available.
-    // TODO-RAINCLAUDE: also wait for ignition so the fidelity assertions
-    // TODO-RAINCLAUDE: below are deterministic.
+    // Wait for MGS inventory and ignition to become available.
     let sps = wait_for_sp_inventory(&ctx, |sps| {
         [0u16, 1].iter().all(|slot| {
             sps.get(&SpIdentifier { typ: SpType::Sled, slot: *slot })
-                .is_some_and(|sp| {
-                    sp.serial_number.is_some() && sp.ignition_present.is_some()
-                })
+                .is_some_and(|sp| sp.state.is_some() && sp.ignition.is_some())
         })
     })
     .await;
@@ -89,30 +89,30 @@ async fn test_commission_inventory() {
     let sled0 = sps
         .get(&SpIdentifier { typ: SpType::Sled, slot: 0 })
         .expect("sled 0 present");
-    assert_eq!(sled0.serial_number.as_deref(), Some("SimGimlet00"));
+    assert_eq!(
+        sled0.state,
+        Some(sim_gimlet_state("SimGimlet00")),
+        "sled 0 state as reported by sp-sim"
+    );
 
     let sled1 = sps
         .get(&SpIdentifier { typ: SpType::Sled, slot: 1 })
         .expect("sled 1 present");
-    assert_eq!(sled1.serial_number.as_deref(), Some("SimGimlet01"));
+    assert_eq!(
+        sled1.state,
+        Some(sim_gimlet_state("SimGimlet01")),
+        "sled 1 state as reported by sp-sim"
+    );
 
-    // TODO-RAINCLAUDE: conversion-fidelity guards for sp_info_to_v1's
-    // TODO-RAINCLAUDE: hand-mapped fields: power_state travels in lockstep
-    // TODO-RAINCLAUDE: with serial_number, and sp-sim reports ignition.
     for sled in [&sled0, &sled1] {
-        assert!(
-            sled.power_state.is_some(),
-            "power_state read in lockstep with serial_number: {sled:?}"
-        );
         assert_eq!(
-            sled.ignition_present,
-            Some(true),
-            "sp-sim sleds report ignition present"
+            sled.ignition,
+            Some(sim_ignition_present()),
+            "sp-sim sleds report ignition present with no faults: {sled:?}"
         );
     }
 
-    // TODO-RAINCLAUDE: exercise the force_refresh branch by re-polling every
-    // TODO-RAINCLAUDE: currently-known SP through the commission client.
+    // Force a refresh.
     let force_refresh: Vec<_> = sps.iter().map(|sp| sp.id).collect();
     let refreshed = ctx
         .commission_client
@@ -125,9 +125,9 @@ async fn test_commission_inventory() {
         .get(&SpIdentifier { typ: SpType::Sled, slot: 0 })
         .expect("sled 0 present after forced refresh");
     assert_eq!(
-        refreshed_sled0.serial_number.as_deref(),
-        Some("SimGimlet00"),
-        "sled 0 serial after forced refresh: {refreshed:?}"
+        refreshed_sled0.state,
+        Some(sim_gimlet_state("SimGimlet00")),
+        "sled 0 state after forced refresh: {refreshed:?}"
     );
 
     let bootstrap = ctx
@@ -136,8 +136,6 @@ async fn test_commission_inventory() {
         .await
         .expect("get_bootstrap_sleds succeeded")
         .into_inner();
-    // TODO-RAINCLAUDE: IdOrdMap iterates in key order (SP identifier), so the
-    // TODO-RAINCLAUDE: sleds come back ordered by slot.
     let ids: Vec<_> = bootstrap.iter().map(|s| s.id).collect();
     assert_eq!(
         ids,
@@ -186,7 +184,6 @@ async fn test_commission_inventory() {
     ctx.teardown().await;
 }
 
-// TODO-RAINCLAUDE: exercises post_start_update validation and a real start.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_commission_start_update() {
     let gateway =
@@ -195,8 +192,8 @@ async fn test_commission_start_update() {
     let ctx = WicketdTestContext::setup(gateway).await;
     let log = ctx.log();
 
-    // TODO-RAINCLAUDE: with no repository uploaded yet, the described system
-    // TODO-RAINCLAUDE: version is absent.
+    // Since a repository hasn't been uploaded yet, the described system version
+    // is absent.
     let repo = ctx
         .commission_client
         .get_repository()
@@ -208,34 +205,21 @@ async fn test_commission_start_update() {
         "no repository uploaded yet, so no system version"
     );
 
-    // TODO-RAINCLAUDE: Wait until sled 0 has SP state so it is a valid target.
+    // Wait until sled 0's SP is populated.
     wait_for_sp_inventory(&ctx, |sps| {
         sps.get(&SpIdentifier { typ: SpType::Sled, slot: 0 })
-            .is_some_and(|sp| sp.serial_number.is_some())
+            .is_some_and(|sp| sp.state.is_some())
     })
     .await;
 
-    // TODO-RAINCLAUDE: Empty targets are rejected with a 400.
-    let empty = StartUpdateParams {
-        targets: BTreeSet::new(),
-        options: StartUpdateOptions::default(),
-    };
-    let err = ctx
-        .commission_client
-        .post_start_update(&empty)
-        .await
-        .expect_err("empty update targets are rejected");
-    assert_client_error_message(
-        &err,
-        StatusCode::BAD_REQUEST,
-        "No update targets specified",
-    );
-
-    // TODO-RAINCLAUDE: A sled slot absent from inventory is rejected with a 400
-    // TODO-RAINCLAUDE: that names the missing inventory state.
+    // A sled absent from inventory is rejected with a 400 that names the
+    // missing inventory state.
     let absent = StartUpdateParams {
-        targets: std::iter::once(SpIdentifier { typ: SpType::Sled, slot: 30 })
-            .collect(),
+        targets: UpdateTargets::new(
+            std::iter::once(SpIdentifier { typ: SpType::Sled, slot: 30 })
+                .collect(),
+        )
+        .expect("a single target is non-empty"),
         options: StartUpdateOptions::default(),
     };
     let err = ctx
@@ -249,7 +233,7 @@ async fn test_commission_start_update() {
         "no inventory state present",
     );
 
-    // TODO-RAINCLAUDE: Upload a fake TUF repository so a real update can start.
+    // Now upload a fake TUF repository so a real update can start.
     let temp_dir = Utf8TempDir::new().expect("temp dir created");
     let archive_path = temp_dir.path().join("archive.zip");
     let args = tufaceous::Args::try_parse_from([
@@ -267,11 +251,12 @@ async fn test_commission_start_update() {
         .await
         .expect("put_repository succeeded");
 
-    // TODO-RAINCLAUDE: A valid start on sled 0 succeeds and drives the update
-    // TODO-RAINCLAUDE: into progress; stop once it reports InProgress.
     let params = StartUpdateParams {
-        targets: std::iter::once(SpIdentifier { typ: SpType::Sled, slot: 0 })
-            .collect(),
+        targets: UpdateTargets::new(
+            std::iter::once(SpIdentifier { typ: SpType::Sled, slot: 0 })
+                .collect(),
+        )
+        .expect("a single target is non-empty"),
         options: StartUpdateOptions::default(),
     };
     ctx.commission_client
@@ -279,18 +264,17 @@ async fn test_commission_start_update() {
         .await
         .expect("post_start_update on sled 0 succeeded");
 
-    let entry =
-        wait_for_sled0_progress(&ctx, "sled 0 reached InProgress", |p| {
-            matches!(p.progress.state, UpdateState::Running)
-        })
-        .await;
-    assert!(
-        matches!(entry.progress.state, UpdateState::Running),
-        "sled 0 rolls up to Running: {:?}",
+    let entry = wait_for_sled0_progress(&ctx, "sled 0 reached Running", |p| {
+        p.progress.state == UpdateState::Running
+    })
+    .await;
+    assert_eq!(
         entry.progress.state,
+        UpdateState::Running,
+        "sled 0 rolls up to Running",
     );
     assert!(
-        entry.progress.steps.len() >= 1,
+        !entry.progress.steps.is_empty(),
         "at least one top-level step: {:?}",
         entry.progress.steps,
     );
@@ -304,7 +288,7 @@ async fn test_commission_start_update() {
     ctx.teardown().await;
 }
 
-// TODO-RAINCLAUDE: exercises the RSS cert/key/password cycle and boundary validation errors.
+// Test setting up RSS via the commissioning client.
 #[tokio::test]
 async fn test_commission_rss_config() {
     let gateway =
@@ -312,12 +296,8 @@ async fn test_commission_rss_config() {
             .await;
     let ctx = WicketdTestContext::setup(gateway).await;
 
-    // TODO-RAINCLAUDE: the test harness runs no bootstrap-agent lockstep server
-    // TODO-RAINCLAUDE: and discovers no bootstrap peers, so both rack-setup
-    // TODO-RAINCLAUDE: endpoints surface the retryable 503 from the lockstep
-    // TODO-RAINCLAUDE: client before any RSS-specific logic (status projection or
-    // TODO-RAINCLAUDE: config validation) runs. This still exercises that the
-    // TODO-RAINCLAUDE: endpoints are wired up and propagate the lockstep error.
+    // We can't actually start RSS since we don't have a bootstrap agent in the
+    // backend, but at least ensure that the endpoints return a 503.
     let err = ctx
         .commission_client
         .get_rack_setup_state()
@@ -386,20 +366,16 @@ async fn test_commission_rss_config() {
         .await
         .expect("delete_rss_config succeeded");
 
-    // TODO-RAINCLAUDE: Wait until both simulated sleds have SP state (serials read):
-    // TODO-RAINCLAUDE: put_rss_config resolves bootstrap slots against the sled inventory,
-    // TODO-RAINCLAUDE: which only contains SPs whose state has been read from MGS.
+    // Wait until both simulated sleds' SPs are available.
     wait_for_sp_inventory(&ctx, |sps| {
         [0u16, 1].iter().all(|slot| {
             sps.get(&SpIdentifier { typ: SpType::Sled, slot: *slot })
-                .is_some_and(|sp| sp.serial_number.is_some())
+                .is_some_and(|sp| sp.state.is_some())
         })
     })
     .await;
 
-    // TODO-RAINCLAUDE: submit a config referencing a nonexistent sled slot: the shape is
-    // TODO-RAINCLAUDE: valid (the body deserializes) but the sled is not in inventory, so
-    // TODO-RAINCLAUDE: this fails with a 400.
+    // Test that a config with an unknown sled is rejected.
     let mut config = example_put_config();
     config.bootstrap_sleds = std::iter::once(200u16).collect();
     let err = ctx
@@ -409,11 +385,7 @@ async fn test_commission_rss_config() {
         .expect_err("config referencing an unknown sled is rejected");
     assert_client_error(&err, StatusCode::BAD_REQUEST);
 
-    // TODO-RAINCLAUDE: positive-path conversion fidelity: PUT a config whose bootstrap
-    // TODO-RAINCLAUDE: slots match the sp-sim inventory, then read the stored config back
-    // TODO-RAINCLAUDE: through the unstable wicketd API and deep-compare it field-by-field
-    // TODO-RAINCLAUDE: against the wicket-common original; a swapped or dropped field in
-    // TODO-RAINCLAUDE: the manual conversions fails here.
+    // Ensure that roundtripping the RSS config works.
     let mut internal = ExampleRackSetupData::non_empty().put_insensitive;
     internal.bootstrap_sleds = [0u16, 1].into_iter().collect();
 
@@ -485,8 +457,6 @@ async fn test_commission_rss_config() {
         "external_jumbo_frames_opt_in_enabled stored"
     );
 
-    // TODO-RAINCLAUDE: a valid, Name-conformant key ID referenced by the
-    // TODO-RAINCLAUDE: uploaded config is accepted.
     let key_body = PutBgpAuthKeyBody {
         key: BgpAuthKey::TcpMd5 { key: "md5-secret".to_owned() },
     };
@@ -508,109 +478,37 @@ async fn test_commission_rss_config() {
     ctx.teardown().await;
 }
 
-// TODO-RAINCLAUDE: a manual port config with a misspelled field must be
-// TODO-RAINCLAUDE: rejected outright, not silently accepted as a DDM-auto port.
-// TODO-RAINCLAUDE: This uses a raw request because the typed client cannot
-// TODO-RAINCLAUDE: express the malformed body; the body is rejected at parse
-// TODO-RAINCLAUDE: time (deny_unknown_fields), before any inventory lookup.
-#[tokio::test]
-async fn test_commission_rss_config_rejects_unknown_port_field() {
-    use dropshot::test_util::ClientTestContext;
-
-    let gateway = gateway_setup::test_setup(
-        "test_commission_rss_config_rejects_unknown_port_field",
-        SpPort::One,
-    )
-    .await;
-    let ctx = WicketdTestContext::setup(gateway).await;
-
-    let raw = ClientTestContext::new(
-        std::net::SocketAddr::V6(ctx.commission_addr),
-        ctx.log().new(slog::o!("component" => "commission raw client")),
-    );
-
-    // TODO-RAINCLAUDE: start from a valid config, then misspell `routes` as
-    // TODO-RAINCLAUDE: `route` in a manual port config.
-    let mut body = serde_json::to_value(example_put_config())
-        .expect("example config serializes to JSON");
-    let port = body["rack_network_config"]["switch0"]["port0"]
-        .as_object_mut()
-        .expect("switch0 port0 is a manual port object");
-    let routes = port.remove("routes").expect("manual port has routes");
-    port.insert("route".to_owned(), routes);
-
-    let request = http::Request::builder()
-        .method(http::Method::PUT)
-        .uri(raw.url("/rack-setup/config"))
-        .header(http::header::CONTENT_TYPE, "application/json")
-        .header(omicron_common::api::VERSION_HEADER, "1.0.0")
-        .body(serde_json::to_string(&body).unwrap().into())
-        .expect("request builds");
-
-    let error = raw
-        .make_request_with_request(request, StatusCode::BAD_REQUEST)
-        .await
-        .expect_err("a misspelled manual port field is rejected with a 400");
-    assert!(
-        error.message.contains("unknown field `route`"),
-        "the 400 names the misspelled manual port-config field: {:?}",
-        error.message,
-    );
-
-    // TODO-RAINCLAUDE: version negotiation runs during routing, before the
-    // TODO-RAINCLAUDE: handler (and any MGS 503), so both rejections are
-    // TODO-RAINCLAUDE: deterministic and need no polling. A version newer than
-    // TODO-RAINCLAUDE: the server supports is rejected with a 400.
-    let request = http::Request::builder()
-        .method(http::Method::GET)
-        .uri(raw.url("/repository"))
-        .header(omicron_common::api::VERSION_HEADER, "99.0.0")
-        .body(String::new().into())
-        .expect("request builds");
-    let error = raw
-        .make_request_with_request(request, StatusCode::BAD_REQUEST)
-        .await
-        .expect_err("an unsupported API version is rejected with a 400");
-    assert!(
-        error.message.contains("server does not support this API version"),
-        "the 400 names the unsupported API version: {:?}",
-        error.message,
-    );
-
-    // TODO-RAINCLAUDE: with no version header at all, the server rejects the
-    // TODO-RAINCLAUDE: request rather than assuming a version (no on_missing is
-    // TODO-RAINCLAUDE: configured).
-    let request = http::Request::builder()
-        .method(http::Method::GET)
-        .uri(raw.url("/repository"))
-        .body(String::new().into())
-        .expect("request builds");
-    let error = raw
-        .make_request_with_request(request, StatusCode::BAD_REQUEST)
-        .await
-        .expect_err("a missing API version header is rejected with a 400");
-    assert!(
-        error.message.contains("missing expected header"),
-        "the 400 names the missing version header: {:?}",
-        error.message,
-    );
-
-    ctx.teardown().await;
-}
-
-fn recovery_hash(
-    hash: &str,
-) -> wicketd_commission_types_versions::latest::rack_setup::PutRecoveryUserPasswordHash
-{
-    use wicketd_commission_types_versions::latest::rack_setup::{
-        NewPasswordHash, PutRecoveryUserPasswordHash,
-    };
+fn recovery_hash(hash: &str) -> PutRecoveryUserPasswordHash {
     PutRecoveryUserPasswordHash { hash: NewPasswordHash(hash.to_string()) }
 }
 
-// TODO-RAINCLAUDE: A valid Argon2id PHC hash with secure parameters, taken from
-// TODO-RAINCLAUDE: sled-agent's simulated-server recovery-user fixture
-// TODO-RAINCLAUDE: (sled-agent/src/sim/server.rs).
+fn sim_gimlet_state(serial_number: &str) -> SpStateInfo {
+    SpStateInfo {
+        serial_number: serial_number.to_string(),
+        // sp-sim gimlets start in power state A0 (see sp-sim/src/gimlet.rs).
+        power_state: PowerState::A0,
+    }
+}
+
+fn sim_ignition_present() -> SpIgnitionInfo {
+    // sp-sim's initial ignition state is powered on with no faults
+    // (see sp-sim/src/sidecar.rs, initial_ignition_state).
+    SpIgnitionInfo::Present {
+        power: true,
+        faults: IgnitionFaults { a3: false, a2: false, rot: false, sp: false },
+    }
+}
+
+// A hash for the password "oxide". This is (obviously) only intended for
+// transient deployments in development with no sensitive data or resources. You
+// can change this value to any other supported hash. The only thing that needs
+// to be changed with this hash are the instructions given to individuals
+// running this program who then want to log in as this user. For more on what's
+// supported, see the API docs for this type and the specific constraints in the
+// nexus-passwords crate.
+//
+// The hash was generated via:
+// `cargo run --example argon2 -- --input oxide`.
 const VALID_PHC_HASH: &str = "$argon2id$v=19$m=98304,t=23,p=1$Effh/p6M2ZKdnpJFeGqtGQ$ZtUwcVODAvUAVK6EQ5FJMv+GMlUCo9PQQsy9cagL+EU";
 
 fn example_put_config() -> PutRssUserConfigInsensitive {

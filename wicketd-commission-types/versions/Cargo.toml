@@ -21,5 +21,8 @@ sled-agent-types-versions.workspace = true
 slog-error-chain.workspace = true
 
 [dev-dependencies]
+gateway-types-versions = { workspace = true, features = ["testing"] }
+proptest.workspace = true
 serde_json.workspace = true
+test-strategy.workspace = true
 toml.workspace = true

@@ -669,12 +669,12 @@
         "type": "object",
         "properties": {
           "targets": {
-            "description": "The service processors to clear update state for. Must be non-empty.",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/SpIdentifier"
-            },
-            "uniqueItems": true
+            "description": "The service processors to clear update state for.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/UpdateTargets"
+              }
+            ]
           }
         },
         "required": [
@@ -699,6 +699,34 @@
         "required": [
           "message",
           "request_id"
+        ]
+      },
+      "IgnitionFaults": {
+        "description": "The faults ignition reports for a present service processor.",
+        "type": "object",
+        "properties": {
+          "a2": {
+            "description": "The A2 power fault.",
+            "type": "boolean"
+          },
+          "a3": {
+            "description": "The A3 power fault.",
+            "type": "boolean"
+          },
+          "rot": {
+            "description": "The root-of-trust fault.",
+            "type": "boolean"
+          },
+          "sp": {
+            "description": "The service-processor fault.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "a2",
+          "a3",
+          "rot",
+          "sp"
         ]
       },
       "IpNet": {
@@ -1458,26 +1486,26 @@
             ]
           },
           "caboose_stage0": {
-            "nullable": true,
-            "description": "The caboose of the stage0 bootloader, if present and read.",
+            "description": "The caboose of the stage0 bootloader.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/Caboose"
+                "$ref": "#/components/schemas/Stage0Caboose"
               }
             ]
           },
           "caboose_stage0next": {
-            "nullable": true,
-            "description": "The caboose of the pending stage0next bootloader, if present and read.",
+            "description": "The caboose of the pending stage0next bootloader.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/Caboose"
+                "$ref": "#/components/schemas/Stage0Caboose"
               }
             ]
           }
         },
         "required": [
-          "active"
+          "active",
+          "caboose_stage0",
+          "caboose_stage0next"
         ]
       },
       "RotSlot": {
@@ -1601,6 +1629,55 @@
           "type"
         ]
       },
+      "SpIgnitionInfo": {
+        "description": "The ignition state of a service processor.",
+        "oneOf": [
+          {
+            "description": "Ignition reports the service processor as present.",
+            "type": "object",
+            "properties": {
+              "faults": {
+                "description": "The faults ignition reports for the service processor.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/IgnitionFaults"
+                  }
+                ]
+              },
+              "power": {
+                "description": "Whether the service processor is powered on.",
+                "type": "boolean"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "present"
+                ]
+              }
+            },
+            "required": [
+              "faults",
+              "power",
+              "state"
+            ]
+          },
+          {
+            "description": "Ignition reports the service processor as absent.",
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "absent"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          }
+        ]
+      },
       "SpInfo": {
         "description": "A projected view of a single service processor's inventory.",
         "type": "object",
@@ -1631,17 +1708,12 @@
               }
             ]
           },
-          "ignition_present": {
+          "ignition": {
             "nullable": true,
-            "description": "Whether ignition reports this service processor as present.\n\n`None` means ignition state has not been read yet; `Some(false)` means ignition reports the service processor as absent; `Some(true)` means ignition reports it as present.",
-            "type": "boolean"
-          },
-          "power_state": {
-            "nullable": true,
-            "description": "The host power state, if the service processor's state has been read.\n\nThis is populated together with `serial_number` from the service processor's state: both are `Some`, or both are `None`.",
+            "description": "The ignition state of this service processor.\n\n`None` means ignition state has not been read yet.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/PowerState"
+                "$ref": "#/components/schemas/SpIgnitionInfo"
               }
             ]
           },
@@ -1654,10 +1726,14 @@
               }
             ]
           },
-          "serial_number": {
+          "state": {
             "nullable": true,
-            "description": "The service processor's serial number, if its state has been read.\n\nThis is populated together with `power_state` from the service processor's state: both are `Some`, or both are `None`.",
-            "type": "string"
+            "description": "The service processor's state, if it has been read.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SpStateInfo"
+              }
+            ]
           }
         },
         "required": [
@@ -1676,7 +1752,30 @@
               "$ref": "#/components/schemas/SpIdentifier"
             }
           }
-        }
+        },
+        "additionalProperties": false
+      },
+      "SpStateInfo": {
+        "description": "The service processor's state, read together from MGS.\n\nThe serial number and power state are always read together from the same service-processor state, so they are presented as a single unit that is either entirely present or entirely absent.",
+        "type": "object",
+        "properties": {
+          "power_state": {
+            "description": "The host power state.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PowerState"
+              }
+            ]
+          },
+          "serial_number": {
+            "description": "The service processor's serial number.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "power_state",
+          "serial_number"
+        ]
       },
       "SpType": {
         "type": "string",
@@ -1710,6 +1809,65 @@
         "required": [
           "progress",
           "sp"
+        ]
+      },
+      "Stage0Caboose": {
+        "description": "The stage0 (or pending stage0next) bootloader caboose for a root of trust.\n\nThe three states are kept distinct because they mean different things to a caller:\n\n* `unsupported`: this RoT version does not report a stage0 bootloader caboose at all. * `not_read`: the RoT version supports reporting a stage0 caboose, but it has not been read yet. * `read`: the stage0 caboose was read.",
+        "oneOf": [
+          {
+            "description": "This RoT version does not report a stage0 bootloader caboose.",
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "unsupported"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          {
+            "description": "The stage0 bootloader caboose is supported but has not been read yet.",
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "not_read"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          {
+            "description": "The stage0 bootloader caboose was read.",
+            "type": "object",
+            "properties": {
+              "caboose": {
+                "description": "The caboose that was read.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Caboose"
+                  }
+                ]
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "read"
+                ]
+              }
+            },
+            "required": [
+              "caboose",
+              "state"
+            ]
+          }
         ]
       },
       "StartUpdateOptions": {
@@ -1747,12 +1905,12 @@
             ]
           },
           "targets": {
-            "description": "The service processors to update. Must be non-empty.",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/SpIdentifier"
-            },
-            "uniqueItems": true
+            "description": "The service processors to update.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/UpdateTargets"
+              }
+            ]
           }
         },
         "required": [
@@ -1963,21 +2121,6 @@
             ]
           },
           {
-            "description": "The update engine determined there was nothing to do and defined no steps.",
-            "type": "object",
-            "properties": {
-              "state": {
-                "type": "string",
-                "enum": [
-                  "skipped"
-                ]
-              }
-            },
-            "required": [
-              "state"
-            ]
-          },
-          {
             "description": "The update failed.",
             "type": "object",
             "properties": {
@@ -2179,6 +2322,15 @@
             ]
           }
         ]
+      },
+      "UpdateTargets": {
+        "description": "A non-empty set of service processors to act on.",
+        "type": "array",
+        "items": {
+          "$ref": "#/components/schemas/SpIdentifier"
+        },
+        "minItems": 1,
+        "uniqueItems": true
       },
       "UserSpecifiedBgpPeerConfig": {
         "description": "User-specified configuration for a BGP peer.\n\nThis is similar to the internal BGP peer configuration, except it does not carry the sensitive `md5_auth_key`; the operator provides the key separately, referenced by `auth_key_id`.",

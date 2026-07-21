@@ -15,11 +15,7 @@ use iddqd::{IdOrdItem, id_upcast};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-// TODO-RAINCLAUDE: SpType, SpIdentifier, PowerState, and RotSlot are unified
-// TODO-RAINCLAUDE: with their canonical gateway home so there is a single
-// TODO-RAINCLAUDE: definition (RFD 619). Note that gateway's RotSlot is
-// TODO-RAINCLAUDE: internally tagged, so it serializes as `{"slot":"a"}`
-// TODO-RAINCLAUDE: rather than a bare `"a"`.
+// Re-exports of pinned gateway types since they are also published by this API.
 pub use gateway_types_versions::v1::component::{
     PowerState, SpIdentifier, SpType,
 };
@@ -48,6 +44,32 @@ pub struct Caboose {
     pub board: String,
 }
 
+/// The stage0 (or pending stage0next) bootloader caboose for a root of trust.
+///
+/// The three states are kept distinct because they mean different things to a
+/// caller:
+///
+/// * `unsupported`: this RoT version does not report a stage0 bootloader
+///   caboose at all.
+/// * `not_read`: the RoT version supports reporting a stage0 caboose, but it
+///   has not been read yet.
+/// * `read`: the stage0 caboose was read.
+#[derive(
+    Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema,
+)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum Stage0Caboose {
+    /// This RoT version does not report a stage0 bootloader caboose.
+    Unsupported,
+    /// The stage0 bootloader caboose is supported but has not been read yet.
+    NotRead,
+    /// The stage0 bootloader caboose was read.
+    Read {
+        /// The caboose that was read.
+        caboose: Caboose,
+    },
+}
+
 /// Root-of-trust information for a single service processor.
 #[derive(
     Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema,
@@ -59,10 +81,57 @@ pub struct RotInfo {
     pub caboose_a: Option<Caboose>,
     /// The caboose of the image in slot B, if it could be read.
     pub caboose_b: Option<Caboose>,
-    /// The caboose of the stage0 bootloader, if present and read.
-    pub caboose_stage0: Option<Caboose>,
-    /// The caboose of the pending stage0next bootloader, if present and read.
-    pub caboose_stage0next: Option<Caboose>,
+    /// The caboose of the stage0 bootloader.
+    pub caboose_stage0: Stage0Caboose,
+    /// The caboose of the pending stage0next bootloader.
+    pub caboose_stage0next: Stage0Caboose,
+}
+
+/// The service processor's state, read together from MGS.
+///
+/// The serial number and power state are always read together from the same
+/// service-processor state, so they are presented as a single unit that is
+/// either entirely present or entirely absent.
+#[derive(
+    Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema,
+)]
+pub struct SpStateInfo {
+    /// The service processor's serial number.
+    pub serial_number: String,
+    /// The host power state.
+    pub power_state: PowerState,
+}
+
+/// The faults ignition reports for a present service processor.
+#[derive(
+    Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema,
+)]
+pub struct IgnitionFaults {
+    /// The A3 power fault.
+    pub a3: bool,
+    /// The A2 power fault.
+    pub a2: bool,
+    /// The root-of-trust fault.
+    pub rot: bool,
+    /// The service-processor fault.
+    pub sp: bool,
+}
+
+/// The ignition state of a service processor.
+#[derive(
+    Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema,
+)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum SpIgnitionInfo {
+    /// Ignition reports the service processor as present.
+    Present {
+        /// Whether the service processor is powered on.
+        power: bool,
+        /// The faults ignition reports for the service processor.
+        faults: IgnitionFaults,
+    },
+    /// Ignition reports the service processor as absent.
+    Absent,
 }
 
 /// A projected view of a single service processor's inventory.
@@ -72,22 +141,12 @@ pub struct RotInfo {
 pub struct SpInfo {
     /// Identifies the service processor by type and slot.
     pub id: SpIdentifier,
-    /// The service processor's serial number, if its state has been read.
+    /// The service processor's state, if it has been read.
+    pub state: Option<SpStateInfo>,
+    /// The ignition state of this service processor.
     ///
-    /// This is populated together with `power_state` from the service
-    /// processor's state: both are `Some`, or both are `None`.
-    pub serial_number: Option<String>,
-    /// The host power state, if the service processor's state has been read.
-    ///
-    /// This is populated together with `serial_number` from the service
-    /// processor's state: both are `Some`, or both are `None`.
-    pub power_state: Option<PowerState>,
-    /// Whether ignition reports this service processor as present.
-    ///
-    /// `None` means ignition state has not been read yet; `Some(false)` means
-    /// ignition reports the service processor as absent; `Some(true)` means
-    /// ignition reports it as present.
-    pub ignition_present: Option<bool>,
+    /// `None` means ignition state has not been read yet.
+    pub ignition: Option<SpIgnitionInfo>,
     /// The caboose of the active service-processor firmware slot, if read.
     pub caboose_active: Option<Caboose>,
     /// The caboose of the inactive service-processor firmware slot, if read.
@@ -121,6 +180,7 @@ pub struct LocationInfo {
 
 /// Parameters for the SP inventory endpoint.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct SpInventoryParams {
     /// Refresh the state of these service processors from MGS before returning,
     /// rather than returning their cached state. Service processors not listed
