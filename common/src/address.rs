@@ -461,7 +461,7 @@ pub const BOOTSTRAP_PREFIX: u16 = 0xfdb0;
 ///
 /// This is a /16 subnet with the prefix [`BOOTSTRAP_PREFIX`]. Individual sled
 /// bootstrap networks are /64 subnets within this range, with the rest of the
-/// previx constructed from the sled's MAC address. This constant is intended to
+/// prefix constructed from the sled's MAC address. This constant is intended to
 /// be used for checking whether an address is a bootstrap address on *any*
 /// sled's bootstrap network.
 pub const BOOTSTRAP_NETWORK_SUBNET: Ipv6Net = Ipv6Net::new_unchecked(
