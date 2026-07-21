@@ -28,7 +28,7 @@ use nexus_types::external_api::silo;
 use nexus_types::external_api::sled as sled_types;
 use nexus_types::inventory::SpType;
 use nexus_types::silo::silo_dns_name;
-use omicron_common::address::{Ipv6Subnet, RACK_PREFIX, get_64_subnet};
+use omicron_common::address::{Ipv6Subnet, RACK_PREFIX_LENGTH, get_64_subnet};
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::IdentityMetadataCreateParams;
@@ -793,7 +793,7 @@ impl super::Nexus {
 
         let subnet = self.db_datastore.rack_subnet(opctx, self.rack_id).await?;
         let rack_subnet =
-            Ipv6Subnet::<RACK_PREFIX>::from(rack_subnet(Some(subnet))?);
+            Ipv6Subnet::<RACK_PREFIX_LENGTH>::from(rack_subnet(Some(subnet))?);
 
         let allocation = match self
             .db_datastore

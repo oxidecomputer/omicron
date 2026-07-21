@@ -6,7 +6,7 @@
 
 use super::sagas;
 use nexus_auth::authn;
-use nexus_config::MIN_VPC_IPV4_SUBNET_PREFIX;
+use nexus_config::MIN_VPC_IPV4_SUBNET_PREFIX_LENGTH;
 use nexus_db_lookup::LookupPath;
 use nexus_db_lookup::lookup;
 use nexus_db_queries::authz;
@@ -90,14 +90,14 @@ impl super::Nexus {
                 "VPC Subnet IPv4 address ranges must be from a private range",
             ));
         }
-        if params.ipv4_block.width() < MIN_VPC_IPV4_SUBNET_PREFIX
+        if params.ipv4_block.width() < MIN_VPC_IPV4_SUBNET_PREFIX_LENGTH
             || params.ipv4_block.width()
                 > self.tunables.max_vpc_ipv4_subnet_prefix
         {
             return Err(external::Error::invalid_request(&format!(
                 "VPC Subnet IPv4 address ranges must have prefix \
                 length between {} and {}, inclusive",
-                MIN_VPC_IPV4_SUBNET_PREFIX,
+                MIN_VPC_IPV4_SUBNET_PREFIX_LENGTH,
                 self.tunables.max_vpc_ipv4_subnet_prefix,
             )));
         }
