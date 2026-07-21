@@ -45,6 +45,7 @@ use wicketd::{RunningUpdateState, StartUpdateError};
 use wicketd_client::types::{
     GetInventoryParams, GetInventoryResponse, StartUpdateParams,
 };
+use wicketd_commission_types::update::UpdateTargets;
 
 /// The list of zone file names defined in fake-non-semver.toml.
 static FAKE_NON_SEMVER_ZONE_FILE_NAMES: &[&str] = &[
@@ -210,7 +211,10 @@ async fn test_updates() {
 
     // Now, try starting the update on SP 0.
     let options = StartUpdateOptions::default();
-    let params = StartUpdateParams { targets: vec![target_sp], options };
+    let params = StartUpdateParams {
+        targets: UpdateTargets::single(target_sp),
+        options,
+    };
     wicketd_testctx
         .wicketd_client
         .post_start_update(&params)
@@ -783,7 +787,7 @@ async fn test_update_races() {
 
     // Now start an update.
     let sp = SpIdentifier { slot: 0, typ: SpType::Sled };
-    let sps: BTreeSet<_> = vec![sp].into_iter().collect();
+    let sps = UpdateTargets::single(sp);
 
     let (sender, receiver) = oneshot::channel();
     wicketd_testctx
