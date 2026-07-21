@@ -44,8 +44,8 @@ use nexus_types::inventory::RotSlot;
 use nexus_types::inventory::SpType;
 use omicron_common::address::Ipv4Range;
 use omicron_common::address::Ipv6Subnet;
-use omicron_common::address::RACK_PREFIX;
-use omicron_common::address::SLED_PREFIX;
+use omicron_common::address::RACK_PREFIX_LENGTH;
+use omicron_common::address::SLED_PREFIX_LENGTH;
 use omicron_common::address::get_sled_address;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Generation;
@@ -169,7 +169,7 @@ impl SystemDescription {
         let rack_subnet_base: Ipv6Addr =
             "fd00:1122:3344:0100::".parse().unwrap();
         let rack_subnet =
-            ipnet::Ipv6Net::new(rack_subnet_base, RACK_PREFIX).unwrap();
+            ipnet::Ipv6Net::new(rack_subnet_base, RACK_PREFIX_LENGTH).unwrap();
         // Skip the initial DNS subnet.
         // (The same behavior is replicated in RSS in `SledPlan::create()` in
         // sled-agent/rack-setup/src/plan/sled.rs.)
@@ -1399,7 +1399,7 @@ impl Sled {
     #[allow(clippy::too_many_arguments)]
     fn new_simulated(
         sled_id: SledUuid,
-        sled_subnet: Ipv6Subnet<SLED_PREFIX>,
+        sled_subnet: Ipv6Subnet<SLED_PREFIX_LENGTH>,
         sled_role: SledRole,
         unique: Option<String>,
         hardware: SledHardware,
@@ -2168,7 +2168,7 @@ struct SubnetIterator {
 
 impl SubnetIterator {
     fn new(rack_subnet: Ipv6Net) -> Self {
-        let mut subnets = rack_subnet.subnets(SLED_PREFIX).unwrap();
+        let mut subnets = rack_subnet.subnets(SLED_PREFIX_LENGTH).unwrap();
         // Skip the initial DNS subnet.
         // (The same behavior is replicated in RSS in `SledPlan::create()` in
         // sled-agent/rack-setup/src/plan/sled.rs.)
@@ -2178,7 +2178,7 @@ impl SubnetIterator {
 }
 
 impl Iterator for SubnetIterator {
-    type Item = Ipv6Subnet<SLED_PREFIX>;
+    type Item = Ipv6Subnet<SLED_PREFIX_LENGTH>;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.subnets.next().map(|s| Ipv6Subnet::new(s.network()))
