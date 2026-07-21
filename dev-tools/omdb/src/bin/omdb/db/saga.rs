@@ -486,7 +486,7 @@ async fn get_all_sagas_in_state(
 
         for row in records_batch {
             let saga_id = row.id();
-            match row.validate() {
+            match Saga::try_from(row) {
                 Ok(saga) => sagas.push(saga),
                 Err(e) => {
                     eprintln!("WARNING: Skipping saga with id {saga_id}: {e}")

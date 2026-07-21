@@ -257,19 +257,31 @@ impl SagaRow {
         self.id
     }
 
-    fn is_abandon_metadata_empty(&self) -> bool {
-        self.abandon_comment.is_none()
-            && self.abandon_reason.is_none()
-            && self.abandon_time.is_none()
-    }
-
-    // Returns the abandonment metadata iff all three columns are set.
-    fn valid_abandon_metadata(&self) -> Option<AbandonMetadata> {
-        Some(AbandonMetadata {
-            time: self.abandon_time?,
-            reason: self.abandon_reason?,
-            comment: self.abandon_comment.clone()?,
-        })
+    /// Collapses the three nullable abandon columns into all-or-nothing
+    /// metadata.
+    fn abandon_metadata(&self) -> Result<Option<AbandonMetadata>, Error> {
+        match (
+            self.abandon_time,
+            self.abandon_reason,
+            self.abandon_comment.clone(),
+        ) {
+            (None, None, None) => Ok(None),
+            (Some(time), Some(reason), Some(comment)) => {
+                Ok(Some(AbandonMetadata { time, reason, comment }))
+            }
+            // A partially-populated set is impossible per the
+            // `abandoned_requires_metadata` and
+            // `not_abandoned_requires_no_metadata` CHECK constraints, so treat
+            // it as corruption.
+            _ => Err(Error::internal_error(&format!(
+                "saga {}: abandonment metadata is partially populated. \
+                abandon_time: {:?} abandon_reason: {:?} abandon_comment: {:?}",
+                self.id,
+                self.abandon_time,
+                self.abandon_reason,
+                self.abandon_comment,
+            ))),
+        }
     }
 }
 
@@ -406,10 +418,7 @@ impl TryFrom<SagaRow> for Saga {
     type Error = Error;
 
     fn try_from(row: SagaRow) -> Result<Self, Self::Error> {
-        let is_abandon_metadata_empty = row.is_abandon_metadata_empty();
-        // If present and valid, convert the three nullable abandonment columns
-        // into `AbandonMetadata`.
-        let valid_abandon_metadata = row.valid_abandon_metadata();
+        let abandon_metadata = row.abandon_metadata()?;
 
         let SagaRow {
             id,
@@ -421,49 +430,35 @@ impl TryFrom<SagaRow> for Saga {
             current_sec,
             adopt_generation,
             adopt_time,
-            abandon_time,
-            abandon_reason,
-            abandon_comment,
+            abandon_time: _,
+            abandon_reason: _,
+            abandon_comment: _,
         } = row;
-
-        // A partially-populated set is impossible per the
-        // `abandoned_requires_metadata` and
-        // `not_abandoned_requires_no_metadata` CHECK constraints, so treat
-        // it as corruption.
-        if !is_abandon_metadata_empty && valid_abandon_metadata.is_none() {
-            return Err(Error::internal_error(&format!(
-                "saga {id}: abandonment metadata is partially populated. \
-                abandon_time: {abandon_time:?} abandon_reason {abandon_reason:?} \
-                abandon_comment: {abandon_comment:?}"
-            )));
-        }
-
-        // TODO-K: Do a try_from for SagaState?
 
         // The abandon metadata must be present exactly when the saga is
         // abandoned. Fold the flat column plus metadata into the validated
         // `SagaExecState`.
-        let saga_state = match saga_state {
-            SagaState::Abandoned => {
-                let metadata = valid_abandon_metadata.ok_or_else(|| {
-                    Error::internal_error(&format!(
-                        "saga {id}: abandoned but has no abandonment metadata"
-                    ))
-                })?;
-
+        let saga_state = match (saga_state, abandon_metadata) {
+            (SagaState::Abandoned, Some(metadata)) => {
                 SagaExecState::Abandoned(metadata)
             }
-            SagaState::Running => {
-                reject_unexpected_metadata(id, valid_abandon_metadata)?;
-                SagaExecState::Running
+            (SagaState::Abandoned, None) => {
+                return Err(Error::internal_error(&format!(
+                    "saga {id}: abandoned but has no abandonment metadata"
+                )));
             }
-            SagaState::Unwinding => {
-                reject_unexpected_metadata(id, valid_abandon_metadata)?;
-                SagaExecState::Unwinding
-            }
-            SagaState::Done => {
-                reject_unexpected_metadata(id, valid_abandon_metadata)?;
-                SagaExecState::Done
+            (SagaState::Running, None) => SagaExecState::Running,
+            (SagaState::Unwinding, None) => SagaExecState::Unwinding,
+            (SagaState::Done, None) => SagaExecState::Done,
+            (
+                SagaState::Running | SagaState::Unwinding | SagaState::Done,
+                Some(AbandonMetadata { time, reason, comment }),
+            ) => {
+                return Err(Error::internal_error(&format!(
+                    "saga {id}: has abandonment metadata but is not abandoned. \
+                    abandon_time: {time:?} abandon_reason: {reason:?} \
+                    abandon_comment: {comment:?}"
+                )));
             }
         };
 
@@ -479,22 +474,6 @@ impl TryFrom<SagaRow> for Saga {
             adopt_time,
         })
     }
-}
-
-// TODO-K: This is a bit shit, fix
-// A non-abandoned saga must not carry abandonment metadata.
-fn reject_unexpected_metadata(
-    id: SagaId,
-    metadata: Option<AbandonMetadata>,
-) -> Result<(), Error> {
-    if let Some(AbandonMetadata { time, reason, comment }) = metadata {
-        return Err(Error::internal_error(&format!(
-            "saga {id}: has abandonment metadata but is not abandoned. \
-            abandon_time: {time:?} abandon_reason {reason:?} \
-            abandon_comment: {comment:?}"
-        )));
-    }
-    Ok(())
 }
 
 /// Lowers a validated [`Saga`] into a raw [`SagaRow`] for insertion. This
@@ -725,22 +704,27 @@ impl diesel::query_builder::UndecoratedInsertRecord<saga::table> for &Saga {}
 /// A raw saga row loaded from the database that has not yet been validated into
 /// a [`Saga`].
 ///
-/// Structural deserialization of the raw columns never fails here. Call
-/// [`LoadedSaga::validate`] to check that the abandon metadata is consistent
-/// with the saga state and obtain a [`Saga`]. This lets batch readers skip
-/// individual invalid rows instead of failing the whole load, which loading
-/// [`Saga`] directly would do.
+/// Its `Queryable::build` is infallible, so it defers the abandon-metadata
+/// check to `Saga::try_from(loaded_saga)`, run per row after loading. Because
+/// Diesel's `load` is all-or-nothing, validating there (as `Saga` does in its
+/// own `build`) fails the whole batch on one bad row. Deferring it lets batch
+/// readers skip individual invalid rows instead.
 pub struct LoadedSaga(SagaRow);
 
 impl LoadedSaga {
     pub fn id(&self) -> SagaId {
         self.0.id()
     }
+}
 
-    /// Validate the loaded row into a [`Saga`], checking that the abandon
-    /// metadata is consistent with the saga state.
-    pub fn validate(self) -> Result<Saga, Error> {
-        Saga::try_from(self.0)
+/// Validate a loaded row into a [`Saga`], checking that the abandon metadata is
+/// consistent with the saga state. Mirrors [`TryFrom<SagaRow>`], which does the
+/// same check on the raw row.
+impl TryFrom<LoadedSaga> for Saga {
+    type Error = Error;
+
+    fn try_from(loaded: LoadedSaga) -> Result<Self, Self::Error> {
+        Saga::try_from(loaded.0)
     }
 }
 

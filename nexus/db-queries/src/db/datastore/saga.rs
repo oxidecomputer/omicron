@@ -243,8 +243,7 @@ impl DataStore {
             // Validate each row into a `Saga` as we collect it.
             for row in batch {
                 let saga_id = row.id();
-                // TODO-K: Do I still need to do this?
-                match row.validate() {
+                match db::saga_types::Saga::try_from(row) {
                     Ok(saga) => sagas.push(saga),
                     Err(e) => {
                         warn!(
@@ -286,7 +285,7 @@ impl DataStore {
             .into_iter()
             .filter_map(|row| {
                 let saga_id = row.id();
-                row.validate()
+                db::saga_types::Saga::try_from(row)
                     .inspect_err(|e| {
                         warn!(
                             &opctx.log,
