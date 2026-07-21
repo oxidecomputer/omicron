@@ -705,7 +705,9 @@ impl super::Nexus {
                             Ok(subnet) => {
                                 info!(self.log, "Rack initialized");
                                 let subnet =
-                                    Ipv6Subnet::<RACK_PREFIX>::from(subnet);
+                                    Ipv6Subnet::<RACK_PREFIX_LENGTH>::from(
+                                        subnet,
+                                    );
                                 // If the subnets were already set, the new
                                 // value is identical, so the `Err` is benign.
                                 let _ = self
