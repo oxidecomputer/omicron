@@ -257,8 +257,7 @@ impl SagaRow {
         self.id
     }
 
-    /// Collapses the three nullable abandon columns into all-or-nothing
-    /// metadata.
+    // Returns the abandonment metadata iff all three columns are set.
     fn abandon_metadata(&self) -> Result<Option<AbandonMetadata>, Error> {
         match (
             self.abandon_time,
@@ -303,9 +302,8 @@ pub struct AbandonMetadata {
 /// This is the validated, domain-side counterpart to the flat `saga_state`
 /// column ([`SagaState`]) plus the three nullable abandon columns. Bundling the
 /// abandonment metadata into the `Abandoned` variant makes the invalid
-/// combinations  unrepresentable. Only [`Abandoned`](Self::Abandoned) can carry
-/// metadata, and it always must. Unlike [`SagaState`], this type is never
-/// stored directly; it is split back into the columns by
+/// combinations  unrepresentable. Unlike [`SagaState`], this type is never
+/// stored directly. It is split back into the columns by
 /// `From<&Saga> for SagaRow`.
 #[derive(Clone, Debug, PartialEq)]
 pub enum SagaExecState {
@@ -378,8 +376,8 @@ impl Saga {
             time_created: now,
             name: name.to_string(),
             saga_dag: dag,
-            // A newly-created saga is never abandoned; `SagaExecState::from`
-            // only ever yields the non-abandoned variants.
+            // A newly-created saga is never abandoned. Steno's
+            // `SagaCachedState` only contains non-abandoned variants.
             saga_state: state.into(),
             current_sec: Some(creator),
             adopt_generation: Generation::new().into(),
@@ -436,8 +434,7 @@ impl TryFrom<SagaRow> for Saga {
         } = row;
 
         // The abandon metadata must be present exactly when the saga is
-        // abandoned. Fold the flat column plus metadata into the validated
-        // `SagaExecState`.
+        // abandoned.
         let saga_state = match (saga_state, abandon_metadata) {
             (SagaState::Abandoned, Some(metadata)) => {
                 SagaExecState::Abandoned(metadata)
