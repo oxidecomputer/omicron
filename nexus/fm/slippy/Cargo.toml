@@ -1,0 +1,23 @@
+[package]
+name = "nexus-fm-slippy"
+version = "0.1.0"
+edition.workspace = true
+
+[lints]
+workspace = true
+
+[build-dependencies]
+omicron-rpaths.workspace = true
+
+[dependencies]
+nexus-types.workspace = true
+omicron-uuid-kinds.workspace = true
+omicron-workspace-hack.workspace = true
+# See omicron-rpaths for more about the "pq-sys" dependency.
+pq-sys = "*"
+
+[dev-dependencies]
+chrono.workspace = true
+nexus-fm = { workspace = true, features = ["testing"] }
+omicron-test-utils.workspace = true
+serde_json.workspace = true

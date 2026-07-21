@@ -67,6 +67,23 @@ enum Commands {
 
     /// Show the analysis report for the requested sitrep, if one exists.
     AnalysisReport(AnalysisReportArgs),
+
+    /// Run the slippy sitrep linter over the requested sitrep.
+    ///
+    /// Slippy checks a sitrep for states that should be impossible, or that
+    /// would be problematic for the fault management subsystem to consume.
+    #[clap(alias = "lint")]
+    Slippy {
+        /// The sitrep to lint, identified by UUID, version number, or
+        /// "current".
+        ///
+        /// A value of "current" selects the current sitrep. An integer
+        /// (optionally prefixed with "v", e.g. "3" or "v3") selects the
+        /// sitrep with that version number in the sitrep history. Any other
+        /// value is parsed as a sitrep UUID.
+        #[clap(value_name = "UUID|VERSION|current")]
+        sitrep: SitrepSelector,
+    },
 }
 
 #[derive(Debug, Args, Clone)]
@@ -275,6 +292,9 @@ pub(super) async fn cmd_db_sitrep(
                 opctx, datastore, fetch_opts, args, colored,
             )
             .await
+        }
+        Commands::Slippy { sitrep } => {
+            cmd_db_sitrep_slippy(opctx, datastore, sitrep).await
         }
     }
 }
@@ -514,6 +534,44 @@ async fn cmd_db_sitrep_show(
             println!("{}", case.display_indented(4, Some(id)).colored(colored));
         }
     }
+
+    Ok(())
+}
+
+async fn cmd_db_sitrep_slippy(
+    opctx: &OpContext,
+    datastore: &DataStore,
+    selector: SitrepSelector,
+) -> anyhow::Result<()> {
+    let (_, id) = selector.resolve(&datastore, &opctx).await?;
+    let err_ctx = selector.display_for_error(&id);
+    let sitrep = datastore
+        .fm_sitrep_read(opctx, id)
+        .await
+        .with_context(|| format!("failed to read {err_ctx}"))?;
+
+    // Lint against the parent sitrep too when it still exists; it may have
+    // been GC'd, in which case only the sitrep-internal checks run.
+    let parent = match sitrep.parent_id() {
+        Some(parent_id) => {
+            match datastore.fm_sitrep_read(opctx, parent_id).await {
+                Ok(parent) => Some(parent),
+                Err(e) => {
+                    eprintln!(
+                        "note: parent sitrep {parent_id} could not be read \
+                     (perhaps it has been garbage collected?), so only \
+                     sitrep-internal checks will run: {e}"
+                    );
+                    None
+                }
+            }
+        }
+        None => None,
+    };
+
+    let report = nexus_fm_slippy::Slippy::new(&sitrep, parent.as_ref())
+        .into_report(nexus_fm_slippy::SlippyReportSortKey::Severity);
+    println!("{}", report.display());
 
     Ok(())
 }

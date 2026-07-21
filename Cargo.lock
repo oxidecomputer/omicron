@@ -7415,6 +7415,7 @@ dependencies = [
  "nexus-db-lookup",
  "nexus-db-model",
  "nexus-db-schema",
+ "nexus-fm-slippy",
  "nexus-inventory",
  "nexus-reconfigurator-planning",
  "nexus-test-utils",
@@ -7545,6 +7546,7 @@ dependencies = [
  "ereport-types",
  "iddqd",
  "nexus-db-model",
+ "nexus-fm-slippy",
  "nexus-inventory",
  "nexus-reconfigurator-planning",
  "nexus-types",
@@ -7562,6 +7564,21 @@ dependencies = [
  "strum 0.27.2",
  "thiserror 2.0.18",
  "typed-rng",
+]
+
+[[package]]
+name = "nexus-fm-slippy"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "nexus-fm",
+ "nexus-types",
+ "omicron-rpaths",
+ "omicron-test-utils",
+ "omicron-uuid-kinds",
+ "omicron-workspace-hack",
+ "pq-sys",
+ "serde_json",
 ]
 
 [[package]]
@@ -9362,6 +9379,7 @@ dependencies = [
  "nexus-db-model",
  "nexus-db-queries",
  "nexus-db-schema",
+ "nexus-fm-slippy",
  "nexus-inventory",
  "nexus-lockstep-client",
  "nexus-networking",

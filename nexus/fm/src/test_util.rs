@@ -3,24 +3,37 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::analysis_input::{Builder, Input, InvalidInputs};
-use crate::builder::SitrepBuilderRng;
+use crate::builder::{SitrepBuilder, SitrepBuilderRng};
 use chrono::DateTime;
 use chrono::Utc;
 use iddqd::IdOrdMap;
 use nexus_db_model::EreporterRestart;
 use nexus_reconfigurator_planning::example;
+use nexus_types::external_api::physical_disk::PhysicalDiskKind;
+use nexus_types::fm;
 use nexus_types::fm::ereport::{
     Ena, Ereport, EreportData, EreportId, Reporter,
 };
-use nexus_types::fm::{Sitrep, SitrepVersion};
+use nexus_types::fm::{
+    DiskFact, Sitrep, SitrepVersion, ZpoolUnhealthyFactPayload,
+};
 use nexus_types::in_service_disk::InServiceDisk;
 use nexus_types::inventory;
+use nexus_types::inventory::ZpoolHealth;
+use omicron_common::api::external::Generation;
 use omicron_test_utils::dev;
+use omicron_uuid_kinds::CaseUuid;
+use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::EreporterRestartKind;
 use omicron_uuid_kinds::EreporterRestartUuid;
+use omicron_uuid_kinds::FactUuid;
 use omicron_uuid_kinds::OmicronZoneKind;
 use omicron_uuid_kinds::OmicronZoneUuid;
+use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::RackUuid;
+use omicron_uuid_kinds::SitrepUuid;
+use omicron_uuid_kinds::SledUuid;
+use omicron_uuid_kinds::ZpoolUuid;
 use rand::rngs::StdRng;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -350,4 +363,188 @@ pub fn mk_ereport(
         "part_number" => ?data.part_number,
     );
     Ereport::new(id, time_collected, collector_id, data, reporter)
+}
+
+pub use nexus_fm_slippy::assert_sitrep_is_slippy_clean;
+
+/// Assert that analysis preserved slippy-cleanliness.
+///
+/// Two guarantees are checked. First, `sitrep` must never contain a `Fatal`
+/// note, even when built from a corrupt parent: the engines quarantine cases
+/// they can't interpret by closing them, and those contained violations
+/// (reported as `Quarantined`) are the only notes engine output may carry.
+/// Second, if `parent` was clean (or absent), `sitrep` must be fully clean.
+#[track_caller]
+pub fn assert_analysis_preserves_slippy_clean(
+    sitrep: &Sitrep,
+    parent: Option<&Sitrep>,
+) {
+    nexus_fm_slippy::assert_sitrep_has_no_fatal_notes(sitrep, parent);
+
+    let parent_is_clean = parent.is_none_or(|parent| {
+        nexus_fm_slippy::Slippy::new_sitrep_only(parent)
+            .into_report(nexus_fm_slippy::SlippyReportSortKey::Kind)
+            .notes()
+            .is_empty()
+    });
+    if parent_is_clean {
+        assert_sitrep_is_slippy_clean(sitrep, parent);
+    }
+}
+
+/// Make an in-service disk set from a list of zpool IDs. Each zpool gets
+/// its own fresh `PhysicalDiskUuid` and dummy identity fields
+/// (vendor/serial/model); tests using this only care about the zpool
+/// dimension.
+pub fn mk_in_service(
+    zpool_ids: impl IntoIterator<Item = ZpoolUuid>,
+) -> IdOrdMap<InServiceDisk> {
+    zpool_ids
+        .into_iter()
+        .map(|zpool_id| InServiceDisk {
+            physical_disk_id: PhysicalDiskUuid::new_v4(),
+            zpool_id,
+            sled_id: SledUuid::new_v4(),
+            vendor: "test-vendor".to_string(),
+            serial: format!("test-serial-{zpool_id}"),
+            model: "test-model".to_string(),
+            variant: PhysicalDiskKind::U2,
+        })
+        .collect()
+}
+
+/// Set the zpool with `zpool_id` to `health`, panicking if not found.
+pub fn set_health(
+    collection: &mut inventory::Collection,
+    zpool_id: ZpoolUuid,
+    health: ZpoolHealth,
+) {
+    for mut sa in collection.sled_agents.iter_mut() {
+        for z in sa.zpools.iter_mut() {
+            if z.id == zpool_id {
+                z.health = health;
+                return;
+            }
+        }
+    }
+    panic!("zpool {zpool_id} not found in collection");
+}
+
+/// Build an `Input` from a collection, an optional parent sitrep, and a
+/// pre-built set of in-service disks.
+pub fn build_input(
+    collection: inventory::Collection,
+    parent_sitrep: Option<Sitrep>,
+    in_service: IdOrdMap<InServiceDisk>,
+) -> Input {
+    let parent = parent_sitrep.map(|s| {
+        Arc::new((
+            fm::SitrepVersion {
+                id: s.id(),
+                version: 0,
+                time_made_current: Utc::now(),
+            },
+            s,
+        ))
+    });
+    let builder =
+        Input::builder(parent, Arc::new(collection), Arc::new(in_service))
+            .expect("input builder should accept fresh inventory");
+    let (input, _report) = builder.build();
+    input
+}
+
+/// Run all diagnosis engines over an input and return the resulting Sitrep
+/// along with the analysis report. Panics unless analysis preserved
+/// slippy-cleanliness (see [`assert_analysis_preserves_slippy_clean`]).
+#[track_caller]
+pub fn run_analyze(
+    log: &slog::Logger,
+    input: &Input,
+) -> (Sitrep, fm::analysis_reports::AnalysisReport) {
+    let mut builder = SitrepBuilder::new_with_rng(
+        log,
+        input,
+        SitrepBuilderRng::from_seed("disk-analyze"),
+    );
+    crate::diagnosis::analyze(&mut builder).expect("analyze ok");
+    let (sitrep, report) = builder.build(OmicronZoneUuid::new_v4(), Utc::now());
+    assert_analysis_preserves_slippy_clean(&sitrep, input.parent_sitrep());
+    (sitrep, report)
+}
+
+/// Make a `ZpoolUnhealthy` (Degraded) fact for the given disk and zpool.
+pub fn make_degraded_fact(
+    parent_sitrep_id: SitrepUuid,
+    inv_collection_id: CollectionUuid,
+    physical_disk_id: PhysicalDiskUuid,
+    zpool_id: ZpoolUuid,
+) -> fm::case::Fact {
+    fm::case::Fact {
+        metadata: fm::case::FactMetadata {
+            id: FactUuid::new_v4(),
+            created_sitrep_id: parent_sitrep_id,
+            comment: format!("zpool {zpool_id} degraded"),
+        },
+        payload: DiskFact::ZpoolUnhealthy(ZpoolUnhealthyFactPayload {
+            physical_disk_id,
+            zpool_id,
+            last_seen_health: ZpoolHealth::Degraded,
+            observed_in_inv: inv_collection_id,
+            time_observed: Utc::now(),
+        })
+        .into(),
+    }
+}
+
+/// Make an open `PhysicalDisk` case carrying the given facts.
+pub fn make_disk_case(
+    case_id: CaseUuid,
+    parent_sitrep_id: SitrepUuid,
+    facts: impl IntoIterator<Item = fm::case::Fact>,
+) -> fm::Case {
+    let mut fact_map = IdOrdMap::new();
+    for fact in facts {
+        fact_map.insert_unique(fact).unwrap();
+    }
+    fm::Case {
+        id: case_id,
+        metadata: fm::case::Metadata {
+            created_sitrep_id: parent_sitrep_id,
+            closed_sitrep_id: None,
+            de: fm::DiagnosisEngineKind::PhysicalDisk,
+            comment: "a disk case".to_string(),
+        },
+        ereports: Default::default(),
+        alerts_requested: Default::default(),
+        support_bundles_requested: Default::default(),
+        facts: fact_map,
+    }
+}
+
+/// Make a parent sitrep containing the given cases.
+pub fn make_parent_sitrep(
+    parent_sitrep_id: SitrepUuid,
+    inv_collection_id: CollectionUuid,
+    cases: impl IntoIterator<Item = fm::Case>,
+) -> Sitrep {
+    let mut case_map = IdOrdMap::new();
+    for case in cases {
+        case_map.insert_unique(case).unwrap();
+    }
+    Sitrep {
+        metadata: fm::SitrepMetadata {
+            id: parent_sitrep_id,
+            inv_collection_id,
+            creator_id: OmicronZoneUuid::new_v4(),
+            parent_sitrep_id: None,
+            time_created: Utc::now(),
+            next_inv_min_time_started: Utc::now(),
+            comment: String::new(),
+            alert_generation: Generation::new(),
+            support_bundle_generation: Generation::new(),
+        },
+        cases: case_map,
+        ereports_by_id: Default::default(),
+    }
 }

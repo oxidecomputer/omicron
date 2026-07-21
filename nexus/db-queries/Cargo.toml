@@ -104,6 +104,7 @@ gateway-types.workspace = true
 illumos-utils.workspace = true
 internal-dns-resolver.workspace = true
 itertools.workspace = true
+nexus-fm-slippy.workspace = true
 nexus-inventory.workspace = true
 nexus-reconfigurator-planning.workspace = true
 nexus-test-utils.workspace = true
