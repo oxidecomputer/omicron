@@ -33,6 +33,7 @@ progenitor::generate_api!(
     },
     crates = {
         "omicron-uuid-kinds" = "*",
+        "oxide-update-engine-types" = "*",
     },
     replace = {
         AbortUpdateOptions = wicket_common::rack_update::AbortUpdateOptions,
@@ -63,7 +64,6 @@ progenitor::generate_api!(
         LinkSpeed = sled_agent_types::early_networking::LinkSpeed,
         M2Slot = installinator_common::M2Slot,
         PortConfigV2 = omicron_common::api::internal::shared::PortConfigV2,
-        ProgressEventForGenericSpec = update_engine::events::ProgressEvent<update_engine::NestedSpec>,
         ProgressEventForInstallinatorSpec = installinator_common::ProgressEvent,
         ProgressEventForUplinkPreflightSpec = wicket_common::preflight_check::ProgressEvent,
         ProgressEventForWicketdEngineSpec = wicket_common::update_events::ProgressEvent,
@@ -82,7 +82,6 @@ progenitor::generate_api!(
         SpState = wicket_common::inventory::SpState,
         SpType = wicket_common::inventory::SpType,
         StartUpdateOptions = wicket_common::rack_update::StartUpdateOptions,
-        StepEventForGenericSpec = update_engine::events::StepEvent<update_engine::NestedSpec>,
         StepEventForUplinkPreflightSpec = wicket_common::preflight_check::StepEvent,
         StepEventForInstallinatorSpec = installinator_common::StepEvent,
         StepEventForWicketdEngineSpec = wicket_common::update_events::StepEvent,
