@@ -24,7 +24,6 @@ use wicketd_commission_types::update::UpdateTargets;
 use crate::ServerContext;
 use crate::helpers::SpIdentifierDisplay;
 use crate::helpers::sps_to_string;
-use crate::mgs::GetInventoryError;
 use crate::mgs::GetInventoryResponse;
 use crate::mgs::MgsHandle;
 use crate::mgs::ShutdownInProgress;
@@ -57,19 +56,6 @@ pub(crate) fn shutdown_to_http(_err: ShutdownInProgress) -> HttpError {
         None,
         "Server is shutting down".to_owned(),
     )
-}
-
-pub(crate) fn inventory_err_to_http(err: GetInventoryError) -> HttpError {
-    match err {
-        GetInventoryError::ShutdownInProgress => {
-            shutdown_to_http(ShutdownInProgress)
-        }
-        GetInventoryError::InvalidSpIdentifier => http_error_with_message(
-            ErrorStatusCode::SERVICE_UNAVAILABLE,
-            None,
-            "Invalid SP identifier in request".to_owned(),
-        ),
-    }
 }
 
 pub(crate) fn ba_lockstep_client(
@@ -163,7 +149,7 @@ pub(crate) fn ba_lockstep_error_to_http(
 ///
 /// This avoids using methods on `HttpError`, many of which don't expose the
 /// full message to clients for security reasons.
-fn http_error_with_message(
+pub(crate) fn http_error_with_message(
     status_code: dropshot::ErrorStatusCode,
     error_code: Option<String>,
     message: String,

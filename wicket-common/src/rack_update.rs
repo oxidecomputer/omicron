@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::{collections::BTreeSet, time::Duration};
+use std::time::Duration;
 
 use semver::Version;
 
@@ -78,17 +78,6 @@ pub struct AbortUpdateOptions {
     /// If passed in, fails the force cancel update operation with a simulated
     /// error.
     pub test_error: Option<UpdateTestError>,
-}
-
-#[derive(
-    Clone, Debug, Default, PartialEq, Eq, JsonSchema, Serialize, Deserialize,
-)]
-pub struct ClearUpdateStateResponse {
-    /// The SPs for which update data was cleared.
-    pub cleared: BTreeSet<SpIdentifier>,
-
-    /// The SPs that had no update state to clear.
-    pub no_update_data: BTreeSet<SpIdentifier>,
 }
 
 #[derive(
