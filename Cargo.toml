@@ -177,7 +177,6 @@ members = [
     "trust-quorum/types/versions",
     "typed-rng",
     "update-common",
-    "update-engine",
     "uuid-kinds",
     "wicket-common",
     "wicket-dbg",
@@ -371,7 +370,6 @@ default-members = [
     "test-utils",
     "typed-rng",
     "update-common",
-    "update-engine",
     "uuid-kinds",
     "wicket-common",
     "wicket-dbg",
@@ -690,6 +688,9 @@ omicron-workspace-hack = "0.1.0"
 omicron-zone-package = "0.12.3"
 oxide-client = { path = "clients/oxide-client" }
 oxide-tokio-rt = "0.1.4"
+oxide-update-engine = "0.1.1"
+oxide-update-engine-types = { version = "0.1.1", features = ["schemars08"] }
+oxide-update-engine-display = "0.1.1"
 oxide-vpc = { git = "https://github.com/oxidecomputer/opte", rev = "ab2941cdf2ab067429a4a68ab2389d2960620b57", features = [ "api", "std" ] }
 oxlog = { path = "dev-tools/oxlog" }
 oxnet = "0.1.5"
@@ -883,7 +884,6 @@ typed-rng = { path = "typed-rng" }
 typify = "0.3.0"
 unicode-width = "0.1.13"
 update-common = { path = "update-common" }
-update-engine = { path = "update-engine" }
 url = "2.5.4"
 usdt = "0.5.0"
 uuid = { version = "1.17.0", features = ["serde", "v4"] }
