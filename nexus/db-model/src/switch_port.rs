@@ -748,6 +748,7 @@ pub struct SwitchPortBgpPeerConfig {
     pub vlan_id: Option<SqlU16>,
     pub id: Uuid,
     router_lifetime: SqlU16,
+    pub src_addr: Option<IpNetwork>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -982,6 +983,7 @@ impl SwitchPortBgpPeerConfig {
             },
             vlan_id: p.vlan_id.map(|x| x.into()),
             router_lifetime: router_lifetime.as_u16().into(),
+            src_addr: p.src_addr.map(|ip| ip.into()),
         }
     }
 }
@@ -1141,6 +1143,7 @@ mod tests {
             allowed_import: ImportExportPolicy::NoFiltering,
             allowed_export: ImportExportPolicy::NoFiltering,
             vlan_id: None,
+            src_addr: None,
         }
     }
 

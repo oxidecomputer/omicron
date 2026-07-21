@@ -1770,6 +1770,7 @@
         ]
       },
       "BgpPeerConfig": {
+        "description": "A BGP peer configuration for a port.",
         "type": "object",
         "properties": {
           "addr": {
@@ -1899,6 +1900,13 @@
             "type": "integer",
             "format": "uint32",
             "minimum": 0
+          },
+          "src_addr": {
+            "nullable": true,
+            "description": "The local IP address to use as the source when establishing outbound TCP connections to this BGP peer. If `None`, the OS selects the source address.",
+            "default": null,
+            "type": "string",
+            "format": "ip"
           },
           "vlan_id": {
             "nullable": true,

@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "2026061100.0.0"
+    "version": "2026072000.0.0"
   },
   "paths": {
     "/device/auth": {
@@ -17733,6 +17733,13 @@
             "type": "integer",
             "format": "uint32",
             "minimum": 0
+          },
+          "src_addr": {
+            "nullable": true,
+            "description": "The local IP address to use as the source when establishing outbound TCP connections to this BGP peer. If `None`, the OS selects the source address.",
+            "default": null,
+            "type": "string",
+            "format": "ip"
           },
           "vlan_id": {
             "nullable": true,

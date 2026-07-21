@@ -150,6 +150,7 @@ impl BgpPeerFromDbBuilder<'_> {
                 communities,
                 allowed_import,
                 allowed_export,
+                src_addr: p.src_addr.map(|x| x.ip()),
             },
         })
     }
@@ -2407,6 +2408,7 @@ mod test {
                         ]),
                         allowed_import: ImportExportPolicy::NoFiltering,
                         vlan_id: None,
+                        src_addr: None,
                     },
                     BgpPeer {
                         bgp_config: bgp_config.identity.name.clone().into(),
@@ -2432,6 +2434,7 @@ mod test {
                             "192.168.3.0/24".parse().unwrap(),
                         ]),
                         vlan_id: None,
+                        src_addr: None,
                     },
                 ],
             }],
@@ -2787,6 +2790,7 @@ mod test {
                     allowed_export: ImportExportPolicy::NoFiltering,
                     allowed_import: ImportExportPolicy::NoFiltering,
                     vlan_id: None,
+                    src_addr: None,
                 }],
             }],
             addresses: vec![],
@@ -2944,6 +2948,7 @@ mod test {
             ]),
             allowed_import: ImportExportPolicy::NoFiltering,
             vlan_id: None,
+            src_addr: None,
         };
 
         let peer_phy1 = BgpPeer {

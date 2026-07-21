@@ -800,7 +800,6 @@ impl BackgroundTask for SwitchPortSettingsManager {
                                         export_policy: export_policy6,
                                     }),
                                     vlan_id: peer.vlan_id,
-                                    //TODO plumb these out to the external API
                                     connect_retry_jitter: Some(JitterRange {
                                         max: 1.0,
                                         min: 0.75,
@@ -808,7 +807,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                                     deterministic_collision_resolution: false,
                                     idle_hold_jitter: None,
                                     src_port: None,
-                                    src_addr: None,
+                                    src_addr: peer.src_addr,
                                 };
 
                                 // update the stored vec if it exists, create a new on if it doesn't exist
@@ -859,7 +858,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                                     deterministic_collision_resolution: false,
                                     idle_hold_jitter: None,
                                     src_port: None,
-                                    src_addr: None,
+                                    src_addr: peer.src_addr,
                                 };
 
                                 // update the stored vec if it exists, create a new on if it doesn't exist
