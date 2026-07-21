@@ -529,7 +529,7 @@ impl<'de, const N: u8> Deserialize<'de> for Ipv6Subnet<N> {
     }
 }
 
-impl Ipv6Subnet<AZ_PREFIX> {
+impl Ipv6Subnet<AZ_PREFIX_LENGTH> {
     pub fn check_external_ip(
         &self,
         ip: IpAddr,
@@ -550,7 +550,7 @@ impl Ipv6Subnet<AZ_PREFIX> {
 )]
 pub struct UnexpectedUnderlayIpError {
     ip: IpAddr,
-    az_subnet: Ipv6Subnet<AZ_PREFIX>,
+    az_subnet: Ipv6Subnet<AZ_PREFIX_LENGTH>,
 }
 
 /// A rack's underlay subnet, along with the AZ-wide underlay subnet
