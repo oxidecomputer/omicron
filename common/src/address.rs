@@ -449,6 +449,30 @@ pub const CP_SERVICES_RESERVED_ADDRESSES: u16 = 0xFFFF;
 /// with each sled in the Reconfigurator blueprint.
 pub const SLED_RESERVED_ADDRESSES: u16 = 2;
 
+/// Initial octet of IPv6 for bootstrap addresses.
+pub const BOOTSTRAP_PREFIX: u16 = 0xfdb0;
+
+/// IPv6 subnet for the *entire* bootstrap network.
+///
+/// This is a /16 subnet with the prefix [`BOOTSTRAP_PREFIX`]. Individual sled
+/// bootstrap networks are /64 subnets within this range, with the rest of the
+/// previx constructed from the sled's MAC address. This constant is intended to
+/// be used for checking whether an address is a bootstrap address on *any*
+/// sled's bootstrap network.
+pub const BOOTSTRAP_NETWORK_SUBNET: Ipv6Net = Ipv6Net::new_unchecked(
+    Ipv6Addr::new(BOOTSTRAP_PREFIX, 0, 0, 0, 0, 0, 0, 0),
+    16,
+);
+
+/// IPv6 prefix length for bootstrap network sled subnets.
+///
+/// This is the length of the prefix for the bootstrap network *of an individual
+/// sled*. The prefix begins with [`BOOTSTRAP_PREFIX`], and the rest of the /64
+/// prefix is constructed from the sled's MAC address. This is disticnt from the
+/// prefix length of [`BOOTSTRAP_NETWORK_SUBNET`], which is the /16 subnet that
+/// contains *all* sled bootstrap networks.
+pub const BOOTSTRAP_SLED_SUBNET_PREFIX_LENGTH: u8 = 64;
+
 /// Wraps an [`Ipv6Net`] with a compile-time prefix length.
 #[derive(
     Debug,
