@@ -25,8 +25,8 @@ use wicketd_commission_types::rack_setup::{
     PutRssUserConfigInsensitive, RackOperationStatus,
 };
 use wicketd_commission_types::update::{
-    ClearUpdateStateParams, RepositoryDescription, SpUpdateProgress,
-    StartUpdateParams,
+    ClearUpdateStateParams, ClearUpdateStateResponse, RepositoryDescription,
+    SpUpdateProgress, StartUpdateParams,
 };
 
 use super::conversions;
@@ -234,15 +234,16 @@ impl WicketdCommissionApi for WicketdCommissionApiImpl {
     async fn post_clear_update_state(
         rqctx: RequestContext<Self::Context>,
         params: TypedBody<ClearUpdateStateParams>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    ) -> Result<HttpResponseOk<ClearUpdateStateResponse>, HttpError> {
         let ctx = rqctx.context();
         let targets = params.into_inner().targets;
 
-        ctx.update_tracker
+        let response = ctx
+            .update_tracker
             .clear_update_state(targets)
             .await
             .map_err(|err| err.to_http_error())?;
-        Ok(HttpResponseUpdatedNoContent())
+        Ok(HttpResponseOk(response))
     }
 
     async fn get_rack_setup_state(

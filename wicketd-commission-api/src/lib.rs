@@ -30,6 +30,8 @@ pub trait WicketdCommissionApi {
     /// If `force_refresh` is non-empty, the request will wait for the listed SPs
     /// to report fresh data, or return a 503 if they do not respond within the
     /// server-side timeout.
+    ///
+    /// Returns 400 if the SP is unknown.
     #[endpoint {
         method = GET,
         path = "/inventory/sps",
@@ -41,7 +43,7 @@ pub trait WicketdCommissionApi {
 
     /// Report the physical location (switch and sled) wicketd is running at
     ///
-    /// Will return 503 if the location is not yet known (typically because
+    /// Returns 503 if the location is not yet known (typically because
     /// wicketd hasn't been able to connect to MGS).
     #[endpoint {
         method = GET,
@@ -118,8 +120,9 @@ pub trait WicketdCommissionApi {
     /// Clear update state for one or more service processors
     ///
     /// Use this to reset update state after a completed or failed update. This
-    /// fails if any of the targeted service processors are currently being
-    /// updated. Clearing targets that have no update data succeeds silently.
+    /// fails with a 400 if any of the targeted service processors are currently
+    /// being updated. Otherwise, the response reports which targets had update
+    /// state cleared and which had no update data to clear.
     #[endpoint {
         method = POST,
         path = "/clear-update-state",
@@ -127,7 +130,10 @@ pub trait WicketdCommissionApi {
     async fn post_clear_update_state(
         rqctx: RequestContext<Self::Context>,
         params: TypedBody<latest::update::ClearUpdateStateParams>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+    ) -> Result<
+        HttpResponseOk<latest::update::ClearUpdateStateResponse>,
+        HttpError,
+    >;
 
     /// Query the current state of rack setup
     #[endpoint {

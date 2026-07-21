@@ -67,10 +67,11 @@ fn rot_info_to_ct(rot: RotInventory) -> ct_inv::RotInfo {
     }
 }
 
-fn ignition_to_ct(ignition: SpIgnition) -> ct_inv::SpIgnitionInfo {
+fn ignition_to_ct(ignition: Option<SpIgnition>) -> ct_inv::SpIgnitionInfo {
     match ignition {
-        SpIgnition::Absent => ct_inv::SpIgnitionInfo::Absent,
-        SpIgnition::Present {
+        None => ct_inv::SpIgnitionInfo::NotRead,
+        Some(SpIgnition::Absent) => ct_inv::SpIgnitionInfo::Absent,
+        Some(SpIgnition::Present {
             power,
             flt_a3,
             flt_a2,
@@ -80,7 +81,7 @@ fn ignition_to_ct(ignition: SpIgnition) -> ct_inv::SpIgnitionInfo {
             id: _,
             ctrl_detect_0: _,
             ctrl_detect_1: _,
-        } => ct_inv::SpIgnitionInfo::Present {
+        }) => ct_inv::SpIgnitionInfo::Present {
             power,
             faults: ct_inv::IgnitionFaults {
                 a3: flt_a3,
@@ -109,7 +110,7 @@ pub(crate) fn sp_info_to_ct(sp: SpInventory) -> ct_inv::SpInfo {
             serial_number: s.serial_number,
             power_state: s.power_state,
         }),
-        ignition: ignition.map(ignition_to_ct),
+        ignition: ignition_to_ct(ignition),
         caboose_active: slot_caboose_to_ct(caboose_active),
         caboose_inactive: slot_caboose_to_ct(caboose_inactive),
         rot: rot.map(rot_info_to_ct),

@@ -32,6 +32,7 @@ progenitor::generate_api!(
         Caboose = wicketd_commission_types_versions::latest::inventory::Caboose,
         CertificateUploadResponse = wicketd_commission_types_versions::latest::rack_setup::CertificateUploadResponse,
         ClearUpdateStateParams = wicketd_commission_types_versions::latest::update::ClearUpdateStateParams,
+        ClearUpdateStateResponse = wicketd_commission_types_versions::latest::update::ClearUpdateStateResponse,
         IgnitionFaults = wicketd_commission_types_versions::latest::inventory::IgnitionFaults,
         IpRange = wicketd_commission_types_versions::latest::rack_setup::IpRange,
         Ipv4Range = wicketd_commission_types_versions::latest::rack_setup::Ipv4Range,

@@ -79,7 +79,9 @@ async fn test_commission_inventory() {
     let sps = wait_for_sp_inventory(&ctx, |sps| {
         [0u16, 1].iter().all(|slot| {
             sps.get(&SpIdentifier { typ: SpType::Sled, slot: *slot })
-                .is_some_and(|sp| sp.state.is_some() && sp.ignition.is_some())
+                .is_some_and(|sp| {
+                    sp.state.is_some() && sp.ignition != SpIgnitionInfo::NotRead
+                })
         })
     })
     .await;
@@ -107,7 +109,7 @@ async fn test_commission_inventory() {
     for sled in [&sled0, &sled1] {
         assert_eq!(
             sled.ignition,
-            Some(sim_ignition_present()),
+            sim_ignition_present(),
             "sp-sim sleds report ignition present with no faults: {sled:?}"
         );
     }
@@ -239,11 +241,10 @@ async fn test_commission_start_update() {
     // A sled absent from inventory is rejected with a 400 that names the
     // missing inventory state.
     let absent = StartUpdateParams {
-        targets: UpdateTargets::new(
-            std::iter::once(SpIdentifier { typ: SpType::Sled, slot: 30 })
-                .collect(),
-        )
-        .expect("a single target is non-empty"),
+        targets: UpdateTargets::single(SpIdentifier {
+            typ: SpType::Sled,
+            slot: 30,
+        }),
         options: StartUpdateOptions::default(),
     };
     let err = ctx
@@ -276,11 +277,10 @@ async fn test_commission_start_update() {
         .expect("put_repository succeeded");
 
     let params = StartUpdateParams {
-        targets: UpdateTargets::new(
-            std::iter::once(SpIdentifier { typ: SpType::Sled, slot: 0 })
-                .collect(),
-        )
-        .expect("a single target is non-empty"),
+        targets: UpdateTargets::single(SpIdentifier {
+            typ: SpType::Sled,
+            slot: 0,
+        }),
         options: StartUpdateOptions::default(),
     };
     ctx.commission_client

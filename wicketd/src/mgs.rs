@@ -275,7 +275,15 @@ impl MgsManager {
         }
     }
 
+    /// Drop waiters whose receiver is closed (e.g., the HTTP request timed out)
+    /// so they don't pile up in case a wedged SP never refreshes.
+    fn prune_dead_waiters(&mut self) {
+        self.waiting_for_update.retain(|waiter| !waiter.reply_tx.is_closed());
+    }
+
     fn check_completed_waiters(&mut self, mgs_last_seen: Instant) {
+        self.prune_dead_waiters();
+
         // This really wants `Vec::drain_filter()`, but it's unstable; instead,
         // use its sample code (but use `swap_remove()` instead of `remove()`
         // because we don't care about order).
@@ -304,6 +312,8 @@ impl MgsManager {
         >,
         force_refresh: Vec<SpIdentifier>,
     ) {
+        self.prune_dead_waiters();
+
         if force_refresh.is_empty() {
             // No force refresh: just return our latest cached inventory.
             _ = reply_tx.send(Ok(self.current_inventory(mgs_last_seen)));
@@ -405,4 +415,62 @@ struct WaitingForRefresh {
     reply_tx: oneshot::Sender<Result<GetInventoryResponse, GetInventoryError>>,
     sps_to_refresh: BTreeSet<SpIdentifier>,
     need_ignition_refresh: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::net::Ipv6Addr;
+    use wicket_common::inventory::SpType;
+
+    fn dummy_manager() -> MgsManager {
+        let log = Logger::root(slog::Discard, o!());
+        let addr = SocketAddrV6::new(Ipv6Addr::LOCALHOST, 0, 0, 0);
+        MgsManager::new(&log, addr)
+    }
+
+    fn sled(slot: u16) -> SpIdentifier {
+        SpIdentifier { typ: SpType::Sled, slot }
+    }
+
+    #[test]
+    fn prune_dead_waiters_drops_only_closed_receivers() {
+        let mut manager = dummy_manager();
+
+        // Simulate a dead waiter with a closed receiver and a non-empty
+        // sps_to_refresh.
+        let (dead_tx, dead_rx) = oneshot::channel();
+        drop(dead_rx);
+        manager.waiting_for_update.push(WaitingForRefresh {
+            reply_tx: dead_tx,
+            sps_to_refresh: std::iter::once(sled(0)).collect(),
+            need_ignition_refresh: true,
+        });
+
+        // Similarly, simulate a live waiter.
+        let (live_tx, _live_rx) = oneshot::channel();
+        manager.waiting_for_update.push(WaitingForRefresh {
+            reply_tx: live_tx,
+            sps_to_refresh: std::iter::once(sled(1)).collect(),
+            need_ignition_refresh: true,
+        });
+
+        manager.prune_dead_waiters();
+
+        assert_eq!(
+            manager.waiting_for_update.len(),
+            1,
+            "only the live waiter remains after pruning",
+        );
+        let remaining = &manager.waiting_for_update[0];
+        assert!(
+            !remaining.reply_tx.is_closed(),
+            "the surviving waiter still has a live receiver",
+        );
+        assert_eq!(
+            remaining.sps_to_refresh,
+            std::iter::once(sled(1)).collect::<BTreeSet<_>>(),
+            "the surviving waiter is the one waiting on sled 1",
+        );
+    }
 }

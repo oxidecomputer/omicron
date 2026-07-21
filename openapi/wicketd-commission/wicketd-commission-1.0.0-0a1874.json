@@ -52,7 +52,7 @@
     "/clear-update-state": {
       "post": {
         "summary": "Clear update state for one or more service processors",
-        "description": "Use this to reset update state after a completed or failed update. This fails if any of the targeted service processors are currently being updated. Clearing targets that have no update data succeeds silently.",
+        "description": "Use this to reset update state after a completed or failed update. This fails with a 400 if any of the targeted service processors are currently being updated. Otherwise, the response reports which targets had update state cleared and which had no update data to clear.",
         "operationId": "post_clear_update_state",
         "requestBody": {
           "content": {
@@ -65,8 +65,15 @@
           "required": true
         },
         "responses": {
-          "204": {
-            "description": "resource updated"
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClearUpdateStateResponse"
+                }
+              }
+            }
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -80,7 +87,7 @@
     "/inventory/sps": {
       "get": {
         "summary": "Get inventory of all service processors visible to wicketd",
-        "description": "If `force_refresh` is non-empty, the request will wait for the listed SPs to report fresh data, or return a 503 if they do not respond within the server-side timeout.",
+        "description": "If `force_refresh` is non-empty, the request will wait for the listed SPs to report fresh data, or return a 503 if they do not respond within the server-side timeout.\n\nReturns 400 if the SP is unknown.",
         "operationId": "get_sp_inventory",
         "requestBody": {
           "content": {
@@ -115,7 +122,7 @@
     "/location": {
       "get": {
         "summary": "Report the physical location (switch and sled) wicketd is running at",
-        "description": "Will return 503 if the location is not yet known (typically because wicketd hasn't been able to connect to MGS).",
+        "description": "Returns 503 if the location is not yet known (typically because wicketd hasn't been able to connect to MGS).",
         "operationId": "get_location",
         "responses": {
           "200": {
@@ -668,6 +675,32 @@
           "targets"
         ],
         "additionalProperties": false
+      },
+      "ClearUpdateStateResponse": {
+        "description": "Response to an instruction to clear update data.",
+        "type": "object",
+        "properties": {
+          "cleared": {
+            "description": "The SPs for which update data was cleared.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SpIdentifier"
+            },
+            "uniqueItems": true
+          },
+          "no_update_data": {
+            "description": "The SPs that had no update state to clear.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SpIdentifier"
+            },
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "cleared",
+          "no_update_data"
+        ]
       },
       "Duration": {
         "type": "object",
@@ -1624,22 +1657,7 @@
         "description": "The most recent progress reported by a running step.",
         "oneOf": [
           {
-            "description": "The step is running but has not reported progress yet.",
-            "type": "object",
-            "properties": {
-              "state": {
-                "type": "string",
-                "enum": [
-                  "no_progress"
-                ]
-              }
-            },
-            "required": [
-              "state"
-            ]
-          },
-          {
-            "description": "The step is running but has stalled without reporting further progress.",
+            "description": "The update engine has not received any progress message for this step attempt yet.\n\nThe engine reports this immediately after a step starts, and again after a retry or progress reset. It does not indicate a stall or timeout.",
             "type": "object",
             "properties": {
               "state": {
@@ -1654,11 +1672,12 @@
             ]
           },
           {
-            "description": "The step reported a progress counter.",
+            "description": "The step reported progress.\n\n`progress` carries the counter if the report included one.",
             "type": "object",
             "properties": {
               "progress": {
-                "description": "The reported progress counter.",
+                "nullable": true,
+                "description": "The reported progress counter, if the report included one.",
                 "allOf": [
                   {
                     "$ref": "#/components/schemas/StepProgress"
@@ -1673,7 +1692,6 @@
               }
             },
             "required": [
-              "progress",
               "state"
             ]
           }
@@ -1743,6 +1761,21 @@
       "SpIgnitionInfo": {
         "description": "The ignition state of a service processor.",
         "oneOf": [
+          {
+            "description": "The ignition state has not been read yet.",
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "not_read"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
           {
             "description": "Ignition reports the service processor as present.",
             "type": "object",
@@ -1818,8 +1851,7 @@
             ]
           },
           "ignition": {
-            "nullable": true,
-            "description": "The ignition state of this service processor.\n\n`None` means ignition state has not been read yet.",
+            "description": "The ignition state of this service processor.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/SpIgnitionInfo"
@@ -1848,7 +1880,8 @@
         "required": [
           "caboose_active",
           "caboose_inactive",
-          "id"
+          "id",
+          "ignition"
         ]
       },
       "SpInventory": {

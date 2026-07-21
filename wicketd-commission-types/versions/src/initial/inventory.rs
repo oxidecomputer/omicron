@@ -140,6 +140,8 @@ pub struct IgnitionFaults {
 )]
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum SpIgnitionInfo {
+    /// The ignition state has not been read yet.
+    NotRead,
     /// Ignition reports the service processor as present.
     Present {
         /// Whether the service processor is powered on.
@@ -161,9 +163,7 @@ pub struct SpInfo {
     /// The service processor's state, if it has been read.
     pub state: Option<SpStateInfo>,
     /// The ignition state of this service processor.
-    ///
-    /// `None` means ignition state has not been read yet.
-    pub ignition: Option<SpIgnitionInfo>,
+    pub ignition: SpIgnitionInfo,
     /// The caboose of the active service-processor firmware slot.
     pub caboose_active: SlotCaboose,
     /// The caboose of the inactive service-processor firmware slot.

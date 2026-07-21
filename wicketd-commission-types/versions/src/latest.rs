@@ -60,6 +60,7 @@ pub mod rack_setup {
 
 pub mod update {
     pub use crate::v1::update::ClearUpdateStateParams;
+    pub use crate::v1::update::ClearUpdateStateResponse;
     pub use crate::v1::update::EmptyUpdateTargets;
     pub use crate::v1::update::RepositoryDescription;
     pub use crate::v1::update::RunningProgress;

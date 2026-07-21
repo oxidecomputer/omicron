@@ -4,11 +4,7 @@
 
 //! Rack setup (RSS) types for the commissioning API.
 //!
-//! The RSS configuration tree (rooted at [`PutRssUserConfigInsensitive`]) is
-//! the single source of truth for these types`. Its serde shape must stay
-//! compatible with the operator-supplied TOML and with the re-exported
-//! `sled-agent-types-versions` types it embeds (see the round-trip tests in
-//! `impls/rack_setup.rs`).
+//! The root struct is [`PutRssUserConfigInsensitive`].
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;

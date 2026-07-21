@@ -2,11 +2,9 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Update (mupdate) types for the commissioning API.
+//! MUPdate types for the commissioning API.
 //!
-//! The progress type here is a flat, server-computed projection of wicketd's
-//! internal update-engine event buffers: callers get a single per-SP state plus
-//! a human-readable step summary, rather than the full event-report graph.
+//! The progress types here are a projection of wicketd's internal event buffers.
 
 use std::collections::BTreeSet;
 
@@ -75,6 +73,18 @@ impl JsonSchema for UpdateTargets {
             ..Default::default()
         })
     }
+}
+
+/// Response to an instruction to clear update data.
+#[derive(
+    Clone, Debug, Default, PartialEq, Eq, JsonSchema, Serialize, Deserialize,
+)]
+pub struct ClearUpdateStateResponse {
+    /// The SPs for which update data was cleared.
+    pub cleared: BTreeSet<SpIdentifier>,
+
+    /// The SPs that had no update state to clear.
+    pub no_update_data: BTreeSet<SpIdentifier>,
 }
 
 /// Error returned when UpdateTargets is constructed from an empty set.
@@ -258,14 +268,18 @@ pub enum UpdateStepStatus {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum RunningProgress {
-    /// The step is running but has not reported progress yet.
-    NoProgress,
-    /// The step is running but has stalled without reporting further progress.
+    /// The update engine has not received any progress message for this step
+    /// attempt yet.
+    ///
+    /// The engine reports this immediately after a step starts, and again after
+    /// a retry or progress reset. It does not indicate a stall or timeout.
     WaitingForProgress,
-    /// The step reported a progress counter.
+    /// The step reported progress.
+    ///
+    /// `progress` carries the counter if the report included one.
     Counter {
-        /// The reported progress counter.
-        progress: StepProgress,
+        /// The reported progress counter, if the report included one.
+        progress: Option<StepProgress>,
     },
 }
 

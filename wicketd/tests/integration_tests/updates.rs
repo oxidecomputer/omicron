@@ -39,8 +39,7 @@ use wicket::OutputKind;
 use wicket_common::{
     inventory::{SpIdentifier, SpType},
     rack_update::{
-        ClearUpdateStateResponse, ExitMessage, RackUpdateStatus,
-        StartUpdateOptions, UpdateState,
+        ExitMessage, RackUpdateStatus, StartUpdateOptions, UpdateState,
     },
     update_events::{StepEventKind, UpdateComponent},
 };
@@ -49,7 +48,8 @@ use wicketd_client::types::{
     GetInventoryParams, GetInventoryResponse, StartUpdateParams,
 };
 use wicketd_commission_types_versions::latest::update::{
-    self, ClearUpdateStateParams, StepOutcome, UpdateStepStatus, UpdateTargets,
+    self, ClearUpdateStateParams, ClearUpdateStateResponse, StepOutcome,
+    UpdateStepStatus, UpdateTargets,
 };
 
 /// The list of zone file names defined in fake-non-semver.toml.
@@ -875,11 +875,10 @@ async fn test_update_races() {
     // deterministically blocked on the oneshot channel passed into
     // start_fake_update) is rejected with a 400 naming the in-progress target.
     let running = ClearUpdateStateParams {
-        targets: UpdateTargets::new(
-            std::iter::once(SpIdentifier { typ: SpType::Sled, slot: 0 })
-                .collect(),
-        )
-        .expect("a single target is non-empty"),
+        targets: UpdateTargets::single(SpIdentifier {
+            typ: SpType::Sled,
+            slot: 0,
+        }),
     };
     let err = wicketd_testctx
         .commission_client
@@ -892,8 +891,8 @@ async fn test_update_races() {
         "targets are currently being updated",
     );
 
-    // Check that the commission API reports sled 0 as InProgress with
-    // reasonable step counts while the fake update is running.
+    // Check that the commission API reports sled 0 as Running with reasonable
+    // step counts while the fake update is running.
     let entry = wait_for_sled0_progress(
         &wicketd_testctx,
         "sled 0 reached Running with its single step running",
@@ -967,19 +966,45 @@ async fn test_update_races() {
         "the fake update rolls up to Completed with its single clean step",
     );
 
-    // Try clearing the state for sled 0.
-    let params = ClearUpdateStateParams {
-        targets: UpdateTargets::new(
-            std::iter::once(SpIdentifier { typ: SpType::Sled, slot: 0 })
-                .collect(),
-        )
-        .expect("a single target is non-empty"),
-    };
-    wicketd_testctx
+    // sled 0's update completed, so it reports as cleared and no_update_data is
+    // empty.
+    let sled0_id = SpIdentifier { typ: SpType::Sled, slot: 0 };
+    let params =
+        ClearUpdateStateParams { targets: UpdateTargets::single(sled0_id) };
+    let response = wicketd_testctx
         .commission_client
         .post_clear_update_state(&params)
         .await
-        .expect("clearing sled 0 succeeded");
+        .expect("clearing sled 0 succeeded")
+        .into_inner();
+    assert_eq!(
+        response,
+        ClearUpdateStateResponse {
+            cleared: std::iter::once(sled0_id).collect(),
+            no_update_data: BTreeSet::new(),
+        },
+        "clearing sled 0 reports exactly sled 0 as cleared",
+    );
+
+    // sled 1 never had an update, so it reports under no_update_data with
+    // nothing cleared.
+    let sled1_id = SpIdentifier { typ: SpType::Sled, slot: 1 };
+    let params =
+        ClearUpdateStateParams { targets: UpdateTargets::single(sled1_id) };
+    let response = wicketd_testctx
+        .commission_client
+        .post_clear_update_state(&params)
+        .await
+        .expect("clearing sled 1 succeeded")
+        .into_inner();
+    assert_eq!(
+        response,
+        ClearUpdateStateResponse {
+            cleared: BTreeSet::new(),
+            no_update_data: std::iter::once(sled1_id).collect(),
+        },
+        "clearing sled 1 reports it as having no update data",
+    );
 
     let progress = wicketd_testctx
         .commission_client
@@ -1002,8 +1027,7 @@ async fn test_update_races() {
     // Run a second fake update to completion so the event buffer is populated
     // again -- otherwise the re-upload check below would be vacuous now that
     // the clear emptied the buffer.
-    let sps = UpdateTargets::new(std::iter::once(sp).collect())
-        .expect("a single target is non-empty");
+    let sps = UpdateTargets::single(sp);
     let (sender, receiver) = oneshot::channel();
     wicketd_testctx
         .server
