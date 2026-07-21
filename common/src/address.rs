@@ -322,7 +322,7 @@ pub const NUM_SOURCE_NAT_PORTS: u16 = 1 << 14;
 // prefix range (`fd00::/48`). See `random_vpc_ipv6_prefix`.
 // Furthermore, all the below *_OPTE_IPV6_SUBNET constants are
 // /64's within this prefix.
-pub static SERVICE_VPC_IPV6_PREFIX: LazyLock<Ipv6Net> = LazyLock::new(|| {
+pub static SERVICE_VPC_IPV6_SUBNET: LazyLock<Ipv6Net> = LazyLock::new(|| {
     Ipv6Net::new(
         Ipv6Addr::new(0xfd77, 0xe9d2, 0x9cd9, 0, 0, 0, 0, 0),
         VPC_IPV6_PREFIX_LENGTH,
