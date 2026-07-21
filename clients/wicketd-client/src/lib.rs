@@ -88,6 +88,7 @@ progenitor::generate_api!(
         StepEventForWicketdEngineSpec = wicket_common::update_events::StepEvent,
         SwitchSlot = sled_agent_types::early_networking::SwitchSlot,
         UpdateSimulatedResult = wicket_common::rack_update::UpdateSimulatedResult,
+        UpdateTargets = wicketd_commission_types_versions::latest::update::UpdateTargets,
         UpdateTestError = wicket_common::rack_update::UpdateTestError,
         UplinkPreflightStepId = wicket_common::preflight_check::UplinkPreflightStepId,
         UserSpecifiedBgpPeerConfig = wicketd_commission_types_versions::latest::rack_setup::UserSpecifiedBgpPeerConfig,

@@ -1469,12 +1469,12 @@
             ]
           },
           "targets": {
-            "description": "The SP identifiers to clear the update state for. Must be non-empty.",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/SpIdentifier"
-            },
-            "uniqueItems": true
+            "description": "The SP identifiers to clear the update state for.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/UpdateTargets"
+              }
+            ]
           }
         },
         "required": [
@@ -5037,12 +5037,12 @@
             ]
           },
           "targets": {
-            "description": "The SP identifiers to start the update with. Must be non-empty.",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/SpIdentifier"
-            },
-            "uniqueItems": true
+            "description": "The SP identifiers to start the update with.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/UpdateTargets"
+              }
+            ]
           }
         },
         "required": [
@@ -7694,6 +7694,15 @@
             ]
           }
         ]
+      },
+      "UpdateTargets": {
+        "description": "A non-empty set of service processors to act on.",
+        "type": "array",
+        "items": {
+          "$ref": "#/components/schemas/SpIdentifier"
+        },
+        "minItems": 1,
+        "uniqueItems": true
       },
       "UpdateTestError": {
         "oneOf": [
