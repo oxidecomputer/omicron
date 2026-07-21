@@ -110,9 +110,6 @@ impl DataStore {
     ) -> Result<(), Error> {
         use nexus_db_schema::schema::saga::dsl;
 
-        // The `Insertable` impl on `&Saga` expands the validated saga into its
-        // column assignments (spreading `abandon_metadata` across the three
-        // columns).
         diesel::insert_into(dsl::saga)
             .values(saga)
             .execute_async(&*self.pool_connection_unauthorized().await?)
@@ -246,6 +243,7 @@ impl DataStore {
             // Validate each row into a `Saga` as we collect it.
             for row in batch {
                 let saga_id = row.id();
+                // TODO-K: Do I still need to do this?
                 match row.validate() {
                     Ok(saga) => sagas.push(saga),
                     Err(e) => {
@@ -407,8 +405,8 @@ mod test {
     use chrono::TimeDelta;
     use db::queries::ALLOW_FULL_TABLE_SCAN_SQL;
     use nexus_db_model::Saga;
+    use nexus_db_model::SagaExecState;
     use nexus_db_model::SagaReasonAbandoned;
-    use nexus_db_model::SagaState;
     use nexus_db_model::{SagaNodeEvent, SecId};
     use omicron_common::api::external::Generation;
     use omicron_test_utils::dev;
@@ -461,12 +459,13 @@ mod test {
         assert!(
             !observed_sagas
                 .iter()
-                .any(|s| s.saga_state == SagaState::Abandoned)
+                .any(|s| matches!(s.saga_state, SagaExecState::Abandoned(_)))
         );
 
         // Remove the abandoned saga from the inserted set so that it can be
         // compared to the observed set.
-        inserted_sagas.retain(|s| s.saga_state != SagaState::Abandoned);
+        inserted_sagas
+            .retain(|s| !matches!(s.saga_state, SagaExecState::Abandoned(_)));
 
         // The observed list is sorted by ID, so sort the inserted list that way
         // too so that the lists can be tested for equality.
@@ -730,10 +729,9 @@ mod test {
                 .expect("row is a valid saga")
         };
 
-        assert_eq!(found_saga.saga_state, SagaState::Abandoned);
-        let abandon = found_saga
-            .abandon_metadata
-            .expect("an abandoned saga should have abandonment metadata");
+        let SagaExecState::Abandoned(abandon) = found_saga.saga_state else {
+            panic!("an abandoned saga should be in the Abandoned state");
+        };
         assert_eq!(abandon.reason, SagaReasonAbandoned::Unrecoverable);
         assert_eq!(abandon.comment, "test".to_string());
 
@@ -869,8 +867,8 @@ mod test {
             .iter()
             .filter_map(|saga| {
                 ((saga.creator == sec_b || saga.creator == sec_c)
-                    && (saga.saga_state == SagaState::Running
-                        || saga.saga_state == SagaState::Unwinding))
+                    && (saga.saga_state == SagaExecState::Running
+                        || saga.saga_state == SagaExecState::Unwinding))
                     .then(|| saga.id)
             })
             .collect();
@@ -879,7 +877,7 @@ mod test {
             .filter_map(|saga| {
                 (saga.creator == sec_a
                     || saga.creator == sec_d
-                    || saga.saga_state == SagaState::Done)
+                    || saga.saga_state == SagaExecState::Done)
                     .then(|| saga.id)
             })
             .collect();
@@ -935,8 +933,8 @@ mod test {
                 assert_eq!(current_sec, sec_a);
                 assert_eq!(*saga.adopt_generation, Generation::from(2));
                 assert!(
-                    saga.saga_state == SagaState::Running
-                        || saga.saga_state == SagaState::Unwinding
+                    saga.saga_state == SagaExecState::Running
+                        || saga.saga_state == SagaExecState::Unwinding
                 );
             } else if sagas_unaffected.contains(&saga.id) {
                 assert_eq!(current_sec, saga.creator);

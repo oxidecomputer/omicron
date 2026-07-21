@@ -22,6 +22,7 @@ use internal_dns_resolver::ResolveError;
 use internal_dns_types::names::ServiceName;
 use nexus_db_lookup::DataStoreConnection;
 use nexus_db_model::Saga;
+use nexus_db_model::SagaExecState;
 use nexus_db_model::SagaNodeEvent;
 use nexus_db_model::SagaState;
 use nexus_db_model::SecId;
@@ -185,7 +186,6 @@ impl From<Saga> for SagaRow {
             current_sec,
             adopt_generation: _,
             adopt_time: _,
-            abandon_metadata: _,
         } = saga;
         Self {
             id: id.0.into(),
@@ -196,7 +196,7 @@ impl From<Saga> for SagaRow {
             },
             time_created,
             name,
-            state: format!("{saga_state:?}"),
+            state: format!("{:?}", SagaState::from(saga_state)),
         }
     }
 }
@@ -383,13 +383,13 @@ async fn cmd_sagas_abandon(
         .await?;
 
     match saga.saga_state {
-        SagaState::Done => {
+        SagaExecState::Done => {
             bail!("saga {} is already done executing", args.saga_id);
         }
-        SagaState::Abandoned => {
+        SagaExecState::Abandoned(_) => {
             bail!("saga {} is already abandoned", args.saga_id);
         }
-        SagaState::Running | SagaState::Unwinding => {}
+        SagaExecState::Running | SagaExecState::Unwinding => {}
     }
 
     let text = r#"

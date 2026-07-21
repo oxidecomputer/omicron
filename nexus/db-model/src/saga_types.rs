@@ -286,13 +286,55 @@ pub struct AbandonMetadata {
     pub comment: String,
 }
 
+/// The execution state of a [`Saga`], in memory.
+///
+/// This is the validated, domain-side counterpart to the flat `saga_state`
+/// column ([`SagaState`]) plus the three nullable abandon columns. Bundling the
+/// abandonment metadata into the `Abandoned` variant makes the invalid
+/// combinations  unrepresentable. Only [`Abandoned`](Self::Abandoned) can carry
+/// metadata, and it always must. Unlike [`SagaState`], this type is never
+/// stored directly; it is split back into the columns by
+/// `From<&Saga> for SagaRow`.
+#[derive(Clone, Debug, PartialEq)]
+pub enum SagaExecState {
+    Running,
+    Unwinding,
+    Done,
+    Abandoned(AbandonMetadata),
+}
+
+impl From<SagaExecState> for SagaState {
+    fn from(value: SagaExecState) -> Self {
+        match value {
+            SagaExecState::Running => SagaState::Running,
+            SagaExecState::Unwinding => SagaState::Unwinding,
+            SagaExecState::Done => SagaState::Done,
+            SagaExecState::Abandoned(_) => SagaState::Abandoned,
+        }
+    }
+}
+
+impl From<steno::SagaCachedState> for SagaExecState {
+    fn from(value: steno::SagaCachedState) -> Self {
+        // Steno has no concept of an abandoned saga, so this only ever produces
+        // the non-abandoned variants.
+        match value {
+            steno::SagaCachedState::Running => SagaExecState::Running,
+            steno::SagaCachedState::Unwinding => SagaExecState::Unwinding,
+            steno::SagaCachedState::Done => SagaExecState::Done,
+        }
+    }
+}
+
 /// A saga loaded and validated from the database or built in memory for
 /// insertion.
 ///
 /// Compared to [`SagaRow`], the three abandon metadata columns are bundled
-/// into a single `abandon` field, kept all or none. Reads go through
-/// `TryFrom<SagaRow>`, which rejects rows whose metadata is inconsistent with
-/// `saga_state` with an [`Error::internal_error`].
+/// into a the saga_state field as part of the `SagaExecState::Abandoned()`
+/// variant so invalid state/metadata combinations can't be represented.
+/// Reads from the database go through `TryFrom<SagaRow>`, which rejects rows
+/// whose metadata is inconsistent with `saga_state` with an
+/// [`Error::internal_error`].
 #[derive(Clone, Debug, PartialEq)]
 pub struct Saga {
     pub id: SagaId,
@@ -300,12 +342,10 @@ pub struct Saga {
     pub time_created: DateTime<Utc>,
     pub name: String,
     pub saga_dag: serde_json::Value,
-    pub saga_state: SagaState,
+    pub saga_state: SagaExecState,
     pub current_sec: Option<SecId>,
     pub adopt_generation: super::Generation,
     pub adopt_time: DateTime<Utc>,
-    // Abandon metadata, present only when `saga_state` is `Abandoned`.
-    pub abandon_metadata: Option<AbandonMetadata>,
 }
 
 impl Saga {
@@ -326,12 +366,12 @@ impl Saga {
             time_created: now,
             name: name.to_string(),
             saga_dag: dag,
+            // A newly-created saga is never abandoned; `SagaExecState::from`
+            // only ever yields the non-abandoned variants.
             saga_state: state.into(),
             current_sec: Some(creator),
             adopt_generation: Generation::new().into(),
             adopt_time: now,
-            // A newly-created saga is never abandoned.
-            abandon_metadata: None,
         }
     }
 
@@ -354,12 +394,10 @@ impl Saga {
             time_created: now,
             name,
             saga_dag: dag,
-            saga_state: SagaState::Abandoned,
+            saga_state: SagaExecState::Abandoned(abandon_metadata),
             current_sec: Some(creator),
             adopt_generation: Generation::new().into(),
             adopt_time: now,
-            // An abandoned saga must always contain abandonment metadata.
-            abandon_metadata: Some(abandon_metadata),
         }
     }
 }
@@ -400,9 +438,12 @@ impl TryFrom<SagaRow> for Saga {
             )));
         }
 
+        // TODO-K: Do a try_from for SagaState?
+
         // The abandon metadata must be present exactly when the saga is
-        // abandoned.
-        let abandon_metadata = match saga_state {
+        // abandoned. Fold the flat column plus metadata into the validated
+        // `SagaExecState`.
+        let saga_state = match saga_state {
             SagaState::Abandoned => {
                 let metadata = valid_abandon_metadata.ok_or_else(|| {
                     Error::internal_error(&format!(
@@ -410,19 +451,19 @@ impl TryFrom<SagaRow> for Saga {
                     ))
                 })?;
 
-                Some(metadata)
+                SagaExecState::Abandoned(metadata)
             }
-            SagaState::Done | SagaState::Running | SagaState::Unwinding => {
-                if let Some(metadata) = valid_abandon_metadata {
-                    return Err(Error::internal_error(&format!(
-                        "saga {id}: has abandonment metadata but is not \
-                        abandoned. abandon_time: {:?} abandon_reason {:?} \
-                        abandon_comment: {:?}",
-                        metadata.time, metadata.reason, metadata.comment
-                    )));
-                }
-
-                None
+            SagaState::Running => {
+                reject_unexpected_metadata(id, valid_abandon_metadata)?;
+                SagaExecState::Running
+            }
+            SagaState::Unwinding => {
+                reject_unexpected_metadata(id, valid_abandon_metadata)?;
+                SagaExecState::Unwinding
+            }
+            SagaState::Done => {
+                reject_unexpected_metadata(id, valid_abandon_metadata)?;
+                SagaExecState::Done
             }
         };
 
@@ -436,22 +477,41 @@ impl TryFrom<SagaRow> for Saga {
             current_sec,
             adopt_generation,
             adopt_time,
-            abandon_metadata,
         })
     }
 }
 
+// TODO-K: This is a bit shit, fix
+// A non-abandoned saga must not carry abandonment metadata.
+fn reject_unexpected_metadata(
+    id: SagaId,
+    metadata: Option<AbandonMetadata>,
+) -> Result<(), Error> {
+    if let Some(AbandonMetadata { time, reason, comment }) = metadata {
+        return Err(Error::internal_error(&format!(
+            "saga {id}: has abandonment metadata but is not abandoned. \
+            abandon_time: {time:?} abandon_reason {reason:?} \
+            abandon_comment: {comment:?}"
+        )));
+    }
+    Ok(())
+}
+
 /// Lowers a validated [`Saga`] into a raw [`SagaRow`] for insertion. This
-/// expands the all or none `abandon_metadata` back into the three nullable
-/// columns.
+/// splits the `SagaExecState` back into the flat `saga_state` column plus the
+/// three nullable abandon columns.
 impl From<&Saga> for SagaRow {
     fn from(saga: &Saga) -> Self {
         let (abandon_time, abandon_reason, abandon_comment) =
-            match &saga.abandon_metadata {
-                Some(AbandonMetadata { time, reason, comment }) => {
-                    (Some(*time), Some(*reason), Some(comment.clone()))
-                }
-                None => (None, None, None),
+            match &saga.saga_state {
+                SagaExecState::Abandoned(AbandonMetadata {
+                    time,
+                    reason,
+                    comment,
+                }) => (Some(*time), Some(*reason), Some(comment.clone())),
+                SagaExecState::Running
+                | SagaExecState::Unwinding
+                | SagaExecState::Done => (None, None, None),
             };
 
         SagaRow {
@@ -460,7 +520,7 @@ impl From<&Saga> for SagaRow {
             time_created: saga.time_created,
             name: saga.name.clone(),
             saga_dag: saga.saga_dag.clone(),
-            saga_state: saga.saga_state,
+            saga_state: saga.saga_state.clone().into(),
             current_sec: saga.current_sec,
             adopt_generation: saga.adopt_generation,
             adopt_time: saga.adopt_time,
@@ -649,7 +709,6 @@ impl Saga {
 
 // Allow a validated `Saga` to be inserted directly. `Values` delegates to the
 // public `SagaInsertValues` tuple, which is what keeps `SagaRow` crate-private.
-// `UndecoratedInsertRecord` enables the batch form.
 impl diesel::Insertable<saga::table> for &Saga {
     type Values = <SagaInsertValues as diesel::Insertable<saga::table>>::Values;
 
@@ -660,7 +719,7 @@ impl diesel::Insertable<saga::table> for &Saga {
     }
 }
 
-// TODO-K: DO I really need this?
+// Enables the batch form of `Insertable`.
 impl diesel::query_builder::UndecoratedInsertRecord<saga::table> for &Saga {}
 
 /// A raw saga row loaded from the database that has not yet been validated into
@@ -823,10 +882,13 @@ mod test {
         );
         let saga = Saga::try_from(row)
             .expect("abandoned saga with full metadata should be valid");
-        assert_eq!(saga.saga_state, SagaState::Abandoned);
         assert_eq!(
-            saga.abandon_metadata,
-            Some(AbandonMetadata { time, reason, comment: comment.clone() })
+            saga.saga_state,
+            SagaExecState::Abandoned(AbandonMetadata {
+                time,
+                reason,
+                comment: comment.clone()
+            })
         );
 
         // Not abandoned and empty metadata is valid. No metadata is propagated
@@ -834,8 +896,7 @@ mod test {
         let row = fake_saga_row(SagaState::Running, None, None, None);
         let saga = Saga::try_from(row)
             .expect("non-abandoned saga without metadata should be valid");
-        assert_eq!(saga.saga_state, SagaState::Running);
-        assert_eq!(saga.abandon_metadata, None);
+        assert_eq!(saga.saga_state, SagaExecState::Running);
 
         // Abandoned and empty metadata is invalid.
         let row = fake_saga_row(SagaState::Abandoned, None, None, None);
