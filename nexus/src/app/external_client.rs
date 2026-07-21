@@ -582,8 +582,8 @@ mod test {
     use super::*;
     use internal_dns_types::config::DnsRecord;
     use omicron_common::address::{
-        Ipv6Subnet, RACK_PREFIX, ReservedRackSubnet, UNDERLAY_MULTICAST_SUBNET,
-        UNDERLAY_MULTICAST_SUBNET_LAST,
+        Ipv6Subnet, RACK_PREFIX_LENGTH, ReservedRackSubnet,
+        UNDERLAY_MULTICAST_SUBNET, UNDERLAY_MULTICAST_SUBNET_LAST,
     };
     use std::collections::HashMap;
     use std::net::Ipv6Addr;
@@ -624,7 +624,7 @@ mod test {
         let sled_ip = nth_addr(rack, (1 << 64) + 5);
         // An address in a different rack's /56, in the same AZ.
         let other_rack_ip = {
-            let rack_size = 1u128 << (128 - RACK_PREFIX);
+            let rack_size = 1u128 << (128 - RACK_PREFIX_LENGTH);
             let rack_offset =
                 u128::from(rack.first_addr()) - u128::from(az.first_addr());
             nth_addr(az, rack_offset + rack_size + 5)
@@ -1121,7 +1121,9 @@ mod test {
     fn underlay_subnets() -> UnderlaySubnets {
         let rack_subnet: ipnetwork::Ipv6Network =
             nexus_test_utils::RACK_SUBNET.parse().unwrap();
-        UnderlaySubnets::new(Ipv6Subnet::<RACK_PREFIX>::from(rack_subnet))
+        UnderlaySubnets::new(Ipv6Subnet::<RACK_PREFIX_LENGTH>::from(
+            rack_subnet,
+        ))
     }
 
     /// Returns the `n`th address in `net`, asserting that it is actually
