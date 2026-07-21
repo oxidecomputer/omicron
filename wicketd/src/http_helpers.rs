@@ -17,9 +17,9 @@ use slog::Logger;
 use slog_error_chain::InlineErrorChain;
 use wicket_common::WICKETD_TIMEOUT;
 use wicket_common::inventory::MgsV1Inventory;
-use wicket_common::inventory::SpIdentifier;
 use wicket_common::inventory::SpType;
 use wicket_common::rack_update::StartUpdateOptions;
+use wicketd_commission_types::update::UpdateTargets;
 
 use crate::ServerContext;
 use crate::helpers::SpIdentifierDisplay;
@@ -163,7 +163,7 @@ pub(crate) fn ba_lockstep_error_to_http(
 ///
 /// This avoids using methods on `HttpError`, many of which don't expose the
 /// full message to clients for security reasons.
-fn http_error_with_message(
+pub(crate) fn http_error_with_message(
     status_code: dropshot::ErrorStatusCode,
     error_code: Option<String>,
     message: String,
@@ -180,16 +180,9 @@ fn http_error_with_message(
 pub(crate) async fn start_update(
     ctx: &ServerContext,
     log: &Logger,
-    targets: BTreeSet<SpIdentifier>,
+    targets: UpdateTargets,
     options: StartUpdateOptions,
 ) -> Result<(), HttpError> {
-    if targets.is_empty() {
-        return Err(HttpError::for_bad_request(
-            None,
-            "No update targets specified".into(),
-        ));
-    }
-
     // Can we update the target SPs? We refuse to update if, for any target SP:
     //
     // 1. We haven't pulled its state in our inventory (most likely cause: the
