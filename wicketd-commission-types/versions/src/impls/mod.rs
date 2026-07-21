@@ -4,5 +4,6 @@
 
 //! Functional code for the latest versions of types.
 
+mod inventory;
 mod rack_setup;
 mod update;

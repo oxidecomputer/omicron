@@ -16,13 +16,15 @@ use gateway_test_utils::setup as gateway_setup;
 use http::StatusCode;
 use iddqd::IdOrdMap;
 use omicron_test_utils::dev::poll::{CondCheckError, wait_for_condition};
+use sp_sim::ROT_STAGING_DEVEL_SIGN;
 use wicket_common::example::ExampleRackSetupData;
 use wicket_common::rack_setup::{BgpAuthKey, CurrentRssUserConfigInsensitive};
 use wicketd_client::types::PutBgpAuthKeyBody;
 use wicketd_commission_types::rack_setup::PutRssUserConfigInsensitive;
 use wicketd_commission_types_versions::latest::inventory::{
-    IgnitionFaults, LocationInfo, PowerState, SpIdentifier, SpIgnitionInfo,
-    SpInfo, SpInventoryParams, SpStateInfo, SpType, SwitchSlot,
+    IgnitionFaults, LocationInfo, PowerState, SlotCaboose, SpIdentifier,
+    SpIgnitionInfo, SpInfo, SpInventoryParams, SpStateInfo, SpType, SwitchSlot,
+    TransceiverInventory,
 };
 use wicketd_commission_types_versions::latest::rack_setup::{
     NewPasswordHash, PutRecoveryUserPasswordHash,
@@ -75,12 +77,14 @@ async fn test_commission_inventory() {
             .await;
     let ctx = WicketdTestContext::setup(gateway).await;
 
-    // Wait for MGS inventory and ignition to become available.
+    // Wait for MGS inventory, ignition, and cabooses.
     let sps = wait_for_sp_inventory(&ctx, |sps| {
         [0u16, 1].iter().all(|slot| {
             sps.get(&SpIdentifier { typ: SpType::Sled, slot: *slot })
                 .is_some_and(|sp| {
-                    sp.state.is_some() && sp.ignition != SpIgnitionInfo::NotRead
+                    sp.state.is_some()
+                        && sp.ignition != SpIgnitionInfo::NotRead
+                        && sled_cabooses_ready(sp)
                 })
         })
     })
@@ -95,6 +99,24 @@ async fn test_commission_inventory() {
         sled0.state,
         Some(sim_gimlet_state("SimGimlet00")),
         "sled 0 state as reported by sp-sim"
+    );
+
+    let SlotCaboose::Read { caboose: sp_caboose } = &sled0.caboose_active else {
+        panic!("sled 0 active SP caboose should be read: {sled0:?}");
+    };
+    assert_eq!(
+        sp_caboose.sign, None,
+        "sp-sim service-processor cabooses carry no signature: {sp_caboose:?}",
+    );
+    let rot = sled0.rot.as_ref().expect("sled 0 RoT info present");
+    let SlotCaboose::Read { caboose: rot_caboose } = &rot.caboose_a else {
+        panic!("sled 0 RoT slot A caboose should be read: {rot:?}");
+    };
+    assert_eq!(
+        rot_caboose.sign.as_deref(),
+        Some(ROT_STAGING_DEVEL_SIGN),
+        "sp-sim RoT cabooses are signed with the staging/devel key: \
+         {rot_caboose:?}",
     );
 
     let sled1 = sps
@@ -132,6 +154,13 @@ async fn test_commission_inventory() {
         refreshed.sps.len(),
         4,
         "four simulated SPs after forced refresh"
+    );
+    assert_eq!(
+        refreshed.transceivers,
+        TransceiverInventory::NotRead,
+        "the test harness has no switch transceiver interface, so the \
+         transceiver inventory is never read: {:?}",
+        refreshed.transceivers,
     );
     let refreshed_sled0 = refreshed
         .sps
@@ -509,6 +538,22 @@ async fn test_commission_rss_config() {
 
 fn recovery_hash(hash: &str) -> PutRecoveryUserPasswordHash {
     PutRecoveryUserPasswordHash { hash: NewPasswordHash(hash.to_string()) }
+}
+
+fn slot_caboose_is_read(caboose: &SlotCaboose) -> bool {
+    match caboose {
+        SlotCaboose::Read { .. } => true,
+        SlotCaboose::NotRead => false,
+    }
+}
+
+fn sled_cabooses_ready(sp: &SpInfo) -> bool {
+    // Cabooses are ready once active SP and RoT slot A are read.
+    slot_caboose_is_read(&sp.caboose_active)
+        && sp
+            .rot
+            .as_ref()
+            .is_some_and(|rot| slot_caboose_is_read(&rot.caboose_a))
 }
 
 fn sim_gimlet_state(serial_number: &str) -> SpStateInfo {

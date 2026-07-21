@@ -7,6 +7,10 @@
 pub mod inventory {
     pub use crate::v1::inventory::BootstrapSled;
     pub use crate::v1::inventory::Caboose;
+    pub use crate::v1::inventory::CmisDatapath;
+    pub use crate::v1::inventory::CmisDatapathState;
+    pub use crate::v1::inventory::CmisLaneStatus;
+    pub use crate::v1::inventory::FaultFlag;
     pub use crate::v1::inventory::IgnitionFaults;
     pub use crate::v1::inventory::LocationInfo;
     pub use crate::v1::inventory::PowerState;
@@ -20,8 +24,16 @@ pub mod inventory {
     pub use crate::v1::inventory::SpInventoryParams;
     pub use crate::v1::inventory::SpStateInfo;
     pub use crate::v1::inventory::SpType;
+    pub use crate::v1::inventory::Sff8636LaneFaults;
     pub use crate::v1::inventory::Stage0Caboose;
     pub use crate::v1::inventory::SwitchSlot;
+    pub use crate::v1::inventory::SwitchTransceivers;
+    pub use crate::v1::inventory::Transceiver;
+    pub use crate::v1::inventory::TransceiverDatapath;
+    pub use crate::v1::inventory::TransceiverInventory;
+    pub use crate::v1::inventory::TransceiverMonitors;
+    pub use crate::v1::inventory::TransceiverStatus;
+    pub use crate::v1::inventory::TransceiverVendor;
 }
 
 pub mod rack_setup {

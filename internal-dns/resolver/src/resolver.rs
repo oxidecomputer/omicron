@@ -11,7 +11,7 @@ use hickory_resolver::lookup::SrvLookup;
 use hickory_resolver::name_server::TokioConnectionProvider;
 use internal_dns_types::names::ServiceName;
 use omicron_common::address::{
-    AZ_PREFIX, DNS_PORT, Ipv6Subnet, get_internal_dns_server_addresses,
+    AZ_PREFIX_LENGTH, DNS_PORT, Ipv6Subnet, get_internal_dns_server_addresses,
 };
 use slog::{debug, error, info, trace};
 use std::net::{Ipv6Addr, SocketAddr, SocketAddrV6};
@@ -186,7 +186,7 @@ impl Resolver {
         log: slog::Logger,
         address: Ipv6Addr,
     ) -> Result<Self, ResolveError> {
-        let subnet = Ipv6Subnet::<AZ_PREFIX>::new(address);
+        let subnet = Ipv6Subnet::<AZ_PREFIX_LENGTH>::new(address);
         Self::new_from_subnet(log, subnet)
     }
 
@@ -209,7 +209,7 @@ impl Resolver {
     // re-resolve this.  That's how we'd learn about dynamic changes to the set
     // of DNS servers.
     pub fn servers_from_subnet(
-        subnet: Ipv6Subnet<AZ_PREFIX>,
+        subnet: Ipv6Subnet<AZ_PREFIX_LENGTH>,
     ) -> Vec<SocketAddr> {
         get_internal_dns_server_addresses(subnet.net().addr())
             .into_iter()
@@ -227,7 +227,7 @@ impl Resolver {
     /// [omicron_common::address::ReservedRackSubnet].
     pub fn new_from_subnet(
         log: slog::Logger,
-        subnet: Ipv6Subnet<AZ_PREFIX>,
+        subnet: Ipv6Subnet<AZ_PREFIX_LENGTH>,
     ) -> Result<Self, ResolveError> {
         let dns_ips = Self::servers_from_subnet(subnet);
         Resolver::new_from_addrs(log, &dns_ips)

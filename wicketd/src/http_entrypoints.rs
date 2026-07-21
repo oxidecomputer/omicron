@@ -9,7 +9,6 @@ use crate::context::CommonConfigContainer;
 use crate::context::RssOrMultirackJoinConfig;
 use crate::http_helpers::ba_lockstep_client;
 use crate::http_helpers::ba_lockstep_error_to_http;
-use crate::http_helpers::inventory_err_to_http;
 use crate::http_helpers::mgs_inventory_or_unavail;
 use crate::http_helpers::start_update;
 use crate::mgs::GetInventoryResponse as GetMgsInventoryResponse;
@@ -389,7 +388,7 @@ impl WicketdApi for WicketdApiImpl {
             }) => Some((inventory, mgs_last_seen)),
             Ok(GetMgsInventoryResponse::Unavailable) => None,
             Err(err) => {
-                return Err(inventory_err_to_http(err));
+                return Err(err.to_http_error());
             }
         };
 

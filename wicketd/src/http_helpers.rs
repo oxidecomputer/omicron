@@ -24,7 +24,6 @@ use wicketd_commission_types::update::UpdateTargets;
 use crate::ServerContext;
 use crate::helpers::SpIdentifierDisplay;
 use crate::helpers::sps_to_string;
-use crate::mgs::GetInventoryError;
 use crate::mgs::GetInventoryResponse;
 use crate::mgs::MgsHandle;
 use crate::mgs::ShutdownInProgress;
@@ -57,24 +56,6 @@ pub(crate) fn shutdown_to_http(_err: ShutdownInProgress) -> HttpError {
         None,
         "Server is shutting down".to_owned(),
     )
-}
-
-pub(crate) fn inventory_err_to_http(err: GetInventoryError) -> HttpError {
-    match err {
-        GetInventoryError::ShutdownInProgress => {
-            shutdown_to_http(ShutdownInProgress)
-        }
-        GetInventoryError::InvalidSpIdentifier { id } => {
-            http_error_with_message(
-                ErrorStatusCode::BAD_REQUEST,
-                None,
-                format!(
-                    "invalid SP identifier in force_refresh request: {}",
-                    SpIdentifierDisplay(id)
-                ),
-            )
-        }
-    }
 }
 
 pub(crate) fn ba_lockstep_client(

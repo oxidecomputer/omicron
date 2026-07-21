@@ -25,8 +25,9 @@ pub use sled_agent_types_versions::v1::early_networking::SwitchSlot;
 
 /// A minimal projection of a firmware caboose.
 ///
-/// Only the fields the commissioning client displays are included; the full
-/// caboose (git commit, sign, epoch, and so on) is intentionally omitted.
+/// Only the fields the commissioning client needs are included; the remaining
+/// caboose fields (git commit, name, epoch, and so on) are intentionally
+/// omitted.
 #[derive(
     Debug,
     Clone,
@@ -44,6 +45,13 @@ pub struct Caboose {
     pub version: String,
     /// The board name the firmware was built for.
     pub board: String,
+    /// The signer of this firmware image, if the image is signed.
+    ///
+    /// For a root of trust, this is the hex-encoded hash of the public key used
+    /// to sign the image; it is `None` for firmware that carries no signature
+    /// (such as service-processor images). Commissioning uses it to match an
+    /// active RoT slot against the corresponding signed TUF artifact.
+    pub sign: Option<String>,
 }
 
 /// The stage0 (or pending stage0next) bootloader caboose for a root of trust.
@@ -183,7 +191,10 @@ impl IdOrdItem for SpInfo {
 }
 
 /// Inventory across all service processors.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+///
+/// This type cannot derive `Eq` because transceiver optical-power readings are
+/// floating-point.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct SpInventory {
     /// How long it has been since wicketd last heard from MGS.
     ///
@@ -191,6 +202,281 @@ pub struct SpInventory {
     pub mgs_last_seen: Duration,
     /// The inventory of each SP.
     pub sps: IdOrdMap<SpInfo>,
+    /// The switch transceiver (optical module) inventory.
+    pub transceivers: TransceiverInventory,
+}
+
+/// The switch transceiver (optical module) inventory.
+///
+/// wicketd reads transceiver state from the switches independently of MGS, so
+/// it is presented as its own read/not-read unit rather than folded into the
+/// per-SP inventory.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum TransceiverInventory {
+    /// The transceiver inventory has not been read yet.
+    NotRead,
+    /// The transceiver inventory was read.
+    Read {
+        /// How long it has been since the transceiver inventory was last read.
+        last_seen: Duration,
+        /// The transceivers in each switch.
+        switches: IdOrdMap<SwitchTransceivers>,
+    },
+}
+
+/// The transceivers in a single switch.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct SwitchTransceivers {
+    /// The switch these transceivers belong to.
+    pub switch: SwitchSlot,
+    /// The transceivers in this switch, keyed by front port.
+    pub transceivers: IdOrdMap<Transceiver>,
+}
+
+impl IdOrdItem for SwitchTransceivers {
+    type Key<'a> = SwitchSlot;
+
+    fn key(&self) -> Self::Key<'_> {
+        self.switch
+    }
+
+    id_upcast!();
+}
+
+/// A single transceiver (optical module) in a switch front port.
+///
+/// The four categories of state (`status`, `vendor`, `monitors`, and
+/// `datapath`) are read independently, so each can be reported or fail on its
+/// own.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct Transceiver {
+    /// The front port the transceiver sits in (for example, `qsfp0`).
+    pub port: String,
+    /// Module presence and power status.
+    pub status: TransceiverStatus,
+    /// Vendor identification.
+    pub vendor: TransceiverVendor,
+    /// Optical power monitors.
+    pub monitors: TransceiverMonitors,
+    /// Per-lane datapath fault state.
+    pub datapath: TransceiverDatapath,
+}
+
+impl IdOrdItem for Transceiver {
+    type Key<'a> = &'a str;
+
+    fn key(&self) -> Self::Key<'_> {
+        &self.port
+    }
+
+    id_upcast!();
+}
+
+/// The presence and power status of a transceiver module.
+#[derive(
+    Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema,
+)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum TransceiverStatus {
+    /// The module status could not be read.
+    Error {
+        /// The error encountered while reading the status.
+        message: String,
+    },
+    /// The module status was read.
+    Read {
+        /// Whether a transceiver module is present in the port.
+        present: bool,
+        /// Whether the module is enabled (powered on).
+        enabled: bool,
+        /// Whether the module's power is good.
+        power_good: bool,
+    },
+}
+
+/// The vendor identification of a transceiver module.
+#[derive(
+    Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema,
+)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum TransceiverVendor {
+    /// The vendor information could not be read.
+    Error {
+        /// The error encountered while reading the vendor information.
+        message: String,
+    },
+    /// The vendor information was read.
+    Read {
+        /// The vendor name.
+        name: String,
+        /// The vendor part number.
+        part: String,
+        /// The module serial number.
+        serial: String,
+    },
+}
+
+/// The optical power monitors of a transceiver module.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum TransceiverMonitors {
+    /// The monitoring data could not be read.
+    Error {
+        /// The error encountered while reading the monitoring data.
+        message: String,
+    },
+    /// The monitoring data was read.
+    Read {
+        /// Per-lane received optical power, in milliwatts.
+        ///
+        /// `None` if the module does not report received power.
+        rx_power_mw: Option<Vec<f32>>,
+        /// Per-lane transmitted optical power, in milliwatts.
+        ///
+        /// `None` if the module does not report transmitted power.
+        tx_power_mw: Option<Vec<f32>>,
+    },
+}
+
+/// The per-lane datapath fault state of a transceiver module.
+///
+/// SFF-8636 and CMIS modules describe their datapaths very differently, so this
+/// projection preserves each spec's native structure rather than flattening
+/// both into a single lane list. Clients can aggregate faults across both specs
+/// using the `iter_lane_faults` helper on this type.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum TransceiverDatapath {
+    /// The datapath state could not be read.
+    Error {
+        /// The error encountered while reading the datapath state.
+        message: String,
+    },
+    /// An SFF-8636 module.
+    Sff8636 {
+        /// The fault flags for each of the module's four lanes, in lane order.
+        lanes: [Sff8636LaneFaults; 4],
+    },
+    /// A CMIS module.
+    Cmis {
+        /// The active datapaths, keyed by application selector code.
+        datapaths: IdOrdMap<CmisDatapath>,
+    },
+}
+
+/// Whether a lane fault flag is asserted.
+///
+/// SFF-8636 modules always report every flag, but a CMIS module may not support
+/// reporting a given flag. `Unsupported` distinguishes "the module does not
+/// report this flag" from a definite `Clear`.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum FaultFlag {
+    /// The fault flag is asserted.
+    Asserted,
+    /// The fault flag is not asserted.
+    Clear,
+    /// The module does not support reporting this flag.
+    Unsupported,
+}
+
+/// The fault flags for one SFF-8636 lane.
+///
+/// SFF-8636 always reports all five flags, so these are plain booleans.
+#[derive(
+    Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema,
+)]
+pub struct Sff8636LaneFaults {
+    /// Media-side (receive) loss of signal.
+    pub rx_los: bool,
+    /// Host-side (transmit) loss of signal.
+    pub tx_los: bool,
+    /// Media-side (receive) loss of lock.
+    pub rx_lol: bool,
+    /// Host-side (transmit) loss of lock.
+    pub tx_lol: bool,
+    /// A fault in the transmitter and/or laser.
+    pub tx_fault: bool,
+}
+
+/// One active CMIS datapath (application).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct CmisDatapath {
+    /// The application selector code identifying this datapath.
+    pub application: u8,
+    /// The status of each lane in this datapath, keyed by lane number.
+    pub lanes: IdOrdMap<CmisLaneStatus>,
+}
+
+impl IdOrdItem for CmisDatapath {
+    type Key<'a> = u8;
+
+    fn key(&self) -> Self::Key<'_> {
+        self.application
+    }
+
+    id_upcast!();
+}
+
+/// The status of one CMIS lane.
+#[derive(
+    Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema,
+)]
+pub struct CmisLaneStatus {
+    /// The lane number within the module.
+    pub lane: u8,
+    /// The datapath state of this lane (CMIS 5.0 section 8.9.1).
+    pub state: CmisDatapathState,
+    /// Media-side (receive) loss of signal.
+    pub rx_los: FaultFlag,
+    /// Host-side (transmit) loss of signal.
+    pub tx_los: FaultFlag,
+    /// Media-side (receive) loss of lock.
+    pub rx_lol: FaultFlag,
+    /// Host-side (transmit) loss of lock.
+    pub tx_lol: FaultFlag,
+    /// A fault in the transmitter and/or laser.
+    ///
+    /// CMIS calls this `TxFailure`; it is named `tx_fault` here for cross-spec
+    /// consistency with SFF-8636.
+    pub tx_fault: FaultFlag,
+}
+
+impl IdOrdItem for CmisLaneStatus {
+    type Key<'a> = u8;
+
+    fn key(&self) -> Self::Key<'_> {
+        self.lane
+    }
+
+    id_upcast!();
+}
+
+/// The datapath state of a CMIS lane.
+///
+/// This mirrors the CMIS datapath state machine (CMIS 5.0 section 8.9.1).
+#[derive(
+    Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum CmisDatapathState {
+    /// The datapath is deactivated.
+    Deactivated,
+    /// The datapath is initializing.
+    Init,
+    /// The datapath is deinitializing.
+    Deinit,
+    /// The datapath is activated.
+    Activated,
+    /// The transmitter is turning on.
+    TxTurnOn,
+    /// The transmitter is turning off.
+    TxTurnOff,
+    /// The datapath is initialized.
+    Initialized,
 }
 
 /// The physical location of the sled wicketd is running on.

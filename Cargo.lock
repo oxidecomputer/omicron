@@ -17513,6 +17513,7 @@ dependencies = [
  "slog",
  "slog-dtrace",
  "slog-error-chain",
+ "sp-sim",
  "subprocess",
  "tar",
  "thiserror 2.0.18",

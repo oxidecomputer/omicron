@@ -9,11 +9,11 @@
 //! out of this crate and into the relevant `*-types-versions` / `*-types` crate
 //! pairs.
 
-use omicron_common::address::AZ_PREFIX;
+use omicron_common::address::AZ_PREFIX_LENGTH;
 use omicron_common::address::IpRange;
 use omicron_common::address::Ipv6Subnet;
-use omicron_common::address::RACK_PREFIX;
-use omicron_common::address::SLED_PREFIX;
+use omicron_common::address::RACK_PREFIX_LENGTH;
+use omicron_common::address::SLED_PREFIX_LENGTH;
 use omicron_common::address::get_64_subnet;
 use omicron_common::api::external::AllowedSourceIps;
 use omicron_common::api::external::Name;
@@ -131,21 +131,21 @@ impl std::fmt::Debug for RackInitializeRequest {
 }
 
 impl RackInitializeRequest {
-    pub fn az_subnet(&self) -> Ipv6Subnet<AZ_PREFIX> {
-        Ipv6Subnet::<AZ_PREFIX>::new(
+    pub fn az_subnet(&self) -> Ipv6Subnet<AZ_PREFIX_LENGTH> {
+        Ipv6Subnet::<AZ_PREFIX_LENGTH>::new(
             self.rack_network_config.rack_subnet.addr(),
         )
     }
 
     /// Returns the subnet for our rack.
-    pub fn rack_subnet(&self) -> Ipv6Subnet<RACK_PREFIX> {
-        Ipv6Subnet::<RACK_PREFIX>::new(
+    pub fn rack_subnet(&self) -> Ipv6Subnet<RACK_PREFIX_LENGTH> {
+        Ipv6Subnet::<RACK_PREFIX_LENGTH>::new(
             self.rack_network_config.rack_subnet.addr(),
         )
     }
 
     /// Returns the subnet for the `index`-th sled in the rack.
-    pub fn sled_subnet(&self, index: u8) -> Ipv6Subnet<SLED_PREFIX> {
+    pub fn sled_subnet(&self, index: u8) -> Ipv6Subnet<SLED_PREFIX_LENGTH> {
         get_64_subnet(self.rack_subnet(), index)
     }
 }

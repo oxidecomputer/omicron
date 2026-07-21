@@ -10,7 +10,9 @@ use crate::{
     output_to_exec_error,
 };
 use libc::ESRCH;
-use omicron_common::address::{AZ_PREFIX, BOOTSTRAP_SUBNET_PREFIX, Ipv6Subnet};
+use omicron_common::address::{
+    AZ_PREFIX_LENGTH, BOOTSTRAP_SUBNET_PREFIX_LENGTH, Ipv6Subnet,
+};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use tokio::process::Command;
 
@@ -35,7 +37,8 @@ impl Route {
         datalink: &str,
     ) -> Result<(), ExecutionError> {
         // Route to the underlay AZ's /48 by deriving it from the gateway IP.
-        let underlay_az: Ipv6Subnet<AZ_PREFIX> = Ipv6Subnet::new(gateway);
+        let underlay_az: Ipv6Subnet<AZ_PREFIX_LENGTH> =
+            Ipv6Subnet::new(gateway);
         let gateway = Gateway::Ipv6(gateway);
         Self::ensure_route_with_gateway(
             &underlay_az.to_string(),
@@ -149,7 +152,7 @@ impl Route {
     }
 
     pub async fn add_bootstrap_route(
-        bootstrap_prefix: Ipv6Subnet<BOOTSTRAP_SUBNET_PREFIX>,
+        bootstrap_prefix: Ipv6Subnet<BOOTSTRAP_SUBNET_PREFIX_LENGTH>,
         gz_bootstrap_addr: Ipv6Addr,
         zone_vnic_name: &str,
     ) -> Result<(), ExecutionError> {

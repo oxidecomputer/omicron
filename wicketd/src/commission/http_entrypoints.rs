@@ -35,8 +35,7 @@ use crate::ServerContext;
 use crate::helpers::SpIdentifierDisplay;
 use crate::http_helpers::{
     ba_lockstep_client, ba_lockstep_error_to_http, http_error_with_message,
-    inventory_err_to_http, inventory_unavailable, mgs_inventory_or_unavail,
-    start_update,
+    inventory_unavailable, mgs_inventory_or_unavail, start_update,
 };
 use crate::mgs::GetInventoryResponse as MgsInventoryResponse;
 
@@ -87,7 +86,7 @@ impl WicketdCommissionApi for WicketdCommissionApiImpl {
                 ),
             )
         })?
-        .map_err(inventory_err_to_http)?;
+        .map_err(|err| err.to_http_error())?;
 
         match response {
             MgsInventoryResponse::Response { inventory, mgs_last_seen } => {
@@ -98,7 +97,14 @@ impl WicketdCommissionApi for WicketdCommissionApiImpl {
                     "MGS inventory holds at most one entry per SpIdentifier, \
                      so the projected SpInfos have unique ids",
                 );
-                Ok(HttpResponseOk(SpInventory { mgs_last_seen, sps }))
+                let transceivers = conversions::transceivers_to_ct(
+                    ctx.transceiver_handle.get_transceivers(),
+                );
+                Ok(HttpResponseOk(SpInventory {
+                    mgs_last_seen,
+                    sps,
+                    transceivers,
+                }))
             }
             MgsInventoryResponse::Unavailable => Err(inventory_unavailable()),
         }

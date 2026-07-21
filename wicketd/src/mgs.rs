@@ -5,6 +5,7 @@
 //! The collection of tasks used for interacting with MGS and maintaining
 //! runtime state.
 
+use dropshot::HttpError;
 use futures::StreamExt;
 use gateway_types::ignition::SpIgnition;
 use slog::{Logger, info, o, warn};
@@ -14,6 +15,10 @@ use tokio::sync::{mpsc, oneshot};
 use tokio::time::{Duration, Instant};
 use tokio_stream::StreamMap;
 use wicket_common::inventory::{MgsV1Inventory, SpIdentifier, SpInventory};
+
+use crate::helpers::SpIdentifierDisplay;
+use crate::http_helpers::http_error_with_message;
+use crate::http_helpers::shutdown_to_http;
 
 use self::inventory::{
     FetchedIgnitionState, FetchedSpData, IgnitionPresence,
@@ -67,8 +72,31 @@ pub enum GetInventoryError {
     ShutdownInProgress,
 
     /// The client specified an invalid SP identifier in a `force_refresh`
-    /// request. Carries the offending identifier.
-    InvalidSpIdentifier { id: SpIdentifier },
+    /// request.
+    InvalidSpIdentifier {
+        /// The invalid SP identifier.
+        id: SpIdentifier,
+    },
+}
+
+impl GetInventoryError {
+    pub(crate) fn to_http_error(&self) -> HttpError {
+        match self {
+            GetInventoryError::ShutdownInProgress => {
+                shutdown_to_http(ShutdownInProgress)
+            }
+            GetInventoryError::InvalidSpIdentifier { id } => {
+                http_error_with_message(
+                    dropshot::ErrorStatusCode::BAD_REQUEST,
+                    None,
+                    format!(
+                        "invalid SP identifier in force_refresh request: {}",
+                        SpIdentifierDisplay(*id)
+                    ),
+                )
+            }
+        }
+    }
 }
 
 impl MgsHandle {

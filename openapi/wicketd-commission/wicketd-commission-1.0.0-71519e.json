@@ -576,11 +576,16 @@
         ]
       },
       "Caboose": {
-        "description": "A minimal projection of a firmware caboose.\n\nOnly the fields the commissioning client displays are included; the full caboose (git commit, sign, epoch, and so on) is intentionally omitted.",
+        "description": "A minimal projection of a firmware caboose.\n\nOnly the fields the commissioning client needs are included; the remaining caboose fields (git commit, name, epoch, and so on) are intentionally omitted.",
         "type": "object",
         "properties": {
           "board": {
             "description": "The board name the firmware was built for.",
+            "type": "string"
+          },
+          "sign": {
+            "nullable": true,
+            "description": "The signer of this firmware image, if the image is signed.\n\nFor a root of trust, this is the hex-encoded hash of the public key used to sign the image; it is `None` for firmware that carries no signature (such as service-processor images). Commissioning uses it to match an active RoT slot against the corresponding signed TUF artifact.",
             "type": "string"
           },
           "version": {
@@ -702,6 +707,164 @@
           "no_update_data"
         ]
       },
+      "CmisDatapath": {
+        "description": "One active CMIS datapath (application).",
+        "type": "object",
+        "properties": {
+          "application": {
+            "description": "The application selector code identifying this datapath.",
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
+          },
+          "lanes": {
+            "title": "IdOrdMap",
+            "description": "The status of each lane in this datapath, keyed by lane number.",
+            "x-rust-type": {
+              "crate": "iddqd",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/CmisLaneStatus"
+                }
+              ],
+              "path": "iddqd::IdOrdMap",
+              "version": "*"
+            },
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CmisLaneStatus"
+            },
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "application",
+          "lanes"
+        ]
+      },
+      "CmisDatapathState": {
+        "description": "The datapath state of a CMIS lane.\n\nThis mirrors the CMIS datapath state machine (CMIS 5.0 section 8.9.1).",
+        "oneOf": [
+          {
+            "description": "The datapath is deactivated.",
+            "type": "string",
+            "enum": [
+              "deactivated"
+            ]
+          },
+          {
+            "description": "The datapath is initializing.",
+            "type": "string",
+            "enum": [
+              "init"
+            ]
+          },
+          {
+            "description": "The datapath is deinitializing.",
+            "type": "string",
+            "enum": [
+              "deinit"
+            ]
+          },
+          {
+            "description": "The datapath is activated.",
+            "type": "string",
+            "enum": [
+              "activated"
+            ]
+          },
+          {
+            "description": "The transmitter is turning on.",
+            "type": "string",
+            "enum": [
+              "tx_turn_on"
+            ]
+          },
+          {
+            "description": "The transmitter is turning off.",
+            "type": "string",
+            "enum": [
+              "tx_turn_off"
+            ]
+          },
+          {
+            "description": "The datapath is initialized.",
+            "type": "string",
+            "enum": [
+              "initialized"
+            ]
+          }
+        ]
+      },
+      "CmisLaneStatus": {
+        "description": "The status of one CMIS lane.",
+        "type": "object",
+        "properties": {
+          "lane": {
+            "description": "The lane number within the module.",
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
+          },
+          "rx_lol": {
+            "description": "Media-side (receive) loss of lock.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/FaultFlag"
+              }
+            ]
+          },
+          "rx_los": {
+            "description": "Media-side (receive) loss of signal.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/FaultFlag"
+              }
+            ]
+          },
+          "state": {
+            "description": "The datapath state of this lane (CMIS 5.0 section 8.9.1).",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/CmisDatapathState"
+              }
+            ]
+          },
+          "tx_fault": {
+            "description": "A fault in the transmitter and/or laser.\n\nCMIS calls this `TxFailure`; it is named `tx_fault` here for cross-spec consistency with SFF-8636.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/FaultFlag"
+              }
+            ]
+          },
+          "tx_lol": {
+            "description": "Host-side (transmit) loss of lock.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/FaultFlag"
+              }
+            ]
+          },
+          "tx_los": {
+            "description": "Host-side (transmit) loss of signal.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/FaultFlag"
+              }
+            ]
+          }
+        },
+        "required": [
+          "lane",
+          "rx_lol",
+          "rx_los",
+          "state",
+          "tx_fault",
+          "tx_lol",
+          "tx_los"
+        ]
+      },
       "Duration": {
         "type": "object",
         "properties": {
@@ -738,6 +901,32 @@
         "required": [
           "message",
           "request_id"
+        ]
+      },
+      "FaultFlag": {
+        "description": "Whether a lane fault flag is asserted.\n\nSFF-8636 modules always report every flag, but a CMIS module may not support reporting a given flag. `Unsupported` distinguishes \"the module does not report this flag\" from a definite `Clear`.",
+        "oneOf": [
+          {
+            "description": "The fault flag is asserted.",
+            "type": "string",
+            "enum": [
+              "asserted"
+            ]
+          },
+          {
+            "description": "The fault flag is not asserted.",
+            "type": "string",
+            "enum": [
+              "clear"
+            ]
+          },
+          {
+            "description": "The module does not support reporting this flag.",
+            "type": "string",
+            "enum": [
+              "unsupported"
+            ]
+          }
         ]
       },
       "IgnitionFaults": {
@@ -1697,6 +1886,39 @@
           }
         ]
       },
+      "Sff8636LaneFaults": {
+        "description": "The fault flags for one SFF-8636 lane.\n\nSFF-8636 always reports all five flags, so these are plain booleans.",
+        "type": "object",
+        "properties": {
+          "rx_lol": {
+            "description": "Media-side (receive) loss of lock.",
+            "type": "boolean"
+          },
+          "rx_los": {
+            "description": "Media-side (receive) loss of signal.",
+            "type": "boolean"
+          },
+          "tx_fault": {
+            "description": "A fault in the transmitter and/or laser.",
+            "type": "boolean"
+          },
+          "tx_lol": {
+            "description": "Host-side (transmit) loss of lock.",
+            "type": "boolean"
+          },
+          "tx_los": {
+            "description": "Host-side (transmit) loss of signal.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "rx_lol",
+          "rx_los",
+          "tx_fault",
+          "tx_lol",
+          "tx_los"
+        ]
+      },
       "SlotCaboose": {
         "description": "The caboose for a single firmware slot, including whether it was read.",
         "oneOf": [
@@ -1885,7 +2107,7 @@
         ]
       },
       "SpInventory": {
-        "description": "Inventory across all service processors.",
+        "description": "Inventory across all service processors.\n\nThis type cannot derive `Eq` because transceiver optical-power readings are floating-point.",
         "type": "object",
         "properties": {
           "mgs_last_seen": {
@@ -1914,11 +2136,20 @@
               "$ref": "#/components/schemas/SpInfo"
             },
             "uniqueItems": true
+          },
+          "transceivers": {
+            "description": "The switch transceiver (optical module) inventory.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TransceiverInventory"
+              }
+            ]
           }
         },
         "required": [
           "mgs_last_seen",
-          "sps"
+          "sps",
+          "transceivers"
         ]
       },
       "SpInventoryParams": {
@@ -2207,6 +2438,409 @@
             "type": "string",
             "enum": [
               "switch1"
+            ]
+          }
+        ]
+      },
+      "SwitchTransceivers": {
+        "description": "The transceivers in a single switch.",
+        "type": "object",
+        "properties": {
+          "switch": {
+            "description": "The switch these transceivers belong to.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SwitchSlot"
+              }
+            ]
+          },
+          "transceivers": {
+            "title": "IdOrdMap",
+            "description": "The transceivers in this switch, keyed by front port.",
+            "x-rust-type": {
+              "crate": "iddqd",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/Transceiver"
+                }
+              ],
+              "path": "iddqd::IdOrdMap",
+              "version": "*"
+            },
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Transceiver"
+            },
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "switch",
+          "transceivers"
+        ]
+      },
+      "Transceiver": {
+        "description": "A single transceiver (optical module) in a switch front port.\n\nThe four categories of state (`status`, `vendor`, `monitors`, and `datapath`) are read independently, so each can be reported or fail on its own.",
+        "type": "object",
+        "properties": {
+          "datapath": {
+            "description": "Per-lane datapath fault state.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TransceiverDatapath"
+              }
+            ]
+          },
+          "monitors": {
+            "description": "Optical power monitors.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TransceiverMonitors"
+              }
+            ]
+          },
+          "port": {
+            "description": "The front port the transceiver sits in (for example, `qsfp0`).",
+            "type": "string"
+          },
+          "status": {
+            "description": "Module presence and power status.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TransceiverStatus"
+              }
+            ]
+          },
+          "vendor": {
+            "description": "Vendor identification.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TransceiverVendor"
+              }
+            ]
+          }
+        },
+        "required": [
+          "datapath",
+          "monitors",
+          "port",
+          "status",
+          "vendor"
+        ]
+      },
+      "TransceiverDatapath": {
+        "description": "The per-lane datapath fault state of a transceiver module.\n\nSFF-8636 and CMIS modules describe their datapaths very differently, so this projection preserves each spec's native structure rather than flattening both into a single lane list. Clients can aggregate faults across both specs using the `iter_lane_faults` helper on this type.",
+        "oneOf": [
+          {
+            "description": "The datapath state could not be read.",
+            "type": "object",
+            "properties": {
+              "message": {
+                "description": "The error encountered while reading the datapath state.",
+                "type": "string"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "error"
+                ]
+              }
+            },
+            "required": [
+              "message",
+              "state"
+            ]
+          },
+          {
+            "description": "An SFF-8636 module.",
+            "type": "object",
+            "properties": {
+              "lanes": {
+                "description": "The fault flags for each of the module's four lanes, in lane order.",
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/Sff8636LaneFaults"
+                },
+                "minItems": 4,
+                "maxItems": 4
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "sff8636"
+                ]
+              }
+            },
+            "required": [
+              "lanes",
+              "state"
+            ]
+          },
+          {
+            "description": "A CMIS module.",
+            "type": "object",
+            "properties": {
+              "datapaths": {
+                "title": "IdOrdMap",
+                "description": "The active datapaths, keyed by application selector code.",
+                "x-rust-type": {
+                  "crate": "iddqd",
+                  "parameters": [
+                    {
+                      "$ref": "#/components/schemas/CmisDatapath"
+                    }
+                  ],
+                  "path": "iddqd::IdOrdMap",
+                  "version": "*"
+                },
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/CmisDatapath"
+                },
+                "uniqueItems": true
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "cmis"
+                ]
+              }
+            },
+            "required": [
+              "datapaths",
+              "state"
+            ]
+          }
+        ]
+      },
+      "TransceiverInventory": {
+        "description": "The switch transceiver (optical module) inventory.\n\nwicketd reads transceiver state from the switches independently of MGS, so it is presented as its own read/not-read unit rather than folded into the per-SP inventory.",
+        "oneOf": [
+          {
+            "description": "The transceiver inventory has not been read yet.",
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "not_read"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          {
+            "description": "The transceiver inventory was read.",
+            "type": "object",
+            "properties": {
+              "last_seen": {
+                "description": "How long it has been since the transceiver inventory was last read.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Duration"
+                  }
+                ]
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "read"
+                ]
+              },
+              "switches": {
+                "title": "IdOrdMap",
+                "description": "The transceivers in each switch.",
+                "x-rust-type": {
+                  "crate": "iddqd",
+                  "parameters": [
+                    {
+                      "$ref": "#/components/schemas/SwitchTransceivers"
+                    }
+                  ],
+                  "path": "iddqd::IdOrdMap",
+                  "version": "*"
+                },
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/SwitchTransceivers"
+                },
+                "uniqueItems": true
+              }
+            },
+            "required": [
+              "last_seen",
+              "state",
+              "switches"
+            ]
+          }
+        ]
+      },
+      "TransceiverMonitors": {
+        "description": "The optical power monitors of a transceiver module.",
+        "oneOf": [
+          {
+            "description": "The monitoring data could not be read.",
+            "type": "object",
+            "properties": {
+              "message": {
+                "description": "The error encountered while reading the monitoring data.",
+                "type": "string"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "error"
+                ]
+              }
+            },
+            "required": [
+              "message",
+              "state"
+            ]
+          },
+          {
+            "description": "The monitoring data was read.",
+            "type": "object",
+            "properties": {
+              "rx_power_mw": {
+                "nullable": true,
+                "description": "Per-lane received optical power, in milliwatts.\n\n`None` if the module does not report received power.",
+                "type": "array",
+                "items": {
+                  "type": "number",
+                  "format": "float"
+                }
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "read"
+                ]
+              },
+              "tx_power_mw": {
+                "nullable": true,
+                "description": "Per-lane transmitted optical power, in milliwatts.\n\n`None` if the module does not report transmitted power.",
+                "type": "array",
+                "items": {
+                  "type": "number",
+                  "format": "float"
+                }
+              }
+            },
+            "required": [
+              "state"
+            ]
+          }
+        ]
+      },
+      "TransceiverStatus": {
+        "description": "The presence and power status of a transceiver module.",
+        "oneOf": [
+          {
+            "description": "The module status could not be read.",
+            "type": "object",
+            "properties": {
+              "message": {
+                "description": "The error encountered while reading the status.",
+                "type": "string"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "error"
+                ]
+              }
+            },
+            "required": [
+              "message",
+              "state"
+            ]
+          },
+          {
+            "description": "The module status was read.",
+            "type": "object",
+            "properties": {
+              "enabled": {
+                "description": "Whether the module is enabled (powered on).",
+                "type": "boolean"
+              },
+              "power_good": {
+                "description": "Whether the module's power is good.",
+                "type": "boolean"
+              },
+              "present": {
+                "description": "Whether a transceiver module is present in the port.",
+                "type": "boolean"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "read"
+                ]
+              }
+            },
+            "required": [
+              "enabled",
+              "power_good",
+              "present",
+              "state"
+            ]
+          }
+        ]
+      },
+      "TransceiverVendor": {
+        "description": "The vendor identification of a transceiver module.",
+        "oneOf": [
+          {
+            "description": "The vendor information could not be read.",
+            "type": "object",
+            "properties": {
+              "message": {
+                "description": "The error encountered while reading the vendor information.",
+                "type": "string"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "error"
+                ]
+              }
+            },
+            "required": [
+              "message",
+              "state"
+            ]
+          },
+          {
+            "description": "The vendor information was read.",
+            "type": "object",
+            "properties": {
+              "name": {
+                "description": "The vendor name.",
+                "type": "string"
+              },
+              "part": {
+                "description": "The vendor part number.",
+                "type": "string"
+              },
+              "serial": {
+                "description": "The module serial number.",
+                "type": "string"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "read"
+                ]
+              }
+            },
+            "required": [
+              "name",
+              "part",
+              "serial",
+              "state"
             ]
           }
         ]

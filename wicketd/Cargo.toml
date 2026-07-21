@@ -106,6 +106,7 @@ sled-agent-config-reconciler = { workspace = true, features = ["testing"] }
 sled-agent-resolvable-files.workspace = true
 sled-agent-resolvable-files-examples.workspace = true
 sled-storage.workspace = true
+sp-sim.workspace = true
 subprocess.workspace = true
 tar.workspace = true
 tokio = { workspace = true, features = ["test-util"] }
