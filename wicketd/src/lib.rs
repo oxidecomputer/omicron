@@ -36,7 +36,7 @@ use mgs::make_mgs_client;
 pub(crate) use mgs::{MgsHandle, MgsManager};
 use nexus_proxy::NexusTcpProxy;
 use omicron_common::FileKv;
-use omicron_common::address::{AZ_PREFIX, Ipv6Subnet};
+use omicron_common::address::{AZ_PREFIX_LENGTH, Ipv6Subnet};
 use oxide_update_engine_types::spec::merge_anyhow_list;
 use preflight_check::PreflightCheckerHandler;
 use sled_hardware_types::Baseboard;
@@ -58,12 +58,12 @@ pub struct Args {
     pub mgs_address: SocketAddrV6,
     pub nexus_proxy_address: SocketAddrV6,
     pub baseboard: Option<Baseboard>,
-    pub rack_subnet: Option<Ipv6Subnet<AZ_PREFIX>>,
+    pub rack_subnet: Option<Ipv6Subnet<AZ_PREFIX_LENGTH>>,
 }
 
 pub struct SmfConfigValues {
     pub address: SocketAddrV6,
-    pub rack_subnet: Option<Ipv6Subnet<AZ_PREFIX>>,
+    pub rack_subnet: Option<Ipv6Subnet<AZ_PREFIX_LENGTH>>,
 }
 
 impl SmfConfigValues {

@@ -1996,7 +1996,7 @@
         "x-rust-type": {
           "crate": "oxide-update-engine-types",
           "path": "oxide_update_engine_types::events::ExecutionUuid",
-          "version": "0.1.1"
+          "version": "0.1.2"
         },
         "type": "string",
         "format": "uuid"
@@ -2892,7 +2892,7 @@
         "x-rust-type": {
           "crate": "oxide-update-engine-types",
           "path": "oxide_update_engine_types::events::ProgressCounter",
-          "version": "0.1.1"
+          "version": "0.1.2"
         },
         "type": "object",
         "properties": {
@@ -2931,12 +2931,12 @@
               "x-rust-type": {
                 "crate": "oxide-update-engine-types",
                 "path": "oxide_update_engine_types::spec::GenericSpec",
-                "version": "0.1.1"
+                "version": "0.1.2"
               }
             }
           ],
           "path": "oxide_update_engine_types::events::ProgressEvent",
-          "version": "0.1.1"
+          "version": "0.1.2"
         },
         "type": "object",
         "properties": {
@@ -3617,7 +3617,7 @@
         "x-rust-type": {
           "crate": "oxide-update-engine-types",
           "path": "oxide_update_engine_types::events::ProgressUnits",
-          "version": "0.1.1"
+          "version": "0.1.2"
         },
         "type": "string"
       },
@@ -5181,12 +5181,12 @@
               "x-rust-type": {
                 "crate": "oxide-update-engine-types",
                 "path": "oxide_update_engine_types::spec::GenericSpec",
-                "version": "0.1.1"
+                "version": "0.1.2"
               }
             }
           ],
           "path": "oxide_update_engine_types::events::StepEvent",
-          "version": "0.1.1"
+          "version": "0.1.2"
         },
         "type": "object",
         "properties": {

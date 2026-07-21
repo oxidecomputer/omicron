@@ -303,10 +303,8 @@ mod tests {
     };
     use omicron_common::disk::M2Slot;
     use omicron_test_utils::dev::test_setup_log;
-    use omicron_uuid_kinds::GenericUuid;
     use oxide_update_engine_types::events::ExecutionUuid;
     use schemars::JsonSchema;
-    use uuid::Uuid;
 
     use super::*;
 
@@ -351,7 +349,7 @@ mod tests {
             "first report matches"
         );
 
-        let execution_id = ExecutionUuid::from_untyped_uuid(Uuid::new_v4());
+        let execution_id = ExecutionUuid::new_v4();
 
         // Send a completion report.
         let completion_report = installinator_common::EventReport {
