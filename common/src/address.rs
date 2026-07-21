@@ -317,6 +317,24 @@ pub const NUM_SOURCE_NAT_PORTS: u16 = 1 << 14;
 // The specific values aren't deployment-specific as they are virtualized
 // within OPTE.
 
+// VPC IPv6 prefixes are three octet-pairs, so we need three `u16` constants to
+// represent the service VPC subnet prefix of `fd77:e9d2:9cd9::/48`.
+//
+// These are used to construct the `SERVICE_VPC_IPV6_SUBNET` constant below,
+// which represents the entire /48, and the various constants for the individual
+// service /64s within this subnet.
+//
+// XXX(eliza): it would be nice to have a way to construct these subnets from
+// the shared prefix octet-pairs that is a bit less gross than having to scream
+// `SERVICE_VPC_IPV6_PREFIX_n` three times for each one, such as by taking the
+// `SERVICE_VPC_IPV6_SUBNET` value and just setting the value of the 4th
+// octet-pair for each service subnet, but I couldn't figure out a way to do
+// that with the current `oxnet` API. At least this way, we aren't hard-coding
+// the `u16` literals for each subnet...
+const SERVICE_VPC_IPV6_PREFIX_1: u16 = 0xfd77;
+const SERVICE_VPC_IPV6_PREFIX_2: u16 = 0xe9d2;
+const SERVICE_VPC_IPV6_PREFIX_3: u16 = 0x9cd9;
+
 /// The IPv6 prefix assigned to the built-in services VPC.
 // The specific prefix here was randomly chosen from the expected VPC
 // prefix range (`fd00::/48`). See `random_vpc_ipv6_prefix`.
@@ -324,7 +342,16 @@ pub const NUM_SOURCE_NAT_PORTS: u16 = 1 << 14;
 // /64's within this prefix.
 pub static SERVICE_VPC_IPV6_SUBNET: LazyLock<Ipv6Net> = LazyLock::new(|| {
     Ipv6Net::new(
-        Ipv6Addr::new(0xfd77, 0xe9d2, 0x9cd9, 0, 0, 0, 0, 0),
+        Ipv6Addr::new(
+            SERVICE_VPC_IPV6_PREFIX_1,
+            SERVICE_VPC_IPV6_PREFIX_2,
+            SERVICE_VPC_IPV6_PREFIX_3,
+            0,
+            0,
+            0,
+            0,
+            0,
+        ),
         VPC_IPV6_PREFIX_LENGTH,
     )
     .unwrap()
@@ -337,7 +364,16 @@ pub static DNS_OPTE_IPV4_SUBNET: LazyLock<Ipv4Net> =
 /// The IPv6 subnet for External DNS OPTE ports.
 pub static DNS_OPTE_IPV6_SUBNET: LazyLock<Ipv6Net> = LazyLock::new(|| {
     Ipv6Net::new(
-        Ipv6Addr::new(0xfd77, 0xe9d2, 0x9cd9, 1, 0, 0, 0, 0),
+        Ipv6Addr::new(
+            SERVICE_VPC_IPV6_PREFIX_1,
+            SERVICE_VPC_IPV6_PREFIX_2,
+            SERVICE_VPC_IPV6_PREFIX_3,
+            1,
+            0,
+            0,
+            0,
+            0,
+        ),
         VPC_SUBNET_IPV6_PREFIX_LENGTH,
     )
     .unwrap()
@@ -350,7 +386,16 @@ pub static NEXUS_OPTE_IPV4_SUBNET: LazyLock<Ipv4Net> =
 /// The IPv6 subnet for Nexus OPTE ports.
 pub static NEXUS_OPTE_IPV6_SUBNET: LazyLock<Ipv6Net> = LazyLock::new(|| {
     Ipv6Net::new(
-        Ipv6Addr::new(0xfd77, 0xe9d2, 0x9cd9, 2, 0, 0, 0, 0),
+        Ipv6Addr::new(
+            SERVICE_VPC_IPV6_PREFIX_1,
+            SERVICE_VPC_IPV6_PREFIX_2,
+            SERVICE_VPC_IPV6_PREFIX_3,
+            2,
+            0,
+            0,
+            0,
+            0,
+        ),
         VPC_SUBNET_IPV6_PREFIX_LENGTH,
     )
     .unwrap()
@@ -363,7 +408,16 @@ pub static NTP_OPTE_IPV4_SUBNET: LazyLock<Ipv4Net> =
 /// The IPv6 subnet for Boundary NTP OPTE ports.
 pub static NTP_OPTE_IPV6_SUBNET: LazyLock<Ipv6Net> = LazyLock::new(|| {
     Ipv6Net::new(
-        Ipv6Addr::new(0xfd77, 0xe9d2, 0x9cd9, 3, 0, 0, 0, 0),
+        Ipv6Addr::new(
+            SERVICE_VPC_IPV6_PREFIX_1,
+            SERVICE_VPC_IPV6_PREFIX_2,
+            SERVICE_VPC_IPV6_PREFIX_3,
+            3,
+            0,
+            0,
+            0,
+            0,
+        ),
         VPC_SUBNET_IPV6_PREFIX_LENGTH,
     )
     .unwrap()
