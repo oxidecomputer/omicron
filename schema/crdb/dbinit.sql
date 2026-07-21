@@ -2444,8 +2444,8 @@ CREATE TABLE IF NOT EXISTS omicron.public.ip_pool_range (
 
 /*
  * These help Nexus enforce that the ranges within an IP Pool do not overlap
- * with any other ranges. See `nexus/src/db/queries/ip_pool.rs` for the actual
- * query which does that.
+ * with any other ranges. See `nexus/db-queries/src/db/queries/ip_pool.rs`
+ * for the actual query which does that.
  */
 CREATE UNIQUE INDEX IF NOT EXISTS lookup_pool_range_by_first_address ON omicron.public.ip_pool_range (
     first_address
