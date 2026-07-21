@@ -4,6 +4,26 @@
 
 //! Re-exports of the latest versions of all published types.
 
+pub mod inventory {
+    pub use crate::v1::inventory::BootstrapSled;
+    pub use crate::v1::inventory::Caboose;
+    pub use crate::v1::inventory::IgnitionFaults;
+    pub use crate::v1::inventory::LocationInfo;
+    pub use crate::v1::inventory::PowerState;
+    pub use crate::v1::inventory::RotInfo;
+    pub use crate::v1::inventory::RotSlot;
+    pub use crate::v1::inventory::SlotCaboose;
+    pub use crate::v1::inventory::SpIdentifier;
+    pub use crate::v1::inventory::SpIgnitionInfo;
+    pub use crate::v1::inventory::SpInfo;
+    pub use crate::v1::inventory::SpInventory;
+    pub use crate::v1::inventory::SpInventoryParams;
+    pub use crate::v1::inventory::SpStateInfo;
+    pub use crate::v1::inventory::SpType;
+    pub use crate::v1::inventory::Stage0Caboose;
+    pub use crate::v1::inventory::SwitchSlot;
+}
+
 pub mod rack_setup {
     pub use crate::v1::rack_setup::AllowedSourceIps;
     pub use crate::v1::rack_setup::BgpAuthKeyId;
@@ -19,10 +39,14 @@ pub mod rack_setup {
     pub use crate::v1::rack_setup::LldpPortConfig;
     pub use crate::v1::rack_setup::ManualPortConfig;
     pub use crate::v1::rack_setup::MaxPathConfig;
+    pub use crate::v1::rack_setup::NewPasswordHash;
+    pub use crate::v1::rack_setup::PutRecoveryUserPasswordHash;
     pub use crate::v1::rack_setup::PutRssUserConfigInsensitive;
+    pub use crate::v1::rack_setup::RackOperationStatus;
     pub use crate::v1::rack_setup::RouteConfig;
     pub use crate::v1::rack_setup::RouterLifetimeConfig;
     pub use crate::v1::rack_setup::RouterPeerIpAddr;
+    pub use crate::v1::rack_setup::RssStepInfo;
     pub use crate::v1::rack_setup::TxEqConfig;
     pub use crate::v1::rack_setup::UplinkAddress;
     pub use crate::v1::rack_setup::UplinkIpNet;
@@ -32,4 +56,22 @@ pub mod rack_setup {
     pub use crate::v1::rack_setup::UserSpecifiedRackNetworkConfig;
     pub use crate::v1::rack_setup::UserSpecifiedRouterPeerAddr;
     pub use crate::v1::rack_setup::UserSpecifiedUplinkAddressConfig;
+}
+
+pub mod update {
+    pub use crate::v1::update::ClearUpdateStateParams;
+    pub use crate::v1::update::ClearUpdateStateResponse;
+    pub use crate::v1::update::EmptyUpdateTargets;
+    pub use crate::v1::update::RepositoryDescription;
+    pub use crate::v1::update::RunningProgress;
+    pub use crate::v1::update::SpUpdateProgress;
+    pub use crate::v1::update::StartUpdateOptions;
+    pub use crate::v1::update::StartUpdateParams;
+    pub use crate::v1::update::StepOutcome;
+    pub use crate::v1::update::StepProgress;
+    pub use crate::v1::update::UpdateProgress;
+    pub use crate::v1::update::UpdateState;
+    pub use crate::v1::update::UpdateStep;
+    pub use crate::v1::update::UpdateStepStatus;
+    pub use crate::v1::update::UpdateTargets;
 }

@@ -6,12 +6,15 @@
 
 use std::{collections::BTreeSet, sync::Arc, time::Duration};
 
-use super::setup::WicketdTestContext;
+use super::setup::{
+    WicketdTestContext, assert_client_error_message, wait_for_sled0_progress,
+};
 use camino::Utf8Path;
 use camino_tempfile::Utf8TempDir;
 use clap::Parser;
 use gateway_messages::SpPort;
 use gateway_test_utils::setup as gateway_setup;
+use http::StatusCode;
 use installinator::HOST_PHASE_2_FILE_NAME;
 use maplit::btreeset;
 use omicron_common::{
@@ -22,6 +25,7 @@ use omicron_common::{
     },
 };
 use omicron_uuid_kinds::{InternalZpoolUuid, MupdateUuid};
+use oxide_update_engine_types::spec::SerializableError;
 use sled_agent_config_reconciler::{
     InternalDiskDetails, InternalDisksReceiver, InternalDisksWithBootDisk,
 };
@@ -31,19 +35,21 @@ use sled_storage::config::MountConfig;
 use tokio::sync::oneshot;
 use tufaceous_artifact::{ArtifactHashId, ArtifactKind, KnownArtifactKind};
 use update_common::artifacts::UpdatePlan;
-use update_engine::NestedError;
 use wicket::OutputKind;
 use wicket_common::{
     inventory::{SpIdentifier, SpType},
     rack_update::{
-        ClearUpdateStateResponse, ExitMessage, RackUpdateStatus,
-        StartUpdateOptions, UpdateState,
+        ExitMessage, RackUpdateStatus, StartUpdateOptions, UpdateState,
     },
     update_events::{StepEventKind, UpdateComponent},
 };
 use wicketd::{RunningUpdateState, StartUpdateError};
 use wicketd_client::types::{
     GetInventoryParams, GetInventoryResponse, StartUpdateParams,
+};
+use wicketd_commission_types_versions::latest::update::{
+    self, ClearUpdateStateParams, ClearUpdateStateResponse, StepOutcome,
+    UpdateStepStatus, UpdateTargets,
 };
 
 /// The list of zone file names defined in fake-non-semver.toml.
@@ -210,7 +216,10 @@ async fn test_updates() {
 
     // Now, try starting the update on SP 0.
     let options = StartUpdateOptions::default();
-    let params = StartUpdateParams { targets: vec![target_sp], options };
+    let params = StartUpdateParams {
+        targets: UpdateTargets::single(target_sp),
+        options,
+    };
     wicketd_testctx
         .wicketd_client
         .post_start_update(&params)
@@ -287,6 +296,28 @@ async fn test_updates() {
         assert!(filtered.components.is_empty());
     }
 
+    // The commission API will report this as a Failed progress entry carrying a
+    // non-empty operator message.
+    let entry = wait_for_sled0_progress(
+        &wicketd_testctx,
+        "sled 0 reached Failed",
+        |p| matches!(p.progress.state, update::UpdateState::Failed { .. }),
+    )
+    .await;
+    // Assert the failure message:
+    //
+    // * The step that fails is "Get host type".
+    // * The step fails because the simulated gimlet reports model
+    //   "i86pc" (`FAKE_GIMLET_MODEL`), which is not a known Oxide host
+    //   type.
+    assert_eq!(
+        entry.progress.state,
+        update::UpdateState::Failed {
+            message: "Get host type: Unknown host type i86pc".to_string(),
+        },
+        "the failed update carries the expected operator-facing message",
+    );
+
     // Try starting the update again -- this should fail because we require that
     // update state is cleared before starting a new one.
     {
@@ -330,7 +361,7 @@ async fn test_updates() {
             .expect("wicket rack-update clear failed");
 
         // stdout should contain a JSON object.
-        let response: Result<ClearUpdateStateResponse, NestedError> =
+        let response: Result<ClearUpdateStateResponse, SerializableError> =
             serde_json::from_slice(&stdout).expect("stdout is valid JSON");
         assert_eq!(
             response.expect("expected Ok response"),
@@ -781,9 +812,31 @@ async fn test_update_races() {
         .await
         .expect("bytes read and archived");
 
+    // Also check that the repository is available via the commissioning API,
+    // and that there's no progress there yet.
+    let repo = wicketd_testctx
+        .commission_client
+        .get_repository()
+        .await
+        .expect("get_repository succeeded")
+        .into_inner();
+    assert_eq!(
+        repo.system_version,
+        Some("1.0.0".parse().unwrap()),
+        "system version from the fake manifest"
+    );
+
+    let progress = wicketd_testctx
+        .commission_client
+        .get_update_progress()
+        .await
+        .expect("get_update_progress succeeded")
+        .into_inner();
+    assert!(progress.is_empty(), "no updates in progress yet");
+
     // Now start an update.
     let sp = SpIdentifier { slot: 0, typ: SpType::Sled };
-    let sps: BTreeSet<_> = vec![sp].into_iter().collect();
+    let sps = UpdateTargets::single(sp);
 
     let (sender, receiver) = oneshot::channel();
     wicketd_testctx
@@ -818,6 +871,60 @@ async fn test_update_races() {
         );
     }
 
+    // Clearing a target whose update is still running (here, it is
+    // deterministically blocked on the oneshot channel passed into
+    // start_fake_update) is rejected with a 400 naming the in-progress target.
+    let running = ClearUpdateStateParams {
+        targets: UpdateTargets::single(SpIdentifier {
+            typ: SpType::Sled,
+            slot: 0,
+        }),
+    };
+    let err = wicketd_testctx
+        .commission_client
+        .post_clear_update_state(&running)
+        .await
+        .expect_err("clearing a running update is rejected");
+    assert_client_error_message(
+        &err,
+        StatusCode::BAD_REQUEST,
+        "targets are currently being updated",
+    );
+
+    // Check that the commission API reports sled 0 as Running with reasonable
+    // step counts while the fake update is running.
+    let entry = wait_for_sled0_progress(
+        &wicketd_testctx,
+        "sled 0 reached Running with its single step running",
+        |p| {
+            p.progress.state == update::UpdateState::Running
+                && p.progress.innermost_running_steps().count() == 1
+        },
+    )
+    .await;
+    assert_eq!(
+        entry.progress.state,
+        update::UpdateState::Running,
+        "sled 0 rolls up to Running",
+    );
+    assert_eq!(
+        entry.progress.steps.len(),
+        1,
+        "the fake update has one top-level step: {:?}",
+        entry.progress.steps,
+    );
+    let running: Vec<_> = entry.progress.innermost_running_steps().collect();
+    assert_eq!(
+        running.len(),
+        1,
+        "exactly one running step in the tree: {running:?}",
+    );
+    assert!(
+        running[0].description.contains("Fake step"),
+        "running step is the fake step: {}",
+        running[0].description,
+    );
+
     // Unblock the update, letting it run to completion.
     let (final_sender, final_receiver) = oneshot::channel();
     sender.send(final_sender).expect("receiver kept open by update engine");
@@ -833,6 +940,113 @@ async fn test_update_races() {
     assert!(
         matches!(last_event.kind, StepEventKind::ExecutionCompleted { .. }),
         "last event is execution completed: {last_event:#?}"
+    );
+
+    // Check that the commission API reports the fake update as having
+    // completed.
+    let entry = wait_for_sled0_progress(
+        &wicketd_testctx,
+        "sled 0 reached Completed",
+        |p| p.progress.state == update::UpdateState::Completed,
+    )
+    .await;
+    assert_eq!(
+        entry.progress,
+        update::UpdateProgress {
+            state: update::UpdateState::Completed,
+            steps: vec![update::UpdateStep {
+                description: "Fake step that waits for receiver to resolve"
+                    .to_string(),
+                status: UpdateStepStatus::Completed {
+                    outcome: StepOutcome::Success { message: None },
+                },
+                children: Vec::new(),
+            }],
+        },
+        "the fake update rolls up to Completed with its single clean step",
+    );
+
+    // sled 0's update completed, so it reports as cleared and no_update_data is
+    // empty.
+    let sled0_id = SpIdentifier { typ: SpType::Sled, slot: 0 };
+    let params =
+        ClearUpdateStateParams { targets: UpdateTargets::single(sled0_id) };
+    let response = wicketd_testctx
+        .commission_client
+        .post_clear_update_state(&params)
+        .await
+        .expect("clearing sled 0 succeeded")
+        .into_inner();
+    assert_eq!(
+        response,
+        ClearUpdateStateResponse {
+            cleared: std::iter::once(sled0_id).collect(),
+            no_update_data: BTreeSet::new(),
+        },
+        "clearing sled 0 reports exactly sled 0 as cleared",
+    );
+
+    // sled 1 never had an update, so it reports under no_update_data with
+    // nothing cleared.
+    let sled1_id = SpIdentifier { typ: SpType::Sled, slot: 1 };
+    let params =
+        ClearUpdateStateParams { targets: UpdateTargets::single(sled1_id) };
+    let response = wicketd_testctx
+        .commission_client
+        .post_clear_update_state(&params)
+        .await
+        .expect("clearing sled 1 succeeded")
+        .into_inner();
+    assert_eq!(
+        response,
+        ClearUpdateStateResponse {
+            cleared: BTreeSet::new(),
+            no_update_data: std::iter::once(sled1_id).collect(),
+        },
+        "clearing sled 1 reports it as having no update data",
+    );
+
+    let progress = wicketd_testctx
+        .commission_client
+        .get_update_progress()
+        .await
+        .expect("get_update_progress succeeded")
+        .into_inner();
+    assert!(progress.is_empty(), "update progress cleared for sled 0");
+
+    let event_buffer = wicketd_testctx
+        .wicketd_client
+        .get_update_sp(&SpType::Sled, 0)
+        .await
+        .expect("received event buffer successfully");
+    assert!(
+        event_buffer.step_events.is_empty(),
+        "event buffer cleared for sled 0: {event_buffer:#?}"
+    );
+
+    // Run a second fake update to completion so the event buffer is populated
+    // again -- otherwise the re-upload check below would be vacuous now that
+    // the clear emptied the buffer.
+    let sps = UpdateTargets::single(sp);
+    let (sender, receiver) = oneshot::channel();
+    wicketd_testctx
+        .server
+        .update_tracker
+        .start_fake_update(sps, receiver)
+        .await
+        .expect("start_fake_update successful");
+    let (final_sender, final_receiver) = oneshot::channel();
+    sender.send(final_sender).expect("receiver kept open by update engine");
+    final_receiver.await.expect("update engine completed successfully");
+
+    let event_buffer = wicketd_testctx
+        .wicketd_client
+        .get_update_sp(&SpType::Sled, 0)
+        .await
+        .expect("received event buffer successfully");
+    assert!(
+        !event_buffer.step_events.is_empty(),
+        "event buffer populated by the second update: {event_buffer:#?}"
     );
 
     // Try uploading the repository again -- since no updates are running, this

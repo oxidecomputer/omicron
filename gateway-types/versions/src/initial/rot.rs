@@ -55,6 +55,7 @@ pub enum RotState {
     Copy,
     PartialEq,
     Eq,
+    Hash,
     PartialOrd,
     Ord,
     Deserialize,
