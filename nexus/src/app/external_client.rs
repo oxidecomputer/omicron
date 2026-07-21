@@ -927,8 +927,9 @@ mod test {
             "http://fd00.example.com/",
             // IDN (punycoded by the parser).
             "http://b\u{fc}cher.example/",
-            // "localhost" as a non-final label is *not* in the localhost
-            // zone: this is a legitimate external name.
+            // "localhost" as a non-final label is *not* in the localhost zone:
+            // this is a legitimate external name, even though you probably
+            // shouldn't do that.
             "http://localhost.example.com/",
         ];
         for url in CASES {
@@ -1250,8 +1251,8 @@ mod test {
     ) {
         let mut found_ip_error = None;
         let mut next = Some(error);
-        while let Some(error) = dbg!(next) {
-            if let Some(e) = dbg!(error.downcast_ref::<ExternalIpError>()) {
+        while let Some(error) = next {
+            if let Some(e) = error.downcast_ref::<ExternalIpError>() {
                 found_ip_error = Some(e);
                 break;
             }
@@ -1278,14 +1279,27 @@ mod test {
 
     #[track_caller]
     fn test_url_loopback_allowed(url: &str) -> Result<Url, ExternalUrlError> {
+        test_url_with_policy(
+            url,
+            TreatLoopbackAsExternal::YesForTestPurposesOnly,
+        )
+    }
+
+    #[track_caller]
+    fn test_url_with_policy(
+        url: &str,
+        loopback: TreatLoopbackAsExternal,
+    ) -> Result<Url, ExternalUrlError> {
+        eprintln!(
+            "ensure_external_url({url:?}, TreatLoopbackAsExternal::{loopback:?})"
+        );
         let url = url
             .parse::<Url>()
             .unwrap_or_else(|e| panic!("test URL {url:?} must parse: {e}"));
-        ensure_external_url(
-            &url,
-            &test_policy(TreatLoopbackAsExternal::YesForTestPurposesOnly),
-        )
-        .map(|()| url)
+        let result =
+            ensure_external_url(&url, &test_policy(loopback)).map(|()| url);
+        eprintln!("  --> {result:?};\n");
+        result
     }
 
     /// Mocks `GET /redirect` on `server` to respond with a 301 to
