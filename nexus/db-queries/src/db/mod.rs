@@ -24,6 +24,7 @@ mod pool;
 mod pool_connection;
 // This is marked public because the error types are used elsewhere, e.g., in
 // sagas.
+pub(crate) mod check_if_limit_reached;
 pub mod queries;
 mod raw_query_builder;
 mod sec_store;
@@ -44,6 +45,7 @@ pub use nexus_db_fixed_data as fixed_data;
 pub use nexus_db_model as model;
 use nexus_db_model::saga_types;
 
+pub use check_if_limit_reached::IsLimitReached;
 pub use config::Config;
 pub use datastore::DataStore;
 pub use on_conflict_ext::IncompleteOnConflictExt;
