@@ -60,7 +60,10 @@ pub trait SledAgentFacilities: Send + Sync + 'static {
     ) -> anyhow::Result<()>;
 
     /// Instruct DDM to stop advertising a prefix.
-    fn ddm_remove_internal_dns_prefix(&self, prefix: Ipv6Subnet<SLED_PREFIX_LENGTH>);
+    fn ddm_remove_internal_dns_prefix(
+        &self,
+        prefix: Ipv6Subnet<SLED_PREFIX_LENGTH>,
+    );
 }
 
 pub trait SledAgentArtifactStore: Send + Sync + 'static {

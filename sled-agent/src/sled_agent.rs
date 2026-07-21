@@ -46,7 +46,9 @@ use illumos_utils::zpool::ZpoolOrRamdisk;
 use internal_dns_resolver::Resolver;
 use itertools::Itertools as _;
 use omicron_common::address::BOOTSTRAP_AGENT_RACK_INIT_PORT;
-use omicron_common::address::{Ipv6Subnet, SLED_PREFIX_LENGTH, get_sled_address};
+use omicron_common::address::{
+    Ipv6Subnet, SLED_PREFIX_LENGTH, get_sled_address,
+};
 use omicron_common::api::external::{ByteCount, ByteCountRangeError, Vni};
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::shared::DelegatedZvol;
@@ -1875,7 +1877,10 @@ impl SledAgentFacilities for ReconcilerFacilities {
         }
     }
 
-    fn ddm_remove_internal_dns_prefix(&self, prefix: Ipv6Subnet<SLED_PREFIX_LENGTH>) {
+    fn ddm_remove_internal_dns_prefix(
+        &self,
+        prefix: Ipv6Subnet<SLED_PREFIX_LENGTH>,
+    ) {
         self.service_manager
             .ddm_reconciler()
             .remove_internal_dns_subnet(prefix);
