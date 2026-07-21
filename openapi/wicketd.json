@@ -1483,6 +1483,7 @@
         ]
       },
       "ClearUpdateStateResponse": {
+        "description": "Response to an instruction to clear update data.",
         "type": "object",
         "properties": {
           "cleared": {

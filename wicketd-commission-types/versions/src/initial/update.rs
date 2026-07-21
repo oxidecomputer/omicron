@@ -71,6 +71,18 @@ impl JsonSchema for UpdateTargets {
     }
 }
 
+/// Response to an instruction to clear update data.
+#[derive(
+    Clone, Debug, Default, PartialEq, Eq, JsonSchema, Serialize, Deserialize,
+)]
+pub struct ClearUpdateStateResponse {
+    /// The SPs for which update data was cleared.
+    pub cleared: BTreeSet<SpIdentifier>,
+
+    /// The SPs that had no update state to clear.
+    pub no_update_data: BTreeSet<SpIdentifier>,
+}
+
 /// Error returned when UpdateTargets is constructed from an empty set.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct EmptyUpdateTargets;
