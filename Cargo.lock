@@ -16350,7 +16350,7 @@ dependencies = [
 [[package]]
 name = "tufaceous"
 version = "0.2.0"
-source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#d24aec34fcbdf5fda0db8103a1e77926bd166a86"
+source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#38730b689596098c61c2c683fe4848712f2e40da"
 dependencies = [
  "atomicwrites",
  "aws-lc-rs",
@@ -16402,7 +16402,7 @@ dependencies = [
 [[package]]
 name = "tufaceous-artifact"
 version = "0.2.0"
-source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#d24aec34fcbdf5fda0db8103a1e77926bd166a86"
+source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#38730b689596098c61c2c683fe4848712f2e40da"
 dependencies = [
  "byte-wrapper",
  "daft",
@@ -16430,7 +16430,7 @@ dependencies = [
 [[package]]
 name = "tufaceous-brand-metadata"
 version = "0.2.0"
-source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#d24aec34fcbdf5fda0db8103a1e77926bd166a86"
+source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#38730b689596098c61c2c683fe4848712f2e40da"
 dependencies = [
  "serde",
  "serde_json",
