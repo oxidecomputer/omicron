@@ -21,9 +21,13 @@ use sled_agent_bootstrap_common::{RssContext, RunRssError};
 use sled_hardware_types::BaseboardId;
 use slog::{Logger, info};
 use slog_error_chain::{InlineErrorChain, SlogInlineError};
-use std::{collections::BTreeSet, time::Duration};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 use thiserror::Error;
-use tokio::sync::watch;
+use tokio::{sync::watch, task::JoinSet};
 use trust_quorum::{NodeApiError, ProxyError};
 use trust_quorum_protocol::CommitError;
 use trust_quorum_types::{
@@ -181,9 +185,8 @@ impl MultirackJoinServiceTask {
                 continue;
             };
 
-            if let Some((new_members, new_epoch)) = self
-                .tq_commit(rack_id, members, epoch, last_committed_epoch)
-                .await?
+            if let Some((new_members, new_epoch)) =
+                self.tq_commit(rack_id, members, epoch).await?
             {
                 members = new_members;
                 epoch = new_epoch;
@@ -256,7 +259,11 @@ impl MultirackJoinServiceTask {
 
             // We're done preparing. Let's move on to committing.
             if all_nodes_prepared {
-                info!(self.log, "Trust quorum prepared at all nodes"; "epoch" => %epoch);
+                info!(
+                    self.log,
+                    "Trust quorum prepared at all nodes";
+                    "epoch" => %epoch
+                );
                 break;
             }
 
@@ -291,7 +298,6 @@ impl MultirackJoinServiceTask {
         rack_id: RackUuid,
         members: BTreeSet<BaseboardId>,
         epoch: Epoch,
-        last_committed_epoch: Option<Epoch>,
     ) -> Result<Option<(BTreeSet<BaseboardId>, Epoch)>, MultirackJoinServiceError>
     {
         // Before we attempt to commit, let's see if the operator has changed
@@ -300,6 +306,64 @@ impl MultirackJoinServiceTask {
         {
             return Ok(Some((new_members, epoch.next())));
         }
+
+        info!(
+            self.log,
+            "Starting to commit trust quorum configuration";
+            "epoch" => %epoch
+        );
+
+        // Commit at this node. This is the only node that we locally access
+        // over the bootstrap agent. For security purposes, we proxy all other
+        // requests over sprockests.
+        //
+        // Unfortunately, if we have a problem here, we need to stop what we're
+        // doing and clean slate.
+        self.ctx.trust_quorum_handle.commit(rack_id, epoch).await?;
+
+        // Peers that must proxy commit over sprockets
+        let mut remote_peers = members.clone();
+        remote_peers.remove(self.ctx.trust_quorum_handle.baseboard_id());
+        let mut set = JoinSet::new();
+
+        // Track and report the status of each remote peer
+        let mut acked = BTreeSet::<BaseboardId>::new();
+        let mut fatal_errors = Arc::new(Mutex::new(BTreeMap::new()));
+        let mut transient_errors = Arc::new(Mutex::new(BTreeMap::new()));
+
+        for peer in remote_peers {
+            let proxy = self.ctx.trust_quorum_handle.proxy();
+            info!(
+                self.log,
+                "Attempting to proxy commit trust quorum";
+                "epoch" => %epoch,
+                "baseboard_id" => %peer
+            );
+            let fatal_errors = fatal_errors.clone();
+            let transient_errors = transient_errors.clone();
+            set.spawn(async move {
+                match proxy.commit(peer.clone(), rack_id, epoch).await {
+                    Ok(trust_quorum_types::status::CommitStatus::Committed) => {
+                    }
+                    Ok(trust_quorum_types::status::CommitStatus::Pending) => {}
+                    Err(e @ ProxyError::Inner(_))
+                    | Err(e @ ProxyError::InvalidResponse(_))
+                    | Err(e @ ProxyError::RecvError) => {
+                        fatal_errors.lock().unwrap().insert(peer, e);
+                    }
+                    Err(transient_err) => {
+                        transient_errors
+                            .lock()
+                            .unwrap()
+                            .insert(peer, transient_err);
+                    }
+                }
+            });
+        }
+
+        // TODO: Await each peer and also check for updates from `input_rx`
+        // TODO: Ensure that output_tx contains the threshold being waited for as well
+        // as safety factor, etc...
 
         Ok(None)
     }
