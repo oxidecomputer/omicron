@@ -37,8 +37,8 @@ use tokio::{sync::watch, task::JoinHandle};
 use wicket_common::{
     WICKETD_TIMEOUT,
     rack_update::{
-        ClearUpdateStateResponse, ComponentUpdateStatus, ExitMessage,
-        RackUpdateStatus, UpdateState, UpdateStateCounts, rollup_update_state,
+        ComponentUpdateStatus, ExitMessage, RackUpdateStatus, UpdateState,
+        UpdateStateCounts, rollup_update_state,
     },
     update_events::{EventReport, WicketdEngineSpec},
 };
@@ -46,7 +46,9 @@ use wicketd_client::types::{
     ClearUpdateStateParams, GetArtifactsAndEventReportsResponse,
     StartUpdateParams,
 };
-use wicketd_commission_types::update::UpdateTargets;
+use wicketd_commission_types::update::{
+    ClearUpdateStateResponse, UpdateTargets,
+};
 
 use super::command::CommandOutput;
 

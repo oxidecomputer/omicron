@@ -36,8 +36,7 @@ use wicket::OutputKind;
 use wicket_common::{
     inventory::{SpIdentifier, SpType},
     rack_update::{
-        ClearUpdateStateResponse, ExitMessage, RackUpdateStatus,
-        StartUpdateOptions, UpdateState,
+        ExitMessage, RackUpdateStatus, StartUpdateOptions, UpdateState,
     },
     update_events::{StepEventKind, UpdateComponent},
 };
@@ -45,7 +44,9 @@ use wicketd::{RunningUpdateState, StartUpdateError};
 use wicketd_client::types::{
     GetInventoryParams, GetInventoryResponse, StartUpdateParams,
 };
-use wicketd_commission_types::update::UpdateTargets;
+use wicketd_commission_types::update::{
+    ClearUpdateStateResponse, UpdateTargets,
+};
 
 /// The list of zone file names defined in fake-non-semver.toml.
 static FAKE_NON_SEMVER_ZONE_FILE_NAMES: &[&str] = &[
