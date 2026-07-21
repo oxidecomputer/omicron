@@ -35,6 +35,9 @@ use installinator_common::InstallinatorCompletionMetadata;
 use installinator_common::WriteOutput;
 use omicron_common::disk::M2Slot;
 use omicron_uuid_kinds::MupdateUuid;
+use oxide_update_engine::AbortHandle;
+use oxide_update_engine_types::events::ProgressUnits;
+use oxide_update_engine_types::spec::{EngineSpec, GenericSpec};
 use semver::Version;
 use sled_hardware_types::OxideSled;
 use slog::Logger;
@@ -65,15 +68,10 @@ use update_common::artifacts::ArtifactsWithPlan;
 use update_common::artifacts::ControlPlaneZonesMode;
 use update_common::artifacts::UpdatePlan;
 use update_common::artifacts::VerificationMode;
-use update_engine::AbortHandle;
-use update_engine::NestedSpec;
-use update_engine::StepSpec;
-use update_engine::events::ProgressUnits;
 use uuid::Uuid;
 use wicket_common::inventory::SpComponentCaboose;
 use wicket_common::inventory::SpIdentifier;
 use wicket_common::inventory::SpType;
-use wicket_common::rack_update::ClearUpdateStateResponse;
 use wicket_common::rack_update::StartUpdateOptions;
 use wicket_common::rack_update::UpdateSimulatedResult;
 use wicket_common::update_events::ComponentRegistrar;
@@ -99,6 +97,7 @@ use wicket_common::update_events::UpdateEngine;
 use wicket_common::update_events::UpdateStepId;
 use wicket_common::update_events::UpdateTerminalError;
 use wicketd_api::GetArtifactsAndEventReportsResponse;
+use wicketd_commission_types::update::ClearUpdateStateResponse;
 use wicketd_commission_types::update::UpdateTargets;
 
 #[derive(Debug)]
@@ -566,7 +565,7 @@ impl SpawnUpdateDriver for FakeUpdateDriver {
         _plan: UpdatePlan,
         _setup_data: &Self::Setup,
     ) -> SpUpdateData {
-        let (sender, mut receiver) = update_engine::channel();
+        let (sender, mut receiver) = oxide_update_engine::channel();
         let event_buffer = Arc::new(StdMutex::new(EventBuffer::new(16)));
         let event_buffer_2 = event_buffer.clone();
         let log = self.log.clone();
@@ -863,7 +862,7 @@ impl UpdateDriver {
         //    the newest components for the SP and RoT, and one without.
 
         // Build the update executor.
-        let (sender, mut receiver) = update_engine::channel();
+        let (sender, mut receiver) = oxide_update_engine::channel();
         let mut engine = UpdateEngine::new(&update_cx.log, sender);
         let abort_handle = engine.abort_handle();
         _ = abort_handle_sender.send(abort_handle);
@@ -1833,7 +1832,7 @@ impl UpdateContext {
     async fn process_installinator_reports(
         &self,
         cx: &StepContext,
-        mut ipr_receiver: watch::Receiver<EventReport<NestedSpec>>,
+        mut ipr_receiver: watch::Receiver<EventReport<GenericSpec>>,
     ) -> anyhow::Result<WriteOutput> {
         let mut write_output = None;
 
@@ -2401,7 +2400,7 @@ impl UpdateContext {
         cx: &StepContext,
         mut ipr_start_receiver: IprStartReceiver,
         image_id: HostPhase2RecoveryImageId,
-    ) -> anyhow::Result<watch::Receiver<EventReport<NestedSpec>>> {
+    ) -> anyhow::Result<watch::Receiver<EventReport<GenericSpec>>> {
         const MGS_PROGRESS_POLL_INTERVAL: Duration = Duration::from_secs(3);
 
         // Waiting for the installinator to start is a little strange. It can't
@@ -2577,7 +2576,7 @@ impl UpdateContext {
             .map(|res| res.into_inner())
     }
 
-    async fn poll_component_update<S: StepSpec>(
+    async fn poll_component_update<S: EngineSpec>(
         &self,
         cx: StepContext<S>,
         stage: ComponentUpdateStage,
