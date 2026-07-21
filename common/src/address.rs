@@ -19,6 +19,11 @@ use std::{
     sync::LazyLock,
 };
 
+/// The routing prefix length of the bootstrap network /40.
+///
+/// This is distinct from [`BOOTSTRAP_SLED_SUBNET_PREFIX_LENGTH`], which is the
+/// prefix length of the /64 subnet for an individual sled's bootstrap
+/// addresses.
 pub const BOOTSTRAP_SUBNET_PREFIX_LENGTH: u8 = 40;
 pub const AZ_PREFIX_LENGTH: u8 = 48;
 pub const RACK_PREFIX_LENGTH: u8 = 56;
@@ -466,11 +471,14 @@ pub const BOOTSTRAP_NETWORK_SUBNET: Ipv6Net = Ipv6Net::new_unchecked(
 
 /// IPv6 prefix length for bootstrap network sled subnets.
 ///
-/// This is the length of the prefix for the bootstrap network *of an individual
-/// sled*. The prefix begins with [`BOOTSTRAP_PREFIX`], and the rest of the /64
-/// prefix is constructed from the sled's MAC address. This is disticnt from the
-/// prefix length of [`BOOTSTRAP_NETWORK_SUBNET`], which is the /16 subnet that
-/// contains *all* sled bootstrap networks.
+/// This is the length of the prefix for the bootstrap network subnet *of an
+/// individual sled*. The prefix begins with [`BOOTSTRAP_PREFIX`], and the rest
+/// of the /64 prefix is constructed from the sled's MAC address.
+///
+/// This is distinct from the prefix length of [`BOOTSTRAP_NETWORK_SUBNET`],
+/// which is the /16 subnet that contains *all* sled bootstrap networks, and
+/// from [`BOOTSTRAP_SUBNET_PREFIX_LENGTH`], which is the prefix length of the
+/// announced bootstrap route.
 pub const BOOTSTRAP_SLED_SUBNET_PREFIX_LENGTH: u8 = 64;
 
 /// Wraps an [`Ipv6Net`] with a compile-time prefix length.
