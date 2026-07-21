@@ -70,7 +70,11 @@ impl DataStore {
         authz_silo: &authz::Silo,
         pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<Image> {
-        opctx.authorize(authz::Action::ListChildren, authz_silo).await?;
+        let authz_silo_image_list =
+            authz::SiloImageList::new(authz_silo.clone());
+        opctx
+            .authorize(authz::Action::ListChildren, &authz_silo_image_list)
+            .await?;
 
         use nexus_db_schema::schema::silo_image::dsl;
         match pagparams {
@@ -101,7 +105,14 @@ impl DataStore {
         silo_image: SiloImage,
     ) -> CreateResult<Image> {
         let image: Image = silo_image.into();
-        opctx.authorize(authz::Action::CreateChild, authz_silo).await?;
+        // Check CreateChild on SiloImageList rather than the Silo itself so
+        // that limited-collaborators can create silo images without the
+        // broader create_child permission on the Silo.
+        let authz_silo_image_list =
+            authz::SiloImageList::new(authz_silo.clone());
+        opctx
+            .authorize(authz::Action::CreateChild, &authz_silo_image_list)
+            .await?;
 
         let name = image.name().clone();
         let silo_id = image.silo_id;
@@ -177,7 +188,14 @@ impl DataStore {
         authz_project_image: &authz::ProjectImage,
         project_image: &ProjectImage,
     ) -> UpdateResult<Image> {
-        opctx.authorize(authz::Action::CreateChild, authz_silo).await?;
+        // Check if the user can create silo images (promote from project images).
+        // We use SiloImageList to allow limited-collaborators to promote images
+        // without granting them the broader create_child permission on Silo.
+        let authz_silo_image_list =
+            authz::SiloImageList::new(authz_silo.clone());
+        opctx
+            .authorize(authz::Action::CreateChild, &authz_silo_image_list)
+            .await?;
         opctx.authorize(authz::Action::Modify, authz_project_image).await?;
 
         use nexus_db_schema::schema::image::dsl;
