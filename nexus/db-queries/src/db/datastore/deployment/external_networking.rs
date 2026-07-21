@@ -220,7 +220,13 @@ impl DataStore {
                     conn,
                     external_ip.ip(),
                 )
-                .await?;
+                .await
+                .map_err(|e| {
+                    Self::map_external_ip_not_found_for_zone_error(
+                        e,
+                        external_ip.ip(),
+                    )
+                })?;
 
             // Actually ensure the IP address.
             let kind = z.zone_type.kind();

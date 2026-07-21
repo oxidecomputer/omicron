@@ -64,7 +64,6 @@ use ref_cast::RefCast;
 use sled_agent_types::inventory::ZoneKind;
 use slog::debug;
 use std::net::IpAddr;
-use std::num::NonZeroU32;
 use uuid::Uuid;
 
 /// Ephemeral IPs for an instance, with one slot per IP version.
@@ -474,6 +473,21 @@ impl DataStore {
         })
     }
 
+    // Helper method to map an `Error` when looking up IP Pools for a specific
+    // IP for an _Omicron zone_, and no such pool contains the address at all.
+    pub(crate) fn map_external_ip_not_found_for_zone_error(
+        err: Error,
+        ip: IpAddr,
+    ) -> Error {
+        match err {
+            Error::ObjectNotFound { .. } => Error::invalid_request(format!(
+                "External IP address {ip} is not available in any \
+                pool assigned to system services",
+            )),
+            other => other,
+        }
+    }
+
     /// Allocates an explicit IP address for an Omicron zone.
     pub async fn external_ip_allocate_omicron_zone(
         &self,
@@ -482,26 +496,19 @@ impl DataStore {
         zone_kind: ZoneKind,
         external_ip: OmicronZoneExternalIp,
     ) -> CreateResult<ExternalIp> {
-        let version = IpVersion::from(external_ip.ip_version());
-        // TODO(#8949): There could be multiple valid IP pools for a given
-        // service, even for a single IP version. For now, use the first such
-        // pool to match existing behavior.
-        let service_pools = self
-            .ip_pools_service_lookup_by_version(
+        let (_authz_pool, db_pool) = self
+            .ip_pool_fetch_containing_address_for_services(
                 opctx,
-                version,
-                NonZeroU32::new(1).unwrap(),
+                external_ip.ip(),
             )
-            .await?;
-        let service_pool = service_pools.first().ok_or_else(|| {
-            Error::internal_error(&format!(
-                "no system services IP pool for IP version {version}"
-            ))
-        })?;
-        opctx
-            .authorize(authz::Action::CreateChild, &service_pool.authz_pool)
-            .await?;
-        let pool_id = service_pool.db_pool.id();
+            .await
+            .map_err(|e| {
+                Self::map_external_ip_not_found_for_zone_error(
+                    e,
+                    external_ip.ip(),
+                )
+            })?;
+        let pool_id = db_pool.id();
         let data = IncompleteExternalIp::for_omicron_zone(
             pool_id,
             external_ip,
@@ -1420,6 +1427,7 @@ mod tests {
     use sled_agent_types::inventory::SourceNatConfigGeneric;
     use std::collections::BTreeSet;
     use std::net::Ipv4Addr;
+    use std::num::NonZeroU32;
 
     async fn read_all_service_ips(
         datastore: &DataStore,

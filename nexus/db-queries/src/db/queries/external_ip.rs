@@ -1755,7 +1755,8 @@ mod tests {
             .expect_err("Should have failed to allocate out-of-bounds IP");
         assert_eq!(
             err.to_string(),
-            "Invalid Request: Requested external IP address not available"
+            "Invalid Request: External IP address 10.0.0.5 is not \
+            available in any pool assigned to system services"
         );
 
         context.success().await;
