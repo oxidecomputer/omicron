@@ -454,7 +454,7 @@ pub const CP_SERVICES_RESERVED_ADDRESSES: u16 = 0xFFFF;
 /// with each sled in the Reconfigurator blueprint.
 pub const SLED_RESERVED_ADDRESSES: u16 = 2;
 
-/// Initial octet of IPv6 for bootstrap addresses.
+/// Initial octets of IPv6 for bootstrap addresses.
 pub const BOOTSTRAP_PREFIX: u16 = 0xfdb0;
 
 /// IPv6 subnet for the *entire* bootstrap network.
