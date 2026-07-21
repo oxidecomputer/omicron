@@ -5,6 +5,7 @@
 //! The collection of tasks used for interacting with MGS and maintaining
 //! runtime state.
 
+use dropshot::HttpError;
 use futures::StreamExt;
 use gateway_types::ignition::SpIgnition;
 use slog::{Logger, info, o, warn};
@@ -14,6 +15,10 @@ use tokio::sync::{mpsc, oneshot};
 use tokio::time::{Duration, Instant};
 use tokio_stream::StreamMap;
 use wicket_common::inventory::{MgsV1Inventory, SpIdentifier, SpInventory};
+
+use crate::helpers::SpIdentifierDisplay;
+use crate::http_helpers::http_error_with_message;
+use crate::http_helpers::shutdown_to_http;
 
 use self::inventory::{
     FetchedIgnitionState, FetchedSpData, IgnitionPresence,
@@ -68,7 +73,30 @@ pub enum GetInventoryError {
 
     /// The client specified an invalid SP identifier in a `force_refresh`
     /// request.
-    InvalidSpIdentifier,
+    InvalidSpIdentifier {
+        /// The invalid SP identifier.
+        id: SpIdentifier,
+    },
+}
+
+impl GetInventoryError {
+    pub(crate) fn to_http_error(&self) -> HttpError {
+        match self {
+            GetInventoryError::ShutdownInProgress => {
+                shutdown_to_http(ShutdownInProgress)
+            }
+            GetInventoryError::InvalidSpIdentifier { id } => {
+                http_error_with_message(
+                    dropshot::ErrorStatusCode::BAD_REQUEST,
+                    None,
+                    format!(
+                        "invalid SP identifier in force_refresh request: {}",
+                        SpIdentifierDisplay(*id)
+                    ),
+                )
+            }
+        }
+    }
 }
 
 impl MgsHandle {
@@ -80,10 +108,12 @@ impl MgsHandle {
             Err(GetInventoryError::ShutdownInProgress) => {
                 Err(ShutdownInProgress)
             }
-            Err(GetInventoryError::InvalidSpIdentifier) => {
+            Err(GetInventoryError::InvalidSpIdentifier { id }) => {
                 // We pass no SP identifiers to refresh, so it's not possible
                 // for one of them to be invalid.
-                unreachable!("empty SP list cannot contain an invalid ID");
+                unreachable!(
+                    "empty SP list cannot contain an invalid ID, but got {id:?}"
+                );
             }
         }
     }
@@ -273,7 +303,15 @@ impl MgsManager {
         }
     }
 
+    /// Drop waiters whose receiver is closed (e.g., the HTTP request timed out)
+    /// so they don't pile up in case a wedged SP never refreshes.
+    fn prune_dead_waiters(&mut self) {
+        self.waiting_for_update.retain(|waiter| !waiter.reply_tx.is_closed());
+    }
+
     fn check_completed_waiters(&mut self, mgs_last_seen: Instant) {
+        self.prune_dead_waiters();
+
         // This really wants `Vec::drain_filter()`, but it's unstable; instead,
         // use its sample code (but use `swap_remove()` instead of `remove()`
         // because we don't care about order).
@@ -302,6 +340,8 @@ impl MgsManager {
         >,
         force_refresh: Vec<SpIdentifier>,
     ) {
+        self.prune_dead_waiters();
+
         if force_refresh.is_empty() {
             // No force refresh: just return our latest cached inventory.
             _ = reply_tx.send(Ok(self.current_inventory(mgs_last_seen)));
@@ -311,7 +351,8 @@ impl MgsManager {
         // Trigger immediate refreshes for all SPs listed in `force_refresh`.
         for &id in &force_refresh {
             let Some(handle) = sp_handles.get(&id) else {
-                _ = reply_tx.send(Err(GetInventoryError::InvalidSpIdentifier));
+                _ = reply_tx
+                    .send(Err(GetInventoryError::InvalidSpIdentifier { id }));
                 return;
             };
 
@@ -402,4 +443,62 @@ struct WaitingForRefresh {
     reply_tx: oneshot::Sender<Result<GetInventoryResponse, GetInventoryError>>,
     sps_to_refresh: BTreeSet<SpIdentifier>,
     need_ignition_refresh: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::net::Ipv6Addr;
+    use wicket_common::inventory::SpType;
+
+    fn dummy_manager() -> MgsManager {
+        let log = Logger::root(slog::Discard, o!());
+        let addr = SocketAddrV6::new(Ipv6Addr::LOCALHOST, 0, 0, 0);
+        MgsManager::new(&log, addr)
+    }
+
+    fn sled(slot: u16) -> SpIdentifier {
+        SpIdentifier { typ: SpType::Sled, slot }
+    }
+
+    #[test]
+    fn prune_dead_waiters_drops_only_closed_receivers() {
+        let mut manager = dummy_manager();
+
+        // Simulate a dead waiter with a closed receiver and a non-empty
+        // sps_to_refresh.
+        let (dead_tx, dead_rx) = oneshot::channel();
+        drop(dead_rx);
+        manager.waiting_for_update.push(WaitingForRefresh {
+            reply_tx: dead_tx,
+            sps_to_refresh: std::iter::once(sled(0)).collect(),
+            need_ignition_refresh: true,
+        });
+
+        // Similarly, simulate a live waiter.
+        let (live_tx, _live_rx) = oneshot::channel();
+        manager.waiting_for_update.push(WaitingForRefresh {
+            reply_tx: live_tx,
+            sps_to_refresh: std::iter::once(sled(1)).collect(),
+            need_ignition_refresh: true,
+        });
+
+        manager.prune_dead_waiters();
+
+        assert_eq!(
+            manager.waiting_for_update.len(),
+            1,
+            "only the live waiter remains after pruning",
+        );
+        let remaining = &manager.waiting_for_update[0];
+        assert!(
+            !remaining.reply_tx.is_closed(),
+            "the surviving waiter still has a live receiver",
+        );
+        assert_eq!(
+            remaining.sps_to_refresh,
+            std::iter::once(sled(1)).collect::<BTreeSet<_>>(),
+            "the surviving waiter is the one waiting on sled 1",
+        );
+    }
 }

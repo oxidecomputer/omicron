@@ -72,7 +72,6 @@ use uuid::Uuid;
 use wicket_common::inventory::SpComponentCaboose;
 use wicket_common::inventory::SpIdentifier;
 use wicket_common::inventory::SpType;
-use wicket_common::rack_update::ClearUpdateStateResponse;
 use wicket_common::rack_update::StartUpdateOptions;
 use wicket_common::rack_update::UpdateSimulatedResult;
 use wicket_common::update_events::ComponentRegistrar;
@@ -98,6 +97,7 @@ use wicket_common::update_events::UpdateEngine;
 use wicket_common::update_events::UpdateStepId;
 use wicket_common::update_events::UpdateTerminalError;
 use wicketd_api::GetArtifactsAndEventReportsResponse;
+use wicketd_commission_types::update::ClearUpdateStateResponse;
 use wicketd_commission_types::update::UpdateTargets;
 
 #[derive(Debug)]
