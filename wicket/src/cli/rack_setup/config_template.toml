@@ -156,6 +156,9 @@ infra_ip_last = ""
         # indicate that no prefixes are allowed.
         # allowed_export = []
 
+        # The source address to use for the BGP session (optional).
+        # src_addr = ""
+
         # Associate a VLAN ID with this BGP session (optional).
         # vlan_id = 0
 

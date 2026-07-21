@@ -7981,6 +7981,13 @@
               }
             ]
           },
+          "src_addr": {
+            "nullable": true,
+            "description": "The source address to use for the BGP session (optional).",
+            "default": null,
+            "type": "string",
+            "format": "ip"
+          },
           "vlan_id": {
             "nullable": true,
             "description": "Associate a VLAN ID with a BGP peer session.",

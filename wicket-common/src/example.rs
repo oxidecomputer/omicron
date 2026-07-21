@@ -174,6 +174,7 @@ impl ExampleRackSetupData {
                 allowed_export: UserSpecifiedImportExportPolicy::Allow(vec![
                     "127.0.0.1/8".parse().unwrap(),
                 ]),
+                src_addr: None,
                 vlan_id: None,
                 router_lifetime: RouterLifetimeConfig::default(),
             },
@@ -200,6 +201,7 @@ impl ExampleRackSetupData {
                     "255.255.0.0/16".parse().unwrap(),
                 ]),
                 allowed_export: UserSpecifiedImportExportPolicy::Allow(vec![]),
+                src_addr: None,
                 vlan_id: None,
                 router_lifetime: RouterLifetimeConfig::default(),
             },
@@ -227,6 +229,7 @@ impl ExampleRackSetupData {
                 "224.0.0.0/4".parse().unwrap(),
             ]),
             allowed_export: UserSpecifiedImportExportPolicy::NoFiltering,
+            src_addr: None,
             vlan_id: None,
             router_lifetime: RouterLifetimeConfig::default(),
         }];
