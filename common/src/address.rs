@@ -109,8 +109,10 @@ pub const IPV4_LINK_LOCAL_MULTICAST_SUBNET: Ipv4Net =
 /// See [RFC 4291] for IPv6 addressing architecture.
 ///
 /// [RFC 4291]: https://www.rfc-editor.org/rfc/rfc4291
-pub const IPV6_MULTICAST_RANGE: Ipv6Net =
-    Ipv6Net::new_unchecked(Ipv6Addr::new(IPV6_MULTICAST_PREFIX, 0, 0, 0, 0, 0, 0, 0), 8);
+pub const IPV6_MULTICAST_RANGE: Ipv6Net = Ipv6Net::new_unchecked(
+    Ipv6Addr::new(IPV6_MULTICAST_PREFIX, 0, 0, 0, 0, 0, 0, 0),
+    8,
+);
 
 /// IPv6 multicast prefix (ff00::/8) mask/value for scope checking.
 ///
