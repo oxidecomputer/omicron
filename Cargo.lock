@@ -6160,25 +6160,37 @@ checksum = "92ecc6618181def0457392ccd0ee51198e065e016d1d527a7ac1b6dc7c1f09d2"
 
 [[package]]
 name = "jiff"
-version = "0.2.21"
+version = "0.2.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b3e3d65f018c6ae946ab16e80944b97096ed73c35b221d1c478a6c81d8f57940"
+checksum = "e184d09547b80eb7e20d141ba2fb1fbac843ca53f4cf1b31210adc4c1adc6e16"
 dependencies = [
+ "defmt 1.0.1",
+ "jiff-core",
  "jiff-static",
  "jiff-tzdb-platform",
  "log",
  "portable-atomic",
  "portable-atomic-util",
  "serde_core",
- "windows-sys 0.61.2",
+ "windows-link",
+]
+
+[[package]]
+name = "jiff-core"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7feca88439efe53da3754500c1851dedf3cb36c524dd5cf8225cc0794de95d09"
+dependencies = [
+ "defmt 1.0.1",
 ]
 
 [[package]]
 name = "jiff-static"
-version = "0.2.21"
+version = "0.2.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a17c2b211d863c7fde02cbea8a3c1a439b98e109286554f2860bdded7ff83818"
+checksum = "323da076b7a6faf914dc677cb05a4b907742ff7375c8322c9e7f5061e5e0e9de"
 dependencies = [
+ "jiff-core",
  "proc-macro2",
  "quote",
  "syn 2.0.117",
@@ -8252,7 +8264,7 @@ dependencies = [
  "textwrap 0.16.2",
  "thiserror 2.0.18",
  "tokio",
- "tough",
+ "tough 0.22.0",
  "trust-quorum-protocol",
  "trust-quorum-types",
  "tufaceous-artifact 0.2.0",
@@ -8294,7 +8306,7 @@ dependencies = [
  "slog-error-chain",
  "strum 0.27.2",
  "thiserror 2.0.18",
- "tough",
+ "tough 0.22.0",
  "tufaceous-artifact 0.2.0",
  "url",
  "uuid",
@@ -8653,6 +8665,16 @@ name = "olpc-cjson"
 version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "696183c9b5fe81a7715d074fd632e8bd46f4ccc0231a3ed7fc580a80de5f7083"
+dependencies = [
+ "serde",
+ "serde_json",
+ "unicode-normalization",
+]
+
+[[package]]
+name = "olpc-cjson"
+version = "0.1.4"
+source = "git+https://github.com/oxidecomputer/tough?branch=oxide%2Fdevelop#56967c9651efcffd7326198f04fc388c4f0f92b9"
 dependencies = [
  "serde",
  "serde_json",
@@ -9863,6 +9885,7 @@ dependencies = [
  "ipnet",
  "ipnetwork",
  "itertools 0.13.0",
+ "jiff",
  "lalrpop-util",
  "lazy_static",
  "libc",
@@ -9938,7 +9961,7 @@ dependencies = [
  "toml_edit 0.19.15",
  "toml_edit 0.22.27",
  "toml_parser",
- "tough",
+ "tough 0.22.0",
  "tracing",
  "tufaceous-artifact 0.2.0",
  "typenum",
@@ -15853,10 +15876,43 @@ dependencies = [
  "globset",
  "hex",
  "log",
- "olpc-cjson",
+ "olpc-cjson 0.1.4 (registry+https://github.com/rust-lang/crates.io-index)",
  "pem",
  "percent-encoding",
  "reqwest 0.12.28",
+ "rustls",
+ "serde",
+ "serde_json",
+ "serde_plain",
+ "snafu",
+ "tempfile",
+ "tokio",
+ "tokio-util",
+ "typed-path",
+ "untrusted 0.7.1",
+ "url",
+ "walkdir",
+]
+
+[[package]]
+name = "tough"
+version = "0.24.0"
+source = "git+https://github.com/oxidecomputer/tough?branch=oxide%2Fdevelop#56967c9651efcffd7326198f04fc388c4f0f92b9"
+dependencies = [
+ "async-recursion",
+ "async-trait",
+ "aws-lc-rs",
+ "bytes",
+ "dyn-clone",
+ "futures",
+ "futures-core",
+ "globset",
+ "hex",
+ "jiff",
+ "log",
+ "olpc-cjson 0.1.4 (git+https://github.com/oxidecomputer/tough?branch=oxide%2Fdevelop)",
+ "pem",
+ "percent-encoding",
  "rustls",
  "serde",
  "serde_json",
@@ -16284,7 +16340,7 @@ dependencies = [
 [[package]]
 name = "tufaceous"
 version = "0.2.0"
-source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#de59b9508e99da8fc39a70d29e4d69300325b220"
+source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#38730b689596098c61c2c683fe4848712f2e40da"
 dependencies = [
  "atomicwrites",
  "aws-lc-rs",
@@ -16299,6 +16355,7 @@ dependencies = [
  "futures-util",
  "hex",
  "hubtools 0.4.7 (git+https://github.com/oxidecomputer/hubtools.git?rev=2b1ef9b38d75563ea800baa3b17327eec17b1b7a)",
+ "jiff",
  "rats-corim 0.1.0 (git+https://github.com/oxidecomputer/rats-corim.git?rev=f0d5d5168d3d31487a56df32c676b0c6240bcc6b)",
  "rawzip",
  "semver 1.0.28",
@@ -16309,7 +16366,7 @@ dependencies = [
  "tar",
  "thiserror 2.0.18",
  "tokio",
- "tough",
+ "tough 0.24.0",
  "tufaceous-artifact 0.2.0",
  "tufaceous-brand-metadata 0.2.0",
  "url",
@@ -16335,7 +16392,7 @@ dependencies = [
 [[package]]
 name = "tufaceous-artifact"
 version = "0.2.0"
-source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#de59b9508e99da8fc39a70d29e4d69300325b220"
+source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#38730b689596098c61c2c683fe4848712f2e40da"
 dependencies = [
  "byte-wrapper",
  "daft",
@@ -16363,7 +16420,7 @@ dependencies = [
 [[package]]
 name = "tufaceous-brand-metadata"
 version = "0.2.0"
-source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#de59b9508e99da8fc39a70d29e4d69300325b220"
+source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#38730b689596098c61c2c683fe4848712f2e40da"
 dependencies = [
  "serde",
  "serde_json",
@@ -16406,7 +16463,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "toml 0.8.23",
- "tough",
+ "tough 0.22.0",
  "tufaceous-artifact 0.1.0",
  "tufaceous-brand-metadata 0.1.0",
  "url",
@@ -16707,7 +16764,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tokio-util",
- "tough",
+ "tough 0.22.0",
  "tufaceous 0.1.0",
  "tufaceous-artifact 0.1.0",
  "tufaceous-brand-metadata 0.1.0",
@@ -17487,7 +17544,7 @@ dependencies = [
  "tokio-stream",
  "tokio-util",
  "toml 0.8.23",
- "tough",
+ "tough 0.22.0",
  "transceiver-controller 0.1.1 (git+https://github.com/oxidecomputer/transceiver-control)",
  "tufaceous 0.1.0",
  "tufaceous-artifact 0.1.0",
