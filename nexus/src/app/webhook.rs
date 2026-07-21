@@ -28,12 +28,16 @@
 //! [RFD 538]: https://rfd.shared.oxide.computer/538
 
 use crate::Nexus;
+use crate::app::external_client::ExternalClientBuilder;
+use crate::app::external_client::ExternalHttpClient;
+use crate::app::external_dns;
 use anyhow::Context;
 use chrono::TimeDelta;
 use chrono::Utc;
 use hmac::{Hmac, Mac};
 use http::HeaderName;
 use http::HeaderValue;
+use nexus_config::ExternalHttpClientConfig;
 use nexus_db_lookup::LookupPath;
 use nexus_db_lookup::lookup;
 use nexus_db_queries::authz;
@@ -68,6 +72,7 @@ use omicron_uuid_kinds::WebhookDeliveryUuid;
 use omicron_uuid_kinds::WebhookSecretUuid;
 use sha2::Sha256;
 use slog_error_chain::InlineErrorChain;
+use std::sync::Arc;
 use std::sync::LazyLock;
 use std::time::Duration;
 use std::time::Instant;
@@ -315,16 +320,13 @@ impl Nexus {
     }
 }
 
-/// Construct a [`reqwest::Client`] configured for webhook delivery requests.
+/// Construct an [`ExternalHttpClient`] configured for webhook delivery
+/// requests.
 pub(super) fn delivery_client(
-    builder: reqwest::ClientBuilder,
-) -> Result<reqwest::Client, reqwest::Error> {
-    builder
-        // Per [RFD 538 § 4.3.1][1], webhook delivery does *not* follow
-        // redirects.
-        //
-        // [1]: https://rfd.shared.oxide.computer/rfd/538#_success
-        .redirect(reqwest::redirect::Policy::none())
+    external_client_config: &ExternalHttpClientConfig,
+    resolver: &Arc<external_dns::Resolver>,
+) -> Result<ExternalHttpClient, reqwest::Error> {
+    let builder: ExternalClientBuilder = reqwest::ClientBuilder::new()
         // Per [RFD 538 § 4.3.2][1], the client must be able to connect to a
         // webhook receiver endpoint within 10 seconds, or the delivery is
         // considered failed.
@@ -336,7 +338,18 @@ pub(super) fn delivery_client(
         //
         // [1]: https://rfd.shared.oxide.computer/rfd/538#delivery-failure
         .timeout(Duration::from_secs(30))
-        .build()
+        .into();
+    builder
+        // Per [RFD 538 § 4.3.1][1], webhook delivery does *not* follow
+        // redirects.
+        //
+        // N.B. that the redirect policy must be set on the
+        // `ExternalClientBuilder`, *not* the `reqwest::ClientBuilder`, or it
+        // will be silently overwritten.
+        //
+        // [1]: https://rfd.shared.oxide.computer/rfd/538#_success
+        .redirect(reqwest::redirect::Policy::none())
+        .build(external_client_config, resolver)
 }
 
 /// Everything necessary to send a delivery request to a webhook receiver.
@@ -345,7 +358,7 @@ pub(super) fn delivery_client(
 /// background task, as it is used both by the deliverator RPW and by the Nexus
 /// API in the liveness probe endpoint.
 pub(crate) struct ReceiverClient<'a> {
-    client: &'a reqwest::Client,
+    client: &'a ExternalHttpClient,
     rx: &'a AlertReceiver,
     secrets: Vec<(WebhookSecretUuid, Hmac<Sha256>)>,
     hdr_rx_id: http::HeaderValue,
@@ -354,7 +367,7 @@ pub(crate) struct ReceiverClient<'a> {
 
 impl<'a> ReceiverClient<'a> {
     pub(crate) fn new(
-        client: &'a reqwest::Client,
+        client: &'a ExternalHttpClient,
         secrets: impl IntoIterator<Item = WebhookSecret>,
         rx: &'a AlertReceiver,
         nexus_id: OmicronZoneUuid,
@@ -466,16 +479,40 @@ impl<'a> ReceiverClient<'a> {
                 return Err(e).context(MSG);
             }
         };
-        let mut request = self
-            .client
-            .post(&self.rx.endpoint)
-            .header(HDR_RX_ID, self.hdr_rx_id.clone())
-            .header(HDR_DELIVERY_ID, delivery.id.to_string())
-            .header(HDR_ALERT_ID, delivery.alert_id.to_string())
-            .header(HDR_ALERT_CLASS, alert_class.to_string())
-            .header(HDR_ALERT_VERSION, alert_version.to_string())
-            .header(HDR_TIMESTAMP, &sent_at)
-            .header(http::header::CONTENT_TYPE, "application/json");
+        let mut request = match self.client.post(&self.rx.endpoint) {
+            Ok(req) => req,
+            Err(err) => {
+                slog::warn!(
+                    &opctx.log,
+                    "webhook receiver URL was rejected by the external IP \
+                     policy";
+                     "endpoint" => %self.rx.endpoint,
+                    "alert_id" => %delivery.alert_id,
+                    "alert_class" => %alert_class,
+                    "delivery_id" => %delivery.id,
+                    "delivery_trigger" => %delivery.triggered_by,
+                    "error" => InlineErrorChain::new(&err),
+                );
+                return Ok(WebhookDeliveryAttempt {
+                    id: WebhookDeliveryAttemptUuid::new_v4().into(),
+                    delivery_id: delivery.id,
+                    rx_id: delivery.rx_id,
+                    attempt: SqlU8::new(delivery.attempts.0 + 1),
+                    result: WebhookDeliveryAttemptResult::FailedUnreachable,
+                    response_status: None,
+                    response_duration: None,
+                    time_created: chrono::Utc::now(),
+                    deliverator_id: self.nexus_id.into(),
+                });
+            }
+        }
+        .header(HDR_RX_ID, self.hdr_rx_id.clone())
+        .header(HDR_DELIVERY_ID, delivery.id.to_string())
+        .header(HDR_ALERT_ID, delivery.alert_id.to_string())
+        .header(HDR_ALERT_CLASS, alert_class.to_string())
+        .header(HDR_ALERT_VERSION, alert_version.to_string())
+        .header(HDR_TIMESTAMP, &sent_at)
+        .header(http::header::CONTENT_TYPE, "application/json");
 
         // For each secret assigned to this webhook, calculate the HMAC and add a signature header.
         for (secret_id, mac) in &mut self.secrets {
@@ -506,8 +543,41 @@ impl<'a> ReceiverClient<'a> {
             }
             Ok(r) => r,
         };
+        // The external IP policy check happens synchronously, when
+        // `ExternalHttpClient::execute` is called, rather than inside the
+        // returned future. If the receiver's URL is rejected by the policy,
+        // the request was never sent at all, so record the delivery attempt
+        // as having failed with no response status or duration, rather than
+        // trying to classify it as a wire-level error below.
+        let request_fut = match self.client.execute(request) {
+            Ok(request_fut) => request_fut,
+            Err(error) => {
+                slog::warn!(
+                    &opctx.log,
+                    "webhook receiver URL was rejected by the external IP \
+                     policy";
+                    "endpoint" => %self.rx.endpoint,
+                    "alert_id" => %delivery.alert_id,
+                    "alert_class" => %alert_class,
+                    "delivery_id" => %delivery.id,
+                    "delivery_trigger" => %delivery.triggered_by,
+                    "error" => InlineErrorChain::new(&error),
+                );
+                return Ok(WebhookDeliveryAttempt {
+                    id: WebhookDeliveryAttemptUuid::new_v4().into(),
+                    delivery_id: delivery.id,
+                    rx_id: delivery.rx_id,
+                    attempt: SqlU8::new(delivery.attempts.0 + 1),
+                    result: WebhookDeliveryAttemptResult::FailedUnreachable,
+                    response_status: None,
+                    response_duration: None,
+                    time_created: chrono::Utc::now(),
+                    deliverator_id: self.nexus_id.into(),
+                });
+            }
+        };
         let t0 = Instant::now();
-        let result = self.client.execute(request).await;
+        let result = request_fut.await;
         let duration = t0.elapsed();
         let (delivery_result, status) = match result {
             // Builder errors are our fault, that's weird!

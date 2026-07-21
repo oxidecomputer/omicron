@@ -35,6 +35,7 @@ use nexus_types::deployment::PendingMgsUpdates;
 use nexus_types::deployment::ReconfiguratorConfigParam;
 
 use omicron_common::address::MGS_PORT;
+use omicron_common::address::UnderlaySubnets;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Error;
 use omicron_uuid_kinds::OmicronZoneUuid;
@@ -71,6 +72,7 @@ pub mod crucible;
 mod deployment;
 mod device_auth;
 mod disk;
+pub(crate) mod external_client;
 mod external_dns;
 pub(crate) mod external_endpoints;
 mod external_ip;
@@ -236,7 +238,7 @@ pub struct Nexus {
     /// This lives on the Nexus struct as we would like to use the same client
     /// pool for the webhook deliverator background task and the webhook probe
     /// API.
-    webhook_delivery_client: reqwest::Client,
+    webhook_delivery_client: external_client::ExternalHttpClient,
 
     /// The tunable parameters from a configuration file
     tunables: Tunables,
@@ -316,6 +318,11 @@ pub struct Nexus {
 
     /// state of overall Nexus quiesce activity
     quiesce: NexusQuiesceHandle,
+
+    /// the underlay subnets (rack and AZ), set once they have been loaded, or
+    /// once the rack has been initialized (if RSS has not already finished when
+    /// this Nexus process starts).
+    underlay_subnets: Arc<OnceLock<UnderlaySubnets>>,
 }
 
 impl Nexus {
@@ -472,30 +479,38 @@ impl Nexus {
             background_tasks_internal,
         ) = background::BackgroundTasksInitializer::new();
 
+        let underlay_subnets = Arc::new(OnceLock::new());
+        // The IP policy is shared by the external DNS resolver (which applies
+        // it to resolved addresses) and any `ExternalHttpClient` (which
+        // applies it to IP literals in URLs).
+        let external_ip_policy = external_client::ExternalIpPolicy::new(
+            underlay_subnets.clone(),
+            config.deployment.external_http_clients.treat_loopback_as_external,
+        );
         let external_resolver = {
             if config.deployment.external_dns_servers.is_empty() {
                 return Err("expected at least 1 external DNS server".into());
             }
+
             Arc::new(external_dns::Resolver::new(
                 &config.deployment.external_dns_servers,
+                external_ip_policy,
             ))
         };
 
-        let webhook_delivery_client = {
-            // The webhook delivery HTTP client will send requests to endpoints
-            // external to the rack, so apply the configuration for external
-            // HTTP clients.
-            let builder = external_http_client_builder(
-                &config.deployment.external_http_clients,
-                &external_resolver,
-            );
-            webhook::delivery_client(builder).map_err(|e| {
-                format!(
-                    "failed to build webhook delivery client: {}",
-                    InlineErrorChain::new(&e)
-                )
-            })?
-        };
+        // The webhook delivery HTTP client will send requests to endpoints
+        // external to the rack, so apply the configuration for external
+        // HTTP clients.
+        let webhook_delivery_client = webhook::delivery_client(
+            &config.deployment.external_http_clients,
+            &external_resolver,
+        )
+        .map_err(|e| {
+            format!(
+                "failed to build webhook delivery client: {}",
+                InlineErrorChain::new(&e)
+            )
+        })?;
 
         let mut mgs_resolver =
             qorb_resolver.for_service(ServiceName::ManagementGatewayService);
@@ -582,6 +597,7 @@ impl Nexus {
             update_status: UpdateStatusHandle::new(blueprint_load_rx),
             quiesce,
             sitrep_load_rx,
+            underlay_subnets,
         };
 
         // TODO-cleanup all the extra Arcs here seems wrong
@@ -1452,29 +1468,4 @@ async fn map_switch_zone_addrs(
     );
 
     switch_zone_addrs
-}
-
-/// Begin configuring an external HTTP client, returning a
-/// `reqwest::ClientBuilder`.
-pub(crate) fn external_http_client_builder(
-    config: &nexus_config::ExternalHttpClientConfig,
-    resolver: &Arc<external_dns::Resolver>,
-) -> reqwest::ClientBuilder {
-    let mut builder = reqwest::ClientBuilder::new();
-
-    builder = builder.dns_resolver(resolver.clone());
-
-    // If we are configured to only bind external TCP connections on a specific interface, do so.
-    #[cfg(any(
-        target_os = "linux",
-        target_os = "macos",
-        target_os = "illumos",
-    ))]
-    {
-        if let Some(ref interface) = config.interface {
-            builder = builder.interface(interface);
-        }
-    }
-
-    builder
 }

@@ -2448,6 +2448,8 @@ impl ServiceManager {
                     external_http_clients:
                         nexus_config::ExternalHttpClientConfig {
                             interface: Some(opte_iface_name.to_string()),
+                            treat_loopback_as_external:
+                                nexus_config::TreatLoopbackAsExternal::No,
                         },
                 };
 

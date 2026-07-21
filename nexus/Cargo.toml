@@ -131,6 +131,7 @@ tokio-util = { workspace = true, features = ["codec", "rt"] }
 tough.workspace = true
 trust-quorum-types.workspace = true
 tufaceous-artifact.workspace = true
+url.workspace = true
 usdt.workspace = true
 uuid.workspace = true
 
@@ -210,6 +211,7 @@ sp-sim.workspace = true
 strum.workspace = true
 subprocess.workspace = true
 term.workspace = true
+transient-dns-server.workspace = true
 tufaceous.workspace = true
 tufaceous-artifact.workspace = true
 tufaceous-lib.workspace = true
