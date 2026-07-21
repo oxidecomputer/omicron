@@ -34,9 +34,8 @@ use nexus_mgs_updates::MgsUpdateDriver;
 use nexus_types::deployment::PendingMgsUpdates;
 use nexus_types::deployment::ReconfiguratorConfigParam;
 
-use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::MGS_PORT;
-use omicron_common::address::RACK_PREFIX;
+use omicron_common::address::UnderlaySubnets;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Error;
 use omicron_uuid_kinds::OmicronZoneUuid;
@@ -319,9 +318,10 @@ pub struct Nexus {
     /// state of overall Nexus quiesce activity
     quiesce: NexusQuiesceHandle,
 
-    /// the rack subnet, set once it has been loaded/once the rack has been
-    /// initialized.
-    rack_subnet: Arc<OnceLock<Ipv6Subnet<RACK_PREFIX>>>,
+    /// the underlay subnets (rack and AZ), set once they have been loaded, or
+    /// once the rack has been initialized (if RSS has not already finished when
+    /// this Nexus process starts).
+    underlay_subnets: Arc<OnceLock<UnderlaySubnets>>,
 }
 
 impl Nexus {
@@ -478,7 +478,7 @@ impl Nexus {
             background_tasks_internal,
         ) = background::BackgroundTasksInitializer::new();
 
-        let rack_subnet = Arc::new(OnceLock::new());
+        let underlay_subnets = Arc::new(OnceLock::new());
         let external_resolver = {
             if config.deployment.external_dns_servers.is_empty() {
                 return Err("expected at least 1 external DNS server".into());
@@ -486,7 +486,7 @@ impl Nexus {
 
             Arc::new(external_dns::Resolver::new(
                 &config.deployment.external_dns_servers,
-                rack_subnet.clone(),
+                underlay_subnets.clone(),
             ))
         };
 
@@ -591,7 +591,7 @@ impl Nexus {
             update_status: UpdateStatusHandle::new(blueprint_load_rx),
             quiesce,
             sitrep_load_rx,
-            rack_subnet,
+            underlay_subnets,
         };
 
         // TODO-cleanup all the extra Arcs here seems wrong

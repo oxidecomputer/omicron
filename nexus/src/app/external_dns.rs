@@ -15,23 +15,21 @@ use hickory_resolver::config::ResolverConfig;
 use hickory_resolver::config::ResolverOpts;
 use hickory_resolver::name_server::TokioConnectionProvider;
 use hickory_resolver::proto::xfer::Protocol;
-use omicron_common::address::AZ_PREFIX;
 use omicron_common::address::DNS_PORT;
-use omicron_common::address::Ipv6Subnet;
-use omicron_common::address::RACK_PREFIX;
+use omicron_common::address::UnderlaySubnets;
 use reqwest::dns::Name;
 
 /// Wrapper around hickory-resolver to provide name resolution
 /// using a given set of DNS servers for use with reqwest.
 pub struct Resolver {
     resolver: TokioResolver,
-    rack_subnet: Arc<OnceLock<Ipv6Subnet<RACK_PREFIX>>>,
+    underlay_subnets: Arc<OnceLock<UnderlaySubnets>>,
 }
 
 impl Resolver {
     pub fn new(
         dns_servers: &[IpAddr],
-        rack_subnet: Arc<OnceLock<Ipv6Subnet<RACK_PREFIX>>>,
+        underlay_subnets: Arc<OnceLock<UnderlaySubnets>>,
     ) -> Resolver {
         assert!(!dns_servers.is_empty());
         let mut rc = ResolverConfig::new();
@@ -77,7 +75,7 @@ impl Resolver {
             )
             .with_options(opts)
             .build(),
-            rack_subnet,
+            underlay_subnets,
         }
     }
 }
@@ -85,7 +83,7 @@ impl Resolver {
 impl reqwest::dns::Resolve for Resolver {
     fn resolve(&self, name: Name) -> reqwest::dns::Resolving {
         let resolver = self.resolver.clone();
-        let rack_subnet = self.rack_subnet.clone();
+        let underlay_subnets = self.underlay_subnets.clone();
         Box::pin(async move {
             let ips = resolver.lookup_ip(name.as_str()).await?;
 
@@ -93,11 +91,14 @@ impl reqwest::dns::Resolve for Resolver {
             // and we _could_ wait for it to be set here, instead of failing
             // fast if we don't know the rack subnet yet. Maybe this is actually
             // the wrong thing and we should wait for it instead, I dunno...
-            let rack_subnet = rack_subnet.get().ok_or_else(|| {
-                anyhow::anyhow!("cannot resolve external DNS names before RSS!")
-            })?;
-            let az_subnet =
-                Ipv6Subnet::<AZ_PREFIX>::new(rack_subnet.net().addr());
+            let az_subnet = underlay_subnets
+                .get()
+                .ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "cannot resolve external DNS names before RSS!"
+                    )
+                })?
+                .az_subnet;
             let addrs = ips
                 .into_iter()
                 .map(|ip| {

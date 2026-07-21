@@ -553,6 +553,25 @@ pub struct UnexpectedUnderlayIpError {
     az_subnet: Ipv6Subnet<AZ_PREFIX>,
 }
 
+/// A rack's underlay subnet, along with the AZ-wide underlay subnet
+/// containing it.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct UnderlaySubnets {
+    pub rack_subnet: Ipv6Subnet<RACK_PREFIX_LENGTH>,
+    pub az_subnet: Ipv6Subnet<AZ_PREFIX_LENGTH>,
+}
+
+impl UnderlaySubnets {
+    /// Constructs a new `UnderlaySubnets` from the rack subnet, widening it to
+    /// determine the AZ subnet.
+    pub fn new(rack_subnet: Ipv6Subnet<RACK_PREFIX_LENGTH>) -> Self {
+        Self {
+            rack_subnet,
+            az_subnet: Ipv6Subnet::new(rack_subnet.net().addr()),
+        }
+    }
+}
+
 /// Represents a subnet which may be used for contacting DNS services.
 #[derive(
     Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq, PartialOrd, Ord,
