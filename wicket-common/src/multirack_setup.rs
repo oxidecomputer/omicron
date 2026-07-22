@@ -6,6 +6,7 @@
 //! cluster.
 
 use crate::rack_setup::{BootstrapSledDescription, GetBgpAuthKeyInfoResponse};
+use iddqd::IdOrdMap;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
@@ -40,7 +41,7 @@ pub struct MultirackJoinConfigBaseUserInput {
 /// a user.
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct CurrentMultirackJoinUserConfig {
-    pub bootstrap_sleds: BTreeSet<BootstrapSledDescription>,
+    pub bootstrap_sleds: IdOrdMap<BootstrapSledDescription>,
     pub rack_network_config: UserSpecifiedRackNetworkConfig,
     pub bgp_auth_keys: GetBgpAuthKeyInfoResponse,
 }

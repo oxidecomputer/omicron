@@ -1647,10 +1647,15 @@ mod test {
 
         // Furthermore, we should be able to see that these IP addresses have
         // been allocated as a part of a service IP pool.
-        let (.., svc_pool) = datastore
-            .ip_pools_service_lookup(&opctx, IpVersion::V4)
+        let svc_pools = datastore
+            .ip_pools_service_lookup_by_version(
+                &opctx,
+                IpVersion::V4,
+                std::num::NonZeroU32::new(1).unwrap(),
+            )
             .await
             .unwrap();
+        let svc_pool = &svc_pools.first().expect("v4 service ip pool").db_pool;
         assert_eq!(svc_pool.name().as_str(), SERVICE_IPV4_POOL_NAME);
 
         let observed_ip_pool_ranges = get_all_ip_pool_ranges(&datastore).await;
@@ -1841,10 +1846,15 @@ mod test {
 
         // Furthermore, we should be able to see that this IP addresses have been
         // allocated as a part of a service IP pool.
-        let (.., svc_pool) = datastore
-            .ip_pools_service_lookup(&opctx, IpVersion::V4)
+        let svc_pools = datastore
+            .ip_pools_service_lookup_by_version(
+                &opctx,
+                IpVersion::V4,
+                std::num::NonZeroU32::new(1).unwrap(),
+            )
             .await
             .unwrap();
+        let svc_pool = &svc_pools.first().expect("v4 service ip pool").db_pool;
         assert_eq!(svc_pool.name().as_str(), SERVICE_IPV4_POOL_NAME);
 
         let observed_ip_pool_ranges = get_all_ip_pool_ranges(&datastore).await;
@@ -2025,10 +2035,15 @@ mod test {
 
         // Furthermore, we should be able to see that this IP address has been
         // allocated as a part of a service IPv6 IP pool.
-        let (.., svc_pool) = datastore
-            .ip_pools_service_lookup(&opctx, IpVersion::V6)
+        let svc_pools = datastore
+            .ip_pools_service_lookup_by_version(
+                &opctx,
+                IpVersion::V6,
+                std::num::NonZeroU32::new(1).unwrap(),
+            )
             .await
             .unwrap();
+        let svc_pool = &svc_pools.first().expect("v6 service ip pool").db_pool;
         assert_eq!(svc_pool.name().as_str(), SERVICE_IPV6_POOL_NAME);
 
         let observed_ip_pool_ranges = get_all_ip_pool_ranges(&datastore).await;

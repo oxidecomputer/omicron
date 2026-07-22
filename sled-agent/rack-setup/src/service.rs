@@ -1790,8 +1790,8 @@ mod test {
     use nexus_reconfigurator_blippy::{Blippy, BlippyReportSortKey};
     use omicron_common::{
         address::{
-            AZ_PREFIX, IpRange, Ipv6Subnet, RACK_PREFIX, SLED_PREFIX,
-            get_sled_address,
+            AZ_PREFIX_LENGTH, IpRange, Ipv6Subnet, RACK_PREFIX_LENGTH,
+            SLED_PREFIX_LENGTH, get_sled_address,
         },
         api::external::{AllowedSourceIps, ByteCount, Generation},
         disk::{DiskIdentity, DiskVariant},
@@ -1822,7 +1822,7 @@ mod test {
 
     fn make_sled_info(
         sled_id: SledUuid,
-        subnet: Ipv6Subnet<SLED_PREFIX>,
+        subnet: Ipv6Subnet<SLED_PREFIX_LENGTH>,
         u2_count: usize,
     ) -> SledInfo {
         let sled_agent_address = get_sled_address(subnet);
@@ -1875,21 +1875,21 @@ mod test {
         vec![
             make_sled_info(
                 SledUuid::new_v4(),
-                Ipv6Subnet::<SLED_PREFIX>::new(
+                Ipv6Subnet::<SLED_PREFIX_LENGTH>::new(
                     "fd00:1122:3344:101::1".parse().unwrap(),
                 ),
                 5,
             ),
             make_sled_info(
                 SledUuid::new_v4(),
-                Ipv6Subnet::<SLED_PREFIX>::new(
+                Ipv6Subnet::<SLED_PREFIX_LENGTH>::new(
                     "fd00:1122:3344:102::1".parse().unwrap(),
                 ),
                 5,
             ),
             make_sled_info(
                 SledUuid::new_v4(),
-                Ipv6Subnet::<SLED_PREFIX>::new(
+                Ipv6Subnet::<SLED_PREFIX_LENGTH>::new(
                     "fd00:1122:3344:103::1".parse().unwrap(),
                 ),
                 5,
@@ -2120,7 +2120,7 @@ mod test {
             rack_network_config: RackNetworkConfig {
                 rack_subnet: Ipv6Net::new(
                     "fd00:1122:3344:0100::".parse().unwrap(),
-                    RACK_PREFIX,
+                    RACK_PREFIX_LENGTH,
                 )
                 .unwrap(),
                 infra_ip_first: IpAddr::V4(Ipv4Addr::LOCALHOST),
@@ -2139,7 +2139,7 @@ mod test {
         };
 
         assert_eq!(
-            omicron_common::address::Ipv6Subnet::<AZ_PREFIX>::new(
+            omicron_common::address::Ipv6Subnet::<AZ_PREFIX_LENGTH>::new(
                 //              Masked out in AZ Subnet
                 //              vv
                 "fd00:1122:3344:0000::".parse::<Ipv6Addr>().unwrap(),
@@ -2147,7 +2147,7 @@ mod test {
             cfg.az_subnet()
         );
         assert_eq!(
-            omicron_common::address::Ipv6Subnet::<RACK_PREFIX>::new(
+            omicron_common::address::Ipv6Subnet::<RACK_PREFIX_LENGTH>::new(
                 //              Shows up from Rack Subnet
                 //              vv
                 "fd00:1122:3344:0100::".parse::<Ipv6Addr>().unwrap(),
@@ -2155,7 +2155,7 @@ mod test {
             cfg.rack_subnet()
         );
         assert_eq!(
-            omicron_common::address::Ipv6Subnet::<SLED_PREFIX>::new(
+            omicron_common::address::Ipv6Subnet::<SLED_PREFIX_LENGTH>::new(
                 //                0th Sled Subnet
                 //                vv
                 "fd00:1122:3344:0100::".parse::<Ipv6Addr>().unwrap(),
@@ -2163,7 +2163,7 @@ mod test {
             cfg.sled_subnet(0)
         );
         assert_eq!(
-            omicron_common::address::Ipv6Subnet::<SLED_PREFIX>::new(
+            omicron_common::address::Ipv6Subnet::<SLED_PREFIX_LENGTH>::new(
                 //                1st Sled Subnet
                 //                vv
                 "fd00:1122:3344:0101::".parse::<Ipv6Addr>().unwrap(),
@@ -2171,7 +2171,7 @@ mod test {
             cfg.sled_subnet(1)
         );
         assert_eq!(
-            omicron_common::address::Ipv6Subnet::<SLED_PREFIX>::new(
+            omicron_common::address::Ipv6Subnet::<SLED_PREFIX_LENGTH>::new(
                 //                Last Sled Subnet
                 //                vv
                 "fd00:1122:3344:01ff::".parse::<Ipv6Addr>().unwrap(),

@@ -14,6 +14,7 @@ use installinator_common::{
     StepWarning, UpdateEngine,
 };
 use omicron_common::FileKv;
+use oxide_update_engine::StepResult;
 use sha2::{Digest, Sha256};
 use slog::{Drain, error, warn};
 use tufaceous_artifact::{
@@ -21,7 +22,6 @@ use tufaceous_artifact::{
     InstallinatorDocument, KnownArtifactKind,
 };
 use tufaceous_lib::ControlPlaneZoneImages;
-use update_engine::StepResult;
 
 use crate::{
     ArtifactWriter, MeasurementToWrite, WriteDestination,

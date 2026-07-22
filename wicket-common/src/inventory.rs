@@ -10,6 +10,7 @@ pub use gateway_client::types::{
 pub use gateway_types::component::{SpIdentifier, SpState, SpType};
 pub use gateway_types::ignition::{SpIgnition, SpIgnitionSystemType};
 pub use gateway_types::rot::{RotSlot, RotState};
+use iddqd::{IdOrdItem, IdOrdMap, id_upcast};
 use omicron_common::snake_case_result;
 use omicron_common::snake_case_result::SnakeCaseResult;
 use schemars::JsonSchema;
@@ -46,19 +47,13 @@ pub struct MgsV1InventorySnapshot {
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "mgs_inventory", rename_all = "snake_case")]
 pub struct MgsV1Inventory {
-    pub sps: Vec<SpInventory>,
-}
-
-impl From<BTreeSet<BootstrapSledDescription>> for SledInventory {
-    fn from(sleds: BTreeSet<BootstrapSledDescription>) -> Self {
-        SledInventory { sleds }
-    }
+    pub sps: IdOrdMap<SpInventory>,
 }
 
 // Inventory about sleds derived from MGS inventory and DDM
 #[derive(Default, Clone, Debug, PartialEq, Eq)]
 pub struct SledInventory {
-    pub sleds: BTreeSet<BootstrapSledDescription>,
+    pub sleds: IdOrdMap<BootstrapSledDescription>,
 }
 
 impl SledInventory {
@@ -143,8 +138,8 @@ impl SledInventory {
     pub fn load_bootstrap_sleds_by_user_chosen_slots(
         &self,
         bootstrap_sled_slots: &BTreeSet<u16>,
-    ) -> Result<BTreeSet<BootstrapSledDescription>, String> {
-        let mut bootstrap_sleds = BTreeSet::new();
+    ) -> Result<IdOrdMap<BootstrapSledDescription>, String> {
+        let mut bootstrap_sleds = IdOrdMap::new();
         for slot in bootstrap_sled_slots {
             let sled =
                 self.sleds
@@ -155,7 +150,9 @@ impl SledInventory {
                             "cannot add unknown sled {slot} to bootstrap_sleds",
                         )
                     })?;
-            bootstrap_sleds.insert(sled.clone());
+            bootstrap_sleds.insert_unique(sled.clone()).expect(
+                "chosen slots are unique, so each sled's SP id is distinct",
+            );
         }
         Ok(bootstrap_sleds)
     }
@@ -189,6 +186,16 @@ impl SpInventory {
             rot: None,
         }
     }
+}
+
+impl IdOrdItem for SpInventory {
+    type Key<'a> = SpIdentifier;
+
+    fn key(&self) -> Self::Key<'_> {
+        self.id
+    }
+
+    id_upcast!();
 }
 
 /// RoT-related data that isn't already supplied in [`SpState`].

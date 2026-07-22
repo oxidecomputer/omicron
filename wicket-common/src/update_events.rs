@@ -4,14 +4,14 @@
 
 use gateway_client::types::PowerState;
 use omicron_common::update::ArtifactId;
+use oxide_update_engine_types::errors::NestedEngineError;
+use oxide_update_engine_types::spec::EngineSpec;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 use std::fmt;
 use std::sync::Arc;
 use thiserror::Error;
-use update_engine::StepSpec;
-use update_engine::errors::NestedEngineError;
 
 #[derive(JsonSchema)]
 pub enum WicketdEngineSpec {}
@@ -55,7 +55,11 @@ pub enum UpdateStepId {
     RunningInstallinator,
 }
 
-impl StepSpec for WicketdEngineSpec {
+impl EngineSpec for WicketdEngineSpec {
+    fn spec_name() -> String {
+        "WicketdEngineSpec".to_owned()
+    }
+
     type Component = UpdateComponent;
     type StepId = UpdateStepId;
     type StepMetadata = serde_json::Value;
@@ -65,7 +69,11 @@ impl StepSpec for WicketdEngineSpec {
     type Error = UpdateTerminalError;
 }
 
-update_engine::define_update_engine!(pub WicketdEngineSpec);
+oxide_update_engine::define_update_engine!(pub WicketdEngineSpec);
+oxide_update_engine_types::define_update_engine_types!(pub WicketdEngineSpec);
+
+pub type StepStatus<S = WicketdEngineSpec> =
+    oxide_update_engine_types::buffer::StepStatus<S>;
 
 #[derive(JsonSchema)]
 pub enum TestStepSpec {}
@@ -86,13 +94,17 @@ pub enum TestStepId {
 #[derive(Debug, Error)]
 pub enum TestStepError {}
 
-impl update_engine::AsError for TestStepError {
+impl oxide_update_engine_types::spec::AsError for TestStepError {
     fn as_error(&self) -> &(dyn std::error::Error + 'static) {
         self
     }
 }
 
-impl StepSpec for TestStepSpec {
+impl EngineSpec for TestStepSpec {
+    fn spec_name() -> String {
+        "TestStepSpec".to_owned()
+    }
+
     type Component = TestStepComponent;
     type StepId = TestStepId;
     type StepMetadata = serde_json::Value;
@@ -116,7 +128,11 @@ pub enum SpComponentUpdateStepId {
     CheckingActiveBootSlot,
 }
 
-impl StepSpec for SpComponentUpdateSpec {
+impl EngineSpec for SpComponentUpdateSpec {
+    fn spec_name() -> String {
+        "SpComponentUpdateSpec".to_owned()
+    }
+
     type Component = UpdateComponent;
     type StepId = SpComponentUpdateStepId;
     type StepMetadata = serde_json::Value;
@@ -230,7 +246,7 @@ pub enum UpdateTerminalError {
     UnknownHost(String),
 }
 
-impl update_engine::AsError for UpdateTerminalError {
+impl oxide_update_engine_types::spec::AsError for UpdateTerminalError {
     fn as_error(&self) -> &(dyn std::error::Error + 'static) {
         self
     }
@@ -287,7 +303,9 @@ pub enum SpComponentUpdateTerminalError {
     },
 }
 
-impl update_engine::AsError for SpComponentUpdateTerminalError {
+impl oxide_update_engine_types::spec::AsError
+    for SpComponentUpdateTerminalError
+{
     fn as_error(&self) -> &(dyn std::error::Error + 'static) {
         self
     }
