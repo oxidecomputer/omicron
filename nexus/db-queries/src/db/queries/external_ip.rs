@@ -1755,7 +1755,8 @@ mod tests {
             .expect_err("Should have failed to allocate out-of-bounds IP");
         assert_eq!(
             err.to_string(),
-            "Invalid Request: Requested external IP address not available"
+            "Invalid Request: External IP address 10.0.0.5 is not \
+            available in any pool assigned to system services"
         );
 
         context.success().await;
@@ -2423,23 +2424,25 @@ mod tests {
             "fd01::ffff".parse::<Ipv6Addr>().unwrap(),
         ))
         .unwrap();
-        let (authz_pool, db_pool) = context
+        let service_pools = context
             .db
             .datastore()
-            .ip_pools_service_lookup(
+            .ip_pools_service_lookup_by_version(
                 context.db.opctx(),
                 nexus_db_model::IpVersion::V6,
+                std::num::NonZeroU32::new(1).unwrap(),
             )
             .await
-            .expect("should be able to lookup service IP Pool");
+            .expect("should be able to lookup service IP Pools");
+        let service_pool = service_pools.first().expect("v6 service ip pool");
         for range in [range1, range2] {
             let _ = context
                 .db
                 .datastore()
                 .ip_pool_add_range(
                     context.db.opctx(),
-                    &authz_pool,
-                    &db_pool,
+                    &service_pool.authz_pool,
+                    &service_pool.db_pool,
                     &range,
                 )
                 .await

@@ -316,11 +316,6 @@ impl OximeterAgent {
             collector_port: address.port(),
         };
 
-        // We don't spawn the task to periodically refresh producers when run
-        // in standalone mode. We can just pretend we registered once, and
-        // that's it.
-        let last_refresh_time = Arc::new(Mutex::new(Some(Utc::now())));
-
         Ok(Self {
             id,
             log,
@@ -329,7 +324,7 @@ impl OximeterAgent {
             collection_tasks: Arc::new(Mutex::new(BTreeMap::new())),
             refresh_interval,
             refresh_task: Arc::new(Mutex::new(None)),
-            last_refresh_time,
+            last_refresh_time: Arc::new(Mutex::new(None)),
         })
     }
 
@@ -982,7 +977,7 @@ mod tests {
         )
         .config(Default::default())
         .start()
-        .expect("failed to spawn empty dropshot server");
+        .expect("failed to spawn live producer server");
 
         // Register the dummy producer.
         let endpoint = ProducerEndpoint {
@@ -1357,6 +1352,102 @@ mod tests {
         assert_eq!(details.address, server.local_addr());
         assert!(details.n_collections > 0);
         assert!(collection_count.load(Ordering::SeqCst) > 0);
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_standalone_integration() {
+        usdt::register_probes().unwrap();
+        let logctx = test_setup_log("test_standalone_integration");
+        let log = &logctx.log;
+
+        // Start the standalone nexus to register and list producers.
+        let nexus = crate::standalone::Server::new(
+            SocketAddr::V6(SocketAddrV6::new(Ipv6Addr::LOCALHOST, 0, 0, 0)),
+            slog::Level::Error,
+        )
+        .expect("failed to start standalone nexus");
+
+        // Spawn the mock server that always reports dummy statistics.
+        let collection_count = Arc::new(AtomicUsize::new(0));
+        let producer = ServerBuilder::new(
+            producer_api_mod::api_description::<LiveProducer>().unwrap(),
+            collection_count.clone(),
+            log.new(slog::o!("component" => "producer")),
+        )
+        .config(Default::default())
+        .start()
+        .expect("failed to spawn live producer server");
+
+        // Spawn the standalone oximeter, using the standalone nexus to track producers.
+        let args = crate::OximeterArguments {
+            id: Uuid::new_v4(),
+            address: SocketAddrV6::new(Ipv6Addr::LOCALHOST, 0, 0, 0),
+        };
+        let collector = crate::Oximeter::new_standalone(
+            log,
+            &args,
+            nexus.local_addr(),
+            None,
+            // Refresh often so the test doesn't wait the 15s production
+            // default for the collector to discover the producer.
+            Duration::from_millis(100),
+        )
+        .await
+        .expect("failed to start standalone collector");
+
+        // Register the producer with the standalone nexus.
+        let producer_id = Uuid::new_v4();
+        let endpoint = ProducerEndpoint {
+            id: producer_id,
+            kind: ProducerKind::Service,
+            address: producer.local_addr(),
+            interval: COLLECTION_INTERVAL,
+        };
+        reqwest::Client::new()
+            .post(format!("http://{}/metrics/producers", nexus.local_addr()))
+            .json(&endpoint)
+            .send()
+            .await
+            .expect("failed to register producer")
+            .error_for_status()
+            .expect("producer registration returned an error");
+
+        // Assert that the producer with the expected uuid was registered.
+        wait_for_condition(
+            || async {
+                if collector
+                    .list_producers(None, 10)
+                    .iter()
+                    .any(|p| p.id == producer_id)
+                {
+                    Ok(())
+                } else {
+                    Err(CondCheckError::<()>::NotYet { status: None })
+                }
+            },
+            &POLL_INTERVAL,
+            &COLLECTION_TIMEOUT,
+        )
+        .await
+        .expect("collector discovered the dummy producer");
+
+        // Assert that the collector collects at least one sample.
+        collector.try_force_collect().expect("forced collection enqueued");
+        wait_for_condition(
+            || async {
+                if collection_count.load(Ordering::SeqCst) >= 1 {
+                    Ok(())
+                } else {
+                    Err(CondCheckError::<()>::NotYet { status: None })
+                }
+            },
+            &POLL_INTERVAL,
+            &COLLECTION_TIMEOUT,
+        )
+        .await
+        .expect("collector collected >0 samples");
+
         logctx.cleanup_successful();
     }
 }

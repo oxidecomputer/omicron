@@ -89,7 +89,7 @@ libc = { version = "0.2.185", features = ["extra_traits"] }
 log = { version = "0.4.29", default-features = false, features = ["std"] }
 managed = { version = "0.8.0", default-features = false, features = ["alloc", "map"] }
 memchr = { version = "2.8.0" }
-newtype-uuid = { version = "1.3.2", features = ["proptest1"] }
+newtype-uuid = { version = "1.3.2", features = ["proptest1", "schemars08", "serde", "v4"] }
 nix = { version = "0.31.2", features = ["feature", "fs", "net", "signal", "uio"] }
 num-bigint-dig = { version = "0.8.6", default-features = false, features = ["i128", "prime", "serde", "u64_digit", "zeroize"] }
 num-integer = { version = "0.1.46", features = ["i128"] }
@@ -238,7 +238,7 @@ libc = { version = "0.2.185", features = ["extra_traits"] }
 log = { version = "0.4.29", default-features = false, features = ["std"] }
 managed = { version = "0.8.0", default-features = false, features = ["alloc", "map"] }
 memchr = { version = "2.8.0" }
-newtype-uuid = { version = "1.3.2", features = ["proptest1"] }
+newtype-uuid = { version = "1.3.2", features = ["proptest1", "schemars08", "serde", "v4"] }
 nix = { version = "0.31.2", features = ["feature", "fs", "net", "signal", "uio"] }
 num-bigint-dig = { version = "0.8.6", default-features = false, features = ["i128", "prime", "serde", "u64_digit", "zeroize"] }
 num-integer = { version = "0.1.46", features = ["i128"] }

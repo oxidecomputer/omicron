@@ -25,7 +25,6 @@ use nexus_types::deployment::UpstreamNtpConfig;
 use nexus_types::external_api::instance::PrivateIpStackCreate;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::IdentityMetadataCreateParams;
-use omicron_common::api::external::IpVersion;
 use omicron_common::api::internal::shared::PrivateIpConfig;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
@@ -200,12 +199,6 @@ impl DataStore {
         opctx: &OpContext,
         zones_to_allocate: impl Iterator<Item = &BlueprintZoneConfig>,
     ) -> Result<(), TransactionError<Error>> {
-        // Looking up the service pool IDs requires an opctx; we'll do this at
-        // most once inside the loop below, when we first encounter an address
-        // of the same IP version.
-        let mut v4_pool = None;
-        let mut v6_pool = None;
-
         for z in zones_to_allocate {
             let Some((external_ip, nic)) = z.zone_type.external_networking()
             else {
@@ -220,29 +213,26 @@ impl DataStore {
                 "nic" => format!("{nic:?}"),
             ));
 
-            // Get existing pool or look it up and cache it.
-            let version = external_ip.ip_version();
-            let pool_ref = match version {
-                IpVersion::V4 => &mut v4_pool,
-                IpVersion::V6 => &mut v6_pool,
-            };
-            let pool = match pool_ref {
-                Some(p) => p,
-                None => {
-                    let new = self
-                        .ip_pools_service_lookup(opctx, version.into())
-                        .await?
-                        .1;
-                    *pool_ref = Some(new);
-                    pool_ref.as_ref().unwrap()
-                }
-            };
+            // Look up the system-service pool containing this address, if any.
+            let (_authz_pool, db_pool) = self
+                .ip_pool_fetch_containing_address_for_services_on_connection(
+                    opctx,
+                    conn,
+                    external_ip.ip(),
+                )
+                .await
+                .map_err(|e| {
+                    Self::map_external_ip_not_found_for_zone_error(
+                        e,
+                        external_ip.ip(),
+                    )
+                })?;
 
             // Actually ensure the IP address.
             let kind = z.zone_type.kind();
             self.ensure_external_service_ip(
                 conn,
-                pool,
+                &db_pool,
                 kind,
                 z.id,
                 external_ip,
@@ -855,15 +845,21 @@ mod tests {
             opctx: &OpContext,
             datastore: &DataStore,
         ) {
-            let (ip_pool, db_pool) = datastore
-                .ip_pools_service_lookup(&opctx, IpVersion::V4.into())
+            let service_pools = datastore
+                .ip_pools_service_lookup_by_version(
+                    &opctx,
+                    omicron_common::api::external::IpVersion::V4.into(),
+                    std::num::NonZeroU32::new(1).unwrap(),
+                )
                 .await
-                .expect("failed to find service IP pool");
+                .expect("failed to find service IP pools");
+            let service_pool =
+                service_pools.first().expect("no v4 system services IP pool");
             datastore
                 .ip_pool_add_range(
                     &opctx,
-                    &ip_pool,
-                    &db_pool,
+                    &service_pool.authz_pool,
+                    &service_pool.db_pool,
                     &self.external_ips_range,
                 )
                 .await

@@ -349,9 +349,9 @@ mod test {
     use nexus_types::silo::silo_dns_name;
     use omicron_common::address::IpRange;
     use omicron_common::address::Ipv6Subnet;
-    use omicron_common::address::RACK_PREFIX;
+    use omicron_common::address::RACK_PREFIX_LENGTH;
     use omicron_common::address::REPO_DEPOT_PORT;
-    use omicron_common::address::SLED_PREFIX;
+    use omicron_common::address::SLED_PREFIX_LENGTH;
     use omicron_common::address::get_sled_address;
     use omicron_common::address::get_switch_zone_address;
     use omicron_common::api::external::Generation;
@@ -646,8 +646,9 @@ mod test {
         let rack_subnet_base: Ipv6Addr =
             "fd00:1122:3344:0100::".parse().unwrap();
         let rack_subnet =
-            ipnet::Ipv6Net::new(rack_subnet_base, RACK_PREFIX).unwrap();
-        let possible_sled_subnets = rack_subnet.subnets(SLED_PREFIX).unwrap();
+            ipnet::Ipv6Net::new(rack_subnet_base, RACK_PREFIX_LENGTH).unwrap();
+        let possible_sled_subnets =
+            rack_subnet.subnets(SLED_PREFIX_LENGTH).unwrap();
 
         let mut blueprint_sleds = BTreeMap::new();
 
