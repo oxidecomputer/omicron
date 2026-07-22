@@ -10,12 +10,15 @@ use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::datastore::fm::GcOrphansResult;
 use nexus_types::internal_api::background::SitrepGcStatus as Status;
+use nexus_types::internal_api::background::fm_sitrep_gc as status;
 use serde_json::json;
 use slog_error_chain::InlineErrorChain;
+use std::num::NonZeroU32;
 use std::sync::Arc;
 
 pub struct SitrepGc {
     datastore: Arc<DataStore>,
+    history_deletion_threshold: NonZeroU32,
 }
 
 impl BackgroundTask for SitrepGc {
@@ -41,11 +44,36 @@ impl BackgroundTask for SitrepGc {
 
 impl SitrepGc {
     pub fn new(datastore: Arc<DataStore>) -> Self {
-        Self { datastore }
+        Self {
+            datastore,
+            history_deletion_threshold:
+                Self::DEFAULT_HISTORY_DELETION_THRESHOLD,
+        }
     }
 
+    // Limits for abandoning sitreps from the history table.
+    pub const DEFAULT_HISTORY_DELETION_THRESHOLD: NonZeroU32 =
+        NonZeroU32::new(2000).unwrap();
+
     async fn actually_activate(&mut self, opctx: &OpContext) -> Status {
-        let mut status = Status::default();
+        // First, try to prune the sitrep history if it's over the threshold.
+        // Doing this first ensures that we will then attempt to GC any rows
+        // abandoned by pruning the history. However, if this fails, we still
+        // want to try to GC rows that were already orphaned, so don't `?` this!
+        let pruning = self.datastore.fm_sitrep_history_prune(&opctx, self.history_deletion_threshold).await.map_err(|e| {
+            let error = InlineErrorChain::new(&e);
+            slog::error!(&opctx.log, "pruning the sitrep history table failed"; &error);
+            error.to_string()
+        });
+
+        let mut status = Status {
+            pruning,
+            orphaned_sitreps_deleted: 0,
+            sitrep_metadata_batches: 0,
+            batch_size: 0,
+            child_tables: Default::default(),
+            errors: Vec::new(),
+        };
 
         match self.datastore.fm_sitrep_gc_orphans(&opctx).await {
             Ok(GcOrphansResult {
@@ -62,7 +90,7 @@ impl SitrepGc {
                     .map(|(table, stats)| {
                         (
                             table.table_name().to_string(),
-                            nexus_types::internal_api::background::ChildTableGcStats {
+                            status::ChildTableGcStats {
                                 rows_deleted: stats.rows_deleted,
                                 batches: stats.batches,
                             },
