@@ -8,3 +8,4 @@
 //! have to depend on `wicketd-commission-types-versions` directly. See RFD 619.
 
 pub mod rack_setup;
+pub mod update;

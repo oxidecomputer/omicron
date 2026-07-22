@@ -19,10 +19,10 @@ use std::{
     sync::LazyLock,
 };
 
-pub const BOOTSTRAP_SUBNET_PREFIX: u8 = 40;
-pub const AZ_PREFIX: u8 = 48;
-pub const RACK_PREFIX: u8 = 56;
-pub const SLED_PREFIX: u8 = 64;
+pub const BOOTSTRAP_SUBNET_PREFIX_LENGTH: u8 = 40;
+pub const AZ_PREFIX_LENGTH: u8 = 48;
+pub const RACK_PREFIX_LENGTH: u8 = 56;
+pub const SLED_PREFIX_LENGTH: u8 = 64;
 
 /// Effective MTU for external-facing OPTE ports when jumbo frames have been
 /// opted into. 500 bytes of headroom under the 9000 byte underlay MTU leaves
@@ -131,8 +131,10 @@ pub const IPV4_LINK_LOCAL_MULTICAST_SUBNET: Ipv4Net =
 /// See [RFC 4291] for IPv6 addressing architecture.
 ///
 /// [RFC 4291]: https://www.rfc-editor.org/rfc/rfc4291
-pub const IPV6_MULTICAST_RANGE: Ipv6Net =
-    Ipv6Net::new_unchecked(Ipv6Addr::new(0xff00, 0, 0, 0, 0, 0, 0, 0), 8);
+pub const IPV6_MULTICAST_RANGE: Ipv6Net = Ipv6Net::new_unchecked(
+    Ipv6Addr::new(IPV6_MULTICAST_PREFIX, 0, 0, 0, 0, 0, 0, 0),
+    8,
+);
 
 /// IPv6 multicast prefix (ff00::/8) mask/value for scope checking.
 ///
@@ -298,7 +300,7 @@ pub const VPC_SUBNET_IPV6_PREFIX_LENGTH: u8 = 64;
 /// Minimum prefix size supported in IPv4 VPC Subnets.
 ///
 /// NOTE: This is the minimum _prefix_, which sets the maximum subnet size.
-pub const MIN_VPC_IPV4_SUBNET_PREFIX: u8 = 8;
+pub const MIN_VPC_IPV4_SUBNET_PREFIX_LENGTH: u8 = 8;
 
 /// The number of reserved addresses at the beginning of a subnet range.
 pub const NUM_INITIAL_RESERVED_IP_ADDRESSES: usize = 5;
@@ -309,7 +311,7 @@ pub const NUM_INITIAL_RESERVED_IP_ADDRESSES: usize = 5;
 /// like, and the broadcast address at the end of the subnet. This size provides
 /// room for 2 ** 6 - 6 = 58 IP addresses, which seems like a reasonable size
 /// for the smallest subnet that's still useful in many contexts.
-pub const MAX_VPC_IPV4_SUBNET_PREFIX: u8 = 26;
+pub const MAX_VPC_IPV4_SUBNET_PREFIX_LENGTH: u8 = 26;
 
 // The number of ports available to an SNAT IP.
 // Note that for static NAT, this value isn't used, and all ports are available.
@@ -337,14 +339,41 @@ pub const NUM_SOURCE_NAT_PORTS: u16 = 1 << 14;
 // The specific values aren't deployment-specific as they are virtualized
 // within OPTE.
 
+// VPC IPv6 prefixes are three octet-pairs, so we need three `u16` constants to
+// represent the service VPC subnet prefix of `fd77:e9d2:9cd9::/48`.
+//
+// These are used to construct the `SERVICE_VPC_IPV6_SUBNET` constant below,
+// which represents the entire /48, and the various constants for the individual
+// service /64s within this subnet.
+//
+// XXX(eliza): it would be nice to have a way to construct these subnets from
+// the shared prefix octet-pairs that is a bit less gross than having to scream
+// `SERVICE_VPC_IPV6_PREFIX_n` three times for each one, such as by taking the
+// `SERVICE_VPC_IPV6_SUBNET` value and just setting the value of the 4th
+// octet-pair for each service subnet, but I couldn't figure out a way to do
+// that with the current `oxnet` API. At least this way, we aren't hard-coding
+// the `u16` literals for each subnet...
+const SERVICE_VPC_IPV6_PREFIX_1: u16 = 0xfd77;
+const SERVICE_VPC_IPV6_PREFIX_2: u16 = 0xe9d2;
+const SERVICE_VPC_IPV6_PREFIX_3: u16 = 0x9cd9;
+
 /// The IPv6 prefix assigned to the built-in services VPC.
 // The specific prefix here was randomly chosen from the expected VPC
 // prefix range (`fd00::/48`). See `random_vpc_ipv6_prefix`.
 // Furthermore, all the below *_OPTE_IPV6_SUBNET constants are
 // /64's within this prefix.
-pub static SERVICE_VPC_IPV6_PREFIX: LazyLock<Ipv6Net> = LazyLock::new(|| {
+pub static SERVICE_VPC_IPV6_SUBNET: LazyLock<Ipv6Net> = LazyLock::new(|| {
     Ipv6Net::new(
-        Ipv6Addr::new(0xfd77, 0xe9d2, 0x9cd9, 0, 0, 0, 0, 0),
+        Ipv6Addr::new(
+            SERVICE_VPC_IPV6_PREFIX_1,
+            SERVICE_VPC_IPV6_PREFIX_2,
+            SERVICE_VPC_IPV6_PREFIX_3,
+            0,
+            0,
+            0,
+            0,
+            0,
+        ),
         VPC_IPV6_PREFIX_LENGTH,
     )
     .unwrap()
@@ -357,7 +386,16 @@ pub static DNS_OPTE_IPV4_SUBNET: LazyLock<Ipv4Net> =
 /// The IPv6 subnet for External DNS OPTE ports.
 pub static DNS_OPTE_IPV6_SUBNET: LazyLock<Ipv6Net> = LazyLock::new(|| {
     Ipv6Net::new(
-        Ipv6Addr::new(0xfd77, 0xe9d2, 0x9cd9, 1, 0, 0, 0, 0),
+        Ipv6Addr::new(
+            SERVICE_VPC_IPV6_PREFIX_1,
+            SERVICE_VPC_IPV6_PREFIX_2,
+            SERVICE_VPC_IPV6_PREFIX_3,
+            1,
+            0,
+            0,
+            0,
+            0,
+        ),
         VPC_SUBNET_IPV6_PREFIX_LENGTH,
     )
     .unwrap()
@@ -370,7 +408,16 @@ pub static NEXUS_OPTE_IPV4_SUBNET: LazyLock<Ipv4Net> =
 /// The IPv6 subnet for Nexus OPTE ports.
 pub static NEXUS_OPTE_IPV6_SUBNET: LazyLock<Ipv6Net> = LazyLock::new(|| {
     Ipv6Net::new(
-        Ipv6Addr::new(0xfd77, 0xe9d2, 0x9cd9, 2, 0, 0, 0, 0),
+        Ipv6Addr::new(
+            SERVICE_VPC_IPV6_PREFIX_1,
+            SERVICE_VPC_IPV6_PREFIX_2,
+            SERVICE_VPC_IPV6_PREFIX_3,
+            2,
+            0,
+            0,
+            0,
+            0,
+        ),
         VPC_SUBNET_IPV6_PREFIX_LENGTH,
     )
     .unwrap()
@@ -383,7 +430,16 @@ pub static NTP_OPTE_IPV4_SUBNET: LazyLock<Ipv4Net> =
 /// The IPv6 subnet for Boundary NTP OPTE ports.
 pub static NTP_OPTE_IPV6_SUBNET: LazyLock<Ipv6Net> = LazyLock::new(|| {
     Ipv6Net::new(
-        Ipv6Addr::new(0xfd77, 0xe9d2, 0x9cd9, 3, 0, 0, 0, 0),
+        Ipv6Addr::new(
+            SERVICE_VPC_IPV6_PREFIX_1,
+            SERVICE_VPC_IPV6_PREFIX_2,
+            SERVICE_VPC_IPV6_PREFIX_3,
+            3,
+            0,
+            0,
+            0,
+            0,
+        ),
         VPC_SUBNET_IPV6_PREFIX_LENGTH,
     )
     .unwrap()
@@ -500,11 +556,11 @@ impl<'de, const N: u8> Deserialize<'de> for Ipv6Subnet<N> {
     Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq, PartialOrd, Ord,
 )]
 pub struct DnsSubnet {
-    subnet: Ipv6Subnet<SLED_PREFIX>,
+    subnet: Ipv6Subnet<SLED_PREFIX_LENGTH>,
 }
 
 impl DnsSubnet {
-    pub fn new(subnet: Ipv6Subnet<SLED_PREFIX>) -> Self {
+    pub fn new(subnet: Ipv6Subnet<SLED_PREFIX_LENGTH>) -> Self {
         Self { subnet }
     }
 
@@ -514,7 +570,7 @@ impl DnsSubnet {
     }
 
     /// Returns the DNS subnet.
-    pub fn subnet(&self) -> Ipv6Subnet<SLED_PREFIX> {
+    pub fn subnet(&self) -> Ipv6Subnet<SLED_PREFIX_LENGTH> {
         self.subnet
     }
 
@@ -542,17 +598,19 @@ impl DnsSubnet {
 /// A wrapper around an IPv6 network, indicating it is a "reserved" rack
 /// subnet which can be used for AZ-wide services.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub struct ReservedRackSubnet(pub Ipv6Subnet<RACK_PREFIX>);
+pub struct ReservedRackSubnet(pub Ipv6Subnet<RACK_PREFIX_LENGTH>);
 
 impl ReservedRackSubnet {
     /// Returns the subnet for the reserved rack subnet.
-    pub fn new(subnet: Ipv6Subnet<AZ_PREFIX>) -> Self {
-        ReservedRackSubnet(Ipv6Subnet::<RACK_PREFIX>::new(subnet.net().addr()))
+    pub fn new(subnet: Ipv6Subnet<AZ_PREFIX_LENGTH>) -> Self {
+        ReservedRackSubnet(Ipv6Subnet::<RACK_PREFIX_LENGTH>::new(
+            subnet.net().addr(),
+        ))
     }
 
     /// Infer the reserved rack subnet from a sled/AZ/DNS subnet.
     pub fn from_subnet<const N: u8>(subnet: Ipv6Subnet<N>) -> Self {
-        Self::new(Ipv6Subnet::<AZ_PREFIX>::new(subnet.net().addr()))
+        Self::new(Ipv6Subnet::<AZ_PREFIX_LENGTH>::new(subnet.net().addr()))
     }
 
     /// Returns the `index`th DNS subnet from this reserved rack subnet.
@@ -563,7 +621,7 @@ impl ReservedRackSubnet {
     /// Returns the DNS addresses from this reserved rack subnet.
     ///
     /// These addresses will come from the first [`INTERNAL_DNS_REDUNDANCY`]
-    /// `/64s` of the [`RACK_PREFIX`] subnet.
+    /// `/64s` of this reserved rack subnet.
     pub fn get_dns_subnets(&self) -> Vec<DnsSubnet> {
         (0..INTERNAL_DNS_REDUNDANCY)
             .map(|idx| self.get_dns_subnet(u8::try_from(idx + 1).unwrap()))
@@ -574,7 +632,7 @@ impl ReservedRackSubnet {
 /// Return the list of DNS servers for the rack, given any address in the AZ
 /// subnet
 pub fn get_internal_dns_server_addresses(addr: Ipv6Addr) -> Vec<IpAddr> {
-    let az_subnet = Ipv6Subnet::<AZ_PREFIX>::new(addr);
+    let az_subnet = Ipv6Subnet::<AZ_PREFIX_LENGTH>::new(addr);
     ReservedRackSubnet::new(az_subnet)
         .get_dns_subnets()
         .iter()
@@ -587,8 +645,10 @@ const SWITCH_ZONE_ADDRESS_INDEX: usize = 2;
 
 /// Return the sled agent address for a subnet.
 ///
-/// This address will come from the first address of the [`SLED_PREFIX`] subnet.
-pub fn get_sled_address(sled_subnet: Ipv6Subnet<SLED_PREFIX>) -> SocketAddrV6 {
+/// This address will come from the first address of the provided `sled_subnet`.
+pub fn get_sled_address(
+    sled_subnet: Ipv6Subnet<SLED_PREFIX_LENGTH>,
+) -> SocketAddrV6 {
     let sled_agent_ip =
         sled_subnet.net().nth(SLED_AGENT_ADDRESS_INDEX as u128).unwrap();
     SocketAddrV6::new(sled_agent_ip, SLED_AGENT_PORT, 0, 0)
@@ -596,9 +656,10 @@ pub fn get_sled_address(sled_subnet: Ipv6Subnet<SLED_PREFIX>) -> SocketAddrV6 {
 
 /// Return the switch zone address for a subnet.
 ///
-/// This address will come from the second address of the [`SLED_PREFIX`] subnet.
+/// This address will come from the second address of the provided
+/// `sled_subnet`.
 pub fn get_switch_zone_address(
-    sled_subnet: Ipv6Subnet<SLED_PREFIX>,
+    sled_subnet: Ipv6Subnet<SLED_PREFIX_LENGTH>,
 ) -> Ipv6Addr {
     sled_subnet.net().nth(SWITCH_ZONE_ADDRESS_INDEX as u128).unwrap()
 }
@@ -607,14 +668,14 @@ pub fn get_switch_zone_address(
 ///
 /// The subnet at index == 0 is used for rack-local services.
 pub fn get_64_subnet(
-    rack_subnet: Ipv6Subnet<RACK_PREFIX>,
+    rack_subnet: Ipv6Subnet<RACK_PREFIX_LENGTH>,
     index: u8,
-) -> Ipv6Subnet<SLED_PREFIX> {
+) -> Ipv6Subnet<SLED_PREFIX_LENGTH> {
     let mut rack_network = rack_subnet.net().addr().octets();
 
     // To set bits distinguishing the /64 from the /56, we modify the 7th octet.
     rack_network[7] = index;
-    Ipv6Subnet::<SLED_PREFIX>::new(Ipv6Addr::from(rack_network))
+    Ipv6Subnet::<SLED_PREFIX_LENGTH>::new(Ipv6Addr::from(rack_network))
 }
 
 /// The IP address version.
@@ -1068,7 +1129,7 @@ mod test {
 
     #[test]
     fn test_dns_subnets() {
-        let subnet = Ipv6Subnet::<AZ_PREFIX>::new(
+        let subnet = Ipv6Subnet::<AZ_PREFIX_LENGTH>::new(
             "fd00:1122:3344:0100::".parse::<Ipv6Addr>().unwrap(),
         );
         let rack_subnet = ReservedRackSubnet::new(subnet);
@@ -1097,7 +1158,7 @@ mod test {
 
     #[test]
     fn test_sled_address() {
-        let subnet = Ipv6Subnet::<SLED_PREFIX>::new(
+        let subnet = Ipv6Subnet::<SLED_PREFIX_LENGTH>::new(
             "fd00:1122:3344:0101::".parse::<Ipv6Addr>().unwrap(),
         );
         assert_eq!(
@@ -1105,7 +1166,7 @@ mod test {
             get_sled_address(subnet)
         );
 
-        let subnet = Ipv6Subnet::<SLED_PREFIX>::new(
+        let subnet = Ipv6Subnet::<SLED_PREFIX_LENGTH>::new(
             "fd00:1122:3344:0308::".parse::<Ipv6Addr>().unwrap(),
         );
         assert_eq!(

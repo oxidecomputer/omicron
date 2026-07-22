@@ -4481,15 +4481,21 @@ mod tests {
             // This looks up the pool again for each range; we only need at most
             // two (one V4, one V6), but our example system doesn't have many
             // ranges so this should be fine.
-            let (service_authz_ip_pool, service_ip_pool) = datastore
-                .ip_pools_service_lookup(&opctx, pool_range.version().into())
+            let service_pools = datastore
+                .ip_pools_service_lookup_by_version(
+                    &opctx,
+                    pool_range.version().into(),
+                    std::num::NonZeroU32::new(1).unwrap(),
+                )
                 .await
-                .expect("lookup service ip pool");
+                .expect("lookup service ip pools");
+            let service_pool =
+                service_pools.first().expect("service ip pool for version");
             datastore
                 .ip_pool_add_range(
                     &opctx,
-                    &service_authz_ip_pool,
-                    &service_ip_pool,
+                    &service_pool.authz_pool,
+                    &service_pool.db_pool,
                     &pool_range,
                 )
                 .await
@@ -4568,15 +4574,20 @@ mod tests {
                     .map(|(ip, _nic)| ip.ip())
             })
             .expect("found external IP");
-        let (service_authz_ip_pool, service_ip_pool) = datastore
-            .ip_pools_service_lookup(&opctx, IpVersion::V4)
+        let service_pools = datastore
+            .ip_pools_service_lookup_by_version(
+                &opctx,
+                IpVersion::V4,
+                std::num::NonZeroU32::new(1).unwrap(),
+            )
             .await
-            .expect("lookup service ip pool");
+            .expect("lookup service ip pools");
+        let service_pool = service_pools.first().expect("v4 service ip pool");
         datastore
             .ip_pool_add_range(
                 &opctx,
-                &service_authz_ip_pool,
-                &service_ip_pool,
+                &service_pool.authz_pool,
+                &service_pool.db_pool,
                 &IpRange::try_from((nexus_ip, nexus_ip))
                     .expect("valid IP range"),
             )

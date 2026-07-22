@@ -13,7 +13,7 @@
 //! * Updating either of these immediately when changes are requested
 
 use omicron_common::address::Ipv6Subnet;
-use omicron_common::address::SLED_PREFIX;
+use omicron_common::address::SLED_PREFIX_LENGTH;
 use omicron_ddm_admin_client::Client;
 use omicron_ddm_admin_client::DdmError;
 use omicron_ddm_admin_client::types::EnableStatsRequest;
@@ -50,7 +50,7 @@ pub(crate) struct DdmReconciler {
 
 impl DdmReconciler {
     pub fn new(
-        bootstrap_subnet: Ipv6Subnet<SLED_PREFIX>,
+        bootstrap_subnet: Ipv6Subnet<SLED_PREFIX_LENGTH>,
         base_log: &Logger,
     ) -> Result<Self, DdmError> {
         let client = Client::localhost(base_log)?;
@@ -77,7 +77,7 @@ impl DdmReconciler {
 
     pub fn set_underlay_subnet(
         &self,
-        underlay_subnet: Ipv6Subnet<SLED_PREFIX>,
+        underlay_subnet: Ipv6Subnet<SLED_PREFIX_LENGTH>,
     ) {
         self.prefixes.send_if_modified(|prefixes| {
             let modified = prefixes.underlay != Some(underlay_subnet);
@@ -91,7 +91,7 @@ impl DdmReconciler {
     /// This method is idempotent.
     pub fn add_internal_dns_subnet(
         &self,
-        internal_dns_subnet: Ipv6Subnet<SLED_PREFIX>,
+        internal_dns_subnet: Ipv6Subnet<SLED_PREFIX_LENGTH>,
     ) {
         self.prefixes.send_if_modified(|prefixes| {
             prefixes.internal_dns.insert(internal_dns_subnet)
@@ -103,7 +103,7 @@ impl DdmReconciler {
     /// This method is idempotent.
     pub fn remove_internal_dns_subnet(
         &self,
-        internal_dns_subnet: Ipv6Subnet<SLED_PREFIX>,
+        internal_dns_subnet: Ipv6Subnet<SLED_PREFIX_LENGTH>,
     ) {
         self.prefixes.send_if_modified(|prefixes| {
             prefixes.internal_dns.remove(&internal_dns_subnet)
@@ -113,13 +113,13 @@ impl DdmReconciler {
 
 #[derive(Debug)]
 struct PrefixesToAdvertise {
-    bootstrap: Ipv6Subnet<SLED_PREFIX>,
-    underlay: Option<Ipv6Subnet<SLED_PREFIX>>,
-    internal_dns: BTreeSet<Ipv6Subnet<SLED_PREFIX>>,
+    bootstrap: Ipv6Subnet<SLED_PREFIX_LENGTH>,
+    underlay: Option<Ipv6Subnet<SLED_PREFIX_LENGTH>>,
+    internal_dns: BTreeSet<Ipv6Subnet<SLED_PREFIX_LENGTH>>,
 }
 
 impl PrefixesToAdvertise {
-    fn new(bootstrap: Ipv6Subnet<SLED_PREFIX>) -> Self {
+    fn new(bootstrap: Ipv6Subnet<SLED_PREFIX_LENGTH>) -> Self {
         Self { bootstrap, underlay: None, internal_dns: BTreeSet::new() }
     }
 

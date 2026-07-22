@@ -33,3 +33,8 @@ pub mod rack_setup {
     pub use crate::v1::rack_setup::UserSpecifiedRouterPeerAddr;
     pub use crate::v1::rack_setup::UserSpecifiedUplinkAddressConfig;
 }
+
+pub mod update {
+    pub use crate::v1::update::EmptyUpdateTargets;
+    pub use crate::v1::update::UpdateTargets;
+}

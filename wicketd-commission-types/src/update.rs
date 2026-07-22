@@ -2,7 +2,4 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Functional code for the latest versions of types.
-
-mod rack_setup;
-mod update;
+pub use wicketd_commission_types_versions::latest::update::*;

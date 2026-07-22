@@ -677,7 +677,7 @@ dependencies = [
 [[package]]
 name = "bhyve_api"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=cd0e2618eac4d80bbfcdbcbd546cb27fd62caa90#cd0e2618eac4d80bbfcdbcbd546cb27fd62caa90"
+source = "git+https://github.com/oxidecomputer/propolis?rev=dcad23754c05c74644c9bb0954ca7ed13dca8381#dcad23754c05c74644c9bb0954ca7ed13dca8381"
 dependencies = [
  "bhyve_api_sys",
  "libc",
@@ -687,7 +687,7 @@ dependencies = [
 [[package]]
 name = "bhyve_api_sys"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=cd0e2618eac4d80bbfcdbcbd546cb27fd62caa90#cd0e2618eac4d80bbfcdbcbd546cb27fd62caa90"
+source = "git+https://github.com/oxidecomputer/propolis?rev=dcad23754c05c74644c9bb0954ca7ed13dca8381#dcad23754c05c74644c9bb0954ca7ed13dca8381"
 dependencies = [
  "libc",
  "strum 0.26.3",
@@ -1755,7 +1755,7 @@ version = "3.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "faf9468729b8cbcea668e36183cb69d317348c2e08e994829fb56ebfdfbaac34"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
@@ -3890,7 +3890,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -5446,7 +5446,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2 0.6.3",
+ "socket2 0.5.10",
  "system-configuration",
  "tokio",
  "tower-layer",
@@ -5884,6 +5884,8 @@ dependencies = [
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "oxide-tokio-rt",
+ "oxide-update-engine",
+ "oxide-update-engine-types",
  "partial-io",
  "proptest",
  "reqwest 0.13.2",
@@ -5904,7 +5906,6 @@ dependencies = [
  "tokio-stream",
  "tufaceous-artifact 0.1.0",
  "tufaceous-lib",
- "update-engine",
 ]
 
 [[package]]
@@ -5919,11 +5920,11 @@ dependencies = [
  "omicron-common",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
+ "oxide-update-engine-types",
  "schemars 0.8.22",
  "serde",
  "slog",
  "tufaceous-artifact 0.1.0",
- "update-engine",
  "uuid",
 ]
 
@@ -5934,6 +5935,7 @@ dependencies = [
  "omicron-common",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
+ "oxide-update-engine-types",
  "progenitor 0.14.0",
  "regress 0.10.5",
  "reqwest 0.13.2",
@@ -5941,7 +5943,6 @@ dependencies = [
  "serde",
  "serde_json",
  "slog",
- "update-engine",
 ]
 
 [[package]]
@@ -5955,6 +5956,8 @@ dependencies = [
  "libc",
  "omicron-common",
  "omicron-workspace-hack",
+ "oxide-update-engine",
+ "oxide-update-engine-types",
  "proptest",
  "schemars 0.8.22",
  "serde",
@@ -5963,7 +5966,6 @@ dependencies = [
  "test-strategy",
  "thiserror 2.0.18",
  "tokio",
- "update-engine",
 ]
 
 [[package]]
@@ -6147,7 +6149,7 @@ checksum = "3640c1c38b8e4e43584d8df18be5fc6b0aa314ce6ebf51b53313d4306cca8e46"
 dependencies = [
  "hermit-abi 0.5.2",
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -6224,7 +6226,7 @@ dependencies = [
  "portable-atomic",
  "portable-atomic-util",
  "serde_core",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -7938,6 +7940,8 @@ dependencies = [
  "omicron-test-utils",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
+ "oxide-update-engine",
+ "oxide-update-engine-types",
  "oxnet",
  "pq-sys",
  "reqwest 0.13.2",
@@ -7946,7 +7950,6 @@ dependencies = [
  "slog",
  "slog-error-chain",
  "tokio",
- "update-engine",
  "uuid",
 ]
 
@@ -8287,6 +8290,8 @@ dependencies = [
  "omicron-workspace-hack",
  "openssl",
  "owo-colors 4.3.0",
+ "oxide-update-engine",
+ "oxide-update-engine-types",
  "oximeter-db",
  "oxnet",
  "oxql-types",
@@ -8316,7 +8321,6 @@ dependencies = [
  "trust-quorum-types",
  "tufaceous-artifact 0.1.0",
  "unicode-width 0.1.14",
- "update-engine",
  "url",
  "uuid",
 ]
@@ -8494,7 +8498,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -9254,6 +9258,8 @@ dependencies = [
  "openssl",
  "oxide-client",
  "oxide-tokio-rt",
+ "oxide-update-engine",
+ "oxide-update-engine-types",
  "oximeter",
  "oximeter-client",
  "oximeter-collector",
@@ -9321,7 +9327,6 @@ dependencies = [
  "tufaceous-artifact 0.1.0",
  "tufaceous-lib",
  "update-common",
- "update-engine",
  "usdt 0.5.0",
  "uuid",
  "zip 4.6.1",
@@ -9436,6 +9441,8 @@ dependencies = [
  "omicron-workspace-hack",
  "owo-colors 4.3.0",
  "oxide-tokio-rt",
+ "oxide-update-engine-display",
+ "oxide-update-engine-types",
  "oximeter-client",
  "oximeter-db",
  "oxnet",
@@ -9465,7 +9472,6 @@ dependencies = [
  "trust-quorum-types",
  "tufaceous-artifact 0.1.0",
  "unicode-width 0.1.14",
- "update-engine",
  "url",
  "uuid",
  "zip 4.6.1",
@@ -9561,6 +9567,9 @@ dependencies = [
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "oxide-tokio-rt",
+ "oxide-update-engine",
+ "oxide-update-engine-display",
+ "oxide-update-engine-types",
  "pq-sys",
  "qorb",
  "repo-depot-client",
@@ -9568,7 +9577,6 @@ dependencies = [
  "slog",
  "supports-color 3.0.2",
  "tokio",
- "update-engine",
  "uuid",
 ]
 
@@ -10269,6 +10277,57 @@ dependencies = [
  "nix 0.31.2",
  "tokio",
  "tokio-dtrace",
+]
+
+[[package]]
+name = "oxide-update-engine"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ec6b4a92c5a78d61609cf956eb428620899f15ffc8881b13260c5168b5fa37ef"
+dependencies = [
+ "cancel-safe-futures",
+ "debug-ignore",
+ "derive-where",
+ "futures",
+ "linear-map",
+ "oxide-update-engine-types",
+ "slog",
+ "tokio",
+]
+
+[[package]]
+name = "oxide-update-engine-display"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fc5a0881ad15043d989eed86f7116c7fce97f1624b73bc41ae029d10ca1003d7"
+dependencies = [
+ "chrono",
+ "debug-ignore",
+ "derive-where",
+ "libsw",
+ "owo-colors 4.3.0",
+ "oxide-update-engine-types",
+ "slog",
+ "swrite",
+ "unicode-width 0.2.0",
+]
+
+[[package]]
+name = "oxide-update-engine-types"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "44b6f7a67e6e404c276d40fccf9b0927e92852e560289d6ea771ce092981cefe"
+dependencies = [
+ "anyhow",
+ "derive-where",
+ "indent_write",
+ "indexmap 2.14.0",
+ "newtype-uuid",
+ "petgraph 0.8.3",
+ "schemars 0.8.22",
+ "serde",
+ "serde_json",
+ "uuid",
 ]
 
 [[package]]
@@ -11788,7 +11847,7 @@ dependencies = [
 [[package]]
 name = "propolis-api-types-versions"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=cd0e2618eac4d80bbfcdbcbd546cb27fd62caa90#cd0e2618eac4d80bbfcdbcbd546cb27fd62caa90"
+source = "git+https://github.com/oxidecomputer/propolis?rev=dcad23754c05c74644c9bb0954ca7ed13dca8381#dcad23754c05c74644c9bb0954ca7ed13dca8381"
 dependencies = [
  "crucible-client-types",
  "propolis_types",
@@ -11801,7 +11860,7 @@ dependencies = [
 [[package]]
 name = "propolis-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=cd0e2618eac4d80bbfcdbcbd546cb27fd62caa90#cd0e2618eac4d80bbfcdbcbd546cb27fd62caa90"
+source = "git+https://github.com/oxidecomputer/propolis?rev=dcad23754c05c74644c9bb0954ca7ed13dca8381#dcad23754c05c74644c9bb0954ca7ed13dca8381"
 dependencies = [
  "async-trait",
  "base64 0.21.7",
@@ -11825,7 +11884,7 @@ dependencies = [
 [[package]]
 name = "propolis-mock-server"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=cd0e2618eac4d80bbfcdbcbd546cb27fd62caa90#cd0e2618eac4d80bbfcdbcbd546cb27fd62caa90"
+source = "git+https://github.com/oxidecomputer/propolis?rev=dcad23754c05c74644c9bb0954ca7ed13dca8381#dcad23754c05c74644c9bb0954ca7ed13dca8381"
 dependencies = [
  "anyhow",
  "atty",
@@ -11858,7 +11917,7 @@ dependencies = [
 [[package]]
 name = "propolis_api_types"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=cd0e2618eac4d80bbfcdbcbd546cb27fd62caa90#cd0e2618eac4d80bbfcdbcbd546cb27fd62caa90"
+source = "git+https://github.com/oxidecomputer/propolis?rev=dcad23754c05c74644c9bb0954ca7ed13dca8381#dcad23754c05c74644c9bb0954ca7ed13dca8381"
 dependencies = [
  "crucible-client-types",
  "propolis-api-types-versions",
@@ -11867,7 +11926,7 @@ dependencies = [
 [[package]]
 name = "propolis_types"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=cd0e2618eac4d80bbfcdbcbd546cb27fd62caa90#cd0e2618eac4d80bbfcdbcbd546cb27fd62caa90"
+source = "git+https://github.com/oxidecomputer/propolis?rev=dcad23754c05c74644c9bb0954ca7ed13dca8381#dcad23754c05c74644c9bb0954ca7ed13dca8381"
 dependencies = [
  "schemars 0.8.22",
  "serde",
@@ -11979,7 +12038,7 @@ dependencies = [
  "quinn-udp",
  "rustc-hash",
  "rustls",
- "socket2 0.6.3",
+ "socket2 0.5.10",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -12017,9 +12076,9 @@ dependencies = [
  "cfg_aliases 0.2.1",
  "libc",
  "once_cell",
- "socket2 0.6.3",
+ "socket2 0.5.10",
  "tracing",
- "windows-sys 0.60.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -12945,7 +13004,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.11.0",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -13012,7 +13071,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -14580,7 +14639,7 @@ version = "0.8.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c1c97747dbf44bb1ca44a561ece23508e99cb592e862f22222dcf42f51d1e451"
 dependencies = [
- "heck 0.5.0",
+ "heck 0.4.1",
  "proc-macro2",
  "quote",
  "syn 2.0.117",
@@ -15283,7 +15342,7 @@ dependencies = [
  "getrandom 0.4.1",
  "once_cell",
  "rustix 1.1.3",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -15303,7 +15362,7 @@ version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d8c27177b12a6399ffc08b98f76f7c9a1f4fe9fc967c784c5a071fa8d93cf7e1"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -16776,45 +16835,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "update-engine"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "buf-list",
- "bytes",
- "camino",
- "camino-tempfile",
- "cancel-safe-futures",
- "chrono",
- "clap",
- "debug-ignore",
- "derive-where",
- "either",
- "futures",
- "indent_write",
- "indexmap 2.14.0",
- "indicatif",
- "indoc 2.0.7",
- "libsw",
- "linear-map",
- "omicron-test-utils",
- "omicron-workspace-hack",
- "owo-colors 4.3.0",
- "petgraph 0.8.3",
- "schemars 0.8.22",
- "serde",
- "serde_json",
- "serde_with 3.21.0",
- "slog",
- "supports-color 3.0.2",
- "swrite",
- "tokio",
- "tokio-stream",
- "unicode-width 0.1.14",
- "uuid",
-]
-
-[[package]]
 name = "url"
 version = "2.5.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -17375,6 +17395,7 @@ dependencies = [
  "futures",
  "hex",
  "humantime",
+ "iddqd",
  "indexmap 2.14.0",
  "indicatif",
  "itertools 0.14.0",
@@ -17383,6 +17404,8 @@ dependencies = [
  "omicron-passwords",
  "omicron-workspace-hack",
  "owo-colors 4.3.0",
+ "oxide-update-engine-display",
+ "oxide-update-engine-types",
  "proptest",
  "ratatui",
  "reqwest 0.13.2",
@@ -17409,7 +17432,6 @@ dependencies = [
  "tufaceous-artifact 0.1.0",
  "tui-tree-widget",
  "unicode-width 0.1.14",
- "update-engine",
  "wicket-common",
  "wicketd-client",
  "wicketd-commission-types",
@@ -17425,10 +17447,13 @@ dependencies = [
  "dropshot",
  "gateway-client",
  "gateway-types",
+ "iddqd",
  "maplit",
  "omicron-common",
  "omicron-workspace-hack",
  "owo-colors 4.3.0",
+ "oxide-update-engine",
+ "oxide-update-engine-types",
  "oxnet",
  "schemars 0.8.22",
  "semver 1.0.28",
@@ -17443,7 +17468,6 @@ dependencies = [
  "toml 0.8.23",
  "transceiver-controller 0.1.1 (git+https://github.com/oxidecomputer/transceiver-control)",
  "tufaceous-artifact 0.1.0",
- "update-engine",
  "wicketd-commission-types",
 ]
 
@@ -17505,6 +17529,7 @@ dependencies = [
  "http-body-util",
  "hubtools 0.4.7 (git+https://github.com/oxidecomputer/hubtools.git?rev=2b1ef9b38d75563ea800baa3b17327eec17b1b7a)",
  "hyper",
+ "iddqd",
  "illumos-utils",
  "installinator",
  "installinator-api",
@@ -17524,6 +17549,8 @@ dependencies = [
  "openapi-lint",
  "openapiv3",
  "oxide-tokio-rt",
+ "oxide-update-engine",
+ "oxide-update-engine-types",
  "oxnet",
  "rand 0.9.2",
  "reqwest 0.13.2",
@@ -17554,7 +17581,6 @@ dependencies = [
  "tufaceous-artifact 0.1.0",
  "tufaceous-lib",
  "update-common",
- "update-engine",
  "uuid",
  "wicket",
  "wicket-common",
@@ -17595,6 +17621,7 @@ dependencies = [
  "omicron-common",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
+ "oxide-update-engine-types",
  "progenitor 0.14.0",
  "regress 0.10.5",
  "reqwest 0.13.2",
@@ -17605,7 +17632,6 @@ dependencies = [
  "sled-agent-types",
  "sled-hardware-types",
  "slog",
- "update-engine",
  "uuid",
  "wicket-common",
  "wicketd-commission-types-versions",
@@ -17623,14 +17649,17 @@ dependencies = [
 name = "wicketd-commission-types-versions"
 version = "0.1.0"
 dependencies = [
+ "gateway-types-versions",
  "omicron-common",
  "omicron-workspace-hack",
  "oxnet",
+ "proptest",
  "schemars 0.8.22",
  "serde",
  "serde_json",
  "sled-agent-types-versions",
  "slog-error-chain",
+ "test-strategy",
  "toml 0.8.23",
 ]
 
@@ -17662,7 +17691,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]

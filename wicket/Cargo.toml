@@ -19,6 +19,7 @@ crossterm.workspace = true
 futures.workspace = true
 hex.workspace = true
 humantime.workspace = true
+iddqd.workspace = true
 indexmap.workspace = true
 indicatif.workspace = true
 itertools.workspace = true
@@ -49,7 +50,8 @@ unicode-width.workspace = true
 zeroize.workspace = true
 
 omicron-passwords.workspace = true
-update-engine.workspace = true
+oxide-update-engine-types.workspace = true
+oxide-update-engine-display.workspace = true
 wicket-common.workspace = true
 wicketd-client.workspace = true
 wicketd-commission-types.workspace = true

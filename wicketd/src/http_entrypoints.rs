@@ -556,13 +556,6 @@ impl WicketdApi for WicketdApiImpl {
         let rqctx = rqctx.context();
         let params = params.into_inner();
 
-        if params.targets.is_empty() {
-            return Err(HttpError::for_bad_request(
-                None,
-                "No targets specified".into(),
-            ));
-        }
-
         if let Some(test_error) = params.options.test_error {
             return Err(test_error
                 .into_http_error(log, "clearing update state")
