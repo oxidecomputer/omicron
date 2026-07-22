@@ -4,6 +4,7 @@
 
 //! Facilities for working with the Omicron database
 
+pub(crate) mod check_if_limit_reached;
 // This is not intended to be public, but this is necessary to use it from
 // doctests
 pub mod collection_attach;
@@ -44,6 +45,7 @@ pub use nexus_db_fixed_data as fixed_data;
 pub use nexus_db_model as model;
 use nexus_db_model::saga_types;
 
+pub use check_if_limit_reached::IsLimitReached;
 pub use config::Config;
 pub use datastore::DataStore;
 pub use on_conflict_ext::IncompleteOnConflictExt;
