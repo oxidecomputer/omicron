@@ -3599,6 +3599,7 @@ fn print_task_fm_analysis(details: &serde_json::Value, colored: bool) {
         end_time,
         report: analysis_report,
         outcome,
+        capacity,
     } = analysis_status;
     match outcome {
         AnalysisOutcome::Error(error) => {
@@ -3609,6 +3610,13 @@ fn print_task_fm_analysis(details: &serde_json::Value, colored: bool) {
                 "    no changes from the current situation report ({:?})",
                 parent_sitrep_id
             );
+        }
+        AnalysisOutcome::LimitReached { limit } => {
+            println!(
+                "{ERRICON}   analysis succeeded, but the database sitrep \
+                 limit ({limit} sitreps) has been reached!"
+            );
+            println!("    no new sitrep was written.");
         }
         AnalysisOutcome::NotCommitted { sitrep_id } => {
             println!(
@@ -3640,6 +3648,13 @@ fn print_task_fm_analysis(details: &serde_json::Value, colored: bool) {
         for error in warnings {
             println!("      > {error}")
         }
+    }
+
+    if let Some(capacity) = capacity {
+        let usage_percent = capacity.usage_percent();
+        println!("    sitrep storage capacity: {usage_percent}% used");
+        println!("      limit: {}", capacity.limit);
+        println!("      count: {}", capacity.count);
     }
 
     let PreparationStatus { warnings, report: prep_report } = prep_status;

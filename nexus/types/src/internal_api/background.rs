@@ -991,6 +991,22 @@ pub mod fm_analysis {
         pub end_time: DateTime<Utc>,
         pub report: crate::fm::analysis_reports::AnalysisReport,
         pub outcome: AnalysisOutcome,
+        pub capacity: Option<SitrepCapacity>,
+    }
+
+    #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+    pub struct SitrepCapacity {
+        pub count: u64,
+        pub limit: u64,
+    }
+
+    impl SitrepCapacity {
+        // NOTE(eliza): this _could_ be implemented as a float to get a couple
+        // decimal places, but I don't really think we need to be that precise,
+        // and matching on ranges nicely is cute...
+        pub fn usage_percent(&self) -> u64 {
+            self.count.saturating_mul(100) / self.limit
+        }
     }
 
     #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -1001,6 +1017,10 @@ pub mod fm_analysis {
         /// Analysis produced a sitrep identical to the current sitrep,
         /// so we threw it away and did nothing.
         Unchanged,
+
+        /// Analysis produced a new sitrep, but the sitrep limit has been
+        /// reached, so it was not written to the database.
+        LimitReached { limit: u64 },
 
         /// Analysis produced a new sitrep, but we failed to make it
         /// the current sitrep.

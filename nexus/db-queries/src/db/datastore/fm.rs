@@ -12,6 +12,8 @@
 use super::DataStore;
 use crate::authz;
 use crate::context::OpContext;
+use crate::db;
+use crate::db::check_if_limit_reached;
 use crate::db::datastore::RunnableQuery;
 use crate::db::datastore::SQL_BATCH_SIZE;
 use crate::db::model;
@@ -19,15 +21,19 @@ use crate::db::model::DbTypedUuid;
 use crate::db::model::SqlU32;
 use crate::db::pagination::Paginator;
 use crate::db::pagination::paginated;
+use crate::db::queries::ALLOW_FULL_TABLE_SCAN_SQL;
 use crate::db::raw_query_builder::QueryBuilder;
 use crate::db::raw_query_builder::TypedSqlQuery;
 use async_bb8_diesel::AsyncRunQueryDsl;
+use async_bb8_diesel::AsyncSimpleConnection;
 use diesel::prelude::*;
 use diesel::result::DatabaseErrorKind;
 use diesel::result::Error as DieselError;
 use diesel::sql_types;
 use dropshot::PaginationOrder;
 use nexus_db_errors::ErrorHandler;
+use nexus_db_errors::OptionalError;
+use nexus_db_errors::TransactionError;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_lookup::DbConnection;
 use nexus_db_schema::schema::ereport::dsl as ereport_dsl;
@@ -1609,6 +1615,61 @@ impl DataStore {
             &pagparams,
         )
         .select(model::SitrepVersion::as_select())
+    }
+
+    /// Check whether the given sitrep limit has been reached.
+    ///
+    /// This (necessarily) does a full table scan on the sitrep table up to
+    /// the limit, so `limit` must be relatively small to avoid performance
+    /// issues.
+    pub async fn fm_sitrep_check_limit_reached(
+        &self,
+        opctx: &OpContext,
+        limit: u64,
+    ) -> Result<db::IsLimitReached, Error> {
+        // The "full" table scan below is treated as a complex operation. (This
+        // should only be called from the FM analysis and sitrep GC background
+        // tasks, for which complex operations are allowed.)
+        opctx.check_complex_operations_allowed()?;
+
+        // TODO(eliza): there should probably be an authz object for the fm sitrep?
+        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
+
+        let limit_query = check_if_limit_reached::LimitQuery::new(
+            sitrep_dsl::fm_sitrep,
+            limit,
+        )?;
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        let err = OptionalError::new();
+
+        self.transaction_retry_wrapper("sitrep_count")
+            .transaction(&conn, |conn| {
+                let err = err.clone();
+                let limit_query = limit_query.clone();
+                async move {
+                    // We need this to call the COUNT(*) query below. But note
+                    // that this isn't really a "full" table scan; the number of
+                    // rows scanned is limited by the LIMIT clause.
+                    conn.batch_execute_async(ALLOW_FULL_TABLE_SCAN_SQL)
+                        .await
+                        .map_err(|e| err.bail(TransactionError::Database(e)))?;
+
+                    // Rather than doing a full table scan, we use a LIMIT
+                    // clause to limit the number of rows returned.
+                    let result = limit_query
+                        .check_if_limit_reached_async(&conn)
+                        .await
+                        .map_err(|e| err.bail(TransactionError::Database(e)))?;
+
+                    Ok(result)
+                }
+            })
+            .await
+            .map_err(|e| match err.take() {
+                Some(err) => err.into_public_ignore_retries(),
+                None => public_error_from_diesel(e, ErrorHandler::Server),
+            })?
     }
 }
 
