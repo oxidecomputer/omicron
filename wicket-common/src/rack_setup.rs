@@ -17,6 +17,7 @@ use std::net::IpAddr;
 use std::net::Ipv6Addr;
 use tufaceous_artifact::ArtifactHash;
 use wicketd_commission_types::rack_setup::AllowedSourceIps;
+use wicketd_commission_types::rack_setup::BgpAuthKey;
 use wicketd_commission_types::rack_setup::BgpAuthKeyId;
 use wicketd_commission_types::rack_setup::IpRange;
 use wicketd_commission_types::rack_setup::UserSpecifiedRackNetworkConfig;
@@ -79,43 +80,6 @@ impl<T: fmt::Display> fmt::Display for DisplaySlice<'_, T> {
     }
 }
 
-/// Describes the actual authentication key to use with a BGP peer.
-///
-/// Currently, only TCP-MD5 authentication is supported.
-#[derive(Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum BgpAuthKey {
-    /// TCP-MD5 authentication.
-    TcpMd5 {
-        /// The pre-shared key.
-        key: String,
-    },
-}
-
-impl BgpAuthKey {
-    /// Returns information about the key that is safe to display in the UI.
-    pub fn info(&self) -> BgpAuthKeyInfo {
-        match self {
-            BgpAuthKey::TcpMd5 { key } => {
-                let sha256 =
-                    ArtifactHash(Sha256::digest(key.as_bytes()).into());
-                BgpAuthKeyInfo::TcpMd5 { sha256 }
-            }
-        }
-    }
-}
-
-// Ensure that the key is not displayed in debug output.
-impl fmt::Debug for BgpAuthKey {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            BgpAuthKey::TcpMd5 { key: _ } => {
-                f.debug_struct("TcpMd5").field("key", &"********").finish()
-            }
-        }
-    }
-}
-
 /// Describes insensitive information about a BGP authentication key.
 ///
 /// This information is considered okay to display in the UI.
@@ -142,6 +106,17 @@ pub enum BgpAuthKeyInfo {
 }
 
 impl BgpAuthKeyInfo {
+    /// Returns information about a key that is safe to display in the UI.
+    pub fn for_key(key: &BgpAuthKey) -> Self {
+        match key {
+            BgpAuthKey::TcpMd5 { key } => {
+                let sha256 =
+                    ArtifactHash(Sha256::digest(key.as_bytes()).into());
+                BgpAuthKeyInfo::TcpMd5 { sha256 }
+            }
+        }
+    }
+
     pub fn to_string_styled(&self, label_style: Style) -> String {
         match self {
             BgpAuthKeyInfo::TcpMd5 { sha256 } => {
