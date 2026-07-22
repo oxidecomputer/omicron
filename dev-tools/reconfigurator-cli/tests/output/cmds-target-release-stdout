@@ -48,7 +48,7 @@ internal DNS generations: 1
 external DNS generations: 1
 target number of Nexus instances: default
 target release (generation 2): 0.0.1 (repo-0.0.1.zip)
-    artifact: 84412c749270423c5b422b034543f35e40c221c23648bf089d10e64c3634e971 kind=installinator_document version 0.0.1
+    artifact: 2f8b4d6e35886a8e17fbbb30c6c6ee13c4f7becd9387d6f8529529317adbc824 kind=installinator_document version 0.0.1
     artifact: b0db8f64463a377a302082c5752056ee191adf904daa625d38a2094059f55248 kind=measurement_corpus version 0.0.1
     artifact: dbea4039b6ed82dbdd8d794d398a5c647ffa6991bd7d063702c2acbc7a0b90c7 kind=measurement_corpus version 0.0.1
     artifact: 812d8e99d0fd6138c76be04c43e6b696eb08d5b93e7e8c2dfefc959e89bc5aff kind=os_phase1,os_board=cosmo,os_variant=host version 0.0.1
@@ -1151,7 +1151,7 @@ internal DNS generations: 1
 external DNS generations: 1
 target number of Nexus instances: default
 target release (generation 3): 1.0.0 (repo-1.0.0.zip)
-    artifact: 07a01bdfc1b1edbc23e4bd9a7a3641d760b09c5eeae8dcdedbe10d62646697b5 kind=installinator_document version 1.0.0
+    artifact: 6d4e4a64aaa5b94273845c63cd8b26dd2dbd6f37a68a4d253e43ca05a8222fa8 kind=installinator_document version 1.0.0
     artifact: 9830767c45f2a02210a177fabafafe2c84501039289483f72cec299b0c78dbcb kind=measurement_corpus version 1.0.0
     artifact: ae9279e9135de75e4e137c6da7f939b5a2eae6d931a7f2205df930e37cd58096 kind=measurement_corpus version 1.0.0
     artifact: 6086843f554e75aefb3f08c7e89b57ed72d69dc88bb1326977689826bb16a9da kind=os_phase1,os_board=cosmo,os_variant=host version 1.0.0
@@ -1242,7 +1242,7 @@ internal DNS generations: 1
 external DNS generations: 1
 target number of Nexus instances: default
 target release (generation 3): 1.0.0 (repo-1.0.0.zip)
-    artifact: 07a01bdfc1b1edbc23e4bd9a7a3641d760b09c5eeae8dcdedbe10d62646697b5 kind=installinator_document version 1.0.0
+    artifact: 6d4e4a64aaa5b94273845c63cd8b26dd2dbd6f37a68a4d253e43ca05a8222fa8 kind=installinator_document version 1.0.0
     artifact: 9830767c45f2a02210a177fabafafe2c84501039289483f72cec299b0c78dbcb kind=measurement_corpus version 1.0.0
     artifact: ae9279e9135de75e4e137c6da7f939b5a2eae6d931a7f2205df930e37cd58096 kind=measurement_corpus version 1.0.0
     artifact: 6086843f554e75aefb3f08c7e89b57ed72d69dc88bb1326977689826bb16a9da kind=os_phase1,os_board=cosmo,os_variant=host version 1.0.0

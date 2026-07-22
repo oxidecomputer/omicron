@@ -28,7 +28,7 @@ internal DNS generations: 1
 external DNS generations: 1
 target number of Nexus instances: default
 target release (generation 2): 0.0.1 (repo-0.0.1.zip)
-    artifact: 84412c749270423c5b422b034543f35e40c221c23648bf089d10e64c3634e971 kind=installinator_document version 0.0.1
+    artifact: 2f8b4d6e35886a8e17fbbb30c6c6ee13c4f7becd9387d6f8529529317adbc824 kind=installinator_document version 0.0.1
     artifact: b0db8f64463a377a302082c5752056ee191adf904daa625d38a2094059f55248 kind=measurement_corpus version 0.0.1
     artifact: dbea4039b6ed82dbdd8d794d398a5c647ffa6991bd7d063702c2acbc7a0b90c7 kind=measurement_corpus version 0.0.1
     artifact: 812d8e99d0fd6138c76be04c43e6b696eb08d5b93e7e8c2dfefc959e89bc5aff kind=os_phase1,os_board=cosmo,os_variant=host version 0.0.1
