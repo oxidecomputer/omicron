@@ -10,8 +10,6 @@ use daft::Diffable;
 use iddqd::IdOrdItem;
 use iddqd::id_upcast;
 use omicron_uuid_kinds::DatasetUuid;
-use omicron_uuid_kinds::PhysicalDiskUuid;
-use omicron_uuid_kinds::ZpoolUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -21,34 +19,6 @@ use crate::api::internal::shared::DatasetKindParseError;
 use crate::{api::external::ByteCount, zpool_name::ZpoolName};
 
 pub use crate::api::internal::shared::DatasetKind;
-
-#[derive(
-    Clone,
-    Debug,
-    Deserialize,
-    Serialize,
-    JsonSchema,
-    PartialEq,
-    Eq,
-    Hash,
-    PartialOrd,
-    Ord,
-)]
-pub struct OmicronPhysicalDiskConfig {
-    pub identity: DiskIdentity,
-    pub id: PhysicalDiskUuid,
-    pub pool_id: ZpoolUuid,
-}
-
-impl IdOrdItem for OmicronPhysicalDiskConfig {
-    type Key<'a> = PhysicalDiskUuid;
-
-    fn key(&self) -> Self::Key<'_> {
-        self.id
-    }
-
-    id_upcast!();
-}
 
 #[derive(
     Debug,
@@ -403,6 +373,7 @@ pub struct DiskIdentity {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use omicron_uuid_kinds::ZpoolUuid;
     use test_strategy::proptest;
 
     #[proptest]

@@ -5,8 +5,12 @@
 use crate::latest::disk::DiskStateRequested;
 use crate::latest::disk::DiskVariant;
 use crate::latest::disk::M2Slot;
+use crate::latest::disk::OmicronPhysicalDiskConfig;
 use anyhow::bail;
+use iddqd::IdOrdItem;
+use iddqd::id_upcast;
 use omicron_common::zpool_name::ZpoolKind;
+use omicron_uuid_kinds::PhysicalDiskUuid;
 use std::fmt;
 use std::str::FromStr;
 
@@ -95,4 +99,14 @@ impl From<ZpoolKind> for DiskVariant {
             ZpoolKind::Internal => DiskVariant::M2,
         }
     }
+}
+
+impl IdOrdItem for OmicronPhysicalDiskConfig {
+    type Key<'a> = PhysicalDiskUuid;
+
+    fn key(&self) -> Self::Key<'_> {
+        self.id
+    }
+
+    id_upcast!();
 }

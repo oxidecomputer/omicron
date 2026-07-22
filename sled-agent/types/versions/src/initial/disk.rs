@@ -5,6 +5,8 @@
 //! Disk types for the Sled Agent API.
 
 use omicron_common::api::internal::nexus::DiskRuntimeState;
+use omicron_common::disk::DiskIdentity;
+use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -81,4 +83,22 @@ pub enum DiskStateRequested {
 pub enum M2Slot {
     A,
     B,
+}
+
+#[derive(
+    Clone,
+    Debug,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+    PartialEq,
+    Eq,
+    Hash,
+    PartialOrd,
+    Ord,
+)]
+pub struct OmicronPhysicalDiskConfig {
+    pub identity: DiskIdentity,
+    pub id: PhysicalDiskUuid,
+    pub pool_id: ZpoolUuid,
 }

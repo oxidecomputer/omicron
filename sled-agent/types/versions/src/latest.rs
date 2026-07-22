@@ -50,6 +50,7 @@ pub mod disk {
     pub use crate::v1::disk::DiskStateRequested;
     pub use crate::v1::disk::DiskVariant;
     pub use crate::v1::disk::M2Slot;
+    pub use crate::v1::disk::OmicronPhysicalDiskConfig;
     pub use crate::v1::disk::Zpool;
 }
 
