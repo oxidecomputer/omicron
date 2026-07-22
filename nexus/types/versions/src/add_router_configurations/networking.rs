@@ -19,6 +19,9 @@
 //! * New [`RouterConfigurationBgpPeerSelector`],
 //!   [`RouterConfigurationStaticRouteSelector`] and
 //!   [`RouterConfigurationBfdPeerSelector`] for selecting the entries above.
+//! * New [`SiloRouterConfigurations`], [`SiloRouterConfiguration`],
+//!   [`SiloRouterConfigurationsUpdate`] and [`SiloRouterConfigurationEntry`]
+//!   for the new `/v1/system/silos/{silo}/router-configurations` endpoints.
 
 use api_identity::ObjectIdentity;
 use omicron_common::api::external::{
@@ -34,6 +37,7 @@ use sled_agent_types_versions::v1::early_networking::SwitchSlot;
 use sled_agent_types_versions::v20::early_networking::MaxPathConfig;
 use sled_agent_types_versions::v20::early_networking::RouterLifetimeConfig;
 use std::net::IpAddr;
+use uuid::Uuid;
 
 /// A named collection of rack routing configuration
 #[derive(
@@ -270,4 +274,43 @@ pub struct RouterConfigurationBfdPeerSelector {
 
     /// Name of the BFD peer entry.
     pub peer: Name,
+}
+
+/// A router configuration used by a silo, along with its priority within
+/// that silo
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+pub struct SiloRouterConfiguration {
+    /// ID of the router configuration
+    pub router_configuration_id: Uuid,
+
+    /// Priority of the router configuration for a silo. Priorities are
+    /// unique within the silo.
+    pub priority: u16,
+}
+
+/// The set of router configurations used by a silo
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+pub struct SiloRouterConfigurations {
+    /// The router configurations used by the silo, in ascending priority
+    /// order
+    pub configurations: Vec<SiloRouterConfiguration>,
+}
+
+/// Assignment of a router configuration to a silo at a given priority
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+pub struct SiloRouterConfigurationEntry {
+    /// A name or id of the router configuration to assign
+    pub router_configuration: NameOrId,
+
+    /// Priority of the router configuration for a silo. Priorities must
+    /// be unique within the silo.
+    pub priority: u16,
+}
+
+/// Full replacement of the set of router configurations used by a silo
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+pub struct SiloRouterConfigurationsUpdate {
+    /// The complete new set of router configurations for the silo. Any
+    /// currently assigned configuration not present here is unassigned.
+    pub configurations: Vec<SiloRouterConfigurationEntry>,
 }

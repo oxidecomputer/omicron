@@ -14,10 +14,12 @@ use chrono::Utc;
 use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
 use nexus_db_errors::OptionalError;
 use nexus_db_errors::{ErrorHandler, public_error_from_diesel};
+use nexus_db_lookup::DbConnection;
 use nexus_db_model::{
     DbTypedUuid, RouterConfiguration, RouterConfigurationBfdPeer,
     RouterConfigurationBgpPeer, RouterConfigurationStaticRoute,
-    RouterConfigurationUpdate, SqlU8, SqlU32, to_db_typed_uuid,
+    RouterConfigurationUpdate, SiloRouterConfiguration, SqlU8, SqlU32,
+    to_db_typed_uuid,
 };
 use nexus_types::identity::Resource;
 use omicron_common::api::external;
@@ -121,11 +123,28 @@ impl DataStore {
         use nexus_db_schema::schema::router_configuration_bfd_peer::dsl as bfd_peer_dsl;
         use nexus_db_schema::schema::router_configuration_bgp_peer::dsl as bgp_peer_dsl;
         use nexus_db_schema::schema::router_configuration_static_route::dsl as static_route_dsl;
+        use nexus_db_schema::schema::silo_router_configuration::dsl as silo_link_dsl;
 
         let conn = self.pool_connection_authorized(opctx).await?;
         let id = to_db_typed_uuid(authz_configuration.id());
+        let err = OptionalError::new();
         self.transaction_retry_wrapper("router_configuration_delete")
-            .transaction(&conn, |conn| async move {
+            .transaction(&conn, async |conn| {
+                // Check if the router configuration is in use by any silos
+                let in_use = diesel::dsl::select(diesel::dsl::exists(
+                    silo_link_dsl::silo_router_configuration
+                        .filter(silo_link_dsl::router_configuration_id.eq(id)),
+                ))
+                .get_result_async::<bool>(&conn)
+                .await?;
+
+                if in_use {
+                    return Err(err.bail(Error::conflict(
+                        "router configuration is in use by one or more \
+                            silos and cannot be deleted",
+                    )));
+                }
+
                 diesel::update(dsl::router_configuration)
                     .filter(dsl::time_deleted.is_null())
                     .filter(dsl::id.eq(id))
@@ -150,6 +169,9 @@ impl DataStore {
             })
             .await
             .map_err(|e| {
+                if let Some(err) = err.take() {
+                    return err;
+                }
                 error!(opctx.log, "router_configuration_delete failed"; "error" => ?e);
                 public_error_from_diesel(
                     e,
@@ -744,5 +766,102 @@ impl DataStore {
             ));
         }
         Ok(())
+    }
+
+    /// List the router configurations used by a silo, in ascending priority
+    /// order.
+    pub async fn silo_router_configurations_list(
+        &self,
+        opctx: &OpContext,
+        authz_silo: &authz::Silo,
+    ) -> ListResultVec<SiloRouterConfiguration> {
+        use nexus_db_schema::schema::silo_router_configuration::dsl;
+
+        let conn = self.pool_connection_authorized(opctx).await?;
+        dsl::silo_router_configuration
+            .filter(dsl::silo_id.eq(authz_silo.id()))
+            .order_by(dsl::priority.asc())
+            .select(SiloRouterConfiguration::as_select())
+            .load_async(&*conn)
+            .await
+            .map_err(|e| {
+                error!(opctx.log, "silo_router_configurations_list failed"; "error" => ?e);
+                public_error_from_diesel(e, ErrorHandler::Server)
+            })
+    }
+
+    /// Unlink all router configurations used by a silo, as part of silo
+    /// deletion.
+    pub async fn silo_router_configurations_delete(
+        &self,
+        opctx: &OpContext,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        authz_silo: &authz::Silo,
+    ) -> DeleteResult {
+        opctx.authorize(authz::Action::Delete, authz_silo).await?;
+
+        use nexus_db_schema::schema::silo_router_configuration::dsl;
+        diesel::delete(dsl::silo_router_configuration)
+            .filter(dsl::silo_id.eq(authz_silo.id()))
+            .execute_async(conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        Ok(())
+    }
+
+    /// Replace the full set of router configurations used by a silo.
+    ///
+    /// All current routing configurations associated with the silo are replaced
+    /// in a single transaction. The transaction checks that every referenced
+    /// router configuration still exists.
+    pub async fn silo_router_configurations_replace(
+        &self,
+        opctx: &OpContext,
+        authz_silo: &authz::Silo,
+        links: Vec<SiloRouterConfiguration>,
+    ) -> ListResultVec<SiloRouterConfiguration> {
+        use nexus_db_schema::schema::router_configuration::dsl as rc_dsl;
+        use nexus_db_schema::schema::silo_router_configuration::dsl;
+
+        let conn = self.pool_connection_authorized(opctx).await?;
+        let silo_id = authz_silo.id();
+        let configuration_ids: Vec<_> =
+            links.iter().map(|link| link.router_configuration_id).collect();
+        let err = OptionalError::new();
+        self.transaction_retry_wrapper("silo_router_configurations_replace")
+            .transaction(&conn, async |conn| {
+                // Check that all referenced router configurations are still live
+                let live_count = rc_dsl::router_configuration
+                    .filter(rc_dsl::time_deleted.is_null())
+                    .filter(rc_dsl::id.eq_any(configuration_ids.clone()))
+                    .count()
+                    .get_result_async::<i64>(&conn)
+                    .await?;
+                if live_count != configuration_ids.len() as i64 {
+                    return Err(err.bail(Error::conflict(
+                        "a referenced router configuration was deleted \
+                         concurrently",
+                    )));
+                }
+
+                diesel::delete(dsl::silo_router_configuration)
+                    .filter(dsl::silo_id.eq(silo_id))
+                    .execute_async(&conn)
+                    .await?;
+                diesel::insert_into(dsl::silo_router_configuration)
+                    .values(links.clone())
+                    .returning(SiloRouterConfiguration::as_returning())
+                    .get_results_async(&conn)
+                    .await
+            })
+            .await
+            .map_err(|e| {
+                if let Some(err) = err.take() {
+                    return err;
+                }
+                error!(opctx.log, "silo_router_configurations_replace failed"; "error" => ?e);
+                public_error_from_diesel(e, ErrorHandler::Server)
+            })
     }
 }
