@@ -130,6 +130,7 @@ use omicron_uuid_kinds::{
 };
 
 use super::{MulticastGroupReconciler, StateTransition};
+use crate::app::multicast::dataplane::MulticastDataplaneClient;
 use crate::app::multicast::sled::MulticastSledClient;
 
 /// Whether at least `min_age` has elapsed since `since`.
@@ -160,6 +161,7 @@ struct MemberReconcileCtx<'a> {
     member: &'a MulticastGroupMember,
     instance_states: &'a InstanceStateMap,
     sled_client: &'a MulticastSledClient,
+    dataplane_client: &'a MulticastDataplaneClient,
 }
 
 /// Maps instance_id to pre-fetched multicast-relevant state.
@@ -194,6 +196,7 @@ impl MulticastGroupReconciler {
         &self,
         opctx: &OpContext,
         sled_client: &MulticastSledClient,
+        dataplane_client: &MulticastDataplaneClient,
     ) -> Result<MemberReconcileCounts, anyhow::Error> {
         trace!(opctx.log, "reconciling member state changes");
 
@@ -204,7 +207,12 @@ impl MulticastGroupReconciler {
 
         for group in groups {
             match self
-                .process_group_member_states(opctx, &group, sled_client)
+                .process_group_member_states(
+                    opctx,
+                    &group,
+                    sled_client,
+                    dataplane_client,
+                )
                 .await
             {
                 Ok(count) => {
@@ -401,6 +409,7 @@ impl MulticastGroupReconciler {
         opctx: &OpContext,
         group: &MulticastGroup,
         sled_client: &MulticastSledClient,
+        dataplane_client: &MulticastDataplaneClient,
     ) -> Result<usize, anyhow::Error> {
         let mut processed = 0;
 
@@ -422,6 +431,7 @@ impl MulticastGroupReconciler {
                         member: &member,
                         instance_states: &instance_states,
                         sled_client,
+                        dataplane_client,
                     };
 
                     let res = self.process_member_state(&ctx).await;
@@ -879,12 +889,17 @@ impl MulticastGroupReconciler {
 
         // Propagate updated M2P/forwarding to all sleds so the
         // dataplane reflects the member's departure. Best-effort since
-        // group reconciliation will converge if this fails. The observed
-        // switch owner is not available on this path, so the next hop falls
-        // back to the shared hash and the group reconciler co-locates it on
-        // its next pass.
-        if let Err(e) =
-            sled_client.propagate_m2p_and_forwarding(opctx, group, None).await
+        // group reconciliation will converge if this fails. This path runs
+        // between group reconciler passes, so it observes the external
+        // entry's owner from DPD to keep the next hop co-located rather than
+        // flipping to the hash fallback until the next pass.
+        let incumbent_switch = ctx
+            .dataplane_client
+            .observe_external_owner(group.multicast_ip.ip())
+            .await;
+        if let Err(e) = sled_client
+            .propagate_m2p_and_forwarding(opctx, group, incumbent_switch)
+            .await
         {
             warn!(
                 opctx.log,
@@ -1503,10 +1518,8 @@ impl MulticastGroupReconciler {
     /// When `sled_id_override` is provided (e.g., during migration), it
     /// is used instead of the potentially stale `member.sled_id`.
     ///
-    /// # Returns
-    ///
-    /// `Ok(true)` when the join completed successfully. `Ok(false)` when no
-    /// sled was available and the operation was a noop.
+    /// Returns `Ok(true)` when the join completed successfully. `Ok(false)`
+    /// when no sled was available and the operation was a no-op.
     async fn complete_instance_member_join(
         &self,
         ctx: &MemberReconcileCtx<'_>,
@@ -1581,12 +1594,20 @@ impl MulticastGroupReconciler {
         // below are treated as hard errors because the VMM cannot
         // receive traffic without an OPTE port subscription.
         //
-        // The observed switch owner is not available on this path, so the
-        // next hop falls back to the shared hash and the group reconciler
-        // co-locates it on its next pass.
+        // This path runs between group reconciler passes, so it observes the
+        // external entry's owner from DPD to keep the next hop co-located
+        // rather than flipping to the hash fallback until the next pass.
+        let incumbent_switch = ctx
+            .dataplane_client
+            .observe_external_owner(ctx.group.multicast_ip.ip())
+            .await;
         if let Err(e) = ctx
             .sled_client
-            .propagate_m2p_and_forwarding(ctx.opctx, ctx.group, None)
+            .propagate_m2p_and_forwarding(
+                ctx.opctx,
+                ctx.group,
+                incumbent_switch,
+            )
             .await
         {
             warn!(

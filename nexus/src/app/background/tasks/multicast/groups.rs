@@ -81,6 +81,7 @@
 
 use std::collections::HashSet;
 use std::net::IpAddr;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use anyhow::{Context, anyhow};
 use futures::future::try_join_all;
@@ -96,6 +97,7 @@ use nexus_types::identity::Resource;
 use omicron_common::address::is_ssm_address;
 use omicron_common::api::external::{self, DataPageParams};
 use omicron_uuid_kinds::{GenericUuid, MulticastGroupUuid};
+use sled_agent_types::early_networking::SwitchSlot;
 
 use super::{MulticastGroupReconciler, StateTransition};
 use crate::app::multicast::dataplane::{
@@ -183,6 +185,43 @@ fn dpd_state_matches_sources(
     }
 }
 
+/// Per-pass counters for placement and election drift observed while
+/// reconciling active groups.
+///
+/// Active groups are reconciled concurrently within a pass, so these are
+/// atomics. The pass driver resets them before reconciling active groups and
+/// folds them into the task status afterward, where omdb surfaces them.
+#[derive(Debug, Default)]
+pub(super) struct ActiveDriftCounters {
+    /// External entries the drift check observed on a non-elected switch.
+    pub(super) entries_misplaced: AtomicUsize,
+    /// Groups whose external ingress owner slot moved since the previous
+    /// reconciliation pass (see `fold_owner_observations`).
+    pub(super) groups_reelected: AtomicUsize,
+}
+
+impl ActiveDriftCounters {
+    pub(super) fn reset(&self) {
+        self.entries_misplaced.store(0, Ordering::Relaxed);
+        self.groups_reelected.store(0, Ordering::Relaxed);
+    }
+}
+
+/// Which switch slot owned each group's external ingress entry, as observed
+/// during one reconciliation pass over active groups. The reconciler folds
+/// these into its owner map (`elected_owners`, kept across passes) via
+/// `fold_owner_observations`, so slot moves can be detected.
+#[derive(Debug, Default)]
+pub(super) struct OwnerSlotObservations {
+    /// Every active group listed this pass, used to prune departed groups
+    /// from the owner map.
+    live: Vec<MulticastGroupUuid>,
+    /// The owner slot observed for each group this pass. Groups whose owner
+    /// went unobserved (drift check or update failed) stay in `live` so
+    /// their recorded slot survives for the next pass.
+    owner_slots: Vec<(MulticastGroupUuid, SwitchSlot)>,
+}
+
 /// Switch-side clients threaded through group state processors.
 struct GroupReconcileClients<'a> {
     dataplane: &'a MulticastDataplaneClient,
@@ -210,6 +249,10 @@ trait GroupStateProcessor {
     ) -> Result<StateTransition, anyhow::Error>;
 
     /// Process a group in "Active" state (check DPD sync status).
+    ///
+    /// Also returns the group's external ingress owner slot when this
+    /// reconciliation pass observed one, so the reconciler can detect moves
+    /// between passes.
     async fn process_active(
         &self,
         reconciler: &MulticastGroupReconciler,
@@ -217,7 +260,7 @@ trait GroupStateProcessor {
         group: &MulticastGroup,
         clients: &GroupReconcileClients<'_>,
         mrib_route_index: Option<&MribRouteIndex>,
-    ) -> Result<StateTransition, anyhow::Error>;
+    ) -> Result<(StateTransition, Option<SwitchSlot>), anyhow::Error>;
 }
 
 /// Processor for external multicast groups (customer/operator-facing).
@@ -260,7 +303,7 @@ impl GroupStateProcessor for ExternalGroupProcessor {
         group: &MulticastGroup,
         clients: &GroupReconcileClients<'_>,
         mrib_route_index: Option<&MribRouteIndex>,
-    ) -> Result<StateTransition, anyhow::Error> {
+    ) -> Result<(StateTransition, Option<SwitchSlot>), anyhow::Error> {
         reconciler
             .handle_active_external_group(
                 opctx,
@@ -372,6 +415,9 @@ impl MulticastGroupReconciler {
     /// 1. List groups by state
     /// 2. Process concurrently
     /// 3. Collect and log results
+    ///
+    /// Owner observations are populated only for the active pass and are
+    /// empty for every other state.
     async fn reconcile_groups_by_state(
         &self,
         opctx: &OpContext,
@@ -379,7 +425,7 @@ impl MulticastGroupReconciler {
         dataplane_client: Option<&MulticastDataplaneClient>,
         sled_client: Option<&MulticastSledClient>,
         switch_zone_client: Option<&MulticastSwitchZoneClient>,
-    ) -> Result<usize, String> {
+    ) -> Result<(usize, OwnerSlotObservations), String> {
         trace!(opctx.log, "searching for multicast groups"; "state" => %state);
 
         let groups = self
@@ -439,10 +485,22 @@ impl MulticastGroupReconciler {
 
         // Handle results with state-appropriate logging and counting
         let mut processed = 0;
+        let mut observations = OwnerSlotObservations::default();
         let total = group_outcomes.len();
         for (group, result) in group_outcomes {
+            if state == MulticastGroupState::Active {
+                observations
+                    .live
+                    .push(MulticastGroupUuid::from_untyped_uuid(group.id()));
+            }
             match result {
-                Ok(transition) => {
+                Ok((transition, owner_slot)) => {
+                    if let Some(slot) = owner_slot {
+                        observations.owner_slots.push((
+                            MulticastGroupUuid::from_untyped_uuid(group.id()),
+                            slot,
+                        ));
+                    }
                     // Count successful transitions based on state expectations
                     let should_count = match state {
                         // Creating: count StateChanged and NoChange
@@ -499,7 +557,7 @@ impl MulticastGroupReconciler {
             );
         }
 
-        Ok(processed)
+        Ok((processed, observations))
     }
 
     /// Process multicast groups that are in "Creating" state.
@@ -515,6 +573,7 @@ impl MulticastGroupReconciler {
             None,
         )
         .await
+        .map(|(processed, _)| processed)
     }
 
     /// Process multicast groups that are in "Deleting" state.
@@ -533,16 +592,20 @@ impl MulticastGroupReconciler {
             Some(switch_zone_client),
         )
         .await
+        .map(|(processed, _)| processed)
     }
 
     /// Reconcile active multicast groups with DPD (drift detection and correction).
+    ///
+    /// Also returns this pass's owner slot observations for the caller to
+    /// fold into the owner map (`fold_owner_observations`).
     pub(super) async fn reconcile_active_groups(
         &self,
         opctx: &OpContext,
         dataplane_client: &MulticastDataplaneClient,
         sled_client: &MulticastSledClient,
         switch_zone_client: &MulticastSwitchZoneClient,
-    ) -> Result<usize, String> {
+    ) -> Result<(usize, OwnerSlotObservations), String> {
         self.reconcile_groups_by_state(
             opctx,
             MulticastGroupState::Active,
@@ -553,8 +616,48 @@ impl MulticastGroupReconciler {
         .await
     }
 
+    /// Fold the owner slots observed during one reconciliation task pass
+    /// into the owner map kept across passes, counting a re-election for
+    /// each group whose recorded owner slot moved.
+    ///
+    /// Runs between reconciliation passes with exclusive access to the
+    /// reconciler, so the map needs no lock. Departed groups are pruned
+    /// against the live set from the same pass rather than on the "Deleted"
+    /// path, which would leak entries when a peer Nexus wins the deletion
+    /// race.
+    pub(super) fn fold_owner_observations(
+        &mut self,
+        opctx: &OpContext,
+        observations: OwnerSlotObservations,
+    ) {
+        let live: HashSet<MulticastGroupUuid> =
+            observations.live.into_iter().collect();
+        self.elected_owners.retain(|id, _| live.contains(id));
+
+        for (group_id, slot) in observations.owner_slots {
+            if let Some(previous) = self.elected_owners.insert(group_id, slot) {
+                if previous != slot {
+                    info!(
+                        opctx.log,
+                        "external multicast group ownership moved between \
+                         switches";
+                        "group_id" => %group_id,
+                        "previous_owner" => ?previous,
+                        "new_owner" => ?slot,
+                    );
+                    self.drift_counters
+                        .groups_reelected
+                        .fetch_add(1, Ordering::Relaxed);
+                }
+            }
+        }
+    }
+
     /// Main dispatch function for processing group state changes.
     /// Routes to appropriate processor based on group type and state.
+    ///
+    /// The owner slot in the returned tuple is `Some` only on the active
+    /// path, when the pass observed the group's external ingress owner.
     async fn process_group_state(
         &self,
         opctx: &OpContext,
@@ -563,14 +666,16 @@ impl MulticastGroupReconciler {
         sled_client: Option<&MulticastSledClient>,
         switch_zone_client: Option<&MulticastSwitchZoneClient>,
         mrib_route_index: Option<&MribRouteIndex>,
-    ) -> Result<StateTransition, anyhow::Error> {
+    ) -> Result<(StateTransition, Option<SwitchSlot>), anyhow::Error> {
         // Future: Match on group type to select different processors if
         // we add more nuanced group types
         let processor = ExternalGroupProcessor;
 
         match group.state {
             MulticastGroupState::Creating => {
-                processor.process_creating(self, opctx, group).await
+                let transition =
+                    processor.process_creating(self, opctx, group).await?;
+                Ok((transition, None))
             }
             MulticastGroupState::Deleting => {
                 let clients = GroupReconcileClients {
@@ -583,7 +688,10 @@ impl MulticastGroupReconciler {
                         "switch zone client required for deleting state",
                     )?,
                 };
-                processor.process_deleting(self, opctx, group, &clients).await
+                let transition = processor
+                    .process_deleting(self, opctx, group, &clients)
+                    .await?;
+                Ok((transition, None))
             }
             MulticastGroupState::Active => {
                 let clients = GroupReconcileClients {
@@ -746,7 +854,7 @@ impl MulticastGroupReconciler {
         sled_client: &MulticastSledClient,
         switch_zone_client: &MulticastSwitchZoneClient,
         mrib_route_index: Option<&MribRouteIndex>,
-    ) -> Result<StateTransition, anyhow::Error> {
+    ) -> Result<(StateTransition, Option<SwitchSlot>), anyhow::Error> {
         let underlay_group_id = group
             .underlay_group_id
             .context("active multicast group missing underlay_group_id")?;
@@ -782,6 +890,12 @@ impl MulticastGroupReconciler {
             .await
         {
             Ok(check) => {
+                if check.misplaced {
+                    self.drift_counters
+                        .entries_misplaced
+                        .fetch_add(1, Ordering::Relaxed);
+                }
+
                 let needs_update = match &check.elected_config {
                     Some(dpd_group) => {
                         let tag_matches =
@@ -853,7 +967,6 @@ impl MulticastGroupReconciler {
                 .update_groups(GroupUpdateParams {
                     external_group: group,
                     underlay_group: &underlay_group,
-                    new_name: group.name().as_str(),
                     source_filter: &source_filter,
                     incumbent_switch,
                 })
@@ -864,7 +977,8 @@ impl MulticastGroupReconciler {
                         opctx.log,
                         "drift correction completed for active group";
                         "group_id" => %group.id(),
-                        "multicast_ip" => %group.multicast_ip
+                        "multicast_ip" => %group.multicast_ip,
+                        "elected_switch" => ?elected_switch
                     );
 
                     dpd_synced = true;
@@ -890,7 +1004,7 @@ impl MulticastGroupReconciler {
                         );
                     }
 
-                    Ok(StateTransition::StateChanged)
+                    Ok((StateTransition::StateChanged, Some(elected_switch)))
                 }
                 Err(e) => {
                     warn!(
@@ -899,8 +1013,10 @@ impl MulticastGroupReconciler {
                         "group_id" => %group.id(),
                         "error" => %e
                     );
-                    // Return NoChange so RPW retries on next activation
-                    Ok(StateTransition::NoChange)
+                    // Return NoChange so RPW retries on next activation.
+                    // The owner is unobserved: the update failed, so the
+                    // entry's placement is unknown until the retry.
+                    Ok((StateTransition::NoChange, None))
                 }
             }
         } else {
@@ -923,7 +1039,7 @@ impl MulticastGroupReconciler {
                 );
             }
 
-            Ok(StateTransition::NoChange)
+            Ok((StateTransition::NoChange, incumbent_switch))
         };
 
         // Reconcile MRIB routes based on whether the group has active

@@ -168,6 +168,17 @@ pub struct MulticastGroupReconcilerStatus {
     pub members_deleted: usize,
     /// Number of empty groups marked for deletion (implicit deletion).
     pub empty_groups_marked: usize,
+    /// External entries the drift check found on a non-elected switch this
+    /// pass. Nonzero values indicate placement drift, the failure mode that
+    /// risks duplicate ingress replication.
+    #[serde(default)]
+    pub external_entries_misplaced: usize,
+    /// Groups whose external ingress owner slot moved since the previous
+    /// reconciliation pass. Recorded in memory per Nexus, so the record
+    /// resets on restart and the same move can be reported by more than one
+    /// Nexus. Persistent nonzero values indicate election flapping.
+    #[serde(default)]
+    pub groups_reelected: usize,
     /// Reconciliation steps skipped this pass because their downstream
     /// client was unavailable. Distinguishes "no work needed" (counters
     /// at 0, `skipped` empty) from "work was deferred" (counters at 0,

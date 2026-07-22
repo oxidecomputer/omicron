@@ -337,11 +337,13 @@ impl MulticastSledClient {
         // The next hop should land on the switch that owns this group's
         // external entry in `dataplane`, since that single DPD object carries
         // both ingress NAT and egress forwarding. The reconciler observes that
-        // owner during its drift check and threads it in as `incumbent_switch`,
-        // so this election prefers the same switch and the two sites co-locate.
-        // When no owner is supplied (the member-churn paths have none in scope),
-        // the election falls back to the shared hash, which agrees with ingress
-        // in steady state and self-corrects on the next group reconciler pass.
+        // owner during its drift check, and the member-churn paths observe it
+        // directly from DPD, both threading it in as `incumbent_switch` so
+        // this election prefers the same switch and the sites co-locate.
+        // When no owner is supplied (teardown, or the observation saw zero or
+        // split ownership), the election falls back to the shared hash, which
+        // agrees with ingress in steady state and self-corrects on the next
+        // group reconciler pass.
         //
         // The address comes from the same switch discovery that defines the
         // candidate set (Dendrite zones in DNS, kept only when their DPD

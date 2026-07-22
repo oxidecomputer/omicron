@@ -113,9 +113,8 @@ pub(crate) mod switch_zone;
 ///   skips this validation). `Some([])` is an explicit empty list. Both are
 ///   invalid for a new SSM membership.
 ///
-/// # Returns
-/// - `Ok(())` if validation passes (ASM address, or SSM with sources)
-/// - `Err` if SSM address without sources
+/// Returns `Ok(())` if validation passes (ASM address, or SSM with sources)
+/// and an error for an SSM address without sources.
 pub(crate) fn validate_ssm_sources(
     group_ip: std::net::IpAddr,
     source_ips: Option<&[std::net::IpAddr]>,
@@ -1417,9 +1416,7 @@ pub(crate) fn map_external_to_underlay_ip_impl(
 /// failover with the owner gone, or an ambiguous split where more than one
 /// switch holds the entry), which falls back to the hash.
 ///
-/// # Returns
-///
-/// `None` when no switches are available.
+/// Returns `None` when no switches are available.
 ///
 /// [`dataplane`]: dataplane
 /// [`sled`]: sled

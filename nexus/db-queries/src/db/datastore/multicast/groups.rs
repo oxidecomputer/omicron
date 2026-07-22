@@ -2131,7 +2131,7 @@ mod tests {
 
         assert!(
             !marked,
-            "Group with active member should NOT be marked for deletion"
+            "Group with active member should not be marked for deletion"
         );
 
         // Verify group is still "Active" (not "Deleting")

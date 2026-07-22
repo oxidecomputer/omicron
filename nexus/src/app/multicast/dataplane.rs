@@ -30,6 +30,26 @@
 //! This enables cross-project and cross-silo multicast while maintaining
 //! security through API authorization and underlay membership control.
 //!
+//! External senders reach the rack through ordinary multicast routing on the
+//! upstream network (PIM, IGMP snooping, or static routes toward the rack
+//! uplinks). Only the elected switch carries the NAT ingress entry for a
+//! group (see [`select_switch_slot`]). A copy arriving at the non-elected
+//! switch is dropped because it has no matching entry. Test environments
+//! without an upstream multicast router mirror frames to both switches and
+//! rely on that same drop behavior.
+//!
+//! The election is one-way: nothing signals to the upstream network which
+//! switch was elected, so deployments must deliver each group's stream
+//! toward both switches' uplinks (static joins or equivalent) and rely on
+//! the non-elected drop. Delivery reaching only the non-elected switch
+//! drops until slot ownership moves.
+//!
+//! TODO(RFD 488 §sect-external-mcast, mcastd): couple NAT ownership to
+//! upstream delivery. The elected switch originates IGMP/MLD membership
+//! reports on its uplinks (host-side proxy reporting, RFC 4605), a new
+//! owner reports and confirms delivery before the NAT ingress entry
+//! moves, and the old owner leaves last.
+//!
 //! ## Source Filtering (IGMPv3/MLDv2)
 //!
 //! Source IPs are stored **per-member** in the control plane, allowing each
@@ -43,14 +63,15 @@
 //!   means receive from any source; non-empty enables source filtering.
 //!
 //! [`UNDERLAY_MULTICAST_SUBNET`]: omicron_common::address::UNDERLAY_MULTICAST_SUBNET
+//! [`select_switch_slot`]: super::select_switch_slot
 
 use std::collections::HashMap;
 use std::net::IpAddr;
 use std::time::Duration;
 
-use futures::future::try_join_all;
+use futures::future::{join_all, try_join_all};
 use oxnet::MulticastMac;
-use slog::{Logger, debug, error, info};
+use slog::{Logger, debug, error, info, warn};
 
 use dpd_client::Error as DpdError;
 use dpd_client::types::{
@@ -153,7 +174,6 @@ pub(crate) struct MulticastDataplaneClient {
 pub(crate) struct GroupUpdateParams<'a> {
     pub external_group: &'a ExternalMulticastGroup,
     pub underlay_group: &'a UnderlayMulticastGroup,
-    pub new_name: &'a str,
     pub source_filter: &'a SourceFilterState,
     /// The switch currently holding the external entry, as observed by the
     /// preceding drift check. Used as an election hint so the update prefers
@@ -170,6 +190,10 @@ pub(crate) struct ExternalDriftCheck {
     /// The elected switch's config when the entry is correctly placed there,
     /// `None` when the reconciler must re-issue an update.
     pub elected_config: Option<MulticastGroupExternalResponse>,
+    /// Whether the entry was observed on a non-elected switch, a stale
+    /// forwarder the follow-up update evicts. Surfaced so the reconciler can
+    /// count placement drift in its task status.
+    pub misplaced: bool,
 }
 
 /// The single switch holding the external entry, or `None` when zero or more
@@ -547,6 +571,16 @@ impl MulticastDataplaneClient {
         // Initial creation, so nothing is programmed yet and there is no
         // current owner to prefer.
         let elected = select_switch_slot(group_id, &available, None);
+        // One line per group lifetime, at info so operators can answer
+        // "which switch owns this group's ingress" without debug logging.
+        info!(
+            self.log,
+            "elected switch to own external multicast ingress";
+            "external_group_id" => %external_group.id(),
+            "multicast_ip" => %external_group_ip,
+            "elected_switch" => ?elected,
+            "dpd_operation" => "create_groups"
+        );
         let dpd_tag: MulticastTag = tag.parse().map_err(|_| {
             Error::internal_error("invalid multicast tag for external removal")
         })?;
@@ -671,7 +705,8 @@ impl MulticastDataplaneClient {
         Ok((underlay_last, external_last))
     }
 
-    /// Update a multicast group's tag (name) and/or sources in the dataplane.
+    /// Update a multicast group's sources and forwarding in the dataplane.
+    /// The dpd tag is immutable, so a rename never reaches the switches.
     ///
     /// Membership is left untouched here: underlay members are owned by
     /// mg-lower/DDM and are not rewritten by this client.
@@ -714,7 +749,14 @@ impl MulticastDataplaneClient {
             inner_mac: MacAddr { a: underlay_ipv6.derive_multicast_mac() },
             vni: Vni::from(u32::from(params.external_group.vni.0)),
         };
-        let new_name_str = params.new_name.to_string();
+        // The DB tag (`{uuid}:{multicast_ip}`) is immutable for the group's
+        // lifetime and shared by the external and underlay entries. Drift
+        // repair below recreates a missing external entry with this tag,
+        // matching `create_groups`. The user-facing name must not be used,
+        // since dpd tags never change after creation.
+        let db_tag = params.external_group.tag.clone().ok_or_else(|| {
+            Error::internal_error("multicast group missing tag")
+        })?;
         let external_group_ip = params.external_group.multicast_ip.ip();
         let sources_dpd = Self::compute_sources_for_dpd(
             external_group_ip,
@@ -731,13 +773,17 @@ impl MulticastDataplaneClient {
         // Prefer whichever switch already holds the entry so a benign rejoin
         // does not move ownership. The drift check that gates this update
         // already observed the owner, so it is threaded in as a hint rather
-        // than re-queried, keeping both elections in agreement.
+        // than re-queried, keeping both elections in agreement. An observed
+        // incumbent switch is always among the candidates, so it is always
+        // retained here. An ownership move only happens when no incumbent was
+        // observed. The reconciler detects moves by comparing against the
+        // owner it recorded on a previous pass.
         let elected =
             select_switch_slot(group_id, &available, params.incumbent_switch);
 
         let update_operations =
             dpd_clients.into_iter().map(|(switch_slot, client)| {
-                let new_name = new_name_str.clone();
+                let db_tag = db_tag.clone();
                 let nat_target = nat_target.clone();
                 let sources = sources_dpd.clone();
                 let underlay_ip_admin = underlay_ip_admin.clone();
@@ -820,7 +866,7 @@ impl MulticastDataplaneClient {
                         group_ip: external_group_ip,
                         external_forwarding,
                         internal_forwarding,
-                        tag: Some(new_name.clone()),
+                        tag: Some(db_tag),
                         sources,
                     };
 
@@ -899,7 +945,6 @@ impl MulticastDataplaneClient {
             "external_group_id" => %params.external_group.id(),
             "switches_updated" => results_len,
             "elected_switch" => ?elected,
-            "new_name" => params.new_name,
             "dpd_operation" => "update_groups"
         );
 
@@ -1057,6 +1102,7 @@ impl MulticastDataplaneClient {
             return Ok(ExternalDriftCheck {
                 incumbent_switch,
                 elected_config: None,
+                misplaced: false,
             });
         }
 
@@ -1088,6 +1134,7 @@ impl MulticastDataplaneClient {
             return Ok(ExternalDriftCheck {
                 incumbent_switch,
                 elected_config: None,
+                misplaced: true,
             });
         }
 
@@ -1105,6 +1152,7 @@ impl MulticastDataplaneClient {
             return Ok(ExternalDriftCheck {
                 incumbent_switch,
                 elected_config: None,
+                misplaced: false,
             });
         };
 
@@ -1120,7 +1168,54 @@ impl MulticastDataplaneClient {
         Ok(ExternalDriftCheck {
             incumbent_switch,
             elected_config: Some(config.into_external_response()?),
+            misplaced: false,
         })
+    }
+
+    /// Observe which switch currently holds a group's external entry.
+    ///
+    /// Member attach and leave run between group reconciler passes and so
+    /// lack the drift check's observed owner. Threading the result into
+    /// `propagate_m2p_and_forwarding` as the election incumbent keeps the
+    /// sled egress next hop co-located with the external entry instead of
+    /// flip-flopping to the hash fallback until the next reconciler pass.
+    ///
+    /// Anything other than exactly one observed holder yields `None` (the
+    /// hash fallback). A read error is treated as not holding, and if that
+    /// hides the incumbent, the election degrades to the hash fallback and
+    /// the next group reconciler pass restores the observed owner. The
+    /// underlay group exists on every switch, so a next hop aimed at the
+    /// non-owning switch still reaches member sleds. Only off-rack egress
+    /// through the external entry is affected for that window.
+    pub(crate) async fn observe_external_owner(
+        &self,
+        group_ip: IpAddr,
+    ) -> Option<SwitchSlot> {
+        let fetch_ops =
+            self.dpd_clients.iter().map(|(switch_slot, client)| async move {
+                (*switch_slot, client.multicast_group_get(&group_ip).await)
+            });
+        let mut holding: Vec<SwitchSlot> = Vec::new();
+        for (switch_slot, outcome) in join_all(fetch_ops).await {
+            match outcome {
+                Ok(_) => holding.push(switch_slot),
+                Err(DpdError::ErrorResponse(resp))
+                    if resp.status() == reqwest::StatusCode::NOT_FOUND => {}
+                Err(e) => {
+                    warn!(
+                        self.log,
+                        "external owner observation failed on switch, \
+                         treating as not holding";
+                        "group_ip" => %group_ip,
+                        "switch" => ?switch_slot,
+                        "error" => %e,
+                        "dpd_operation" => "observe_external_owner"
+                    );
+                }
+            }
+        }
+
+        single_external_owner(&holding)
     }
 
     pub(crate) async fn remove_groups(

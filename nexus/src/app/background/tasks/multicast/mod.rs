@@ -173,6 +173,7 @@
 //! [`instance_updater`]: crate::app::background::tasks::instance_updater
 //! [`MulticastGroupReconcilerConfig`]: nexus_config::MulticastGroupReconcilerConfig
 
+use std::collections::HashMap;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 
@@ -186,6 +187,8 @@ use nexus_db_model::MulticastGroup;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_types::internal_api::background::MulticastGroupReconcilerStatus;
+use omicron_uuid_kinds::MulticastGroupUuid;
+use sled_agent_types::early_networking::SwitchSlot;
 
 use crate::app::background::BackgroundTask;
 use crate::app::multicast::dataplane::MulticastDataplaneClient;
@@ -225,6 +228,18 @@ pub(crate) struct MulticastGroupReconciler {
     orphan_grace_period: chrono::TimeDelta,
     /// Whether multicast functionality is enabled.
     enabled: bool,
+    /// Per-pass placement and election drift counters for active groups.
+    /// Reset at the start of active-group reconciliation and folded into
+    /// the task status afterward.
+    drift_counters: groups::ActiveDriftCounters,
+    /// The last observed external ingress owner per active group, kept across
+    /// passes so a change in owner can be detected and counted as a
+    /// re-election.
+    ///
+    /// This is mutated only between passes (`fold_owner_observations`) and
+    /// is in-memory and per-Nexus: it resets on restart (the first pass
+    /// re-records silently) and each Nexus counts slot moves independently.
+    elected_owners: HashMap<MulticastGroupUuid, SwitchSlot>,
 }
 
 impl MulticastGroupReconciler {
@@ -245,6 +260,8 @@ impl MulticastGroupReconciler {
             group_concurrency_limit,
             orphan_grace_period,
             enabled,
+            drift_counters: groups::ActiveDriftCounters::default(),
+            elected_owners: HashMap::new(),
         }
     }
 
@@ -404,8 +421,13 @@ impl MulticastGroupReconciler {
         // Process member state changes. Underlay dataplane members are
         // programmed by ddmd from DDM peer subscriptions; the reconciler only
         // advances member DB state and manages OPTE subscriptions plus
-        // M2P/forwarding propagation via sled-agent.
-        match self.reconcile_member_states(opctx, &sled_client).await {
+        // M2P/forwarding propagation via sled-agent. The dataplane client is
+        // read-only here, observing the external entry's owner so forwarding
+        // stays co-located with it.
+        match self
+            .reconcile_member_states(opctx, &sled_client, &dataplane_client)
+            .await
+        {
             Ok(counts) => {
                 status.members_processed += counts.processed;
             }
@@ -439,6 +461,7 @@ impl MulticastGroupReconciler {
 
         // Reconcile active groups
         if let Some(switch_zone_client) = &switch_zone_client {
+            self.drift_counters.reset();
             match self
                 .reconcile_active_groups(
                     opctx,
@@ -448,13 +471,29 @@ impl MulticastGroupReconciler {
                 )
                 .await
             {
-                Ok(count) => status.groups_verified += count,
+                Ok((count, observations)) => {
+                    status.groups_verified += count;
+                    // Detect owner slot moves against the map recorded on a
+                    // previous pass, incrementing `groups_reelected`, before
+                    // the drift counters are read into the status below.
+                    self.fold_owner_observations(opctx, observations);
+                }
                 Err(e) => {
                     let msg =
                         format!("failed to reconcile active groups: {e:#}");
                     status.errors.push(msg);
                 }
             }
+            // Fold drift counters in even on error, since per-group handlers
+            // may have observed drift before the pass-level failure.
+            status.external_entries_misplaced = self
+                .drift_counters
+                .entries_misplaced
+                .load(std::sync::atomic::Ordering::Relaxed);
+            status.groups_reelected = self
+                .drift_counters
+                .groups_reelected
+                .load(std::sync::atomic::Ordering::Relaxed);
         } else {
             status.skipped.push("reconcile_active_groups".to_string());
         }

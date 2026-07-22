@@ -341,10 +341,9 @@ impl DataStore {
     ///
     /// Used by the RPW reconciler.
     ///
-    /// # Returns
-    ///
-    /// `Ok(true)` if the row was updated; `Ok(false)` if no row matched
-    /// the filters (member not found, soft-deleted, or state mismatch).
+    /// Returns `Ok(true)` if the row was updated and `Ok(false)` if no row
+    /// matched the filters (member not found, soft-deleted, or state
+    /// mismatch).
     pub async fn multicast_group_member_set_state_if_current_for_parent(
         &self,
         opctx: &OpContext,
@@ -377,10 +376,8 @@ impl DataStore {
     ///
     /// Used by the RPW reconciler.
     ///
-    /// # Returns
-    ///
-    /// `Ok(true)` if the row was updated; `Ok(false)` if the row was
-    /// missing or its state was not "Left".
+    /// Returns `Ok(true)` if the row was updated and `Ok(false)` if the row
+    /// was missing or its state was not "Left".
     pub async fn multicast_group_member_left_to_joining_if_current_for_parent(
         &self,
         opctx: &OpContext,
@@ -416,10 +413,8 @@ impl DataStore {
     ///
     /// Used by the RPW reconciler.
     ///
-    /// # Returns
-    ///
-    /// `Ok(true)` if the row was updated; `Ok(false)` if the row was
-    /// missing or its state did not match `expected_state`.
+    /// Returns `Ok(true)` if the row was updated and `Ok(false)` if the row
+    /// was missing or its state did not match `expected_state`.
     pub async fn multicast_group_member_to_left_if_current_for_parent(
         &self,
         opctx: &OpContext,
@@ -622,9 +617,7 @@ impl DataStore {
     /// - `parent_valid`: Whether the parent is in a valid state for multicast
     /// - `current_sled_id`: The parent's current sled_id from VMM lookup
     ///
-    /// # Returns
-    ///
-    /// The reconciliation result indicating what action was taken.
+    /// Returns the reconciliation result indicating what action was taken.
     ///
     /// # Example Usage (from RPW reconciler)
     ///
@@ -1194,9 +1187,13 @@ impl DataStore {
 mod tests {
     use super::*;
 
+    use std::net::Ipv4Addr;
+
     use nexus_types::identity::Resource;
     use nexus_types::multicast::MulticastGroupCreate;
-    use omicron_common::address::MAX_SOURCE_IPS_PER_GROUP;
+    use omicron_common::address::{
+        MAX_SOURCE_IPS_PER_GROUP, MAX_SOURCE_IPS_PER_MEMBER,
+    };
     use omicron_common::api::external::DataPageParams;
     use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_test_utils::dev;
@@ -4362,6 +4359,198 @@ mod tests {
         logctx.cleanup_successful();
     }
 
+    // A supplied source filter is written on every attach path: new inserts,
+    // "Left" reactivations, and rewrites on live members. Each path that
+    // would grow the per-group source IP union past the cap must fail, while
+    // an attach restating the stored filter leaves the union unchanged and
+    // must pass.
+    #[tokio::test]
+    async fn test_member_attach_union_cap_bounds_filter_rewrites() {
+        let logctx = dev::test_setup_log(
+            "test_member_attach_union_cap_bounds_filter_rewrites",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let setup = multicast::create_test_setup(
+            &opctx,
+            &datastore,
+            "union-cap-test-pool",
+            "union-cap-test-project",
+        )
+        .await;
+
+        let group = multicast::create_test_group_with_state(
+            &opctx,
+            &datastore,
+            "union-cap-group",
+            "224.10.1.101",
+            true, // make_active
+        )
+        .await;
+        let group_id = MulticastGroupUuid::from_untyped_uuid(group.id());
+
+        // Fill the union to exactly the group cap with members that each
+        // stay within the per-member cap, mirroring what the app layer
+        // permits: 256 / 32 = 8 members with 32 distinct sources apiece.
+        let filler_count = MAX_SOURCE_IPS_PER_GROUP / MAX_SOURCE_IPS_PER_MEMBER;
+        let mut first_source: Option<IpAddr> = None;
+        for m in 0..filler_count {
+            let filler = create_stopped_instance_record(
+                &opctx,
+                &datastore,
+                &setup.authz_project,
+                &format!("cap-instance-fill-{m}"),
+            )
+            .await;
+            let sources: Vec<IpAddr> = (0..MAX_SOURCE_IPS_PER_MEMBER)
+                .map(|i| IpAddr::V4(Ipv4Addr::new(10, 0, m as u8, i as u8)))
+                .collect();
+            first_source.get_or_insert(sources[0]);
+            datastore
+                .multicast_group_member_attach(
+                    &opctx,
+                    group_id,
+                    MemberParentRef::Instance(filler),
+                    Some(sources.as_slice()),
+                )
+                .await
+                .expect("Filling the union to the cap should succeed");
+        }
+        let first_source = first_source.unwrap();
+
+        // Attach a second member with a source already in the union,
+        // keeping the union at the cap.
+        let instance2 = create_stopped_instance_record(
+            &opctx,
+            &datastore,
+            &setup.authz_project,
+            "cap-instance-2",
+        )
+        .await;
+        let existing_source: Vec<IpAddr> = vec![first_source];
+        let member2 = datastore
+            .multicast_group_member_attach(
+                &opctx,
+                group_id,
+                MemberParentRef::Instance(instance2),
+                Some(existing_source.as_slice()),
+            )
+            .await
+            .expect("Attach with an existing source should succeed");
+
+        // A live member's supplied filter is rewritten, so a rewrite that
+        // would grow the union past the cap must be rejected.
+        let over_cap: Vec<IpAddr> = vec!["10.0.9.9".parse().unwrap()];
+        let err = datastore
+            .multicast_group_member_attach(
+                &opctx,
+                group_id,
+                MemberParentRef::Instance(instance2),
+                Some(over_cap.as_slice()),
+            )
+            .await
+            .expect_err("Over-cap filter rewrite on a live member must fail");
+        assert!(
+            err.to_string().contains("source IP union cap"),
+            "Received unexpected error: {err}"
+        );
+
+        // Restating the stored filter leaves the union unchanged and the
+        // row untouched.
+        let member2_again = datastore
+            .multicast_group_member_attach(
+                &opctx,
+                group_id,
+                MemberParentRef::Instance(instance2),
+                Some(existing_source.as_slice()),
+            )
+            .await
+            .expect("Restating the stored filter must not trip the cap");
+        assert_eq!(
+            member2.id, member2_again.id,
+            "Received a different member on reattach"
+        );
+        assert_eq!(
+            member2.time_modified, member2_again.time_modified,
+            "Restating the stored filter must not update time_modified"
+        );
+        let stored: Vec<IpAddr> =
+            member2_again.source_ips.iter().map(|n| n.ip()).collect();
+        assert_eq!(
+            stored, existing_source,
+            "Restating the stored filter must preserve source_ips"
+        );
+
+        // Reactivating a "Left" member does rewrite its sources, so the
+        // same list must still trip the cap.
+        datastore
+            .multicast_group_members_detach_by_parent(
+                &opctx,
+                MemberParentRef::Instance(instance2),
+            )
+            .await
+            .expect("Detach should succeed");
+        let err = datastore
+            .multicast_group_member_attach(
+                &opctx,
+                group_id,
+                MemberParentRef::Instance(instance2),
+                Some(over_cap.as_slice()),
+            )
+            .await
+            .expect_err("Left reactivation over the cap must fail");
+        assert!(
+            err.to_string().contains("source IP union cap"),
+            "Received unexpected error: {err}"
+        );
+
+        // A new insert is likewise still guarded.
+        let instance3 = create_stopped_instance_record(
+            &opctx,
+            &datastore,
+            &setup.authz_project,
+            "cap-instance-3",
+        )
+        .await;
+        let err = datastore
+            .multicast_group_member_attach(
+                &opctx,
+                group_id,
+                MemberParentRef::Instance(instance3),
+                Some(over_cap.as_slice()),
+            )
+            .await
+            .expect_err("New insert over the cap must fail");
+        assert!(
+            err.to_string().contains("source IP union cap"),
+            "Received unexpected error: {err}"
+        );
+
+        // Reactivation within the cap still succeeds and rewrites sources.
+        let member2_react = datastore
+            .multicast_group_member_attach(
+                &opctx,
+                group_id,
+                MemberParentRef::Instance(instance2),
+                Some(existing_source.as_slice()),
+            )
+            .await
+            .expect("'Left' reactivation within the cap should succeed");
+        assert_eq!(
+            member2.id, member2_react.id,
+            "Reactivation should reuse the existing row"
+        );
+        assert_eq!(
+            member2_react.state,
+            MulticastGroupMemberState::Joining,
+            "Reactivation should transition back to 'Joining'"
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
     #[tokio::test]
     async fn test_member_attach_reactivation_source_handling() {
         let logctx = dev::test_setup_log(
@@ -5022,13 +5211,22 @@ mod tests {
         .await;
         let group_id = MulticastGroupUuid::from_untyped_uuid(group.id());
 
+        // Members that fill the group cap with full per-member blocks,
+        // plus one more for the over-cap attempt.
+        let full_members = MAX_SOURCE_IPS_PER_GROUP / MAX_SOURCE_IPS_PER_MEMBER;
+        assert_eq!(
+            full_members * MAX_SOURCE_IPS_PER_MEMBER,
+            MAX_SOURCE_IPS_PER_GROUP,
+            "Received a cap ratio the test layout no longer matches"
+        );
+
         let mut instances = Vec::new();
-        for name in ["union-cap-inst1", "union-cap-inst2", "union-cap-inst3"] {
+        for i in 0..=full_members {
             let record = create_stopped_instance_record(
                 &opctx,
                 &datastore,
                 &setup.authz_project,
-                name,
+                &format!("union-cap-inst{i}"),
             )
             .await;
             instances.push(InstanceUuid::from_untyped_uuid(
@@ -5050,40 +5248,30 @@ mod tests {
                 .collect()
         };
 
-        // The per-member cap does not bind at the datastore layer, so a
-        // single member can carry most of the group budget.
-        let first = sources(0, MAX_SOURCE_IPS_PER_GROUP - 6);
-        datastore
-            .multicast_group_member_attach(
-                &opctx,
-                group_id,
-                MemberParentRef::Instance(instances[0]),
-                Some(first.as_slice()),
-            )
-            .await
-            .expect("Should attach member under the cap");
-
-        // Second member lands the union exactly on the cap. The check is
-        // strictly greater-than, so this succeeds.
-        let boundary = sources(1, 6);
-        datastore
-            .multicast_group_member_attach(
-                &opctx,
-                group_id,
-                MemberParentRef::Instance(instances[1]),
-                Some(boundary.as_slice()),
-            )
-            .await
-            .expect("Should attach member with union at the cap");
+        // Each attach carries with it a full per-member block, hitting the
+        // union on the group cap exactly. The check is strictly greater-than,
+        // so every attach succeeds.
+        for (i, instance) in instances.iter().take(full_members).enumerate() {
+            let block = sources(i as u8, MAX_SOURCE_IPS_PER_MEMBER);
+            datastore
+                .multicast_group_member_attach(
+                    &opctx,
+                    group_id,
+                    MemberParentRef::Instance(*instance),
+                    Some(block.as_slice()),
+                )
+                .await
+                .expect("Should attach member with union at or under the cap");
+        }
 
         // A single new source pushes the union past the cap and trips the
         // CTE sentinel.
-        let over = sources(2, 1);
+        let over = sources(full_members as u8, 1);
         let err = datastore
             .multicast_group_member_attach(
                 &opctx,
                 group_id,
-                MemberParentRef::Instance(instances[2]),
+                MemberParentRef::Instance(instances[full_members]),
                 Some(over.as_slice()),
             )
             .await
@@ -5094,9 +5282,9 @@ mod tests {
         );
 
         // A repeat join replaces this member's list, so the union is
-        // measured without its stored sources: swapping most of the budget
-        // for 10 fresh sources stays under the cap.
-        let replacement = sources(3, 10);
+        // measured without its stored sources: swapping a full per-member
+        // block for 10 new sources stays under the cap.
+        let replacement = sources(full_members as u8 + 1, 10);
         let replaced = datastore
             .multicast_group_member_attach(
                 &opctx,

@@ -515,9 +515,7 @@ impl MulticastGroupMember {
 
     /// Typed accessor for the parent when it is an instance.
     ///
-    /// # Returns
-    ///
-    /// `Some(InstanceUuid)` if `parent_kind` is
+    /// Returns `Some(InstanceUuid)` if `parent_kind` is
     /// [`MulticastGroupMemberParentKind::Instance`], `None` otherwise.
     pub fn instance_id(&self) -> Option<InstanceUuid> {
         match self.parent_ref() {
@@ -528,9 +526,7 @@ impl MulticastGroupMember {
 
     /// Typed accessor for the parent when it is a probe.
     ///
-    /// # Returns
-    ///
-    /// `Some(ProbeUuid)` if `parent_kind` is
+    /// Returns `Some(ProbeUuid)` if `parent_kind` is
     /// [`MulticastGroupMemberParentKind::Probe`], `None` otherwise.
     pub fn probe_id(&self) -> Option<ProbeUuid> {
         match self.parent_ref() {

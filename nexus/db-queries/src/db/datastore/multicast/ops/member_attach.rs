@@ -280,7 +280,7 @@ impl AttachMemberToGroupStatement {
         self,
         conn: &async_bb8_diesel::Connection<DbConnection>,
     ) -> Result<AttachMemberResult, AttachMemberError> {
-        // A fresh insert returns the row keyed by `new_member_id`. Any other
+        // A new insert returns the row keyed by `new_member_id`. Any other
         // ID means the upsert hit an existing active row.
         let new_member_id = self.new_member_id;
         self.get_result_async::<MulticastGroupMember>(conn)
@@ -406,6 +406,8 @@ impl AttachMemberToGroupStatement {
         //   CASE
         //     WHEN NOT EXISTS (SELECT 1 FROM parent_sled) THEN <parent-sentinel>
         //     WHEN NOT EXISTS (SELECT 1 FROM valid_group) THEN 'group-not-found'
+        //     [WHEN (SELECT size FROM proposed_union_size) > <cap>
+        //        THEN 'source-union-exceeded']
         //     ELSE 'TRUE'
         //   END AS BOOL
         // ) AS validated
@@ -446,6 +448,11 @@ impl AttachMemberToGroupStatement {
     /// `(parent_kind, parent_id)` key: an instance and a probe may share a
     /// UUID in the same group, so excluding by `parent_id` alone would drop the
     /// other kind's sources from the cap check.
+    ///
+    /// Members in "Left" state still count toward the union. This is
+    /// deliberate, as a "Left" member can reactivate with `source_ips: None`,
+    /// which preserves its stored sources without a cap check. Hence, its
+    /// capacity must remain reserved while the row is live.
     fn push_proposed_union_size_cte<'a>(
         &'a self,
         mut out: AstPass<'_, 'a, Pg>,
