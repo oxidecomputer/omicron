@@ -163,7 +163,8 @@ rustls-pemfile = { workspace = true }
 scim2-rs.workspace = true
 support-bundle-collection.workspace = true
 update-common.workspace = true
-update-engine.workspace = true
+oxide-update-engine.workspace = true
+oxide-update-engine-types.workspace = true
 omicron-workspace-hack.workspace = true
 omicron-uuid-kinds.workspace = true
 zip = { workspace = true, features = ["jiff-02"] }

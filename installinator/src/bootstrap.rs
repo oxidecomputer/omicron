@@ -12,7 +12,7 @@ use illumos_utils::dladm;
 use illumos_utils::dladm::Dladm;
 use illumos_utils::zone::Zones;
 use omicron_common::address::Ipv6Subnet;
-use omicron_common::address::SLED_PREFIX;
+use omicron_common::address::SLED_PREFIX_LENGTH;
 use omicron_common::backoff::retry_notify;
 use omicron_common::backoff::retry_policy_internal_service_aggressive;
 use omicron_ddm_admin_client::Client as DdmAdminClient;
@@ -87,7 +87,7 @@ pub(crate) async fn bootstrap_sled(
     // so it can advertise it to other sleds.
     let ddmd_client = DdmAdminClient::localhost(&log)?;
     tokio::spawn({
-        let prefix = Ipv6Subnet::<SLED_PREFIX>::new(ip).net();
+        let prefix = Ipv6Subnet::<SLED_PREFIX_LENGTH>::new(ip).net();
         async move {
             retry_notify(
                 retry_policy_internal_service_aggressive(),
