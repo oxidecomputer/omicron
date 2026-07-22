@@ -1823,7 +1823,7 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
                 disk_test.add_zpool_with_datasets(sled_id).await;
             }
         }
-        disk_test.propagate_datasets_to_sleds().await;
+        disk_test.propagate_storage_to_sleds().await;
 
         disk_test
     }
@@ -1851,7 +1851,7 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
     ///
     /// Does not inform sled agents to use these pools.
     ///
-    /// See: [Self::propagate_datasets_to_sleds] if you want to send this
+    /// See: [Self::propagate_storage_to_sleds] if you want to send this
     /// configuration to a simulated sled agent.
     pub async fn add_zpool_with_datasets(&mut self, sled_id: SledUuid) {
         self.add_sized_zpool_with_datasets(
@@ -1865,7 +1865,7 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
     ///
     /// Does not inform sled agents to use these pools.
     ///
-    /// See: [Self::propagate_datasets_to_sleds] if you want to send this
+    /// See: [Self::propagate_storage_to_sleds] if you want to send this
     /// configuration to a simulated sled agent.
     pub async fn add_sized_zpool_with_datasets(
         &mut self,
@@ -1902,7 +1902,7 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
     /// sled's current `OmicronSledConfig` (leaving zones and any other
     /// contents intact, including preexisting disks and datasets!) and sends
     /// the updated config at the next generation.
-    pub async fn propagate_datasets_to_sleds(&mut self) {
+    pub async fn propagate_storage_to_sleds(&mut self) {
         let cptestctx = self.cptestctx;
 
         for (sled_id, PerSledDiskState { zpools }) in &self.sleds {
@@ -1974,7 +1974,7 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
     ///
     /// Does not inform sled agents to use these pools.
     ///
-    /// See: [Self::propagate_datasets_to_sleds] if you want to send
+    /// See: [Self::propagate_storage_to_sleds] if you want to send
     /// this configuration to a simulated sled agent.
     pub async fn add_zpool_with_datasets_ext(
         &mut self,
@@ -2219,7 +2219,7 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
     ///
     /// Note that this only affects this `DiskTest`'s in-memory state; if the
     /// zpool's disk and datasets were previously propagated to a sled's
-    /// config, they remain there ([Self::propagate_datasets_to_sleds] only
+    /// config, they remain there ([Self::propagate_storage_to_sleds] only
     /// adds entries, it never removes them).
     pub async fn remove_zpool(&mut self, zpool_id: ZpoolUuid) {
         for sled in self.sleds.values_mut() {
