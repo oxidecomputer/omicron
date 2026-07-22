@@ -45,7 +45,7 @@ const CHANNEL_CAPACITY: usize = 8;
 
 /// Response to a request for MGS-specific inventory information.
 #[derive(Debug)]
-pub enum GetInventoryResponse {
+pub(crate) enum GetInventoryResponse {
     Response {
         /// Every per-SP record the manager holds.
         ///
@@ -112,7 +112,7 @@ impl GetInventoryError {
 }
 
 impl MgsHandle {
-    pub async fn get_cached_inventory(
+    pub(crate) async fn get_cached_inventory(
         &self,
     ) -> Result<GetInventoryResponse, ShutdownInProgress> {
         match self.get_inventory_refreshing_sps(Vec::new()).await {
@@ -130,7 +130,7 @@ impl MgsHandle {
         }
     }
 
-    pub async fn get_inventory_refreshing_sps(
+    pub(crate) async fn get_inventory_refreshing_sps(
         &self,
         force_refresh: Vec<SpIdentifier>,
     ) -> Result<GetInventoryResponse, GetInventoryError> {
@@ -488,7 +488,7 @@ impl MgsManager {
 
 /// A single SP's record in the manager's inventory map.
 #[derive(Clone, Debug)]
-pub struct SpRecord {
+pub(crate) struct SpRecord {
     pub id: SpIdentifier,
     pub ignition: Option<SpIgnition>,
 
