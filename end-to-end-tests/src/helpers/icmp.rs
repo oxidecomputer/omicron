@@ -21,6 +21,12 @@ const HIDE_CURSOR: &str = "\x1b[?25l";
 const SHOW_CURSOR: &str = "\x1b[?25h";
 const MOVE_CURSOR_UP: &str = "\x1b[A";
 
+/// Refresh cadence for the live ping status table.
+const DISPLAY_REFRESH_INTERVAL: Duration = Duration::from_millis(100);
+
+/// Poll interval for the quiesce check in `drain_until_quiescent`.
+const DRAIN_POLL_INTERVAL: Duration = Duration::from_millis(100);
+
 const ICMP_ECHO_TYPE: u8 = 8;
 const ICMP_ECHO_CODE: u8 = 0;
 const ICMP_ECHO_REPLY_TYPE: u8 = 0;
@@ -31,10 +37,14 @@ const ICMPV6_ECHO_TYPE: u8 = 128;
 const ICMPV6_ECHO_CODE: u8 = 0;
 const ICMPV6_ECHO_REPLY_TYPE: u8 = 129;
 
-// IPv4 raw sockets deliver the leading IP header to userspace, so received
+// IPv4 raw sockets deliver the leading IP header to userspace, and received
 // datagrams are parsed past a fixed 20-byte IPv4 header. IPv6 raw sockets never
 // include the IPv6 header (RFC 3542), so v6 datagrams are parsed from offset 0.
 const IPV4_HEADER_LEN: usize = 20;
+
+// Receive buffer for one raw-socket datagram. Echo replies are tiny, but the
+// buffer comfortably covers a jumbo-MTU (9000 byte) frame.
+const RX_BUF_LEN: usize = 10240;
 
 #[derive(Debug, Serialize, Deserialize)]
 struct EchoRequest {
@@ -148,25 +158,26 @@ impl<T> PingState<T> {
         self.tx_count = tx_total;
     }
 
-    /// Record a matched reply received at `at`: bump the receive count, latch
-    /// the transmit baseline on the first reply, and fold the round-trip time
-    /// into the running statistics. The round-trip update is skipped when no
-    /// send has been recorded yet, which cannot happen once traffic is flowing.
+    /// Record a matched reply received at `at`. We bump the receive count,
+    /// latch the transmit baseline on the first reply, and fold the round-trip
+    /// time into the running statistics. The round-trip update is skipped when
+    /// no send has been recorded yet, which cannot happen once traffic is
+    /// flowing.
     fn record_reply(&mut self, at: Instant) {
         self.rx_count += 1;
         if self.first == 0 {
             self.first = self.tx_count;
         }
         if let Some(sent) = self.sent {
-            let dt = at - sent;
-            self.current = Some(dt);
-            if self.low == Duration::ZERO || dt < self.low {
-                self.low = dt;
+            let round_trip = at - sent;
+            self.current = Some(round_trip);
+            if self.low == Duration::ZERO || round_trip < self.low {
+                self.low = round_trip;
             }
-            if dt > self.high {
-                self.high = dt;
+            if round_trip > self.high {
+                self.high = round_trip;
             }
-            self.sum += dt;
+            self.sum += round_trip;
         }
     }
 }
@@ -191,13 +202,14 @@ impl Pinger4 {
                 for (_id, t) in self.targets.lock().unwrap().iter() {
                     print_ping_row(t);
                 }
-                // move the cursor back to the top for another round of reporting
+                // move the cursor back to the top for another round of
+                // reporting
                 for _ in 0..self.targets.lock().unwrap().len() {
                     print!("{MOVE_CURSOR_UP}");
                 }
                 print!("\r");
 
-                sleep(Duration::from_millis(100));
+                sleep(DISPLAY_REFRESH_INTERVAL);
             }
         });
     }
@@ -222,8 +234,8 @@ impl Pinger4 {
         duration: Duration,
     ) {
         // `seq` is the 16-bit ICMP sequence number and is allowed to wrap.
-        // `tx_total` is the true count of packets sent and must not, so it is a
-        // separate wide counter.
+        // `tx_total` is the true count of packets sent and must not wrap, so
+        // it is kept as a separate wide counter.
         let mut seq = 0u16;
         let mut tx_total: u32 = 0;
         let stop = Instant::now() + duration;
@@ -281,7 +293,7 @@ impl Pinger4 {
         // necessary accounting.
         spawn(move || {
             loop {
-                let mut ubuf = [MaybeUninit::new(0); 10240];
+                let mut ubuf = [MaybeUninit::new(0); RX_BUF_LEN];
                 if let Ok((sz, _)) = self.sock.recv_from(&mut ubuf) {
                     let buf = unsafe { ubuf[..sz].assume_init_ref() };
                     let msg: EchoRequest =
@@ -429,9 +441,9 @@ pub struct McastReport<T> {
 
 /// Outcome of `drain_until_quiescent`.
 ///
-/// The two exits are not equivalent: [`DrainResult::Quiesced`] means every
-/// replicated reply was counted, while [`DrainResult::TimedOut`] means the
-/// receive count never settled, so the tally may be incomplete or duplicate
+/// The two exits are not equivalent: `DrainResult::Quiesced` means every
+/// replicated reply was counted, while `DrainResult::TimedOut` means the
+/// receive count never settled, so the count may be incomplete or duplicate
 /// delivery is still ongoing. Callers should treat a timeout as a test failure.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum DrainResult {
@@ -444,12 +456,13 @@ enum DrainResult {
 /// Block until multicast replication has drained.
 ///
 /// When the send loop ends, replicated copies of the final requests are still
-/// in flight. Rather than clip the tail at a fixed buffer, poll the aggregate
-/// receive count and return `DrainResult::Quiesced` once it has stopped
-/// advancing for `quiesce`, so every replicated reply is counted. `timeout`
-/// bounds the wait so a member that never quiesces (for example a steady
-/// duplicate storm) cannot hang the test; that exit returns
-/// `DrainResult::TimedOut`.
+/// in flight. Rather than clip the tail at a fixed buffer, we poll the
+/// aggregate receive count and return `DrainResult::Quiesced` once it has
+/// stopped advancing for `quiesce`, so that every replicated reply is counted.
+///
+/// `timeout` bounds the wait so a member that never quiesces (for example
+/// when duplicate copies keep arriving) cannot hang the test. That exit
+/// returns `DrainResult::TimedOut`.
 fn drain_until_quiescent<K, T>(
     targets: &Mutex<BTreeMap<K, PingState<T>>>,
     quiesce: Duration,
@@ -462,7 +475,7 @@ fn drain_until_quiescent<K, T>(
     let mut last = total_rx(&targets.lock().unwrap());
     let mut stable_since = Instant::now();
     loop {
-        sleep(Duration::from_millis(100));
+        sleep(DRAIN_POLL_INTERVAL);
 
         if Instant::now() >= deadline {
             return DrainResult::TimedOut;
@@ -489,9 +502,9 @@ trait McastPinger: Send + Sync + 'static {
     type Addr: Copy + Ord + Display;
 
     /// Build a pinger for `group`, stamping every request with `id`, and spawn
-    /// its receive and loss-counting workers. `ttl` raises the multicast egress
-    /// limit (IPv4 `IP_MULTICAST_TTL` or IPv6 `IPV6_MULTICAST_HOPS`) so requests
-    /// traverse the rack underlay to remote members.
+    /// its receive and loss-counting workers. `ttl` raises the multicast
+    /// egress limit (IPv4 `IP_MULTICAST_TTL` or IPv6 `IPV6_MULTICAST_HOPS`) so
+    /// requests traverse the rack underlay to remote members.
     fn new(ttl: u32, group: Self::Addr, id: u16) -> Arc<Self>;
 
     /// Per-member reply accounting, keyed by responder source address.
@@ -505,8 +518,8 @@ trait McastPinger: Send + Sync + 'static {
     /// route-lookup failure.
     fn egress_source(group: Self::Addr) -> Option<Self::Addr>;
 
-    /// Wire copies of our own requests received back so far; see
-    /// [`McastReport::sender_self_rx`].
+    /// Wire copies of our own requests received back so far (see
+    /// `McastReport::sender_self_rx`).
     fn self_rx(&self) -> u32;
 
     /// Spawn the live ticker that repaints a status row per member.
@@ -521,7 +534,7 @@ trait McastPinger: Send + Sync + 'static {
                     print!("{MOVE_CURSOR_UP}");
                 }
                 print!("\r");
-                sleep(Duration::from_millis(100));
+                sleep(DISPLAY_REFRESH_INTERVAL);
             }
         });
     }
@@ -548,8 +561,8 @@ trait McastPinger: Send + Sync + 'static {
 /// joined members, whose kernels reply unicast. `expected_members` seeds the
 /// per-member report so a member that never replies surfaces with
 /// `rx_count == 0`. Unexpected responders are added as they appear. After the
-/// send window the count is drained to quiescence so late replicated copies are
-/// tallied before the report is built.
+/// send window, the count is drained to quiescence so late replicated copies
+/// are fully counted before the report is built.
 fn mcast_ping_test_run<P: McastPinger>(
     group: P::Addr,
     expected_members: &[P::Addr],
@@ -569,9 +582,9 @@ fn mcast_ping_test_run<P: McastPinger>(
     pinger.clone().show();
     pinger.clone().tx(pps, duration);
     // Let the send window elapse, then keep counting until replication drains.
-    // The final requests' replicated copies are still in flight at the deadline,
-    // so we finish only once the receive count stops advancing rather than
-    // clipping the tail at a fixed buffer.
+    // The final requests' replicated copies are still in flight at the
+    // deadline, so we finish only once the receive count stops advancing
+    // rather than clipping the tail at a fixed buffer.
     sleep(duration);
     assert_eq!(
         drain_until_quiescent(
@@ -609,24 +622,26 @@ fn mcast_ping_test_run<P: McastPinger>(
 ///
 /// A single ICMP echo stream is sent to the multicast group address at `pps`
 /// for `duration`. The rack replicates each request to the joined members,
-/// and replies are tallied by the responder source address rather than ICMP
-/// identifer, as every member answers with the same ID the request carried, so
+/// and replies are counted by the responder source address rather than ICMP
+/// identifier, as every member answers with the same ID the request carried, so
 /// the source address is the only discriminator. `expected_members` seeds the
 /// per-member report so a member that never replies surfaces with
-/// `rx_count == 0`.  Unexpected responders are added as they appear.
+/// `rx_count == 0`. Unexpected responders are added as they appear.
 ///
 /// The reply is generated by each member's kernel ICMP responder, not by any
-/// userspace listener: membership (held open by the in-zone joiner) only makes
-/// the kernel accept the group's packets, after which the kernel echoes. This
-/// relies on illumos responding to multicast echo by default
-/// (`ip_respond_to_echo_multicast=1`). Linux takes the opposite default
-/// (`net.ipv4.icmp_echo_ignore_broadcasts=1`), so a Linux member would join the
-/// group yet never reply, surfacing here as a silent `rx_count == 0`.
+/// userspace listener: membership (held open by the in-zone joiner, i.e., the
+/// SMF service sled-agent runs in each probe zone) only makes the kernel accept
+/// the group's packets, after which the kernel echoes. This relies on illumos
+/// responding to multicast echo by default (`ip_respond_to_echo_multicast=1`).
+/// Linux takes the opposite default (`net.ipv4.icmp_echo_ignore_broadcasts=1`),
+/// so a Linux member would join the group yet never reply, surfacing here as a
+/// silent `rx_count == 0`.
 ///
-/// The reply is unicast back to the sender, so a counted `rx` witnesses the
+/// The reply back to the sender is unicast, so a counted `rx` witnesses the
 /// full round trip: multicast egress to the member and the unicast return. A
 /// clean run confirms both directions. A member that stops replying does not
 /// localize the fault to egress, since a broken return path looks identical.
+///
 /// Pair this with a switch-side replication counter to attribute a failure to
 /// egress alone.
 pub fn mcast_ping4_test_run(
@@ -647,9 +662,9 @@ pub fn mcast_ping4_test_run(
 
 /// Determine the IPv4 source address the raw multicast stream egresses from.
 ///
-/// The raw ICMP socket lets the kernel pick the source via a route lookup on the
-/// group. A throwaway UDP `connect` to the group runs the same lookup and binds
-/// the source that `local_addr` reports. No datagram is sent.
+/// The raw ICMP socket lets the kernel pick the source via a route lookup on
+/// the group. A throwaway UDP `connect` to the group runs the same lookup and
+/// binds the source that `local_addr` reports. No datagram is sent.
 ///
 /// Returns `None` on lookup failure, surfaced as a null sender rather than
 /// aborting the test.
@@ -669,9 +684,9 @@ fn egress_source_v4(group: Ipv4Addr) -> Option<Ipv4Addr> {
 /// `IP_MULTICAST_TTL`. Fixed-length option validation requires the supplied
 /// length to match that table entry exactly.
 ///
-/// socket2's `set_multicast_ttl_v4` passes a four-byte `c_int`, which
-/// the illumos kernel rejects with `EINVAL`. There the option is set directly as
-/// a `u8`. Other platforms accept the `c_int` form, so the socket2 path is used
+/// socket2's `set_multicast_ttl_v4` passes a four-byte `c_int`, which the
+/// illumos kernel rejects with `EINVAL`. There the option is set directly as a
+/// `u8`. Other platforms accept the `c_int` form, so the socket2 path is used
 /// unchanged.
 #[cfg(target_os = "illumos")]
 fn set_multicast_ttl_v4(sock: &Socket, ttl: u32) {
@@ -733,8 +748,8 @@ struct McastPinger4 {
     group: Ipv4Addr,
     /// Per-member reply accounting, keyed by responder source address.
     targets: Mutex<BTreeMap<Ipv4Addr, Ping4State>>,
-    /// Wire copies of our own requests received back; see
-    /// [`McastReport::sender_self_rx`].
+    /// Wire copies of our own requests received back (see
+    /// `McastReport::sender_self_rx`).
     self_rx: AtomicU32,
 }
 
@@ -743,7 +758,7 @@ impl McastPinger4 {
         spawn(move || {
             let egress = Self::egress_source(self.group);
             loop {
-                let mut ubuf = [MaybeUninit::new(0); 10240];
+                let mut ubuf = [MaybeUninit::new(0); RX_BUF_LEN];
                 if let Ok((sz, from)) = self.sock.recv_from(&mut ubuf) {
                     let buf = unsafe { ubuf[..sz].assume_init_ref() };
                     let msg: EchoRequest =
@@ -756,10 +771,10 @@ impl McastPinger4 {
                         .map(|socket_addr| *socket_addr.ip());
                     // With multicast loopback disabled and the group joined as
                     // a listener, an echo request carrying our identifier can
-                    // only have arrived from the wire: the dataplane delivered
-                    // the sender's own stream back to it. Requiring the source
-                    // to be our own egress address discards identifier
-                    // collisions with another host's request stream.
+                    // only have arrived from the wire, meaning the dataplane
+                    // delivered the sender's own stream back to it. Requiring
+                    // the source to be our own egress address discards
+                    // identifier collisions with another host's request stream.
                     if msg.typ == ICMP_ECHO_TYPE
                         && msg.identifier == self.id
                         && egress.map_or(true, |e| src == Some(e))
@@ -826,8 +841,8 @@ impl McastPinger for McastPinger4 {
     fn tx(self: Arc<Self>, pps: usize, duration: Duration) {
         let interval = Duration::from_secs_f64(1.0 / pps as f64);
         // `seq` is the 16-bit ICMP sequence number and is allowed to wrap.
-        // `tx_total` is the true count of packets sent and must not, so it is a
-        // separate wide counter.
+        // `tx_total` is the true count of packets sent and must not wrap, so
+        // it is kept as a separate wide counter.
         let mut seq = 0u16;
         let mut tx_total: u32 = 0;
         let stop = Instant::now() + duration;
@@ -882,23 +897,24 @@ impl McastPinger for McastPinger4 {
 ///
 /// The IPv6 sibling of `mcast_ping4_test_run`. A single ICMPv6 echo stream is
 /// sent to the multicast group at `pps` for `duration`. The rack replicates
-/// each request to the joined members and replies are tallied by responder
+/// each request to the joined members and replies are counted by responder
 /// source address. `expected_members` seeds the per-member report so a member
 /// that never replies surfaces with `rx_count == 0`. Unexpected responders are
 /// added as they appear.
 ///
 /// As with the IPv4 path, the reply comes from each member's kernel ICMPv6
-/// responder, not the in-zone joiner that's applied.
+/// responder, not from the in-zone joiner (the SMF service sled-agent runs in
+/// each probe zone to hold group memberships open). Membership only makes the
+/// kernel accept the group's packets. illumos echoes multicast pings by
+/// default, so a member on a stack that suppresses multicast echo replies
+/// would join yet remain silent.
 ///
-/// Membership only makes the kernel accept the group's packets. illumos echoes
-/// multicast pings by default, so a member on a stack that suppresses multicast
-/// echo replies would join yet still stay silent.
-///
-/// The reply is unicast back to the sender, so a counted `rx` witnesses the full
-/// round trip: multicast egress to the member and the unicast return. A clean run
-/// confirms both directions. A member that stops replying does not localize the
-/// fault to egress, since a broken return path looks identical. Pair this with a
-/// switch-side replication counter to attribute a failure to egress alone.
+/// The reply is unicast back to the sender, so a counted `rx` witnesses the
+/// full round trip: multicast egress to the member and the unicast return. A
+/// clean run confirms both directions. A member that stops replying does not
+/// localize the fault to egress, since a broken return path looks identical.
+/// Pair this with a switch-side replication counter to attribute a failure to
+/// egress alone.
 pub fn mcast_ping6_test_run(
     group: Ipv6Addr,
     expected_members: &[Ipv6Addr],
@@ -940,8 +956,8 @@ struct McastPinger6 {
     group: Ipv6Addr,
     /// Per-member reply accounting, keyed by responder source address.
     targets: Mutex<BTreeMap<Ipv6Addr, Ping6State>>,
-    /// Wire copies of our own requests received back; see
-    /// [`McastReport::sender_self_rx`].
+    /// Wire copies of our own requests received back (see
+    /// `McastReport::sender_self_rx`).
     self_rx: AtomicU32,
 }
 
@@ -950,7 +966,7 @@ impl McastPinger6 {
         spawn(move || {
             let egress = Self::egress_source(self.group);
             loop {
-                let mut ubuf = [MaybeUninit::new(0); 10240];
+                let mut ubuf = [MaybeUninit::new(0); RX_BUF_LEN];
                 if let Ok((sz, from)) = self.sock.recv_from(&mut ubuf) {
                     let buf = unsafe { ubuf[..sz].assume_init_ref() };
                     // IPv6 raw sockets never deliver the IPv6 header, so the
@@ -1005,10 +1021,11 @@ impl McastPinger for McastPinger6 {
     fn new(hops: u32, group: Ipv6Addr, id: u16) -> Arc<Self> {
         let sock = Socket::new(Domain::IPV6, Type::RAW, Some(Protocol::ICMPV6))
             .unwrap();
-        // Multicast egress is governed by IPV6_MULTICAST_HOPS (default 1). Raise
-        // it so requests traverse the rack underlay to remote members. Unlike
-        // the IPv4 TTL this is the standard four-byte `c_int` form on every
-        // platform, so socket2's helper works on illumos without a libc shim.
+        // Multicast egress is governed by IPV6_MULTICAST_HOPS (default 1).
+        // Raise it so requests traverse the rack underlay to remote members.
+        // Unlike the IPv4 TTL this is the standard four-byte `c_int` form on
+        // every platform, so socket2's helper works on illumos without a libc
+        // shim.
         sock.set_multicast_hops_v6(hops).unwrap();
         // Join the group as a local listener and disable loopback, mirroring
         // the IPv4 path: any echo request of ours that arrives came from the
@@ -1037,8 +1054,8 @@ impl McastPinger for McastPinger6 {
     fn tx(self: Arc<Self>, pps: usize, duration: Duration) {
         let interval = Duration::from_secs_f64(1.0 / pps as f64);
         // `seq` is the 16-bit ICMP sequence number and is allowed to wrap.
-        // `tx_total` is the true count of packets sent and must not, so it is a
-        // separate wide counter.
+        // `tx_total` is the true count of packets sent and must not wrap, so
+        // it is kept as a separate wide counter.
         let mut seq = 0u16;
         let mut tx_total: u32 = 0;
         let stop = Instant::now() + duration;
@@ -1091,15 +1108,14 @@ impl McastPinger for McastPinger6 {
 
 /// A source address that may legitimately appear on an echo reply.
 ///
-/// An Echo Reply to a multicast-destined Echo Request must be sourced from a
+/// An echo reply to a multicast-destined echo request must be sourced from a
 /// unicast address of the responding interface, never the group address. For
 /// ICMPv6 this is mandated by RFC 4443 section 4.2. For ICMPv4, RFC 1122
-/// section 3.2.2.6 allows any host to answer a broadcast or multicast Echo
-/// Request, and the reply carries that host's own unicast address. A
+/// section 3.2.2.6 allows any host to answer a broadcast or multicast echo
+/// request, and the reply carries that host's own unicast address. A
 /// noncompliant responder that instead sources the reply from the group address
-/// would otherwise be tallied against the group rather than against a member,
-/// corrupting per-member accounting. Enforcing unicast sources also discards a
-/// looped-back copy of our own multicast-destined request.
+/// would otherwise be counted against the group rather than against a member,
+/// corrupting per-member accounting.
 trait ReplySource {
     fn is_valid_reply_source(&self) -> bool;
 }
@@ -1122,12 +1138,12 @@ impl ReplySource for Ipv6Addr {
 /// A multicast sender may observe copies of its own outgoing requests (for
 /// example when `IP_MULTICAST_LOOP` is enabled). Echo requests share the echo
 /// header layout, so acceptance is gated on the message being an echo reply
-/// (`expected_reply_type`, which differs between ICMPv4 and ICMPv6) that carries
-/// our stream `identifier`. A reply without a resolvable source, or one whose
-/// source is not a unicast address (per RFC 1122 section 3.2.2.6 for ICMPv4 and
-/// RFC 4443 section 4.2 for ICMPv6), is dropped. The caller supplies the
-/// family-specific reply type so the same logic serves both IPv4 and IPv6
-/// streams.
+/// (`expected_reply_type`, which differs between ICMPv4 and ICMPv6) that
+/// carries our stream `identifier`. A reply without a resolvable source, or
+/// one whose source is not a unicast address (per RFC 1122 section 3.2.2.6
+/// for ICMPv4 and RFC 4443 section 4.2 for ICMPv6), is dropped. The caller
+/// supplies the family-specific reply type so the same logic serves both IPv4
+/// and IPv6 streams.
 fn classify_mcast_reply<T: ReplySource>(
     typ: u8,
     expected_reply_type: u8,
@@ -1169,7 +1185,7 @@ mod tests {
     #[test]
     fn echo_request_is_rejected() {
         // A looped-back copy of our own request carries our identifier but is
-        // type 8 (echo request), so it must not be tallied as a member reply.
+        // type 8 (echo request), so it must not be counted as a member reply.
         assert_eq!(
             classify_mcast_reply(
                 ICMP_ECHO_TYPE,
@@ -1214,7 +1230,7 @@ mod tests {
     fn reply_from_multicast_source_is_rejected() {
         // An echo reply's source must be unicast (RFC 1122 section 3.2.2.6 for
         // ICMPv4, RFC 4443 section 4.2 for ICMPv6). A group-sourced reply is
-        // noncompliant and must not be tallied against a member.
+        // noncompliant and must not be counted against a member.
         assert_eq!(
             classify_mcast_reply(
                 ICMP_ECHO_REPLY_TYPE,
@@ -1254,7 +1270,7 @@ mod tests {
     #[test]
     fn v6_echo_request_is_rejected() {
         // The looped-back v6 request is type 128 (echo request), not the 129
-        // reply type, so it must not be tallied as a member reply.
+        // reply type, so it must not be counted as a member reply.
         assert_eq!(
             classify_mcast_reply(
                 ICMPV6_ECHO_TYPE,

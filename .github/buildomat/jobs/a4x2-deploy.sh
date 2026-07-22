@@ -217,17 +217,17 @@ pfexec netstat -nr
 pfexec route add 198.51.100.0/24 $customer_edge_addr
 
 # commtest sends multicast from the host. cr1 also sits on the host-facing L2
-# segment, so mirror those test frames directly from cr1's host-facing NIC toward
-# the switch-facing NICs instead of running a multicast routing daemon in the VM
-# images. The group's elected switch is picked later from its Nexus-assigned UUID,
-# so this setup cannot know which sidecar owns the external NAT entry. Mirror each
-# group to both switch-facing sidecars and let the non-elected switch drop its
-# copy for want of a matching external entry.
+# segment, so we mirror those test frames directly from cr1's host-facing NIC
+# toward the switch-facing NICs instead of running a multicast routing daemon in
+# the VM images themselves. The group's elected switch is picked later from its
+# Nexus-assigned UUID, which means this setup cannot know which sidecar owns the
+# external NAT entry. Mirror each group to both switch-facing sidecars and let
+# the non-elected switch drop its copy, since it has no matching external entry.
 mcast_groups=("239.100.0.1" "239.100.0.2")
 
-# We resolve the host-facing interface by asking which link routes back to the
-# multicast source (the host's external address commtest sends from). This
-# avoids hardcoding names that vary with a4x2 NIC enumeration. The host-facing
+# We resolve the host-facing interface via a route lookup toward the multicast
+# source (the host's external address commtest sends from). This avoids
+# hardcoding names that vary with a4x2 NIC enumeration. The host-facing
 # NIC sits in the router's management VRF, which hides the connected /24 from
 # the main table, so the lookup must be VRF-scoped. An unscoped lookup follows
 # the BGP default out a rack-facing NIC instead.
@@ -254,19 +254,19 @@ mcast_inbound_iface() {
 # single switch chosen by a group-UUID hash. The UUID is allocated later and is
 # unknown here, so the script cannot predict which sidecar is the elected one.
 # Mirroring to both sidecars is a robust solution: only the elected switch holds
-# the external NAT entry and replicates to the underlay, while the other ingests
-# the copy and drops it for want of a matching entry, so there is no duplicate
-# replication. flower is tc's flow-field packet classifier, matching each group
+# the external NAT entry and replicates to the underlay. The other switch has no
+# matching entry and drops its copy, so nothing is replicated twice. flower is
+# tc's flow-field packet classifier, matching each group
 # by dst_ip.
 mcast_mirror() {
     local node=$1 iif=$2; shift 2
     local oifs=("$@") g out pref=100 actions
 
-    # Recreate clsact rather than replacing it in place, so filters left by a
-    # previous install (possibly at other prefs or with other actions) cannot
-    # linger alongside the new set.
-    ./a4x2 exec "$node" "tc qdisc del dev $iif clsact 2>/dev/null || true"
-    ./a4x2 exec "$node" "tc qdisc add dev $iif clsact"
+    # Ensure the shared clsact qdisc exists without recreating it. Deleting
+    # it would drop every ingress filter on the device, not just the mirror
+    # set this function owns. Per-group filters below use `replace` with an
+    # explicit handle, which is idempotent across reruns.
+    ./a4x2 exec "$node" "tc qdisc add dev $iif clsact 2>/dev/null || true"
     for g in "${mcast_groups[@]}"; do
         # All sidecars must be mirred actions chained in one filter. Separate
         # per-sidecar filters do not work because the first matching filter ends
@@ -278,8 +278,11 @@ mcast_mirror() {
             actions+=" action mirred egress mirror dev $out"
         done
         echo "  $node mirror $g: $iif -> ${oifs[*]}"
+        # The explicit handle keeps `replace` idempotent. Left at 0, the
+        # kernel treats a rerun as a fresh insert and flower returns EEXIST
+        # for the duplicate key.
         ./a4x2 exec "$node" \
-            "tc filter replace dev $iif ingress pref $pref protocol ip \
+            "tc filter replace dev $iif ingress handle 1 pref $pref protocol ip \
              flower dst_ip $g$actions"
         pref=$((pref + 1))
     done
