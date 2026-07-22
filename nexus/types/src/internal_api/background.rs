@@ -906,24 +906,37 @@ pub enum SitrepLoadStatus {
     Loaded { version: crate::fm::SitrepVersion, time_loaded: DateTime<Utc> },
 }
 
-/// Per-child-table GC statistics, used by [`SitrepGcStatus`].
-#[derive(
-    Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq,
-)]
-pub struct ChildTableGcStats {
-    pub rows_deleted: usize,
-    pub batches: usize,
-}
-
 /// The status of a `fm_sitrep_gc` background task activation.
-#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct SitrepGcStatus {
+    pub pruning: Result<fm_sitrep_gc::HistoryPruningStatus, String>,
     pub orphaned_sitreps_deleted: usize,
     pub sitrep_metadata_batches: usize,
     pub batch_size: u32,
     /// Per-child-table statistics, keyed by table name.
-    pub child_tables: BTreeMap<String, ChildTableGcStats>,
+    pub child_tables: BTreeMap<String, fm_sitrep_gc::ChildTableGcStats>,
     pub errors: Vec<String>,
+}
+
+pub mod fm_sitrep_gc {
+    use super::*;
+
+    /// Describes the status of pruning old records from the end of the sitrep
+    /// history table.
+    #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+    pub enum HistoryPruningStatus {
+        BelowLimit { threshold: u32, count: u64 },
+        Pruned { threshold: u32, n_pruned: usize, newest_version_pruned: u32 },
+    }
+
+    /// Per-child-table GC statistics, used by [`SitrepGcStatus`].
+    #[derive(
+        Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq,
+    )]
+    pub struct ChildTableGcStats {
+        pub rows_deleted: usize,
+        pub batches: usize,
+    }
 }
 
 /// The status of a `fm_analysis` background task activation.

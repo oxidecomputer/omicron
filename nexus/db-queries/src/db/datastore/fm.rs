@@ -47,6 +47,7 @@ use nexus_db_schema::schema::fm_sitrep_history::dsl as history_dsl;
 use nexus_db_schema::schema::fm_support_bundle_request::dsl as support_bundle_req_dsl;
 use nexus_types::fm;
 use nexus_types::fm::Sitrep;
+use nexus_types::internal_api::background::fm_sitrep_gc::HistoryPruningStatus;
 use nexus_types::support_bundle::{BundleData, BundleDataSelection};
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
@@ -64,6 +65,7 @@ use omicron_uuid_kinds::SupportBundleUuid;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
+use std::num::NonZeroU32;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -161,8 +163,7 @@ impl DataStore {
     ) -> Result<Option<fm::SitrepVersion>, Error> {
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
         let conn = self.pool_connection_authorized(opctx).await?;
-        let version = self
-            .fm_current_sitrep_version_on_conn(&conn)
+        let version = Self::fm_current_sitrep_version_on_conn(&conn)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?
             .map(Into::into);
@@ -170,7 +171,6 @@ impl DataStore {
     }
 
     async fn fm_current_sitrep_version_on_conn(
-        &self,
         conn: &async_bb8_diesel::Connection<DbConnection>,
     ) -> Result<Option<model::SitrepVersion>, DieselError> {
         history_dsl::fm_sitrep_history
@@ -227,7 +227,7 @@ impl DataStore {
         let conn = self.pool_connection_authorized(opctx).await?;
         loop {
             let version =
-                self.fm_current_sitrep_version_on_conn(&conn).await.map_err(
+                Self::fm_current_sitrep_version_on_conn(&conn).await.map_err(
                     |e| public_error_from_diesel(e, ErrorHandler::Server),
                 )?;
             let version: fm::SitrepVersion = match version {
@@ -1283,7 +1283,7 @@ impl DataStore {
                     // First, ensure that we are not deleting the current
                     // sitrep, and bail out if we would.
                     if let Some(model::SitrepVersion { sitrep_id, .. }) =
-                        self.fm_current_sitrep_version_on_conn(&conn).await?
+                        Self::fm_current_sitrep_version_on_conn(&conn).await?
                     {
                         if ids.contains(&sitrep_id.as_untyped_uuid()) {
                             return Err(err.bail(TransactionError::CustomError(Error::conflict(format!(
@@ -1670,6 +1670,103 @@ impl DataStore {
                 Some(err) => err.into_public_ignore_retries(),
                 None => public_error_from_diesel(e, ErrorHandler::Server),
             })?
+    }
+
+    pub async fn fm_sitrep_history_prune(
+        &self,
+        opctx: &OpContext,
+        deletion_threshold: NonZeroU32,
+    ) -> Result<HistoryPruningStatus, Error> {
+        // The "full" table scan below is treated as a complex operation. (This
+        // should only be called from the FM analysis and sitrep GC background
+        // tasks, for which complex operations are allowed.)
+        opctx.check_complex_operations_allowed()?;
+
+        // TODO(eliza): there should probably be an authz object for the fm sitrep?
+        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
+
+        let limit = deletion_threshold.get();
+        let limit_query = check_if_limit_reached::LimitQuery::new(
+            history_dsl::fm_sitrep_history,
+            u64::from(limit),
+        )?;
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        let err = OptionalError::new();
+
+        self.transaction_retry_wrapper("sitrep_history_prune")
+            .transaction(&conn, |conn| {
+                let err = err.clone();
+                let limit_query = limit_query.clone();
+                async move {
+                    // We need this to call the COUNT(*) query below. But note
+                    // that this isn't really a "full" table scan; the number of
+                    // rows scanned is limited by the LIMIT clause.
+                    conn.batch_execute_async(ALLOW_FULL_TABLE_SCAN_SQL)
+                        .await
+                        .map_err(|e| err.bail(TransactionError::Database(e)))?;
+
+                    // Rather than doing a full table scan, we use a LIMIT
+                    // clause to limit the number of rows returned.
+                    let limit_reached = limit_query
+                        .check_if_limit_reached_async(&conn)
+                        .await
+                        .map_err(|e| err.bail(TransactionError::Database(e)))?
+                        .map_err(|e| {
+                            err.bail(TransactionError::CustomError(e))
+                        })?;
+
+                    // If the history table is below the limit, we're done here.
+                    if let db::IsLimitReached::No { count } = limit_reached {
+                        return Ok(HistoryPruningStatus::BelowLimit {
+                            threshold: limit,
+                            count,
+                        });
+                    }
+
+                    // Otherwise, we need to delete old versions that are over
+                    // the limit. To do this, we will determine the latest
+                    // version, subtract the limit to keep from that version to
+                    // determine the first version to delete, and delete all
+                    // versions less than or equal to that version number.
+                    let latest_version = Self::fm_current_sitrep_version_on_conn(&conn)
+                        .await
+                        .map_err(|e| err.bail(TransactionError::Database(e)))?
+                        .ok_or_else(|| {
+                            let e = Error::InternalError {
+                                internal_message: format!(
+                                    "if the sitrep history table count is over \
+                                     a non-zero limit ({limit}), there must be \
+                                     a latest version! this makes no sense",
+                                ),
+                            };
+                            err.bail(TransactionError::CustomError(e))
+                        })?
+                        .version.0;
+                    let newest_version_pruned = latest_version
+                        .checked_sub(limit)
+                        .ok_or_else(|| {
+                            let e = Error::InternalError {
+                                internal_message: format!(
+                                    "if the history table is over the limit, \
+                                     subtracing the limit ({limit}) from the \
+                                     latest version (v{latest_version}) should \
+                                     give us a version to prune!",
+                                ),
+                            };
+                            err.bail(TransactionError::CustomError(e))
+                        })?;
+
+                    let n_pruned = diesel::delete(history_dsl::fm_sitrep_history).filter(history_dsl::version.le(SqlU32(newest_version_pruned))).execute_async(&conn).await.map_err(|e| err.bail(TransactionError::Database(e)))?;
+
+                    Ok(HistoryPruningStatus::Pruned { threshold: limit, n_pruned, newest_version_pruned })
+                }
+            })
+            .await
+            .map_err(|e| match err.take() {
+                Some(err) => err.into_public_ignore_retries(),
+                None => public_error_from_diesel(e, ErrorHandler::Server),
+            })
     }
 }
 
