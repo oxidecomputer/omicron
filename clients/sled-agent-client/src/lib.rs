@@ -50,7 +50,6 @@ progenitor::generate_api!(
         CommitStatus = trust_quorum_types::status::CommitStatus,
         CoordinatorStatus = trust_quorum_types::status::CoordinatorStatus,
         DatasetsConfig = omicron_common::disk::DatasetsConfig,
-        DatasetManagementStatus = omicron_common::disk::DatasetManagementStatus,
         DatasetKind = omicron_common::api::internal::shared::DatasetKind,
         DiskIdentity = omicron_common::disk::DiskIdentity,
         DiskManagementStatus = omicron_common::disk::DiskManagementStatus,
