@@ -644,16 +644,14 @@ impl DataStore {
                     // We need this to call the COUNT(*) query below. But note
                     // that this isn't really a "full" table scan; the number of
                     // rows scanned is limited by the LIMIT clause.
-                    conn.batch_execute_async(ALLOW_FULL_TABLE_SCAN_SQL)
-                        .await
-                        .map_err(|e| err.bail(TransactionError::Database(e)))?;
+                    conn.batch_execute_async(ALLOW_FULL_TABLE_SCAN_SQL).await?;
 
                     // Rather than doing a full table scan, we use a LIMIT
                     // clause to limit the number of rows returned.
                     let result = limit_query
                         .check_if_limit_reached_async(&conn)
                         .await
-                        .map_err(|e| err.bail(TransactionError::Database(e)))?;
+                        .map_err(|e| e.into_diesel(&err))?;
 
                     Ok(result)
                 }
@@ -662,7 +660,7 @@ impl DataStore {
             .map_err(|e| match err.take() {
                 Some(err) => err.into_public_ignore_retries(),
                 None => public_error_from_diesel(e, ErrorHandler::Server),
-            })?
+            })
     }
 
     /// Read a complete blueprint from the database

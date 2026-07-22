@@ -14,8 +14,8 @@ use diesel::query_builder::Query;
 use diesel::query_builder::QueryFragment;
 use diesel::query_builder::QueryId;
 use diesel::query_source::QuerySource;
-use diesel::result::Error as DieselError;
 use diesel::sql_types;
+use nexus_db_errors::TransactionError;
 use nexus_db_lookup::DbConnection;
 use omicron_common::api::external::Error;
 
@@ -61,7 +61,7 @@ where
     pub async fn check_if_limit_reached_async(
         self,
         conn: &async_bb8_diesel::Connection<DbConnection>,
-    ) -> Result<Result<IsLimitReached, Error>, DieselError>
+    ) -> Result<IsLimitReached, TransactionError<Error>>
     where
         Self: Send + 'static,
     {
@@ -72,29 +72,31 @@ where
         // `TypedSqlQuery<BigInt>: diesel::Table` is not satisfied`.
         // So we use load_async, knowing that only one row will be
         // returned.
-        self.load_async::<i64>(conn).await.map(|results| {
-            // There must be exactly one row in the returned result.
-            let count = *results.get(0).ok_or_else(|| {
-                Error::internal_error(
-                    "check_if_limit_reached query returned no values",
-                )
-            })?;
+        let results = self.load_async::<i64>(conn).await?;
 
-            // Note count >= limit (and not count > limit): for a limit of 5000 we
-            // want to fail if it's reached 5000.
-            if count >= limit {
-                Ok(IsLimitReached::Yes)
-            } else {
-                let count =
-                    u64::try_from(count).map_err(|_| Error::InternalError {
-                        internal_message: format!(
-                            "error converting record count {count} to u64 (how \
+        // There must be exactly one row in the returned result.
+        let count = *results.get(0).ok_or_else(|| {
+            TransactionError::CustomError(Error::internal_error(
+                "check_if_limit_reached query returned no values",
+            ))
+        })?;
+
+        // Note count >= limit (and not count > limit): for a limit of 5000 we
+        // want to fail if it's reached 5000.
+        if count >= limit {
+            Ok(IsLimitReached::Yes)
+        } else {
+            let count = u64::try_from(count).map_err(|_| {
+                let error = Error::InternalError {
+                    internal_message: format!(
+                        "error converting record count {count} to u64 (how \
                             is it negative?)"
-                        ),
-                    })?;
-                Ok(IsLimitReached::No { count })
-            }
-        })
+                    ),
+                };
+                TransactionError::CustomError(error)
+            })?;
+            Ok(IsLimitReached::No { count })
+        }
     }
 }
 
