@@ -1651,16 +1651,14 @@ impl DataStore {
                     // We need this to call the COUNT(*) query below. But note
                     // that this isn't really a "full" table scan; the number of
                     // rows scanned is limited by the LIMIT clause.
-                    conn.batch_execute_async(ALLOW_FULL_TABLE_SCAN_SQL)
-                        .await
-                        .map_err(|e| err.bail(TransactionError::Database(e)))?;
+                    conn.batch_execute_async(ALLOW_FULL_TABLE_SCAN_SQL).await?;
 
                     // Rather than doing a full table scan, we use a LIMIT
                     // clause to limit the number of rows returned.
                     let result = limit_query
                         .check_if_limit_reached_async(&conn)
                         .await
-                        .map_err(|e| err.bail(TransactionError::Database(e)))?;
+                        .map_err(|e| e.into_diesel(&err))?;
 
                     Ok(result)
                 }
@@ -1669,7 +1667,7 @@ impl DataStore {
             .map_err(|e| match err.take() {
                 Some(err) => err.into_public_ignore_retries(),
                 None => public_error_from_diesel(e, ErrorHandler::Server),
-            })?
+            })
     }
 
     pub async fn fm_sitrep_history_prune(
@@ -1703,23 +1701,18 @@ impl DataStore {
                     // that this isn't really a "full" table scan; the number of
                     // rows scanned is limited by the LIMIT clause.
                     conn.batch_execute_async(ALLOW_FULL_TABLE_SCAN_SQL)
-                        .await
-                        .map_err(|e| err.bail(TransactionError::Database(e)))?;
+                        .await?;
 
                     // Rather than doing a full table scan, we use a LIMIT
                     // clause to limit the number of rows returned.
                     let limit_reached = limit_query
                         .check_if_limit_reached_async(&conn)
                         .await
-                        .map_err(|e| err.bail(TransactionError::Database(e)))?
-                        .map_err(|e| {
-                            err.bail(TransactionError::CustomError(e))
-                        })?;
+                        .map_err(|e| e.into_diesel(&err))?;
 
                     // If the history table is below the limit, we're done here.
                     if let db::IsLimitReached::No { count } = limit_reached {
                         return Ok(HistoryPruningStatus::BelowLimit {
-                            threshold: limit,
                             count,
                         });
                     }
@@ -1730,8 +1723,7 @@ impl DataStore {
                     // determine the first version to delete, and delete all
                     // versions less than or equal to that version number.
                     let latest_version = Self::fm_current_sitrep_version_on_conn(&conn)
-                        .await
-                        .map_err(|e| err.bail(TransactionError::Database(e)))?
+                        .await?
                         .ok_or_else(|| {
                             let e = Error::InternalError {
                                 internal_message: format!(
@@ -1759,7 +1751,7 @@ impl DataStore {
 
                     let n_pruned = diesel::delete(history_dsl::fm_sitrep_history).filter(history_dsl::version.le(SqlU32(newest_version_pruned))).execute_async(&conn).await.map_err(|e| err.bail(TransactionError::Database(e)))?;
 
-                    Ok(HistoryPruningStatus::Pruned { threshold: limit, n_pruned, newest_version_pruned })
+                    Ok(HistoryPruningStatus::Pruned { n_pruned, newest_version_pruned })
                 }
             })
             .await
