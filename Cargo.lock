@@ -961,6 +961,7 @@ dependencies = [
  "sled-agent-types",
  "sled-hardware-types",
  "strum 0.27.2",
+ "trust-quorum-types",
 ]
 
 [[package]]
@@ -13965,6 +13966,7 @@ dependencies = [
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "oxnet",
+ "schemars 0.8.22",
  "serde",
  "sled-agent-bootstrap-common",
  "sled-agent-types",

@@ -288,8 +288,8 @@ pub enum RackOperationStatus {
         id: RackInitUuid,
     },
     MultirackJoinInProgress {
+        // Status is queried via a different API
         id: MultirackJoinUuid,
-        step: MultirackJoinStep,
     },
     MultirackJoinCompleted {
         id: Option<MultirackJoinUuid>,
@@ -347,48 +347,6 @@ impl RssStep {
 
     pub fn index(&self) -> usize {
         for (index, variant) in RssStep::iter().enumerate() {
-            if *self == variant {
-                return index;
-            }
-        }
-        return 0;
-    }
-}
-
-/// Steps we go through during multirack join.
-/// Keep this list in order that they happen.
-#[derive(
-    Copy,
-    Clone,
-    Debug,
-    Deserialize,
-    EnumCount,
-    EnumIter,
-    Eq,
-    Hash,
-    JsonSchema,
-    Ord,
-    PartialEq,
-    PartialOrd,
-    Serialize,
-)]
-#[serde(tag = "status", rename_all = "snake_case")]
-pub enum MultirackJoinStep {
-    Requested,
-    Starting,
-    InitTrustQuorum,
-    InitialNetworkConfigUpdate,
-    SledInit,
-    FinalNetworkConfigUpdate,
-}
-
-impl MultirackJoinStep {
-    pub fn max_step(&self) -> usize {
-        MultirackJoinStep::COUNT
-    }
-
-    pub fn index(&self) -> usize {
-        for (index, variant) in MultirackJoinStep::iter().enumerate() {
             if *self == variant {
                 return index;
             }

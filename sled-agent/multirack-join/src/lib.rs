@@ -15,9 +15,11 @@
 
 #[macro_use]
 extern crate slog;
-use bootstrap_agent_lockstep_types::{MultirackJoinRequest, MultirackJoinStep};
+use bootstrap_agent_lockstep_types::MultirackJoinRequest;
 use nexus_types::trust_quorum::TrustQuorumConfig;
 use omicron_uuid_kinds::RackUuid;
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 use sled_agent_bootstrap_common::{RssContext, RunRssError};
 use sled_hardware_types::BaseboardId;
 use slog::{Logger, info};
@@ -33,10 +35,10 @@ use tokio::{
     task::{JoinError, JoinSet},
 };
 use trust_quorum::{NodeApiError, ProxyError};
-use trust_quorum_protocol::CommitError;
 use trust_quorum_types::{
-    messages::ReconfigureMsg as TqReconfigureMsg, status::CoordinatorStatus,
-    types::Epoch, types::Threshold,
+    messages::ReconfigureMsg as TqReconfigureMsg,
+    status::CoordinatorStatus,
+    types::{Epoch, Threshold},
 };
 
 /// Describes errors which may occur while operating the multirack join service.
@@ -75,18 +77,45 @@ impl From<RunRssError> for MultirackJoinServiceError {
 
 /// The current state of the `MultirackJoinService` as retrieved from the `output`
 /// watch channel.
-#[derive(Debug, Clone)]
-pub struct MultirackJoinServiceState {
-    step: MultirackJoinStep,
-    trust_quorum_coordinator_status: Option<CoordinatorStatus>,
+#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+pub enum MultirackJoinServiceState {
+    Requested,
+    Starting,
+    TrustQuorumReconfigure(TqReconfigureMsg),
+    TrustQuorumPreparing(CoordinatorStatus),
+    TrustQuorumCommitting {
+        rack_id: RackUuid,
+        members: BTreeSet<BaseboardId>,
+        epoch: Epoch,
+        last_committed_epoch: Option<Epoch>,
+        threshold: Threshold,
+        commit_crash_tolerance: u8,
+        acked: BTreeSet<BaseboardId>,
+        fatal_errors: BTreeMap<BaseboardId, String>,
+        transient_errors: BTreeMap<BaseboardId, String>,
+    },
+}
+
+enum TqPrepareResult {
+    Prepared,
+    ReconfigurationNeeded {
+        new_members: BTreeSet<BaseboardId>,
+        new_epoch: Epoch,
+    },
+}
+
+enum TqCommitResult {
+    Committed,
+    ReconfigurationNeeded {
+        new_members: BTreeSet<BaseboardId>,
+        new_epoch: Epoch,
+        just_committed_epoch: Epoch,
+    },
 }
 
 impl MultirackJoinServiceState {
     pub fn new() -> Self {
-        Self {
-            step: MultirackJoinStep::Requested,
-            trust_quorum_coordinator_status: None,
-        }
+        Self::Requested
     }
 }
 
@@ -124,15 +153,10 @@ struct MultirackJoinServiceTask {
 }
 
 impl MultirackJoinServiceTask {
-    fn step(&mut self, next: MultirackJoinStep) {
-        self.output_tx.send_modify(|state| state.step = next);
-    }
-}
-
-impl MultirackJoinServiceTask {
     /// The main loop of the Multirack Join Service
     pub async fn run(&mut self) -> Result<(), MultirackJoinServiceError> {
-        self.step(MultirackJoinStep::Starting);
+        self.output_tx
+            .send_modify(|state| *state = MultirackJoinServiceState::Starting);
 
         // Check to see if we've already finished RSS or multirack join
         self.ctx.is_rss_complete(&self.log).await?;
@@ -159,8 +183,6 @@ impl MultirackJoinServiceTask {
         &mut self,
         rack_id: RackUuid,
     ) -> Result<(), MultirackJoinServiceError> {
-        self.step(MultirackJoinStep::InitTrustQuorum);
-
         let members =
             self.input_rx.borrow_and_update().trust_quorum_peers.clone();
         let epoch = trust_quorum_types::types::Epoch(1);
@@ -175,7 +197,7 @@ impl MultirackJoinServiceTask {
         rack_id: RackUuid,
         mut members: BTreeSet<BaseboardId>,
         mut epoch: Epoch,
-        last_committed_epoch: Option<Epoch>,
+        mut last_committed_epoch: Option<Epoch>,
     ) -> Result<(), MultirackJoinServiceError> {
         loop {
             self.tq_reconfigure(
@@ -186,23 +208,32 @@ impl MultirackJoinServiceTask {
             )
             .await?;
 
-            if let Some((new_members, new_epoch)) =
-                self.tq_prepare(members.clone(), epoch).await?
+            if let TqPrepareResult::ReconfigurationNeeded {
+                new_members,
+                new_epoch,
+            } = self.tq_prepare(members.clone(), epoch).await?
             {
-                // We need to reconfigure
+                // Start over
                 members = new_members;
                 epoch = new_epoch;
                 continue;
             };
 
-            if let Some((new_members, new_epoch)) =
-                self.tq_commit(rack_id, members, epoch).await?
-            {
-                members = new_members;
-                epoch = new_epoch;
-            } else {
-                break;
-            };
+            match self.tq_commit(rack_id, members, epoch).await? {
+                TqCommitResult::Committed => {
+                    // We are done.
+                    break;
+                }
+                TqCommitResult::ReconfigurationNeeded {
+                    new_members,
+                    new_epoch,
+                    just_committed_epoch,
+                } => {
+                    members = new_members;
+                    epoch = new_epoch;
+                    last_committed_epoch = Some(just_committed_epoch);
+                }
+            }
         }
 
         Ok(())
@@ -226,6 +257,11 @@ impl MultirackJoinServiceTask {
             threshold,
         };
 
+        self.output_tx.send_modify(|state| {
+            *state =
+                MultirackJoinServiceState::TrustQuorumReconfigure(msg.clone())
+        });
+
         // Start the initial configuration with this node as coordinator
         self.ctx.trust_quorum_handle.reconfigure(msg).await?;
 
@@ -242,8 +278,7 @@ impl MultirackJoinServiceTask {
         &mut self,
         members: BTreeSet<BaseboardId>,
         epoch: Epoch,
-    ) -> Result<Option<(BTreeSet<BaseboardId>, Epoch)>, MultirackJoinServiceError>
-    {
+    ) -> Result<TqPrepareResult, MultirackJoinServiceError> {
         loop {
             let status = self
                 .ctx
@@ -259,11 +294,25 @@ impl MultirackJoinServiceTask {
             );
 
             // Set the output state and notifiy receivers if it has changed
-            self.output_tx.send_if_modified(|state| {
-                let status = Some(status);
-                let changed = state.trust_quorum_coordinator_status == status;
-                state.trust_quorum_coordinator_status = status;
-                changed
+            self.output_tx.send_if_modified(|state| match state {
+                MultirackJoinServiceState::TrustQuorumPreparing(
+                    coordinator_status,
+                ) => {
+                    if &status != coordinator_status {
+                        *state =
+                            MultirackJoinServiceState::TrustQuorumPreparing(
+                                status,
+                            );
+                        true
+                    } else {
+                        false
+                    }
+                }
+                _ => {
+                    *state =
+                        MultirackJoinServiceState::TrustQuorumPreparing(status);
+                    true
+                }
             });
 
             // We're done preparing. Let's move on to committing.
@@ -291,31 +340,39 @@ impl MultirackJoinServiceTask {
             if let Some(new_members) =
                 self.has_membership_changed(&members).await?
             {
-                // Returning the new members will trigger a reconfiguration.
-                return Ok(Some((new_members, epoch.next())));
+                return Ok(TqPrepareResult::ReconfigurationNeeded {
+                    new_members,
+                    new_epoch: epoch.next(),
+                });
             }
 
             tokio::time::sleep(Duration::from_millis(500)).await;
         }
 
-        // All members have prepared
-        Ok(None)
+        // Before we return, let's see if the operator has changed the
+        // configuration one more time.
+        if let Some(new_members) = self.has_membership_changed(&members).await?
+        {
+            Ok(TqPrepareResult::ReconfigurationNeeded {
+                new_members,
+                new_epoch: epoch.next(),
+            })
+        } else {
+            Ok(TqPrepareResult::Prepared)
+        }
     }
 
+    // Attempt to commit the configuration at each node.
+    //
+    // If a new configuration comes in before commit is attempted or after the
+    // minimum number of nodes has committed then return the new members, new
+    // epoch, and last commmitted epoch.
     async fn tq_commit(
         &mut self,
         rack_id: RackUuid,
         members: BTreeSet<BaseboardId>,
         epoch: Epoch,
-    ) -> Result<Option<(BTreeSet<BaseboardId>, Epoch)>, MultirackJoinServiceError>
-    {
-        // Before we attempt to commit, let's see if the operator has changed
-        // the configuration.
-        if let Some(new_members) = self.has_membership_changed(&members).await?
-        {
-            return Ok(Some((new_members, epoch.next())));
-        }
-
+    ) -> Result<TqCommitResult, MultirackJoinServiceError> {
         info!(
             self.log,
             "Starting to commit trust quorum configuration";
@@ -415,31 +472,32 @@ impl MultirackJoinServiceTask {
                 res = self.input_rx.changed() => {
                     res?;
                     // The operator changed the input
-                    // Did the membership change?
                     let new_members =
                         self.input_rx.borrow_and_update().trust_quorum_peers.clone();
+                    // Did the membership change?
                     if members != new_members {
-                        if acked.len() > min_acks_to_commit {
+                        if acked.len() >= min_acks_to_commit {
                             // We can commit this configuration safely and then try a reconfiguration
                             // with the updated config.
-                            //
-                            // TODO: We need to also return the
-                            // last-committed-configuration (epoch).
-                            // TODO: What do we insert in Nexus, and when?
-                            return Ok(Some((new_members, epoch.next())));
+                            let just_committed_epoch = epoch;
+                            return Ok(TqCommitResult::ReconfigurationNeeded {
+                                new_members,
+                                new_epoch: epoch.next(),
+                                just_committed_epoch
+                            });
                         }
                         // TODO: Add nodes which failed to ack
                         return Err(MultirackJoinServiceError::TrustQuorumCommitFailure(epoch));
 
                     } else {
-                        // Something other than membership changed, just move
-                        // ignore for now.
+                        // Something other than membership changed, just ignore
+                        // for now.
                     }
                 }
             }
         }
 
-        Ok(None)
+        Ok(TqCommitResult::Committed)
     }
 
     // Check if we have received an updated membership set from an operator.
