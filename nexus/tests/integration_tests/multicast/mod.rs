@@ -71,6 +71,7 @@ mod pool_selection;
 
 // Timeout constants for test operations
 const POLL_INTERVAL: Duration = Duration::from_millis(50);
+const POLL_TIMEOUT: Duration = Duration::from_secs(30);
 const MULTICAST_OPERATION_TIMEOUT: Duration = Duration::from_secs(120);
 
 /// Generic helper for PUT upsert requests that return 201 Created.
@@ -217,6 +218,11 @@ pub(crate) async fn create_multicast_ip_pool_v6(
     pool
 }
 
+/// The reconciler can take longer than the default 10s timeout under
+/// parallel test load, especially after the CRDB graceful-shutdown
+/// change (eb8ae2f8f). 30s matches other heavy background task timeouts.
+const RECONCILER_ACTIVATION_TIMEOUT: Duration = Duration::from_secs(30);
+
 /// Waits for the multicast group reconciler to complete.
 ///
 /// This wraps wait_background_task with the correct task name.
@@ -237,9 +243,10 @@ pub(crate) async fn wait_for_multicast_reconciler(
 pub(crate) async fn activate_multicast_reconciler(
     lockstep_client: &ClientTestContext,
 ) -> nexus_lockstep_client::types::BackgroundTask {
-    nexus_test_utils::background::activate_background_task(
+    nexus_test_utils::background::activate_background_task_with_timeout(
         lockstep_client,
         "multicast_reconciler",
+        RECONCILER_ACTIVATION_TIMEOUT,
     )
     .await
 }
@@ -313,8 +320,8 @@ where
 /// This function verifies that inventory has SP data for EVERY in-service sled,
 /// not just that inventory completed.
 ///
-/// This is required for multicast member operations which map `sled_id` → `sp_slot`
-/// → switch ports via inventory.
+/// This is required for multicast member operations which map `sled_id` to
+/// `sp_slot` to switch ports via inventory.
 pub(crate) async fn ensure_inventory_ready(
     cptestctx: &ControlPlaneTestContext,
 ) {
@@ -338,41 +345,44 @@ pub(crate) async fn ensure_inventory_ready(
                 Err(e) => {
                     warn!(log, "failed to list sleds: {e}");
                     return Err(CondCheckError::<String>::NotYet {
-                        status: None,
+                        status: Some(format!("failed to list sleds: {e}")),
                     });
                 }
             };
 
             if sleds.is_empty() {
                 warn!(log, "no in-service sleds found yet");
-                return Err(CondCheckError::<String>::NotYet { status: None });
+                return Err(CondCheckError::<String>::NotYet {
+                    status: Some("no in-service sleds found yet".to_string()),
+                });
             }
 
             // Get latest inventory
-            let inventory =
-                match datastore.inventory_get_latest_collection(&opctx).await {
-                    Ok(Some(inv)) => inv,
-                    Ok(None) => {
-                        debug!(log, "no inventory collection yet");
-                        return Err(CondCheckError::<String>::NotYet {
-                            status: None,
-                        });
-                    }
-                    Err(e) => {
-                        warn!(log, "failed to get inventory: {e}");
-                        return Err(CondCheckError::<String>::NotYet {
-                            status: None,
-                        });
-                    }
-                };
+            let inventory = match datastore
+                .inventory_get_latest_collection(&opctx)
+                .await
+            {
+                Ok(Some(inv)) => inv,
+                Ok(None) => {
+                    debug!(log, "no inventory collection yet");
+                    return Err(CondCheckError::<String>::NotYet {
+                        status: Some("no inventory collection yet".to_string()),
+                    });
+                }
+                Err(e) => {
+                    warn!(log, "failed to get inventory: {e}");
+                    return Err(CondCheckError::<String>::NotYet {
+                        status: Some(format!("failed to get inventory: {e}")),
+                    });
+                }
+            };
 
             // Verify inventory has SP data for each sled
             let mut missing_sleds = Vec::new();
             for sled in &sleds {
                 let has_sp = inventory.sps.iter().any(|(bb, _)| {
-                    (bb.serial_number == sled.serial_number()
-                        && bb.part_number == sled.part_number())
-                        || bb.serial_number == sled.serial_number()
+                    bb.serial_number == sled.serial_number()
+                        && bb.part_number == sled.part_number()
                 });
 
                 if !has_sp {
@@ -394,11 +404,16 @@ pub(crate) async fn ensure_inventory_ready(
                     missing_sleds.len(),
                     missing_sleds
                 );
-                Err(CondCheckError::<String>::NotYet { status: None })
+                Err(CondCheckError::<String>::NotYet {
+                    status: Some(format!(
+                        "inventory missing SP data for sleds: \
+                         {missing_sleds:?}"
+                    )),
+                })
             }
         },
-        &Duration::from_millis(500), // Check every 500ms
-        &Duration::from_secs(120),   // Wait up to 120s
+        &Duration::from_millis(500),
+        &MULTICAST_OPERATION_TIMEOUT,
     )
     .await
     {
@@ -456,12 +471,14 @@ pub(crate) async fn ensure_dpd_ready(cptestctx: &ControlPlaneTestContext) {
                         "DPD not ready yet";
                         "error" => %e
                     );
-                    Err(CondCheckError::<String>::NotYet { status: None })
+                    Err(CondCheckError::<String>::NotYet {
+                        status: Some(format!("dpd not responding: {e}")),
+                    })
                 }
             }
         },
-        &Duration::from_millis(200), // Check every 200ms
-        &Duration::from_secs(30),    // Wait up to 30 seconds for switches
+        &Duration::from_millis(200),
+        &POLL_TIMEOUT,
     )
     .await
     {
@@ -529,7 +546,9 @@ pub(crate) async fn wait_for_group_state(
             if group.state == expected_state_as_str {
                 Ok(group)
             } else {
-                Err(CondCheckError::<()>::NotYet { status: None })
+                Err(CondCheckError::<()>::NotYet {
+                    status: Some(format!("group state: {}", group.state)),
+                })
             }
         },
         &POLL_INTERVAL,
@@ -600,11 +619,15 @@ pub(crate) async fn wait_for_member_state(
                     "Joined" => Ok(member.clone()),
                     "Joining" => {
                         // Member exists and is in transition - wait a bit more
-                        Err(CondCheckError::NotYet { status: None })
+                        Err(CondCheckError::NotYet {
+                            status: Some("member state: Joining".to_string()),
+                        })
                     }
                     "Left" => {
                         // Member in Left state, reconciler needs to process instance start - wait more
-                        Err(CondCheckError::NotYet { status: None })
+                        Err(CondCheckError::NotYet {
+                            status: Some("member state: Left".to_string()),
+                        })
                     }
                     other_state => Err(CondCheckError::Failed(format!(
                         "Member {instance_id} in group {group_name} has unexpected state '{other_state}', expected 'Left', 'Joining' or 'Joined'"
@@ -612,7 +635,9 @@ pub(crate) async fn wait_for_member_state(
                 }
             } else {
                 // Member doesn't exist yet - wait for it to be created
-                Err(CondCheckError::NotYet { status: None })
+                Err(CondCheckError::NotYet {
+                    status: Some("member not created yet".to_string()),
+                })
             }
         } else {
             // For other states, just look for exact match
@@ -622,10 +647,14 @@ pub(crate) async fn wait_for_member_state(
                 if member.state == expected_state_as_str {
                     Ok(member.clone())
                 } else {
-                    Err(CondCheckError::NotYet { status: None })
+                    Err(CondCheckError::NotYet {
+                        status: Some(format!("member state: {}", member.state)),
+                    })
                 }
             } else {
-                Err(CondCheckError::NotYet { status: None })
+                Err(CondCheckError::NotYet {
+                    status: Some("member not found".to_string()),
+                })
             }
         }
     };
@@ -720,7 +749,12 @@ pub(crate) async fn wait_for_instance_sled_assignment(
                         "instance_id" => %instance_id,
                         "instance_state" => ?instance.nexus_state.state()
                     );
-                    Err(CondCheckError::<String>::NotYet { status: None })
+                    Err(CondCheckError::<String>::NotYet {
+                        status: Some(format!(
+                            "instance has no VMM yet, state: {:?}",
+                            instance.nexus_state.state()
+                        )),
+                    })
                 }
             } else {
                 warn!(
@@ -728,7 +762,11 @@ pub(crate) async fn wait_for_instance_sled_assignment(
                     "instance not found in batch fetch";
                     "instance_id" => %instance_id
                 );
-                Err(CondCheckError::<String>::NotYet { status: None })
+                Err(CondCheckError::<String>::NotYet {
+                    status: Some(
+                        "instance not found in batch fetch".to_string(),
+                    ),
+                })
             }
         },
         &POLL_INTERVAL,
@@ -793,7 +831,12 @@ pub(crate) async fn instance_wait_for_running_with_simulation(
             if instance.runtime.run_state == expected_state {
                 Ok(instance)
             } else {
-                Err(CondCheckError::<String>::NotYet { status: None })
+                Err(CondCheckError::<String>::NotYet {
+                    status: Some(format!(
+                        "instance state: {:?}",
+                        instance.runtime.run_state
+                    )),
+                })
             }
         },
         &POLL_INTERVAL,
@@ -868,7 +911,12 @@ pub(crate) async fn wait_for_instance_stopped(
                         .await;
                 }
 
-                Err(CondCheckError::<anyhow::Error>::NotYet { status: None })
+                Err(CondCheckError::<anyhow::Error>::NotYet {
+                    status: Some(format!(
+                        "instance state: {:?}",
+                        instance.runtime.run_state
+                    )),
+                })
             }
         },
         &POLL_INTERVAL,
@@ -1045,7 +1093,9 @@ pub(crate) async fn wait_for_member_count(
             if members.len() == expected_count {
                 Ok(())
             } else {
-                Err(CondCheckError::<String>::NotYet { status: None })
+                Err(CondCheckError::<String>::NotYet {
+                    status: Some(format!("member count: {}", members.len())),
+                })
             }
         },
         &POLL_INTERVAL,
@@ -1079,19 +1129,18 @@ pub(crate) async fn wait_for_group_deleted(
         lockstep_client,
         || async {
             let group_url = mcast_group_url(group_name);
-            match NexusRequest::object_get(client, &group_url)
-                .authn_as(AuthnMode::PrivilegedUser)
-                .execute()
-                .await
-            {
-                Ok(response) => {
-                    if response.status == StatusCode::NOT_FOUND {
-                        Ok(())
-                    } else {
-                        Err(CondCheckError::<()>::NotYet { status: None })
-                    }
-                }
-                Err(_) => Ok(()), // Assume 404 or similar error means deleted
+            let response = NexusRequest::new(
+                RequestBuilder::new(client, Method::GET, &group_url)
+                    .expect_status(Some(StatusCode::NOT_FOUND)),
+            )
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute()
+            .await;
+            match response {
+                Ok(_) => Ok(()),
+                Err(_) => Err(CondCheckError::<()>::NotYet {
+                    status: Some("group still present".to_string()),
+                }),
             }
         },
         &POLL_INTERVAL,

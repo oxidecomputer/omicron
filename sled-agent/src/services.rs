@@ -1173,6 +1173,7 @@ impl ServiceManager {
                 dhcp_config: DhcpCfg::default(),
                 // Services do not use attached subnets, only instances.
                 attached_subnets: vec![],
+                multicast_groups: &[],
                 // TODO(RFD 689): plumb the fleet-wide jumbo-frames opt-in
                 // (`system_networking_settings.external_jumbo_frames_opt_in_enabled`)
                 // through blueprints / reconfigurator-execution to this point

@@ -91,6 +91,8 @@ pub mod v40;
 pub mod v41;
 #[path = "non_empty_uplink_ports/mod.rs"]
 pub mod v42;
+#[path = "mcast_m2p_forwarding/mod.rs"]
+pub mod v43;
 #[path = "add_probe_put_endpoint/mod.rs"]
 pub mod v6;
 #[path = "multicast_support/mod.rs"]

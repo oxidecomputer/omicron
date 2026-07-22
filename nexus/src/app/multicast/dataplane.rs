@@ -113,7 +113,8 @@ trait IntoUnderlayMulticast {
 impl IntoUnderlayMulticast for IpAddr {
     fn into_underlay_multicast(self) -> Result<UnderlayMulticastIpv6, Error> {
         match self {
-            IpAddr::V6(ipv6) => Ok(UnderlayMulticastIpv6(ipv6)),
+            IpAddr::V6(ipv6) => UnderlayMulticastIpv6::try_from(ipv6)
+                .map_err(|e| Error::invalid_request(e.to_string())),
             IpAddr::V4(_) => Err(Error::invalid_request(
                 "underlay multicast groups must use IPv6 addresses",
             )),
@@ -179,12 +180,34 @@ impl MulticastDataplaneClient {
     fn select_one_switch(
         &self,
     ) -> MulticastDataplaneResult<(&SwitchSlot, &dpd_client::Client)> {
-        let mut switches: Vec<_> = self.dpd_clients.iter().collect();
-        switches.sort_by_key(|(loc, _)| *loc);
-        switches
-            .into_iter()
-            .next()
+        self.dpd_clients
+            .iter()
+            .min_by_key(|(loc, _)| *loc)
             .ok_or_else(|| Error::internal_error("no DPD clients available"))
+    }
+
+    /// Compute DPD source filter from aggregated member source state.
+    ///
+    /// For SSM addresses, always returns specific sources. For ASM addresses,
+    /// returns `None` (any source) if any member omitted sources, otherwise
+    /// returns the union of all member sources.
+    fn compute_sources_for_dpd(
+        external_group_ip: IpAddr,
+        source_filter: &SourceFilterState,
+    ) -> Option<Vec<IpSrc>> {
+        if is_ssm_address(external_group_ip)
+            || !source_filter.has_any_source_member
+        {
+            Some(
+                source_filter
+                    .specific_sources
+                    .iter()
+                    .map(|ip| dpd_client::types::IpSrc::Exact(*ip))
+                    .collect(),
+            )
+        } else {
+            None
+        }
     }
 
     async fn dpd_ensure_underlay_created(
@@ -413,33 +436,9 @@ impl MulticastDataplaneClient {
             inner_mac: MacAddr { a: underlay_ipv6.derive_multicast_mac() },
             vni: Vni::from(u32::from(external_group.vni.0)),
         };
-
         let external_group_ip = external_group.multicast_ip.ip();
-
-        // Source filtering per RFC 4607:
-        // - SSM (232/8, ff3x::/32): always use specific sources. API
-        //   validation prevents SSM joins without sources.
-        // - ASM: use specific sources when all members specify sources,
-        //   otherwise None to allow any source at the switch level.
-        let sources_dpd = if is_ssm_address(external_group_ip) {
-            Some(
-                source_filter
-                    .specific_sources
-                    .iter()
-                    .map(|ip| IpSrc::Exact(*ip))
-                    .collect::<Vec<_>>(),
-            )
-        } else if source_filter.has_any_source_member {
-            None
-        } else {
-            Some(
-                source_filter
-                    .specific_sources
-                    .iter()
-                    .map(|ip| IpSrc::Exact(*ip))
-                    .collect::<Vec<_>>(),
-            )
-        };
+        let sources_dpd =
+            Self::compute_sources_for_dpd(external_group_ip, source_filter);
 
         let create_operations =
             dpd_clients.into_iter().map(|(switch_slot, client)| {
@@ -570,36 +569,12 @@ impl MulticastDataplaneClient {
             inner_mac: MacAddr { a: underlay_ipv6.derive_multicast_mac() },
             vni: Vni::from(u32::from(params.external_group.vni.0)),
         };
-
         let new_name_str = params.new_name.to_string();
         let external_group_ip = params.external_group.multicast_ip.ip();
-
-        // Source filtering per RFC 4607:
-        // - SSM (232/8, ff3x::/32): always use specific sources. API
-        //   validation prevents SSM joins without sources.
-        // - ASM: use specific sources when all members specify sources,
-        //   otherwise None to allow any source at the switch level.
-        let sources_dpd = if is_ssm_address(external_group_ip) {
-            Some(
-                params
-                    .source_filter
-                    .specific_sources
-                    .iter()
-                    .map(|ip| IpSrc::Exact(*ip))
-                    .collect::<Vec<_>>(),
-            )
-        } else if params.source_filter.has_any_source_member {
-            None
-        } else {
-            Some(
-                params
-                    .source_filter
-                    .specific_sources
-                    .iter()
-                    .map(|ip| IpSrc::Exact(*ip))
-                    .collect::<Vec<_>>(),
-            )
-        };
+        let sources_dpd = Self::compute_sources_for_dpd(
+            external_group_ip,
+            params.source_filter,
+        );
 
         let update_operations =
             dpd_clients.into_iter().map(|(switch_slot, client)| {

@@ -86,6 +86,7 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyy_mm_dd_nn, IDENT),
+    (2026_07_16_00, MULTICAST_SOURCE_LIMITS),
     (2026_06_11_00, ADD_SYSTEM_IP_POOL_APIS),
     (2026_06_10_00, BGP_CONFIGURATION_UPDATE),
     (2026_06_08_00, INSTANCE_CPU_TYPE_TURIN_V2),
@@ -6757,13 +6758,15 @@ pub trait NexusExternalApi {
     /// the group must already exist.
     ///
     /// Source IPs are optional for ASM addresses but required for SSM addresses
-    /// (232.0.0.0/8 for IPv4, ff3x::/32 for IPv6). Duplicate IPs in the request
-    /// are automatically deduplicated, with a maximum of 64 source IPs allowed.
+    /// (232.0.0.0/8 for IPv4, ff3x::/32 for IPv6). Duplicate source IPs in a
+    /// single request are rejected. Per-member source list is capped at 32, and
+    /// the union of source IPs across all members of a single group is capped
+    /// at 256.
     #[endpoint {
         method = PUT,
         path = "/v1/instances/{instance}/multicast-groups/{multicast_group}",
         tags = ["experimental"],
-        versions = VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES..,
+        versions = VERSION_MULTICAST_SOURCE_LIMITS..,
     }]
     async fn instance_multicast_group_join(
         rqctx: RequestContext<Self::Context>,
@@ -6772,6 +6775,37 @@ pub trait NexusExternalApi {
         body_params: TypedBody<latest::multicast::InstanceMulticastGroupJoin>,
     ) -> Result<
         HttpResponseCreated<latest::multicast::MulticastGroupMember>,
+        HttpError,
+    >;
+
+    /// Join multicast group by name, IP address, or UUID
+    ///
+    /// Groups can be referenced by name, IP address, or UUID. If the group
+    /// doesn't exist, it's implicitly created with an auto-allocated IP from a
+    /// multicast pool linked to the caller's silo. When referencing by UUID,
+    /// the group must already exist.
+    ///
+    /// Source IPs are optional for ASM addresses but required for SSM addresses
+    /// (232.0.0.0/8 for IPv4, ff3x::/32 for IPv6). Duplicate IPs in the request
+    /// are automatically deduplicated, with a maximum of 64 source IPs allowed.
+    #[endpoint {
+        method = PUT,
+        path = "/v1/instances/{instance}/multicast-groups/{multicast_group}",
+        tags = ["experimental"],
+        operation_id = "instance_multicast_group_join",
+        versions = VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES..VERSION_MULTICAST_SOURCE_LIMITS,
+    }]
+    async fn instance_multicast_group_join_v2026_01_08_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<
+            v2026_01_08_00::multicast::InstanceMulticastGroupPath,
+        >,
+        query_params: Query<v2025_11_20_00::project::OptionalProjectSelector>,
+        body_params: TypedBody<
+            v2026_01_08_00::multicast::InstanceMulticastGroupJoin,
+        >,
+    ) -> Result<
+        HttpResponseCreated<v2026_01_08_00::multicast::MulticastGroupMember>,
         HttpError,
     >;
 

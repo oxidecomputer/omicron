@@ -61,7 +61,9 @@ use nexus_db_queries::db::datastore::multicast::ExternalMulticastGroupWithSource
 use nexus_db_queries::{authz, db};
 use nexus_types::external_api::multicast;
 use nexus_types::multicast::MulticastGroupCreate;
-use omicron_common::address::is_ssm_address;
+use omicron_common::address::{
+    MAX_SOURCE_IPS_PER_GROUP, MAX_SOURCE_IPS_PER_MEMBER, is_ssm_address,
+};
 use omicron_common::api::external::{
     self, CreateResult, DataPageParams, DeleteResult,
     IdentityMetadataCreateParams, ListResultVec, LookupResult,
@@ -70,6 +72,7 @@ use omicron_common::api::external::{
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid, MulticastGroupUuid};
 
 pub(crate) mod dataplane;
+pub(crate) mod sled;
 
 /// Validate that SSM addresses have source IPs.
 ///
@@ -107,6 +110,42 @@ pub(crate) fn validate_ssm_sources(
         return Err(external::Error::invalid_request(
             "SSM multicast addresses require at least one source IP",
         ));
+    }
+    Ok(())
+}
+
+/// Validate per-member source IP list shape.
+///
+/// Applies whenever a member declares source IPs, irrespective of SSM or ASM
+/// group semantics. Enforces:
+///
+/// - At most [`MAX_SOURCE_IPS_PER_MEMBER`] entries
+/// - No duplicates (rejected explicitly rather than silently deduplicated, so
+///   client bugs are surfaced and downstream consumers can assume the list is
+///   canonical)
+pub(crate) fn validate_member_source_ips(
+    source_ips: Option<&[std::net::IpAddr]>,
+) -> Result<(), external::Error> {
+    let Some(sources) = source_ips else {
+        return Ok(());
+    };
+    if sources.is_empty() {
+        return Ok(());
+    }
+    let count = sources.len();
+    if count > MAX_SOURCE_IPS_PER_MEMBER {
+        return Err(external::Error::invalid_request(format!(
+            "membership source IP count {count} exceeds per-member limit \
+             of {MAX_SOURCE_IPS_PER_MEMBER}",
+        )));
+    }
+    let mut seen = std::collections::BTreeSet::new();
+    for ip in sources {
+        if !seen.insert(*ip) {
+            return Err(external::Error::invalid_request(format!(
+                "duplicate source IP {ip} in membership request",
+            )));
+        }
     }
     Ok(())
 }
@@ -351,6 +390,10 @@ impl super::Nexus {
             )));
         }
 
+        // Per-member source IP shape (count + duplicate) check runs once
+        // up front, independent of group resolution.
+        validate_member_source_ips(source_ips)?;
+
         // Find or create the group based on identifier type.
         // SSM validation happens inside resolve functions.
         let group_id = match group_identifier {
@@ -371,6 +414,13 @@ impl super::Nexus {
                 self.resolve_group_by_id(opctx, *id, source_ips).await?
             }
         };
+
+        // Preflight per-group source IP union cap for a descriptive 400 in
+        // the non-racing common case. The datastore CTE enforces the same
+        // bound atomically inside `multicast_group_member_attach_to_instance`.
+        if let Some(sources) = source_ips.filter(|s| !s.is_empty()) {
+            self.validate_group_source_union(opctx, group_id, sources).await?;
+        }
 
         // Attach the member with its source IPs
         let member = self
@@ -593,6 +643,36 @@ impl super::Nexus {
         validate_ssm_sources(group_ip, source_ips)?;
 
         Ok(MulticastGroupUuid::from_untyped_uuid(db_group.identity.id))
+    }
+
+    /// Preflight check that the union of existing member source IPs and
+    /// `proposed` for `group_id` stays within
+    /// [`MAX_SOURCE_IPS_PER_GROUP`].
+    async fn validate_group_source_union(
+        &self,
+        opctx: &OpContext,
+        group_id: MulticastGroupUuid,
+        proposed: &[IpAddr],
+    ) -> Result<(), external::Error> {
+        let filter_state = self
+            .db_datastore
+            .multicast_groups_source_filter_state(opctx, &[group_id])
+            .await?;
+        let mut union = filter_state
+            .get(&group_id.into_untyped_uuid())
+            .map(|s| s.specific_sources.clone())
+            .unwrap_or_default();
+        union.extend(proposed.iter().copied());
+        if union.len() > MAX_SOURCE_IPS_PER_GROUP {
+            return Err(external::Error::invalid_request(format!(
+                "adding {} source IP(s) would push group source union to \
+                 {}, exceeding per-group cap of {}",
+                proposed.len(),
+                union.len(),
+                MAX_SOURCE_IPS_PER_GROUP,
+            )));
+        }
+        Ok(())
     }
 
     /// Resolve a multicast group identifier to a UUID (lookup only).
@@ -886,5 +966,33 @@ mod tests {
         assert!(!is_ssm_address(IpAddr::V6(Ipv6Addr::new(
             0xff1e, 0, 0, 0, 0, 0, 0, 1
         ))));
+    }
+
+    #[test]
+    fn test_generate_group_name_from_ip() {
+        let v4 = IpAddr::V4(Ipv4Addr::new(224, 1, 2, 3));
+        assert_eq!(
+            generate_group_name_from_ip(v4).unwrap().as_str(),
+            "mcast-224-1-2-3"
+        );
+
+        let v4_zeros = IpAddr::V4(Ipv4Addr::new(224, 0, 0, 1));
+        assert_eq!(
+            generate_group_name_from_ip(v4_zeros).unwrap().as_str(),
+            "mcast-224-0-0-1"
+        );
+
+        let v6: IpAddr = IpAddr::V6(Ipv6Addr::new(0xff0e, 0, 0, 0, 0, 0, 0, 1));
+        assert_eq!(
+            generate_group_name_from_ip(v6).unwrap().as_str(),
+            "mcast-ff0e-0-0-0-0-0-0-1"
+        );
+
+        let v6_ssm: IpAddr =
+            IpAddr::V6(Ipv6Addr::new(0xff3e, 0, 0, 0, 0, 0, 0, 0xabcd));
+        assert_eq!(
+            generate_group_name_from_ip(v6_ssm).unwrap().as_str(),
+            "mcast-ff3e-0-0-0-0-0-0-abcd"
+        );
     }
 }

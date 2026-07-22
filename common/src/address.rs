@@ -63,10 +63,32 @@ pub const IPV4_SSM_SUBNET: Ipv4Net =
 pub const IPV6_SSM_SUBNET: Ipv6Net =
     Ipv6Net::new_unchecked(Ipv6Addr::new(0xff30, 0, 0, 0, 0, 0, 0, 0), 12);
 
-/// Maximum source IPs per SSM group member (per [RFC 3376] IGMPv3).
+/// Maximum source IPs a single multicast group member may declare for
+/// source filtering.
+///
+/// Applies to SSM members (which always declare sources) and to ASM members
+/// using `INCLUDE`-mode filtering. The cap reflects `(S,G)` fanout cost,
+/// which is identical regardless of group-address semantics.
+///
+/// Oxide policy bound. [RFC 3376] §4.2.1 (IGMPv3) and [RFC 3810] §5.2.1
+/// (MLDv2) leave per-group source-list size implementation-defined, MTU-bound
+/// at 16-bit max. For comparison: Linux defaults to 10 (`igmp_max_msf`),
+/// FreeBSD to 128 (`maxsocksrc`). 32 was chosen to cover realistic workloads
+/// (1-8 sources per channel typical) while protecting the shared `(S,G)`
+/// forwarding state from a single tenant's fan-out.
 ///
 /// [RFC 3376]: https://www.rfc-editor.org/rfc/rfc3376
-pub const MAX_SSM_SOURCE_IPS: usize = 64;
+/// [RFC 3810]: https://www.rfc-editor.org/rfc/rfc3810
+pub const MAX_SOURCE_IPS_PER_MEMBER: usize = 32;
+
+/// Maximum size of the union of source IPs across all members of a single
+/// multicast group.
+///
+/// Oxide policy bound. Bounds the `(S,G)` install count one group can produce
+/// by aggregating fan-out across members. 256 leaves headroom for large
+/// multi-tenant deployments while keeping dataplane forwarding state
+/// predictable.
+pub const MAX_SOURCE_IPS_PER_GROUP: usize = 256;
 
 /// Check if an IP is in the SSM (Source-Specific Multicast) range.
 ///

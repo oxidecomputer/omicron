@@ -95,6 +95,10 @@ impl DataStore {
     /// - `None` → preserve existing `source_ips` (rejoin without changes)
     /// - `Some([])` → clear `source_ips` (switch to ASM)
     /// - `Some([a,b])` → replace with new `source_ips` (update sources)
+    ///
+    /// Atomically enforces the per-group source IP union cap
+    /// ([`omicron_common::address::MAX_SOURCE_IPS_PER_GROUP`]) when a
+    /// non-empty source list is being applied.
     pub async fn multicast_group_member_attach_to_instance(
         &self,
         opctx: &OpContext,
