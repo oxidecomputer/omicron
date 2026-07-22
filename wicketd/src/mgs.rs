@@ -45,8 +45,8 @@ pub enum GetInventoryResponse {
     Response {
         /// Every per-SP record the manager holds.
         ///
-        /// Consumers that speak the (currently frozen) unstable wire API project
-        /// this down to `MgsV1Inventory` via [`records_to_mgs_inventory`].
+        /// Consumers that speak the (currently frozen) unstable wicketd API
+        /// project this down to `MgsV1Inventory`.
         sps: IdOrdMap<SpRecord>,
         mgs_last_seen: Duration,
     },
@@ -441,9 +441,6 @@ impl MgsManager {
 }
 
 /// A single SP's record in the manager's inventory map.
-///
-/// The frozen `SpInventory` wire type is a lossy projection produced at read
-/// time by [`SpRecord::to_sp_inventory`].
 #[derive(Clone, Debug)]
 pub struct SpRecord {
     pub id: SpIdentifier,
