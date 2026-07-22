@@ -446,7 +446,7 @@ pub struct SpRecord {
     pub id: SpIdentifier,
     pub ignition: Option<SpIgnition>,
 
-    /// Data from the most recent successful `sp_get` cycle, replaced wholesale.
+    /// Data from the most recent successful fetch.
     pub(crate) data: Option<FetchedSpData>,
 }
 
@@ -498,9 +498,6 @@ impl IdOrdItem for SpRecord {
 }
 
 /// Project the per-SP records into the frozen `MgsV1Inventory` wire type.
-///
-/// This is the single read-time projection shared by every consumer of the
-/// frozen wire API.
 pub(crate) fn records_to_mgs_inventory(
     records: &IdOrdMap<SpRecord>,
 ) -> MgsV1Inventory {
