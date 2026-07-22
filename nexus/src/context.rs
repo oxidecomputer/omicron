@@ -21,7 +21,7 @@ use nexus_db_queries::authn::ConsoleSessionWithSiloId;
 use nexus_db_queries::authn::external::session_cookie::SessionStore;
 use nexus_db_queries::context::{OpContext, OpKind};
 use nexus_db_queries::{authn, authz, db};
-use omicron_common::address::{AZ_PREFIX, Ipv6Subnet};
+use omicron_common::address::{AZ_PREFIX_LENGTH, Ipv6Subnet};
 use omicron_uuid_kinds::ConsoleSessionUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::RackUuid;
@@ -231,7 +231,7 @@ impl ServerContext {
         let (resolver, qorb_resolver) = match config.deployment.internal_dns {
             nexus_config::InternalDns::FromSubnet { subnet } => {
                 let az_subnet =
-                    Ipv6Subnet::<AZ_PREFIX>::new(subnet.net().addr());
+                    Ipv6Subnet::<AZ_PREFIX_LENGTH>::new(subnet.net().addr());
                 info!(
                     log,
                     "Setting up resolver using DNS servers for subnet: {:?}",
