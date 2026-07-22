@@ -29,6 +29,9 @@ use omicron_common::{
     },
 };
 use omicron_uuid_kinds::{MupdateOverrideUuid, MupdateUuid};
+use oxide_update_engine_types::errors::NestedEngineError;
+use oxide_update_engine_types::events::ProgressUnits;
+use oxide_update_engine_types::spec::EngineSpec;
 use sha2::{Digest, Sha256};
 use slog::{Logger, info, warn};
 use slog_error_chain::InlineErrorChain;
@@ -39,9 +42,6 @@ use tokio::{
     task::JoinSet,
 };
 use tufaceous_artifact_v2::ArtifactHash;
-use update_engine::{
-    StepSpec, errors::NestedEngineError, events::ProgressUnits,
-};
 
 use crate::{async_temp_file::AsyncNamedTempFile, hardware::Hardware};
 
@@ -677,7 +677,7 @@ impl ControlPlaneZoneWriteContext<'_> {
         transport: &'b mut impl WriteTransport,
         zpool: Option<&'b ZpoolName>,
     ) {
-        use update_engine::StepHandle;
+        use oxide_update_engine::StepHandle;
 
         let slot = self.slot;
         let mupdate_override_uuid = self.mupdate_override_uuid;
@@ -1193,7 +1193,7 @@ impl WriteTransport for BlockDeviceTransport {
 
 /// On success, returns the block size required when interacting with
 /// `destination`.
-async fn write_artifact_impl<S: StepSpec<ProgressMetadata = ()>>(
+async fn write_artifact_impl<S: EngineSpec<ProgressMetadata = ()>>(
     component: WriteComponent,
     slot: M2Slot,
     mut artifact: BufList,
@@ -1431,7 +1431,7 @@ mod tests {
             (SharedTransport(Arc::clone(&inner)), SharedTransport(inner))
         };
 
-        let (event_sender, event_receiver) = update_engine::channel();
+        let (event_sender, event_receiver) = oxide_update_engine::channel();
 
         let receiver_handle = tokio::spawn(async move {
             ReceiverStream::new(event_receiver).collect::<Vec<_>>().await

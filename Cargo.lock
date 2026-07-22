@@ -5831,6 +5831,8 @@ dependencies = [
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "oxide-tokio-rt",
+ "oxide-update-engine",
+ "oxide-update-engine-types",
  "partial-io",
  "proptest",
  "reqwest 0.13.2",
@@ -5850,8 +5852,8 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tokio-stream",
+ "tufaceous 0.2.0",
  "tufaceous-artifact 0.2.0",
- "update-engine",
 ]
 
 [[package]]
@@ -5866,11 +5868,11 @@ dependencies = [
  "omicron-common",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
+ "oxide-update-engine-types",
  "schemars 0.8.22",
  "serde",
  "slog",
  "tufaceous-artifact 0.2.0",
- "update-engine",
  "uuid",
 ]
 
@@ -5881,6 +5883,7 @@ dependencies = [
  "omicron-common",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
+ "oxide-update-engine-types",
  "progenitor 0.14.0",
  "regress 0.10.5",
  "reqwest 0.13.2",
@@ -5888,7 +5891,6 @@ dependencies = [
  "serde",
  "serde_json",
  "slog",
- "update-engine",
 ]
 
 [[package]]
@@ -5902,6 +5904,8 @@ dependencies = [
  "libc",
  "omicron-common",
  "omicron-workspace-hack",
+ "oxide-update-engine",
+ "oxide-update-engine-types",
  "proptest",
  "schemars 0.8.22",
  "serde",
@@ -5910,7 +5914,6 @@ dependencies = [
  "test-strategy",
  "thiserror 2.0.18",
  "tokio",
- "update-engine",
 ]
 
 [[package]]
@@ -7895,6 +7898,8 @@ dependencies = [
  "omicron-test-utils",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
+ "oxide-update-engine",
+ "oxide-update-engine-types",
  "oxnet",
  "pq-sys",
  "reqwest 0.13.2",
@@ -7903,7 +7908,6 @@ dependencies = [
  "slog",
  "slog-error-chain",
  "tokio",
- "update-engine",
  "uuid",
 ]
 
@@ -8244,6 +8248,8 @@ dependencies = [
  "omicron-workspace-hack",
  "openssl",
  "owo-colors 4.3.0",
+ "oxide-update-engine",
+ "oxide-update-engine-types",
  "oximeter-db",
  "oxnet",
  "oxql-types",
@@ -8273,7 +8279,6 @@ dependencies = [
  "trust-quorum-types",
  "tufaceous-artifact 0.1.0",
  "unicode-width 0.1.14",
- "update-engine",
  "url",
  "uuid",
 ]
@@ -9222,6 +9227,8 @@ dependencies = [
  "openssl",
  "oxide-client",
  "oxide-tokio-rt",
+ "oxide-update-engine",
+ "oxide-update-engine-types",
  "oximeter",
  "oximeter-client",
  "oximeter-collector",
@@ -9289,7 +9296,6 @@ dependencies = [
  "tufaceous-artifact 0.1.0",
  "tufaceous-lib",
  "update-common",
- "update-engine",
  "usdt 0.5.0",
  "uuid",
  "zip 4.6.1",
@@ -9404,6 +9410,8 @@ dependencies = [
  "omicron-workspace-hack",
  "owo-colors 4.3.0",
  "oxide-tokio-rt",
+ "oxide-update-engine-display",
+ "oxide-update-engine-types",
  "oximeter-client",
  "oximeter-db",
  "oxnet",
@@ -9433,7 +9441,6 @@ dependencies = [
  "trust-quorum-types",
  "tufaceous-artifact 0.1.0",
  "unicode-width 0.1.14",
- "update-engine",
  "url",
  "uuid",
  "zip 4.6.1",
@@ -9529,6 +9536,9 @@ dependencies = [
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "oxide-tokio-rt",
+ "oxide-update-engine",
+ "oxide-update-engine-display",
+ "oxide-update-engine-types",
  "pq-sys",
  "qorb",
  "repo-depot-client",
@@ -9536,7 +9546,6 @@ dependencies = [
  "slog",
  "supports-color 3.0.2",
  "tokio",
- "update-engine",
  "uuid",
 ]
 
@@ -10236,6 +10245,57 @@ dependencies = [
  "nix 0.31.2",
  "tokio",
  "tokio-dtrace",
+]
+
+[[package]]
+name = "oxide-update-engine"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ec6b4a92c5a78d61609cf956eb428620899f15ffc8881b13260c5168b5fa37ef"
+dependencies = [
+ "cancel-safe-futures",
+ "debug-ignore",
+ "derive-where",
+ "futures",
+ "linear-map",
+ "oxide-update-engine-types",
+ "slog",
+ "tokio",
+]
+
+[[package]]
+name = "oxide-update-engine-display"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fc5a0881ad15043d989eed86f7116c7fce97f1624b73bc41ae029d10ca1003d7"
+dependencies = [
+ "chrono",
+ "debug-ignore",
+ "derive-where",
+ "libsw",
+ "owo-colors 4.3.0",
+ "oxide-update-engine-types",
+ "slog",
+ "swrite",
+ "unicode-width 0.2.0",
+]
+
+[[package]]
+name = "oxide-update-engine-types"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "44b6f7a67e6e404c276d40fccf9b0927e92852e560289d6ea771ce092981cefe"
+dependencies = [
+ "anyhow",
+ "derive-where",
+ "indent_write",
+ "indexmap 2.14.0",
+ "newtype-uuid",
+ "petgraph 0.8.3",
+ "schemars 0.8.22",
+ "serde",
+ "serde_json",
+ "uuid",
 ]
 
 [[package]]
@@ -16780,45 +16840,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "update-engine"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "buf-list",
- "bytes",
- "camino",
- "camino-tempfile",
- "cancel-safe-futures",
- "chrono",
- "clap",
- "debug-ignore",
- "derive-where",
- "either",
- "futures",
- "indent_write",
- "indexmap 2.14.0",
- "indicatif",
- "indoc 2.0.7",
- "libsw",
- "linear-map",
- "omicron-test-utils",
- "omicron-workspace-hack",
- "owo-colors 4.3.0",
- "petgraph 0.8.3",
- "schemars 0.8.22",
- "serde",
- "serde_json",
- "serde_with 3.21.0",
- "slog",
- "supports-color 3.0.2",
- "swrite",
- "tokio",
- "tokio-stream",
- "unicode-width 0.1.14",
- "uuid",
-]
-
-[[package]]
 name = "url"
 version = "2.5.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -17379,6 +17400,7 @@ dependencies = [
  "futures",
  "hex",
  "humantime",
+ "iddqd",
  "indexmap 2.14.0",
  "indicatif",
  "itertools 0.14.0",
@@ -17387,6 +17409,8 @@ dependencies = [
  "omicron-passwords",
  "omicron-workspace-hack",
  "owo-colors 4.3.0",
+ "oxide-update-engine-display",
+ "oxide-update-engine-types",
  "proptest",
  "ratatui",
  "reqwest 0.13.2",
@@ -17413,7 +17437,6 @@ dependencies = [
  "tufaceous-artifact 0.2.0",
  "tui-tree-widget",
  "unicode-width 0.1.14",
- "update-engine",
  "wicket-common",
  "wicketd-client",
  "wicketd-commission-types",
@@ -17429,10 +17452,13 @@ dependencies = [
  "dropshot",
  "gateway-client",
  "gateway-types",
+ "iddqd",
  "maplit",
  "omicron-common",
  "omicron-workspace-hack",
  "owo-colors 4.3.0",
+ "oxide-update-engine",
+ "oxide-update-engine-types",
  "oxnet",
  "schemars 0.8.22",
  "semver 1.0.28",
@@ -17447,7 +17473,6 @@ dependencies = [
  "toml 0.8.23",
  "transceiver-controller 0.1.1 (git+https://github.com/oxidecomputer/transceiver-control)",
  "tufaceous-artifact 0.2.0",
- "update-engine",
  "wicketd-commission-types",
 ]
 
@@ -17510,6 +17535,7 @@ dependencies = [
  "http-body-util",
  "hubtools 0.4.7 (git+https://github.com/oxidecomputer/hubtools.git?rev=2b1ef9b38d75563ea800baa3b17327eec17b1b7a)",
  "hyper",
+ "iddqd",
  "illumos-utils",
  "installinator",
  "installinator-api",
@@ -17530,6 +17556,8 @@ dependencies = [
  "openapi-lint",
  "openapiv3",
  "oxide-tokio-rt",
+ "oxide-update-engine",
+ "oxide-update-engine-types",
  "oxnet",
  "rand 0.9.2",
  "reqwest 0.13.2",
@@ -17558,7 +17586,6 @@ dependencies = [
  "transceiver-controller 0.1.1 (git+https://github.com/oxidecomputer/transceiver-control)",
  "tufaceous 0.2.0",
  "tufaceous-artifact 0.2.0",
- "update-engine",
  "uuid",
  "wicket",
  "wicket-common",
@@ -17598,6 +17625,7 @@ dependencies = [
  "omicron-common",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
+ "oxide-update-engine-types",
  "progenitor 0.14.0",
  "regress 0.10.5",
  "reqwest 0.13.2",
@@ -17608,7 +17636,6 @@ dependencies = [
  "sled-agent-types",
  "sled-hardware-types",
  "slog",
- "update-engine",
  "uuid",
  "wicket-common",
  "wicketd-commission-types-versions",
@@ -17626,14 +17653,17 @@ dependencies = [
 name = "wicketd-commission-types-versions"
 version = "0.1.0"
 dependencies = [
+ "gateway-types-versions",
  "omicron-common",
  "omicron-workspace-hack",
  "oxnet",
+ "proptest",
  "schemars 0.8.22",
  "serde",
  "serde_json",
  "sled-agent-types-versions",
  "slog-error-chain",
+ "test-strategy",
  "toml 0.8.23",
 ]
 

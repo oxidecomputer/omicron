@@ -34,6 +34,9 @@ use installinator_common::WriteOutput;
 use lpc55_areas::CMPAPage;
 use omicron_common::disk::M2Slot;
 use omicron_uuid_kinds::MupdateUuid;
+use oxide_update_engine::AbortHandle;
+use oxide_update_engine_types::events::ProgressUnits;
+use oxide_update_engine_types::spec::{EngineSpec, GenericSpec};
 use semver::Version;
 use sled_hardware_types::OxideSled;
 use slog::Logger;
@@ -72,10 +75,6 @@ use tufaceous_v2::ArtifactHandle;
 use tufaceous_v2::ExpirationEnforcement;
 use tufaceous_v2::Repository;
 use tufaceous_v2::RepositoryLoader;
-use update_engine::AbortHandle;
-use update_engine::NestedSpec;
-use update_engine::StepSpec;
-use update_engine::events::ProgressUnits;
 use uuid::Uuid;
 use wicket_common::artifact::ArtifactId;
 use wicket_common::inventory::SpIdentifier;
@@ -106,6 +105,7 @@ use wicket_common::update_events::UpdateEngine;
 use wicket_common::update_events::UpdateStepId;
 use wicket_common::update_events::UpdateTerminalError;
 use wicketd_api::GetArtifactsAndEventReportsResponse;
+use wicketd_commission_types::update::UpdateTargets;
 
 const TRAMPOLINE_PHASE_2_TAGS: KnownArtifactTags =
     KnownArtifactTags::OsPhase2(OsPhase2Tags {
@@ -209,7 +209,7 @@ impl UpdateTracker {
 
     pub(crate) async fn start(
         &self,
-        sps: BTreeSet<SpIdentifier>,
+        sps: UpdateTargets,
         opts: StartUpdateOptions,
     ) -> Result<(), Vec<StartUpdateError>> {
         let imp = RealSpawnUpdateDriver { update_tracker: self, opts };
@@ -223,7 +223,7 @@ impl UpdateTracker {
     #[doc(hidden)]
     pub async fn start_fake_update(
         &self,
-        sps: BTreeSet<SpIdentifier>,
+        sps: UpdateTargets,
         fake_step_receiver: oneshot::Receiver<oneshot::Sender<()>>,
     ) -> Result<(), Vec<StartUpdateError>> {
         let imp = FakeUpdateDriver {
@@ -235,10 +235,10 @@ impl UpdateTracker {
 
     pub(crate) async fn clear_update_state(
         &self,
-        sps: BTreeSet<SpIdentifier>,
+        targets: UpdateTargets,
     ) -> Result<ClearUpdateStateResponse, ClearUpdateStateError> {
         let mut update_data = self.sp_update_data.lock().await;
-        update_data.clear_update_state(&sps)
+        update_data.clear_update_state(&targets)
     }
 
     pub(crate) async fn abort_update(
@@ -260,14 +260,14 @@ impl UpdateTracker {
     /// performs the same checks.
     pub(crate) async fn update_pre_checks(
         &self,
-        sps: BTreeSet<SpIdentifier>,
+        sps: UpdateTargets,
     ) -> Result<(), Vec<StartUpdateError>> {
         self.start_impl::<NeverUpdateDriver>(sps, None).await
     }
 
     async fn start_impl<Spawn>(
         &self,
-        sps: BTreeSet<SpIdentifier>,
+        sps: UpdateTargets,
         spawn_update_driver: Option<Spawn>,
     ) -> Result<(), Vec<StartUpdateError>>
     where
@@ -618,7 +618,7 @@ impl SpawnUpdateDriver for FakeUpdateDriver {
         _plan: Arc<Repository>,
         _setup_data: &Self::Setup,
     ) -> SpUpdateData {
-        let (sender, mut receiver) = update_engine::channel();
+        let (sender, mut receiver) = oxide_update_engine::channel();
         let event_buffer = Arc::new(StdMutex::new(EventBuffer::new(16)));
         let event_buffer_2 = event_buffer.clone();
         let log = self.log.clone();
@@ -732,7 +732,7 @@ impl UpdateTrackerData {
 
     fn clear_update_state(
         &mut self,
-        sps: &BTreeSet<SpIdentifier>,
+        sps: &UpdateTargets,
     ) -> Result<ClearUpdateStateResponse, ClearUpdateStateError> {
         // Are any updates currently running? If so, then reject the request.
         let in_progress_updates = sps
@@ -916,7 +916,7 @@ impl UpdateDriver {
         //    the newest components for the SP and RoT, and one without.
 
         // Build the update executor.
-        let (sender, mut receiver) = update_engine::channel();
+        let (sender, mut receiver) = oxide_update_engine::channel();
         let mut engine = UpdateEngine::new(&update_cx.log, sender);
         let abort_handle = engine.abort_handle();
         _ = abort_handle_sender.send(abort_handle);
@@ -1883,7 +1883,7 @@ impl UpdateContext {
     async fn process_installinator_reports(
         &self,
         cx: &StepContext,
-        mut ipr_receiver: watch::Receiver<EventReport<NestedSpec>>,
+        mut ipr_receiver: watch::Receiver<EventReport<GenericSpec>>,
     ) -> anyhow::Result<WriteOutput> {
         let mut write_output = None;
 
@@ -2236,7 +2236,7 @@ impl UpdateContext {
         cx: &StepContext,
         mut ipr_start_receiver: IprStartReceiver,
         image_id: HostPhase2RecoveryImageId,
-    ) -> anyhow::Result<watch::Receiver<EventReport<NestedSpec>>> {
+    ) -> anyhow::Result<watch::Receiver<EventReport<GenericSpec>>> {
         const MGS_PROGRESS_POLL_INTERVAL: Duration = Duration::from_secs(3);
 
         // Waiting for the installinator to start is a little strange. It can't
@@ -2412,7 +2412,7 @@ impl UpdateContext {
             .map(|res| res.into_inner())
     }
 
-    async fn poll_component_update<S: StepSpec>(
+    async fn poll_component_update<S: EngineSpec>(
         &self,
         cx: StepContext<S>,
         stage: ComponentUpdateStage,

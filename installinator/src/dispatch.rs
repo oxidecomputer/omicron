@@ -17,6 +17,7 @@ use installinator_common::{
 };
 use omicron_common::FileKv;
 use omicron_common::update::MupdateOverrideHashId;
+use oxide_update_engine::StepResult;
 use sha2::{Digest, Sha256};
 use sled_hardware::{DataLinks, is_oxide_sled};
 use slog::{Drain, error, warn};
@@ -24,7 +25,6 @@ use tufaceous_artifact_v2::{
     ArtifactHash, InstallinatorArtifact, InstallinatorArtifactKind,
     InstallinatorDocument,
 };
-use update_engine::StepResult;
 
 use crate::{
     ArtifactWriter, MeasurementToWrite, WriteDestination, ZoneToWrite,

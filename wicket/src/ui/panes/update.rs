@@ -19,6 +19,11 @@ use crate::ui::widgets::{
 use crate::ui::wrap::wrap_text;
 use crate::{Action, Cmd, State};
 use indexmap::IndexMap;
+use oxide_update_engine_display::ProgressRatioDisplay;
+use oxide_update_engine_types::buffer::{
+    AbortReason, CompletionReason, ExecutionStatus, FailureReason, StepKey,
+    TerminalKind, WillNotBeRunReason,
+};
 use ratatui::Frame;
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::text::{Line, Span, Text};
@@ -32,11 +37,6 @@ use tufaceous_artifact_v2::{
     RotTags,
 };
 use tui_tree_widget::{Tree, TreeItem, TreeState};
-use update_engine::display::ProgressRatioDisplay;
-use update_engine::{
-    AbortReason, CompletionReason, ExecutionStatus, FailureReason, StepKey,
-    TerminalKind, WillNotBeRunReason,
-};
 use wicket_common::inventory::RotSlot;
 use wicket_common::update_events::{
     EventBuffer, EventReport, ProgressEvent, StepOutcome, StepStatus,
@@ -2073,7 +2073,13 @@ impl ComponentUpdateListState {
         for &(step_key, value) in steps.as_slice() {
             let step_info = value.step_info();
             let mut item_spans = Vec::new();
-            let indent = value.nest_level() * 2;
+            let nest_level = event_buffer
+                .get_execution_data(&step_key.execution_id)
+                .expect(
+                    "step's execution is present in the buffer it came from",
+                )
+                .nest_level();
+            let indent = nest_level * 2;
             if indent > 0 {
                 item_spans.push(Span::raw(format!("{:indent$}", ' ')));
             }

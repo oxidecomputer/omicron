@@ -20,11 +20,11 @@ use bytes::Bytes;
 use installinator_client::{ClientError, ResponseValue};
 use installinator_common::EventReport;
 use omicron_uuid_kinds::MupdateUuid;
+use oxide_update_engine_types::events::StepEventIsTerminal;
 use proptest::{collection::vec_deque, prelude::*};
 use reqwest::StatusCode;
 use test_strategy::Arbitrary;
 use tokio::sync::mpsc;
-use update_engine::events::StepEventIsTerminal;
 
 use crate::{
     artifact::ArtifactLookupId,

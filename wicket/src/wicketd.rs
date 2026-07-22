@@ -18,6 +18,7 @@ use wicketd_client::types::{
     ClearUpdateStateParams, GetInventoryParams, GetInventoryResponse,
     GetLocationResponse, IgnitionCommand, StartUpdateParams,
 };
+use wicketd_commission_types::update::UpdateTargets;
 
 use crate::keymap::ShowPopupCmd;
 use crate::state::ComponentId;
@@ -164,7 +165,7 @@ impl WicketdManager {
             let update_client =
                 create_wicketd_client(&log, addr, WICKETD_TIMEOUT);
             let params = StartUpdateParams {
-                targets: vec![component_id.into()],
+                targets: UpdateTargets::single(component_id.into()),
                 options,
             };
             let response = match update_client.post_start_update(&params).await
@@ -229,7 +230,7 @@ impl WicketdManager {
             let update_client =
                 create_wicketd_client(&log, addr, WICKETD_TIMEOUT);
             let params = ClearUpdateStateParams {
-                targets: vec![component_id.into()],
+                targets: UpdateTargets::single(component_id.into()),
                 options,
             };
             let response =

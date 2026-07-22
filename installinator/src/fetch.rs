@@ -15,8 +15,8 @@ use installinator_client::ClientError;
 use installinator_common::{
     InstallinatorProgressMetadata, StepContext, StepProgress,
 };
+use oxide_update_engine_types::events::ProgressUnits;
 use tokio::{sync::mpsc, time::Instant};
-use update_engine::events::ProgressUnits;
 
 use crate::{
     artifact::{ArtifactClient, ArtifactLookupId},
