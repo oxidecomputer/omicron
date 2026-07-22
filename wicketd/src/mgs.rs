@@ -21,12 +21,10 @@ use crate::helpers::SpIdentifierDisplay;
 use crate::http_helpers::http_error_with_message;
 use crate::http_helpers::shutdown_to_http;
 
-pub use self::inventory::Fetched;
-pub(crate) use self::inventory::FetchedSpData;
-pub use self::inventory::MgsFetchError;
-pub use self::inventory::RotData;
-pub use self::inventory::RotFetch;
-pub use self::inventory::Stage0Fetch;
+pub(crate) use self::inventory::{FetchedSpData, MgsFetchError};
+// Will be used by the commissioning API.
+#[cfg_attr(not(test), expect(unused_imports))]
+pub(crate) use self::inventory::{Fetched, RotData, RotFetch, Stage0Fetch};
 use self::inventory::{
     FetchedIgnitionState, IgnitionPresence, IgnitionStateFetcher,
     SpFetchResult, SpStateFetcher,
@@ -499,7 +497,7 @@ pub struct SpRecord {
 
     /// The most recent state-fetch error for this SP, or `None` if the last
     /// state fetch succeeded (or fetching hasn't failed yet).
-    pub last_state_fetch_error: Option<MgsFetchError>,
+    last_state_fetch_error: Option<MgsFetchError>,
 }
 
 impl SpRecord {

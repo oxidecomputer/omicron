@@ -179,8 +179,10 @@ pub(super) enum SpFetchResult {
 /// * One of the variants holds an unread response body, and we don't want to
 ///   hold on to an open connection persistently.
 #[derive(Clone, Debug)]
-pub struct MgsFetchError {
+pub(crate) struct MgsFetchError {
+    #[cfg_attr(not(test), expect(dead_code))]
     pub message: String,
+    #[expect(dead_code)]
     pub observed_at: Instant,
 }
 
@@ -210,10 +212,11 @@ pub(crate) struct FetchedSpData {
 
 /// The outcome of the most recent attempt to fetch one piece of SP data.
 #[derive(Clone, Debug)]
-pub enum Fetched<T> {
+pub(crate) enum Fetched<T> {
     /// Not attempted yet, or invalidated by an SP state or ignition change.
     NotRead,
     /// The most recent attempt failed.
+    #[cfg_attr(not(test), expect(dead_code))]
     Error(MgsFetchError),
     /// The most recent attempt succeeded.
     Read(T),
@@ -243,9 +246,10 @@ impl<T: Clone> Fetched<T> {
 /// SP's `sp_get` response always carries an `SpState.rot`, so the only states
 /// are either that the SP cannot reach its RoT or a successful read.
 #[derive(Clone, Debug)]
-pub enum RotFetch {
+pub(crate) enum RotFetch {
     /// The SP reported it cannot talk to its RoT (from `SpState.rot`).
     CommunicationFailed {
+        #[expect(dead_code)]
         message: String,
     },
     Read(Box<RotData>),
@@ -276,7 +280,7 @@ impl RotFetch {
 }
 
 #[derive(Clone, Debug)]
-pub struct RotData {
+pub(crate) struct RotData {
     pub active: RotSlot,
     pub caboose_a: Fetched<SpComponentCaboose>,
     pub caboose_b: Fetched<SpComponentCaboose>,
@@ -286,7 +290,7 @@ pub struct RotData {
 
 /// A stage0 (or stage0next) bootloader caboose.
 #[derive(Clone, Debug)]
-pub enum Stage0Fetch {
+pub(crate) enum Stage0Fetch {
     /// This RoT version (V2) does not report stage0 bootloader cabooses.
     Unsupported,
     Supported(Fetched<SpComponentCaboose>),
