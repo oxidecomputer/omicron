@@ -51,19 +51,19 @@ pub enum MultirackJoinServiceError {
     RackInitInterrupted,
 
     #[error("Trust quorum error")]
-    TrustQuorum(#[from] NodeApiError),
+    TqApiError(#[from] NodeApiError),
 
     #[error("Trust quorum coordinator doesn't think it's a coordinator")]
-    TrustQuorumBadCoordinator,
+    TqBadCoordinator,
+
+    #[error("Trust quorum commit cannot complete: {0:?}")]
+    TqCommitFailed(CommitState),
 
     #[error("Failed to receive input from bootstrap agent")]
     InputRx(#[from] watch::error::RecvError),
 
     #[error("Failed to join proxy commit task")]
     ProxyCommit(#[from] JoinError),
-
-    #[error("Trust quorum commit cannot complete at epoch {0}")]
-    TrustQuorumCommitFailure(Epoch),
 }
 
 impl From<RunRssError> for MultirackJoinServiceError {
@@ -75,27 +75,37 @@ impl From<RunRssError> for MultirackJoinServiceError {
     }
 }
 
-/// The current state of the `MultirackJoinService` as retrieved from the `output`
-/// watch channel.
+#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+pub struct CommitState {
+    rack_id: RackUuid,
+    members: BTreeSet<BaseboardId>,
+    epoch: Epoch,
+    last_committed_epoch: Option<Epoch>,
+    threshold: Threshold,
+    commit_crash_tolerance: u8,
+    acked: BTreeSet<BaseboardId>,
+    fatal_errors: BTreeMap<BaseboardId, String>,
+    transient_errors: BTreeMap<BaseboardId, String>,
+}
+
+/// The current state of the `MultirackJoinService` as retrieved from the
+/// `output_rx` watch channel.
 #[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
 pub enum MultirackJoinServiceState {
     Requested,
     Starting,
     TrustQuorumReconfigure(TqReconfigureMsg),
     TrustQuorumPreparing(CoordinatorStatus),
-    TrustQuorumCommitting {
-        rack_id: RackUuid,
-        members: BTreeSet<BaseboardId>,
-        epoch: Epoch,
-        last_committed_epoch: Option<Epoch>,
-        threshold: Threshold,
-        commit_crash_tolerance: u8,
-        acked: BTreeSet<BaseboardId>,
-        fatal_errors: BTreeMap<BaseboardId, String>,
-        transient_errors: BTreeMap<BaseboardId, String>,
-    },
+    TrustQuorumCommitting(CommitState),
 }
 
+impl MultirackJoinServiceState {
+    pub fn new() -> Self {
+        Self::Requested
+    }
+}
+
+// The value returned from `MultirackJoinServiceTask::tq_prepare`
 enum TqPrepareResult {
     Prepared,
     ReconfigurationNeeded {
@@ -104,6 +114,7 @@ enum TqPrepareResult {
     },
 }
 
+// The value returned from `MultirackJoinServiceTask::tq_commit`
 enum TqCommitResult {
     Committed,
     ReconfigurationNeeded {
@@ -113,17 +124,11 @@ enum TqCommitResult {
     },
 }
 
-impl MultirackJoinServiceState {
-    pub fn new() -> Self {
-        Self::Requested
-    }
-}
-
 /// The interface to the Multirack Join Service.
 pub struct MultirackJoinServiceHandle {
-    handle: tokio::task::JoinHandle<Result<(), MultirackJoinServiceError>>,
-    input_tx: watch::Sender<MultirackJoinRequest>,
-    output_rx: watch::Receiver<MultirackJoinServiceState>,
+    pub handle: tokio::task::JoinHandle<Result<(), MultirackJoinServiceError>>,
+    pub input_tx: watch::Sender<MultirackJoinRequest>,
+    pub output_rx: watch::Receiver<MultirackJoinServiceState>,
 }
 
 impl MultirackJoinServiceHandle {
@@ -166,6 +171,10 @@ impl MultirackJoinServiceTask {
         info!(&self.log, "Created RackId {rack_id}");
 
         self.init_trust_quorum(rack_id).await?;
+
+        // TODO:
+        //   Start sled-agents
+        //   Configure networking
 
         Ok(())
     }
@@ -219,7 +228,10 @@ impl MultirackJoinServiceTask {
                 continue;
             };
 
-            match self.tq_commit(rack_id, members, epoch).await? {
+            match self
+                .tq_commit(rack_id, members, epoch, last_committed_epoch)
+                .await?
+            {
                 TqCommitResult::Committed => {
                     // We are done.
                     break;
@@ -285,7 +297,7 @@ impl MultirackJoinServiceTask {
                 .trust_quorum_handle
                 .coordinator_status()
                 .await?
-                .ok_or(MultirackJoinServiceError::TrustQuorumBadCoordinator)?;
+                .ok_or(MultirackJoinServiceError::TqBadCoordinator)?;
 
             let all_nodes_prepared = status.acked_prepares == members;
             let still_waiting = itertools::join(
@@ -372,6 +384,7 @@ impl MultirackJoinServiceTask {
         rack_id: RackUuid,
         members: BTreeSet<BaseboardId>,
         epoch: Epoch,
+        last_committed_epoch: Option<Epoch>,
     ) -> Result<TqCommitResult, MultirackJoinServiceError> {
         info!(
             self.log,
@@ -393,92 +406,96 @@ impl MultirackJoinServiceTask {
         remote_peers.remove(&this_sled);
         let mut set = JoinSet::new();
 
-        // Track and report the status of each remote peer
-        let mut acked = BTreeSet::from([this_sled]);
-        let mut fatal_errors = BTreeMap::new();
-        let transient_errors = Arc::new(Mutex::new(BTreeMap::new()));
-
-        for peer in remote_peers {
-            let proxy = self.ctx.trust_quorum_handle.proxy();
-            info!(
-                self.log,
-                "Attempting to proxy commit trust quorum";
-                "epoch" => %epoch,
-                "baseboard_id" => %peer
-            );
-            let transient_errors = transient_errors.clone();
-            set.spawn(async move {
-                loop {
-                    let peer = peer.clone();
-                    match proxy.commit(peer.clone(), rack_id, epoch).await {
-                        Ok(
-                            trust_quorum_types::status::CommitStatus::Committed,
-                        ) => {
-                            return Ok(peer);
-                        }
-                        Ok(
-                            trust_quorum_types::status::CommitStatus::Pending,
-                        ) => {
-                            let s = "unexpected CommitStatus::Pending \
-                            from prepared peer"
-                                .to_string();
-                            return Err((peer, s));
-                        }
-                        Err(e @ ProxyError::Inner(_))
-                        | Err(e @ ProxyError::InvalidResponse(_))
-                        | Err(e @ ProxyError::RecvError) => {
-                            let s = InlineErrorChain::new(&e).to_string();
-                            return Err((peer, s));
-                        }
-                        Err(e) => {
-                            let s = InlineErrorChain::new(&e).to_string();
-                            transient_errors.lock().unwrap().insert(peer, s);
-                            tokio::time::sleep(Duration::from_millis(500))
-                                .await;
-                        }
-                    }
-                }
-            });
-        }
-
         let threshold =
             TrustQuorumConfig::threshold(members.len().try_into().unwrap());
         let commit_crash_tolerance = TrustQuorumConfig::commit_crash_tolerance(
             members.len().try_into().unwrap(),
         );
-
         let min_acks_to_commit =
             (threshold.0 + commit_crash_tolerance) as usize;
+
+        // Transient errors are updated inside proxy commit tasks
+        let transient_errors = Arc::new(Mutex::new(BTreeMap::new()));
+
+        // Update our state as we start
+        let mut commit_state = CommitState {
+            rack_id,
+            members: members.clone(),
+            epoch,
+            last_committed_epoch,
+            threshold,
+            commit_crash_tolerance,
+            acked: BTreeSet::from([this_sled]),
+            fatal_errors: BTreeMap::new(),
+            transient_errors: BTreeMap::new(),
+        };
+        self.output_tx.send_modify(|state| {
+            *state = MultirackJoinServiceState::TrustQuorumCommitting(
+                commit_state.clone(),
+            )
+        });
+
+        for peer in remote_peers {
+            self.tq_spawn_proxy_commit_task(
+                rack_id,
+                peer,
+                epoch,
+                transient_errors.clone(),
+                &mut set,
+            );
+        }
 
         loop {
             tokio::select! {
                 Some(res) = set.join_next() => {
                     match res? {
                         Ok(peer_id) => {
-                            acked.insert(peer_id);
-                            if acked == members {
-                                // All nodes committed. We are done.
-                                break;
-                            }
-
-
-                    }
+                            info!(
+                                self.log,
+                                "Proxy commit acked";
+                                "peer_id" => %peer_id
+                            );
+                            commit_state.acked.insert(peer_id);
+                        }
                         Err((peer_id,err)) => {
-                            fatal_errors.insert(peer_id, err);
+                            error!(
+                                self.log,
+                                "Failed to proxy commit";
+                                "peer_id" => %peer_id,
+                                "err" => %err
+                            );
+                            commit_state.fatal_errors.insert(peer_id, err);
 
                         }
                     }
+                    self.output_tx.send_modify(|state| {
+                        *state = MultirackJoinServiceState::TrustQuorumCommitting(
+                            commit_state.clone(),
+                        )
+                    });
+                    if commit_state.acked == members {
+                        info!(
+                            self.log,
+                            "Trust quorum committed at all nodes";
+                            "epoch" => %epoch
+                        );
+                        break;
+                    }
+
                 }
                 res = self.input_rx.changed() => {
                     res?;
                     // The operator changed the input
-                    let new_members =
-                        self.input_rx.borrow_and_update().trust_quorum_peers.clone();
+                    let new_members = self
+                      .input_rx
+                      .borrow_and_update()
+                      .trust_quorum_peers.clone();
+
                     // Did the membership change?
                     if members != new_members {
-                        if acked.len() >= min_acks_to_commit {
-                            // We can commit this configuration safely and then try a reconfiguration
-                            // with the updated config.
+                        if commit_state.acked.len() >= min_acks_to_commit {
+                            // We can commit this configuration safely and then
+                            // try a reconfiguration with the updated config.
                             let just_committed_epoch = epoch;
                             return Ok(TqCommitResult::ReconfigurationNeeded {
                                 new_members,
@@ -486,18 +503,65 @@ impl MultirackJoinServiceTask {
                                 just_committed_epoch
                             });
                         }
-                        // TODO: Add nodes which failed to ack
-                        return Err(MultirackJoinServiceError::TrustQuorumCommitFailure(epoch));
-
+                        return Err(MultirackJoinServiceError::TqCommitFailed(
+                            commit_state
+                        ));
                     } else {
-                        // Something other than membership changed, just ignore
-                        // for now.
+                        // Something other than membership changed. Ignore.
                     }
                 }
             }
         }
 
         Ok(TqCommitResult::Committed)
+    }
+
+    /// Spawn a task to perform a proxy commit
+    ///
+    /// Success and fatal errors are returned from the task. Transient errors
+    /// are continuously retried.
+    fn tq_spawn_proxy_commit_task(
+        &mut self,
+        rack_id: RackUuid,
+        peer: BaseboardId,
+        epoch: Epoch,
+        transient_errors: Arc<Mutex<BTreeMap<BaseboardId, String>>>,
+        set: &mut JoinSet<Result<BaseboardId, (BaseboardId, String)>>,
+    ) {
+        let proxy = self.ctx.trust_quorum_handle.proxy();
+        info!(
+            self.log,
+            "Attempting to proxy commit trust quorum";
+            "epoch" => %epoch,
+            "baseboard_id" => %peer
+        );
+        set.spawn(async move {
+            loop {
+                let peer = peer.clone();
+                match proxy.commit(peer.clone(), rack_id, epoch).await {
+                    Ok(trust_quorum_types::status::CommitStatus::Committed) => {
+                        return Ok(peer);
+                    }
+                    Ok(trust_quorum_types::status::CommitStatus::Pending) => {
+                        let s = "unexpected CommitStatus::Pending \
+                            from prepared peer"
+                            .to_string();
+                        return Err((peer, s));
+                    }
+                    Err(e @ ProxyError::Inner(_))
+                    | Err(e @ ProxyError::InvalidResponse(_))
+                    | Err(e @ ProxyError::RecvError) => {
+                        let s = InlineErrorChain::new(&e).to_string();
+                        return Err((peer, s));
+                    }
+                    Err(e) => {
+                        let s = InlineErrorChain::new(&e).to_string();
+                        transient_errors.lock().unwrap().insert(peer, s);
+                        tokio::time::sleep(Duration::from_millis(500)).await;
+                    }
+                }
+            }
+        });
     }
 
     // Check if we have received an updated membership set from an operator.
