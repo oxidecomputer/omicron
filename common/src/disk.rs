@@ -18,10 +18,7 @@ use std::fmt;
 use std::str::FromStr;
 
 use crate::api::internal::shared::DatasetKindParseError;
-use crate::{
-    api::external::ByteCount,
-    zpool_name::{ZpoolKind, ZpoolName},
-};
+use crate::{api::external::ByteCount, zpool_name::ZpoolName};
 
 pub use crate::api::internal::shared::DatasetKind;
 
@@ -401,33 +398,6 @@ pub struct DiskIdentity {
     pub vendor: String,
     pub model: String,
     pub serial: String,
-}
-
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    Hash,
-    Serialize,
-    Deserialize,
-    JsonSchema,
-    Ord,
-    PartialOrd,
-)]
-pub enum DiskVariant {
-    U2,
-    M2,
-}
-
-impl From<ZpoolKind> for DiskVariant {
-    fn from(kind: ZpoolKind) -> DiskVariant {
-        match kind {
-            ZpoolKind::External => DiskVariant::U2,
-            ZpoolKind::Internal => DiskVariant::M2,
-        }
-    }
 }
 
 #[cfg(test)]

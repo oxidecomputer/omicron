@@ -15,8 +15,9 @@ use crate::is_oxide_sled;
 use camino::Utf8Path;
 use illumos_utils::zpool::Zpool;
 use illumos_utils::zpool::ZpoolName;
-use omicron_common::disk::{DiskIdentity, DiskVariant};
+use omicron_common::disk::DiskIdentity;
 use omicron_uuid_kinds::ZpoolUuid;
+use sled_agent_types::disk::DiskVariant;
 use slog::Logger;
 use slog::info;
 

@@ -15,8 +15,9 @@ use key_manager::StorageKeyRequester;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::internal::shared::DatasetKind;
 use omicron_common::disk::{
-    CompressionAlgorithm, DatasetName, DiskIdentity, DiskVariant, GzipLevel,
+    CompressionAlgorithm, DatasetName, DiskIdentity, GzipLevel,
 };
+use sled_agent_types::disk::DiskVariant;
 use slog::{Logger, debug, info, warn};
 use slog_error_chain::InlineErrorChain;
 use std::process::Stdio;

@@ -143,12 +143,12 @@ mod tests {
     use super::*;
     use camino::Utf8PathBuf;
     use omicron_common::disk::DiskIdentity;
-    use omicron_common::disk::DiskVariant;
     use omicron_test_utils::dev;
     use proptest::collection::btree_map;
     use proptest::prelude::*;
     use proptest::sample::Index;
     use proptest::sample::size_range;
+    use sled_agent_types::disk::DiskVariant;
     use sled_hardware::DiskFirmware;
     use sled_hardware::UnparsedDisk;
     use sled_storage::disk::RawSyntheticDisk;

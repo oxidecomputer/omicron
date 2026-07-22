@@ -3,8 +3,10 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::latest::disk::DiskStateRequested;
+use crate::latest::disk::DiskVariant;
 use crate::latest::disk::M2Slot;
 use anyhow::bail;
+use omicron_common::zpool_name::ZpoolKind;
 use std::fmt;
 use std::str::FromStr;
 
@@ -82,6 +84,15 @@ impl TryFrom<i64> for M2Slot {
             17 => Ok(Self::A),
             18 => Ok(Self::B),
             _ => bail!("unexpected M.2 slot {value}"),
+        }
+    }
+}
+
+impl From<ZpoolKind> for DiskVariant {
+    fn from(kind: ZpoolKind) -> DiskVariant {
+        match kind {
+            ZpoolKind::External => DiskVariant::U2,
+            ZpoolKind::Internal => DiskVariant::M2,
         }
     }
 }

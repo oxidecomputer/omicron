@@ -5,7 +5,6 @@
 //! Disk types for the Sled Agent API.
 
 use omicron_common::api::internal::nexus::DiskRuntimeState;
-use omicron_common::disk::DiskVariant;
 use omicron_uuid_kinds::ZpoolUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -21,23 +20,25 @@ pub struct DiskPathParam {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 pub struct Zpool {
     pub id: ZpoolUuid,
-    pub disk_type: DiskType,
+    pub disk_type: DiskVariant,
 }
 
-/// Disk type classification.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
-pub enum DiskType {
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+    Ord,
+    PartialOrd,
+)]
+pub enum DiskVariant {
     U2,
     M2,
-}
-
-impl From<DiskVariant> for DiskType {
-    fn from(v: DiskVariant) -> Self {
-        match v {
-            DiskVariant::U2 => Self::U2,
-            DiskVariant::M2 => Self::M2,
-        }
-    }
 }
 
 /// Sent from to a sled agent to establish the runtime state of a Disk

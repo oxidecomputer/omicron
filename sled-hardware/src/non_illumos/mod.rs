@@ -6,8 +6,9 @@ use std::collections::HashMap;
 
 use crate::disk::{DiskPaths, Partition, PooledDiskError, UnparsedDisk};
 use crate::{ExternalDisks, HardwareView, SledMode};
-use omicron_common::disk::{DiskIdentity, DiskVariant};
+use omicron_common::disk::DiskIdentity;
 use omicron_uuid_kinds::ZpoolUuid;
+use sled_agent_types::disk::DiskVariant;
 use sled_hardware_types::{Baseboard, SledCpuFamily};
 use slog::Logger;
 use tokio::sync::watch;
