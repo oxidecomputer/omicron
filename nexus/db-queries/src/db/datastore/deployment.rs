@@ -2861,12 +2861,6 @@ async fn insert_pending_mgs_update(
     Ok(())
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum BlueprintLimitReachedOutput {
-    No { count: u64 },
-    Yes,
-}
-
 // Helper to process BpPendingMgsUpdateComponent rows
 fn process_update_row<T>(
     row: T,

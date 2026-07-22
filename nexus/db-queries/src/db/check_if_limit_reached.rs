@@ -47,7 +47,8 @@ where
         Ok(Self { limit, from: table.from_clause() })
     }
 
-    /// Check if the number of rows in the table exceeds the limit.
+    /// Check if the number of rows in the table has reached or exceeded the
+    /// limit.
     ///
     /// # Usage Notes
     ///
@@ -64,11 +65,9 @@ where
     where
         Self: Send + 'static,
     {
-        let limit = u64::try_from(self.limit).expect(
-            "this i64 was initially converted from a u64, so it should \
-             not be negative...",
-        );
-
+        // Copy this out of `self` first`kq, because `load_async` takes the
+        // query by value.
+        let limit = self.limit;
         // self.first_async fails with `the trait bound
         // `TypedSqlQuery<BigInt>: diesel::Table` is not satisfied`.
         // So we use load_async, knowing that only one row will be
@@ -80,19 +79,19 @@ where
                     "check_if_limit_reached query returned no values",
                 )
             })?;
-            let count =
-                u64::try_from(count).map_err(|_| Error::InternalError {
-                    internal_message: format!(
-                        "error converting record count {count} to u64 (how is \
-                        it negative?)"
-                    ),
-                })?;
 
             // Note count >= limit (and not count > limit): for a limit of 5000 we
             // want to fail if it's reached 5000.
             if count >= limit {
                 Ok(IsLimitReached::Yes)
             } else {
+                let count =
+                    u64::try_from(count).map_err(|_| Error::InternalError {
+                        internal_message: format!(
+                            "error converting record count {count} to u64 (how \
+                            is it negative?)"
+                        ),
+                    })?;
                 Ok(IsLimitReached::No { count })
             }
         })
