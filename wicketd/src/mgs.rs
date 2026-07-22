@@ -5,8 +5,10 @@
 //! The collection of tasks used for interacting with MGS and maintaining
 //! runtime state.
 
+use dropshot::HttpError;
 use futures::StreamExt;
 use gateway_types::ignition::SpIgnition;
+use iddqd::{IdOrdItem, IdOrdMap, id_upcast};
 use slog::{Logger, info, o, warn};
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::SocketAddrV6;
@@ -15,8 +17,12 @@ use tokio::time::{Duration, Instant};
 use tokio_stream::StreamMap;
 use wicket_common::inventory::{MgsV1Inventory, SpIdentifier, SpInventory};
 
+use crate::helpers::SpIdentifierDisplay;
+use crate::http_helpers::http_error_with_message;
+use crate::http_helpers::shutdown_to_http;
+
 use self::inventory::{
-    FetchedIgnitionState, FetchedSpData, IgnitionPresence,
+    FetchedIgnitionState, FetchedSpData, FetchedSpMessage, IgnitionPresence,
     IgnitionStateFetcher, SpStateFetcher,
 };
 
@@ -36,7 +42,14 @@ const CHANNEL_CAPACITY: usize = 8;
 /// Response to a request for MGS-specific inventory information.
 #[derive(Debug)]
 pub enum GetInventoryResponse {
-    Response { inventory: MgsV1Inventory, mgs_last_seen: Duration },
+    Response {
+        /// Every per-SP record the manager holds.
+        ///
+        /// Consumers that speak the (currently frozen) unstable wire API project
+        /// this down to `MgsV1Inventory` via [`records_to_mgs_inventory`].
+        sps: IdOrdMap<SpRecord>,
+        mgs_last_seen: Duration,
+    },
     Unavailable,
 }
 
@@ -68,7 +81,30 @@ pub enum GetInventoryError {
 
     /// The client specified an invalid SP identifier in a `force_refresh`
     /// request.
-    InvalidSpIdentifier,
+    InvalidSpIdentifier {
+        /// The invalid SP identifier.
+        id: SpIdentifier,
+    },
+}
+
+impl GetInventoryError {
+    pub(crate) fn to_http_error(&self) -> HttpError {
+        match self {
+            GetInventoryError::ShutdownInProgress => {
+                shutdown_to_http(ShutdownInProgress)
+            }
+            GetInventoryError::InvalidSpIdentifier { id } => {
+                http_error_with_message(
+                    dropshot::ErrorStatusCode::BAD_REQUEST,
+                    None,
+                    format!(
+                        "invalid SP identifier in force_refresh request: {}",
+                        SpIdentifierDisplay(*id)
+                    ),
+                )
+            }
+        }
+    }
 }
 
 impl MgsHandle {
@@ -80,10 +116,12 @@ impl MgsHandle {
             Err(GetInventoryError::ShutdownInProgress) => {
                 Err(ShutdownInProgress)
             }
-            Err(GetInventoryError::InvalidSpIdentifier) => {
+            Err(GetInventoryError::InvalidSpIdentifier { id }) => {
                 // We pass no SP identifiers to refresh, so it's not possible
                 // for one of them to be invalid.
-                unreachable!("empty SP list cannot contain an invalid ID");
+                unreachable!(
+                    "empty SP list cannot contain an invalid ID, but got {id:?}"
+                );
             }
         }
     }
@@ -139,7 +177,7 @@ pub struct MgsManager {
     tx: mpsc::Sender<MgsRequest>,
     rx: mpsc::Receiver<MgsRequest>,
     mgs_client: gateway_client::Client,
-    inventory: BTreeMap<SpIdentifier, SpInventory>,
+    records: IdOrdMap<SpRecord>,
 
     // Our clients can request an immediate refresh for a particular set of SPs.
     // When they do, we don't want to reply to them until we get updates for
@@ -160,7 +198,7 @@ impl MgsManager {
             tx,
             rx,
             mgs_client,
-            inventory: BTreeMap::new(),
+            records: IdOrdMap::new(),
             waiting_for_update: Vec::new(),
         }
     }
@@ -231,7 +269,7 @@ impl MgsManager {
 
                 Some((_, sp)) = sp_data_streams.next() => {
                     last_successful_mgs_response =
-                        last_successful_mgs_response.max(sp.mgs_received);
+                        last_successful_mgs_response.max(sp.data.mgs_received);
                     self.update_inventory_with_sp(
                         sp,
                         last_successful_mgs_response,
@@ -259,21 +297,25 @@ impl MgsManager {
         &self,
         mgs_last_seen: Instant,
     ) -> GetInventoryResponse {
-        if self.inventory.is_empty() {
+        if self.records.is_empty() {
             GetInventoryResponse::Unavailable
         } else {
-            let inventory = MgsV1Inventory {
-                sps: self.inventory.values().cloned().collect(),
-            };
-
             GetInventoryResponse::Response {
-                inventory,
+                sps: self.records.clone(),
                 mgs_last_seen: mgs_last_seen.elapsed(),
             }
         }
     }
 
+    /// Drop waiters whose receiver is closed (e.g., the HTTP request timed out)
+    /// so they don't pile up in case a wedged SP never refreshes.
+    fn prune_dead_waiters(&mut self) {
+        self.waiting_for_update.retain(|waiter| !waiter.reply_tx.is_closed());
+    }
+
     fn check_completed_waiters(&mut self, mgs_last_seen: Instant) {
+        self.prune_dead_waiters();
+
         // This really wants `Vec::drain_filter()`, but it's unstable; instead,
         // use its sample code (but use `swap_remove()` instead of `remove()`
         // because we don't care about order).
@@ -302,6 +344,8 @@ impl MgsManager {
         >,
         force_refresh: Vec<SpIdentifier>,
     ) {
+        self.prune_dead_waiters();
+
         if force_refresh.is_empty() {
             // No force refresh: just return our latest cached inventory.
             _ = reply_tx.send(Ok(self.current_inventory(mgs_last_seen)));
@@ -311,7 +355,8 @@ impl MgsManager {
         // Trigger immediate refreshes for all SPs listed in `force_refresh`.
         for &id in &force_refresh {
             let Some(handle) = sp_handles.get(&id) else {
-                _ = reply_tx.send(Err(GetInventoryError::InvalidSpIdentifier));
+                _ = reply_tx
+                    .send(Err(GetInventoryError::InvalidSpIdentifier { id }));
                 return;
             };
 
@@ -341,10 +386,8 @@ impl MgsManager {
         mgs_last_seen: Instant,
     ) {
         for (id, ignition) in ignition.sps {
-            let entry = self
-                .inventory
-                .entry(id)
-                .or_insert_with(|| SpInventory::new(id));
+            let mut entry =
+                self.records.entry(id).or_insert_with(|| SpRecord::new(id));
 
             // Update our handle with the current ignition state so it can
             // (potentially) adjust its polling frequency.
@@ -375,31 +418,159 @@ impl MgsManager {
 
     fn update_inventory_with_sp(
         &mut self,
-        sp: FetchedSpData,
+        sp: FetchedSpMessage,
         mgs_last_seen: Instant,
     ) {
-        let entry = self
-            .inventory
-            .entry(sp.id)
-            .or_insert_with(|| SpInventory::new(sp.id));
-        entry.state = Some(sp.state);
-        entry.components = sp.components;
-        entry.caboose_active = sp.caboose_active;
-        entry.caboose_inactive = sp.caboose_inactive;
-        entry.rot = sp.rot;
+        let id = sp.id;
+        // Scope the `record` RefMut so it is dropped before we access `&mut
+        // self` again below.
+        {
+            let mut record =
+                self.records.entry(id).or_insert_with(|| SpRecord::new(id));
+            record.data = Some(sp.data);
+        }
 
         // Scan any pending waiters and remove this SP from their list; if that
         // was the last thing they needed, `check_completed_waiters()` will send
         // them a response.
         for waiting in &mut self.waiting_for_update {
-            waiting.sps_to_refresh.remove(&sp.id);
+            waiting.sps_to_refresh.remove(&id);
         }
         self.check_completed_waiters(mgs_last_seen);
     }
+}
+
+/// A single SP's record in the manager's inventory map.
+///
+/// The frozen `SpInventory` wire type is a lossy projection produced at read
+/// time by [`SpRecord::to_sp_inventory`].
+#[derive(Clone, Debug)]
+pub struct SpRecord {
+    pub id: SpIdentifier,
+    pub ignition: Option<SpIgnition>,
+
+    /// Data from the most recent successful `sp_get` cycle, replaced wholesale.
+    pub(crate) data: Option<FetchedSpData>,
+}
+
+impl SpRecord {
+    fn new(id: SpIdentifier) -> Self {
+        Self { id, ignition: None, data: None }
+    }
+
+    /// Project this record into the frozen `SpInventory` wire type.
+    fn to_sp_inventory(&self) -> SpInventory {
+        let (state, components, caboose_active, caboose_inactive, rot) =
+            match &self.data {
+                Some(FetchedSpData {
+                    state,
+                    components,
+                    caboose_active,
+                    caboose_inactive,
+                    rot,
+                    mgs_received: _,
+                }) => (
+                    Some(state.clone()),
+                    components.clone(),
+                    caboose_active.clone(),
+                    caboose_inactive.clone(),
+                    rot.clone(),
+                ),
+                None => (None, None, None, None, None),
+            };
+        SpInventory {
+            id: self.id,
+            ignition: self.ignition.clone(),
+            state,
+            components,
+            caboose_active,
+            caboose_inactive,
+            rot,
+        }
+    }
+}
+
+impl IdOrdItem for SpRecord {
+    type Key<'a> = SpIdentifier;
+
+    fn key(&self) -> Self::Key<'_> {
+        self.id
+    }
+
+    id_upcast!();
+}
+
+/// Project the per-SP records into the frozen `MgsV1Inventory` wire type.
+///
+/// This is the single read-time projection shared by every consumer of the
+/// frozen wire API.
+pub(crate) fn records_to_mgs_inventory(
+    records: &IdOrdMap<SpRecord>,
+) -> MgsV1Inventory {
+    let sps = records.iter().map(SpRecord::to_sp_inventory).collect();
+    MgsV1Inventory { sps }
 }
 
 struct WaitingForRefresh {
     reply_tx: oneshot::Sender<Result<GetInventoryResponse, GetInventoryError>>,
     sps_to_refresh: BTreeSet<SpIdentifier>,
     need_ignition_refresh: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::net::Ipv6Addr;
+    use wicket_common::inventory::SpType;
+
+    fn dummy_manager() -> MgsManager {
+        let log = Logger::root(slog::Discard, o!());
+        let addr = SocketAddrV6::new(Ipv6Addr::LOCALHOST, 0, 0, 0);
+        MgsManager::new(&log, addr)
+    }
+
+    fn sled(slot: u16) -> SpIdentifier {
+        SpIdentifier { typ: SpType::Sled, slot }
+    }
+
+    #[test]
+    fn prune_dead_waiters_drops_only_closed_receivers() {
+        let mut manager = dummy_manager();
+
+        // Simulate a dead waiter with a closed receiver and a non-empty
+        // sps_to_refresh.
+        let (dead_tx, dead_rx) = oneshot::channel();
+        drop(dead_rx);
+        manager.waiting_for_update.push(WaitingForRefresh {
+            reply_tx: dead_tx,
+            sps_to_refresh: std::iter::once(sled(0)).collect(),
+            need_ignition_refresh: true,
+        });
+
+        // Similarly, simulate a live waiter.
+        let (live_tx, _live_rx) = oneshot::channel();
+        manager.waiting_for_update.push(WaitingForRefresh {
+            reply_tx: live_tx,
+            sps_to_refresh: std::iter::once(sled(1)).collect(),
+            need_ignition_refresh: true,
+        });
+
+        manager.prune_dead_waiters();
+
+        assert_eq!(
+            manager.waiting_for_update.len(),
+            1,
+            "only the live waiter remains after pruning",
+        );
+        let remaining = &manager.waiting_for_update[0];
+        assert!(
+            !remaining.reply_tx.is_closed(),
+            "the surviving waiter still has a live receiver",
+        );
+        assert_eq!(
+            remaining.sps_to_refresh,
+            std::iter::once(sled(1)).collect::<BTreeSet<_>>(),
+            "the surviving waiter is the one waiting on sled 1",
+        );
+    }
 }
