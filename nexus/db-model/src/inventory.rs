@@ -58,7 +58,6 @@ use nexus_types::inventory::{
 use omicron_common::api::external;
 use omicron_common::disk::DatasetConfig;
 use omicron_common::disk::DatasetName;
-use omicron_common::disk::DiskIdentity;
 use omicron_common::update::OmicronInstallManifestSource;
 use omicron_common::zpool_name::ZpoolName;
 use omicron_uuid_kinds::DatasetKind;
@@ -83,6 +82,7 @@ use omicron_uuid_kinds::SvcEnabledNotOnlineUuid;
 use omicron_uuid_kinds::ZpoolKind;
 use omicron_uuid_kinds::{CollectionKind, OmicronZoneKind};
 use omicron_uuid_kinds::{CollectionUuid, OmicronZoneUuid};
+use sled_agent_types::disk::DiskIdentity;
 use sled_agent_types::disk::M2Slot;
 use sled_agent_types::disk::OmicronPhysicalDiskConfig;
 use sled_agent_types::inventory::BootImageHeader;

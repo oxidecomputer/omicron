@@ -112,6 +112,7 @@ use omicron_uuid_kinds::OmicronSledConfigUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
+use sled_agent_types::disk::DiskIdentity;
 use sled_agent_types::disk::M2Slot;
 use sled_agent_types::inventory::BootPartitionContents;
 use sled_agent_types::inventory::BootPartitionDetails;
@@ -3108,7 +3109,7 @@ impl DataStore {
 
                     disks.entry(sled_id).or_default().push(
                         nexus_types::inventory::PhysicalDisk {
-                            identity: omicron_common::disk::DiskIdentity {
+                            identity: DiskIdentity {
                                 vendor: disk.vendor,
                                 model: disk.model,
                                 serial: disk.serial,

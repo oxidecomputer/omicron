@@ -1087,9 +1087,9 @@ mod tests {
     use super::*;
     use assert_matches::assert_matches;
     use illumos_utils::zpool::ZpoolName;
-    use omicron_common::disk::DiskIdentity;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::ZpoolUuid;
+    use sled_agent_types::disk::DiskIdentity;
     use sled_hardware::DiskFirmware;
     use sled_hardware::DiskPaths;
     use sled_hardware::PooledDisk;
@@ -1157,7 +1157,7 @@ mod tests {
             None,
             0,
             variant,
-            omicron_common::disk::DiskIdentity {
+            DiskIdentity {
                 vendor: "test".into(),
                 model: "test".into(),
                 serial: serial.into(),

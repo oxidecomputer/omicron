@@ -1630,10 +1630,10 @@ mod test {
             SLED_PREFIX_LENGTH, get_sled_address,
         },
         api::external::{AllowedSourceIps, ByteCount, Generation},
-        disk::DiskIdentity,
     };
     use omicron_uuid_kinds::SledUuid;
     use oxnet::Ipv6Net;
+    use sled_agent_types::disk::DiskIdentity;
     use sled_agent_types::disk::DiskVariant;
     use sled_agent_types::{
         early_networking::{PortConfig, RackNetworkConfig, UplinkPorts},

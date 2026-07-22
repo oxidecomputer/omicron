@@ -40,6 +40,7 @@ use strum::EnumIter;
 use tufaceous_artifact::ArtifactHash;
 use uuid::Uuid;
 
+use super::disk::DiskIdentity;
 use super::disk::DiskVariant;
 use super::disk::M2Slot;
 use super::disk::OmicronPhysicalDiskConfig;
@@ -92,7 +93,7 @@ impl From<sled_hardware_types::Baseboard> for Baseboard {
 /// Identifies information about disks which may be attached to Sleds.
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
 pub struct InventoryDisk {
-    pub identity: omicron_common::disk::DiskIdentity,
+    pub identity: DiskIdentity,
     pub variant: DiskVariant,
     pub slot: i64,
     // Today we only have NVMe disks so we embedded the firmware metadata here.

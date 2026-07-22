@@ -32,6 +32,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 use sled_agent_types::disk::M2Slot;
+use sled_agent_types_versions::latest::disk::DiskIdentity;
 use sled_agent_types_versions::latest::inventory::ConfigReconcilerInventory;
 use sled_agent_types_versions::latest::inventory::ConfigReconcilerInventoryResult;
 use sled_agent_types_versions::latest::inventory::ConfigReconcilerInventoryStatus;
@@ -604,7 +605,7 @@ pub struct PhysicalDisk {
     // InventoryDisk and PhysicalDisk? The types are structurally the same, but
     // maybe the separation is useful to indicate that a `PhysicalDisk` doesn't
     // always show up in the inventory.
-    pub identity: omicron_common::disk::DiskIdentity,
+    pub identity: DiskIdentity,
     pub variant: PhysicalDiskKind,
     pub slot: i64,
     pub firmware: PhysicalDiskFirmware,

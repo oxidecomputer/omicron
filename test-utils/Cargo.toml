@@ -26,6 +26,7 @@ pem.workspace = true
 port-file.workspace = true
 regex.workspace = true
 rustls.workspace = true
+sled-agent-types.workspace = true
 slog.workspace = true
 subprocess.workspace = true
 thiserror.workspace = true

@@ -103,12 +103,12 @@ mod tests {
     use omicron_common::api::external::Generation;
     use omicron_common::api::internal::shared::DatasetKind;
     use omicron_common::disk::CompressionAlgorithm;
-    use omicron_common::disk::DiskIdentity;
     use omicron_common::zpool_name::ZpoolName;
     use omicron_uuid_kinds::DatasetUuid;
     use omicron_uuid_kinds::OmicronZoneUuid;
     use omicron_uuid_kinds::PhysicalDiskUuid;
     use omicron_uuid_kinds::ZpoolUuid;
+    use sled_agent_types::disk::DiskIdentity;
     use sled_agent_types::inventory::SledRole;
     use std::net::Ipv6Addr;
     use std::net::SocketAddr;

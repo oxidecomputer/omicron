@@ -681,7 +681,6 @@ mod tests {
     use camino_tempfile::tempfile;
     use iddqd::IdOrdMap;
     use illumos_utils::zpool::ZpoolName;
-    use omicron_common::disk::DiskIdentity;
     use omicron_test_utils::dev;
     use omicron_test_utils::dev::poll::wait_for_watch_channel_condition;
     use omicron_uuid_kinds::InternalZpoolUuid;
@@ -689,6 +688,7 @@ mod tests {
     use omicron_uuid_kinds::OmicronZoneUuid;
     use omicron_uuid_kinds::PhysicalDiskUuid;
     use omicron_uuid_kinds::ZpoolUuid;
+    use sled_agent_types::disk::DiskIdentity;
     use sled_agent_types::disk::OmicronPhysicalDiskConfig;
     use sled_agent_types::inventory::HostPhase2DesiredContents;
     use sled_agent_types::inventory::HostPhase2DesiredSlots;

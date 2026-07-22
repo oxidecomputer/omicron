@@ -350,26 +350,6 @@ impl IdOrdItem for DatasetConfig {
     id_upcast!();
 }
 
-/// Uniquely identifies a disk.
-#[derive(
-    Debug,
-    Clone,
-    PartialEq,
-    Eq,
-    Hash,
-    Ord,
-    PartialOrd,
-    Serialize,
-    Deserialize,
-    JsonSchema,
-    Diffable,
-)]
-pub struct DiskIdentity {
-    pub vendor: String,
-    pub model: String,
-    pub serial: String,
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

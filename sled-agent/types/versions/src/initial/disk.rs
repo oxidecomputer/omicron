@@ -5,7 +5,6 @@
 //! Disk types for the Sled Agent API.
 
 use omicron_common::api::internal::nexus::DiskRuntimeState;
-use omicron_common::disk::DiskIdentity;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use schemars::JsonSchema;
@@ -101,4 +100,24 @@ pub struct OmicronPhysicalDiskConfig {
     pub identity: DiskIdentity,
     pub id: PhysicalDiskUuid,
     pub pool_id: ZpoolUuid,
+}
+
+/// Uniquely identifies a disk.
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Hash,
+    Ord,
+    PartialOrd,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+    daft::Diffable,
+)]
+pub struct DiskIdentity {
+    pub vendor: String,
+    pub model: String,
+    pub serial: String,
 }
