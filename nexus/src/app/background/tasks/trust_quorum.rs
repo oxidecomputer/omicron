@@ -22,7 +22,7 @@ use nexus_types::trust_quorum::{
     TrustQuorumConfig as NexusTrustQuorumConfig, TrustQuorumConfigState,
     TrustQuorumMemberState,
 };
-use omicron_common::address::{Ipv6Subnet, RACK_PREFIX, get_64_subnet};
+use omicron_common::address::{Ipv6Subnet, RACK_PREFIX_LENGTH, get_64_subnet};
 use omicron_uuid_kinds::{RackUuid, SledUuid};
 use parallel_task_set::ParallelTaskSet;
 use rand::seq::SliceRandom;
@@ -563,7 +563,7 @@ async fn start_sled_agents(
     info!(log, "Looking up subnet for rack: {}", rack_id);
     let subnet = datastore.rack_subnet(&opctx, rack_id).await?;
     let rack_subnet =
-        Ipv6Subnet::<RACK_PREFIX>::from(rack_subnet(Some(subnet))?);
+        Ipv6Subnet::<RACK_PREFIX_LENGTH>::from(rack_subnet(Some(subnet))?);
 
     // Get a set of random sled agent clients for concurrent calls to
     // `start_sled_agent`.
@@ -616,7 +616,7 @@ async fn send_start_sled_agent_requests(
     log: &Logger,
     client_dest: BaseboardId,
     client: sled_agent_client::Client,
-    rack_subnet: Ipv6Subnet<RACK_PREFIX>,
+    rack_subnet: Ipv6Subnet<RACK_PREFIX_LENGTH>,
     allocations_by_baseboard_id: BTreeMap<
         BaseboardId,
         SledUnderlaySubnetAllocation,
