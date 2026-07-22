@@ -1312,8 +1312,8 @@ mod test {
         let version = fake_target_version();
         let blueprint =
             fake_blueprint(&cptestctx.logctx.log, &version, Utc::now(), false);
-        // There is a stuck active saga no update has ever been run, contact
-        // support should be true
+        // There is a stuck active saga, and no update has ever been run.
+        // contact_support should be true.
         assert!(
             nexus
                 .contact_support(
