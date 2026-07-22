@@ -59,3 +59,25 @@ pub enum DiskStateRequested {
     Destroyed,
     Faulted,
 }
+
+/// Describes an M.2 slot, often in the context of writing a system image to
+/// it.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+    daft::Diffable,
+    strum::EnumIter,
+)]
+#[cfg_attr(any(test, feature = "testing"), derive(test_strategy::Arbitrary))]
+pub enum M2Slot {
+    A,
+    B,
+}

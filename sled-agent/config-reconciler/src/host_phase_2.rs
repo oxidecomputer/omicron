@@ -11,7 +11,7 @@ use crate::SledAgentArtifactStore;
 use camino::Utf8Path;
 use camino::Utf8PathBuf;
 use installinator_common::RawDiskWriter;
-use omicron_common::disk::M2Slot;
+use sled_agent_types::disk::M2Slot;
 use sled_agent_types::inventory::BootPartitionContents as BootPartitionContentsInventory;
 use sled_agent_types::inventory::BootPartitionDetails;
 use sled_agent_types::inventory::HostPhase2DesiredContents;

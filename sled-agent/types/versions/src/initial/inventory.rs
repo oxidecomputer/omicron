@@ -21,7 +21,7 @@ use omicron_common::api::external::MacAddr;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::Vni;
 use omicron_common::disk::{
-    DatasetConfig, DatasetName, DiskVariant, M2Slot, OmicronPhysicalDiskConfig,
+    DatasetConfig, DatasetName, DiskVariant, OmicronPhysicalDiskConfig,
 };
 use omicron_common::snake_case_result;
 use omicron_common::snake_case_result::SnakeCaseResult;
@@ -42,6 +42,7 @@ use strum::EnumIter;
 use tufaceous_artifact::ArtifactHash;
 use uuid::Uuid;
 
+use super::disk::M2Slot;
 use crate::impls::inventory::SourceNatConfigError;
 
 /// Describes properties that should uniquely identify a Gimlet.

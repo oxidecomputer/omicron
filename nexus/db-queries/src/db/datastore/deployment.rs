@@ -3179,7 +3179,6 @@ mod tests {
     use omicron_common::api::internal::shared::PrivateIpv4Config;
     use omicron_common::api::internal::shared::PrivateIpv6Config;
     use omicron_common::disk::DiskIdentity;
-    use omicron_common::disk::M2Slot;
     use omicron_common::zpool_name::ZpoolName;
     use omicron_test_utils::dev;
     use omicron_test_utils::dev::poll::CondCheckError;
@@ -3194,6 +3193,7 @@ mod tests {
     use sled_agent_types::inventory::NetworkInterface;
     use sled_agent_types::inventory::NetworkInterfaceKind;
     use std::collections::BTreeMap;
+    use sled_agent_types::disk::M2Slot;
     use std::collections::BTreeSet;
     use std::mem;
     use std::net::Ipv6Addr;

@@ -49,6 +49,7 @@ pub mod disk {
     pub use crate::v1::disk::DiskPathParam;
     pub use crate::v1::disk::DiskStateRequested;
     pub use crate::v1::disk::DiskType;
+    pub use crate::v1::disk::M2Slot;
     pub use crate::v1::disk::Zpool;
 }
 

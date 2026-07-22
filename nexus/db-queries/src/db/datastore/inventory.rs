@@ -105,7 +105,6 @@ use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use omicron_common::bail_unless;
-use omicron_common::disk::M2Slot;
 use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::GenericUuid;
@@ -113,6 +112,7 @@ use omicron_uuid_kinds::OmicronSledConfigUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
+use sled_agent_types::disk::M2Slot;
 use sled_agent_types::inventory::BootPartitionContents;
 use sled_agent_types::inventory::BootPartitionDetails;
 use sled_agent_types::inventory::ConfigReconcilerInventory;
@@ -5417,7 +5417,6 @@ mod test {
     use omicron_common::api::internal::shared::PrivateIpv6Config;
     use omicron_common::disk::DatasetKind;
     use omicron_common::disk::DatasetName;
-    use omicron_common::disk::M2Slot;
     use omicron_common::zpool_name::ZpoolName;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::GenericUuid;
@@ -5427,6 +5426,7 @@ mod test {
         ZpoolUuid,
     };
     use pretty_assertions::assert_eq;
+    use sled_agent_types::disk::M2Slot;
     use sled_agent_types::inventory::BootPartitionContents;
     use sled_agent_types::inventory::BootPartitionDetails;
     use sled_agent_types::inventory::NetworkInterface;
