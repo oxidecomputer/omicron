@@ -36,6 +36,7 @@ use nexus_types::internal_api::params::RackInitializationRequest;
 use nexus_types::internal_api::views::BackgroundTask;
 use nexus_types::internal_api::views::DemoSaga;
 use nexus_types::internal_api::views::MgsUpdateDriverStatus;
+use nexus_types::internal_api::views::MulticastDdmPeersView;
 use nexus_types::internal_api::views::QuiesceStatus;
 use nexus_types::internal_api::views::Saga;
 use nexus_types::internal_api::views::SupportBundleInfo;
@@ -206,6 +207,17 @@ pub trait NexusLockstepApi {
     async fn mgs_updates(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<MgsUpdateDriverStatus>, HttpError>;
+
+    // Debug interface for DDM underlay peers
+
+    /// Read-only view of DDM underlay peers across switch zones
+    #[endpoint {
+        method = GET,
+        path = "/multicast/ddm-peers",
+    }]
+    async fn multicast_ddm_peers(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<MulticastDdmPeersView>, HttpError>;
 
     // APIs for managing blueprints
     //

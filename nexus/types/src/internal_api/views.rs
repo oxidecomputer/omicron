@@ -1263,6 +1263,64 @@ pub struct SupportBundleInfo {
     pub fm_case_id: Option<CaseUuid>,
 }
 
+/// DDM session state of an underlay peer.
+///
+/// Mirrors the variants of the DDM admin API's `PeerStatus` without the
+/// state-duration payload, which is carried separately on
+/// [`MulticastDdmPeer::status_duration`] so consumers can match on the
+/// state directly.
+#[derive(
+    Clone, Copy, Debug, Serialize, Deserialize, JsonSchema, PartialEq, Eq,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum MulticastDdmPeerStatus {
+    Init,
+    Solicit,
+    Exchange,
+    Expired,
+}
+
+impl Display for MulticastDdmPeerStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Init => write!(f, "init"),
+            Self::Solicit => write!(f, "solicit"),
+            Self::Exchange => write!(f, "exchange"),
+            Self::Expired => write!(f, "expired"),
+        }
+    }
+}
+
+/// A single DDM underlay peer as observed from a switch zone.
+///
+/// Under RFD 488, `mg-lower` derives underlay multicast members from the
+/// DDM peer subscriptions reported here. The `if_name` field names the switch
+/// interface the peer was discovered on (e.g. "tfportrear0_0").
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+pub struct MulticastDdmPeer {
+    /// The switch zone the peer was observed from.
+    pub switch: String,
+    /// The peer's underlay address.
+    pub addr: Ipv6Addr,
+    /// The peer's reported hostname.
+    pub host: String,
+    /// The peer's DDM session state.
+    pub status: MulticastDdmPeerStatus,
+    /// How long the peer has held its current session state.
+    pub status_duration: Duration,
+    /// The switch interface the peer was discovered on, if known.
+    pub if_name: Option<String>,
+}
+
+/// Read-only view of DDM underlay peers across all switch zones.
+///
+/// Surfaced via `omdb nexus multicast ddm-peers` for operators inspecting the
+/// underlay topology that drives multicast member programming.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+pub struct MulticastDdmPeersView {
+    pub peers: Vec<MulticastDdmPeer>,
+}
+
 #[cfg(test)]
 mod test {
     use super::CompletedAttempt;

@@ -83,7 +83,7 @@ use trust_quorum_types::messages::{
 use trust_quorum_types::status::{CommitStatus, CoordinatorStatus, NodeStatus};
 
 // Fixed identifiers for prior versions only
-use sled_agent_types_versions::{v1, v20, v25, v26, v30, v33, v39, v42};
+use sled_agent_types_versions::{v1, v7, v20, v25, v26, v30, v33, v39, v42};
 use sled_diagnostics::{
     SledDiagnosticsCommandHttpOutput, SledDiagnosticsQueryOutput,
 };
@@ -717,11 +717,11 @@ impl SledAgentApi for SledAgentImpl {
         body: TypedBody<InstanceMulticastMembership>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let sa = rqctx.context();
-        let id = path_params.into_inner().propolis_id;
+        let propolis_id = path_params.into_inner().propolis_id;
         let membership = body.into_inner();
         sa.latencies()
             .instrument_dropshot_handler(&rqctx, async {
-                sa.instance_join_multicast_group(id, &membership).await?;
+                sa.vmm_join_multicast_group(propolis_id, &membership).await?;
                 Ok(HttpResponseUpdatedNoContent())
             })
             .await
@@ -733,11 +733,59 @@ impl SledAgentApi for SledAgentImpl {
         body: TypedBody<InstanceMulticastMembership>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let sa = rqctx.context();
-        let id = path_params.into_inner().propolis_id;
+        let propolis_id = path_params.into_inner().propolis_id;
         let membership = body.into_inner();
         sa.latencies()
             .instrument_dropshot_handler(&rqctx, async {
-                sa.instance_leave_multicast_group(id, &membership).await?;
+                sa.vmm_leave_multicast_group(propolis_id, &membership).await?;
+                Ok(HttpResponseUpdatedNoContent())
+            })
+            .await
+    }
+
+    async fn vmm_join_multicast_group_v7(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v1::instance::VmmPathParam>,
+        body: TypedBody<v7::instance::InstanceMulticastBody>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let sa = rqctx.context();
+        let propolis_id = path_params.into_inner().propolis_id;
+        let membership = match body.into_inner() {
+            v7::instance::InstanceMulticastBody::Join(m) => m,
+            v7::instance::InstanceMulticastBody::Leave(_) => {
+                return Err(HttpError::for_bad_request(
+                    None,
+                    "Join endpoint cannot process Leave operations".to_string(),
+                ));
+            }
+        };
+        sa.latencies()
+            .instrument_dropshot_handler(&rqctx, async {
+                sa.vmm_join_multicast_group(propolis_id, &membership).await?;
+                Ok(HttpResponseUpdatedNoContent())
+            })
+            .await
+    }
+
+    async fn vmm_leave_multicast_group_v7(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v1::instance::VmmPathParam>,
+        body: TypedBody<v7::instance::InstanceMulticastBody>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let sa = rqctx.context();
+        let propolis_id = path_params.into_inner().propolis_id;
+        let membership = match body.into_inner() {
+            v7::instance::InstanceMulticastBody::Leave(m) => m,
+            v7::instance::InstanceMulticastBody::Join(_) => {
+                return Err(HttpError::for_bad_request(
+                    None,
+                    "Leave endpoint cannot process Join operations".to_string(),
+                ));
+            }
+        };
+        sa.latencies()
+            .instrument_dropshot_handler(&rqctx, async {
+                sa.vmm_leave_multicast_group(propolis_id, &membership).await?;
                 Ok(HttpResponseUpdatedNoContent())
             })
             .await

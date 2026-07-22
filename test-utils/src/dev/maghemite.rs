@@ -31,14 +31,25 @@ pub struct MgdInstance {
 }
 
 impl MgdInstance {
+    /// Start an `mgd` process.
+    ///
+    /// `mgs_addr` is the required management-gateway (MGS) endpoint mgd is
+    /// bound to. In the harness it is the switch's gateway instance.
+    ///
+    /// `dendrite_addr` and `ddm_addr` point mgd's lower half (illumos
+    /// only) at a dpd and a DDM admin endpoint respectively. When set,
+    /// the `mg-lower-mrib` thread syncs the local MRIB to the DDM
+    /// endpoint as multicast origination.
     pub async fn start(
         port: u16,
         mgs_addr: SocketAddr,
+        dendrite_addr: Option<SocketAddr>,
+        ddm_addr: Option<SocketAddr>,
     ) -> Result<Self, anyhow::Error> {
         let temp_dir = Utf8TempDir::new()?;
         let port_file = temp_dir.path().join("mgd_port");
 
-        let args = vec![
+        let mut args = vec![
             "run".to_string(),
             "--admin-addr".into(),
             "::1".into(),
@@ -56,6 +67,14 @@ impl MgdInstance {
             "--mgs-addr".into(),
             mgs_addr.to_string(),
         ];
+        if let Some(addr) = dendrite_addr {
+            args.push("--dendrite-addr".into());
+            args.push(addr.to_string());
+        }
+        if let Some(addr) = ddm_addr {
+            args.push("--ddm-addr".into());
+            args.push(addr.to_string());
+        }
 
         let mut child = tokio::process::Command::new("mgd")
             .args(&args)
@@ -147,14 +166,16 @@ async fn read_port_file(
 /// `MgdInstance`.
 ///
 /// `ddmd` runs in sled global zones and switch zones in production. Spawned
-/// here with `--api-only`, which serves only the admin API and skips the
-/// discovery / exchange / routing daemons that need real network interfaces
-/// and illumos-only kernel facilities. Only switch-zone instances
-/// are registered in internal DNS as `ServiceName::Ddm`; sled-global-zone
-/// instances are accessed locally by their own host (RSS, sled-agent's
-/// prefix advertisement, etc.) and don't need DNS publication.
+/// here with `--api-only`, which serves only the admin API: it does not run
+/// DDM peer discovery, the peering handshake, or the transit-routing tail that
+/// programs the underlay dataplane, all of which need real network interfaces
+/// and illumos-only kernel facilities. No rear-port peers form, so the harness
+/// exercises the admin surface alone. Only switch-zone instances are
+/// registered in internal DNS as `ServiceName::Ddm`. Sled-global-zone
+/// instances are accessed locally by their own host (RSS, sled-agent's prefix
+/// advertisement, etc.) and don't need DNS publication.
 pub struct DdmInstance {
-    /// Port number the ddmd instance is listening on.
+    /// Port number the ddmd admin server is listening on.
     pub port: u16,
     /// Arguments provided to the `ddmd` cli command.
     pub args: Vec<String>,

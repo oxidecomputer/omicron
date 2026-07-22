@@ -5410,7 +5410,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let instance_lookup =
                 nexus.instance_lookup(&opctx, instance_selector)?;
             let result = nexus
-                .instance_join_multicast_group(
+                .vmm_join_multicast_group(
                     &opctx,
                     &path.multicast_group,
                     &instance_lookup,
@@ -5448,7 +5448,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let group_lookup =
                 nexus.multicast_group_lookup(&opctx, &group_selector).await?;
             nexus
-                .instance_leave_multicast_group(
+                .vmm_leave_multicast_group(
                     &opctx,
                     &group_lookup,
                     &instance_lookup,
@@ -5519,7 +5519,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let result = apictx
                 .context
                 .nexus
-                .instance_join_multicast_group(
+                .vmm_join_multicast_group(
                     &opctx,
                     &path.multicast_group,
                     &instance_lookup,

@@ -513,8 +513,8 @@ async fn test_silo_user_multicast_permissions(
         start: false,
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
-        enable_jumbo_frames: false,
         multicast_groups: Vec::new(),
+        enable_jumbo_frames: false,
     };
     let instance2: Instance = NexusRequest::objects_post(
         client,

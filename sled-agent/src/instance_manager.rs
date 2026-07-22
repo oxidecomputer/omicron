@@ -18,7 +18,7 @@ use illumos_utils::opte::PortManager;
 use illumos_utils::running_zone::ZoneBuilderFactory;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::internal::shared::SledIdentifiers;
-use omicron_uuid_kinds::PropolisUuid;
+use omicron_uuid_kinds::{InstanceUuid, PropolisUuid};
 use oxnet::IpNet;
 use sled_agent_config_reconciler::AvailableDatasetsReceiver;
 use sled_agent_config_reconciler::CurrentlyManagedZpoolsReceiver;
@@ -42,6 +42,9 @@ pub enum Error {
 
     #[error("VMM with ID {0} not found")]
     NoSuchVmm(PropolisUuid),
+
+    #[error("No active VMM for instance {0}")]
+    NoActiveVmmForInstance(InstanceUuid),
 
     #[error("OPTE port management error")]
     Opte(#[from] illumos_utils::opte::Error),
@@ -303,7 +306,12 @@ impl InstanceManager {
         rx.await?
     }
 
-    pub async fn join_multicast_group(
+    /// Subscribe a VMM's OPTE port to a multicast group.
+    ///
+    /// Keyed by `propolis_id` rather than `instance_id` so the dispatch is
+    /// unambiguous during live migration, when source and target VMMs for
+    /// the same instance can both be registered.
+    pub async fn join_multicast_group_by_vmm(
         &self,
         propolis_id: PropolisUuid,
         membership: &InstanceMulticastMembership,
@@ -311,7 +319,7 @@ impl InstanceManager {
         let (tx, rx) = oneshot::channel();
         self.inner
             .tx
-            .send(InstanceManagerRequest::JoinMulticastGroup {
+            .send(InstanceManagerRequest::JoinMulticastGroupByVmm {
                 propolis_id,
                 membership: membership.clone(),
                 tx,
@@ -322,7 +330,11 @@ impl InstanceManager {
         rx.await?
     }
 
-    pub async fn leave_multicast_group(
+    /// Unsubscribe a VMM's OPTE port from a multicast group.
+    ///
+    /// See [`Self::join_multicast_group_by_vmm`] for the serialization
+    /// and migration-safety properties.
+    pub async fn leave_multicast_group_by_vmm(
         &self,
         propolis_id: PropolisUuid,
         membership: &InstanceMulticastMembership,
@@ -330,7 +342,7 @@ impl InstanceManager {
         let (tx, rx) = oneshot::channel();
         self.inner
             .tx
-            .send(InstanceManagerRequest::LeaveMulticastGroup {
+            .send(InstanceManagerRequest::LeaveMulticastGroupByVmm {
                 propolis_id,
                 membership: membership.clone(),
                 tx,
@@ -482,12 +494,12 @@ enum InstanceManagerRequest {
     RefreshExternalIps {
         tx: oneshot::Sender<Result<(), Error>>,
     },
-    JoinMulticastGroup {
+    JoinMulticastGroupByVmm {
         propolis_id: PropolisUuid,
         membership: InstanceMulticastMembership,
         tx: oneshot::Sender<Result<(), Error>>,
     },
-    LeaveMulticastGroup {
+    LeaveMulticastGroupByVmm {
         propolis_id: PropolisUuid,
         membership: InstanceMulticastMembership,
         tx: oneshot::Sender<Result<(), Error>>,
@@ -630,11 +642,11 @@ impl InstanceManagerRunner {
                         Some(RefreshExternalIps { tx }) => {
                             self.refresh_external_ips(tx)
                         },
-                        Some(JoinMulticastGroup { propolis_id, membership, tx }) => {
-                            self.join_multicast_group(tx, propolis_id, &membership)
-                        },
-                        Some(LeaveMulticastGroup { propolis_id, membership, tx }) => {
-                            self.leave_multicast_group(tx, propolis_id, &membership)
+                        Some(JoinMulticastGroupByVmm { propolis_id, membership, tx }) => {
+                            self.join_multicast_group_by_vmm(tx, propolis_id, &membership)
+                        }
+                        Some(LeaveMulticastGroupByVmm { propolis_id, membership, tx }) => {
+                            self.leave_multicast_group_by_vmm(tx, propolis_id, &membership)
                         }
                         Some(GetState { propolis_id, tx }) => {
                             // TODO(eliza): it could potentially be nice to
@@ -903,27 +915,39 @@ impl InstanceManagerRunner {
         Ok(())
     }
 
-    fn join_multicast_group(
+    /// Forward a join to the VMM's instance task. The lookup runs inside
+    /// this dispatcher loop, so it is serialized with `EnsureRegistered`,
+    /// `EnsureUnregistered`, and other per-VMM state changes. If no VMM
+    /// is registered with this `propolis_id` the call is a noop, since
+    /// there is no OPTE port to update.
+    ///
+    /// `jobs` is keyed by `propolis_id`, so the lookup is unambiguous
+    /// even during live migration when source and target VMMs for the
+    /// same `instance_id` are both registered.
+    fn join_multicast_group_by_vmm(
         &self,
         tx: oneshot::Sender<Result<(), Error>>,
         propolis_id: PropolisUuid,
         membership: &InstanceMulticastMembership,
     ) -> Result<(), Error> {
-        let Some(instance) = self.get_propolis(propolis_id) else {
-            return Err(Error::NoSuchVmm(propolis_id));
+        let Some(instance) = self.jobs.get(&propolis_id) else {
+            return tx.send(Ok(())).map_err(|_| Error::FailedSendClientClosed);
         };
         instance.join_multicast_group(tx, membership)?;
         Ok(())
     }
 
-    fn leave_multicast_group(
+    /// Forward a leave to the VMM's instance task. See
+    /// [`Self::join_multicast_group_by_vmm`] for serialization and
+    /// no-active-VMM behavior.
+    fn leave_multicast_group_by_vmm(
         &self,
         tx: oneshot::Sender<Result<(), Error>>,
         propolis_id: PropolisUuid,
         membership: &InstanceMulticastMembership,
     ) -> Result<(), Error> {
-        let Some(instance) = self.get_propolis(propolis_id) else {
-            return Err(Error::NoSuchVmm(propolis_id));
+        let Some(instance) = self.jobs.get(&propolis_id) else {
+            return tx.send(Ok(())).map_err(|_| Error::FailedSendClientClosed);
         };
         instance.leave_multicast_group(tx, membership)?;
         Ok(())

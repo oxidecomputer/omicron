@@ -408,7 +408,7 @@ impl DataStore {
         use nexus_db_schema::schema::multicast_group_member;
         let now = Utc::now();
 
-        // Atomic: only mark `Deleting` if no active members exist.
+        // Atomically mark "Deleting" only if no active members exist.
         let rows = diesel::update(multicast_group::table)
             .filter(multicast_group::id.eq(group_id.into_untyped_uuid()))
             .filter(

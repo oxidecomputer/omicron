@@ -168,6 +168,11 @@ pub struct MulticastGroupReconcilerStatus {
     pub members_deleted: usize,
     /// Number of empty groups marked for deletion (implicit deletion).
     pub empty_groups_marked: usize,
+    /// Reconciliation steps skipped this pass because their downstream
+    /// client was unavailable. Distinguishes "no work needed" (counters
+    /// at 0, `skipped` empty) from "work was deferred" (counters at 0,
+    /// step name in `skipped`).
+    pub skipped: Vec<String>,
     /// Errors that occurred during reconciliation operations.
     pub errors: Vec<String>,
 }

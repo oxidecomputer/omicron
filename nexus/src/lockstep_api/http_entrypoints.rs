@@ -46,6 +46,7 @@ use nexus_types::internal_api::params::RackInitializationRequest;
 use nexus_types::internal_api::views::BackgroundTask;
 use nexus_types::internal_api::views::DemoSaga;
 use nexus_types::internal_api::views::MgsUpdateDriverStatus;
+use nexus_types::internal_api::views::MulticastDdmPeersView;
 use nexus_types::internal_api::views::QuiesceStatus;
 use nexus_types::internal_api::views::Saga;
 use nexus_types::internal_api::views::SupportBundleInfo;
@@ -308,6 +309,22 @@ impl NexusLockstepApi for NexusLockstepApiImpl {
                 crate::context::op_context_for_internal_api(&rqctx).await;
             let nexus = &apictx.nexus;
             Ok(HttpResponseOk(nexus.mgs_updates(&opctx).await?))
+        };
+        apictx
+            .internal_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn multicast_ddm_peers(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<MulticastDdmPeersView>, HttpError> {
+        let apictx = &rqctx.context().context;
+        let handler = async {
+            let opctx =
+                crate::context::op_context_for_internal_api(&rqctx).await;
+            let nexus = &apictx.nexus;
+            Ok(HttpResponseOk(nexus.multicast_ddm_peers(&opctx).await?))
         };
         apictx
             .internal_latencies

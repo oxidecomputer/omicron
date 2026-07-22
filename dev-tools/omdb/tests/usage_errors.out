@@ -1420,6 +1420,7 @@ Commands:
   clickhouse-policy      interact with clickhouse policy
   fetch-omdb             fetch an omdb binary associated with an active Nexus
   mgs-updates            print information about pending MGS updates
+  multicast              inspect multicast state
   oximeter-read-policy   interact with oximeter read policy
   quiesce                view or modify the quiesce status
   reconfigurator-config  interact with reconfigurator config

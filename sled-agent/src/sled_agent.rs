@@ -589,6 +589,7 @@ impl SledAgent {
         let port_manager = PortManager::new(
             parent_log.new(o!("component" => "PortManager")),
             *sled_address.ip(),
+            &underlay_nics,
         );
 
         // The VMM reservoir is configured with respect to what's left after
@@ -1044,27 +1045,36 @@ impl SledAgent {
     }
 
     /// Subscribe a VMM's OPTE port to a multicast group.
-    pub async fn instance_join_multicast_group(
+    ///
+    /// Keyed by `propolis_id` rather than `instance_id` so the dispatch
+    /// is unambiguous during live migration (source and target VMMs for
+    /// the same instance can both be registered). Dispatch runs under
+    /// the instance manager's per-VMM lock so OPTE port mutation is
+    /// serialized with other state changes for the same VMM.
+    pub async fn vmm_join_multicast_group(
         &self,
         propolis_id: PropolisUuid,
         membership: &InstanceMulticastMembership,
     ) -> Result<(), Error> {
         self.inner
             .instances
-            .join_multicast_group(propolis_id, membership)
+            .join_multicast_group_by_vmm(propolis_id, membership)
             .await
             .map_err(|e| Error::Instance(e))
     }
 
     /// Unsubscribe a VMM's OPTE port from a multicast group.
-    pub async fn instance_leave_multicast_group(
+    ///
+    /// See [`Self::vmm_join_multicast_group`] for the migration-safety
+    /// and no-active-VMM semantics.
+    pub async fn vmm_leave_multicast_group(
         &self,
         propolis_id: PropolisUuid,
         membership: &InstanceMulticastMembership,
     ) -> Result<(), Error> {
         self.inner
             .instances
-            .leave_multicast_group(propolis_id, membership)
+            .leave_multicast_group_by_vmm(propolis_id, membership)
             .await
             .map_err(|e| Error::Instance(e))
     }

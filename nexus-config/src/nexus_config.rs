@@ -935,38 +935,59 @@ pub struct MulticastGroupReconcilerConfig {
     #[serde_as(as = "DurationSeconds<u64>")]
     pub period_secs: Duration,
 
-    /// TTL (in seconds) for the sled-to-switch-port mapping cache.
+    /// Maximum number of groups to process concurrently per reconciler pass.
     ///
-    /// This cache maps sled IDs to their physical switch ports. It changes when
-    /// sleds are added/removed or inventory is updated.
-    ///
-    /// Default: 3600 seconds (1 hour)
+    /// Each slot may hold an in-flight `dpd_ensure` saga that the reconciler
+    /// awaits in the same pass. A wedged dependency holds a slot until the
+    /// saga unwinds, so this cap bounds the worst-case in-flight saga count.
     #[serde(
-        default = "MulticastGroupReconcilerConfig::default_sled_cache_ttl_secs"
+        default = "MulticastGroupReconcilerConfig::default_group_concurrency_limit"
     )]
-    #[serde_as(as = "DurationSeconds<u64>")]
-    pub sled_cache_ttl_secs: Duration,
+    pub group_concurrency_limit: usize,
 
-    /// TTL (in seconds) for the backplane hardware topology cache.
+    /// Maximum number of members to process concurrently per group.
     ///
-    /// This cache stores the hardware platform's port mapping. It effectively
-    /// never changes during normal operation.
-    ///
-    /// Default: 86400 seconds (24 hours) with smart invalidation
+    /// Members do not start sagas. Per-member work involves HTTP calls to
+    /// DPD and sled-agent. The default accounts for the outer
+    /// `group_concurrency_limit` multiplier, since peak in-flight
+    /// per-member futures is the product of the two limits.
     #[serde(
-        default = "MulticastGroupReconcilerConfig::default_backplane_cache_ttl_secs"
+        default = "MulticastGroupReconcilerConfig::default_member_concurrency_limit"
     )]
+    pub member_concurrency_limit: usize,
+
+    /// Grace period before an orphaned "Creating" group with no members is
+    /// reaped by the emptiness sweep.
+    ///
+    /// Implicit group creation and first-member attach are not atomic, and even
+    /// static membership must propagate through the ddm/MRIB exchange before a
+    /// group is live. This grace gates reaping on the group's creation time so a
+    /// group whose first attach is still in flight is not collected prematurely.
+    ///
+    /// The value should bound that worst-case attach-and-propagate latency with
+    /// margin. A future IGMP/MLD hold-down for emptied "Active" groups (RFD
+    /// 0488) is a sibling timer, not a reuse of this knob: snooped membership
+    /// expiry must derive from the protocol's Group Membership Interval
+    /// (robustness variable x query interval + max response time, ~260s with
+    /// RFC 3376 defaults), which is far longer than this grace.
     #[serde_as(as = "DurationSeconds<u64>")]
-    pub backplane_cache_ttl_secs: Duration,
+    #[serde(
+        default = "MulticastGroupReconcilerConfig::default_orphan_grace_secs"
+    )]
+    pub orphan_grace_secs: Duration,
 }
 
 impl MulticastGroupReconcilerConfig {
-    const fn default_sled_cache_ttl_secs() -> Duration {
-        Duration::from_secs(3600) // 1 hour
+    const fn default_group_concurrency_limit() -> usize {
+        16
     }
 
-    const fn default_backplane_cache_ttl_secs() -> Duration {
-        Duration::from_secs(86400) // 24 hours
+    const fn default_member_concurrency_limit() -> usize {
+        32
+    }
+
+    const fn default_orphan_grace_secs() -> Duration {
+        Duration::from_secs(60)
     }
 }
 
@@ -974,8 +995,9 @@ impl Default for MulticastGroupReconcilerConfig {
     fn default() -> Self {
         Self {
             period_secs: Duration::from_secs(60),
-            sled_cache_ttl_secs: Self::default_sled_cache_ttl_secs(),
-            backplane_cache_ttl_secs: Self::default_backplane_cache_ttl_secs(),
+            group_concurrency_limit: Self::default_group_concurrency_limit(),
+            member_concurrency_limit: Self::default_member_concurrency_limit(),
+            orphan_grace_secs: Self::default_orphan_grace_secs(),
         }
     }
 }
@@ -1608,8 +1630,9 @@ mod test {
                         },
                         multicast_reconciler: MulticastGroupReconcilerConfig {
                             period_secs: Duration::from_secs(60),
-                            sled_cache_ttl_secs: MulticastGroupReconcilerConfig::default_sled_cache_ttl_secs(),
-                            backplane_cache_ttl_secs: MulticastGroupReconcilerConfig::default_backplane_cache_ttl_secs(),
+                            group_concurrency_limit: MulticastGroupReconcilerConfig::default_group_concurrency_limit(),
+                            member_concurrency_limit: MulticastGroupReconcilerConfig::default_member_concurrency_limit(),
+                            orphan_grace_secs: MulticastGroupReconcilerConfig::default_orphan_grace_secs(),
                         },
                         trust_quorum: TrustQuorumConfig {
                             period_secs: Duration::from_secs(60),

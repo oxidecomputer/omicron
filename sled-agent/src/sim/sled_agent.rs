@@ -113,8 +113,8 @@ pub struct SledAgent {
     /// subnets attached to instances.
     pub attached_subnets:
         Mutex<HashMap<PropolisUuid, IdOrdMap<AttachedSubnet>>>,
-    /// multicast group memberships for instances
-    pub multicast_groups:
+    /// multicast group memberships, keyed by VMM (propolis).
+    pub instance_multicast_groups:
         Mutex<HashMap<PropolisUuid, HashSet<InstanceMulticastMembership>>>,
     pub vpc_routes: Mutex<HashMap<RouterId, RouteSet>>,
     config: Config,
@@ -206,7 +206,7 @@ impl SledAgent {
             mcast_fwd: Mutex::new(HashMap::new()),
             external_ips: Mutex::new(HashMap::new()),
             attached_subnets: Mutex::new(HashMap::new()),
-            multicast_groups: Mutex::new(HashMap::new()),
+            instance_multicast_groups: Mutex::new(HashMap::new()),
             vpc_routes: Mutex::new(HashMap::new()),
             mock_propolis: futures::lock::Mutex::new(None),
             config: config.clone(),
@@ -361,6 +361,17 @@ impl SledAgent {
 
             let vcr = serde_json::from_str(&disk_request.request_json)?;
             self.simulated_upstairs.map_id_to_vcr(*id, &vcr);
+        }
+
+        // Real sled-agent applies multicast memberships when it creates OPTE
+        // ports at registration, so migration targets receive them without an
+        // explicit join call. Mirror that here.
+        if !local_config.multicast_groups.is_empty() {
+            let mut groups = self.instance_multicast_groups.lock().unwrap();
+            groups
+                .entry(propolis_id)
+                .or_default()
+                .extend(local_config.multicast_groups.iter().cloned());
         }
 
         let mut routes = self.vpc_routes.lock().unwrap();
@@ -709,7 +720,20 @@ impl SledAgent {
         req: &McastForwardingEntry,
     ) -> Result<(), Error> {
         let mut fwd = self.mcast_fwd.lock().unwrap();
-        fwd.insert(req.underlay, req.next_hops.clone());
+        // Match legit OPTE semantics: next hops accumulate, keyed by next-hop
+        // address. A next hop whose address already exists replaces that
+        // entry; a new address is appended. Next hops absent from `req` are
+        // left in place. Only `clear_mcast_fwd` removes them. A full-vector
+        // replace here would diverge from xde and hide the stale-next-hop
+        // accumulation that `converge_forwarding`'s clear-before-set guards
+        // against.
+        let entry = fwd.entry(req.underlay).or_default();
+        for hop in &req.next_hops {
+            match entry.iter_mut().find(|h| h.next_hop == hop.next_hop) {
+                Some(existing) => *existing = hop.clone(),
+                None => entry.push(hop.clone()),
+            }
+        }
         Ok(())
     }
 
@@ -867,41 +891,33 @@ impl SledAgent {
         Ok(())
     }
 
-    pub async fn instance_join_multicast_group(
+    pub async fn vmm_join_multicast_group(
         &self,
         propolis_id: PropolisUuid,
         membership: &InstanceMulticastMembership,
     ) -> Result<(), Error> {
         if !self.vmms.contains_key(&propolis_id.into_untyped_uuid()).await {
             return Err(Error::internal_error(
-                "can't join multicast group for VMM that's not registered",
+                "can't alter multicast membership for VMM that's not registered",
             ));
         }
-
-        let mut groups = self.multicast_groups.lock().unwrap();
-        let my_groups = groups.entry(propolis_id).or_default();
-
-        my_groups.insert(membership.clone());
-
+        let mut groups = self.instance_multicast_groups.lock().unwrap();
+        groups.entry(propolis_id).or_default().insert(membership.clone());
         Ok(())
     }
 
-    pub async fn instance_leave_multicast_group(
+    pub async fn vmm_leave_multicast_group(
         &self,
         propolis_id: PropolisUuid,
         membership: &InstanceMulticastMembership,
     ) -> Result<(), Error> {
         if !self.vmms.contains_key(&propolis_id.into_untyped_uuid()).await {
             return Err(Error::internal_error(
-                "can't leave multicast group for VMM that's not registered",
+                "can't alter multicast membership for VMM that's not registered",
             ));
         }
-
-        let mut groups = self.multicast_groups.lock().unwrap();
-        let my_groups = groups.entry(propolis_id).or_default();
-
-        my_groups.remove(membership);
-
+        let mut groups = self.instance_multicast_groups.lock().unwrap();
+        groups.entry(propolis_id).or_default().remove(membership);
         Ok(())
     }
 

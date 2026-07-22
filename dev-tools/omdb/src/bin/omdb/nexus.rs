@@ -168,6 +168,8 @@ enum NexusCommands {
     FetchOmdb(FetchOmdbArgs),
     /// print information about pending MGS updates
     MgsUpdates,
+    /// inspect multicast state
+    Multicast(MulticastArgs),
     /// interact with oximeter read policy
     OximeterReadPolicy(OximeterReadPolicyArgs),
     /// view or modify the quiesce status
@@ -449,6 +451,26 @@ enum ClickhousePolicyMode {
 struct FetchOmdbArgs {
     /// output path to write the fetched omdb
     output: Utf8PathBuf,
+}
+
+#[derive(Debug, Args)]
+struct MulticastArgs {
+    #[command(subcommand)]
+    command: MulticastCommands,
+}
+
+#[derive(Debug, Subcommand)]
+enum MulticastCommands {
+    /// List DDM underlay peers observed across switch zones
+    DdmPeers(MulticastDdmPeersArgs),
+}
+
+#[derive(Debug, Args)]
+struct MulticastDdmPeersArgs {
+    /// Show only peers that become multicast underlay members
+    /// (DDM session in `Exchange` with a switch rear-port interface).
+    #[arg(long)]
+    mcast: bool,
 }
 
 #[derive(Debug, Args)]
@@ -832,6 +854,14 @@ impl NexusArgs {
             }
 
             NexusCommands::MgsUpdates => cmd_nexus_mgs_updates(&client).await,
+
+            NexusCommands::Multicast(MulticastArgs { command }) => {
+                match command {
+                    MulticastCommands::DdmPeers(args) => {
+                        cmd_nexus_multicast_ddm_peers(&client, args).await
+                    }
+                }
+            }
 
             NexusCommands::OximeterReadPolicy(OximeterReadPolicyArgs {
                 command,
@@ -4801,6 +4831,68 @@ async fn cmd_nexus_mgs_updates(
         .context("fetching update status")?
         .into_inner();
     println!("{}", response.detailed_display());
+    Ok(())
+}
+
+async fn cmd_nexus_multicast_ddm_peers(
+    client: &nexus_lockstep_client::Client,
+    args: &MulticastDdmPeersArgs,
+) -> Result<(), anyhow::Error> {
+    let view = client
+        .multicast_ddm_peers()
+        .await
+        .context("fetching multicast DDM peers")?
+        .into_inner();
+
+    let mut peers = view.peers;
+    if args.mcast {
+        // Members are derived only from peers in DDM `Exchange` on a switch
+        // rear-port interface (see the multicast members background task).
+        peers.retain(|peer| {
+            peer.status
+                == nexus_lockstep_client::types::MulticastDdmPeerStatus::Exchange
+                && peer.if_name.is_some()
+        });
+    }
+
+    if peers.is_empty() {
+        println!("no DDM peers reported by any switch zone");
+        return Ok(());
+    }
+
+    #[derive(Tabled)]
+    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+    struct PeerRow {
+        switch: String,
+        addr: String,
+        host: String,
+        status: String,
+        duration: String,
+        if_name: String,
+    }
+
+    peers.sort_by(|a, b| (&a.switch, &a.addr).cmp(&(&b.switch, &b.addr)));
+    let rows = peers.into_iter().map(|peer| PeerRow {
+        switch: peer.switch,
+        addr: peer.addr.to_string(),
+        host: peer.host,
+        status: peer.status.to_string(),
+        duration: format!(
+            "{:?}",
+            std::time::Duration::new(
+                peer.status_duration.secs,
+                peer.status_duration.nanos,
+            )
+        ),
+        if_name: peer.if_name.unwrap_or_else(|| "-".to_string()),
+    });
+
+    let table = tabled::Table::new(rows)
+        .with(tabled::settings::Style::empty())
+        .with(tabled::settings::Padding::new(0, 1, 0, 0))
+        .to_string();
+    println!("{table}");
+
     Ok(())
 }
 

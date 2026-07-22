@@ -8905,6 +8905,7 @@ name = "omicron-ddm-admin-client"
 version = "0.1.0"
 dependencies = [
  "ddm-admin-client",
+ "ddm-api-types-versions",
  "either",
  "omicron-common",
  "omicron-workspace-hack",
@@ -9247,6 +9248,7 @@ dependencies = [
  "num-integer",
  "omicron-cockroach-metrics",
  "omicron-common",
+ "omicron-ddm-admin-client",
  "omicron-passwords",
  "omicron-rpaths",
  "omicron-sled-agent",
@@ -9827,6 +9829,7 @@ dependencies = [
  "regex",
  "reqwest 0.13.2",
  "rustls",
+ "schemars 0.8.22",
  "serde",
  "sha2 0.10.9",
  "slog",

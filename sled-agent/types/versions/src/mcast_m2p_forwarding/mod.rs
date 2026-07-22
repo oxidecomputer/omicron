@@ -4,7 +4,9 @@
 
 //! Version `MCAST_M2P_FORWARDING` of the Sled Agent API.
 //!
-//! Adds multicast-to-physical mapping and forwarding types used by
-//! the multicast-to-physical and forwarding endpoints.
+//! This version adds the multicast-to-physical (M2P) mapping and
+//! forwarding types used by the new networking endpoints. It also changes
+//! the multicast subscription endpoints to take an `InstanceMulticastMembership`
+//! request body in place of `InstanceMulticastBody`.
 
 pub mod multicast;

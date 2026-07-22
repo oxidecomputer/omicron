@@ -458,9 +458,33 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
         let mgs_addr =
             SocketAddrV6::new(Ipv6Addr::LOCALHOST, mgs.port, 0, 0).into();
 
+        // Point mgd's lower half at this switch's dendrite and ddmd so the
+        // mg-lower-mrib thread (illumos only) syncs MRIB entries to ddmd as
+        // multicast origination.
+        //
+        // Both daemons must be started first.
+        let dendrite_addr = self
+            .dendrite
+            .read()
+            .unwrap()
+            .get(&switch_slot)
+            .map(|d| SocketAddrV6::new(Ipv6Addr::LOCALHOST, d.port(), 0, 0))
+            .map(std::net::SocketAddr::V6);
+        let ddm_addr = self
+            .ddm
+            .get(&switch_slot)
+            .map(|d| SocketAddrV6::new(Ipv6Addr::LOCALHOST, d.port, 0, 0))
+            .map(std::net::SocketAddr::V6);
+
         // Set up an instance of mgd
-        let mgd =
-            dev::maghemite::MgdInstance::start(0, mgs_addr).await.unwrap();
+        let mgd = dev::maghemite::MgdInstance::start(
+            0,
+            mgs_addr,
+            dendrite_addr,
+            ddm_addr,
+        )
+        .await
+        .unwrap();
         let port = mgd.port;
         self.mgd.insert(switch_slot, mgd);
         let address = SocketAddrV6::new(Ipv6Addr::LOCALHOST, port, 0, 0);
@@ -473,13 +497,13 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
 
     pub async fn start_ddm(&mut self, switch_slot: SwitchSlot) {
         let log = &self.logctx.log;
-        debug!(log, "Starting DDM sim"; "switch_slot" => ?switch_slot);
+        debug!(log, "Starting ddmd"; "switch_slot" => ?switch_slot);
 
         let ddm = dev::maghemite::DdmInstance::start().await.unwrap();
         let port = ddm.port;
         self.ddm.insert(switch_slot, ddm);
 
-        debug!(log, "DDM sim started"; "port" => port);
+        debug!(log, "ddmd started"; "port" => port);
     }
 
     pub async fn record_switch_dns(
@@ -1665,15 +1689,15 @@ pub(crate) async fn setup_with_config_impl<N: NexusServer>(
                     }),
                 ),
                 (
-                    "start_mgd_switch0",
-                    Box::new(|builder| {
-                        builder.start_mgd(SwitchSlot::Switch0).boxed()
-                    }),
-                ),
-                (
                     "start_ddm_switch0",
                     Box::new(|builder| {
                         builder.start_ddm(SwitchSlot::Switch0).boxed()
+                    }),
+                ),
+                (
+                    "start_mgd_switch0",
+                    Box::new(|builder| {
+                        builder.start_mgd(SwitchSlot::Switch0).boxed()
                     }),
                 ),
                 (
@@ -1715,15 +1739,15 @@ pub(crate) async fn setup_with_config_impl<N: NexusServer>(
                         }),
                     ),
                     (
-                        "start_mgd_switch1",
-                        Box::new(|builder| {
-                            builder.start_mgd(SwitchSlot::Switch1).boxed()
-                        }),
-                    ),
-                    (
                         "start_ddm_switch1",
                         Box::new(|builder| {
                             builder.start_ddm(SwitchSlot::Switch1).boxed()
+                        }),
+                    ),
+                    (
+                        "start_mgd_switch1",
+                        Box::new(|builder| {
+                            builder.start_mgd(SwitchSlot::Switch1).boxed()
                         }),
                     ),
                     (
