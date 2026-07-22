@@ -4,7 +4,7 @@
 
 //! Sled-related types for the Sled Agent API.
 
-use omicron_common::address::{Ipv6Subnet, SLED_PREFIX};
+use omicron_common::address::{Ipv6Subnet, SLED_PREFIX_LENGTH};
 use omicron_uuid_kinds::SledUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -61,5 +61,5 @@ pub struct StartSledAgentRequestBody {
     pub is_lrtq_learner: bool,
 
     /// Portion of the IP space to be managed by the Sled Agent.
-    pub subnet: Ipv6Subnet<SLED_PREFIX>,
+    pub subnet: Ipv6Subnet<SLED_PREFIX_LENGTH>,
 }

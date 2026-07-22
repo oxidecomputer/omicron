@@ -9,7 +9,7 @@ pub use gateway_client::types::{
 };
 pub use gateway_types::component::{SpIdentifier, SpState, SpType};
 pub use gateway_types::ignition::{SpIgnition, SpIgnitionSystemType};
-pub use gateway_types::rot::{RotSlot, RotState};
+pub use gateway_types::rot::{RotImageError, RotSlot, RotState};
 use iddqd::{IdOrdItem, IdOrdMap, id_upcast};
 use omicron_common::snake_case_result;
 use omicron_common::snake_case_result::SnakeCaseResult;
