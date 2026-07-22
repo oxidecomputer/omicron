@@ -49,7 +49,7 @@ pub(super) struct FetchedIgnitionState {
 // cancelled.
 pub(super) struct IgnitionStateFetcher {
     task: task::JoinHandle<()>,
-    rx: mpsc::Receiver<FetchedIgnitionState>,
+    rx: mpsc::Receiver<Result<FetchedIgnitionState, MgsFetchError>>,
     fetch_now_tx: mpsc::Sender<()>,
 }
 
@@ -86,7 +86,9 @@ impl IgnitionStateFetcher {
     }
 
     /// Receive the next result from the ignition state-fetching task.
-    pub(super) async fn recv(&mut self) -> FetchedIgnitionState {
+    pub(super) async fn recv(
+        &mut self,
+    ) -> Result<FetchedIgnitionState, MgsFetchError> {
         // The task we spawned holds `tx` either until `rx` is dropped (which it
         // obviously is not here, since we're using it!) or it panics, so we can
         // unwrap here. The only way we panic is if our inner task already did.
@@ -108,7 +110,7 @@ impl IgnitionStateFetcher {
 }
 
 async fn ignition_fetching_task(
-    tx: mpsc::Sender<FetchedIgnitionState>,
+    tx: mpsc::Sender<Result<FetchedIgnitionState, MgsFetchError>>,
     mut fetch_now_rx: mpsc::Receiver<()>,
     mgs_client: gateway_client::Client,
     log: Logger,
@@ -131,6 +133,16 @@ async fn ignition_fetching_task(
                     log, "Failed to get ignition state from MGS";
                     "err" => %err,
                 );
+                // Report the failure to the manager (mirroring the per-SP
+                // state-fetch error path) instead of only logging it.
+                let failure = Err(MgsFetchError::new(&err));
+                if tx.send(failure).await.is_err() {
+                    warn!(
+                        log,
+                        "Receiver for ignition state-fetching task is gone"
+                    );
+                    break;
+                }
                 continue;
             }
         };
@@ -141,7 +153,7 @@ async fn ignition_fetching_task(
             sps.insert(result.id, result.details);
         }
 
-        let emit = FetchedIgnitionState { sps, mgs_received };
+        let emit = Ok(FetchedIgnitionState { sps, mgs_received });
 
         // If our receiver is gone, we'll exit - there's no one left for
         // us to send results to!

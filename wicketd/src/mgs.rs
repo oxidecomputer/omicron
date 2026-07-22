@@ -52,6 +52,12 @@ pub(crate) enum GetInventoryResponse {
         /// Consumers that speak the (currently frozen) unstable wicketd API
         /// project this down to `MgsV1Inventory`.
         sps: IdOrdMap<SpRecord>,
+
+        /// The most recent ignition-list fetch error, or `None` if the last
+        /// ignition fetch succeeded (or none has failed yet).
+        #[cfg_attr(not(test), expect(dead_code))]
+        last_ignition_fetch_error: Option<MgsFetchError>,
+
         mgs_last_seen: Duration,
     },
     Unavailable,
@@ -183,6 +189,11 @@ pub struct MgsManager {
     mgs_client: gateway_client::Client,
     records: IdOrdMap<SpRecord>,
 
+    // The most recent ignition-list fetch error, if any. Ignition is fetched
+    // rack-wide in a single request, so this is a single error rather than one
+    // per SP. Cleared by the next successful ignition fetch.
+    last_ignition_fetch_error: Option<MgsFetchError>,
+
     // Our clients can request an immediate refresh for a particular set of SPs.
     // When they do, we don't want to reply to them until we get updates for
     // those SPs, so we hold the set of reply channels along with the list of
@@ -203,6 +214,7 @@ impl MgsManager {
             rx,
             mgs_client,
             records: IdOrdMap::new(),
+            last_ignition_fetch_error: None,
             waiting_for_update: Vec::new(),
         }
     }
@@ -262,13 +274,21 @@ impl MgsManager {
         loop {
             tokio::select! {
                 ignition = ignition_task_handle.recv() => {
-                    last_successful_mgs_response =
-                        last_successful_mgs_response.max(ignition.mgs_received);
-                    self.update_inventory_with_ignition(
-                        ignition,
-                        &sp_task_handles,
-                        last_successful_mgs_response,
-                    );
+                    match ignition {
+                        Ok(ignition) => {
+                            last_successful_mgs_response =
+                                last_successful_mgs_response
+                                    .max(ignition.mgs_received);
+                            self.update_inventory_with_ignition(
+                                ignition,
+                                &sp_task_handles,
+                                last_successful_mgs_response,
+                            );
+                        }
+                        Err(error) => {
+                            self.record_ignition_fetch_error(error);
+                        }
+                    }
                 }
 
                 Some((id, result)) = sp_data_streams.next() => {
@@ -327,6 +347,9 @@ impl MgsManager {
         } else {
             GetInventoryResponse::Response {
                 sps: self.records.clone(),
+                last_ignition_fetch_error: self
+                    .last_ignition_fetch_error
+                    .clone(),
                 mgs_last_seen: mgs_last_seen.elapsed(),
             }
         }
@@ -410,6 +433,9 @@ impl MgsManager {
         sp_handles: &BTreeMap<SpIdentifier, SpStateFetcher>,
         mgs_last_seen: Instant,
     ) {
+        // A successful ignition fetch clears a recorded ignition error.
+        self.last_ignition_fetch_error = None;
+
         for (id, ignition) in ignition.sps {
             let mut entry =
                 self.records.entry(id).or_insert_with(|| SpRecord::new(id));
@@ -483,6 +509,14 @@ impl MgsManager {
         // We do not reset `data` back to `None` here -- it represents the
         // last successful fetch.
         record.last_state_fetch_error = Some(error);
+    }
+
+    /// Record the latest ignition-list fetch error.
+    ///
+    /// Like `record_sp_state_fetch_error`, an ignition error does not satisfy
+    /// force-refresh waiters.
+    fn record_ignition_fetch_error(&mut self, error: MgsFetchError) {
+        self.last_ignition_fetch_error = Some(error);
     }
 }
 
@@ -1009,6 +1043,99 @@ mod tests {
             remaining.sps_to_refresh,
             std::iter::once(sled(1)).collect::<BTreeSet<_>>(),
             "the surviving waiter is the one waiting on sled 1",
+        );
+    }
+
+    #[test]
+    fn ignition_fetch_errors_are_recorded_and_cleared() {
+        let mut manager = dummy_manager();
+        let now = Instant::now();
+
+        // An ignition fetch error by itself does not make inventory available.
+        manager.record_ignition_fetch_error(mgs_fetch_error(
+            "ignition is unhappy",
+        ));
+        match manager.current_inventory(now) {
+            GetInventoryResponse::Unavailable => {}
+            other => panic!("expected Unavailable, got {other:?}"),
+        }
+
+        // Once an SP has data, the ignition error is exposed in the response.
+        manager.update_inventory_with_sp(
+            sled(0),
+            fetched_sp_data(sled(0)),
+            now,
+        );
+        let GetInventoryResponse::Response {
+            last_ignition_fetch_error, ..
+        } = manager.current_inventory(now)
+        else {
+            panic!("expected inventory to be available");
+        };
+        let error = last_ignition_fetch_error
+            .expect("the ignition fetch error is reported");
+        assert_eq!(error.message, "ignition is unhappy");
+
+        // A successful ignition fetch clears the error.
+        let mut sps = BTreeMap::new();
+        sps.insert(sled(0), SpIgnition::Absent);
+        let ignition = FetchedIgnitionState { sps, mgs_received: now };
+        manager.update_inventory_with_ignition(ignition, &BTreeMap::new(), now);
+        let GetInventoryResponse::Response {
+            last_ignition_fetch_error, ..
+        } = manager.current_inventory(now)
+        else {
+            panic!("expected inventory to be available");
+        };
+        assert!(
+            last_ignition_fetch_error.is_none(),
+            "a successful ignition fetch clears the recorded error",
+        );
+    }
+
+    #[test]
+    fn ignition_fetch_error_does_not_satisfy_ignition_waiter() {
+        let mut manager = dummy_manager();
+
+        // A live waiter that needs only an ignition refresh.
+        let (reply_tx, mut reply_rx) = oneshot::channel();
+        manager.waiting_for_update.push(WaitingForRefresh {
+            reply_tx,
+            sps_to_refresh: BTreeSet::new(),
+            need_ignition_refresh: true,
+        });
+
+        // Recording an ignition fetch error must not complete the waiter: only
+        // a successful ignition fetch clears `need_ignition_refresh`.
+        manager.record_ignition_fetch_error(mgs_fetch_error(
+            "ignition is unhappy",
+        ));
+        assert_eq!(
+            manager.waiting_for_update.len(),
+            1,
+            "an ignition error leaves the waiter queued",
+        );
+        match reply_rx.try_recv() {
+            Err(oneshot::error::TryRecvError::Empty) => {}
+            other => {
+                panic!("waiter should have no response yet, got {other:?}")
+            }
+        }
+
+        // A successful ignition fetch clears `need_ignition_refresh` and
+        // completes the waiter.
+        let ignition = FetchedIgnitionState {
+            sps: BTreeMap::new(),
+            mgs_received: Instant::now(),
+        };
+        manager.update_inventory_with_ignition(
+            ignition,
+            &BTreeMap::new(),
+            Instant::now(),
+        );
+        assert!(
+            manager.waiting_for_update.is_empty(),
+            "a successful ignition fetch completes the waiter",
         );
     }
 }
