@@ -7,13 +7,16 @@
 use http::StatusCode;
 use http::method::Method;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
+use nexus_test_utils::resource_helpers::create_silo;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::networking::{
     AddressLotBlockCreate, AddressLotCreate, AddressLotKind, BfdPeer,
     BgpAnnounceSetCreate, BgpAnnouncementCreate, BgpPeerKind,
     RouterConfiguration, RouterConfigurationBgpConfig,
     RouterConfigurationBgpConfigSet, RouterConfigurationBgpPeer,
-    RouterConfigurationCreate, RouterConfigurationUpdate, StaticRoute,
+    RouterConfigurationCreate, RouterConfigurationUpdate,
+    SiloRouterConfigurationEntry, SiloRouterConfigurations,
+    SiloRouterConfigurationsUpdate, StaticRoute,
 };
 use omicron_common::api::external::{
     IdentityMetadataCreateParams, IdentityMetadataUpdateParams, NameOrId,
@@ -584,4 +587,206 @@ async fn test_router_configuration_sub_resources(
     assert!(configuration.bgp_peers.is_empty());
     assert!(configuration.routes.is_empty());
     assert!(configuration.bfd_peers.is_empty());
+}
+
+#[nexus_test]
+async fn test_silo_router_configurations(ctx: &ControlPlaneTestContext) {
+    let client = &ctx.external_client;
+    let silo = create_silo(
+        client,
+        "rc-silo",
+        true,
+        nexus_types::external_api::silo::SiloIdentityMode::LocalOnly,
+    )
+    .await;
+    let silo_configurations_url =
+        format!("/v1/system/silos/{}/router-configurations", silo.identity.id);
+
+    // Initially the silo uses no router configurations.
+    let linked: SiloRouterConfigurations =
+        NexusRequest::object_get(client, &silo_configurations_url)
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute()
+            .await
+            .unwrap()
+            .parsed_body()
+            .unwrap();
+    assert!(linked.configurations.is_empty());
+
+    // Create two router configurations to link.
+    let mut created = Vec::new();
+    for name in ["alpha", "beta"] {
+        let params = RouterConfigurationCreate {
+            identity: IdentityMetadataCreateParams {
+                name: name.parse().unwrap(),
+                description: String::new(),
+            },
+        };
+        let configuration: RouterConfiguration =
+            NexusRequest::objects_post(client, CONFIGURATIONS_URL, &params)
+                .authn_as(AuthnMode::PrivilegedUser)
+                .execute()
+                .await
+                .unwrap()
+                .parsed_body()
+                .unwrap();
+        created.push(configuration);
+    }
+
+    // Assign both router configurations to the silo, one by name and one by
+    // id, listed out of priority order.
+    let update = SiloRouterConfigurationsUpdate {
+        configurations: vec![
+            SiloRouterConfigurationEntry {
+                router_configuration: NameOrId::Name("beta".parse().unwrap()),
+                priority: 20,
+            },
+            SiloRouterConfigurationEntry {
+                router_configuration: NameOrId::Id(created[0].identity.id),
+                priority: 10,
+            },
+        ],
+    };
+    let linked: SiloRouterConfigurations = NexusRequest::object_put(
+        client,
+        &silo_configurations_url,
+        Some(&update),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body()
+    .unwrap();
+
+    // The response is sorted by ascending priority.
+    assert_eq!(linked.configurations.len(), 2);
+    assert_eq!(linked.configurations[0].priority, 10);
+    assert_eq!(
+        linked.configurations[0].router_configuration_id,
+        created[0].identity.id
+    );
+    assert_eq!(linked.configurations[1].priority, 20);
+    assert_eq!(
+        linked.configurations[1].router_configuration_id,
+        created[1].identity.id
+    );
+
+    // Fetching returns the same result.
+    let fetched: SiloRouterConfigurations =
+        NexusRequest::object_get(client, &silo_configurations_url)
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute()
+            .await
+            .unwrap()
+            .parsed_body()
+            .unwrap();
+    assert_eq!(fetched, linked);
+
+    // Duplicate priorities are rejected.
+    let update = SiloRouterConfigurationsUpdate {
+        configurations: vec![
+            SiloRouterConfigurationEntry {
+                router_configuration: NameOrId::Name("alpha".parse().unwrap()),
+                priority: 10,
+            },
+            SiloRouterConfigurationEntry {
+                router_configuration: NameOrId::Name("beta".parse().unwrap()),
+                priority: 10,
+            },
+        ],
+    };
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::PUT, &silo_configurations_url)
+            .body(Some(&update))
+            .expect_status(Some(StatusCode::BAD_REQUEST)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+
+    // Listing the same router configuration twice is rejected.
+    let update = SiloRouterConfigurationsUpdate {
+        configurations: vec![
+            SiloRouterConfigurationEntry {
+                router_configuration: NameOrId::Name("alpha".parse().unwrap()),
+                priority: 10,
+            },
+            SiloRouterConfigurationEntry {
+                router_configuration: NameOrId::Id(created[0].identity.id),
+                priority: 20,
+            },
+        ],
+    };
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::PUT, &silo_configurations_url)
+            .body(Some(&update))
+            .expect_status(Some(StatusCode::BAD_REQUEST)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+
+    // Failed updates left the previous assignments untouched.
+    let fetched: SiloRouterConfigurations =
+        NexusRequest::object_get(client, &silo_configurations_url)
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute()
+            .await
+            .unwrap()
+            .parsed_body()
+            .unwrap();
+    assert_eq!(fetched, linked);
+
+    // A router configuration used by a silo cannot be deleted.
+    let alpha_url = format!("{CONFIGURATIONS_URL}/alpha");
+    NexusRequest::expect_failure(
+        client,
+        StatusCode::CONFLICT,
+        Method::DELETE,
+        &alpha_url,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+
+    // Remove "alpha" from the silo's router configurations.
+    let update = SiloRouterConfigurationsUpdate {
+        configurations: vec![SiloRouterConfigurationEntry {
+            router_configuration: NameOrId::Name("beta".parse().unwrap()),
+            priority: 5,
+        }],
+    };
+    NexusRequest::object_put(client, &silo_configurations_url, Some(&update))
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap()
+        .parsed_body::<SiloRouterConfigurations>()
+        .unwrap();
+
+    NexusRequest::object_delete(client, &alpha_url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap();
+
+    // Deleting the silo unlinks its router configurations, so "beta" can be
+    // deleted afterwards.
+    NexusRequest::object_delete(
+        client,
+        &format!("/v1/system/silos/{}", silo.identity.id),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+    NexusRequest::object_delete(client, &format!("{CONFIGURATIONS_URL}/beta"))
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap();
 }

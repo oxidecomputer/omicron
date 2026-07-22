@@ -343,6 +343,10 @@ pub mod networking {
     pub use crate::v2026_07_07_00::networking::RouterConfigurationSelector;
     pub use crate::v2026_07_07_00::networking::RouterConfigurationStaticRouteSelector;
     pub use crate::v2026_07_07_00::networking::RouterConfigurationUpdate;
+    pub use crate::v2026_07_07_00::networking::SiloRouterConfiguration;
+    pub use crate::v2026_07_07_00::networking::SiloRouterConfigurationEntry;
+    pub use crate::v2026_07_07_00::networking::SiloRouterConfigurations;
+    pub use crate::v2026_07_07_00::networking::SiloRouterConfigurationsUpdate;
     pub use crate::v2026_07_07_00::networking::StaticRoute;
 }
 

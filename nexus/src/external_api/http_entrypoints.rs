@@ -619,6 +619,46 @@ impl NexusExternalApi for NexusExternalApiImpl {
         .await
     }
 
+    async fn silo_router_configurations_view(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<path_params::SiloPath>,
+    ) -> Result<HttpResponseOk<networking::SiloRouterConfigurations>, HttpError>
+    {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let path = path_params.into_inner();
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let result = nexus
+                .silo_router_configurations_view(&opctx, path.silo)
+                .await?;
+            Ok(HttpResponseOk(result))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn silo_router_configurations_update(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<path_params::SiloPath>,
+        update: TypedBody<networking::SiloRouterConfigurationsUpdate>,
+    ) -> Result<HttpResponseOk<networking::SiloRouterConfigurations>, HttpError>
+    {
+        audit_and_time(&rqctx, |opctx, nexus| async move {
+            let path = path_params.into_inner();
+            let update = update.into_inner();
+            let result = nexus
+                .silo_router_configurations_update(&opctx, path.silo, update)
+                .await?;
+            Ok(HttpResponseOk::<networking::SiloRouterConfigurations>(result))
+        })
+        .await
+    }
+
     // Silo-specific user endpoints
 
     async fn silo_user_list(

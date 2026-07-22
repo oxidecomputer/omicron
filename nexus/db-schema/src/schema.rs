@@ -426,6 +426,20 @@ table! {
 }
 
 table! {
+    silo_router_configuration (silo_id, priority) {
+        silo_id -> Uuid,
+        router_configuration_id -> Uuid,
+        priority -> Int4,
+    }
+}
+
+allow_tables_to_appear_in_same_query!(
+    silo_router_configuration,
+    router_configuration
+);
+joinable!(silo_router_configuration -> router_configuration (router_configuration_id));
+
+table! {
     switch_port_settings_address_config (port_settings_id, address, interface_name) {
         port_settings_id -> Uuid,
         address_lot_block_id -> Uuid,

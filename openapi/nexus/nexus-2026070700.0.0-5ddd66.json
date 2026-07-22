@@ -13240,6 +13240,92 @@
         }
       }
     },
+    "/v1/system/silos/{silo}/router-configurations": {
+      "get": {
+        "tags": [
+          "system/silos"
+        ],
+        "summary": "List router configurations used by silo",
+        "description": "Returns the router configurations assigned to the silo, in ascending priority order.",
+        "operationId": "silo_router_configurations_view",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "silo",
+            "description": "Name or ID of the silo",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SiloRouterConfigurations"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "system/silos"
+        ],
+        "summary": "Update router configurations used by silo",
+        "description": "Replaces the full set of router configurations assigned to the silo, along with their priorities. Any currently assigned configuration not present in the request is unassigned.",
+        "operationId": "silo_router_configurations_update",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "silo",
+            "description": "Name or ID of the silo",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SiloRouterConfigurationsUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SiloRouterConfigurations"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/v1/system/silos/{silo}/subnet-pools": {
       "get": {
         "tags": [
@@ -29324,6 +29410,83 @@
           "identity_id",
           "identity_type",
           "role_name"
+        ]
+      },
+      "SiloRouterConfiguration": {
+        "description": "A router configuration used by a silo, along with its priority within that silo",
+        "type": "object",
+        "properties": {
+          "priority": {
+            "description": "Priority of the router configuration for a silo. Priorities are unique within the silo.",
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          },
+          "router_configuration_id": {
+            "description": "ID of the router configuration",
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "priority",
+          "router_configuration_id"
+        ]
+      },
+      "SiloRouterConfigurationEntry": {
+        "description": "Assignment of a router configuration to a silo at a given priority",
+        "type": "object",
+        "properties": {
+          "priority": {
+            "description": "Priority of the router configuration for a silo. Priorities must be unique within the silo.",
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          },
+          "router_configuration": {
+            "description": "A name or id of the router configuration to assign",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/NameOrId"
+              }
+            ]
+          }
+        },
+        "required": [
+          "priority",
+          "router_configuration"
+        ]
+      },
+      "SiloRouterConfigurations": {
+        "description": "The set of router configurations used by a silo",
+        "type": "object",
+        "properties": {
+          "configurations": {
+            "description": "The router configurations used by the silo, in ascending priority order",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SiloRouterConfiguration"
+            }
+          }
+        },
+        "required": [
+          "configurations"
+        ]
+      },
+      "SiloRouterConfigurationsUpdate": {
+        "description": "Full replacement of the set of router configurations used by a silo",
+        "type": "object",
+        "properties": {
+          "configurations": {
+            "description": "The complete new set of router configurations for the silo. Any currently assigned configuration not present here is unassigned.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SiloRouterConfigurationEntry"
+            }
+          }
+        },
+        "required": [
+          "configurations"
         ]
       },
       "SiloSubnetPool": {

@@ -724,6 +724,44 @@ pub trait NexusExternalApi {
         HttpError,
     >;
 
+    /// List router configurations used by silo
+    ///
+    /// Returns the router configurations assigned to the silo, in ascending
+    /// priority order.
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/silos/{silo}/router-configurations",
+        tags = ["system/silos"],
+        versions = VERSION_ADD_ROUTER_CONFIGURATIONS..,
+    }]
+    async fn silo_router_configurations_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::SiloPath>,
+    ) -> Result<
+        HttpResponseOk<latest::networking::SiloRouterConfigurations>,
+        HttpError,
+    >;
+
+    /// Update router configurations used by silo
+    ///
+    /// Replaces the full set of router configurations assigned to the silo,
+    /// along with their priorities. Any currently assigned configuration not
+    /// present in the request is unassigned.
+    #[endpoint {
+        method = PUT,
+        path = "/v1/system/silos/{silo}/router-configurations",
+        tags = ["system/silos"],
+        versions = VERSION_ADD_ROUTER_CONFIGURATIONS..,
+    }]
+    async fn silo_router_configurations_update(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::SiloPath>,
+        update: TypedBody<latest::networking::SiloRouterConfigurationsUpdate>,
+    ) -> Result<
+        HttpResponseOk<latest::networking::SiloRouterConfigurations>,
+        HttpError,
+    >;
+
     // Silo-specific user endpoints
 
     /// List built-in (system) users in silo

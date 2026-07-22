@@ -12,6 +12,7 @@ use ipnetwork::IpNetwork;
 use nexus_db_schema::schema::{
     router_configuration, router_configuration_bfd_peer,
     router_configuration_bgp_peer, router_configuration_static_route,
+    silo_router_configuration,
 };
 use nexus_types::external_api::networking;
 use nexus_types::identity::Resource;
@@ -26,6 +27,7 @@ use sled_agent_types::early_networking::ImportExportPolicy;
 use sled_agent_types::early_networking::MaxPathConfig;
 use sled_agent_types::early_networking::RouterLifetimeConfig;
 use slog_error_chain::InlineErrorChain;
+use uuid::Uuid;
 
 /// The BGP configuration stored inline on a `router_configuration` row.
 ///
@@ -381,6 +383,30 @@ impl From<RouterConfigurationBfdPeer> for networking::BfdPeer {
             detection_threshold: value.detection_threshold.0,
             required_rx: (*value.required_rx).into(),
             switch: value.switch.into(),
+        }
+    }
+}
+
+/// Links a silo to a router configuration it uses with a unique priority
+/// within the silo.
+#[derive(Queryable, Insertable, Selectable, Clone, Debug)]
+#[diesel(table_name = silo_router_configuration)]
+pub struct SiloRouterConfiguration {
+    pub silo_id: Uuid,
+    pub router_configuration_id: DbTypedUuid<RouterConfigurationKind>,
+    pub priority: SqlU16,
+}
+
+impl SiloRouterConfiguration {
+    pub fn new(
+        silo_id: Uuid,
+        router_configuration_id: RouterConfigurationUuid,
+        priority: u16,
+    ) -> Self {
+        Self {
+            silo_id,
+            router_configuration_id: router_configuration_id.into(),
+            priority: priority.into(),
         }
     }
 }

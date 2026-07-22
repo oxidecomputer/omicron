@@ -228,6 +228,8 @@ pub static DEMO_SILO_POLICY_URL: LazyLock<String> =
     LazyLock::new(|| format!("/v1/system/silos/{}/policy", *DEMO_SILO_NAME));
 pub static DEMO_SILO_QUOTAS_URL: LazyLock<String> =
     LazyLock::new(|| format!("/v1/system/silos/{}/quotas", *DEMO_SILO_NAME));
+pub static DEMO_SILO_ROUTER_CONFIGURATIONS_URL: LazyLock<String> =
+    LazyLock::new(|| format!("{}/router-configurations", *DEMO_SILO_URL));
 pub static DEMO_SILO_CREATE: LazyLock<silo::SiloCreate> =
     LazyLock::new(|| silo::SiloCreate {
         identity: IdentityMetadataCreateParams {
@@ -2241,6 +2243,22 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                     AllowedMethod::Put(
                         serde_json::to_value(silo::SiloQuotasCreate::empty())
                             .unwrap(),
+                    ),
+                ],
+            },
+            VerifyEndpoint {
+                url: &DEMO_SILO_ROUTER_CONFIGURATIONS_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::Get,
+                    AllowedMethod::Put(
+                        serde_json::to_value(
+                            networking::SiloRouterConfigurationsUpdate {
+                                configurations: vec![],
+                            },
+                        )
+                        .unwrap(),
                     ),
                 ],
             },

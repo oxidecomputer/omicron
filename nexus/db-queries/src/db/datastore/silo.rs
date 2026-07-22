@@ -500,6 +500,11 @@ impl DataStore {
                 self.silo_auth_settings_delete(opctx, &conn, &authz_silo)
                     .await?;
 
+                self.silo_router_configurations_delete(
+                    opctx, &conn, &authz_silo,
+                )
+                .await?;
+
                 self.virtual_provisioning_collection_delete_on_connection(
                     &opctx.log, &conn, id,
                 )

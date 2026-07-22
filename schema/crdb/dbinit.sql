@@ -4083,6 +4083,28 @@ CREATE TABLE IF NOT EXISTS omicron.public.router_configuration_static_route (
     PRIMARY KEY (router_configuration_id, name)
 );
 
+/*
+ * Links a silo to the router configurations it uses, in priority order.
+ * Multiple silos may reference the same router configuration. Each priority
+ * is unique within a silo (enforced by the primary key); rows are
+ * hard-deleted and replaced in bulk when a silo's set of configurations is
+ * updated.
+ */
+CREATE TABLE IF NOT EXISTS omicron.public.silo_router_configuration (
+    silo_id UUID NOT NULL,
+    router_configuration_id UUID NOT NULL,
+    priority INT4 NOT NULL CHECK (priority >= 0 AND priority <= 65535),
+
+    PRIMARY KEY (silo_id, priority)
+);
+
+/*
+ * Enforces that a router configuration appears at most once per silo and
+ * supports reverse lookups (which silos use a given router configuration).
+ */
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_silo_router_configuration_by_router_configuration
+    ON omicron.public.silo_router_configuration (router_configuration_id, silo_id);
+
 
 CREATE TABLE IF NOT EXISTS omicron.public.switch_port_settings_address_config (
     port_settings_id UUID,

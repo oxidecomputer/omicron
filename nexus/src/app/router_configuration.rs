@@ -20,7 +20,14 @@ use omicron_common::api::external::{
     NameOrId, UpdateResult,
 };
 use omicron_uuid_kinds::{GenericUuid, RouterConfigurationUuid};
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
+
+/// Maximum number of router configurations that may be assigned to a silo.
+///
+/// This bounds the size of the transaction that replaces a silo's set of
+/// router configurations, like `MAX_ROLE_ASSIGNMENTS_PER_RESOURCE` does for
+/// policy updates.
+const MAX_ROUTER_CONFIGURATIONS_PER_SILO: usize = 64;
 
 impl super::Nexus {
     pub fn router_configuration_lookup<'a>(
@@ -598,5 +605,100 @@ impl super::Nexus {
                 peer,
             )
             .await
+    }
+
+    pub async fn silo_router_configurations_view(
+        &self,
+        opctx: &OpContext,
+        silo: NameOrId,
+    ) -> LookupResult<networking::SiloRouterConfigurations> {
+        let (.., authz_silo) = self
+            .silo_lookup(opctx, silo)?
+            .lookup_for(authz::Action::Read)
+            .await?;
+
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+
+        let configurations = self
+            .db_datastore
+            .silo_router_configurations_list(opctx, &authz_silo)
+            .await?
+            .into_iter()
+            .map(|link| networking::SiloRouterConfiguration {
+                router_configuration_id: RouterConfigurationUuid::from(
+                    link.router_configuration_id,
+                )
+                .into_untyped_uuid(),
+                priority: *link.priority,
+            })
+            .collect();
+
+        Ok(networking::SiloRouterConfigurations { configurations })
+    }
+
+    pub async fn silo_router_configurations_update(
+        &self,
+        opctx: &OpContext,
+        silo: NameOrId,
+        update: networking::SiloRouterConfigurationsUpdate,
+    ) -> UpdateResult<networking::SiloRouterConfigurations> {
+        let (.., authz_silo) = self
+            .silo_lookup(opctx, silo)?
+            .lookup_for(authz::Action::Modify)
+            .await?;
+
+        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
+
+        if update.configurations.len() > MAX_ROUTER_CONFIGURATIONS_PER_SILO {
+            return Err(Error::invalid_request(format!(
+                "at most {MAX_ROUTER_CONFIGURATIONS_PER_SILO} router \
+                 configurations may be assigned to a silo"
+            )));
+        }
+
+        let mut priorities = BTreeSet::new();
+        let mut configuration_ids = BTreeSet::new();
+        let mut links = Vec::new();
+        let mut configurations = Vec::new();
+        for entry in &update.configurations {
+            if !priorities.insert(entry.priority) {
+                return Err(Error::invalid_request(format!(
+                    "priority {} is used by more than one router \
+                     configuration",
+                    entry.priority
+                )));
+            }
+            let (.., authz_configuration, db_configuration) = self
+                .router_configuration_lookup(
+                    opctx,
+                    entry.router_configuration.clone(),
+                )?
+                .fetch()
+                .await?;
+            if !configuration_ids.insert(authz_configuration.id()) {
+                return Err(Error::invalid_request(format!(
+                    "router configuration \"{}\" appears more than once",
+                    db_configuration.name()
+                )));
+            }
+            links.push(nexus_db_model::SiloRouterConfiguration::new(
+                authz_silo.id(),
+                authz_configuration.id(),
+                entry.priority,
+            ));
+            configurations.push(networking::SiloRouterConfiguration {
+                router_configuration_id: authz_configuration
+                    .id()
+                    .into_untyped_uuid(),
+                priority: entry.priority,
+            });
+        }
+
+        self.db_datastore
+            .silo_router_configurations_replace(opctx, &authz_silo, links)
+            .await?;
+
+        configurations.sort_by_key(|c| c.priority);
+        Ok(networking::SiloRouterConfigurations { configurations })
     }
 }
