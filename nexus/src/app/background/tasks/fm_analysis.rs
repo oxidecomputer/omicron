@@ -12,6 +12,7 @@ use futures::future::BoxFuture;
 use iddqd::IdOrdMap;
 use nexus_db_model::PhysicalDiskPolicy;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db;
 use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::datastore;
 use nexus_db_queries::db::identity::Asset;
@@ -90,6 +91,15 @@ impl BackgroundTask for FmAnalysis {
 }
 
 impl FmAnalysis {
+    /// The maximum number of sitreps allowed in the database.
+    ///
+    /// If this limit is exceeded, analysis will not produce additional sitreps
+    /// until some old ones are deleted.
+    ///
+    /// This value was chosen totally arbitrarily. In future changes, this will
+    /// become configurable at runtime, in case I've gotten it wrong.
+    pub const SITREP_LIMIT: u64 = 2500;
+
     pub fn new(
         datastore: Arc<DataStore>,
         sitrep_rx: watch::Receiver<Option<CurrentSitrep>>,
@@ -508,9 +518,25 @@ impl FmAnalysis {
                 start_time,
                 end_time,
                 report,
+                capacity: None,
                 outcome: status::AnalysisOutcome::Error(e.to_string()),
             };
         }
+
+        // Before writing the new sitrep to the database, check whether there is
+        // capacity to write a new sitrep.
+        let capacity = match self.check_sitrep_limit(&opctx, warnings).await {
+            Ok(capacity) => Some(capacity),
+            Err(outcome) => {
+                return status::AnalysisStatus {
+                    start_time,
+                    end_time,
+                    report,
+                    capacity: None,
+                    outcome,
+                };
+            }
+        };
 
         if let Some(parent) = inputs.parent_sitrep() {
             if parent.compare_state() == sitrep {
@@ -523,6 +549,7 @@ impl FmAnalysis {
                     start_time,
                     end_time,
                     report,
+                    capacity,
                     outcome: status::AnalysisOutcome::Unchanged,
                 };
             }
@@ -568,6 +595,7 @@ impl FmAnalysis {
                     start_time,
                     end_time,
                     report,
+                    capacity,
                     outcome: status::AnalysisOutcome::Committed { sitrep_id },
                 }
             }
@@ -586,6 +614,7 @@ impl FmAnalysis {
                     start_time,
                     end_time,
                     report,
+                    capacity,
                     outcome: status::AnalysisOutcome::NotCommitted {
                         sitrep_id,
                     },
@@ -602,6 +631,7 @@ impl FmAnalysis {
                     start_time,
                     end_time,
                     report,
+                    capacity,
                     outcome: status::AnalysisOutcome::CommitFailed {
                         sitrep_id,
                         error: e.to_string(),
@@ -609,6 +639,86 @@ impl FmAnalysis {
                 }
             }
         }
+    }
+
+    async fn check_sitrep_limit(
+        &self,
+        opctx: &OpContext,
+        warnings: &mut Vec<String>,
+    ) -> Result<status::SitrepCapacity, status::AnalysisOutcome> {
+        let count = match self
+            .datastore
+            .fm_sitrep_check_limit_reached(&opctx, Self::SITREP_LIMIT)
+            .await
+        {
+            Ok(db::IsLimitReached::Yes) => {
+                error!(
+                    &opctx.log,
+                    "sitrep capacity is at or above the limit, a new sitrep \
+                     will not be written";
+                     "limit" => Self::SITREP_LIMIT,
+                );
+                // Activate the GC task to see if we can clean up any old
+                // sitreps.
+                self.activators.sitrep_gc.activate();
+                return Err(status::AnalysisOutcome::LimitReached {
+                    limit: Self::SITREP_LIMIT,
+                });
+            }
+            Ok(db::IsLimitReached::No { count }) => count,
+            Err(error) => {
+                const MSG: &str = "failed to check sitrep limit";
+                let error = InlineErrorChain::new(&error);
+                error!(&opctx.log, "{MSG}"; &error);
+                return Err(status::AnalysisOutcome::Error(format!(
+                    "{MSG}: {error}"
+                )));
+            }
+        };
+
+        let capacity =
+            status::SitrepCapacity { count, limit: Self::SITREP_LIMIT };
+        let usage_percent = capacity.usage_percent();
+        match usage_percent {
+            0..=59 => {
+                trace!(
+                    &opctx.log,
+                    "sitrep count under limit, proceeding with analysis";
+                    "limit" => Self::SITREP_LIMIT,
+                    "count" => count,
+                    "usage_percent" => usage_percent,
+                );
+            }
+            60..=79 => {
+                debug!(
+                    &opctx.log,
+                    "sitrep count above 60% of limit, proceeding with analysis \
+                     (will stop analysis if limit is reached)";
+                    "limit" => Self::SITREP_LIMIT,
+                    "count" => count,
+                    "usage_percent" => usage_percent,
+                );
+            }
+            80.. => {
+                warn!(
+                    &opctx.log,
+                    "sitrep count above 80% of limit, proceeding with analysis \
+                     (will stop analysis if limit is reached)";
+                    "limit" => Self::SITREP_LIMIT,
+                    "count" => count,
+                    "usage_percent" => usage_percent,
+                );
+                warnings.push(format!(
+                    "sitrep count ({count}) at {usage_percent}% of limit ({})",
+                    Self::SITREP_LIMIT
+                ));
+                // Activate the GC task to see if we can clean up any old
+                // sitreps.
+                self.activators.sitrep_gc.activate();
+            }
+        }
+
+        Ok(capacity)
     }
 }
 
