@@ -50,7 +50,7 @@ progenitor::generate_api!(
         BootstrapSledDescription = wicket_common::rack_setup::BootstrapSledDescription,
         CertificateUploadResponse = wicketd_commission_types_versions::latest::rack_setup::CertificateUploadResponse,
         ClearUpdateStateOptions = wicket_common::rack_update::ClearUpdateStateOptions,
-        ClearUpdateStateResponse = wicket_common::rack_update::ClearUpdateStateResponse,
+        ClearUpdateStateResponse = wicketd_commission_types_versions::latest::update::ClearUpdateStateResponse,
         CurrentRssUserConfigInsensitive = wicket_common::rack_setup::CurrentRssUserConfigInsensitive,
         Duration = std::time::Duration,
         EventReportForUplinkPreflightCheckSpec = wicket_common::preflight_check::EventReport,
