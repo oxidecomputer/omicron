@@ -29,9 +29,7 @@ use omicron_common::disk::DatasetName;
 use omicron_common::disk::DatasetsConfig;
 use omicron_common::disk::DatasetsManagementResult;
 use omicron_common::disk::DiskIdentity;
-use omicron_common::disk::DiskManagementStatus;
 use omicron_common::disk::DiskVariant;
-use omicron_common::disk::DisksManagementResult;
 use omicron_common::disk::OmicronPhysicalDisksConfig;
 use omicron_common::disk::SharedDatasetConfig;
 use omicron_uuid_kinds::DatasetUuid;
@@ -43,6 +41,7 @@ use omicron_uuid_kinds::ZpoolUuid;
 use propolis_client::VolumeConstructionRequest;
 use serde::Serialize;
 use sled_agent_types::dataset::LocalStorageDatasetEnsureRequest;
+use sled_agent_types::inventory::OmicronSledConfig;
 use sled_agent_types::inventory::ZpoolHealth;
 use sled_agent_types::support_bundle::NESTED_DATASET_NOT_FOUND;
 use sled_storage::nested_dataset::NestedDatasetConfig;
@@ -1350,8 +1349,7 @@ pub(crate) struct StorageInner {
     log: Logger,
     sled_id: Uuid,
     root: Utf8TempDir,
-    config: Option<OmicronPhysicalDisksConfig>,
-    dataset_config: Option<DatasetsConfig>,
+    sled_config: Option<OmicronSledConfig>,
     nested_datasets: HashMap<DatasetName, NestedDatasetStorage>,
     physical_disks: HashMap<PhysicalDiskUuid, PhysicalDisk>,
     next_disk_slot: i64,
@@ -1372,8 +1370,7 @@ impl StorageInner {
             sled_id,
             log,
             root: camino_tempfile::tempdir().unwrap(),
-            config: None,
-            dataset_config: None,
+            sled_config: None,
             nested_datasets: HashMap::new(),
             physical_disks: HashMap::new(),
             next_disk_slot: 0,
@@ -1394,34 +1391,98 @@ impl StorageInner {
         &self.physical_disks
     }
 
+    /// Sets the currently-ledgered sled config.
+    pub fn set_omicron_config(
+        &mut self,
+        config: OmicronSledConfig,
+    ) -> Result<(), HttpError> {
+        if let Some(stored_config) = self.sled_config.as_ref() {
+            if stored_config.generation > config.generation {
+                return Err(HttpError::for_client_error(
+                    None,
+                    dropshot::ClientErrorStatusCode::BAD_REQUEST,
+                    "Generation number too old".to_string(),
+                ));
+            } else if stored_config.generation == config.generation {
+                if *stored_config != config {
+                    return Err(HttpError::for_client_error(
+                        None,
+                        dropshot::ClientErrorStatusCode::BAD_REQUEST,
+                        "Generation number unchanged but data is different"
+                            .to_string(),
+                    ));
+                }
+                // An identical config at the same generation is a no-op.
+                return Ok(());
+            }
+        }
+
+        // Add a "nested dataset" entry for all datasets that should exist,
+        // and remove it for all datasets that have been removed.
+        let dataset_names: HashSet<_> =
+            config.datasets.iter().map(|config| config.name.clone()).collect();
+        for dataset in &dataset_names {
+            // Datasets delegated to zones manage their own storage.
+            if dataset.kind().zoned() {
+                continue;
+            }
+
+            let root = self.root().to_path_buf();
+            self.nested_datasets.entry(dataset.clone()).or_insert_with(|| {
+                NestedDatasetStorage::new(
+                    &root,
+                    dataset.clone(),
+                    String::new(),
+                    SharedDatasetConfig::default(),
+                )
+            });
+        }
+        self.nested_datasets
+            .retain(|dataset, _| dataset_names.contains(dataset));
+
+        self.sled_config = Some(config);
+        Ok(())
+    }
+
+    pub fn omicron_sled_config(&self) -> Option<OmicronSledConfig> {
+        self.sled_config.clone()
+    }
+
     pub fn datasets_config_list(&self) -> Result<DatasetsConfig, HttpError> {
-        let Some(config) = self.dataset_config.as_ref() else {
+        let Some(config) = self.sled_config.as_ref() else {
             return Err(HttpError::for_not_found(
                 None,
                 "No control plane datasets".into(),
             ));
         };
-        Ok(config.clone())
+        Ok(DatasetsConfig {
+            generation: config.generation,
+            datasets: config
+                .datasets
+                .iter()
+                .map(|dataset| (dataset.id, dataset.clone()))
+                .collect(),
+        })
     }
 
     pub fn dataset_get(
         &self,
         dataset_name: &String,
     ) -> Result<DatasetProperties, HttpError> {
-        let Some(config) = self.dataset_config.as_ref() else {
+        let Some(config) = self.sled_config.as_ref() else {
             return Err(HttpError::for_not_found(
                 None,
                 "No control plane datasets".into(),
             ));
         };
 
-        for (id, dataset) in config.datasets.iter() {
+        for dataset in config.datasets.iter() {
             if dataset.name.full_name().as_str() == dataset_name {
                 return Ok(DatasetProperties {
-                    id: Some(*id),
+                    id: Some(dataset.id),
                     name: dataset_name.to_string(),
                     // We should have an entry in `self.nested_datasets` for
-                    // every entry in `config.datasets` (`datasets_ensure()`
+                    // every entry in `config.datasets` (`set_omicron_config()`
                     // keeps these in sync), but we only keeping track of a
                     // `mounted` property on nested datasets. Look that up here.
                     mounted: self
@@ -1461,62 +1522,27 @@ impl StorageInner {
         return Err(HttpError::for_not_found(None, "Dataset not found".into()));
     }
 
+    /// Splats a legacy `DatasetsConfig` onto the `OmicronSledConfig` held by
+    /// this sim sled-agent, preserving any ledgered disks and zones.
+    ///
+    /// This is a stepping stone for tests that still manage datasets
+    /// separately from the rest of the sled config; new callers should build
+    /// a full `OmicronSledConfig` and use `set_omicron_config()` instead.
     pub fn datasets_ensure(
         &mut self,
         config: DatasetsConfig,
     ) -> Result<DatasetsManagementResult, HttpError> {
-        if let Some(stored_config) = self.dataset_config.as_ref() {
-            if stored_config.generation > config.generation {
-                return Err(HttpError::for_client_error(
-                    None,
-                    dropshot::ClientErrorStatusCode::BAD_REQUEST,
-                    "Generation number too old".to_string(),
-                ));
-            } else if stored_config.generation == config.generation
-                && *stored_config != config
-            {
-                return Err(HttpError::for_client_error(
-                    None,
-                    dropshot::ClientErrorStatusCode::BAD_REQUEST,
-                    "Generation number unchanged but data is different"
-                        .to_string(),
-                ));
-            }
-        }
-        self.dataset_config.replace(config.clone());
-
-        // Add a "nested dataset" entry for all datasets that should exist,
-        // and remove it for all datasets that have been removed.
-        let dataset_names: HashSet<_> = config
-            .datasets
-            .values()
-            .map(|config| config.name.clone())
-            .collect();
-        for dataset in &dataset_names {
-            // Datasets delegated to zones manage their own storage.
-            if dataset.kind().zoned() {
-                continue;
-            }
-
-            let root = self.root().to_path_buf();
-            self.nested_datasets.entry(dataset.clone()).or_insert_with(|| {
-                NestedDatasetStorage::new(
-                    &root,
-                    dataset.clone(),
-                    String::new(),
-                    SharedDatasetConfig::default(),
-                )
-            });
-        }
-        self.nested_datasets
-            .retain(|dataset, _| dataset_names.contains(&dataset));
+        let mut sled_config = self.sled_config.clone().unwrap_or_default();
+        sled_config.generation = config.generation;
+        sled_config.datasets = config.datasets.values().cloned().collect();
+        self.set_omicron_config(sled_config)?;
 
         Ok(DatasetsManagementResult {
             status: config
                 .datasets
-                .values()
+                .into_values()
                 .map(|config| DatasetManagementStatus {
-                    dataset_name: config.name.clone(),
+                    dataset_name: config.name,
                     err: None,
                 })
                 .collect(),
@@ -1728,48 +1754,15 @@ impl StorageInner {
     pub fn omicron_physical_disks_list(
         &self,
     ) -> Result<OmicronPhysicalDisksConfig, HttpError> {
-        let Some(config) = self.config.as_ref() else {
+        let Some(config) = self.sled_config.as_ref() else {
             return Err(HttpError::for_not_found(
                 None,
                 "No control plane disks".into(),
             ));
         };
-        Ok(config.clone())
-    }
-
-    pub fn omicron_physical_disks_ensure(
-        &mut self,
-        config: OmicronPhysicalDisksConfig,
-    ) -> Result<DisksManagementResult, HttpError> {
-        if let Some(stored_config) = self.config.as_ref() {
-            if stored_config.generation > config.generation {
-                return Err(HttpError::for_client_error(
-                    None,
-                    dropshot::ClientErrorStatusCode::BAD_REQUEST,
-                    "Generation number too old".to_string(),
-                ));
-            } else if stored_config.generation == config.generation
-                && *stored_config != config
-            {
-                return Err(HttpError::for_client_error(
-                    None,
-                    dropshot::ClientErrorStatusCode::BAD_REQUEST,
-                    "Generation number unchanged but data is different"
-                        .to_string(),
-                ));
-            }
-        }
-        self.config.replace(config.clone());
-
-        Ok(DisksManagementResult {
-            status: config
-                .disks
-                .into_iter()
-                .map(|config| DiskManagementStatus {
-                    identity: config.identity,
-                    err: None,
-                })
-                .collect(),
+        Ok(OmicronPhysicalDisksConfig {
+            generation: config.generation,
+            disks: config.disks.iter().cloned().collect(),
         })
     }
 
