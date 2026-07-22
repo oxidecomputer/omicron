@@ -296,7 +296,13 @@ impl LocalStorage for sim::Storage {
         // This gives us a local clone of the datasets config; we call
         // `remove(dataset_id)` below to avoid having to also clone the dataset
         // config we want to return.
-        let mut config = self.lock().datasets_config_list()?;
+        //
+        // TODO-cleanup Why do we return an HTTP "not found" in one case and a
+        // separate `DatasetNotFound` in the other case? We have a test that
+        // cares about the difference.
+        let mut config = self.lock().omicron_sled_config().ok_or(
+            HttpError::for_not_found(None, "No control plane datasets".into()),
+        )?;
         config.datasets.remove(dataset_id).ok_or(Error::DatasetNotFound)
     }
 

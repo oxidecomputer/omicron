@@ -14,16 +14,14 @@ use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
 use std::fmt;
 use std::str::FromStr;
 
 use crate::api::internal::shared::DatasetKindParseError;
 use crate::{
-    api::external::{ByteCount, Generation},
+    api::external::ByteCount,
     zpool_name::{ZpoolKind, ZpoolName},
 };
-use omicron_ledger::Ledgerable;
 
 pub use crate::api::internal::shared::DatasetKind;
 
@@ -53,44 +51,6 @@ impl IdOrdItem for OmicronPhysicalDiskConfig {
     }
 
     id_upcast!();
-}
-
-#[derive(
-    Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
-)]
-pub struct OmicronPhysicalDisksConfig {
-    /// generation number of this configuration
-    ///
-    /// This generation number is owned by the control plane (i.e., RSS or
-    /// Nexus, depending on whether RSS-to-Nexus handoff has happened).  It
-    /// should not be bumped within Sled Agent.
-    ///
-    /// Sled Agent rejects attempts to set the configuration to a generation
-    /// older than the one it's currently running.
-    pub generation: Generation,
-
-    pub disks: Vec<OmicronPhysicalDiskConfig>,
-}
-
-impl Default for OmicronPhysicalDisksConfig {
-    fn default() -> Self {
-        Self { generation: Generation::new(), disks: vec![] }
-    }
-}
-
-impl Ledgerable for OmicronPhysicalDisksConfig {
-    fn is_newer_than(&self, other: &OmicronPhysicalDisksConfig) -> bool {
-        self.generation > other.generation
-    }
-
-    // No need to do this, the generation number is provided externally.
-    fn generation_bump(&mut self) {}
-}
-
-impl OmicronPhysicalDisksConfig {
-    pub fn new() -> Self {
-        Self { generation: Generation::new(), disks: vec![] }
-    }
 }
 
 #[derive(
@@ -421,42 +381,6 @@ impl IdOrdItem for DatasetConfig {
     }
 
     id_upcast!();
-}
-
-#[derive(
-    Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
-)]
-pub struct DatasetsConfig {
-    /// generation number of this configuration
-    ///
-    /// This generation number is owned by the control plane (i.e., RSS or
-    /// Nexus, depending on whether RSS-to-Nexus handoff has happened).  It
-    /// should not be bumped within Sled Agent.
-    ///
-    /// Sled Agent rejects attempts to set the configuration to a generation
-    /// older than the one it's currently running.
-    ///
-    /// Note that "Generation::new()", AKA, the first generation number,
-    /// is reserved for "no datasets". This is the default configuration
-    /// for a sled before any requests have been made.
-    pub generation: Generation,
-
-    pub datasets: BTreeMap<DatasetUuid, DatasetConfig>,
-}
-
-impl Default for DatasetsConfig {
-    fn default() -> Self {
-        Self { generation: Generation::new(), datasets: BTreeMap::new() }
-    }
-}
-
-impl Ledgerable for DatasetsConfig {
-    fn is_newer_than(&self, other: &Self) -> bool {
-        self.generation > other.generation
-    }
-
-    // No need to do this, the generation number is provided externally.
-    fn generation_bump(&mut self) {}
 }
 
 /// Uniquely identifies a disk.
