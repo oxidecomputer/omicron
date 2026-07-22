@@ -638,6 +638,15 @@ Sled Agent uses the Crucible Agent client types only, and only in the simulated
 sled agent.
 """
 
+[[dependency_filter_rules]]
+ancestor = "omicron-sled-agent"
+client = "crucible-pantry-client"
+evaluation = "bogus"
+note = """
+Sled Agent uses the Crucible Pantry client types only, and only in the simulated
+sled agent.
+"""
+
 ################################################################################
 # Intra-deployment-unit-only edges
 #

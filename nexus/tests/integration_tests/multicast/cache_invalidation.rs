@@ -13,7 +13,8 @@
 
 use http::{Method, StatusCode};
 
-use gateway_client::types::{PowerState, RotState, SpState};
+use gateway_types::component::{PowerState, SpState};
+use gateway_types::rot::RotState;
 use nexus_db_lookup::LookupPath;
 use nexus_db_queries::context::OpContext;
 use nexus_test_utils::resource_helpers::{
