@@ -69,7 +69,7 @@ use std::io::Cursor;
 use std::num::NonZeroU8;
 use std::str;
 use std::sync::Arc;
-use tufaceous_artifact::ArtifactHash;
+use tufaceous_artifact_v2::ArtifactHash;
 
 // TODO
 // The gateway service will get asynchronous notifications both from directly

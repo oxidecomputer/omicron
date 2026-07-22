@@ -15,7 +15,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::net::IpAddr;
 use std::net::Ipv6Addr;
-use tufaceous_artifact::ArtifactHash;
+use tufaceous_artifact_v2::ArtifactHash;
 use wicketd_commission_types::rack_setup::AllowedSourceIps;
 use wicketd_commission_types::rack_setup::BgpAuthKeyId;
 use wicketd_commission_types::rack_setup::IpRange;

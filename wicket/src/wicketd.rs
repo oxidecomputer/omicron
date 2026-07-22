@@ -20,7 +20,6 @@ use wicketd_client::types::{
 };
 use wicketd_commission_types::update::UpdateTargets;
 
-use crate::events::{ArtifactData, EventReportMap};
 use crate::keymap::ShowPopupCmd;
 use crate::state::ComponentId;
 use crate::{Cmd, Event};
@@ -449,20 +448,10 @@ impl WicketdManager {
                     Ok(val) => {
                         // TODO: Only send on changes
                         let rsp = val.into_inner();
-                        let artifacts = rsp
-                            .artifacts
-                            .into_iter()
-                            .map(|artifact| ArtifactData {
-                                id: artifact.artifact_id,
-                                sign: artifact.sign,
-                            })
-                            .collect();
-                        let system_version = rsp.system_version;
-                        let event_reports: EventReportMap = rsp.event_reports;
                         let _ = tx.send(Event::ArtifactsAndEventReports {
-                            system_version,
-                            artifacts,
-                            event_reports,
+                            system_version: rsp.system_version,
+                            artifacts: rsp.artifacts,
+                            event_reports: rsp.event_reports,
                         });
                     }
                     Err(e) => {

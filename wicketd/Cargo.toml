@@ -46,8 +46,8 @@ slog-dtrace.workspace = true
 slog.workspace = true
 rand.workspace = true
 thiserror.workspace = true
-tufaceous-artifact.workspace = true
-tufaceous-lib.workspace = true
+tufaceous-artifact-v2.workspace = true
+tufaceous-v2.workspace = true
 tokio = { workspace = true, features = [ "full" ] }
 tokio-stream.workspace = true
 tokio-util.workspace = true
@@ -70,7 +70,6 @@ omicron-passwords.workspace = true
 omicron-uuid-kinds.workspace = true
 sled-agent-types.workspace = true
 sled-hardware-types.workspace = true
-update-common.workspace = true
 oxide-update-engine.workspace = true
 oxide-update-engine-types.workspace = true
 wicket-common.workspace = true
@@ -80,12 +79,14 @@ wicketd-client.workspace = true
 omicron-workspace-hack.workspace = true
 semver.workspace = true
 slog-error-chain.workspace = true
+lpc55_areas.workspace = true
 
 [[bin]]
 name = "wicketd"
 doc = false
 
 [dev-dependencies]
+chrono.workspace = true
 expectorate.workspace = true
 flate2.workspace = true
 fs-err.workspace = true
@@ -105,5 +106,4 @@ sled-storage.workspace = true
 subprocess.workspace = true
 tar.workspace = true
 tokio = { workspace = true, features = ["test-util"] }
-tufaceous.workspace = true
 wicket.workspace = true

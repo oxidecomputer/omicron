@@ -20,7 +20,9 @@ use installinator_common_versions::latest;
 use omicron_uuid_kinds::MupdateUuid;
 use oxide_update_engine_types::events::EventReport;
 use oxide_update_engine_types::spec::GenericSpec;
-use tufaceous_artifact::ArtifactHashId;
+use schemars::JsonSchema;
+use serde::Deserialize;
+use tufaceous_artifact_v2::ArtifactHash;
 
 api_versions!([
     // Do not create new versions of this client-side versioned API.
@@ -41,7 +43,7 @@ pub trait InstallinatorApi {
     }]
     async fn get_artifact_by_hash(
         rqctx: RequestContext<Self::Context>,
-        path: Path<ArtifactHashId>,
+        path: Path<GetArtifactPathParams>,
     ) -> Result<HttpResponseHeaders<HttpResponseOk<FreeformBody>>, HttpError>;
 
     /// Report progress and completion to the server.
@@ -60,6 +62,17 @@ pub trait InstallinatorApi {
         path: Path<latest::report::ReportQuery>,
         report: TypedBody<EventReport<GenericSpec>>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct GetArtifactPathParams {
+    /// This parameter is ignored and is present only to avoid needing a new
+    /// API version. Recommend using "any".
+    pub kind: String,
+
+    /// The hash of the artifact.
+    #[schemars(schema_with = "ArtifactHash::v1_json_schema")]
+    pub hash: ArtifactHash,
 }
 
 /// Add a content length header to a response.
