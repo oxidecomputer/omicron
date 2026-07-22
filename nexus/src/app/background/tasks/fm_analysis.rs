@@ -28,6 +28,7 @@ use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SupportBundleUuid;
 use serde_json::json;
 use slog_error_chain::InlineErrorChain;
+use std::num::NonZeroU64;
 use std::sync::Arc;
 use tokio::sync::watch;
 
@@ -39,6 +40,7 @@ pub struct FmAnalysis {
     activators: Activators,
     nexus_id: OmicronZoneUuid,
     analysis_enabled: bool,
+    sitrep_limit: NonZeroU64,
 }
 
 /// This is just because I don't like it when a constructor takes multiple
@@ -98,7 +100,7 @@ impl FmAnalysis {
     ///
     /// This value was chosen totally arbitrarily. In future changes, this will
     /// become configurable at runtime, in case I've gotten it wrong.
-    pub const SITREP_LIMIT: u64 = 2500;
+    pub const DEFAULT_SITREP_LIMIT: NonZeroU64 = NonZeroU64::new(2500).unwrap();
 
     pub fn new(
         datastore: Arc<DataStore>,
@@ -115,6 +117,7 @@ impl FmAnalysis {
             activators,
             nexus_id,
             analysis_enabled,
+            sitrep_limit: Self::DEFAULT_SITREP_LIMIT,
         }
     }
 
@@ -646,9 +649,10 @@ impl FmAnalysis {
         opctx: &OpContext,
         warnings: &mut Vec<String>,
     ) -> Result<status::SitrepCapacity, status::AnalysisOutcome> {
+        let limit = self.sitrep_limit.get();
         let count = match self
             .datastore
-            .fm_sitrep_check_limit_reached(&opctx, Self::SITREP_LIMIT)
+            .fm_sitrep_check_limit_reached(&opctx, limit)
             .await
         {
             Ok(db::IsLimitReached::Yes) => {
@@ -656,14 +660,12 @@ impl FmAnalysis {
                     &opctx.log,
                     "sitrep capacity is at or above the limit, a new sitrep \
                      will not be written";
-                     "limit" => Self::SITREP_LIMIT,
+                     "limit" => limit,
                 );
                 // Activate the GC task to see if we can clean up any old
                 // sitreps.
                 self.activators.sitrep_gc.activate();
-                return Err(status::AnalysisOutcome::LimitReached {
-                    limit: Self::SITREP_LIMIT,
-                });
+                return Err(status::AnalysisOutcome::LimitReached { limit });
             }
             Ok(db::IsLimitReached::No { count }) => count,
             Err(error) => {
@@ -676,15 +678,14 @@ impl FmAnalysis {
             }
         };
 
-        let capacity =
-            status::SitrepCapacity { count, limit: Self::SITREP_LIMIT };
+        let capacity = status::SitrepCapacity { count, limit };
         let usage_percent = capacity.usage_percent();
         match usage_percent {
             0..=59 => {
                 trace!(
                     &opctx.log,
                     "sitrep count under limit, proceeding with analysis";
-                    "limit" => Self::SITREP_LIMIT,
+                    "limit" => limit,
                     "count" => count,
                     "usage_percent" => usage_percent,
                 );
@@ -694,7 +695,7 @@ impl FmAnalysis {
                     &opctx.log,
                     "sitrep count above 60% of limit, proceeding with analysis \
                      (will stop analysis if limit is reached)";
-                    "limit" => Self::SITREP_LIMIT,
+                    "limit" => limit,
                     "count" => count,
                     "usage_percent" => usage_percent,
                 );
@@ -704,13 +705,13 @@ impl FmAnalysis {
                     &opctx.log,
                     "sitrep count above 80% of limit, proceeding with analysis \
                      (will stop analysis if limit is reached)";
-                    "limit" => Self::SITREP_LIMIT,
+                    "limit" => limit,
                     "count" => count,
                     "usage_percent" => usage_percent,
                 );
                 warnings.push(format!(
-                    "sitrep count ({count}) at {usage_percent}% of limit ({})",
-                    Self::SITREP_LIMIT
+                    "sitrep count ({count}) at {usage_percent}% of limit \
+                     ({limit})",
                 ));
                 // Activate the GC task to see if we can clean up any old
                 // sitreps.

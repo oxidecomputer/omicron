@@ -3653,8 +3653,8 @@ fn print_task_fm_analysis(details: &serde_json::Value, colored: bool) {
     if let Some(capacity) = capacity {
         let usage_percent = capacity.usage_percent();
         println!("    sitrep storage capacity: {usage_percent}% used");
-        println!("      limit: {}", capacity.limit);
-        println!("      count: {}", capacity.count);
+        println!("      limit: {:>6}", capacity.limit);
+        println!("      count: {:>6}", capacity.count);
     }
 
     let PreparationStatus { warnings, report: prep_report } = prep_status;
@@ -3701,7 +3701,11 @@ fn print_task_fm_sitrep_loader(details: &serde_json::Value) {
 }
 
 fn print_task_fm_sitrep_gc(details: &serde_json::Value) {
+    use nexus_types::internal_api::background::fm_sitrep_gc::HistoryPruningStatus;
+
     let SitrepGcStatus {
+        history_pruning_status,
+        history_limit,
         orphaned_sitreps_deleted,
         sitrep_metadata_batches,
         batch_size,
@@ -3718,6 +3722,41 @@ fn print_task_fm_sitrep_gc(details: &serde_json::Value) {
         Ok(status) => status,
     };
 
+    println!("    pruning sitrep history table:");
+    const HISTORY_LIMIT: &str = "max sitreps to keep:";
+    const STATUS: &str = "status:";
+    const SITREP_COUNT: &str = "current count:";
+    const PRUNED: &str = "sitreps pruned:";
+    const LATEST_VERSION_PRUNED: &str = "latest version pruned:";
+    const P_WIDTH: usize = const_max_len(&[
+        HISTORY_LIMIT,
+        SITREP_COUNT,
+        PRUNED,
+        LATEST_VERSION_PRUNED,
+    ]) + 1;
+    println!("      {HISTORY_LIMIT:<P_WIDTH$}{history_limit:>NUM_WIDTH$}");
+    match history_pruning_status {
+        Err(error) => {
+            println!("{ERRICON}   {STATUS}: failed!");
+            println!("        > {error}")
+        }
+        Ok(HistoryPruningStatus::BelowLimit { count }) => {
+            println!("      {STATUS}: below limit (no sitreps pruned)");
+            println!("      {SITREP_COUNT:<P_WIDTH$}{count:>NUM_WIDTH$}");
+        }
+        Ok(HistoryPruningStatus::Pruned {
+            n_pruned,
+            newest_version_pruned,
+        }) => {
+            println!("      {STATUS}: limit reached");
+            println!("      {PRUNED:<P_WIDTH$}{n_pruned:>NUM_WIDTH$}");
+            println!(
+                "      {LATEST_VERSION_PRUNED:<P_WIDTH$}v{newest_version_pruned}"
+            );
+        }
+    }
+
+    println!("    garbage collecting orphaned sitreps:");
     const BASE_WIDTH: usize = 40;
     const NUM_WIDTH: usize = 4;
 
@@ -3741,27 +3780,27 @@ fn print_task_fm_sitrep_gc(details: &serde_json::Value) {
         }
     }
 
-    println!("    {:<width$}{batch_size:>NUM_WIDTH$}", "batch size:");
+    println!("      {:<width$}{batch_size:>NUM_WIDTH$}", "batch size:");
     println!(
-        "    {:<width$}{orphaned_sitreps_deleted:>NUM_WIDTH$}",
+        "      {:<width$}{orphaned_sitreps_deleted:>NUM_WIDTH$}",
         "orphaned sitreps deleted:"
     );
     println!(
-        "    {:<width$}{sitrep_metadata_batches:>NUM_WIDTH$}",
+        "      {:<width$}{sitrep_metadata_batches:>NUM_WIDTH$}",
         "  batches:"
     );
 
     if child_tables.is_empty() {
-        eprintln!("(!)   warning: no child tables reported (likely a bug)");
+        eprintln!("(!)     warning: no child tables reported (likely a bug)");
     }
 
     for (table_name, stats) in &child_tables {
         println!(
-            "    {:<width$}{:>NUM_WIDTH$}",
+            "      {:<width$}{:>NUM_WIDTH$}",
             format!("orphaned {table_name} rows deleted:"),
             stats.rows_deleted,
         );
-        println!("    {:<width$}{:>NUM_WIDTH$}", "  batches:", stats.batches,);
+        println!("      {:<width$}{:>NUM_WIDTH$}", "  batches:", stats.batches);
     }
 }
 

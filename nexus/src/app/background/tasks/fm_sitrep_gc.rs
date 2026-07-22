@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 pub struct SitrepGc {
     datastore: Arc<DataStore>,
-    history_deletion_threshold: NonZeroU32,
+    history_limit: NonZeroU32,
 }
 
 impl BackgroundTask for SitrepGc {
@@ -44,15 +44,11 @@ impl BackgroundTask for SitrepGc {
 
 impl SitrepGc {
     pub fn new(datastore: Arc<DataStore>) -> Self {
-        Self {
-            datastore,
-            history_deletion_threshold:
-                Self::DEFAULT_HISTORY_DELETION_THRESHOLD,
-        }
+        Self { datastore, history_limit: Self::DEFAULT_HISTORY_LIMIT }
     }
 
     // Limits for abandoning sitreps from the history table.
-    pub const DEFAULT_HISTORY_DELETION_THRESHOLD: NonZeroU32 =
+    pub const DEFAULT_HISTORY_LIMIT: NonZeroU32 =
         NonZeroU32::new(2000).unwrap();
 
     async fn actually_activate(&mut self, opctx: &OpContext) -> Status {
@@ -60,14 +56,15 @@ impl SitrepGc {
         // Doing this first ensures that we will then attempt to GC any rows
         // abandoned by pruning the history. However, if this fails, we still
         // want to try to GC rows that were already orphaned, so don't `?` this!
-        let pruning = self.datastore.fm_sitrep_history_prune(&opctx, self.history_deletion_threshold).await.map_err(|e| {
+        let pruning = self.datastore.fm_sitrep_history_prune(&opctx, self.history_limit).await.map_err(|e| {
             let error = InlineErrorChain::new(&e);
             slog::error!(&opctx.log, "pruning the sitrep history table failed"; &error);
             error.to_string()
         });
 
         let mut status = Status {
-            pruning,
+            history_pruning_status: pruning,
+            history_limit: self.history_limit.get(),
             orphaned_sitreps_deleted: 0,
             sitrep_metadata_batches: 0,
             batch_size: 0,

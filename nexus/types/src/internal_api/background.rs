@@ -909,7 +909,9 @@ pub enum SitrepLoadStatus {
 /// The status of a `fm_sitrep_gc` background task activation.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct SitrepGcStatus {
-    pub pruning: Result<fm_sitrep_gc::HistoryPruningStatus, String>,
+    pub history_limit: u32,
+    pub history_pruning_status:
+        Result<fm_sitrep_gc::HistoryPruningStatus, String>,
     pub orphaned_sitreps_deleted: usize,
     pub sitrep_metadata_batches: usize,
     pub batch_size: u32,
@@ -925,8 +927,8 @@ pub mod fm_sitrep_gc {
     /// history table.
     #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
     pub enum HistoryPruningStatus {
-        BelowLimit { threshold: u32, count: u64 },
-        Pruned { threshold: u32, n_pruned: usize, newest_version_pruned: u32 },
+        BelowLimit { count: u64 },
+        Pruned { n_pruned: usize, newest_version_pruned: u32 },
     }
 
     /// Per-child-table GC statistics, used by [`SitrepGcStatus`].
