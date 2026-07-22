@@ -7,12 +7,16 @@
 //! There is no separate tokio task here; our parent reconciler task owns this
 //! set of disks and is able to mutate it in place during reconciliation.
 
-use anyhow::Context;
 use futures::future;
 use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
 use iddqd::id_ord_map::Entry;
 use iddqd::id_upcast;
+use illumos_utils::zfs::DestroyDatasetError;
+use illumos_utils::zfs::DestroyDatasetErrorVariant;
+use illumos_utils::zfs::EnsureDatasetError;
+use illumos_utils::zfs::ListDatasetsError;
+use illumos_utils::zfs::SetValueError;
 use illumos_utils::zfs::Zfs;
 use illumos_utils::zpool::Zpool;
 use illumos_utils::zpool::ZpoolName;
@@ -66,24 +70,57 @@ enum DiskManagementError {
     #[error("Expected zpool UUID of {expected}, but saw {observed}")]
     ZpoolUuidMismatch { expected: ZpoolUuid, observed: ZpoolUuid },
 
-    #[error(
-        "Failed to access keys necessary to unlock storage. \
-         This error may be transient."
-    )]
-    KeyManager(String),
+    #[error("Failed to adopt disk containing zpool {zpool_id}")]
+    AdoptDisk {
+        zpool_id: ZpoolUuid,
+        #[source]
+        error: DiskError,
+    },
 
-    #[error("Other error starting disk management: {0}")]
-    Other(String),
+    // The errors below are all from `illumos-utils`, and already include
+    // context like the name of the dataset on which we're operating.
+    #[error(transparent)]
+    ListDatasets(#[from] ListDatasetsError),
+
+    #[error(transparent)]
+    EnsureDataset(#[from] EnsureDatasetError),
+
+    #[error(transparent)]
+    DestroyDataset(#[from] DestroyDatasetError),
+
+    #[error(transparent)]
+    SetValues(#[from] SetValueError),
 }
 
 impl DiskManagementError {
     fn retryable(&self) -> bool {
         match self {
-            Self::KeyManager(_) => true,
+            // definitely retryable
+            Self::AdoptDisk {
+                zpool_id: _,
+                error: DiskError::Dataset(DatasetError::KeyManager(_)),
+            } => true,
+
+            // definitely not retryable
             Self::NotFound
             | Self::InternalDiskControlPlaneRequest(_)
             | Self::ZpoolUuidMismatch { .. }
-            | Self::Other(_) => false,
+            | Self::DestroyDataset(DestroyDatasetError {
+                name: _,
+                err: DestroyDatasetErrorVariant::NotFound,
+            }) => false,
+
+            // might be retryable? in many of these cases we'd need more
+            // information from the inner error than they expose, so we'll
+            // err on the side of retrying
+            Self::AdoptDisk { .. }
+            | Self::ListDatasets(_)
+            | Self::EnsureDataset(_)
+            | Self::DestroyDataset(DestroyDatasetError {
+                name: _,
+                err: DestroyDatasetErrorVariant::Other(_),
+            })
+            | Self::SetValues(_) => true,
         }
     }
 }
@@ -597,27 +634,23 @@ impl ExternalDisks {
                 //
                 // Fortunately, this case should be nearly impossible in
                 // practice.  But if we get here, mark the disk accordingly.
-                let error = InlineErrorChain::new(&*error);
                 error!(
                     log,
                     "failed to destroy former zone roots on pool";
                     "pool" => %zpool_name,
-                    &error,
+                    InlineErrorChain::new(&error),
                 );
-                failed.push((disk_id, error.to_string()));
+                failed.push((disk_id, error));
             }
         }
 
         // Attempt to un-adopt any disks that we failed to clean up.
         if !failed.is_empty() {
-            for (disk_id, message) in failed {
+            for (disk_id, error) in failed {
                 // unwrap(): We got these diskids from entries in the map
                 // above.
                 let mut disk = self.disks.get_mut(&disk_id).unwrap();
-                *disk = ExternalDiskState::failed(
-                    disk.config.clone(),
-                    DiskManagementError::Other(message),
-                );
+                *disk = ExternalDiskState::failed(disk.config.clone(), error);
             }
 
             self.update_output_watch_channels();
@@ -817,7 +850,7 @@ trait DiskAdopter {
         mount_config: &MountConfig,
         archiver: &FormerZoneRootArchiver,
         log: &Logger,
-    ) -> impl Future<Output = Result<(), anyhow::Error>> + Send;
+    ) -> impl Future<Output = Result<(), DiskManagementError>> + Send;
 }
 
 struct RealDiskAdopter<'a> {
@@ -840,17 +873,9 @@ impl DiskAdopter for RealDiskAdopter<'_> {
             Some(self.key_requester),
         )
         .await
-        .map_err(|err| {
-            let err_string = InlineErrorChain::new(&err).to_string();
-            match err {
-                // We pick this error out and identify it separately because
-                // it may be transient, and should sometimes be handled with
-                // a retry.
-                DiskError::Dataset(DatasetError::KeyManager(_)) => {
-                    DiskManagementError::KeyManager(err_string)
-                }
-                _ => DiskManagementError::Other(err_string),
-            }
+        .map_err(|error| DiskManagementError::AdoptDisk {
+            zpool_id: pool_id,
+            error,
         })?;
 
         // Read the epoch from the crypt dataset after successful adoption.
@@ -903,7 +928,7 @@ impl DiskAdopter for RealDiskAdopter<'_> {
         mount_config: &MountConfig,
         archiver: &FormerZoneRootArchiver,
         log: &Logger,
-    ) -> Result<(), anyhow::Error> {
+    ) -> Result<(), DiskManagementError> {
         // Attempt to archive and then wipe the contents of the zones dataset.
         //
         // There's a chain of design goals and compromises here:
@@ -982,13 +1007,7 @@ impl DiskAdopter for RealDiskAdopter<'_> {
                     "agent",
                     agent_local_value,
                 )
-                .await
-                .context("setting \"agent\" dataset property")
-                .map_err(|error| {
-                    DiskManagementError::Other(
-                        InlineErrorChain::new(&*error).to_string(),
-                    )
-                })?;
+                .await?;
             }
         };
 
@@ -1007,14 +1026,7 @@ async fn cleanup_former_zone_roots(
     // Within each pool, ZONE_DATASET is the name of the dataset that's the
     // parent of all the zone root filesystems' datasets.
     let parent_dataset_name = format!("{}/{}", zpool_name, ZONE_DATASET);
-    let child_datasets = Zfs::list_datasets(&parent_dataset_name)
-        .await
-        .context("listing datasets")
-        .map_err(|error| {
-            DiskManagementError::Other(
-                InlineErrorChain::new(&*error).to_string(),
-            )
-        })?;
+    let child_datasets = Zfs::list_datasets(&parent_dataset_name).await?;
 
     for child_name in child_datasets {
         // Determine the mountpoint of the child dataset.
@@ -1046,13 +1058,7 @@ async fn cleanup_former_zone_roots(
             &child_dataset_name,
             &Mountpoint(Utf8PathBuf::from(&mountpoint)),
         )
-        .await
-        .with_context(|| format!("mounting {:?}", &child_dataset_name))
-        .map_err(|error| {
-            DiskManagementError::Other(
-                InlineErrorChain::new(&*error).to_string(),
-            )
-        })?;
+        .await?;
 
         // Attempt to archive this dataset as though it's a former zone root.
         // This is best-effort.
@@ -1070,11 +1076,7 @@ async fn cleanup_former_zone_roots(
             "destroying former zone root";
             "dataset_name" => &child_dataset_name,
         );
-        Zfs::destroy_dataset(&child_dataset_name).await.map_err(|error| {
-            DiskManagementError::Other(
-                InlineErrorChain::new(&error).to_string(),
-            )
-        })?;
+        Zfs::destroy_dataset(&child_dataset_name).await?;
     }
 
     Ok(())
@@ -1134,7 +1136,7 @@ mod tests {
             _mount_config: &MountConfig,
             _archiver: &FormerZoneRootArchiver,
             _log: &Logger,
-        ) -> Result<(), anyhow::Error> {
+        ) -> Result<(), DiskManagementError> {
             Ok(())
         }
     }
