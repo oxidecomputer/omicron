@@ -39,7 +39,8 @@ sled-agent-types.workspace = true
 slog.workspace = true
 slog-error-chain.workspace = true
 tokio.workspace = true
-update-engine.workspace = true
+oxide-update-engine.workspace = true
+oxide-update-engine-types.workspace = true
 uuid.workspace = true
 
 # See omicron-rpaths for more about the "pq-sys" dependency.  This is needed
