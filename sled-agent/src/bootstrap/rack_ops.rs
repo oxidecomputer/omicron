@@ -13,6 +13,7 @@ use omicron_uuid_kinds::RackInitUuid;
 use sled_agent_bootstrap_common::RssContext;
 use sled_agent_multirack_join::MultirackJoinServiceError;
 use sled_agent_multirack_join::MultirackJoinServiceHandle;
+use sled_agent_multirack_join::MultirackJoinServiceState;
 use sled_agent_rack_setup::RackInitializeRequestParams;
 use sled_agent_rack_setup::SetupServiceError;
 use slog_error_chain::InlineErrorChain;
@@ -108,9 +109,8 @@ impl RssAccess {
             RssStatus::InitializationPanicked { id } => {
                 RackOperationStatus::InitializationPanicked { id: *id }
             }
-            RssStatus::MultirackJoinInProgress { id, handle } => {
-                let id = *id;
-                todo!()
+            RssStatus::MultirackJoinInProgress { id, .. } => {
+                RackOperationStatus::MultirackJoinInProgress { id: *id }
             }
             RssStatus::MultirackJoinCompleted { id } => {
                 RackOperationStatus::MultirackJoinCompleted { id: *id }
@@ -200,7 +200,35 @@ impl RssAccess {
 
         match &mut *status {
             RssStatus::Uninitialized => {
-                todo!()
+                let id = MultirackJoinUuid::new_v4();
+                let MultirackJoinServiceHandle {
+                    join_handle,
+                    input_tx,
+                    output_rx,
+                } = MultirackJoinServiceHandle::spawn(ctx, request);
+                *status = RssStatus::MultirackJoinInProgress {
+                    id,
+                    input_tx,
+                    output_rx,
+                };
+                mem::drop(status);
+                let status = Arc::clone(&self.status);
+
+                // Spawn a task that waits for the multirack join service task to exit
+                tokio::spawn(async move {
+                    let new_status = match join_handle.await {
+                        Ok(Ok(())) => {
+                            RssStatus::MultirackJoinCompleted { id: Some(id) }
+                        }
+                        Ok(Err(err)) => {
+                            RssStatus::MultirackJoinFailed { id, err }
+                        }
+                        Err(_) => RssStatus::MultirackJoinPanicked { id },
+                    };
+                    *status.lock().unwrap() = new_status;
+                });
+
+                Ok(id)
             }
 
             RssStatus::Initializing { .. } => {
@@ -234,7 +262,43 @@ impl RssAccess {
             }
         }
     }
+
+    pub(crate) fn get_multirack_join_state(
+        &self,
+    ) -> Result<MultirackJoinServiceState, RssConflictError> {
+        let mut status = self.status.lock().unwrap();
+
+        match &mut *status {
+            RssStatus::Uninitialized => {
+                Ok(MultirackJoinServiceState::Uninitialized)
+            }
+
+            RssStatus::Initializing { .. } => Err(RssConflictError),
+            RssStatus::Initialized { .. } => Err(RssConflictError),
+            RssStatus::InitializationFailed { .. } => Err(RssConflictError),
+            RssStatus::InitializationPanicked { .. } => Err(RssConflictError),
+
+            RssStatus::MultirackJoinInProgress { output_rx, .. } => {
+                let state = output_rx.borrow().clone();
+                Ok(state)
+            }
+            RssStatus::MultirackJoinCompleted { .. } => {
+                Ok(MultirackJoinServiceState::Completed)
+            }
+            RssStatus::MultirackJoinFailed { err, .. } => {
+                Ok(MultirackJoinServiceState::Failed(
+                    InlineErrorChain::new(err).to_string(),
+                ))
+            }
+            RssStatus::MultirackJoinPanicked { .. } => {
+                Ok(MultirackJoinServiceState::TaskPanicked)
+            }
+        }
+    }
 }
+
+// RSS was run, and not the multirack join service
+pub struct RssConflictError;
 
 enum RssStatus {
     // Our two main primary states.
@@ -269,7 +333,8 @@ enum RssStatus {
     // scales, but should eventually leave).
     MultirackJoinInProgress {
         id: MultirackJoinUuid,
-        handle: MultirackJoinServiceHandle,
+        input_tx: watch::Sender<MultirackJoinRequest>,
+        output_rx: watch::Receiver<MultirackJoinServiceState>,
     },
 
     MultirackJoinCompleted {

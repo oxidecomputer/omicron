@@ -92,17 +92,15 @@ pub struct CommitState {
 /// `output_rx` watch channel.
 #[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
 pub enum MultirackJoinServiceState {
+    Uninitialized,
     Requested,
     Starting,
     TrustQuorumReconfigure(TqReconfigureMsg),
     TrustQuorumPreparing(CoordinatorStatus),
     TrustQuorumCommitting(CommitState),
-}
-
-impl MultirackJoinServiceState {
-    pub fn new() -> Self {
-        Self::Requested
-    }
+    Completed,
+    Failed(String),
+    TaskPanicked,
 }
 
 // The value returned from `MultirackJoinServiceTask::tq_prepare`
@@ -126,7 +124,8 @@ enum TqCommitResult {
 
 /// The interface to the Multirack Join Service.
 pub struct MultirackJoinServiceHandle {
-    pub handle: tokio::task::JoinHandle<Result<(), MultirackJoinServiceError>>,
+    pub join_handle:
+        tokio::task::JoinHandle<Result<(), MultirackJoinServiceError>>,
     pub input_tx: watch::Sender<MultirackJoinRequest>,
     pub output_rx: watch::Receiver<MultirackJoinServiceState>,
 }
@@ -134,9 +133,9 @@ pub struct MultirackJoinServiceHandle {
 impl MultirackJoinServiceHandle {
     pub fn spawn(ctx: RssContext, request: MultirackJoinRequest) -> Self {
         let (input_tx, input_rx) = watch::channel(request);
-        let state = MultirackJoinServiceState::new();
+        let state = MultirackJoinServiceState::Requested;
         let (output_tx, output_rx) = watch::channel(state.clone());
-        let handle = tokio::task::spawn(async move {
+        let join_handle = tokio::task::spawn(async move {
             let log =
                 ctx.base_log.new(o!("component" => "MultirackJoinService"));
             info!(log, "Starting Multirack Join Service");
@@ -145,7 +144,7 @@ impl MultirackJoinServiceHandle {
             task.run().await
         });
 
-        Self { handle, input_tx, output_rx }
+        Self { join_handle, input_tx, output_rx }
     }
 }
 

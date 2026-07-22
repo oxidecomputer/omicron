@@ -23,6 +23,7 @@ use bootstrap_agent_lockstep_types::RackInitializeRequest;
 use bootstrap_agent_lockstep_types::RackOperationStatus;
 use bootstrap_agent_lockstep_types::ReplicatedNetworkConfig;
 use bootstrap_agent_lockstep_types::ReplicatedNetworkConfigContents;
+use dropshot::ClientErrorStatusCode;
 use dropshot::{
     ApiDescription, HttpError, HttpResponseOk, RequestContext, TypedBody,
 };
@@ -31,6 +32,7 @@ use omicron_uuid_kinds::RackInitUuid;
 use sled_agent_bootstrap_common::RssContext;
 use sled_agent_config_reconciler::InternalDisksReceiver;
 use sled_agent_measurements::MeasurementsHandle;
+use sled_agent_multirack_join::MultirackJoinServiceState;
 use sled_agent_rack_setup::RackInitializeRequestParams;
 use slog::Logger;
 use sprockets_tls::keys::SprocketsConfig;
@@ -176,5 +178,22 @@ impl BootstrapAgentLockstepApi for BootstrapAgentLockstepImpl {
             .start_multirack_join(request)
             .map_err(|err| HttpError::for_bad_request(None, err.to_string()))?;
         Ok(HttpResponseOk(id))
+    }
+
+    async fn multirack_join_state(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<MultirackJoinServiceState>, HttpError> {
+        let ctx = rqctx.context();
+        let state =
+            ctx.rss_access.get_multirack_join_state().map_err(|_| {
+                HttpError::for_client_error(
+                    Some("Conflict".to_string()),
+                    ClientErrorStatusCode::CONFLICT,
+                    "Cannot run multirack join: RSS has been run on this rack"
+                        .to_string(),
+                )
+            })?;
+
+        Ok(HttpResponseOk(state))
     }
 }

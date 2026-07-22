@@ -17,12 +17,13 @@ use bootstrap_agent_lockstep_types::ReplicatedNetworkConfig;
 use dropshot::{HttpError, HttpResponseOk, RequestContext, TypedBody};
 use omicron_uuid_kinds::MultirackJoinUuid;
 use omicron_uuid_kinds::RackInitUuid;
+use sled_agent_multirack_join::MultirackJoinServiceState;
 
 #[dropshot::api_description]
 pub trait BootstrapAgentLockstepApi {
     type Context;
 
-    /// Get the current status of rack initialization or reset.
+    /// Get the current status of rack initialization.
     #[endpoint {
         method = GET,
         path = "/rack-initialize",
@@ -74,4 +75,13 @@ pub trait BootstrapAgentLockstepApi {
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<MultirackJoinRequest>,
     ) -> Result<HttpResponseOk<MultirackJoinUuid>, HttpError>;
+
+    /// Get the current status of the multirack join
+    #[endpoint {
+        method = GET,
+        path = "/multirack-join",
+    }]
+    async fn multirack_join_state(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<MultirackJoinServiceState>, HttpError>;
 }
