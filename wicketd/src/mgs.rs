@@ -21,8 +21,6 @@ use crate::helpers::SpIdentifierDisplay;
 use crate::http_helpers::http_error_with_message;
 use crate::http_helpers::shutdown_to_http;
 
-// This somewhat awkward `#[cfg(test)]` is because RotData is used by a test in
-// conversions.rs.
 pub(crate) use self::inventory::{
     Fetched, FetchedSpData, MgsFetchError, RotFetch, Stage0Fetch,
 };
@@ -30,6 +28,8 @@ use self::inventory::{
     FetchedIgnitionState, IgnitionPresence, IgnitionStateFetcher,
     SpFetchResult, SpStateFetcher,
 };
+// RotData and RotImageErrors are only needed by tests in conversions.rs, hence
+// this somewhat awkward separate `#[cfg(test)]` re-export.
 #[cfg(test)]
 pub(crate) use self::inventory::{RotData, RotImageErrors};
 

@@ -27,8 +27,7 @@ pub use sled_agent_types_versions::v1::early_networking::SwitchSlot;
 /// A minimal projection of a firmware caboose.
 ///
 /// Only the fields the commissioning client needs are included; the remaining
-/// caboose fields (git commit, name, epoch, and so on) are intentionally
-/// omitted.
+/// caboose fields (git commit, name, and epoch) are intentionally omitted.
 #[derive(
     Debug,
     Clone,
@@ -150,10 +149,9 @@ pub enum RotInfo {
     NotRead,
     /// The service processor reported that it cannot reach its root of trust.
     ///
-    /// This is the SP's own report (from its `SpState.rot`), not a wicketd
-    /// fetch error: the SP responded, but told us it could not talk to its RoT.
-    /// It therefore carries only a message, with no `age`, unlike a
-    /// `FetchError`.
+    /// This is the SP's own report, not a wicketd fetch error: the SP
+    /// responded, but told us it could not talk to its RoT. It therefore
+    /// carries only a message, with no `age`, unlike a `FetchError`.
     Error {
         /// The failure the service processor reported for its root of trust.
         message: String,
@@ -241,7 +239,7 @@ pub enum SpStateInfo {
     },
     /// The service processor's state was read.
     Read {
-        /// The service processor's serial number.
+        /// The baseboard serial number reported by the service processor.
         serial_number: String,
         /// The host power state.
         power_state: PowerState,
@@ -256,11 +254,16 @@ pub enum SpStateInfo {
         refresh_error: Option<FetchError>,
         /// How long it has been since this reading was fetched.
         ///
-        /// The cabooses and root-of-trust information for this service
-        /// processor are refreshed together with this reading, so this age
-        /// applies to them as well. A large value means wicketd has not
-        /// successfully read this service processor recently, even if
-        /// `refresh_error` is `None`.
+        /// A large value means wicketd has not successfully read this
+        /// service processor recently, even if `refresh_error` is `None`.
+        ///
+        /// This age applies to the state reading alone. The cabooses and RoT
+        /// information for this SP are re-read only when its reported state
+        /// changes or when a prior read of them failed, so they may be older
+        /// than this age. In particular, writing a new image to the inactive
+        /// service-processor slot does not change the reported state, so
+        /// `caboose_inactive` may remain stale until the service processor
+        /// resets.
         age: Duration,
     },
 }
@@ -371,30 +374,14 @@ pub struct SpInventory {
     /// fetch succeeded (or none has failed yet); the per-SP `ignition` fields
     /// then reflect that most recent successful fetch.
     pub ignition_fetch_error: Option<FetchError>,
-    /// The switch transceiver (optical module) inventory.
-    pub transceivers: TransceiverInventory,
-}
-
-/// The switch transceiver (optical module) inventory.
-///
-/// wicketd reads transceiver state from the switches independently of MGS, so
-/// it is presented as its own read/not-read unit rather than folded into the
-/// per-SP inventory.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(tag = "state", rename_all = "snake_case")]
-pub enum TransceiverInventory {
-    /// No switch's transceiver inventory has been read yet.
-    NotRead,
-    /// At least one switch's transceiver inventory was read.
-    Read {
-        /// The transceivers in each switch that has been read.
-        ///
-        /// A switch that wicketd has never successfully read is absent from
-        /// this map rather than present and empty, so a caller can tell "this
-        /// switch reported no transceivers" from "we have never heard from
-        /// this switch".
-        switches: IdOrdMap<SwitchTransceivers>,
-    },
+    /// The switch transceiver (optical module) inventory, keyed by switch.
+    ///
+    /// wicketd reads transceiver state from the switches independently of
+    /// MGS. A switch that wicketd has never successfully read is absent from
+    /// this map rather than present and empty, so a caller can tell "this
+    /// switch reported no transceivers" from "we have never heard from this
+    /// switch". An empty map means no switch has been read yet.
+    pub transceivers: IdOrdMap<SwitchTransceivers>,
 }
 
 /// The transceivers in a single switch.
@@ -435,7 +422,7 @@ pub struct Transceiver {
     pub port: String,
     /// Module presence and power status.
     pub status: TransceiverStatus,
-    /// Module power status.
+    /// Module power mode.
     pub power: TransceiverPower,
     /// Vendor identification.
     pub vendor: TransceiverVendor,
@@ -477,7 +464,7 @@ pub enum TransceiverStatus {
     },
 }
 
-/// The power status of a transceiver module.
+/// The power mode of a transceiver module, including whether it was read.
 #[derive(
     Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema,
 )]
@@ -692,7 +679,8 @@ impl IdOrdItem for CmisLaneStatus {
 
 /// The datapath state of a CMIS lane.
 ///
-/// This mirrors the CMIS datapath state machine (CMIS 5.0 section 8.9.1).
+/// This mirrors the CMIS datapath state machine; the states are those reported
+/// by the Data Path State Indicator (CMIS 5.0 section 8.9.1).
 #[derive(
     Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema,
 )]
@@ -721,9 +709,16 @@ pub enum CmisDatapathState {
 pub struct LocationInfo {
     /// The slot of the switch this sled is cabled to.
     pub switch_slot: SwitchSlot,
-    /// The serial number of that switch's service processor, if known.
+    /// The serial number of that switch, as reported by its service
+    /// processor, if known.
+    ///
+    /// `None` means the switch's state has not been successfully read yet;
+    /// the switch's entry in the SP inventory carries the details, including
+    /// any fetch error.
     pub switch_serial: Option<String>,
     /// The serial number of the sled wicketd is running on, if known.
+    ///
+    /// `None` means wicketd was started without baseboard information.
     pub sled_serial: Option<String>,
 }
 
@@ -775,4 +770,42 @@ impl IdOrdItem for BootstrapSled {
     }
 
     id_upcast!();
+}
+
+/// The response to a bootstrap-sleds request.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct GetBootstrapSledsResponse {
+    /// The sleds visible in the MGS inventory.
+    ///
+    /// See `BootstrapSled` for when a sled appears here and when its `ip` is
+    /// populated.
+    pub sleds: IdOrdMap<BootstrapSled>,
+    /// Bootstrap-network peers that could not be matched to any sled in
+    /// `sleds`.
+    ///
+    /// Reported so that "a peer is on the bootstrap network but cannot be
+    /// matched to inventory" is distinguishable from "the sled has not been
+    /// discovered on the bootstrap network yet" (a `None` `BootstrapSled::ip`).
+    pub unmatched_peers: Vec<UnmatchedBootstrapPeer>,
+}
+
+/// A peer discovered on the bootstrap network that could not be matched to
+/// any sled reported by MGS.
+///
+/// Bootstrap peers are matched to sleds by the baseboard identity each peer's
+/// bootstrap agent reports about itself. A peer appears here instead of
+/// contributing a `BootstrapSled::ip` when that match wasn't successful: either
+/// transiently, because the sled's SP has not been read from MGS yet, or
+/// persistently, because the peer could not identify its own baseboard (or
+/// reports an identity that disagrees with MGS). A persistent entry here means
+/// the peer's address has been discovered but rack setup will not be able to
+/// use it.
+#[derive(
+    Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema,
+)]
+pub struct UnmatchedBootstrapPeer {
+    /// The baseboard identity the peer reported about itself.
+    pub identity: String,
+    /// The peer's bootstrap-network address.
+    pub ip: Ipv6Addr,
 }

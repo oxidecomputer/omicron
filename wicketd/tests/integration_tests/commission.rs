@@ -23,11 +23,11 @@ use wicketd_commission_types::rack_setup::PutRssUserConfigInsensitive;
 use wicketd_commission_types_versions::latest::inventory::{
     IgnitionFaults, LocationInfo, PowerState, RotImageValidity, RotInfo,
     SlotCaboose, SpIdentifier, SpIgnitionInfo, SpInfo, SpInventoryParams,
-    SpStateInfo, SpType, SwitchSlot, TransceiverInventory,
+    SpStateInfo, SpType, SwitchSlot,
 };
 use wicketd_commission_types_versions::latest::rack_setup::{
-    BgpAuthKey, BgpAuthKeyId, NewPasswordHash, PutRecoveryUserPasswordHash,
-    SetBgpAuthKeyStatus,
+    BgpAuthKey, BgpAuthKeyId, CertificatePem, NewPasswordHash, PrivateKeyPem,
+    PutRecoveryUserPasswordHash, SetBgpAuthKeyStatus,
 };
 use wicketd_commission_types_versions::latest::update::{
     StartUpdateOptions, StartUpdateParams, UpdateState, UpdateTargets,
@@ -155,9 +155,8 @@ async fn test_commission_inventory() {
         4,
         "four simulated SPs after forced refresh"
     );
-    assert_eq!(
-        refreshed.transceivers,
-        TransceiverInventory::NotRead,
+    assert!(
+        refreshed.transceivers.is_empty(),
         "the test harness has no switch transceiver interface, so the \
          transceiver inventory is never read: {:?}",
         refreshed.transceivers,
@@ -185,7 +184,7 @@ async fn test_commission_inventory() {
         .await
         .expect("get_bootstrap_sleds succeeded")
         .into_inner();
-    let ids: Vec<_> = bootstrap.iter().map(|s| s.id).collect();
+    let ids: Vec<_> = bootstrap.sleds.iter().map(|s| s.id).collect();
     assert_eq!(
         ids,
         vec![
@@ -194,11 +193,16 @@ async fn test_commission_inventory() {
         ],
     );
     let serial_numbers: Vec<_> =
-        bootstrap.iter().map(|s| s.serial_number.clone()).collect();
+        bootstrap.sleds.iter().map(|s| s.serial_number.clone()).collect();
     assert_eq!(serial_numbers, vec!["SimGimlet00", "SimGimlet01"]);
     assert!(
-        bootstrap.iter().all(|s| s.ip.is_none()),
+        bootstrap.sleds.iter().all(|s| s.ip.is_none()),
         "no bootstrap IPs discovered in the test environment"
+    );
+    assert!(
+        bootstrap.unmatched_peers.is_empty(),
+        "no bootstrap peers are discovered in the test environment: {:?}",
+        bootstrap.unmatched_peers,
     );
 
     let location = wait_for_condition(
@@ -391,7 +395,9 @@ async fn test_commission_rss_config() {
     // key.
     let response = ctx
         .commission_client
-        .post_rss_config_cert("a garbage certificate")
+        .post_rss_config_cert(&CertificatePem(
+            "a garbage certificate".to_string(),
+        ))
         .await
         .expect("post_rss_config_cert succeeded")
         .into_inner();
@@ -404,7 +410,7 @@ async fn test_commission_rss_config() {
     // 400.
     let err = ctx
         .commission_client
-        .post_rss_config_key("a garbage key")
+        .post_rss_config_key(&PrivateKeyPem("a garbage key".to_string()))
         .await
         .expect_err("post_rss_config_key rejects an invalid pair");
     assert_client_error(&err, StatusCode::BAD_REQUEST);
@@ -628,16 +634,8 @@ fn sim_ignition_present() -> SpIgnitionInfo {
     }
 }
 
-// A hash for the password "oxide". This is (obviously) only intended for
-// transient deployments in development with no sensitive data or resources. You
-// can change this value to any other supported hash. The only thing that needs
-// to be changed with this hash are the instructions given to individuals
-// running this program who then want to log in as this user. For more on what's
-// supported, see the API docs for this type and the specific constraints in the
-// omicron-passwords crate.
-//
-// The hash was generated via:
-// `cargo run --example argon2 -- --input oxide`.
+// A hash of the password "oxide", for test use only. Generated via:
+// `cargo run -p omicron-passwords --example argon2 -- --input oxide`.
 const VALID_PHC_HASH: &str = "$argon2id$v=19$m=98304,t=23,p=1$Effh/p6M2ZKdnpJFeGqtGQ$ZtUwcVODAvUAVK6EQ5FJMv+GMlUCo9PQQsy9cagL+EU";
 
 fn example_put_config() -> PutRssUserConfigInsensitive {

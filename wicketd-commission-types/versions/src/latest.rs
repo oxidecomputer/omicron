@@ -12,6 +12,7 @@ pub mod inventory {
     pub use crate::v1::inventory::CmisLaneStatus;
     pub use crate::v1::inventory::FaultFlag;
     pub use crate::v1::inventory::FetchError;
+    pub use crate::v1::inventory::GetBootstrapSledsResponse;
     pub use crate::v1::inventory::IgnitionFaults;
     pub use crate::v1::inventory::LocationInfo;
     pub use crate::v1::inventory::PowerState;
@@ -36,12 +37,12 @@ pub mod inventory {
     pub use crate::v1::inventory::SwitchTransceivers;
     pub use crate::v1::inventory::Transceiver;
     pub use crate::v1::inventory::TransceiverDatapath;
-    pub use crate::v1::inventory::TransceiverInventory;
     pub use crate::v1::inventory::TransceiverMonitors;
     pub use crate::v1::inventory::TransceiverPower;
     pub use crate::v1::inventory::TransceiverPowerMode;
     pub use crate::v1::inventory::TransceiverStatus;
     pub use crate::v1::inventory::TransceiverVendor;
+    pub use crate::v1::inventory::UnmatchedBootstrapPeer;
 }
 
 pub mod rack_setup {
@@ -50,6 +51,7 @@ pub mod rack_setup {
     pub use crate::v1::rack_setup::BgpAuthKeyId;
     pub use crate::v1::rack_setup::BgpAuthKeyPath;
     pub use crate::v1::rack_setup::BgpConfig;
+    pub use crate::v1::rack_setup::CertificatePem;
     pub use crate::v1::rack_setup::CertificateUploadResponse;
     pub use crate::v1::rack_setup::IpAllowList;
     pub use crate::v1::rack_setup::IpRange;
@@ -62,6 +64,7 @@ pub mod rack_setup {
     pub use crate::v1::rack_setup::ManualPortConfig;
     pub use crate::v1::rack_setup::MaxPathConfig;
     pub use crate::v1::rack_setup::NewPasswordHash;
+    pub use crate::v1::rack_setup::PrivateKeyPem;
     pub use crate::v1::rack_setup::PutRecoveryUserPasswordHash;
     pub use crate::v1::rack_setup::PutRssUserConfigInsensitive;
     pub use crate::v1::rack_setup::RackOperationStatus;

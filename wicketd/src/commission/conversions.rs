@@ -4,7 +4,7 @@
 
 //! Conversions between internal and commission types.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::net::Ipv6Addr;
 
 use bootstrap_agent_lockstep_types as bootstrap;
@@ -17,7 +17,7 @@ use transceiver_controller::{
     PowerMode, PowerState, ReceiverPower, Sff8636Datapath, Vendor, VendorInfo,
 };
 use wicket_common::inventory::{
-    SpComponentCaboose, SpIgnition, SpType, Transceiver,
+    SpComponentCaboose, SpIgnition, SpState, SpType, Transceiver,
 };
 use wicketd_commission_types::inventory as ct_inv;
 use wicketd_commission_types::rack_setup::{
@@ -190,18 +190,33 @@ pub(crate) fn sp_info_to_ct(record: &SpRecord) -> ct_inv::SpInfo {
             // The RoT is projected separately by `rot_info_to_ct` below, off the
             // whole `data`.
             rot: _,
-        }) => (
-            ct_inv::SpStateInfo::Read {
-                serial_number: state.serial_number.clone(),
-                power_state: state.power_state,
-                refresh_error: last_state_fetch_error
-                    .as_ref()
-                    .map(fetch_error_to_ct),
-                age: mgs_received.elapsed(),
-            },
-            slot_caboose_to_ct(caboose_active),
-            slot_caboose_to_ct(caboose_inactive),
-        ),
+        }) => {
+            let SpState {
+                serial_number,
+                power_state,
+                // The remaining identity fields are not projected by the
+                // commission API.
+                model: _,
+                revision: _,
+                hubris_archive_id: _,
+                base_mac_address: _,
+                // The RoT state is projected via `FetchedSpData::rot` (which
+                // is derived from this field at fetch time), not read here.
+                rot: _,
+            } = state;
+            (
+                ct_inv::SpStateInfo::Read {
+                    serial_number: serial_number.clone(),
+                    power_state: *power_state,
+                    refresh_error: last_state_fetch_error
+                        .as_ref()
+                        .map(fetch_error_to_ct),
+                    age: mgs_received.elapsed(),
+                },
+                slot_caboose_to_ct(caboose_active),
+                slot_caboose_to_ct(caboose_inactive),
+            )
+        }
         None => {
             let state = match last_state_fetch_error {
                 Some(error) => ct_inv::SpStateInfo::Error {
@@ -226,46 +241,61 @@ pub(crate) fn sp_info_to_ct(record: &SpRecord) -> ct_inv::SpInfo {
 pub(crate) fn bootstrap_sleds_to_ct(
     records: &IdOrdMap<SpRecord>,
     ddm_discovered_sleds: &BTreeMap<Baseboard, Ipv6Addr>,
-) -> IdOrdMap<ct_inv::BootstrapSled> {
-    IdOrdMap::from_iter_unique(records.iter().filter_map(|record| {
-        if record.id.typ != SpType::Sled {
-            return None;
-        }
-        let state = &record.data.as_ref()?.state;
-        let baseboard = Baseboard::new_gimlet(
-            state.serial_number.clone(),
-            state.model.clone(),
-            state.revision,
-        );
-        let ip = ddm_discovered_sleds.get(&baseboard).copied();
-        Some(ct_inv::BootstrapSled {
-            id: record.id,
-            serial_number: state.serial_number.clone(),
-            ip,
-        })
-    }))
+) -> ct_inv::GetBootstrapSledsResponse {
+    let mut matched = BTreeSet::new();
+    let sleds = IdOrdMap::from_iter_unique(records.iter().filter_map(
+        |record| {
+            if record.id.typ != SpType::Sled {
+                return None;
+            }
+            let state = &record.data.as_ref()?.state;
+            let baseboard = Baseboard::new_gimlet(
+                state.serial_number.clone(),
+                state.model.clone(),
+                state.revision,
+            );
+            let ip = ddm_discovered_sleds.get(&baseboard).copied();
+            if ip.is_some() {
+                matched.insert(baseboard);
+            }
+            Some(ct_inv::BootstrapSled {
+                id: record.id,
+                serial_number: state.serial_number.clone(),
+                ip,
+            })
+        },
+    ))
     .expect(
         "the manager's SP records are keyed by SpIdentifier, so the projected \
          BootstrapSleds have unique ids",
-    )
+    );
+
+    // Also collect and return unmatched peers.
+    let unmatched_peers = ddm_discovered_sleds
+        .iter()
+        .filter(|(baseboard, _)| !matched.contains(*baseboard))
+        .map(|(baseboard, ip)| ct_inv::UnmatchedBootstrapPeer {
+            identity: baseboard.to_string(),
+            ip: *ip,
+        })
+        .collect();
+
+    ct_inv::GetBootstrapSledsResponse { sleds, unmatched_peers }
 }
 
 pub(crate) fn transceivers_to_ct(
     response: GetTransceiversResponse,
-) -> ct_inv::TransceiverInventory {
+) -> IdOrdMap<ct_inv::SwitchTransceivers> {
     match response {
-        GetTransceiversResponse::Unavailable => {
-            ct_inv::TransceiverInventory::NotRead
-        }
+        GetTransceiversResponse::Unavailable => IdOrdMap::new(),
         GetTransceiversResponse::Response { transceivers } => {
-            let switches = IdOrdMap::from_iter_unique(
+            IdOrdMap::from_iter_unique(
                 transceivers.into_iter().map(switch_transceivers_to_ct),
             )
             .expect(
                 "the internal transceiver inventory is keyed by SwitchSlot, so \
                  the projected SwitchTransceivers have unique switch keys",
-            );
-            ct_inv::TransceiverInventory::Read { switches }
+            )
         }
     }
 }
@@ -874,6 +904,88 @@ mod tests {
         assert_eq!(sp_info_to_ct(&record).state, ct_inv::SpStateInfo::NotRead);
     }
 
+    fn read_sled_record(slot: u16, serial_number: &str) -> SpRecord {
+        SpRecord {
+            id: sled(slot),
+            ignition: None,
+            data: Some(fetched_data(
+                sp_state(
+                    serial_number,
+                    RotState::CommunicationFailed {
+                        message: "rot down".to_string(),
+                    },
+                ),
+                RotFetch::CommunicationFailed {
+                    message: "rot down".to_string(),
+                },
+            )),
+            last_state_fetch_error: None,
+        }
+    }
+
+    #[test]
+    fn bootstrap_sleds_project_ips_and_unmatched_peers() {
+        let mut records = IdOrdMap::new();
+        records
+            .insert_unique(read_sled_record(0, "SimGimlet00"))
+            .expect("sled 0 is unique");
+        records
+            .insert_unique(read_sled_record(1, "SimGimlet01"))
+            .expect("sled 1 is unique");
+        records
+            .insert_unique(SpRecord {
+                id: sled(2),
+                ignition: None,
+                data: None,
+                last_state_fetch_error: None,
+            })
+            .expect("sled 2 is unique");
+
+        let sled0_ip: Ipv6Addr = "fdb0::1".parse().expect("valid IPv6 address");
+        let unknown_ip: Ipv6Addr =
+            "fdb0::2".parse().expect("valid IPv6 address");
+        let mut ddm = BTreeMap::new();
+        ddm.insert(
+            Baseboard::new_gimlet(
+                "SimGimlet00".to_string(),
+                "model".to_string(),
+                0,
+            ),
+            sled0_ip,
+        );
+        ddm.insert(Baseboard::unknown(), unknown_ip);
+
+        let response = bootstrap_sleds_to_ct(&records, &ddm);
+
+        assert_eq!(
+            response.sleds.len(),
+            2,
+            "sled 2 has no state reading, so it is absent: {:?}",
+            response.sleds,
+        );
+        let sled0_entry = response.sleds.get(&sled(0)).expect("sled 0 present");
+        assert_eq!(sled0_entry.serial_number, "SimGimlet00");
+        assert_eq!(
+            sled0_entry.ip,
+            Some(sled0_ip),
+            "sled 0's baseboard matches its DDM entry",
+        );
+        let sled1_entry = response.sleds.get(&sled(1)).expect("sled 1 present");
+        assert_eq!(
+            sled1_entry.ip, None,
+            "sled 1 has no DDM entry, so no address yet",
+        );
+
+        assert_eq!(
+            response.unmatched_peers,
+            vec![ct_inv::UnmatchedBootstrapPeer {
+                identity: "unknown".to_string(),
+                ip: unknown_ip,
+            }],
+            "the unknown-baseboard peer is surfaced as unmatched",
+        );
+    }
+
     #[test]
     fn slot_caboose_projects_all_states() {
         assert_eq!(
@@ -1295,10 +1407,9 @@ mod tests {
     }
 
     #[test]
-    fn transceivers_unavailable_is_not_read() {
-        assert_eq!(
-            transceivers_to_ct(GetTransceiversResponse::Unavailable),
-            ct_inv::TransceiverInventory::NotRead,
+    fn transceivers_unavailable_projects_empty() {
+        assert!(
+            transceivers_to_ct(GetTransceiversResponse::Unavailable).is_empty(),
         );
     }
 
@@ -1328,10 +1439,7 @@ mod tests {
             .collect(),
         };
 
-        let projected = transceivers_to_ct(response);
-        let ct_inv::TransceiverInventory::Read { switches } = projected else {
-            panic!("expected Read inventory, got {projected:?}");
-        };
+        let switches = transceivers_to_ct(response);
 
         let switch = switches
             .iter()

@@ -105,11 +105,18 @@ impl LaneFaultsView {
 }
 
 impl TransceiverDatapath {
+    /// Iterates over the fault flags of every lane in this datapath.
+    ///
+    /// Returns an error carrying the read-failure message if the datapath
+    /// state could not be read at all, so that an unreadable module is not
+    /// mistaken for a fault-free one.
     pub fn iter_lane_faults(
         &self,
-    ) -> impl Iterator<Item = LaneFaultsView> + '_ {
+    ) -> Result<impl Iterator<Item = LaneFaultsView> + '_, &str> {
         let views: Vec<LaneFaultsView> = match self {
-            TransceiverDatapath::Error { message: _ } => Vec::new(),
+            TransceiverDatapath::Error { message } => {
+                return Err(message.as_str());
+            }
             TransceiverDatapath::Sff8636 { lanes } => {
                 lanes.iter().map(LaneFaultsView::from_sff8636).collect()
             }
@@ -119,7 +126,7 @@ impl TransceiverDatapath {
                 .map(LaneFaultsView::from_cmis)
                 .collect(),
         };
-        views.into_iter()
+        Ok(views.into_iter())
     }
 }
 
@@ -137,10 +144,10 @@ mod tests {
     }
 
     #[test]
-    fn iter_lane_faults_error_is_empty() {
+    fn iter_lane_faults_error_returns_message() {
         let datapath =
             TransceiverDatapath::Error { message: "boom".to_string() };
-        assert_eq!(datapath.iter_lane_faults().count(), 0);
+        assert_eq!(datapath.iter_lane_faults().err(), Some("boom"));
     }
 
     #[test]
@@ -177,7 +184,8 @@ mod tests {
                 },
             ],
         };
-        let views: Vec<_> = datapath.iter_lane_faults().collect();
+        let views: Vec<_> =
+            datapath.iter_lane_faults().expect("datapath was read").collect();
         assert_eq!(views.len(), 4);
         assert_eq!(views[0].rx_los, FaultFlag::Asserted);
         assert_eq!(views[0].tx_los, FaultFlag::Clear);
@@ -214,7 +222,8 @@ mod tests {
         .into_iter()
         .collect();
         let datapath = TransceiverDatapath::Cmis { datapaths };
-        let views: Vec<_> = datapath.iter_lane_faults().collect();
+        let views: Vec<_> =
+            datapath.iter_lane_faults().expect("datapath was read").collect();
         assert_eq!(views.len(), 3);
         assert!(views.iter().all(|v| v.rx_lol == FaultFlag::Unsupported));
         assert!(views.iter().all(|v| v.tx_fault == FaultFlag::Asserted));

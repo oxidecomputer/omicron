@@ -16,12 +16,12 @@ use wicketd_commission_api::{
     WicketdCommissionApi, wicketd_commission_api_mod,
 };
 use wicketd_commission_types::inventory::{
-    BootstrapSled, LocationInfo, SpIdentifier, SpInventory, SpInventoryParams,
-    SwitchSlot,
+    GetBootstrapSledsResponse, LocationInfo, SpIdentifier, SpInventory,
+    SpInventoryParams, SwitchSlot,
 };
 use wicketd_commission_types::rack_setup::{
-    BgpAuthKey, BgpAuthKeyPath, CertificateUploadResponse,
-    PutRecoveryUserPasswordHash, PutRssUserConfigInsensitive,
+    BgpAuthKey, BgpAuthKeyPath, CertificatePem, CertificateUploadResponse,
+    PrivateKeyPem, PutRecoveryUserPasswordHash, PutRssUserConfigInsensitive,
     RackOperationStatus, SetBgpAuthKeyStatus,
 };
 use wicketd_commission_types::update::{
@@ -193,19 +193,19 @@ impl WicketdCommissionApi for WicketdCommissionApiImpl {
 
     async fn get_bootstrap_sleds(
         rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<IdOrdMap<BootstrapSled>>, HttpError> {
+    ) -> Result<HttpResponseOk<GetBootstrapSledsResponse>, HttpError> {
         let ctx = rqctx.context();
         let response =
             cached_inventory_or_timeout(&ctx.mgs_handle, SP_REFRESH_TIMEOUT)
                 .await?;
 
         let ddm_discovered_sleds = ctx.bootstrap_peers.sleds();
-        let sleds = conversions::bootstrap_sleds_to_ct(
+        let bootstrap_sleds = conversions::bootstrap_sleds_to_ct(
             &response.sps,
             &ddm_discovered_sleds,
         );
 
-        Ok(HttpResponseOk(sleds))
+        Ok(HttpResponseOk(bootstrap_sleds))
     }
 
     async fn get_repository(
@@ -344,7 +344,7 @@ impl WicketdCommissionApi for WicketdCommissionApiImpl {
 
     async fn post_rss_config_cert(
         rqctx: RequestContext<Self::Context>,
-        body: TypedBody<String>,
+        body: TypedBody<CertificatePem>,
     ) -> Result<HttpResponseOk<CertificateUploadResponse>, HttpError> {
         let ctx = rqctx.context();
 
@@ -354,7 +354,7 @@ impl WicketdCommissionApi for WicketdCommissionApiImpl {
         )?;
 
         let response = rss_config
-            .push_cert(body.into_inner())
+            .push_cert(body.into_inner().0)
             .map_err(|err| HttpError::for_bad_request(None, err))?;
 
         Ok(HttpResponseOk(response))
@@ -362,7 +362,7 @@ impl WicketdCommissionApi for WicketdCommissionApiImpl {
 
     async fn post_rss_config_key(
         rqctx: RequestContext<Self::Context>,
-        body: TypedBody<String>,
+        body: TypedBody<PrivateKeyPem>,
     ) -> Result<HttpResponseOk<CertificateUploadResponse>, HttpError> {
         let ctx = rqctx.context();
 
@@ -372,7 +372,7 @@ impl WicketdCommissionApi for WicketdCommissionApiImpl {
         )?;
 
         let response = rss_config
-            .push_key(body.into_inner())
+            .push_key(body.into_inner().0)
             .map_err(|err| HttpError::for_bad_request(None, err))?;
 
         Ok(HttpResponseOk(response))

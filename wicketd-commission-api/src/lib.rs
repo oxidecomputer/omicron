@@ -56,12 +56,18 @@ pub trait WicketdCommissionApi {
 
     /// Get inventory of all service processors visible to wicketd
     ///
+    /// The response also carries the switch transceiver (optical module)
+    /// inventory, which wicketd reads independently of MGS.
+    ///
     /// If `force_refresh` is non-empty, the request will wait for the listed SPs
     /// to report fresh data, or return a 503 if they do not respond within the
-    /// server-side timeout.
+    /// server-side timeout. A 503 is also returned if wicketd has not completed
+    /// its initial fetch of the MGS inventory.
     ///
-    /// Returns 400 if the SP is unknown.
+    /// Returns 400 if any SP listed in `force_refresh` is unknown.
     #[endpoint {
+        // POST mostly because GET-with-body has somewhat spotty support. In
+        // principle this is somewhere between GET and POST.
         method = POST,
         path = "/inventory/sps",
     }]
@@ -82,7 +88,10 @@ pub trait WicketdCommissionApi {
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<latest::inventory::LocationInfo>, HttpError>;
 
-    /// List all sleds known to wicketd and their bootstrap-network addresses
+    /// List sleds whose state has been read from MGS, and their bootstrap-network addresses
+    ///
+    /// The response also reports bootstrap-network peers that could not be
+    /// matched to any sled in the MGS inventory.
     #[endpoint {
         method = GET,
         path = "/bootstrap-sleds",
@@ -90,7 +99,7 @@ pub trait WicketdCommissionApi {
     async fn get_bootstrap_sleds(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<
-        HttpResponseOk<IdOrdMap<latest::inventory::BootstrapSled>>,
+        HttpResponseOk<latest::inventory::GetBootstrapSledsResponse>,
         HttpError,
     >;
 
@@ -213,7 +222,7 @@ pub trait WicketdCommissionApi {
     }]
     async fn post_rss_config_cert(
         rqctx: RequestContext<Self::Context>,
-        body: TypedBody<String>,
+        body: TypedBody<latest::rack_setup::CertificatePem>,
     ) -> Result<
         HttpResponseOk<latest::rack_setup::CertificateUploadResponse>,
         HttpError,
@@ -234,7 +243,7 @@ pub trait WicketdCommissionApi {
     }]
     async fn post_rss_config_key(
         rqctx: RequestContext<Self::Context>,
-        body: TypedBody<String>,
+        body: TypedBody<latest::rack_setup::PrivateKeyPem>,
     ) -> Result<
         HttpResponseOk<latest::rack_setup::CertificateUploadResponse>,
         HttpError,

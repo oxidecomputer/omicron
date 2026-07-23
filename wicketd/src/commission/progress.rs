@@ -142,7 +142,9 @@ fn running_progress<S: EngineSpec>(
         },
         LeafProgress::WaitingForProgress => RunningProgress::WaitingForProgress,
         // Unknown means an event couldn't be deserialized. The EventBuffer
-        // drops these events so this branch is unreachable in practice.
+        // drops top-level unknown events, but a nested event whose leaf
+        // couldn't be deserialized can still reach here; fall back to
+        // progress without a counter.
         LeafProgress::Unknown => RunningProgress::Progress { progress: None },
     }
 }

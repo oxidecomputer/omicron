@@ -642,6 +642,22 @@ impl fmt::Debug for NewPasswordHash {
     }
 }
 
+/// A certificate in PEM format, uploaded during rack setup.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+pub struct CertificatePem(pub String);
+
+/// A private key in PEM format, uploaded during rack setup.
+///
+/// The key material is redacted from the `Debug` output.
+#[derive(Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+pub struct PrivateKeyPem(pub String);
+
+impl fmt::Debug for PrivateKeyPem {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("PrivateKeyPem").field(&"********").finish()
+    }
+}
+
 /// The body of a request to set the recovery-silo user password hash.
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
