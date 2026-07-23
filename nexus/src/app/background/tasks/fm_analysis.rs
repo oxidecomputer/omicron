@@ -681,8 +681,8 @@ impl FmAnalysis {
         let capacity = status::SitrepCapacity { count, limit };
         let usage_percent = capacity.usage_percent();
         match usage_percent {
-            0..=59 => {
-                trace!(
+            0..80 => {
+                debug!(
                     &opctx.log,
                     "sitrep count under limit, proceeding with analysis";
                     "limit" => limit,
@@ -690,21 +690,29 @@ impl FmAnalysis {
                     "usage_percent" => usage_percent,
                 );
             }
-            60..=79 => {
-                debug!(
+            // With the default history limit and max sitrep limit, we start
+            // pruning the history table at 80% of history, so this is just
+            // operational, not a warning.
+            80..95 => {
+                info!(
                     &opctx.log,
-                    "sitrep count above 60% of limit, proceeding with analysis \
-                     (will stop analysis if limit is reached)";
+                    "sitrep count above 80% of limit, proceeding with analysis \
+                     and activating GC (will stop analysis if limit is reached)";
                     "limit" => limit,
                     "count" => count,
                     "usage_percent" => usage_percent,
                 );
+                // Activate the GC task to see if we can clean up any old
+                // sitreps.
+                self.activators.sitrep_gc.activate();
             }
-            80.. => {
+            // At 95% of the limit, this is where I might start to worry that
+            // the GC task isn't running or something!
+            95.. => {
                 warn!(
                     &opctx.log,
-                    "sitrep count above 80% of limit, proceeding with analysis \
-                     (will stop analysis if limit is reached)";
+                    "sitrep count above 95% of limit, proceeding with analysis \
+                     and activating GC (will stop analysis if limit is reached)";
                     "limit" => limit,
                     "count" => count,
                     "usage_percent" => usage_percent,
