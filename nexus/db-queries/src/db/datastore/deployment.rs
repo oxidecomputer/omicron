@@ -620,88 +620,47 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         limit: u64,
-    ) -> Result<BlueprintLimitReachedOutput, Error> {
+    ) -> Result<crate::db::IsLimitReached, Error> {
+        use nexus_db_schema::schema::blueprint::dsl;
+
         // The "full" table scan below is treated as a complex operation. (This
         // should only be called from the blueprint planner background task,
         // for which complex operations are allowed.)
         opctx.check_complex_operations_allowed()?;
         opctx.authorize(authz::Action::Read, &authz::BLUEPRINT_CONFIG).await?;
+        let limit_query = crate::db::check_if_limit_reached::LimitQuery::new(
+            dsl::blueprint,
+            limit,
+        )?;
         let conn = self.pool_connection_authorized(opctx).await?;
-
-        let limit_i64 = i64::try_from(limit).map_err(|e| {
-            Error::invalid_value(
-                "limit",
-                format!("limit cannot be converted to i64: {e}"),
-            )
-        })?;
 
         let err = OptionalError::new();
 
-        let count = self
-            .transaction_retry_wrapper("blueprint_count")
+        self.transaction_retry_wrapper("blueprint_count")
             .transaction(&conn, |conn| {
                 let err = err.clone();
-
+                let limit_query = limit_query.clone();
                 async move {
                     // We need this to call the COUNT(*) query below. But note
                     // that this isn't really a "full" table scan; the number of
                     // rows scanned is limited by the LIMIT clause.
-                    conn.batch_execute_async(ALLOW_FULL_TABLE_SCAN_SQL)
-                        .await
-                        .map_err(|e| err.bail(TransactionError::Database(e)))?;
+                    conn.batch_execute_async(ALLOW_FULL_TABLE_SCAN_SQL).await?;
 
                     // Rather than doing a full table scan, we use a LIMIT
                     // clause to limit the number of rows returned.
-                    let mut count_star_sql = QueryBuilder::new();
-                    count_star_sql
-                        .sql(
-                            "SELECT COUNT(*) FROM \
-                             (SELECT 1 FROM omicron.public.blueprint \
-                              LIMIT $1)",
-                        )
-                        .bind::<diesel::sql_types::BigInt, _>(limit_i64);
-
-                    let query =
-                        count_star_sql.query::<diesel::sql_types::BigInt>();
-
-                    // query.first_async fails with `the trait bound
-                    // `TypedSqlQuery<BigInt>: diesel::Table` is not satisfied`.
-                    // So we use load_async, knowing that only one row will be
-                    // returned.
-                    let value = query
-                        .load_async::<i64>(&conn)
+                    let result = limit_query
+                        .check_if_limit_reached_async(&conn)
                         .await
-                        .map_err(|e| err.bail(TransactionError::Database(e)))?;
+                        .map_err(|e| e.into_diesel(&err))?;
 
-                    Ok(value)
+                    Ok(result)
                 }
             })
             .await
             .map_err(|e| match err.take() {
                 Some(err) => err.into_public_ignore_retries(),
                 None => public_error_from_diesel(e, ErrorHandler::Server),
-            })?;
-
-        // There must be exactly one row in the returned result.
-        let count = *count.get(0).ok_or_else(|| {
-            Error::internal_error("error getting blueprint count from database")
-        })?;
-
-        let count = u64::try_from(count).map_err(|_| {
-            Error::internal_error(&format!(
-                "error converting blueprint count {} into \
-                 u64 (how is it negative?)",
-                count
-            ))
-        })?;
-
-        // Note count >= limit (and not count > limit): for a limit of 5000 we
-        // want to fail if it's reached 5000.
-        if count >= limit {
-            Ok(BlueprintLimitReachedOutput::Yes)
-        } else {
-            Ok(BlueprintLimitReachedOutput::No { count })
-        }
+            })
     }
 
     /// Read a complete blueprint from the database
@@ -2900,12 +2859,6 @@ async fn insert_pending_mgs_update(
     Ok(())
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum BlueprintLimitReachedOutput {
-    No { count: u64 },
-    Yes,
-}
-
 // Helper to process BpPendingMgsUpdateComponent rows
 fn process_update_row<T>(
     row: T,
@@ -4481,15 +4434,21 @@ mod tests {
             // This looks up the pool again for each range; we only need at most
             // two (one V4, one V6), but our example system doesn't have many
             // ranges so this should be fine.
-            let (service_authz_ip_pool, service_ip_pool) = datastore
-                .ip_pools_service_lookup(&opctx, pool_range.version().into())
+            let service_pools = datastore
+                .ip_pools_service_lookup_by_version(
+                    &opctx,
+                    pool_range.version().into(),
+                    std::num::NonZeroU32::new(1).unwrap(),
+                )
                 .await
-                .expect("lookup service ip pool");
+                .expect("lookup service ip pools");
+            let service_pool =
+                service_pools.first().expect("service ip pool for version");
             datastore
                 .ip_pool_add_range(
                     &opctx,
-                    &service_authz_ip_pool,
-                    &service_ip_pool,
+                    &service_pool.authz_pool,
+                    &service_pool.db_pool,
                     &pool_range,
                 )
                 .await
@@ -4568,15 +4527,20 @@ mod tests {
                     .map(|(ip, _nic)| ip.ip())
             })
             .expect("found external IP");
-        let (service_authz_ip_pool, service_ip_pool) = datastore
-            .ip_pools_service_lookup(&opctx, IpVersion::V4)
+        let service_pools = datastore
+            .ip_pools_service_lookup_by_version(
+                &opctx,
+                IpVersion::V4,
+                std::num::NonZeroU32::new(1).unwrap(),
+            )
             .await
-            .expect("lookup service ip pool");
+            .expect("lookup service ip pools");
+        let service_pool = service_pools.first().expect("v4 service ip pool");
         datastore
             .ip_pool_add_range(
                 &opctx,
-                &service_authz_ip_pool,
-                &service_ip_pool,
+                &service_pool.authz_pool,
+                &service_pool.db_pool,
                 &IpRange::try_from((nexus_ip, nexus_ip))
                     .expect("valid IP range"),
             )
