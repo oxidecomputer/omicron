@@ -6,6 +6,7 @@
 
 use super::histogram;
 use super::schema::TimeseriesName;
+use crate::impls::cache::FieldSetCache;
 use crate::impls::traits::Producer;
 use bytes::Bytes;
 use chrono::DateTime;
@@ -15,6 +16,7 @@ use parse_display::FromStr;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
+use serde_json::value::RawValue;
 use std::borrow::Cow;
 use std::boxed::Box;
 use std::collections::BTreeMap;
@@ -282,10 +284,49 @@ pub struct Sample {
     pub timeseries_version: NonZeroU8,
 
     // Target name and fields
-    pub(crate) target: FieldSet,
+    pub(crate) target: Arc<FieldSet>,
 
     // Metric name and fields
-    pub(crate) metric: FieldSet,
+    pub(crate) metric: Arc<FieldSet>,
+}
+
+/// A concrete type representing a single, timestamped measurement from a timeseries.
+#[derive(Debug, Clone, Deserialize)]
+pub struct RawSample<'a> {
+    /// The measured value of the metric at this sample
+    pub measurement: Measurement,
+
+    /// The name of the timeseries this sample belongs to
+    pub timeseries_name: TimeseriesName,
+
+    /// The version of the timeseries this sample belongs to
+    //
+    // TODO-cleanup: This should be removed once schema are tracked in CRDB.
+    #[serde(default = "super::schema::default_schema_version")]
+    pub timeseries_version: NonZeroU8,
+
+    // Target name and fields
+    #[serde(borrow)]
+    pub(crate) target: &'a RawValue,
+
+    // Metric name and fields
+    #[serde(borrow)]
+    pub(crate) metric: &'a RawValue,
+}
+
+impl<'a> RawSample<'a> {
+    pub fn to_sample(
+        &'a self,
+        cache: &mut FieldSetCache,
+    ) -> Result<Sample, serde_json::Error> {
+        Ok(Sample {
+            measurement: self.measurement.clone(),
+            timeseries_name: self.timeseries_name.clone(),
+            timeseries_version: self.timeseries_version,
+            target: cache.get(self.target.get())?,
+            metric: cache.get(self.metric.get())?,
+        })
+    }
 }
 
 type ProducerList = Vec<Box<dyn Producer>>;
@@ -296,6 +337,34 @@ pub enum ProducerResultsItem {
     Err(MetricsError),
 }
 pub type ProducerResults = Vec<ProducerResultsItem>;
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(tag = "status", content = "info", rename_all = "snake_case")]
+pub enum RawProducerResultsItem<'a> {
+    Ok(#[serde(borrow)] Vec<RawSample<'a>>),
+    Err(MetricsError),
+}
+
+impl<'a> RawProducerResultsItem<'a> {
+    pub fn to_producer_result(
+        &'a self,
+        cache: &mut FieldSetCache,
+    ) -> Result<ProducerResultsItem, serde_json::Error> {
+        match self {
+            Self::Ok(raw_samples) => Ok(ProducerResultsItem::Ok(
+                raw_samples
+                    .iter()
+                    .map(|raw_sample| raw_sample.to_sample(cache))
+                    .collect::<Result<Vec<_>, _>>()?,
+            )),
+            Self::Err(metrics_error) => {
+                Ok(ProducerResultsItem::Err(metrics_error.clone()))
+            }
+        }
+    }
+}
+
+pub type RawProducerResults<'a> = Vec<RawProducerResultsItem<'a>>;
 
 /// The `ProducerRegistry` is a centralized collection point for metrics in consumer code.
 #[derive(Debug, Clone)]

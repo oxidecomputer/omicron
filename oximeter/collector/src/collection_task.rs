@@ -10,8 +10,11 @@ use crate::self_stats;
 use chrono::DateTime;
 use chrono::Utc;
 use omicron_common::api::internal::nexus::ProducerEndpoint;
+use oximeter::types::FieldSetCache;
 use oximeter::types::ProducerResults;
 use oximeter::types::ProducerResultsItem;
+use oximeter::types::RawProducerResults;
+use oximeter::types::RawProducerResultsItem;
 use oximeter_types::producer::FailedCollection;
 use oximeter_types::producer::ProducerDetails;
 use oximeter_types::producer::SuccessfulCollection;
@@ -75,6 +78,8 @@ struct SingleCollectionResult {
     result: Result<ProducerResults, self_stats::FailureReason>,
     /// The duration the collection took.
     duration: Duration,
+
+    cache: FieldSetCache,
 }
 
 /// Run a single collection from the producer.
@@ -82,6 +87,7 @@ async fn perform_collection(
     log: Logger,
     client: reqwest::Client,
     producer: ProducerEndpoint,
+    mut cache: FieldSetCache,
 ) -> SingleCollectionResult {
     let start = Instant::now();
     debug!(log, "collecting from producer");
@@ -96,30 +102,25 @@ async fn perform_collection(
     let result = match res {
         Ok(res) => {
             if res.status().is_success() {
-                match res.json::<ProducerResults>().await {
-                    Ok(results) => {
-                        let n_samples: usize = results
-                            .iter()
-                            .map(|r| match r {
-                                ProducerResultsItem::Ok(samples) => {
-                                    samples.len()
-                                }
-                                ProducerResultsItem::Err(_) => 0,
-                            })
-                            .sum();
-                        debug!(
-                            log,
-                            "collected results from producer";
-                            "n_results" => results.len(),
-                            "n_samples" => n_samples,
-                        );
-                        Ok(results)
+                match res.bytes().await {
+                    Ok(body) => {
+                        match parse_producer_body(&body, &mut cache, &log) {
+                            Ok(results) => Ok(results),
+                            Err(err) => {
+                                warn!(
+                                    log,
+                                    "failed to collect results from producer";
+                                    InlineErrorChain::new(&err),
+                                );
+                                Err(self_stats::FailureReason::Deserialization)
+                            }
+                        }
                     }
-                    Err(e) => {
+                    Err(err) => {
                         warn!(
                             log,
                             "failed to collect results from producer";
-                            InlineErrorChain::new(&e),
+                            InlineErrorChain::new(&err),
                         );
                         Err(self_stats::FailureReason::Deserialization)
                     }
@@ -143,7 +144,33 @@ async fn perform_collection(
         }
     };
     emit_dtrace_probes(&producer.id, result.as_ref());
-    SingleCollectionResult { result, duration: start.elapsed() }
+    SingleCollectionResult { result, duration: start.elapsed(), cache }
+}
+
+fn parse_producer_body(
+    body: &[u8],
+    cache: &mut FieldSetCache,
+    log: &Logger,
+) -> Result<ProducerResults, serde_json::Error> {
+    let raw_results = serde_json::from_slice::<RawProducerResults>(&body)?;
+    let n_samples: usize = raw_results
+        .iter()
+        .map(|r| match r {
+            RawProducerResultsItem::Ok(samples) => samples.len(),
+            RawProducerResultsItem::Err(_) => 0,
+        })
+        .sum();
+    debug!(
+        log,
+        "collected results from producer";
+        "n_results" => raw_results.len(),
+        "n_samples" => n_samples,
+    );
+    let results = raw_results
+        .iter()
+        .map(|raw| raw.to_producer_result(cache))
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(results)
 }
 
 // NOTE: We have some non-zero disabled-probe cost here, because we're deciding
@@ -237,6 +264,7 @@ async fn collection_loop(
         // Safety: `build()` only fails if TLS couldn't be initialized or the
         // system DNS configuration could not be loaded.
         .unwrap();
+    let mut cache = FieldSetCache::new();
     loop {
         // Wait for notification that we have a collection to perform, from
         // either the forced- or timer-collection queue.
@@ -282,12 +310,13 @@ async fn collection_loop(
             log.clone(),
             client.clone(),
             *producer_info_rx.borrow_and_update(),
+            cache,
         ));
 
         // Wait for that collection to complete or fail, or for an update to the
         // producer's information. In the latter case, recreate the future for
         // the collection itself with the new producer information.
-        let SingleCollectionResult { result, duration } = 'collection: loop {
+        let SingleCollectionResult { result, duration, cache: new_cache } = 'collection: loop {
             tokio::select! {
                 biased;
 
@@ -313,6 +342,7 @@ async fn collection_loop(
                                 log.new(o!("address" => update.address)),
                                 client.clone(),
                                 update,
+                                FieldSetCache::new(),
                             ));
                             continue 'collection;
                         }
@@ -333,6 +363,7 @@ async fn collection_loop(
                 }
             }
         };
+        cache = new_cache;
 
         // Now that the collection has completed, send on the results, along
         // with the timing information we got with the request.

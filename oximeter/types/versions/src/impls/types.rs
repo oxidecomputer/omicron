@@ -644,8 +644,8 @@ impl Sample {
         Ok(Self {
             timeseries_name,
             timeseries_version: target.version(),
-            target: target_fields,
-            metric: metric_fields,
+            target: target_fields.into(),
+            metric: metric_fields.into(),
             measurement: metric.measure(timestamp),
         })
     }
@@ -676,8 +676,8 @@ impl Sample {
         Ok(Self {
             timeseries_name,
             timeseries_version: target.version(),
-            target: target_fields,
-            metric: metric_fields,
+            target: target_fields.into(),
+            metric: metric_fields.into(),
             measurement: Measurement { timestamp, datum },
         })
     }
