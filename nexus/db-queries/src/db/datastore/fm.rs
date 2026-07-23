@@ -1759,7 +1759,7 @@ impl DataStore {
                     // activation. Because there are no gaps in the version
                     // numbers assigned to sitreps as they are committed, this
                     // means we are exactly at the limit. This is the expected
-                    // steady state if everything is more or less in sync.So,
+                    // steady state if everything is more or less in sync. So,
                     // don't say that we pruned something if we didn't actually
                     // delete anything.
                     if n_pruned == 0 {
@@ -1768,7 +1768,10 @@ impl DataStore {
                         });
                     }
 
-                    Ok(HistoryPruningStatus::Pruned { n_pruned, newest_version_pruned })
+                    Ok(HistoryPruningStatus::Pruned {
+                        n_pruned,
+                        newest_version_pruned,
+                    })
                 }
             })
             .await
