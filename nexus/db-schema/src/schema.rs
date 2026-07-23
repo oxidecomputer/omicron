@@ -271,6 +271,7 @@ table! {
         vlan_id -> Nullable<Int4>,
         id -> Uuid,
         router_lifetime -> Int4,
+        src_addr -> Nullable<Inet>,
     }
 }
 
@@ -318,28 +319,6 @@ table! {
         shaper -> Nullable<Text>,
         checker -> Nullable<Text>,
         max_paths -> Int2,
-    }
-}
-
-table! {
-    bgp_peer_view (switch_slot, port_name) {
-        switch_slot -> crate::enums::SwitchSlotEnum,
-        port_name -> Text,
-        addr -> Nullable<Inet>,
-        hold_time -> Int8,
-        idle_hold_time -> Int8,
-        delay_open -> Int8,
-        connect_retry -> Int8,
-        keepalive -> Int8,
-        remote_asn -> Nullable<Int8>,
-        min_ttl -> Nullable<Int2>,
-        md5_auth_key -> Nullable<Text>,
-        multi_exit_discriminator -> Nullable<Int8>,
-        local_pref -> Nullable<Int8>,
-        enforce_first_as -> Bool,
-        vlan_id -> Nullable<Int4>,
-        router_lifetime -> Int4,
-        asn -> Int8,
     }
 }
 

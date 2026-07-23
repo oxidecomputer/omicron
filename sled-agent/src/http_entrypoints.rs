@@ -964,6 +964,7 @@ impl SledAgentApi for SledAgentImpl {
         use v30::early_networking::EarlyNetworkConfigBody as BodyV30;
         use v33::system_networking::SystemNetworkingConfig as BodyV33;
         use v39::system_networking::SystemNetworkingConfig as BodyV39;
+        use v42::system_networking::SystemNetworkingConfig as BodyV42;
         type LatestEnvelope = EarlyNetworkConfigEnvelope;
 
         let sa = rqctx.context();
@@ -991,7 +992,9 @@ impl SledAgentApi for SledAgentImpl {
                                     ))
                                 })?;
                         let body = BodyV20::from(BodyV26::from(BodyV30::from(
-                            BodyV33::from(BodyV39::from(latest_version_body)),
+                            BodyV33::from(BodyV39::from(BodyV42::from(
+                                latest_version_body,
+                            ))),
                         )));
                         v20::early_networking::EarlyNetworkConfig {
                             generation: config.generation,

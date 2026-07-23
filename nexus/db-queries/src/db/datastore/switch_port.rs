@@ -2015,7 +2015,7 @@ impl<'a> BgpPeerProperties<'a> {
             RouterPeerType::Unnumbered { .. } => {
                 self.unnumbered_peers.insert(link_name, peer)
             }
-            RouterPeerType::Numbered { ip } => {
+            RouterPeerType::Numbered { ip, .. } => {
                 self.numbered_peers.insert(ip.into(), peer)
             }
         };
@@ -2030,7 +2030,7 @@ impl<'a> BgpPeerProperties<'a> {
                 RouterPeerType::Unnumbered { .. } => {
                     ("unnumbered", format!("link {link_name}"))
                 }
-                RouterPeerType::Numbered { ip } => {
+                RouterPeerType::Numbered { ip, .. } => {
                     ("numbered", format!("address {ip}"))
                 }
             };
@@ -2406,6 +2406,7 @@ mod test {
                         bgp_config: bgp_config.identity.name.clone().into(),
                         addr: RouterPeerType::Numbered {
                             ip: "192.168.1.1".parse().unwrap(),
+                            src_addr: None,
                         },
                         hold_time: 0,
                         idle_hold_time: 0,
@@ -2804,6 +2805,7 @@ mod test {
                     bgp_config: bgp_config.identity.name.clone().into(),
                     addr: RouterPeerType::Numbered {
                         ip: "192.168.1.1".parse().unwrap(),
+                        src_addr: None,
                     },
                     hold_time: 0,
                     idle_hold_time: 0,

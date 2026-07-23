@@ -768,7 +768,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
 
                         match peer.addr {
                             // Numbered peer - identified by address
-                            RouterPeerType::Numbered { ip } => {
+                            RouterPeerType::Numbered { ip, src_addr } => {
                                 // now that the peer passes the above validations, add it to the list for configuration
                                 let peer_config = BgpPeerConfig {
                                     name: format!("{ip}"),
@@ -798,7 +798,6 @@ impl BackgroundTask for SwitchPortSettingsManager {
                                         export_policy: export_policy6,
                                     }),
                                     vlan_id: peer.vlan_id,
-                                    //TODO plumb these out to the external API
                                     connect_retry_jitter: Some(JitterRange {
                                         max: 1.0,
                                         min: 0.75,
@@ -806,7 +805,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                                     deterministic_collision_resolution: false,
                                     idle_hold_jitter: None,
                                     src_port: None,
-                                    src_addr: None,
+                                    src_addr: src_addr.map(IpAddr::from),
                                 };
 
                                 // update the stored vec if it exists, create a new on if it doesn't exist

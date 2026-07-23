@@ -316,10 +316,11 @@
         ]
       },
       "BgpPeerConfig": {
+        "description": "A BGP peer configuration for a port.",
         "type": "object",
         "properties": {
           "addr": {
-            "description": "Address of the peer.",
+            "description": "Address of the peer (numbered or unnumbered).",
             "allOf": [
               {
                 "$ref": "#/components/schemas/RouterPeerType"
@@ -1414,6 +1415,13 @@
             "properties": {
               "ip": {
                 "description": "IP address for numbered BGP peers.",
+                "type": "string",
+                "format": "ip"
+              },
+              "src_addr": {
+                "nullable": true,
+                "description": "Optional local IP address to bind when establishing outbound TCP connections to this peer. If `None`, the OS selects the source address.",
+                "default": null,
                 "type": "string",
                 "format": "ip"
               },

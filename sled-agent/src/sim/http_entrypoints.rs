@@ -412,6 +412,7 @@ impl SledAgentApi for SledAgentSimImpl {
         use v30::early_networking::EarlyNetworkConfigBody as BodyV30;
         use v33::system_networking::SystemNetworkingConfig as BodyV33;
         use v39::system_networking::SystemNetworkingConfig as BodyV39;
+        use v42::system_networking::SystemNetworkingConfig as BodyV42;
 
         let config =
             rqctx.context().bootstore_network_config.lock().unwrap().clone();
@@ -435,7 +436,7 @@ impl SledAgentApi for SledAgentSimImpl {
         // Downconvert from the current version to the v20 version we have to
         // return from this endpoint.
         let body = BodyV20::from(BodyV26::from(BodyV30::from(BodyV33::from(
-            BodyV39::from(latest_version_body),
+            BodyV39::from(BodyV42::from(latest_version_body)),
         ))));
 
         Ok(HttpResponseOk(v20::early_networking::EarlyNetworkConfig {

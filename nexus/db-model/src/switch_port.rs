@@ -43,6 +43,7 @@ use sled_agent_types::early_networking::RouterPeerIpAddr;
 use sled_agent_types::early_networking::RouterPeerIpAddrError;
 use sled_agent_types::early_networking::RouterPeerType;
 use sled_agent_types::early_networking::SwitchSlot;
+use std::net::IpAddr;
 use uuid::Uuid;
 
 /// Extension trait on [`RouterPeerType`] for converting it to and from the way
@@ -74,7 +75,7 @@ impl RouterPeerTypeDbRepresentation for RouterPeerType {
     fn ip_db_repr(&self) -> Option<IpNetwork> {
         match self {
             Self::Unnumbered { .. } => None,
-            Self::Numbered { ip } => Some((*ip).into()),
+            Self::Numbered { ip, .. } => Some((*ip).into()),
         }
     }
 
@@ -85,7 +86,7 @@ impl RouterPeerTypeDbRepresentation for RouterPeerType {
         match ip.map(|ip| ip.ip()) {
             Some(ip) => {
                 let ip = RouterPeerIpAddr::try_from(ip)?;
-                Ok(Self::Numbered { ip })
+                Ok(Self::Numbered { ip, src_addr: None })
             }
             None => Ok(Self::Unnumbered { router_lifetime }),
         }
@@ -748,6 +749,7 @@ pub struct SwitchPortBgpPeerConfig {
     pub vlan_id: Option<SqlU16>,
     pub id: Uuid,
     router_lifetime: SqlU16,
+    pub src_addr: Option<IpNetwork>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -769,6 +771,15 @@ pub enum SwitchPortBgpPeerConfigInvalidData {
         port_settings_id: Uuid,
         #[source]
         err: RouterLifetimeConfigError,
+    },
+    #[error(
+        "database inconsistency: \
+        invalid source address in BGP peer config {port_settings_id}"
+    )]
+    SrcAddress {
+        port_settings_id: Uuid,
+        #[source]
+        err: RouterPeerIpAddrError,
     },
 }
 
@@ -797,7 +808,17 @@ impl SwitchPortBgpPeerConfig {
                             err,
                         }
                     })?;
-                Ok(RouterPeerType::Numbered { ip })
+                let src_addr = self
+                    .src_addr
+                    .map(|network| RouterPeerIpAddr::try_from(network.ip()))
+                    .transpose()
+                    .map_err(|err| {
+                        SwitchPortBgpPeerConfigInvalidData::SrcAddress {
+                            port_settings_id: self.port_settings_id,
+                            err,
+                        }
+                    })?;
+                Ok(RouterPeerType::Numbered { ip, src_addr })
             }
             None => {
                 let router_lifetime = RouterLifetimeConfig::new(
@@ -982,6 +1003,12 @@ impl SwitchPortBgpPeerConfig {
             },
             vlan_id: p.vlan_id.map(|x| x.into()),
             router_lifetime: router_lifetime.as_u16().into(),
+            src_addr: match p.addr {
+                RouterPeerType::Numbered { src_addr, .. } => {
+                    src_addr.map(|a| IpAddr::from(a).into())
+                }
+                RouterPeerType::Unnumbered { .. } => None,
+            },
         }
     }
 }
@@ -1053,7 +1080,7 @@ mod tests {
     fn router_peer_repr_round_trip_numbered_v4() {
         let ip_addr = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1));
         let ip = RouterPeerIpAddr::try_from(ip_addr).unwrap();
-        let original = RouterPeerType::Numbered { ip };
+        let original = RouterPeerType::Numbered { ip, src_addr: None };
 
         let db_repr = original.ip_db_repr();
         assert_eq!(db_repr, Some(IpNetwork::from(ip_addr)));
@@ -1070,7 +1097,7 @@ mod tests {
     fn router_peer_repr_round_trip_numbered_v6() {
         let ip_addr = IpAddr::V6(Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 1));
         let ip = RouterPeerIpAddr::try_from(ip_addr).unwrap();
-        let original = RouterPeerType::Numbered { ip };
+        let original = RouterPeerType::Numbered { ip, src_addr: None };
 
         let db_repr = original.ip_db_repr();
         assert_eq!(db_repr, Some(IpNetwork::from(ip_addr)));
@@ -1149,7 +1176,7 @@ mod tests {
         let ip =
             RouterPeerIpAddr::try_from(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)))
                 .unwrap();
-        let original = RouterPeerType::Numbered { ip };
+        let original = RouterPeerType::Numbered { ip, src_addr: None };
         let db_peer = SwitchPortBgpPeerConfig::new(
             Uuid::new_v4(),
             BgpConfigUuid::new_v4(),

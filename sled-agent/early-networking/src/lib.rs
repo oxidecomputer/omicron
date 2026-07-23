@@ -556,7 +556,7 @@ impl<'a> EarlyNetworkSetup<'a> {
 
                 match peer.addr {
                     // Numbered peer - identified by address
-                    RouterPeerType::Numbered { ip: addr } => {
+                    RouterPeerType::Numbered { ip: addr, src_addr } => {
                         let bpc = MgBgpPeerConfig {
                             name: format!("{}", addr),
                             host: SocketAddr::new(addr.into(), 179),
@@ -594,7 +594,7 @@ impl<'a> EarlyNetworkSetup<'a> {
                             }),
                             deterministic_collision_resolution: false,
                             idle_hold_jitter: None,
-                            src_addr: None,
+                            src_addr: src_addr.map(IpAddr::from),
                             src_port: None,
                         };
                         match bgp_peer_configs.get_mut(&port.port) {

@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "2026061100.0.0"
+    "version": "2026072000.0.0"
   },
   "paths": {
     "/device/auth": {
@@ -26939,6 +26939,13 @@
             "properties": {
               "ip": {
                 "description": "IP address for numbered BGP peers.",
+                "type": "string",
+                "format": "ip"
+              },
+              "src_addr": {
+                "nullable": true,
+                "description": "Optional local IP address to bind when establishing outbound TCP connections to this peer. If `None`, the OS selects the source address.",
+                "default": null,
                 "type": "string",
                 "format": "ip"
               },

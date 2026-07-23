@@ -555,6 +555,7 @@ mod tests {
                     "192.0.2.1".parse::<IpAddr>().unwrap(),
                 )
                 .expect("192.0.2.1 is a valid router peer ip"),
+                src_addr: None,
             },
             hold_time: 6,
             idle_hold_time: 3,

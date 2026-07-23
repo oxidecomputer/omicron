@@ -615,7 +615,7 @@ fn build_port_config(
                         }
                     }
                     UserSpecifiedRouterPeerAddr::Numbered(ip) => {
-                        RouterPeerType::Numbered { ip }
+                        RouterPeerType::Numbered { ip, src_addr: p.src_addr }
                     }
                 };
 
