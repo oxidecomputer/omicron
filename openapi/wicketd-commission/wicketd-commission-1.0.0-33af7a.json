@@ -1,0 +1,3844 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Wicketd Commission API",
+    "description": "Stable API for rack commissioning (RFD 710)",
+    "contact": {
+      "url": "https://oxide.computer",
+      "email": "api@oxide.computer"
+    },
+    "version": "1.0.0"
+  },
+  "paths": {
+    "/bootstrap-sleds": {
+      "get": {
+        "summary": "List all sleds known to wicketd and their bootstrap-network addresses",
+        "operationId": "get_bootstrap_sleds",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "IdOrdMap_of_BootstrapSled",
+                  "x-rust-type": {
+                    "crate": "iddqd",
+                    "parameters": [
+                      {
+                        "$ref": "#/components/schemas/BootstrapSled"
+                      }
+                    ],
+                    "path": "iddqd::IdOrdMap",
+                    "version": "*"
+                  },
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/BootstrapSled"
+                  },
+                  "uniqueItems": true
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/clear-update-state": {
+      "post": {
+        "summary": "Clear update state for one or more service processors",
+        "description": "Use this to reset update state after a completed or failed update. This fails with a 400 if any of the targeted service processors are currently being updated. Otherwise, the response reports which targets had update state cleared and which had no update data to clear.",
+        "operationId": "post_clear_update_state",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClearUpdateStateParams"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClearUpdateStateResponse"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/inventory/sps": {
+      "get": {
+        "summary": "Get inventory of all service processors visible to wicketd",
+        "description": "If `force_refresh` is non-empty, the request will wait for the listed SPs to report fresh data, or return a 503 if they do not respond within the server-side timeout.\n\nReturns 400 if the SP is unknown.",
+        "operationId": "get_sp_inventory",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SpInventoryParams"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SpInventory"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/location": {
+      "get": {
+        "summary": "Report the physical location (switch and sled) wicketd is running at",
+        "description": "Returns 503 if the location is not yet known (typically because wicketd hasn't been able to connect to MGS).",
+        "operationId": "get_location",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LocationInfo"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/rack-setup": {
+      "get": {
+        "summary": "Query the current state of rack setup",
+        "operationId": "get_rack_setup_state",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RackOperationStatus"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "summary": "Run rack setup",
+        "description": "Returns an error if the rack setup configuration has not been fully populated.",
+        "operationId": "post_run_rack_setup",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RackInitUuid"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/rack-setup/config": {
+      "put": {
+        "summary": "Update (a subset of) the current RSS configuration",
+        "description": "Sensitive values (certificates and the recovery password hash) are not set through this endpoint.",
+        "operationId": "put_rss_config",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PutRssUserConfigInsensitive"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "summary": "Reset all RSS configuration to default values",
+        "operationId": "delete_rss_config",
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/rack-setup/config/bgp-auth-key/{key_id}": {
+      "put": {
+        "summary": "Set the BGP authentication key for a key ID",
+        "description": "A BGP peer in the RSS configuration may reference an authentication key by ID; the key material itself is set here, and rack setup is rejected until every referenced key ID has been set. Keys are write-only: this API never returns key material.\n\nReturns 400 if the key ID is not referenced by the current RSS configuration.",
+        "operationId": "put_bgp_auth_key",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key_id",
+            "description": "The key ID, as referenced by a BGP peer in the RSS configuration.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/BgpAuthKeyId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BgpAuthKey"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SetBgpAuthKeyStatus"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/rack-setup/config/cert": {
+      "post": {
+        "summary": "Add an external certificate",
+        "description": "A certificate must be paired with its private key; the two may be posted in either order. Posting a certificate again before the pair completes replaces the pending certificate. Re-uploading a certificate and key that have already been accepted is detected as a duplicate: nothing is stored, and the response is `cert_key_duplicate_ignored`. If validation of a completed cert/key pair fails, both pending halves are discarded and must be re-posted.",
+        "operationId": "post_rss_config_cert",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "title": "String",
+                "type": "string"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CertificateUploadResponse"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/rack-setup/config/key": {
+      "post": {
+        "summary": "Add the private key of an external certificate",
+        "description": "A private key must be paired with its certificate; the two may be posted in either order. Posting a key again before the pair completes replaces the pending key. Re-uploading a certificate and key that have already been accepted is detected as a duplicate: nothing is stored, and the response is `cert_key_duplicate_ignored`. If validation of a completed cert/key pair fails, both pending halves are discarded and must be re-posted.",
+        "operationId": "post_rss_config_key",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "title": "String",
+                "type": "string"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CertificateUploadResponse"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/rack-setup/config/recovery-user-password-hash": {
+      "put": {
+        "summary": "Set the recovery-silo user password hash",
+        "operationId": "put_rss_config_recovery_user_password_hash",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PutRecoveryUserPasswordHash"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/repository": {
+      "get": {
+        "summary": "Describe the TUF repository currently held by wicketd",
+        "operationId": "get_repository",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RepositoryDescription"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "summary": "Upload a TUF repository to wicketd",
+        "description": "At any given time, wicketd holds at most one TUF repository, extracted to ephemeral storage; any previously-uploaded repository is discarded. This request is rejected with a 400 while any service-processor update is in progress. A successful upload clears all update progress state, so a subsequent `GET /update-progress` returns an empty list.",
+        "operationId": "put_repository",
+        "requestBody": {
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/update": {
+      "post": {
+        "summary": "Start updating one or more service processors",
+        "description": "A target that already has update state (even from a successful update) is rejected until that state is cleared with `/clear-update-state` or a new repository is uploaded.",
+        "operationId": "post_start_update",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartUpdateParams"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/update-progress": {
+      "get": {
+        "summary": "Report the update progress of every service processor with update state",
+        "operationId": "get_update_progress",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "IdOrdMap_of_SpUpdateProgress",
+                  "x-rust-type": {
+                    "crate": "iddqd",
+                    "parameters": [
+                      {
+                        "$ref": "#/components/schemas/SpUpdateProgress"
+                      }
+                    ],
+                    "path": "iddqd::IdOrdMap",
+                    "version": "*"
+                  },
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SpUpdateProgress"
+                  },
+                  "uniqueItems": true
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "AllowedSourceIps": {
+        "description": "Description of source IPs allowed to reach rack services.",
+        "oneOf": [
+          {
+            "description": "Allow traffic from any external IP address.",
+            "type": "object",
+            "properties": {
+              "allow": {
+                "type": "string",
+                "enum": [
+                  "any"
+                ]
+              }
+            },
+            "required": [
+              "allow"
+            ]
+          },
+          {
+            "description": "Restrict access to a specific set of source IP addresses or subnets.\n\nAll others are prevented from reaching rack services.",
+            "type": "object",
+            "properties": {
+              "allow": {
+                "type": "string",
+                "enum": [
+                  "list"
+                ]
+              },
+              "ips": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/IpNet"
+                }
+              }
+            },
+            "required": [
+              "allow",
+              "ips"
+            ]
+          }
+        ]
+      },
+      "BgpAuthKey": {
+        "description": "Describes the actual authentication key to use with a BGP peer.\n\nCurrently, only TCP-MD5 authentication is supported.",
+        "oneOf": [
+          {
+            "description": "TCP-MD5 authentication.",
+            "type": "object",
+            "properties": {
+              "key": {
+                "description": "The pre-shared key.",
+                "type": "string"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "tcp_md5"
+                ]
+              }
+            },
+            "required": [
+              "key",
+              "kind"
+            ]
+          }
+        ]
+      },
+      "BgpAuthKeyId": {
+        "description": "The key identifier for authentication to use with a BGP peer.",
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/Name"
+          }
+        ]
+      },
+      "BgpConfig": {
+        "type": "object",
+        "properties": {
+          "asn": {
+            "description": "The autonomous system number for the BGP configuration.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "checker": {
+            "nullable": true,
+            "description": "Checker to apply to incoming messages.",
+            "default": null,
+            "type": "string"
+          },
+          "max_paths": {
+            "description": "Maximum number of paths to use when multiple \"best paths\" exist",
+            "default": 1,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/MaxPathConfig"
+              }
+            ]
+          },
+          "originate": {
+            "description": "The set of prefixes for the BGP router to originate.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/IpNet"
+            }
+          },
+          "shaper": {
+            "nullable": true,
+            "description": "Shaper to apply to outgoing messages.",
+            "default": null,
+            "type": "string"
+          }
+        },
+        "required": [
+          "asn",
+          "originate"
+        ]
+      },
+      "BootstrapSled": {
+        "description": "A sled as seen on the bootstrap network.\n\nA sled is reported here once its service processor's state has been read from MGS. (A populated cubby whose state has not yet been polled is absent until it is.)\n\nA sled's `ip` becomes `Some` once it has been discovered on the bootstrap network; sleds still missing an address report `None`.",
+        "type": "object",
+        "properties": {
+          "id": {
+            "description": "The service processor for this sled (its type and slot).",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SpIdentifier"
+              }
+            ]
+          },
+          "ip": {
+            "nullable": true,
+            "description": "The sled's bootstrap-network address, once it has been discovered.",
+            "type": "string",
+            "format": "ipv6"
+          },
+          "serial_number": {
+            "description": "The sled's baseboard serial number.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "serial_number"
+        ]
+      },
+      "Caboose": {
+        "description": "A minimal projection of a firmware caboose.\n\nOnly the fields the commissioning client needs are included; the remaining caboose fields (git commit, name, epoch, and so on) are intentionally omitted.",
+        "type": "object",
+        "properties": {
+          "board": {
+            "description": "The board name the firmware was built for.",
+            "type": "string"
+          },
+          "sign": {
+            "nullable": true,
+            "description": "The signer of this firmware image, if the image is signed.\n\nFor a root of trust, this is the hex-encoded hash of the public key used to sign the image; it is `None` for firmware that carries no signature (such as service-processor images). Commissioning uses it to match an active RoT slot against the corresponding signed TUF artifact.",
+            "type": "string"
+          },
+          "version": {
+            "description": "The firmware version string.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "board",
+          "version"
+        ]
+      },
+      "CertificateUploadResponse": {
+        "description": "The result of uploading half of a certificate/key pair.",
+        "oneOf": [
+          {
+            "description": "The key has been uploaded, but we're waiting on its corresponding certificate chain.",
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "waiting_on_cert"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          {
+            "description": "The cert chain has been uploaded, but we're waiting on its corresponding private key.",
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "waiting_on_key"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          {
+            "description": "A cert chain and its key have been accepted.",
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "cert_key_accepted"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          {
+            "description": "A cert chain and its key are valid, but have already been uploaded.",
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "cert_key_duplicate_ignored"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          }
+        ]
+      },
+      "ClearUpdateStateParams": {
+        "description": "Parameters for clearing update state.",
+        "type": "object",
+        "properties": {
+          "targets": {
+            "description": "The service processors to clear update state for.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/UpdateTargets"
+              }
+            ]
+          }
+        },
+        "required": [
+          "targets"
+        ],
+        "additionalProperties": false
+      },
+      "ClearUpdateStateResponse": {
+        "description": "Response to an instruction to clear update data.",
+        "type": "object",
+        "properties": {
+          "cleared": {
+            "description": "The SPs for which update data was cleared.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SpIdentifier"
+            },
+            "uniqueItems": true
+          },
+          "no_update_data": {
+            "description": "The SPs that had no update state to clear.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SpIdentifier"
+            },
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "cleared",
+          "no_update_data"
+        ]
+      },
+      "CmisDatapath": {
+        "description": "One active CMIS datapath (application).",
+        "type": "object",
+        "properties": {
+          "application": {
+            "description": "The application selector code identifying this datapath.",
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
+          },
+          "lanes": {
+            "title": "IdOrdMap",
+            "description": "The status of each lane in this datapath, keyed by lane number.",
+            "x-rust-type": {
+              "crate": "iddqd",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/CmisLaneStatus"
+                }
+              ],
+              "path": "iddqd::IdOrdMap",
+              "version": "*"
+            },
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CmisLaneStatus"
+            },
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "application",
+          "lanes"
+        ]
+      },
+      "CmisDatapathState": {
+        "description": "The datapath state of a CMIS lane.\n\nThis mirrors the CMIS datapath state machine (CMIS 5.0 section 8.9.1).",
+        "oneOf": [
+          {
+            "description": "The datapath is deactivated.",
+            "type": "string",
+            "enum": [
+              "deactivated"
+            ]
+          },
+          {
+            "description": "The datapath is initializing.",
+            "type": "string",
+            "enum": [
+              "init"
+            ]
+          },
+          {
+            "description": "The datapath is deinitializing.",
+            "type": "string",
+            "enum": [
+              "deinit"
+            ]
+          },
+          {
+            "description": "The datapath is activated.",
+            "type": "string",
+            "enum": [
+              "activated"
+            ]
+          },
+          {
+            "description": "The transmitter is turning on.",
+            "type": "string",
+            "enum": [
+              "tx_turn_on"
+            ]
+          },
+          {
+            "description": "The transmitter is turning off.",
+            "type": "string",
+            "enum": [
+              "tx_turn_off"
+            ]
+          },
+          {
+            "description": "The datapath is initialized.",
+            "type": "string",
+            "enum": [
+              "initialized"
+            ]
+          }
+        ]
+      },
+      "CmisLaneStatus": {
+        "description": "The status of one CMIS lane.",
+        "type": "object",
+        "properties": {
+          "lane": {
+            "description": "The lane number within the module.",
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
+          },
+          "rx_lol": {
+            "description": "Media-side (receive) loss of lock.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/FaultFlag"
+              }
+            ]
+          },
+          "rx_los": {
+            "description": "Media-side (receive) loss of signal.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/FaultFlag"
+              }
+            ]
+          },
+          "state": {
+            "description": "The datapath state of this lane (CMIS 5.0 section 8.9.1).",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/CmisDatapathState"
+              }
+            ]
+          },
+          "tx_fault": {
+            "description": "A fault in the transmitter and/or laser.\n\nCMIS calls this `TxFailure`; it is named `tx_fault` here for cross-spec consistency with SFF-8636.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/FaultFlag"
+              }
+            ]
+          },
+          "tx_lol": {
+            "description": "Host-side (transmit) loss of lock.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/FaultFlag"
+              }
+            ]
+          },
+          "tx_los": {
+            "description": "Host-side (transmit) loss of signal.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/FaultFlag"
+              }
+            ]
+          }
+        },
+        "required": [
+          "lane",
+          "rx_lol",
+          "rx_los",
+          "state",
+          "tx_fault",
+          "tx_lol",
+          "tx_los"
+        ]
+      },
+      "Duration": {
+        "type": "object",
+        "properties": {
+          "nanos": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "secs": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "nanos",
+          "secs"
+        ]
+      },
+      "Error": {
+        "description": "Error information from a response.",
+        "type": "object",
+        "properties": {
+          "error_code": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "request_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "message",
+          "request_id"
+        ]
+      },
+      "FaultFlag": {
+        "description": "Whether a lane fault flag is asserted.\n\nSFF-8636 modules always report every flag, but a CMIS module may not support reporting a given flag. `Unsupported` distinguishes \"the module does not report this flag\" from a definite `Clear`.",
+        "oneOf": [
+          {
+            "description": "The fault flag is asserted.",
+            "type": "string",
+            "enum": [
+              "asserted"
+            ]
+          },
+          {
+            "description": "The fault flag is not asserted.",
+            "type": "string",
+            "enum": [
+              "clear"
+            ]
+          },
+          {
+            "description": "The module does not support reporting this flag.",
+            "type": "string",
+            "enum": [
+              "unsupported"
+            ]
+          }
+        ]
+      },
+      "FetchError": {
+        "description": "An error wicketd encountered while fetching a piece of inventory from MGS.\n\nThis is the wire projection of wicketd's internal fetch error. Each fetched item that can fail on its own (the SP state, a caboose slot, the stage0 bootloader caboose, or the rack-wide ignition list) reports one of these when its most recent fetch failed.",
+        "type": "object",
+        "properties": {
+          "age": {
+            "description": "How long ago this error was observed. A small value means the fetch is still failing now. A large value means it has not been refreshed in a while: for a top-level fetch (the SP state or the rack-wide ignition list) that the poller retries on its own schedule, the poller may be wedged; for a sub-fetch error (a caboose slot or the stage0 bootloader caboose, which only refresh on a successful `sp_get`), it instead means the enclosing SP fetch has stopped succeeding.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Duration"
+              }
+            ]
+          },
+          "message": {
+            "description": "A description of what went wrong.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "age",
+          "message"
+        ]
+      },
+      "IgnitionFaults": {
+        "description": "The faults ignition reports for a present service processor.",
+        "type": "object",
+        "properties": {
+          "a2": {
+            "description": "The A2 power fault.",
+            "type": "boolean"
+          },
+          "a3": {
+            "description": "The A3 power fault.",
+            "type": "boolean"
+          },
+          "rot": {
+            "description": "The root-of-trust fault.",
+            "type": "boolean"
+          },
+          "sp": {
+            "description": "The service-processor fault.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "a2",
+          "a3",
+          "rot",
+          "sp"
+        ]
+      },
+      "IpNet": {
+        "x-rust-type": {
+          "crate": "oxnet",
+          "path": "oxnet::IpNet",
+          "version": "0.1.0"
+        },
+        "oneOf": [
+          {
+            "title": "v4",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Ipv4Net"
+              }
+            ]
+          },
+          {
+            "title": "v6",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Ipv6Net"
+              }
+            ]
+          }
+        ]
+      },
+      "IpRange": {
+        "oneOf": [
+          {
+            "title": "v4",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Ipv4Range"
+              }
+            ]
+          },
+          {
+            "title": "v6",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Ipv6Range"
+              }
+            ]
+          }
+        ]
+      },
+      "Ipv4Net": {
+        "example": "192.168.1.0/24",
+        "title": "An IPv4 subnet",
+        "description": "An IPv4 subnet, including prefix and prefix length",
+        "x-rust-type": {
+          "crate": "oxnet",
+          "path": "oxnet::Ipv4Net",
+          "version": "0.1.0"
+        },
+        "type": "string",
+        "pattern": "^(([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])\\.){3}([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])/([0-9]|1[0-9]|2[0-9]|3[0-2])$"
+      },
+      "Ipv4Range": {
+        "description": "A non-decreasing IPv4 address range, inclusive of both ends.\n\nThe first address must be less than or equal to the last address.",
+        "type": "object",
+        "properties": {
+          "first": {
+            "type": "string",
+            "format": "ipv4"
+          },
+          "last": {
+            "type": "string",
+            "format": "ipv4"
+          }
+        },
+        "required": [
+          "first",
+          "last"
+        ]
+      },
+      "Ipv6Net": {
+        "example": "fd12:3456::/64",
+        "title": "An IPv6 subnet",
+        "description": "An IPv6 subnet, including prefix and subnet mask",
+        "x-rust-type": {
+          "crate": "oxnet",
+          "path": "oxnet::Ipv6Net",
+          "version": "0.1.0"
+        },
+        "type": "string",
+        "pattern": "^(([0-9a-fA-F]{1,4}:){7,7}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,7}:|([0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,5}(:[0-9a-fA-F]{1,4}){1,2}|([0-9a-fA-F]{1,4}:){1,4}(:[0-9a-fA-F]{1,4}){1,3}|([0-9a-fA-F]{1,4}:){1,3}(:[0-9a-fA-F]{1,4}){1,4}|([0-9a-fA-F]{1,4}:){1,2}(:[0-9a-fA-F]{1,4}){1,5}|[0-9a-fA-F]{1,4}:((:[0-9a-fA-F]{1,4}){1,6})|:((:[0-9a-fA-F]{1,4}){1,7}|:)|fe80:(:[0-9a-fA-F]{0,4}){0,4}%[0-9a-zA-Z]{1,}|::(ffff(:0{1,4}){0,1}:){0,1}((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])|([0-9a-fA-F]{1,4}:){1,4}:((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9]))\\/([0-9]|[1-9][0-9]|1[0-1][0-9]|12[0-8])$"
+      },
+      "Ipv6Range": {
+        "description": "A non-decreasing IPv6 address range, inclusive of both ends.\n\nThe first address must be less than or equal to the last address.",
+        "type": "object",
+        "properties": {
+          "first": {
+            "type": "string",
+            "format": "ipv6"
+          },
+          "last": {
+            "type": "string",
+            "format": "ipv6"
+          }
+        },
+        "required": [
+          "first",
+          "last"
+        ]
+      },
+      "LinkFec": {
+        "description": "The forward error correction mode of a link.",
+        "oneOf": [
+          {
+            "description": "Firecode forward error correction.",
+            "type": "string",
+            "enum": [
+              "firecode"
+            ]
+          },
+          {
+            "description": "No forward error correction.",
+            "type": "string",
+            "enum": [
+              "none"
+            ]
+          },
+          {
+            "description": "Reed-Solomon forward error correction.",
+            "type": "string",
+            "enum": [
+              "rs"
+            ]
+          }
+        ]
+      },
+      "LinkSpeed": {
+        "description": "The speed of a link.",
+        "oneOf": [
+          {
+            "description": "Zero gigabits per second.",
+            "type": "string",
+            "enum": [
+              "speed0_g"
+            ]
+          },
+          {
+            "description": "1 gigabit per second.",
+            "type": "string",
+            "enum": [
+              "speed1_g"
+            ]
+          },
+          {
+            "description": "10 gigabits per second.",
+            "type": "string",
+            "enum": [
+              "speed10_g"
+            ]
+          },
+          {
+            "description": "25 gigabits per second.",
+            "type": "string",
+            "enum": [
+              "speed25_g"
+            ]
+          },
+          {
+            "description": "40 gigabits per second.",
+            "type": "string",
+            "enum": [
+              "speed40_g"
+            ]
+          },
+          {
+            "description": "50 gigabits per second.",
+            "type": "string",
+            "enum": [
+              "speed50_g"
+            ]
+          },
+          {
+            "description": "100 gigabits per second.",
+            "type": "string",
+            "enum": [
+              "speed100_g"
+            ]
+          },
+          {
+            "description": "200 gigabits per second.",
+            "type": "string",
+            "enum": [
+              "speed200_g"
+            ]
+          },
+          {
+            "description": "400 gigabits per second.",
+            "type": "string",
+            "enum": [
+              "speed400_g"
+            ]
+          }
+        ]
+      },
+      "LldpAdminStatus": {
+        "description": "To what extent should this port participate in LLDP",
+        "type": "string",
+        "enum": [
+          "enabled",
+          "disabled",
+          "rx_only",
+          "tx_only"
+        ]
+      },
+      "LldpPortConfig": {
+        "description": "Per-port LLDP configuration settings.  Only the \"status\" setting is mandatory.  All other fields have natural defaults or may be inherited from the switch.",
+        "type": "object",
+        "properties": {
+          "chassis_id": {
+            "nullable": true,
+            "description": "Chassis ID to advertise.  If this is set, it will be advertised as a LocallyAssigned ID type.  If this is not set, it will be inherited from the switch-level settings.",
+            "type": "string"
+          },
+          "management_addrs": {
+            "nullable": true,
+            "description": "Management IP addresses to advertise.  If this is not set, it will be inherited from the switch-level settings.",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "ip"
+            }
+          },
+          "port_description": {
+            "nullable": true,
+            "description": "Port description to advertise.  If this is not set, no description will be advertised.",
+            "type": "string"
+          },
+          "port_id": {
+            "nullable": true,
+            "description": "Port ID to advertise.  If this is set, it will be advertised as a LocallyAssigned ID type.  If this is not set, it will be set to the port name. e.g., qsfp0/0.",
+            "type": "string"
+          },
+          "status": {
+            "description": "To what extent should this port participate in LLDP",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/LldpAdminStatus"
+              }
+            ]
+          },
+          "system_description": {
+            "nullable": true,
+            "description": "System description to advertise.  If this is not set, it will be inherited from the switch-level settings.",
+            "type": "string"
+          },
+          "system_name": {
+            "nullable": true,
+            "description": "System name to advertise.  If this is not set, it will be inherited from the switch-level settings.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
+      "LocationInfo": {
+        "description": "The physical location of the sled wicketd is running on.",
+        "type": "object",
+        "properties": {
+          "sled_serial": {
+            "nullable": true,
+            "description": "The serial number of the sled wicketd is running on, if known.",
+            "type": "string"
+          },
+          "switch_serial": {
+            "nullable": true,
+            "description": "The serial number of that switch's service processor, if known.",
+            "type": "string"
+          },
+          "switch_slot": {
+            "description": "The slot of the switch this sled is cabled to.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SwitchSlot"
+              }
+            ]
+          }
+        },
+        "required": [
+          "switch_slot"
+        ]
+      },
+      "ManualPortConfig": {
+        "description": "User-specified per-port configuration.\n\nThis contains all of the fields of a port configuration other than the port name, which is used as the map key.",
+        "type": "object",
+        "properties": {
+          "addresses": {
+            "description": "Addresses configured on this port.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UserSpecifiedUplinkAddressConfig"
+            }
+          },
+          "autoneg": {
+            "description": "Whether autonegotiation is enabled.",
+            "type": "boolean"
+          },
+          "bgp_peers": {
+            "description": "BGP peers reachable on this port.",
+            "default": [],
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UserSpecifiedBgpPeerConfig"
+            }
+          },
+          "lldp": {
+            "nullable": true,
+            "description": "LLDP configuration for this port.",
+            "default": null,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/LldpPortConfig"
+              }
+            ]
+          },
+          "routes": {
+            "description": "Static routes for this port.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RouteConfig"
+            }
+          },
+          "tx_eq": {
+            "nullable": true,
+            "description": "Transmit equalization overrides for this port.",
+            "default": null,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TxEqConfig"
+              }
+            ]
+          },
+          "uplink_port_fec": {
+            "nullable": true,
+            "description": "The forward error correction mode, if any.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/LinkFec"
+              }
+            ]
+          },
+          "uplink_port_speed": {
+            "description": "The port speed.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/LinkSpeed"
+              }
+            ]
+          }
+        },
+        "required": [
+          "addresses",
+          "autoneg",
+          "routes",
+          "uplink_port_speed"
+        ],
+        "additionalProperties": false
+      },
+      "MaxPathConfig": {
+        "type": "integer",
+        "format": "uint8",
+        "minimum": 1,
+        "maximum": 32
+      },
+      "Name": {
+        "title": "A name unique within the parent collection",
+        "description": "Names must begin with a lower case ASCII letter, be composed exclusively of lowercase ASCII, uppercase ASCII, numbers, and '-', and may not end with a '-'. Names cannot be a UUID, but they may contain a UUID. They can be at most 63 characters long.",
+        "type": "string",
+        "pattern": "^(?![0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$)^[a-z]([a-zA-Z0-9-]*[a-zA-Z0-9]+)?$",
+        "minLength": 1,
+        "maxLength": 63
+      },
+      "PowerState": {
+        "description": "See RFD 81.\n\nThis enum only lists power states the SP is able to control; higher power states are controlled by ignition.",
+        "type": "string",
+        "enum": [
+          "A0",
+          "A1",
+          "A2"
+        ]
+      },
+      "PutRecoveryUserPasswordHash": {
+        "description": "The body of a request to set the recovery-silo user password hash.",
+        "type": "object",
+        "properties": {
+          "hash": {
+            "description": "The password hash, in PHC string format.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "hash"
+        ],
+        "additionalProperties": false
+      },
+      "PutRssUserConfigInsensitive": {
+        "description": "The portion of the RSS configuration that can be posted in one shot.\n\nIt is provided by the operator uploading a TOML file. Sensitive values (certificates and the recovery password hash) are set separately.",
+        "type": "object",
+        "properties": {
+          "allowed_source_ips": {
+            "description": "IPs or subnets allowed to make requests to user-facing services.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AllowedSourceIps"
+              }
+            ]
+          },
+          "bootstrap_sleds": {
+            "description": "The slot numbers of the sleds to bring up during RSS.\n\nwicketd maps these back to sleds with the correct identifiers based on the bootstrap sleds it reports.",
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "uint16",
+              "minimum": 0
+            },
+            "uniqueItems": true
+          },
+          "dns_servers": {
+            "description": "The external DNS server addresses.",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "ip"
+            }
+          },
+          "external_dns_ips": {
+            "description": "Service IP addresses on which external DNS servers are run.",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "ip"
+            }
+          },
+          "external_dns_zone_name": {
+            "description": "The DNS zone name delegated to the rack for external DNS.",
+            "type": "string"
+          },
+          "external_jumbo_frames_opt_in_enabled": {
+            "description": "Enable the fleet-wide jumbo-frames opt-in.",
+            "default": false,
+            "type": "boolean"
+          },
+          "internal_services_ip_pool_ranges": {
+            "description": "Ranges of the service IP pool which may be used for internal services.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/IpRange"
+            }
+          },
+          "ntp_servers": {
+            "description": "The external NTP server addresses.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "rack_network_config": {
+            "description": "The user-specified rack network configuration.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/UserSpecifiedRackNetworkConfig"
+              }
+            ]
+          }
+        },
+        "required": [
+          "allowed_source_ips",
+          "bootstrap_sleds",
+          "dns_servers",
+          "external_dns_ips",
+          "external_dns_zone_name",
+          "internal_services_ip_pool_ranges",
+          "ntp_servers",
+          "rack_network_config"
+        ],
+        "additionalProperties": false
+      },
+      "RackInitUuid": {
+        "x-rust-type": {
+          "crate": "omicron-uuid-kinds",
+          "path": "omicron_uuid_kinds::RackInitUuid",
+          "version": "*"
+        },
+        "type": "string",
+        "format": "uuid"
+      },
+      "RackOperationStatus": {
+        "description": "The current status of any rack-level operation being performed.",
+        "oneOf": [
+          {
+            "description": "Rack initialization is in progress.",
+            "type": "object",
+            "properties": {
+              "id": {
+                "description": "The ID of the initialization operation.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/RackInitUuid"
+                  }
+                ]
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "initializing"
+                ]
+              },
+              "step": {
+                "description": "Information about the current step.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/RssStepInfo"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "status",
+              "step"
+            ]
+          },
+          {
+            "description": "The rack is initialized. `id` is `None` if the rack was already initialized on startup.",
+            "type": "object",
+            "properties": {
+              "id": {
+                "nullable": true,
+                "description": "The ID of the initialization operation, if one was performed.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/RackInitUuid"
+                  }
+                ]
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "initialized"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          {
+            "description": "Rack initialization failed.",
+            "type": "object",
+            "properties": {
+              "id": {
+                "description": "The ID of the initialization operation.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/RackInitUuid"
+                  }
+                ]
+              },
+              "message": {
+                "description": "A message describing the failure.",
+                "type": "string"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "initialization_failed"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "message",
+              "status"
+            ]
+          },
+          {
+            "description": "Rack initialization panicked.",
+            "type": "object",
+            "properties": {
+              "id": {
+                "description": "The ID of the initialization operation.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/RackInitUuid"
+                  }
+                ]
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "initialization_panicked"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "status"
+            ]
+          },
+          {
+            "description": "The rack is being reset.",
+            "type": "object",
+            "properties": {
+              "id": {
+                "description": "The ID of the reset operation.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/RackResetUuid"
+                  }
+                ]
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "resetting"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "status"
+            ]
+          },
+          {
+            "description": "The rack is uninitialized. `reset_id` is `None` if it was uninitialized on startup, or `Some` if a reset operation completed.",
+            "type": "object",
+            "properties": {
+              "reset_id": {
+                "nullable": true,
+                "description": "The ID of the reset operation, if one was performed.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/RackResetUuid"
+                  }
+                ]
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "uninitialized"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          {
+            "description": "Rack reset failed.",
+            "type": "object",
+            "properties": {
+              "id": {
+                "description": "The ID of the reset operation.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/RackResetUuid"
+                  }
+                ]
+              },
+              "message": {
+                "description": "A message describing the failure.",
+                "type": "string"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "reset_failed"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "message",
+              "status"
+            ]
+          },
+          {
+            "description": "Rack reset panicked.",
+            "type": "object",
+            "properties": {
+              "id": {
+                "description": "The ID of the reset operation.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/RackResetUuid"
+                  }
+                ]
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "reset_panicked"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "status"
+            ]
+          }
+        ]
+      },
+      "RackResetUuid": {
+        "x-rust-type": {
+          "crate": "omicron-uuid-kinds",
+          "path": "omicron_uuid_kinds::RackResetUuid",
+          "version": "*"
+        },
+        "type": "string",
+        "format": "uuid"
+      },
+      "ReceiverPower": {
+        "description": "A received optical power measurement from one lane.\n\nModules report received power in one of two ways, and the two are not directly comparable, so the kind of measurement is carried alongside the value rather than being flattened away.",
+        "oneOf": [
+          {
+            "description": "An average optical power measurement, in milliwatts.",
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "average"
+                ]
+              },
+              "value_mw": {
+                "description": "The measured power, in milliwatts.",
+                "type": "number",
+                "format": "float"
+              }
+            },
+            "required": [
+              "kind",
+              "value_mw"
+            ]
+          },
+          {
+            "description": "A peak-to-peak optical power measurement, in milliwatts.",
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "peak_to_peak"
+                ]
+              },
+              "value_mw": {
+                "description": "The measured power, in milliwatts.",
+                "type": "number",
+                "format": "float"
+              }
+            },
+            "required": [
+              "kind",
+              "value_mw"
+            ]
+          }
+        ]
+      },
+      "RepositoryDescription": {
+        "description": "A description of the TUF repository currently held by wicketd.",
+        "type": "object",
+        "properties": {
+          "system_version": {
+            "nullable": true,
+            "description": "The system version of the uploaded TUF repository, if one is present.",
+            "type": "string",
+            "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$"
+          }
+        }
+      },
+      "RotImageError": {
+        "type": "string",
+        "enum": [
+          "unchecked",
+          "first_page_erased",
+          "partially_programmed",
+          "invalid_length",
+          "header_not_programmed",
+          "bootloader_too_small",
+          "bad_magic",
+          "header_image_size",
+          "unaligned_length",
+          "unsupported_type",
+          "reset_vector_not_thumb2",
+          "reset_vector",
+          "signature"
+        ]
+      },
+      "RotInfo": {
+        "description": "Root-of-trust information for a single service processor.\n\nThe root of trust is reached through its service processor, so it has its own read state: an SP that responds may still be unable to talk to its RoT.",
+        "oneOf": [
+          {
+            "description": "The root of trust has not been read yet.",
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "not_read"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          {
+            "description": "The service processor reported that it cannot reach its root of trust.\n\nThis is the SP's own report (from its `SpState.rot`), not a wicketd fetch error: the SP responded, but told us it could not talk to its RoT. It therefore carries only a message, with no `kind` or `age`, unlike a `FetchError`.",
+            "type": "object",
+            "properties": {
+              "message": {
+                "description": "The failure the service processor reported for its root of trust.",
+                "type": "string"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "error"
+                ]
+              }
+            },
+            "required": [
+              "message",
+              "state"
+            ]
+          },
+          {
+            "description": "The root of trust was read.",
+            "type": "object",
+            "properties": {
+              "active": {
+                "description": "The currently-active RoT image slot.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/RotSlot"
+                  }
+                ]
+              },
+              "slot_a": {
+                "description": "The image in slot A.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/RotSlotInfo"
+                  }
+                ]
+              },
+              "slot_b": {
+                "description": "The image in slot B.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/RotSlotInfo"
+                  }
+                ]
+              },
+              "stage0": {
+                "description": "The stage0 bootloader.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/RotStage0Info"
+                  }
+                ]
+              },
+              "stage0next": {
+                "description": "The pending stage0next bootloader.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/RotStage0Info"
+                  }
+                ]
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "read"
+                ]
+              }
+            },
+            "required": [
+              "active",
+              "slot_a",
+              "slot_b",
+              "stage0",
+              "stage0next",
+              "state"
+            ]
+          }
+        ]
+      },
+      "RotSlot": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "slot": {
+                "type": "string",
+                "enum": [
+                  "a"
+                ]
+              }
+            },
+            "required": [
+              "slot"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "slot": {
+                "type": "string",
+                "enum": [
+                  "b"
+                ]
+              }
+            },
+            "required": [
+              "slot"
+            ]
+          }
+        ]
+      },
+      "RotSlotInfo": {
+        "description": "One root-of-trust firmware slot.\n\nThe caboose says what firmware is in the slot; `image_error` says whether the RoT considers that image usable. The two are read from different sources, so a slot can have a readable caboose and still be unbootable.",
+        "type": "object",
+        "properties": {
+          "caboose": {
+            "description": "The caboose of the image in this slot.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SlotCaboose"
+              }
+            ]
+          },
+          "image_error": {
+            "nullable": true,
+            "description": "Why the RoT considers this image invalid, if it does.\n\n`None` means the image is valid, or that this RoT version does not report per-slot image validity.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RotImageError"
+              }
+            ]
+          }
+        },
+        "required": [
+          "caboose"
+        ]
+      },
+      "RotStage0Info": {
+        "description": "The stage0 (or stage0next) bootloader slot.",
+        "type": "object",
+        "properties": {
+          "caboose": {
+            "description": "The caboose of the bootloader in this slot.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Stage0Caboose"
+              }
+            ]
+          },
+          "image_error": {
+            "nullable": true,
+            "description": "Why the RoT considers this bootloader image invalid, if it does.\n\n`None` means the image is valid, or that this RoT version does not report per-slot image validity.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RotImageError"
+              }
+            ]
+          }
+        },
+        "required": [
+          "caboose"
+        ]
+      },
+      "RouteConfig": {
+        "type": "object",
+        "properties": {
+          "destination": {
+            "description": "The destination of the route.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/IpNet"
+              }
+            ]
+          },
+          "nexthop": {
+            "description": "The nexthop/gateway address.",
+            "type": "string",
+            "format": "ip"
+          },
+          "rib_priority": {
+            "nullable": true,
+            "description": "The RIB priority (i.e. Admin Distance) associated with this route.",
+            "default": null,
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
+          },
+          "vlan_id": {
+            "nullable": true,
+            "description": "The VLAN id associated with this route.",
+            "default": null,
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "destination",
+          "nexthop"
+        ]
+      },
+      "RouterLifetimeConfig": {
+        "description": "Router lifetime in seconds for unnumbered BGP peers",
+        "type": "integer",
+        "format": "uint16",
+        "minimum": 0,
+        "maximum": 9000
+      },
+      "RssStepInfo": {
+        "description": "Information about the current RSS step.",
+        "type": "object",
+        "properties": {
+          "description": {
+            "description": "A human-readable description of the current step.",
+            "type": "string"
+          },
+          "step": {
+            "description": "The 1-based index of the current step.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "total_steps": {
+            "description": "The total number of RSS steps.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "description",
+          "step",
+          "total_steps"
+        ]
+      },
+      "RunningProgress": {
+        "description": "The most recent progress reported by a running step.",
+        "oneOf": [
+          {
+            "description": "The update engine has not received any progress message for this step attempt yet.\n\nThe engine reports this immediately after a step starts, and again after a retry or progress reset. It does not indicate a stall or timeout.",
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "waiting_for_progress"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          {
+            "description": "The step reported progress.\n\n`progress` carries the counter if the report included one.",
+            "type": "object",
+            "properties": {
+              "progress": {
+                "nullable": true,
+                "description": "The reported progress counter, if the report included one.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/StepProgress"
+                  }
+                ]
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "counter"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          }
+        ]
+      },
+      "SetBgpAuthKeyStatus": {
+        "oneOf": [
+          {
+            "description": "The key was accepted and replaced an old key.",
+            "type": "string",
+            "enum": [
+              "replaced"
+            ]
+          },
+          {
+            "description": "The key was accepted, and is the same as the existing key.",
+            "type": "string",
+            "enum": [
+              "unchanged"
+            ]
+          },
+          {
+            "description": "The key was accepted and is new.",
+            "type": "string",
+            "enum": [
+              "added"
+            ]
+          }
+        ]
+      },
+      "Sff8636LaneFaults": {
+        "description": "The fault flags for one SFF-8636 lane.\n\nSFF-8636 always reports all five flags, so these are plain booleans.",
+        "type": "object",
+        "properties": {
+          "rx_lol": {
+            "description": "Media-side (receive) loss of lock.",
+            "type": "boolean"
+          },
+          "rx_los": {
+            "description": "Media-side (receive) loss of signal.",
+            "type": "boolean"
+          },
+          "tx_fault": {
+            "description": "A fault in the transmitter and/or laser.",
+            "type": "boolean"
+          },
+          "tx_lol": {
+            "description": "Host-side (transmit) loss of lock.",
+            "type": "boolean"
+          },
+          "tx_los": {
+            "description": "Host-side (transmit) loss of signal.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "rx_lol",
+          "rx_los",
+          "tx_fault",
+          "tx_lol",
+          "tx_los"
+        ]
+      },
+      "SlotCaboose": {
+        "description": "The caboose for a single firmware slot, including whether it was read.\n\nA caboose that could not be read is reported as `error` rather than `not_read`, so that a caller waiting for a caboose to appear can tell a transient \"not yet\" from a read that keeps failing.",
+        "oneOf": [
+          {
+            "description": "The caboose for this slot has not been read yet.",
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "not_read"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          {
+            "description": "Reading the caboose for this slot failed.",
+            "type": "object",
+            "properties": {
+              "error": {
+                "description": "What went wrong reading the caboose.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/FetchError"
+                  }
+                ]
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "error"
+                ]
+              }
+            },
+            "required": [
+              "error",
+              "state"
+            ]
+          },
+          {
+            "description": "The caboose for this slot was read.",
+            "type": "object",
+            "properties": {
+              "caboose": {
+                "description": "The caboose that was read.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Caboose"
+                  }
+                ]
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "read"
+                ]
+              }
+            },
+            "required": [
+              "caboose",
+              "state"
+            ]
+          }
+        ]
+      },
+      "SpIdentifier": {
+        "type": "object",
+        "properties": {
+          "slot": {
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          },
+          "type": {
+            "$ref": "#/components/schemas/SpType"
+          }
+        },
+        "required": [
+          "slot",
+          "type"
+        ]
+      },
+      "SpIgnitionInfo": {
+        "description": "The ignition state of a service processor.\n\nThis has no per-SP `Error` variant: ignition is fetched rack-wide in a single request, so a fetch failure is not attributable to any one SP. A failed ignition fetch is reported once on `SpInventory.ignition_fetch_error` instead.",
+        "oneOf": [
+          {
+            "description": "The ignition state has not been read yet.",
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "not_read"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          {
+            "description": "Ignition reports the service processor as present.",
+            "type": "object",
+            "properties": {
+              "faults": {
+                "description": "The faults ignition reports for the service processor.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/IgnitionFaults"
+                  }
+                ]
+              },
+              "power": {
+                "description": "Whether the service processor is powered on.",
+                "type": "boolean"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "present"
+                ]
+              }
+            },
+            "required": [
+              "faults",
+              "power",
+              "state"
+            ]
+          },
+          {
+            "description": "Ignition reports the service processor as absent.",
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "absent"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          }
+        ]
+      },
+      "SpInfo": {
+        "description": "A single service processor's inventory.\n\nThe state, ignition, caboose, and root-of-trust fields are read from MGS independently of one another, so each carries its own read state and they may disagree about how much is known.",
+        "type": "object",
+        "properties": {
+          "caboose_active": {
+            "description": "The caboose of the active service-processor firmware slot.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SlotCaboose"
+              }
+            ]
+          },
+          "caboose_inactive": {
+            "description": "The caboose of the inactive service-processor firmware slot.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SlotCaboose"
+              }
+            ]
+          },
+          "id": {
+            "description": "Identifies the service processor by type and slot.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SpIdentifier"
+              }
+            ]
+          },
+          "ignition": {
+            "description": "The ignition state of this service processor.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SpIgnitionInfo"
+              }
+            ]
+          },
+          "rot": {
+            "description": "Root-of-trust information.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RotInfo"
+              }
+            ]
+          },
+          "state": {
+            "description": "The service processor's state.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SpStateInfo"
+              }
+            ]
+          }
+        },
+        "required": [
+          "caboose_active",
+          "caboose_inactive",
+          "id",
+          "ignition",
+          "rot",
+          "state"
+        ]
+      },
+      "SpInventory": {
+        "description": "Inventory across all service processors.\n\nThis type cannot derive `Eq` because transceiver optical-power readings are floating-point.",
+        "type": "object",
+        "properties": {
+          "ignition_fetch_error": {
+            "nullable": true,
+            "description": "The rack-wide ignition-list fetch error, if the most recent ignition fetch failed.\n\nIgnition is fetched for the whole rack in a single request, so a failure is reported once here rather than per SP. `None` means the last ignition fetch succeeded (or none has failed yet); the per-SP `ignition` fields then reflect that most recent successful fetch.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/FetchError"
+              }
+            ]
+          },
+          "mgs_last_seen": {
+            "description": "How long it has been since wicketd last heard from MGS.\n\nA large value indicates that MGS might be down. This is a duration rather than a timestamp because wicketd and its clients keep independent clocks, and commissioning runs before time is synced.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Duration"
+              }
+            ]
+          },
+          "sps": {
+            "title": "IdOrdMap",
+            "description": "The inventory of each SP.",
+            "x-rust-type": {
+              "crate": "iddqd",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/SpInfo"
+                }
+              ],
+              "path": "iddqd::IdOrdMap",
+              "version": "*"
+            },
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SpInfo"
+            },
+            "uniqueItems": true
+          },
+          "transceivers": {
+            "description": "The switch transceiver (optical module) inventory.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TransceiverInventory"
+              }
+            ]
+          }
+        },
+        "required": [
+          "mgs_last_seen",
+          "sps",
+          "transceivers"
+        ]
+      },
+      "SpInventoryParams": {
+        "description": "Parameters for the SP inventory endpoint.",
+        "type": "object",
+        "properties": {
+          "force_refresh": {
+            "description": "Refresh the state of these service processors from MGS before returning, rather than returning their cached state. Service processors not listed here are returned from the cache.",
+            "default": [],
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SpIdentifier"
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "SpStateInfo": {
+        "description": "The service processor's state, read together from MGS.\n\nThe serial number and power state are always read together from the same service-processor state, so they are reported as a single unit.",
+        "oneOf": [
+          {
+            "description": "The service processor's state has not been read yet.",
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "not_read"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          {
+            "description": "Reading the service processor's state failed.",
+            "type": "object",
+            "properties": {
+              "error": {
+                "description": "What went wrong reading the state.\n\nThe error's `kind` says whether the failure looks transient (so a caller waiting for this service processor should keep waiting) or permanent (so retrying is unlikely to help on its own).",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/FetchError"
+                  }
+                ]
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "error"
+                ]
+              }
+            },
+            "required": [
+              "error",
+              "state"
+            ]
+          },
+          {
+            "description": "The service processor's state was read.",
+            "type": "object",
+            "properties": {
+              "power_state": {
+                "description": "The host power state.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/PowerState"
+                  }
+                ]
+              },
+              "refresh_error": {
+                "nullable": true,
+                "description": "The error from a more recent state fetch that failed while this older reading still stands, if any.\n\nThe reading remains primary: a stale-but-real reading beats no reading. `Some` means the most recent `sp_get` failed but an earlier one succeeded, so the concurrent failure is surfaced here rather than displacing the reading. `None` means the most recent fetch succeeded (or none has failed since).",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/FetchError"
+                  }
+                ]
+              },
+              "serial_number": {
+                "description": "The service processor's serial number.",
+                "type": "string"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "read"
+                ]
+              }
+            },
+            "required": [
+              "power_state",
+              "serial_number",
+              "state"
+            ]
+          }
+        ]
+      },
+      "SpType": {
+        "type": "string",
+        "enum": [
+          "sled",
+          "power",
+          "switch"
+        ]
+      },
+      "SpUpdateProgress": {
+        "description": "Update progress for a single service processor.\n\nAn SP's update progress is only provided once an update has been started for it.",
+        "type": "object",
+        "properties": {
+          "progress": {
+            "description": "The update progress for that service processor.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/UpdateProgress"
+              }
+            ]
+          },
+          "sp": {
+            "description": "The service processor this progress describes.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SpIdentifier"
+              }
+            ]
+          }
+        },
+        "required": [
+          "progress",
+          "sp"
+        ]
+      },
+      "Stage0Caboose": {
+        "description": "The stage0 (or pending stage0next) bootloader caboose for a root of trust.\n\nThe four states are kept distinct because they mean different things to a caller:\n\n* `unsupported`: this RoT version does not report a stage0 bootloader caboose at all. * `not_read`: the RoT version supports reporting a stage0 caboose, but it has not been read yet. * `error`: reading the stage0 caboose was attempted and failed. * `read`: the stage0 caboose was read.",
+        "oneOf": [
+          {
+            "description": "This RoT version does not report a stage0 bootloader caboose.",
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "unsupported"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          {
+            "description": "The stage0 bootloader caboose is supported but has not been read yet.",
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "not_read"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          {
+            "description": "Reading the stage0 bootloader caboose failed.",
+            "type": "object",
+            "properties": {
+              "error": {
+                "description": "What went wrong reading the caboose.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/FetchError"
+                  }
+                ]
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "error"
+                ]
+              }
+            },
+            "required": [
+              "error",
+              "state"
+            ]
+          },
+          {
+            "description": "The stage0 bootloader caboose was read.",
+            "type": "object",
+            "properties": {
+              "caboose": {
+                "description": "The caboose that was read.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Caboose"
+                  }
+                ]
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "read"
+                ]
+              }
+            },
+            "required": [
+              "caboose",
+              "state"
+            ]
+          }
+        ]
+      },
+      "StartUpdateOptions": {
+        "description": "Options controlling how an update is performed.",
+        "type": "object",
+        "properties": {
+          "skip_rot_bootloader_version_check": {
+            "description": "If true, skip the check on the current RoT bootloader version and always update it regardless of whether the update appears to be needed.",
+            "default": false,
+            "type": "boolean"
+          },
+          "skip_rot_version_check": {
+            "description": "If true, skip the check on the current RoT version and always update it regardless of whether the update appears to be needed.",
+            "default": false,
+            "type": "boolean"
+          },
+          "skip_sp_version_check": {
+            "description": "If true, skip the check on the current SP version and always update it regardless of whether the update appears to be needed.",
+            "default": false,
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      },
+      "StartUpdateParams": {
+        "description": "Parameters for starting an update.",
+        "type": "object",
+        "properties": {
+          "options": {
+            "description": "Options controlling the update.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/StartUpdateOptions"
+              }
+            ]
+          },
+          "targets": {
+            "description": "The service processors to update.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/UpdateTargets"
+              }
+            ]
+          }
+        },
+        "required": [
+          "options",
+          "targets"
+        ],
+        "additionalProperties": false
+      },
+      "StepOutcome": {
+        "description": "The outcome of a step that ran to completion.",
+        "oneOf": [
+          {
+            "description": "The step succeeded, optionally with a message.",
+            "type": "object",
+            "properties": {
+              "message": {
+                "nullable": true,
+                "description": "An optional message describing the success.",
+                "type": "string"
+              },
+              "outcome": {
+                "type": "string",
+                "enum": [
+                  "success"
+                ]
+              }
+            },
+            "required": [
+              "outcome"
+            ]
+          },
+          {
+            "description": "The step succeeded but produced a warning.",
+            "type": "object",
+            "properties": {
+              "message": {
+                "description": "The warning message.",
+                "type": "string"
+              },
+              "outcome": {
+                "type": "string",
+                "enum": [
+                  "warning"
+                ]
+              }
+            },
+            "required": [
+              "message",
+              "outcome"
+            ]
+          },
+          {
+            "description": "The step was skipped.",
+            "type": "object",
+            "properties": {
+              "message": {
+                "description": "The message describing why the step was skipped.",
+                "type": "string"
+              },
+              "outcome": {
+                "type": "string",
+                "enum": [
+                  "skipped"
+                ]
+              }
+            },
+            "required": [
+              "message",
+              "outcome"
+            ]
+          }
+        ]
+      },
+      "StepProgress": {
+        "description": "A step's progress towards completion.",
+        "type": "object",
+        "properties": {
+          "current": {
+            "description": "The current progress value.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "total": {
+            "nullable": true,
+            "description": "The total value this progress counts towards, if known.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "units": {
+            "description": "The units of `current` and `total` (for example, \"bytes\").",
+            "type": "string"
+          }
+        },
+        "required": [
+          "current",
+          "units"
+        ]
+      },
+      "SwitchSlot": {
+        "description": "Identifies switch physical location",
+        "oneOf": [
+          {
+            "description": "Switch in upper slot",
+            "type": "string",
+            "enum": [
+              "switch0"
+            ]
+          },
+          {
+            "description": "Switch in lower slot",
+            "type": "string",
+            "enum": [
+              "switch1"
+            ]
+          }
+        ]
+      },
+      "SwitchTransceivers": {
+        "description": "The transceivers in a single switch.",
+        "type": "object",
+        "properties": {
+          "last_seen": {
+            "description": "How long it has been since this switch's transceivers were read.\n\nThis is tracked per switch because wicketd polls each switch with its own task: a large value here means this switch's poller is wedged, even if the other switch is being read normally.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Duration"
+              }
+            ]
+          },
+          "switch": {
+            "description": "The switch these transceivers belong to.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SwitchSlot"
+              }
+            ]
+          },
+          "transceivers": {
+            "title": "IdOrdMap",
+            "description": "The transceivers in this switch, keyed by front port.",
+            "x-rust-type": {
+              "crate": "iddqd",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/Transceiver"
+                }
+              ],
+              "path": "iddqd::IdOrdMap",
+              "version": "*"
+            },
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Transceiver"
+            },
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "last_seen",
+          "switch",
+          "transceivers"
+        ]
+      },
+      "Transceiver": {
+        "description": "A single transceiver (optical module) in a switch front port.\n\nThe four categories of state (`status`, `vendor`, `monitors`, and `datapath`) are read independently, so each can be reported or fail on its own.",
+        "type": "object",
+        "properties": {
+          "datapath": {
+            "description": "Per-lane datapath fault state.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TransceiverDatapath"
+              }
+            ]
+          },
+          "monitors": {
+            "description": "Optical power monitors.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TransceiverMonitors"
+              }
+            ]
+          },
+          "port": {
+            "description": "The front port the transceiver sits in (for example, `qsfp0`).",
+            "type": "string"
+          },
+          "status": {
+            "description": "Module presence and power status.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TransceiverStatus"
+              }
+            ]
+          },
+          "vendor": {
+            "description": "Vendor identification.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TransceiverVendor"
+              }
+            ]
+          }
+        },
+        "required": [
+          "datapath",
+          "monitors",
+          "port",
+          "status",
+          "vendor"
+        ]
+      },
+      "TransceiverDatapath": {
+        "description": "The per-lane datapath fault state of a transceiver module.\n\nSFF-8636 and CMIS modules describe their datapaths very differently, so this projection preserves each spec's native structure rather than flattening both into a single lane list. Clients can aggregate faults across both specs using the `iter_lane_faults` helper on this type.",
+        "oneOf": [
+          {
+            "description": "The datapath state could not be read.",
+            "type": "object",
+            "properties": {
+              "message": {
+                "description": "The error encountered while reading the datapath state.",
+                "type": "string"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "error"
+                ]
+              }
+            },
+            "required": [
+              "message",
+              "state"
+            ]
+          },
+          {
+            "description": "An SFF-8636 module.",
+            "type": "object",
+            "properties": {
+              "lanes": {
+                "description": "The fault flags for each of the module's four lanes, in lane order.",
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/Sff8636LaneFaults"
+                },
+                "minItems": 4,
+                "maxItems": 4
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "sff8636"
+                ]
+              }
+            },
+            "required": [
+              "lanes",
+              "state"
+            ]
+          },
+          {
+            "description": "A CMIS module.",
+            "type": "object",
+            "properties": {
+              "datapaths": {
+                "title": "IdOrdMap",
+                "description": "The active datapaths, keyed by application selector code.",
+                "x-rust-type": {
+                  "crate": "iddqd",
+                  "parameters": [
+                    {
+                      "$ref": "#/components/schemas/CmisDatapath"
+                    }
+                  ],
+                  "path": "iddqd::IdOrdMap",
+                  "version": "*"
+                },
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/CmisDatapath"
+                },
+                "uniqueItems": true
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "cmis"
+                ]
+              }
+            },
+            "required": [
+              "datapaths",
+              "state"
+            ]
+          }
+        ]
+      },
+      "TransceiverInventory": {
+        "description": "The switch transceiver (optical module) inventory.\n\nwicketd reads transceiver state from the switches independently of MGS, so it is presented as its own read/not-read unit rather than folded into the per-SP inventory.",
+        "oneOf": [
+          {
+            "description": "No switch's transceiver inventory has been read yet.",
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "not_read"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          {
+            "description": "At least one switch's transceiver inventory was read.",
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "read"
+                ]
+              },
+              "switches": {
+                "title": "IdOrdMap",
+                "description": "The transceivers in each switch that has been read.\n\nA switch that wicketd has never successfully read is absent from this map rather than present and empty, so a caller can tell \"this switch reported no transceivers\" from \"we have never heard from this switch\".",
+                "x-rust-type": {
+                  "crate": "iddqd",
+                  "parameters": [
+                    {
+                      "$ref": "#/components/schemas/SwitchTransceivers"
+                    }
+                  ],
+                  "path": "iddqd::IdOrdMap",
+                  "version": "*"
+                },
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/SwitchTransceivers"
+                },
+                "uniqueItems": true
+              }
+            },
+            "required": [
+              "state",
+              "switches"
+            ]
+          }
+        ]
+      },
+      "TransceiverMonitors": {
+        "description": "The optical power monitors of a transceiver module.",
+        "oneOf": [
+          {
+            "description": "The monitoring data could not be read.",
+            "type": "object",
+            "properties": {
+              "message": {
+                "description": "The error encountered while reading the monitoring data.",
+                "type": "string"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "error"
+                ]
+              }
+            },
+            "required": [
+              "message",
+              "state"
+            ]
+          },
+          {
+            "description": "The monitoring data was read.",
+            "type": "object",
+            "properties": {
+              "rx_power": {
+                "nullable": true,
+                "description": "Per-lane received optical power.\n\n`None` if the module does not report received power.",
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/ReceiverPower"
+                }
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "read"
+                ]
+              },
+              "tx_power_mw": {
+                "nullable": true,
+                "description": "Per-lane transmitted optical power, in milliwatts.\n\n`None` if the module does not report transmitted power.",
+                "type": "array",
+                "items": {
+                  "type": "number",
+                  "format": "float"
+                }
+              }
+            },
+            "required": [
+              "state"
+            ]
+          }
+        ]
+      },
+      "TransceiverStatus": {
+        "description": "The presence and power status of a transceiver module.",
+        "oneOf": [
+          {
+            "description": "The module status could not be read.",
+            "type": "object",
+            "properties": {
+              "message": {
+                "description": "The error encountered while reading the status.",
+                "type": "string"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "error"
+                ]
+              }
+            },
+            "required": [
+              "message",
+              "state"
+            ]
+          },
+          {
+            "description": "The module status was read.",
+            "type": "object",
+            "properties": {
+              "enabled": {
+                "description": "Whether the module is enabled (powered on).",
+                "type": "boolean"
+              },
+              "power_good": {
+                "description": "Whether the module's power is good.",
+                "type": "boolean"
+              },
+              "present": {
+                "description": "Whether a transceiver module is present in the port.",
+                "type": "boolean"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "read"
+                ]
+              }
+            },
+            "required": [
+              "enabled",
+              "power_good",
+              "present",
+              "state"
+            ]
+          }
+        ]
+      },
+      "TransceiverVendor": {
+        "description": "The vendor identification of a transceiver module.",
+        "oneOf": [
+          {
+            "description": "The vendor information could not be read.",
+            "type": "object",
+            "properties": {
+              "message": {
+                "description": "The error encountered while reading the vendor information.",
+                "type": "string"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "error"
+                ]
+              }
+            },
+            "required": [
+              "message",
+              "state"
+            ]
+          },
+          {
+            "description": "The vendor information was read.",
+            "type": "object",
+            "properties": {
+              "name": {
+                "description": "The vendor name.",
+                "type": "string"
+              },
+              "part": {
+                "description": "The vendor part number.",
+                "type": "string"
+              },
+              "serial": {
+                "description": "The module serial number.",
+                "type": "string"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "read"
+                ]
+              }
+            },
+            "required": [
+              "name",
+              "part",
+              "serial",
+              "state"
+            ]
+          }
+        ]
+      },
+      "TxEqConfig": {
+        "description": "Per-port tx-eq overrides.  This can be used to fine-tune the transceiver equalization settings to improve signal integrity.",
+        "type": "object",
+        "properties": {
+          "main": {
+            "nullable": true,
+            "description": "Main tap",
+            "type": "integer",
+            "format": "int32"
+          },
+          "post1": {
+            "nullable": true,
+            "description": "Post-cursor tap1",
+            "type": "integer",
+            "format": "int32"
+          },
+          "post2": {
+            "nullable": true,
+            "description": "Post-cursor tap2",
+            "type": "integer",
+            "format": "int32"
+          },
+          "pre1": {
+            "nullable": true,
+            "description": "Pre-cursor tap1",
+            "type": "integer",
+            "format": "int32"
+          },
+          "pre2": {
+            "nullable": true,
+            "description": "Pre-cursor tap2",
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      },
+      "UpdateProgress": {
+        "description": "The progress of a single update execution: its overall state and its steps.",
+        "type": "object",
+        "properties": {
+          "state": {
+            "description": "The overall rollup state of this execution.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/UpdateState"
+              }
+            ]
+          },
+          "steps": {
+            "description": "The steps of this execution, in order.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UpdateStep"
+            }
+          }
+        },
+        "required": [
+          "state",
+          "steps"
+        ]
+      },
+      "UpdateState": {
+        "description": "The state of an update execution.",
+        "oneOf": [
+          {
+            "description": "An update has been started, but execution has not begun yet.",
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "waiting"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          {
+            "description": "The update is currently running.",
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "running"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          {
+            "description": "The update ran to completion.\n\nWhether individual steps performed work or were skipped (for example, because a component was already at its target version) is recorded in the per-step outcomes.",
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "completed"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          {
+            "description": "The update failed.",
+            "type": "object",
+            "properties": {
+              "message": {
+                "description": "A human-readable description of the failure, combining the failed step and its error message (including any nested causes).",
+                "type": "string"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "failed"
+                ]
+              }
+            },
+            "required": [
+              "message",
+              "state"
+            ]
+          },
+          {
+            "description": "The update was aborted.",
+            "type": "object",
+            "properties": {
+              "message": {
+                "description": "A human-readable description of the abort, combining the aborted step and its message.",
+                "type": "string"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "aborted"
+                ]
+              }
+            },
+            "required": [
+              "message",
+              "state"
+            ]
+          }
+        ]
+      },
+      "UpdateStep": {
+        "description": "A single node in the update step tree.\n\nA step may spawn nested executions (for example, a per-component update that runs its own engine). Those executions appear in `children`.",
+        "type": "object",
+        "properties": {
+          "children": {
+            "description": "The nested executions this step spawned, in order. Empty if the step ran no nested engine.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UpdateProgress"
+            }
+          },
+          "description": {
+            "description": "A human-readable description of this step.",
+            "type": "string"
+          },
+          "status": {
+            "description": "The status of this step.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/UpdateStepStatus"
+              }
+            ]
+          }
+        },
+        "required": [
+          "children",
+          "description",
+          "status"
+        ]
+      },
+      "UpdateStepStatus": {
+        "description": "The status of a single step in the update step tree.",
+        "oneOf": [
+          {
+            "description": "The step has not started yet.",
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "not_started"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          {
+            "description": "The step is currently running.",
+            "type": "object",
+            "properties": {
+              "progress": {
+                "description": "The most recent progress reported by the step.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/RunningProgress"
+                  }
+                ]
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "running"
+                ]
+              }
+            },
+            "required": [
+              "progress",
+              "status"
+            ]
+          },
+          {
+            "description": "The step completed.",
+            "type": "object",
+            "properties": {
+              "outcome": {
+                "description": "The outcome of the completed step.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/StepOutcome"
+                  }
+                ]
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "completed"
+                ]
+              }
+            },
+            "required": [
+              "outcome",
+              "status"
+            ]
+          },
+          {
+            "description": "The step failed.",
+            "type": "object",
+            "properties": {
+              "causes": {
+                "description": "The chain of underlying causes for the failure, outermost first.",
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "message": {
+                "description": "A human-readable description of the failure.",
+                "type": "string"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "failed"
+                ]
+              }
+            },
+            "required": [
+              "causes",
+              "message",
+              "status"
+            ]
+          },
+          {
+            "description": "The step was aborted while running.",
+            "type": "object",
+            "properties": {
+              "message": {
+                "description": "A human-readable description of the abort.",
+                "type": "string"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "aborted"
+                ]
+              }
+            },
+            "required": [
+              "message",
+              "status"
+            ]
+          },
+          {
+            "description": "The step will not be run because a prior step failed or was aborted.",
+            "type": "object",
+            "properties": {
+              "reason": {
+                "description": "A human-readable description of why the step will not be run, naming the causal step.",
+                "type": "string"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "will_not_be_run"
+                ]
+              }
+            },
+            "required": [
+              "reason",
+              "status"
+            ]
+          }
+        ]
+      },
+      "UpdateTargets": {
+        "description": "A non-empty set of service processors to act on.",
+        "type": "array",
+        "items": {
+          "$ref": "#/components/schemas/SpIdentifier"
+        },
+        "minItems": 1,
+        "uniqueItems": true
+      },
+      "UserSpecifiedBgpPeerConfig": {
+        "description": "User-specified configuration for a BGP peer.\n\nThis is similar to the internal BGP peer configuration, except it does not carry the sensitive `md5_auth_key`; the operator provides the key separately, referenced by `auth_key_id`.",
+        "type": "object",
+        "properties": {
+          "addr": {
+            "description": "Address of the peer.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/UserSpecifiedRouterPeerAddr"
+              }
+            ]
+          },
+          "allowed_export": {
+            "description": "Apply export policy to this peer with an allow list.",
+            "default": null,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/UserSpecifiedImportExportPolicy"
+              }
+            ]
+          },
+          "allowed_import": {
+            "description": "Apply import policy to this peer with an allow list.",
+            "default": null,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/UserSpecifiedImportExportPolicy"
+              }
+            ]
+          },
+          "asn": {
+            "description": "The autonomous system number of the router the peer belongs to.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "auth_key_id": {
+            "nullable": true,
+            "description": "The key identifier for authentication to use with the peer.",
+            "default": null,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/BgpAuthKeyId"
+              }
+            ]
+          },
+          "communities": {
+            "description": "Include the provided communities in updates sent to the peer.",
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            }
+          },
+          "connect_retry": {
+            "nullable": true,
+            "description": "The interval in seconds between peer connection retry attempts. Defaults to 3 seconds.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "delay_open": {
+            "nullable": true,
+            "description": "How long to delay sending open messages to a peer, in seconds. Defaults to 0.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "enforce_first_as": {
+            "description": "Enforce that the first AS in paths received from this peer is the peer's AS.",
+            "default": false,
+            "type": "boolean"
+          },
+          "hold_time": {
+            "nullable": true,
+            "description": "How long to keep a session alive without a keepalive, in seconds. Defaults to 6 seconds.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "idle_hold_time": {
+            "nullable": true,
+            "description": "How long to keep a peer in idle after a state machine reset, in seconds. Defaults to 3 seconds.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "keepalive": {
+            "nullable": true,
+            "description": "The interval to send keepalive messages at, in seconds. Defaults to 2 seconds.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "local_pref": {
+            "nullable": true,
+            "description": "Apply a local preference to routes received from this peer.",
+            "default": null,
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "min_ttl": {
+            "nullable": true,
+            "description": "Require messages from a peer have a minimum IP time to live field.",
+            "default": null,
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
+          },
+          "multi_exit_discriminator": {
+            "nullable": true,
+            "description": "Apply the provided multi-exit discriminator (MED) updates sent to the peer.",
+            "default": null,
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "port": {
+            "description": "Switch port the peer is reachable on.",
+            "type": "string"
+          },
+          "remote_asn": {
+            "nullable": true,
+            "description": "Require that a peer has a specified ASN.",
+            "default": null,
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "router_lifetime": {
+            "description": "Router lifetime in seconds for unnumbered BGP peers.",
+            "default": 0,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RouterLifetimeConfig"
+              }
+            ]
+          },
+          "vlan_id": {
+            "nullable": true,
+            "description": "Associate a VLAN ID with a BGP peer session.",
+            "default": null,
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "addr",
+          "asn",
+          "port"
+        ],
+        "additionalProperties": false
+      },
+      "UserSpecifiedImportExportPolicy": {
+        "nullable": true,
+        "type": "array",
+        "items": {
+          "$ref": "#/components/schemas/IpNet"
+        }
+      },
+      "UserSpecifiedPortConfig": {
+        "description": "A user-specified port configuration.",
+        "anyOf": [
+          {
+            "description": "A manually-configured port.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ManualPortConfig"
+              }
+            ]
+          },
+          {
+            "description": "A port configured automatically via DDM.",
+            "type": "object",
+            "additionalProperties": false
+          }
+        ]
+      },
+      "UserSpecifiedRackNetworkConfig": {
+        "description": "User-specified parts of the rack network configuration.",
+        "type": "object",
+        "properties": {
+          "bgp": {
+            "description": "BGP configuration for the rack.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BgpConfig"
+            }
+          },
+          "infra_ip_first": {
+            "description": "The first address of the infrastructure IP range.",
+            "type": "string",
+            "format": "ip"
+          },
+          "infra_ip_last": {
+            "description": "The last address of the infrastructure IP range.",
+            "type": "string",
+            "format": "ip"
+          },
+          "rack_subnet_address": {
+            "nullable": true,
+            "description": "The rack subnet address, if statically assigned.",
+            "type": "string",
+            "format": "ipv6"
+          },
+          "switch0": {
+            "description": "Per-port configuration for switch 0, keyed by port name.",
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/UserSpecifiedPortConfig"
+            }
+          },
+          "switch1": {
+            "description": "Per-port configuration for switch 1, keyed by port name.",
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/UserSpecifiedPortConfig"
+            }
+          }
+        },
+        "required": [
+          "bgp",
+          "infra_ip_first",
+          "infra_ip_last",
+          "switch0",
+          "switch1"
+        ],
+        "additionalProperties": false
+      },
+      "UserSpecifiedRouterPeerAddr": {
+        "type": "string"
+      },
+      "UserSpecifiedUplinkAddressConfig": {
+        "description": "A user-specified uplink address configuration.\n\nThis provides a friendlier TOML representation of an uplink address.",
+        "type": "object",
+        "properties": {
+          "address": {
+            "description": "The address to be used on the uplink.",
+            "type": "string"
+          },
+          "vlan_id": {
+            "nullable": true,
+            "description": "The VLAN id (if any) associated with this address.",
+            "default": null,
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "address"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "responses": {
+      "Error": {
+        "description": "Error",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      }
+    }
+  }
+}

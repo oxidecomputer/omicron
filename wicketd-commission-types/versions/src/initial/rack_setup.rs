@@ -4,19 +4,14 @@
 
 //! Rack setup (RSS) types for the commissioning API.
 //!
-//! The RSS configuration tree (rooted at [`PutRssUserConfigInsensitive`]) is
-//! copied verbatim from `wicket-common`, `sled-agent-types`, and
-//! `omicron-common` so that its serde shape is byte-for-byte compatible with
-//! the internal types (see the round-trip tests in wicketd). The functional
-//! machinery of the originals (validation error types, inherent methods, and
-//! conversions to internal types) lives elsewhere: validation and conversion
-//! happen at the wicketd boundary.
+//! The root struct is [`PutRssUserConfigInsensitive`].
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::net::{IpAddr, Ipv6Addr};
 
 use omicron_common::api::external::Name;
+use omicron_uuid_kinds::{RackInitUuid, RackResetUuid};
 use oxnet::IpNet;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize, Serializer};
@@ -496,6 +491,50 @@ impl<'de> Deserialize<'de> for UserSpecifiedRouterPeerAddr {
 )]
 pub struct BgpAuthKeyId(pub(crate) Name);
 
+/// Describes the actual authentication key to use with a BGP peer.
+///
+/// Currently, only TCP-MD5 authentication is supported.
+#[derive(Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum BgpAuthKey {
+    /// TCP-MD5 authentication.
+    TcpMd5 {
+        /// The pre-shared key.
+        key: String,
+    },
+}
+
+// Ensure that the key is not displayed in debug output.
+impl fmt::Debug for BgpAuthKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            BgpAuthKey::TcpMd5 { key: _ } => {
+                f.debug_struct("TcpMd5").field("key", &"********").finish()
+            }
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum SetBgpAuthKeyStatus {
+    /// The key was accepted and replaced an old key.
+    Replaced,
+
+    /// The key was accepted, and is the same as the existing key.
+    Unchanged,
+
+    /// The key was accepted and is new.
+    Added,
+}
+
+/// Identifies the BGP authentication key being set.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+pub struct BgpAuthKeyPath {
+    /// The key ID, as referenced by a BGP peer in the RSS configuration.
+    pub key_id: BgpAuthKeyId,
+}
+
 /// The result of uploading half of a certificate/key pair.
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
 #[serde(tag = "status", rename_all = "snake_case")]
@@ -585,4 +624,86 @@ impl JsonSchema for UserSpecifiedImportExportPolicy {
     ) -> schemars::schema::Schema {
         Option::<Vec<IpNet>>::json_schema(r#gen)
     }
+}
+
+/// A recovery-silo user password hash, in PHC string format.
+///
+/// This shares its name with the validated `omicron_passwords::NewPasswordHash`
+/// it converts into, but holds an unvalidated string. The hash is validated (as
+/// an Argon2id PHC string) only at the wicketd conversion boundary.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(transparent)]
+pub struct NewPasswordHash(pub String);
+
+/// The body of a request to set the recovery-silo user password hash.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct PutRecoveryUserPasswordHash {
+    /// The password hash, in PHC string format.
+    pub hash: NewPasswordHash,
+}
+
+/// Information about the current RSS step.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+pub struct RssStepInfo {
+    /// The 1-based index of the current step.
+    pub step: u32,
+    /// The total number of RSS steps.
+    pub total_steps: u32,
+    /// A human-readable description of the current step.
+    pub description: String,
+}
+
+/// The current status of any rack-level operation being performed.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum RackOperationStatus {
+    /// Rack initialization is in progress.
+    Initializing {
+        /// The ID of the initialization operation.
+        id: RackInitUuid,
+        /// Information about the current step.
+        step: RssStepInfo,
+    },
+    /// The rack is initialized. `id` is `None` if the rack was already
+    /// initialized on startup.
+    Initialized {
+        /// The ID of the initialization operation, if one was performed.
+        id: Option<RackInitUuid>,
+    },
+    /// Rack initialization failed.
+    InitializationFailed {
+        /// The ID of the initialization operation.
+        id: RackInitUuid,
+        /// A message describing the failure.
+        message: String,
+    },
+    /// Rack initialization panicked.
+    InitializationPanicked {
+        /// The ID of the initialization operation.
+        id: RackInitUuid,
+    },
+    /// The rack is being reset.
+    Resetting {
+        /// The ID of the reset operation.
+        id: RackResetUuid,
+    },
+    /// The rack is uninitialized. `reset_id` is `None` if it was uninitialized
+    /// on startup, or `Some` if a reset operation completed.
+    Uninitialized {
+        /// The ID of the reset operation, if one was performed.
+        reset_id: Option<RackResetUuid>,
+    },
+    /// Rack reset failed.
+    ResetFailed {
+        /// The ID of the reset operation.
+        id: RackResetUuid,
+        /// A message describing the failure.
+        message: String,
+    },
+    /// Rack reset panicked.
+    ResetPanicked {
+        /// The ID of the reset operation.
+        id: RackResetUuid,
+    },
 }

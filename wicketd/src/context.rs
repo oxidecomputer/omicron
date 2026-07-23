@@ -35,11 +35,11 @@ use std::sync::OnceLock;
 use wicket_common::inventory::MgsV1Inventory;
 use wicket_common::inventory::SledInventory;
 use wicket_common::inventory::SpIdentifier;
-use wicket_common::rack_setup::BgpAuthKey;
 use wicket_common::rack_setup::BgpAuthKeyStatus;
 use wicket_common::rack_setup::BootstrapSledDescription;
-use wicketd_api::SetBgpAuthKeyStatus;
+use wicketd_commission_types::rack_setup::BgpAuthKey;
 use wicketd_commission_types::rack_setup::BgpAuthKeyId;
+use wicketd_commission_types::rack_setup::SetBgpAuthKeyStatus;
 
 #[derive(Default)]
 pub(crate) struct RssOrMultirackJoinConfigCommon {
@@ -275,7 +275,16 @@ impl RssOrMultirackJoinConfig {
 
 /// Shared state used by API handlers
 pub struct ServerContext {
+    /// The main wicketd API address, stored as `config.address` in the SMF
+    /// configuration.
+    ///
+    /// This address is used to reject SMF updates which attempt to change it.
     pub(crate) bind_address: SocketAddrV6,
+    /// The commission API address, stored as `config.commission-address` in the
+    /// SMF configuration.
+    ///
+    /// This address is used to reject SMF updates which attempt to change it.
+    pub(crate) commission_bind_address: SocketAddrV6,
     pub mgs_handle: MgsHandle,
     pub mgs_client: gateway_client::Client,
     pub transceiver_handle: TransceiverHandle,

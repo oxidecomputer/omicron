@@ -75,6 +75,7 @@ oxide-update-engine.workspace = true
 oxide-update-engine-types.workspace = true
 wicket-common.workspace = true
 wicketd-api.workspace = true
+wicketd-commission-api.workspace = true
 wicketd-commission-types.workspace = true
 wicketd-client.workspace = true
 omicron-workspace-hack.workspace = true
@@ -88,6 +89,9 @@ doc = false
 [dev-dependencies]
 expectorate.workspace = true
 flate2.workspace = true
+omicron-common.workspace = true
+wicketd-commission-client.workspace = true
+wicketd-commission-types-versions.workspace = true
 fs-err.workspace = true
 gateway-test-utils.workspace = true
 http.workspace = true
@@ -102,6 +106,7 @@ sled-agent-config-reconciler = { workspace = true, features = ["testing"] }
 sled-agent-resolvable-files.workspace = true
 sled-agent-resolvable-files-examples.workspace = true
 sled-storage.workspace = true
+sp-sim.workspace = true
 subprocess.workspace = true
 tar.workspace = true
 tokio = { workspace = true, features = ["test-util"] }

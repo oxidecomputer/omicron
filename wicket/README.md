@@ -167,7 +167,7 @@ location = { switch0 = ["sled", 1], switch1 = ["sled", 1] }
 Taking the port number mentioned above, run:
 
 ```
-cargo run -p wicketd -- run wicketd/examples/config.toml --address '[::1]:12226' --artifact-address '[::]:12227' --nexus-proxy-address '[::1]:12228' --mgs-address '[::1]:12225'
+cargo run -p wicketd -- run wicketd/examples/config.toml --address '[::1]:12226' --artifact-address '[::]:12227' --commission-address '[::1]:12234' --nexus-proxy-address '[::1]:12228' --mgs-address '[::1]:12225'
 ```
 
 In this case, the port number in `--address` provides the interface between

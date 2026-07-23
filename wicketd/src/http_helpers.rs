@@ -4,9 +4,9 @@
 
 //! Helper and utility code for the wicketd HTTP APIs.
 //!
-//! Currently this is only used for the main wicketd API implementation defined
-//! in `http_entrypoints.rs`. In the future, the same code will be used for the
-//! commission API (RFD 710).
+//! These helpers are shared by both the unstable wicketd API (defined in
+//! `http_entrypoints.rs`) and the stable commission API (defined in the
+//! `commission` module).
 
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
@@ -27,6 +27,7 @@ use crate::helpers::sps_to_string;
 use crate::mgs::GetInventoryResponse;
 use crate::mgs::MgsHandle;
 use crate::mgs::ShutdownInProgress;
+use crate::mgs::records_to_mgs_inventory;
 
 // Get the current inventory or return a 503 Unavailable.
 //
@@ -36,8 +37,9 @@ pub(crate) async fn mgs_inventory_or_unavail(
     mgs_handle: &MgsHandle,
 ) -> Result<MgsV1Inventory, HttpError> {
     match mgs_handle.get_cached_inventory().await {
-        Ok(GetInventoryResponse::Response { inventory, .. }) => Ok(inventory),
-        Ok(GetInventoryResponse::Unavailable) => Err(inventory_unavailable()),
+        Ok(GetInventoryResponse { sps, .. }) => {
+            records_to_mgs_inventory(&sps).ok_or_else(inventory_unavailable)
+        }
         Err(err @ ShutdownInProgress) => Err(shutdown_to_http(err)),
     }
 }
@@ -209,25 +211,15 @@ pub(crate) async fn start_update(
     let mut self_update = None;
     let mut maybe_self_update = BTreeSet::new();
 
-    // Next, do we have the states of the target SP?
-    let sp_states: BTreeMap<_, _> = match inventory {
-        GetInventoryResponse::Response { inventory, .. } => inventory
-            .sps
-            .into_iter()
-            .filter_map(|sp| {
-                if targets.contains(&sp.id) {
-                    if let Some(sp_state) = sp.state {
-                        Some((sp.id, sp_state))
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                }
-            })
-            .collect(),
-        GetInventoryResponse::Unavailable => BTreeMap::new(),
-    };
+    // Next, do we have the states of the target SPs?
+    let GetInventoryResponse { sps, .. } = &inventory;
+    let sp_states: BTreeMap<_, _> = targets
+        .iter()
+        .filter_map(|target| {
+            let state = sps.get(target)?.data.as_ref()?.state.clone();
+            Some((*target, state))
+        })
+        .collect();
 
     for target in &targets {
         let sp_state = match sp_states.get(target) {

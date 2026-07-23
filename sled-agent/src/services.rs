@@ -68,6 +68,7 @@ use omicron_common::address::NTP_ADMIN_PORT;
 use omicron_common::address::RACK_PREFIX_LENGTH;
 use omicron_common::address::SLED_PREFIX_LENGTH;
 use omicron_common::address::TFPORTD_PORT;
+use omicron_common::address::WICKETD_COMMISSION_PORT;
 use omicron_common::address::WICKETD_NEXUS_PROXY_PORT;
 use omicron_common::address::WICKETD_PORT;
 use omicron_common::address::{BOOTSTRAP_ARTIFACT_PORT, COCKROACH_ADMIN_PORT};
@@ -2676,6 +2677,11 @@ impl ServiceManager {
                         "address",
                         "astring",
                         &format!("[::1]:{WICKETD_PORT}"),
+                    )
+                    .add_property(
+                        "commission-address",
+                        "astring",
+                        &format!("[::1]:{WICKETD_COMMISSION_PORT}"),
                     )
                     .add_property(
                         "artifact-address",
