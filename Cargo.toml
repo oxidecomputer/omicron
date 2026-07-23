@@ -747,7 +747,7 @@ progenitor-extras = "0.2.0"
 # NOTE: if you change the pinned revision of the `bhyve_api` and propolis
 # dependencies, you must also update the references in package-manifest.toml to
 # match the new revision.
-bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "979b72896bc39a876c98fb32fe706da37a4fc408" }
+bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "372a57444262a662863e5da6f5a78c694cb6bfa8" }
 propolis-api-types-versions = { git = "https://github.com/oxidecomputer/propolis", rev = "979b72896bc39a876c98fb32fe706da37a4fc408" }
 propolis_api_types = { git = "https://github.com/oxidecomputer/propolis", rev = "979b72896bc39a876c98fb32fe706da37a4fc408" }
 propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "979b72896bc39a876c98fb32fe706da37a4fc408" }
