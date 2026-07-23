@@ -133,7 +133,7 @@ fn early_network_blobs_deserialize() {
 /// future, older blobs can still be deserialized correctly.
 fn current_config_example() -> (&'static str, EarlyNetworkConfigEnvelope) {
     // NOTE: the description must not contain commas or newlines.
-    let description = "2026-04-28 pre-r20";
+    let description = "2026-07-20 v43";
     let config = EarlyNetworkConfigEnvelope::from(&SystemNetworkingConfig {
         rack_network_config: RackNetworkConfig {
             rack_subnet: "fd00:1122:3344:100::/56".parse().unwrap(),
