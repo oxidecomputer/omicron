@@ -9,6 +9,7 @@ mod config;
 mod context;
 mod helpers;
 mod http_entrypoints;
+mod http_helpers;
 mod installinator_progress;
 pub mod mgs;
 mod multirack_config;
@@ -35,7 +36,8 @@ use mgs::make_mgs_client;
 pub(crate) use mgs::{MgsHandle, MgsManager};
 use nexus_proxy::NexusTcpProxy;
 use omicron_common::FileKv;
-use omicron_common::address::{AZ_PREFIX, Ipv6Subnet};
+use omicron_common::address::{AZ_PREFIX_LENGTH, Ipv6Subnet};
+use oxide_update_engine_types::spec::merge_anyhow_list;
 use preflight_check::PreflightCheckerHandler;
 use sled_hardware_types::Baseboard;
 use slog::{Drain, debug, error, o};
@@ -56,12 +58,12 @@ pub struct Args {
     pub mgs_address: SocketAddrV6,
     pub nexus_proxy_address: SocketAddrV6,
     pub baseboard: Option<Baseboard>,
-    pub rack_subnet: Option<Ipv6Subnet<AZ_PREFIX>>,
+    pub rack_subnet: Option<Ipv6Subnet<AZ_PREFIX_LENGTH>>,
 }
 
 pub struct SmfConfigValues {
     pub address: SocketAddrV6,
-    pub rack_subnet: Option<Ipv6Subnet<AZ_PREFIX>>,
+    pub rack_subnet: Option<Ipv6Subnet<AZ_PREFIX_LENGTH>>,
 }
 
 impl SmfConfigValues {
@@ -112,7 +114,7 @@ impl SmfConfigValues {
 }
 
 pub struct Server {
-    pub wicketd_server: HttpServer<ServerContext>,
+    pub wicketd_server: HttpServer<Arc<ServerContext>>,
     pub installinator_server: HttpServer<WicketdInstallinatorContext>,
     pub artifact_store: WicketdArtifactStore,
     pub update_tracker: Arc<UpdateTracker>,
@@ -196,7 +198,7 @@ impl Server {
             let mgs_client = make_mgs_client(log.clone(), args.mgs_address);
             dropshot::ServerBuilder::new(
                 http_entrypoints::api(),
-                ServerContext {
+                Arc::new(ServerContext {
                     bind_address: args.address,
                     mgs_handle,
                     mgs_client,
@@ -209,7 +211,7 @@ impl Server {
                     rss_or_multirack_join_config: Default::default(),
                     preflight_checker: PreflightCheckerHandler::new(&log),
                     internal_dns_resolver,
-                },
+                }),
                 ds_log,
             )
             .config(dropshot_config)
@@ -261,14 +263,26 @@ impl Server {
 
     /// Close all running dropshot servers.
     pub async fn close(mut self) -> Result<()> {
-        self.wicketd_server.close().await.map_err(|error| {
-            anyhow!("error closing wicketd server: {error}")
-        })?;
-        self.installinator_server.close().await.map_err(|error| {
-            anyhow!("error closing artifact server: {error}")
-        })?;
+        // Close the servers concurrently and shut down the proxy, then report
+        // every error that occurred.
+        let (wicketd, installinator) = tokio::join!(
+            self.wicketd_server.close(),
+            self.installinator_server.close(),
+        );
         self.nexus_tcp_proxy.shutdown();
-        Ok(())
+
+        let errors: Vec<anyhow::Error> = [
+            wicketd.map_err(|error| {
+                anyhow!("error closing wicketd server: {error}")
+            }),
+            installinator.map_err(|error| {
+                anyhow!("error closing artifact server: {error}")
+            }),
+        ]
+        .into_iter()
+        .filter_map(Result::err)
+        .collect();
+        if errors.is_empty() { Ok(()) } else { Err(merge_anyhow_list(errors)) }
     }
 
     pub async fn wait_for_finish(self) -> Result<(), String> {

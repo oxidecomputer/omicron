@@ -32,8 +32,8 @@ use omicron_common::address::{
     CP_SERVICES_RESERVED_ADDRESSES, DDMD_PORT, DENDRITE_PORT, DNS_HTTP_PORT,
     DNS_PORT, Ipv6Subnet, MGD_PORT, MGS_PORT, NEXUS_INTERNAL_PORT,
     NEXUS_LOCKSTEP_PORT, NTP_PORT, NUM_SOURCE_NAT_PORTS, REPO_DEPOT_PORT,
-    ReservedRackSubnet, SLED_PREFIX, SLED_RESERVED_ADDRESSES, get_sled_address,
-    get_switch_zone_address,
+    ReservedRackSubnet, SLED_PREFIX_LENGTH, SLED_RESERVED_ADDRESSES,
+    get_sled_address, get_switch_zone_address,
 };
 use omicron_common::api::external::{Generation, MacAddr, Vni};
 use omicron_common::api::internal::shared::{
@@ -178,7 +178,7 @@ impl SledConfig {
 pub struct PlannedSledDescription {
     pub underlay_address: SocketAddrV6,
     pub sled_id: SledUuid,
-    pub subnet: Ipv6Subnet<SLED_PREFIX>,
+    pub subnet: Ipv6Subnet<SLED_PREFIX_LENGTH>,
     pub config: SledConfig,
     pub last_allocated_ip_subnet_offset: LastAllocatedSubnetIpOffset,
 }
@@ -995,12 +995,12 @@ impl ServicePlan {
 
 struct AddressBumpAllocator {
     sled_id: SledUuid,
-    subnet: Ipv6Subnet<SLED_PREFIX>,
+    subnet: Ipv6Subnet<SLED_PREFIX_LENGTH>,
     last_addr_offset: u16,
 }
 
 impl AddressBumpAllocator {
-    fn new(sled_id: SledUuid, subnet: Ipv6Subnet<SLED_PREFIX>) -> Self {
+    fn new(sled_id: SledUuid, subnet: Ipv6Subnet<SLED_PREFIX_LENGTH>) -> Self {
         Self { sled_id, subnet, last_addr_offset: SLED_RESERVED_ADDRESSES }
     }
 
@@ -1038,7 +1038,7 @@ pub struct SledInfo {
     /// unique id for the sled agent
     pub sled_id: SledUuid,
     /// the sled's unique IPv6 subnet
-    subnet: Ipv6Subnet<SLED_PREFIX>,
+    subnet: Ipv6Subnet<SLED_PREFIX_LENGTH>,
     /// the address of the Sled Agent on the sled's subnet
     pub sled_address: SocketAddrV6,
     /// the inventory returned by the Sled
@@ -1059,7 +1059,7 @@ pub struct SledInfo {
 impl SledInfo {
     pub fn new(
         sled_id: SledUuid,
-        subnet: Ipv6Subnet<SLED_PREFIX>,
+        subnet: Ipv6Subnet<SLED_PREFIX_LENGTH>,
         sled_address: SocketAddrV6,
         inventory: Inventory,
         is_scrimlet: bool,
@@ -1380,7 +1380,7 @@ mod tests {
         let logctx = test_setup_log("bump_allocator_basics");
 
         let address = Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 0);
-        let subnet = Ipv6Subnet::<SLED_PREFIX>::new(address);
+        let subnet = Ipv6Subnet::<SLED_PREFIX_LENGTH>::new(address);
 
         let mut allocator =
             AddressBumpAllocator::new(SledUuid::new_v4(), subnet);
@@ -1419,7 +1419,7 @@ mod tests {
         let logctx = test_setup_log("bump_allocator_exhaustion");
 
         let address = Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 0);
-        let subnet = Ipv6Subnet::<SLED_PREFIX>::new(address);
+        let subnet = Ipv6Subnet::<SLED_PREFIX_LENGTH>::new(address);
 
         let mut allocator =
             AddressBumpAllocator::new(SledUuid::new_v4(), subnet);
@@ -1501,7 +1501,7 @@ mod tests {
     fn test_sled_info() -> SledInfo {
         let sled_id = SledUuid::new_v4();
         let address = Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 0);
-        let subnet = Ipv6Subnet::<SLED_PREFIX>::new(address);
+        let subnet = Ipv6Subnet::<SLED_PREFIX_LENGTH>::new(address);
         let sled_address = get_sled_address(subnet);
         let is_scrimlet = true;
 

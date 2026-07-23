@@ -2306,6 +2306,7 @@ async fn do_switch_port_settings_delete(
 mod test {
     use crate::db::datastore::UpdatePrecondition;
     use crate::db::pub_test_utils::TestDatabase;
+    use nexus_db_lookup::LookupPath;
     use nexus_db_model::INFRA_LOT;
     use nexus_types::external_api::networking::{
         AddressLotBlockCreate, AddressLotCreate, AddressLotKind,
@@ -2366,7 +2367,24 @@ mod test {
             max_paths: Default::default(),
         };
 
-        datastore.bgp_config_create(&opctx, &bgp_config).await.unwrap();
+        let (.., authz_announce_set) = LookupPath::new(&opctx, datastore)
+            .bgp_announce_set_name_owned(
+                announce_set.identity.name.clone().into(),
+            )
+            .lookup_for(nexus_auth::authz::Action::Read)
+            .await
+            .expect("lookup announce set");
+
+        datastore
+            .bgp_config_create(
+                &opctx,
+                nexus_db_model::BgpConfig::from_config_create(
+                    &bgp_config,
+                    authz_announce_set.id(),
+                ),
+            )
+            .await
+            .unwrap();
 
         let settings = SwitchPortSettingsCreate {
             identity: IdentityMetadataCreateParams {
@@ -2647,19 +2665,16 @@ mod test {
                         );
                     }
                     NameOrId::Name(name) => {
-                        let db_bgp_config = datastore
-                            .bgp_config_get(
-                                opctx,
-                                &NameOrId::Id(
-                                    db_peer.bgp_config_id.into_untyped_uuid(),
-                                ),
-                            )
-                            .await
-                            .expect("bgp config should be present in db");
+                        let (.., authz_bgp_config) =
+                            LookupPath::new(&opctx, datastore)
+                                .bgp_config_name_owned(name.into())
+                                .lookup_for(nexus_auth::authz::Action::Read)
+                                .await
+                                .expect("lookup bgp config");
 
                         assert_eq!(
-                            db_bgp_config.identity.name,
-                            nexus_db_model::Name(name)
+                            db_peer.bgp_config_id(),
+                            authz_bgp_config.id(),
                         );
                     }
                 }
@@ -2751,7 +2766,25 @@ mod test {
             shaper: None,
             max_paths: Default::default(),
         };
-        datastore.bgp_config_create(&opctx, &bgp_config).await.unwrap();
+
+        let (.., authz_announce_set) = LookupPath::new(&opctx, datastore)
+            .bgp_announce_set_name_owned(
+                announce_set.identity.name.clone().into(),
+            )
+            .lookup_for(nexus_auth::authz::Action::Read)
+            .await
+            .expect("lookup announce set");
+
+        datastore
+            .bgp_config_create(
+                &opctx,
+                nexus_db_model::BgpConfig::from_config_create(
+                    &bgp_config,
+                    authz_announce_set.id(),
+                ),
+            )
+            .await
+            .unwrap();
 
         // Switch port settings with one BGP peer, applied to the port.
         let settings = SwitchPortSettingsCreate {
@@ -2920,7 +2953,25 @@ mod test {
             shaper: None,
             max_paths: Default::default(),
         };
-        datastore.bgp_config_create(&opctx, &bgp_config).await.unwrap();
+
+        let (.., authz_announce_set) = LookupPath::new(&opctx, datastore)
+            .bgp_announce_set_name_owned(
+                announce_set.identity.name.clone().into(),
+            )
+            .lookup_for(nexus_auth::authz::Action::Read)
+            .await
+            .expect("lookup announce set");
+
+        datastore
+            .bgp_config_create(
+                &opctx,
+                nexus_db_model::BgpConfig::from_config_create(
+                    &bgp_config,
+                    authz_announce_set.id(),
+                ),
+            )
+            .await
+            .unwrap();
 
         // Two unnumbered peers on different links, each with distinct
         // communities and import/export policies.

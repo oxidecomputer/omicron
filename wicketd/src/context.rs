@@ -8,6 +8,7 @@ use crate::MgsHandle;
 use crate::bgp_auth_keys::BgpAuthKeyError;
 use crate::bgp_auth_keys::BgpAuthKeys;
 use crate::bootstrap_addrs::BootstrapPeersFromDdm;
+use crate::http_helpers::http_error_with_message;
 use crate::multirack_config::CurrentMultirackJoinConfig;
 use crate::preflight_check::PreflightCheckerHandler;
 use crate::rss_config::CurrentRssConfig;
@@ -18,9 +19,11 @@ use anyhow::anyhow;
 use anyhow::bail;
 use dropshot::ClientErrorStatusCode;
 use dropshot::HttpError;
+use iddqd::IdOrdMap;
 use internal_dns_resolver::Resolver;
 use sled_hardware_types::Baseboard;
 use slog::info;
+use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::mem;
@@ -33,15 +36,15 @@ use wicket_common::inventory::MgsV1Inventory;
 use wicket_common::inventory::SledInventory;
 use wicket_common::inventory::SpIdentifier;
 use wicket_common::rack_setup::BgpAuthKey;
-use wicket_common::rack_setup::BgpAuthKeyId;
 use wicket_common::rack_setup::BgpAuthKeyStatus;
 use wicket_common::rack_setup::BootstrapSledDescription;
 use wicketd_api::SetBgpAuthKeyStatus;
+use wicketd_commission_types::rack_setup::BgpAuthKeyId;
 
 #[derive(Default)]
 pub(crate) struct RssOrMultirackJoinConfigCommon {
     pub inventory: SledInventory,
-    pub bootstrap_sleds: BTreeSet<BootstrapSledDescription>,
+    pub bootstrap_sleds: IdOrdMap<BootstrapSledDescription>,
     pub bgp_auth_keys: BgpAuthKeys,
 }
 
@@ -328,10 +331,12 @@ impl ServerContext {
         }
     }
 
-    pub(crate) async fn local_switch_id(&self) -> Option<SpIdentifier> {
+    pub(crate) async fn local_switch_id(
+        &self,
+    ) -> Result<SpIdentifier, LocalSwitchIdError> {
         // Do we already have it cached from a previous invocation?
         if let Some(&switch_id) = self.local_switch_id.get() {
-            return Some(switch_id);
+            return Ok(switch_id);
         }
 
         // We don't have a cached switch ID; try to fetch it from MGS. We
@@ -351,7 +356,7 @@ impl ServerContext {
                     self.transceiver_handle.set_local_switch_id(switch_id);
                 }
 
-                Some(switch_id)
+                Ok(switch_id)
             }
             Err(err) => {
                 slog::warn!(
@@ -359,8 +364,25 @@ impl ServerContext {
                     "Failed to fetch local switch ID from MGS";
                     "err" => #%err,
                 );
-                None
+                Err(LocalSwitchIdError::from(err))
             }
         }
+    }
+}
+
+/// An error returned when the local switch ID cannot be fetched from MGS.
+#[derive(Debug, thiserror::Error)]
+#[error("failed to fetch local switch ID from MGS")]
+pub(crate) struct LocalSwitchIdError(
+    #[from] gateway_client::Error<gateway_client::types::Error>,
+);
+
+impl LocalSwitchIdError {
+    pub(crate) fn to_http_error(&self) -> HttpError {
+        http_error_with_message(
+            dropshot::ErrorStatusCode::SERVICE_UNAVAILABLE,
+            Some("UnknownSwitchSlot".to_string()),
+            format!("{} (is MGS running?)", InlineErrorChain::new(self)),
+        )
     }
 }

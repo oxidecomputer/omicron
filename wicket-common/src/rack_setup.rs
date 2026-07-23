@@ -2,8 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use omicron_common::address;
-use omicron_common::api::internal::shared::AllowedSourceIps;
+use iddqd::{IdOrdItem, IdOrdMap, id_upcast};
 use owo_colors::OwoColorize;
 use owo_colors::Style;
 use schemars::JsonSchema;
@@ -13,33 +12,25 @@ use sha2::Digest;
 use sha2::Sha256;
 use sled_hardware_types::Baseboard;
 use std::collections::BTreeMap;
-use std::collections::BTreeSet;
 use std::fmt;
 use std::net::IpAddr;
 use std::net::Ipv6Addr;
 use tufaceous_artifact::ArtifactHash;
+use wicketd_commission_types::rack_setup::AllowedSourceIps;
+use wicketd_commission_types::rack_setup::BgpAuthKeyId;
+use wicketd_commission_types::rack_setup::IpRange;
+use wicketd_commission_types::rack_setup::UserSpecifiedRackNetworkConfig;
 
 use crate::inventory::SpIdentifier;
-
-// Temporary re-exports -- a later commit will remove them.
-pub use wicketd_commission_types::rack_setup::BgpAuthKeyId;
-pub use wicketd_commission_types::rack_setup::ManualPortConfig;
-pub use wicketd_commission_types::rack_setup::PutRssUserConfigInsensitive;
-pub use wicketd_commission_types::rack_setup::UserSpecifiedBgpPeerConfig;
-pub use wicketd_commission_types::rack_setup::UserSpecifiedImportExportPolicy;
-pub use wicketd_commission_types::rack_setup::UserSpecifiedPortConfig;
-pub use wicketd_commission_types::rack_setup::UserSpecifiedRackNetworkConfig;
-pub use wicketd_commission_types::rack_setup::UserSpecifiedRouterPeerAddr;
-pub use wicketd_commission_types::rack_setup::UserSpecifiedUplinkAddressConfig;
 
 /// The subset of `RackInitializeRequest` that the user fills in as clear text
 /// (e.g., via an uploaded config file).
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 pub struct CurrentRssUserConfigInsensitive {
-    pub bootstrap_sleds: BTreeSet<BootstrapSledDescription>,
+    pub bootstrap_sleds: IdOrdMap<BootstrapSledDescription>,
     pub ntp_servers: Vec<String>,
     pub dns_servers: Vec<IpAddr>,
-    pub internal_services_ip_pool_ranges: Vec<address::IpRange>,
+    pub internal_services_ip_pool_ranges: Vec<IpRange>,
     pub external_dns_ips: Vec<IpAddr>,
     pub external_dns_zone_name: String,
     pub rack_network_config: Option<UserSpecifiedRackNetworkConfig>,
@@ -50,23 +41,23 @@ pub struct CurrentRssUserConfigInsensitive {
     pub external_jumbo_frames_opt_in_enabled: bool,
 }
 
-#[derive(
-    Clone,
-    Debug,
-    Serialize,
-    Deserialize,
-    JsonSchema,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-)]
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 pub struct BootstrapSledDescription {
     pub id: SpIdentifier,
     pub baseboard: Baseboard,
     /// The sled's bootstrap address, if the host is on and we've discovered it
     /// on the bootstrap network.
     pub bootstrap_ip: Option<Ipv6Addr>,
+}
+
+impl IdOrdItem for BootstrapSledDescription {
+    type Key<'a> = SpIdentifier;
+
+    fn key(&self) -> Self::Key<'_> {
+        self.id
+    }
+
+    id_upcast!();
 }
 
 /// Displayer for a slice of `fmt::Display` structs.

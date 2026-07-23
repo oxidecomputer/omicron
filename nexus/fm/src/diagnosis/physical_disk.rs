@@ -285,7 +285,13 @@ pub(super) fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
                 }
                 case_mut
             }
-            None => builder.cases.open_case(DiagnosisEngineKind::PhysicalDisk),
+            None => builder.cases.open_case(
+                DiagnosisEngineKind::PhysicalDisk,
+                format!(
+                    "opened because zpool {} on disk {} was {current_health}",
+                    disk.zpool_id, disk.physical_disk_id
+                ),
+            ),
         };
 
         case_mut.add_fact(
