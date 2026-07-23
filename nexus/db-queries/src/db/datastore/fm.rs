@@ -1752,8 +1752,7 @@ impl DataStore {
                     let n_pruned = diesel::delete(history_dsl::fm_sitrep_history)
                         .filter(history_dsl::version.le(SqlU32(newest_version_pruned)))
                         .execute_async(&conn)
-                        .await
-                        .map_err(|e| err.bail(TransactionError::Database(e)))?;
+                        .await?;
 
                     Ok(HistoryPruningStatus::Pruned { n_pruned, newest_version_pruned })
                 }
