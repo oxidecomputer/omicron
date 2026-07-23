@@ -56,11 +56,49 @@ impl SitrepGc {
         // Doing this first ensures that we will then attempt to GC any rows
         // abandoned by pruning the history. However, if this fails, we still
         // want to try to GC rows that were already orphaned, so don't `?` this!
-        let pruning = self.datastore.fm_sitrep_history_prune(&opctx, self.history_limit).await.map_err(|e| {
-            let error = InlineErrorChain::new(&e);
-            slog::error!(&opctx.log, "pruning the sitrep history table failed"; &error);
-            error.to_string()
-        });
+        let pruning = match self
+            .datastore
+            .fm_sitrep_history_prune(&opctx, self.history_limit)
+            .await
+        {
+            Ok(status::HistoryPruningStatus::BelowLimit { count }) => {
+                slog::debug!(
+                    &opctx.log,
+                    "sitrep history depth is below the limit, no entries were \
+                     pruned";
+                    "sitrep_history_count" => count,
+                    "sitrep_history_limit" => self.history_limit.get(),
+                );
+                Ok(status::HistoryPruningStatus::BelowLimit { count })
+            }
+            Ok(status::HistoryPruningStatus::Pruned {
+                n_pruned,
+                newest_version_pruned,
+            }) => {
+                slog::info!(
+                    &opctx.log,
+                    "pruned old sitreps from the end of the history table";
+                    "sitrep_history_limit" => self.history_limit.get(),
+                    "sitreps_pruned" => n_pruned,
+                    "newest_version_pruned" => newest_version_pruned
+
+                );
+                Ok(status::HistoryPruningStatus::Pruned {
+                    n_pruned,
+                    newest_version_pruned,
+                })
+            }
+            Err(e) => {
+                let error = InlineErrorChain::new(&e);
+                slog::error!(
+                    &opctx.log,
+                    "pruning the sitrep history table failed";
+                    "sitrep_history_limit" => self.history_limit.get(),
+                    &error
+                );
+                Err(error.to_string())
+            }
+        };
 
         let mut status = Status {
             history_pruning_status: pruning,
@@ -96,14 +134,10 @@ impl SitrepGc {
                     .collect();
             }
             Err(err) => {
-                let err = InlineErrorChain::new(&err);
+                let error = InlineErrorChain::new(&err);
                 const MSG: &str = "failed to GC orphaned sitreps";
-                slog::error!(
-                    &opctx.log,
-                    "{MSG}";
-                    &err,
-                );
-                status.errors.push(format!("{MSG}: {err}"));
+                slog::error!(&opctx.log, "{MSG}"; &error);
+                status.errors.push(format!("{MSG}: {error}"));
             }
         }
 
