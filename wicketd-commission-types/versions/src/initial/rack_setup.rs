@@ -412,9 +412,10 @@ pub struct UserSpecifiedBgpPeerConfig {
     /// Apply export policy to this peer with an allow list.
     #[serde(default)]
     pub allowed_export: UserSpecifiedImportExportPolicy,
-    /// The source address to use for the BGP session (optional).
+    /// The optional source address to use for starting a
+    /// BGP session with a numbered peer.
     #[serde(default)]
-    pub src_addr: Option<IpAddr>,
+    pub src_addr: Option<RouterPeerIpAddr>,
     /// Associate a VLAN ID with a BGP peer session.
     #[serde(default)]
     pub vlan_id: Option<u16>,

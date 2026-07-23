@@ -1774,7 +1774,7 @@
         "type": "object",
         "properties": {
           "addr": {
-            "description": "Address of the peer.",
+            "description": "Address of the peer (numbered or unnumbered).",
             "allOf": [
               {
                 "$ref": "#/components/schemas/RouterPeerType"
@@ -1900,13 +1900,6 @@
             "type": "integer",
             "format": "uint32",
             "minimum": 0
-          },
-          "src_addr": {
-            "nullable": true,
-            "description": "The local IP address to use as the source when establishing outbound TCP connections to this BGP peer. If `None`, the OS selects the source address.",
-            "default": null,
-            "type": "string",
-            "format": "ip"
           },
           "vlan_id": {
             "nullable": true,
@@ -8693,6 +8686,13 @@
             "properties": {
               "ip": {
                 "description": "IP address for numbered BGP peers.",
+                "type": "string",
+                "format": "ip"
+              },
+              "src_addr": {
+                "nullable": true,
+                "description": "Optional local IP address to bind when establishing outbound TCP connections to this peer. If `None`, the OS selects the source address.",
+                "default": null,
                 "type": "string",
                 "format": "ip"
               },

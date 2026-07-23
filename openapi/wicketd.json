@@ -7983,7 +7983,7 @@
           },
           "src_addr": {
             "nullable": true,
-            "description": "The source address to use for the BGP session (optional).",
+            "description": "The optional source address to use for starting a BGP session with a numbered peer.",
             "default": null,
             "type": "string",
             "format": "ip"

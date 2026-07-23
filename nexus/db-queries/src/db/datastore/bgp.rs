@@ -1358,8 +1358,10 @@ mod tests {
         let iface_db: nexus_db_model::Name = iface_ext.clone().into();
 
         // Set up peer types: one numbered, one unnumbered.
-        let numbered =
-            RouterPeerType::Numbered { ip: "192.168.1.1".parse().unwrap() };
+        let numbered = RouterPeerType::Numbered {
+            ip: "192.168.1.1".parse().unwrap(),
+            src_addr: None,
+        };
         let unnumbered = RouterPeerType::Unnumbered {
             router_lifetime: RouterLifetimeConfig::default(),
         };
@@ -1430,8 +1432,10 @@ mod tests {
 
         // A different numbered IP returns nothing.
         let other_ip: IpAddr = "10.0.0.1".parse().unwrap();
-        let other =
-            RouterPeerType::Numbered { ip: other_ip.try_into().unwrap() };
+        let other = RouterPeerType::Numbered {
+            ip: other_ip.try_into().unwrap(),
+            src_addr: None,
+        };
         let empty = datastore
             .communities_for_peer(&opctx, port_settings_id, &iface_ext, other)
             .await
@@ -1477,7 +1481,6 @@ mod tests {
             allowed_import,
             allowed_export,
             vlan_id: None,
-            src_addr: None,
         }
     }
 
@@ -1493,10 +1496,14 @@ mod tests {
 
         // Set up peer types: two numbered (one with imports, one without), one
         // unnumbered.
-        let numbered =
-            RouterPeerType::Numbered { ip: "192.168.1.1".parse().unwrap() };
-        let numbered_no_filtering =
-            RouterPeerType::Numbered { ip: "192.168.1.2".parse().unwrap() };
+        let numbered = RouterPeerType::Numbered {
+            ip: "192.168.1.1".parse().unwrap(),
+            src_addr: None,
+        };
+        let numbered_no_filtering = RouterPeerType::Numbered {
+            ip: "192.168.1.2".parse().unwrap(),
+            src_addr: None,
+        };
         let unnumbered = RouterPeerType::Unnumbered {
             router_lifetime: RouterLifetimeConfig::default(),
         };
@@ -1650,10 +1657,14 @@ mod tests {
 
         // Set up peer types: two numbered (one with exports, one without), one
         // unnumbered.
-        let numbered =
-            RouterPeerType::Numbered { ip: "192.168.1.1".parse().unwrap() };
-        let numbered_no_filtering =
-            RouterPeerType::Numbered { ip: "192.168.1.2".parse().unwrap() };
+        let numbered = RouterPeerType::Numbered {
+            ip: "192.168.1.1".parse().unwrap(),
+            src_addr: None,
+        };
+        let numbered_no_filtering = RouterPeerType::Numbered {
+            ip: "192.168.1.2".parse().unwrap(),
+            src_addr: None,
+        };
         let unnumbered = RouterPeerType::Unnumbered {
             router_lifetime: RouterLifetimeConfig::default(),
         };

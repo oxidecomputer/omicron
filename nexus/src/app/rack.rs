@@ -543,7 +543,6 @@ impl super::Nexus {
                     allowed_import: r.allowed_import.clone(),
                     allowed_export: r.allowed_export.clone(),
                     vlan_id: r.vlan_id,
-                    src_addr: r.src_addr,
                 })
                 .collect();
 

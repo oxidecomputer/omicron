@@ -150,7 +150,6 @@ impl BgpPeerFromDbBuilder<'_> {
                 communities,
                 allowed_import,
                 allowed_export,
-                src_addr: p.src_addr.map(|x| x.ip()),
             },
         })
     }
@@ -2016,7 +2015,7 @@ impl<'a> BgpPeerProperties<'a> {
             RouterPeerType::Unnumbered { .. } => {
                 self.unnumbered_peers.insert(link_name, peer)
             }
-            RouterPeerType::Numbered { ip } => {
+            RouterPeerType::Numbered { ip, .. } => {
                 self.numbered_peers.insert(ip.into(), peer)
             }
         };
@@ -2031,7 +2030,7 @@ impl<'a> BgpPeerProperties<'a> {
                 RouterPeerType::Unnumbered { .. } => {
                     ("unnumbered", format!("link {link_name}"))
                 }
-                RouterPeerType::Numbered { ip } => {
+                RouterPeerType::Numbered { ip, .. } => {
                     ("numbered", format!("address {ip}"))
                 }
             };
@@ -2389,6 +2388,7 @@ mod test {
                         bgp_config: bgp_config.identity.name.clone().into(),
                         addr: RouterPeerType::Numbered {
                             ip: "192.168.1.1".parse().unwrap(),
+                            src_addr: None,
                         },
                         hold_time: 0,
                         idle_hold_time: 0,
@@ -2408,7 +2408,6 @@ mod test {
                         ]),
                         allowed_import: ImportExportPolicy::NoFiltering,
                         vlan_id: None,
-                        src_addr: None,
                     },
                     BgpPeer {
                         bgp_config: bgp_config.identity.name.clone().into(),
@@ -2434,7 +2433,6 @@ mod test {
                             "192.168.3.0/24".parse().unwrap(),
                         ]),
                         vlan_id: None,
-                        src_addr: None,
                     },
                 ],
             }],
@@ -2774,6 +2772,7 @@ mod test {
                     bgp_config: bgp_config.identity.name.clone().into(),
                     addr: RouterPeerType::Numbered {
                         ip: "192.168.1.1".parse().unwrap(),
+                        src_addr: None,
                     },
                     hold_time: 0,
                     idle_hold_time: 0,
@@ -2790,7 +2789,6 @@ mod test {
                     allowed_export: ImportExportPolicy::NoFiltering,
                     allowed_import: ImportExportPolicy::NoFiltering,
                     vlan_id: None,
-                    src_addr: None,
                 }],
             }],
             addresses: vec![],
@@ -2948,7 +2946,6 @@ mod test {
             ]),
             allowed_import: ImportExportPolicy::NoFiltering,
             vlan_id: None,
-            src_addr: None,
         };
 
         let peer_phy1 = BgpPeer {

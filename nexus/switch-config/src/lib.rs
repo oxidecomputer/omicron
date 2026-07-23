@@ -396,7 +396,6 @@ pub fn build_rack_network_config(
                     allowed_import: peer.allowed_import.clone(),
                     allowed_export: peer.allowed_export.clone(),
                     vlan_id: peer.vlan_id,
-                    src_addr: peer.src_addr,
                 })
                 .collect()
         };
@@ -556,6 +555,7 @@ mod tests {
                     "192.0.2.1".parse::<IpAddr>().unwrap(),
                 )
                 .expect("192.0.2.1 is a valid router peer ip"),
+                src_addr: None,
             },
             hold_time: 6,
             idle_hold_time: 3,
@@ -572,7 +572,6 @@ mod tests {
             allowed_import: ImportExportPolicy::NoFiltering,
             allowed_export: ImportExportPolicy::NoFiltering,
             vlan_id: None,
-            src_addr: None,
         }
     }
 

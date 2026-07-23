@@ -614,7 +614,7 @@ fn build_port_config(
                         }
                     }
                     UserSpecifiedRouterPeerAddr::Numbered(ip) => {
-                        RouterPeerType::Numbered { ip }
+                        RouterPeerType::Numbered { ip, src_addr: p.src_addr }
                     }
                 };
 
@@ -637,7 +637,6 @@ fn build_port_config(
                     allowed_export: p.allowed_export.clone().into(),
                     allowed_import: p.allowed_import.clone().into(),
                     vlan_id: p.vlan_id,
-                    src_addr: p.src_addr,
                 }
             })
             .collect(),

@@ -6,9 +6,12 @@
 //!
 //! Changes in this version:
 //!
-//! * [`BgpPeerConfig`] gains a new [`BgpPeerConfig::src_addr`] field: an
-//!   optional source address specifying which local IP address to bind when
-//!   establishing outbound TCP connections to a BGP peer.
+//! * Define a new [`RouterPeerType`] that adds `src_addr` to the
+//!   [`RouterPeerType::Numbered`] variant. Since numbered peers can
+//!   technically be reachable via multiple interfaces, this gives
+//!   the operator the ability to specify a stable source for BGP
+//!   sessions.
+//! * [`BgpPeerConfig`] uses the new [`RouterPeerType`]
 
 use crate::v1::early_networking as v1;
 use crate::v20::early_networking as v20;
@@ -19,6 +22,52 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::net::IpAddr;
 
+#[derive(
+    Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq, Hash, JsonSchema,
+)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum RouterPeerType {
+    Unnumbered {
+        /// Router lifetime in seconds for unnumbered BGP peers.
+        router_lifetime: v20::RouterLifetimeConfig,
+    },
+    Numbered {
+        /// IP address for numbered BGP peers.
+        ip: v30::RouterPeerIpAddr,
+        /// Optional local IP address to bind when establishing outbound TCP
+        /// connections to this peer. If `None`, the OS selects the source
+        /// address.
+        #[serde(default)]
+        src_addr: Option<v30::RouterPeerIpAddr>,
+    },
+}
+
+/// Upgrade from v30: set `src_addr: None` for numbered peers.
+impl From<v30::RouterPeerType> for RouterPeerType {
+    fn from(value: v30::RouterPeerType) -> Self {
+        match value {
+            v30::RouterPeerType::Unnumbered { router_lifetime } => {
+                Self::Unnumbered { router_lifetime }
+            }
+            v30::RouterPeerType::Numbered { ip } => {
+                Self::Numbered { ip, src_addr: None }
+            }
+        }
+    }
+}
+
+/// Downgrade to v30: drop `src_addr`.
+impl From<RouterPeerType> for v30::RouterPeerType {
+    fn from(value: RouterPeerType) -> Self {
+        match value {
+            RouterPeerType::Unnumbered { router_lifetime } => {
+                Self::Unnumbered { router_lifetime }
+            }
+            RouterPeerType::Numbered { ip, .. } => Self::Numbered { ip },
+        }
+    }
+}
+
 /// A BGP peer configuration for a port.
 #[derive(
     Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Hash, JsonSchema,
@@ -28,8 +77,8 @@ pub struct BgpPeerConfig {
     pub asn: u32,
     /// Switch port the peer is reachable on.
     pub port: String,
-    /// Address of the peer.
-    pub addr: v30::RouterPeerType,
+    /// Address of the peer (numbered or unnumbered).
+    pub addr: RouterPeerType,
     /// How long to keep a session alive without a keepalive in seconds.
     /// Defaults to 6.
     pub hold_time: Option<u64>,
@@ -71,11 +120,6 @@ pub struct BgpPeerConfig {
     /// Associate a VLAN ID with a BGP peer session.
     #[serde(default)]
     pub vlan_id: Option<u16>,
-    /// The local IP address to use as the source when establishing outbound
-    /// TCP connections to this BGP peer. If `None`, the OS selects the source
-    /// address.
-    #[serde(default)]
-    pub src_addr: Option<IpAddr>,
 }
 
 impl From<v30::BgpPeerConfig> for BgpPeerConfig {
@@ -83,7 +127,7 @@ impl From<v30::BgpPeerConfig> for BgpPeerConfig {
         Self {
             asn: value.asn,
             port: value.port,
-            addr: value.addr,
+            addr: value.addr.into(),
             hold_time: value.hold_time,
             idle_hold_time: value.idle_hold_time,
             delay_open: value.delay_open,
@@ -99,7 +143,6 @@ impl From<v30::BgpPeerConfig> for BgpPeerConfig {
             allowed_import: value.allowed_import,
             allowed_export: value.allowed_export,
             vlan_id: value.vlan_id,
-            src_addr: None,
         }
     }
 }
@@ -109,7 +152,7 @@ impl From<BgpPeerConfig> for v30::BgpPeerConfig {
         Self {
             asn: value.asn,
             port: value.port,
-            addr: value.addr,
+            addr: value.addr.into(),
             hold_time: value.hold_time,
             idle_hold_time: value.idle_hold_time,
             delay_open: value.delay_open,

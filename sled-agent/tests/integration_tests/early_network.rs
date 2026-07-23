@@ -207,7 +207,6 @@ fn current_config_example() -> (&'static str, EarlyNetworkConfigEnvelope) {
                             "172.20.26.0/24".parse().unwrap(),
                         ]),
                         vlan_id: Some(1),
-                        src_addr: None,
                     }],
                     autoneg: false,
                     tx_eq: None,
@@ -235,6 +234,7 @@ fn current_config_example() -> (&'static str, EarlyNetworkConfigEnvelope) {
                         port: "qsfp18".to_owned(),
                         addr: RouterPeerType::Numbered {
                             ip: "172.20.15.43".parse().unwrap(),
+                            src_addr: Some("172.20.15.44".parse().unwrap()),
                         },
                         hold_time: Some(6),
                         idle_hold_time: Some(0),
@@ -254,7 +254,6 @@ fn current_config_example() -> (&'static str, EarlyNetworkConfigEnvelope) {
                             "172.20.26.0/24".parse().unwrap(),
                         ]),
                         vlan_id: None,
-                        src_addr: None,
                     }],
                     autoneg: false,
                     tx_eq: None,

@@ -66,7 +66,7 @@ impl super::Nexus {
             for p in x.peers.iter() {
                 if let Some(ref key) = p.md5_auth_key {
                     let peer_id = match p.addr {
-                        RouterPeerType::Numbered { ip } => {
+                        RouterPeerType::Numbered { ip, .. } => {
                             format!("peer {ip}")
                         }
                         RouterPeerType::Unnumbered { .. } => {

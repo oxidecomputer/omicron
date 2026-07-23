@@ -6,9 +6,9 @@
 //!
 //! Changes in this version:
 //!
-//! * Add [`BgpPeer::src_addr`]: an optional source address that specifies
-//!   which local IP address to bind when establishing outbound TCP connections
-//!   to a BGP peer.
+//! * Add `src_addr` to [`RouterPeerType::Numbered`]
+//! * [`BgpPeer::addr`] now uses the v43 [`RouterPeerType`] (with `src_addr`
+//!   inside `Numbered`).
 //! * Define new versions of types that transitively include [`BgpPeer`]:
 //!   * [`BgpPeerConfig`]
 //!   * [`SwitchPortSettings`]
@@ -27,8 +27,7 @@ use omicron_common::api::external::NameOrId;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sled_agent_types_versions::v1::early_networking::ImportExportPolicy;
-use sled_agent_types_versions::v30::early_networking::RouterPeerType;
-use std::net::IpAddr;
+use sled_agent_types_versions::v43::early_networking::RouterPeerType;
 
 // Re-export the error type unchanged from the previous version.
 pub use crate::v2026_04_16_00::networking::BgpPeerConversionError;
@@ -92,19 +91,13 @@ pub struct BgpPeer {
 
     /// Associate a VLAN ID with a peer.
     pub vlan_id: Option<u16>,
-
-    /// The local IP address to use as the source when establishing outbound
-    /// TCP connections to this BGP peer. If `None`, the OS selects the source
-    /// address.
-    #[serde(default)]
-    pub src_addr: Option<IpAddr>,
 }
 
 impl From<crate::v2026_04_16_00::networking::BgpPeer> for BgpPeer {
     fn from(value: crate::v2026_04_16_00::networking::BgpPeer) -> Self {
         Self {
             bgp_config: value.bgp_config,
-            addr: value.addr,
+            addr: value.addr.into(),
             hold_time: value.hold_time,
             idle_hold_time: value.idle_hold_time,
             delay_open: value.delay_open,
@@ -120,7 +113,6 @@ impl From<crate::v2026_04_16_00::networking::BgpPeer> for BgpPeer {
             allowed_import: value.allowed_import,
             allowed_export: value.allowed_export,
             vlan_id: value.vlan_id,
-            src_addr: None,
         }
     }
 }
@@ -129,7 +121,7 @@ impl From<BgpPeer> for crate::v2026_04_16_00::networking::BgpPeer {
     fn from(value: BgpPeer) -> Self {
         Self {
             bgp_config: value.bgp_config,
-            addr: value.addr,
+            addr: value.addr.into(),
             hold_time: value.hold_time,
             idle_hold_time: value.idle_hold_time,
             delay_open: value.delay_open,

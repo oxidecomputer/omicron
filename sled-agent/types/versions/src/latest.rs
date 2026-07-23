@@ -75,7 +75,6 @@ pub mod early_networking {
     pub use crate::v30::early_networking::InvalidIpAddrError;
     pub use crate::v30::early_networking::RouterPeerIpAddr;
     pub use crate::v30::early_networking::RouterPeerIpAddrError;
-    pub use crate::v30::early_networking::RouterPeerType;
     pub use crate::v30::early_networking::UplinkAddress;
     pub use crate::v30::early_networking::UplinkAddressConfig;
     pub use crate::v30::early_networking::UplinkIpNet;
@@ -85,6 +84,7 @@ pub mod early_networking {
     pub use crate::v43::early_networking::EmptyUplinkPortsError;
     pub use crate::v43::early_networking::PortConfig;
     pub use crate::v43::early_networking::RackNetworkConfig;
+    pub use crate::v43::early_networking::RouterPeerType;
     pub use crate::v43::early_networking::UplinkPorts;
 }
 
