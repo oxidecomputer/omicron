@@ -8,6 +8,7 @@ use crate::app::background::BackgroundTask;
 use futures::future::BoxFuture;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
+use nexus_db_queries::db::datastore;
 use nexus_db_queries::db::datastore::fm::GcOrphansResult;
 use nexus_types::internal_api::background::SitrepGcStatus as Status;
 use nexus_types::internal_api::background::fm_sitrep_gc as status;
@@ -19,6 +20,7 @@ use std::sync::Arc;
 pub struct SitrepGc {
     datastore: Arc<DataStore>,
     history_limit: NonZeroU32,
+    batch_size: NonZeroU32,
 }
 
 impl BackgroundTask for SitrepGc {
@@ -44,7 +46,11 @@ impl BackgroundTask for SitrepGc {
 
 impl SitrepGc {
     pub fn new(datastore: Arc<DataStore>) -> Self {
-        Self { datastore, history_limit: Self::DEFAULT_HISTORY_LIMIT }
+        Self {
+            datastore,
+            history_limit: Self::DEFAULT_HISTORY_LIMIT,
+            batch_size: datastore::SQL_BATCH_SIZE,
+        }
     }
 
     // Limits for abandoning sitreps from the history table.
@@ -56,70 +62,74 @@ impl SitrepGc {
         // Doing this first ensures that we will then attempt to GC any rows
         // abandoned by pruning the history. However, if this fails, we still
         // want to try to GC rows that were already orphaned, so don't `?` this!
-        let pruning = match self
-            .datastore
-            .fm_sitrep_history_prune(&opctx, self.history_limit)
-            .await
-        {
-            Ok(status::HistoryPruningStatus::NotPruned { count }) => {
-                slog::debug!(
-                    &opctx.log,
-                    "sitrep history depth is below the limit, no entries were \
-                     pruned";
-                    "sitrep_history_count" => count,
-                    "sitrep_history_limit" => self.history_limit.get(),
-                );
-                Ok(status::HistoryPruningStatus::NotPruned { count })
-            }
-            Ok(status::HistoryPruningStatus::Pruned {
-                n_pruned,
-                newest_version_pruned,
-            }) => {
-                slog::info!(
-                    &opctx.log,
-                    "pruned old sitreps from the end of the history table";
-                    "sitrep_history_limit" => self.history_limit.get(),
-                    "sitreps_pruned" => n_pruned,
-                    "newest_version_pruned" => newest_version_pruned
-
-                );
+        let mut history_pruning = status::HistoryPruningStatus::default();
+        let pruning_params = datastore::fm::HistoryPruningParams {
+            limit: self.history_limit,
+            batch_size: self.batch_size,
+        };
+        let history_pruning_outcome = loop {
+            match self.datastore.fm_sitrep_history_prune(&opctx, params).await {
+                Ok(status::HistoryPruningStatus::NotPruned { count }) => {
+                    slog::debug!(
+                        &opctx.log,
+                        "sitrep history depth is below the limit, no entries were \
+                         pruned";
+                        "sitrep_history_count" => count,
+                        "sitrep_history_limit" => self.history_limit.get(),
+                    );
+                    Ok(status::HistoryPruningStatus::NotPruned { count })
+                }
                 Ok(status::HistoryPruningStatus::Pruned {
                     n_pruned,
                     newest_version_pruned,
-                })
-            }
-            Err(e) => {
-                let error = InlineErrorChain::new(&e);
-                slog::error!(
-                    &opctx.log,
-                    "pruning the sitrep history table failed";
-                    "sitrep_history_limit" => self.history_limit.get(),
-                    &error
-                );
-                Err(error.to_string())
-            }
+                }) => {
+                    slog::info!(
+                        &opctx.log,
+                        "pruned old sitreps from the end of the history table";
+                        "sitrep_history_limit" => self.history_limit.get(),
+                        "sitreps_pruned" => n_pruned,
+                        "newest_version_pruned" => newest_version_pruned
+
+                    );
+                    Ok(status::HistoryPruningStatus::Pruned {
+                        n_pruned,
+                        newest_version_pruned,
+                    })
+                }
+                Err(e) => {
+                    let error = InlineErrorChain::new(&e);
+                    slog::error!(
+                        &opctx.log,
+                        "pruning the sitrep history table failed";
+                        "sitrep_history_limit" => self.history_limit.get(),
+                        &error
+                    );
+                    break status::HistoryPruningOutcome::Error(
+                        error.to_string(),
+                    );
+                }
+            };
         };
 
         let mut status = Status {
-            history_pruning_status: pruning,
-            history_limit: self.history_limit.get(),
+            history_pruning_status: pruning_status,
+            history_pruning_outcome,
             orphaned_sitreps_deleted: 0,
             sitrep_metadata_batches: 0,
-            batch_size: 0,
+            batch_size: self.batch_size.get(),
             child_tables: Default::default(),
             errors: Vec::new(),
         };
 
-        match self.datastore.fm_sitrep_gc_orphans(&opctx).await {
+        match self.datastore.fm_sitrep_gc_orphans(&opctx, self.batch_size).await
+        {
             Ok(GcOrphansResult {
                 sitreps_deleted,
                 sitrep_metadata_batches,
-                batch_size,
                 child_tables,
             }) => {
                 status.orphaned_sitreps_deleted = sitreps_deleted;
                 status.sitrep_metadata_batches = sitrep_metadata_batches;
-                status.batch_size = batch_size;
                 status.child_tables = child_tables
                     .into_iter()
                     .map(|(table, stats)| {

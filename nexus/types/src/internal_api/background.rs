@@ -909,9 +909,8 @@ pub enum SitrepLoadStatus {
 /// The status of a `fm_sitrep_gc` background task activation.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct SitrepGcStatus {
-    pub history_limit: u32,
-    pub history_pruning_status:
-        Result<fm_sitrep_gc::HistoryPruningStatus, String>,
+    pub history_pruning_status: fm_sitrep_gc::HistoryPruningStatus,
+    pub history_pruning_outcome: fm_sitrep_gc::HistoryPruningOutcome,
     pub orphaned_sitreps_deleted: usize,
     pub sitrep_metadata_batches: usize,
     pub batch_size: u32,
@@ -922,18 +921,22 @@ pub struct SitrepGcStatus {
 
 pub mod fm_sitrep_gc {
     use super::*;
+    use std::ops::RangeInclusive;
 
     /// Describes the status of pruning old records from the end of the sitrep
     /// history table.
+    #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+    pub struct HistoryPruningStatus {
+        pub limit: u32,
+        pub batches: usize,
+        pub sitreps_pruned: usize,
+        pub versions_pruned: Option<RangeInclusive<u32>>,
+    }
+
     #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
-    pub enum HistoryPruningStatus {
-        /// The history table holds no more than the configured limit of
-        /// entries, so nothing was pruned.
+    pub enum HistoryPruningOutcome {
         NotPruned { count: u64 },
-        /// The history table exceeded the limit, and the oldest `n_pruned`
-        /// entries were deleted. `newest_version_pruned` is the version of the
-        /// newest entry that was deleted.
-        Pruned { n_pruned: usize, newest_version_pruned: u32 },
+        Error(String),
     }
 
     /// Per-child-table GC statistics, used by [`SitrepGcStatus`].
