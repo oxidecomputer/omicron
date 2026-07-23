@@ -22,9 +22,7 @@ use crate::http_helpers::http_error_with_message;
 use crate::http_helpers::shutdown_to_http;
 
 pub(crate) use self::inventory::{FetchedSpData, MgsFetchError};
-// Will be used by the commissioning API.
-#[cfg_attr(not(test), expect(unused_imports))]
-pub(crate) use self::inventory::{Fetched, RotData, RotFetch, Stage0Fetch};
+
 use self::inventory::{
     FetchedIgnitionState, IgnitionPresence, IgnitionStateFetcher,
     SpFetchResult, SpStateFetcher,
@@ -574,6 +572,8 @@ struct WaitingForRefresh {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use crate::mgs::inventory::{Fetched, RotData, RotFetch, Stage0Fetch};
     use gateway_types::component::{PowerState, SpState};
     use gateway_types::rot::RotState;
     use std::net::Ipv6Addr;
