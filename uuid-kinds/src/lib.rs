@@ -68,6 +68,7 @@ impl_typed_uuid_kinds! {
         LoopbackAddress = {},
         MulticastGroup = {},
         Measurement = {},
+        MultirackJoin = {},
         Mupdate = {},
         MupdateOverride = {},
         // `OmicronSledConfig`s do not themselves contain IDs, but we generate IDs

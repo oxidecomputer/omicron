@@ -4,20 +4,20 @@
 
 //! Internal API for rack-level bootstrap agent operations.
 
-use crate::bootstrap::rss_handle::RssHandle;
-use bootstore::schemes::v0 as bootstore;
+use crate::bootstrap::rss_handle::run_rss;
+use bootstrap_agent_lockstep_types::MultirackJoinRequest;
 use bootstrap_agent_lockstep_types::RackOperationStatus;
 use bootstrap_agent_lockstep_types::RssStep;
+use omicron_uuid_kinds::MultirackJoinUuid;
 use omicron_uuid_kinds::RackInitUuid;
-use sled_agent_config_reconciler::InternalDisksReceiver;
-use sled_agent_measurements::MeasurementsHandle;
+use sled_agent_bootstrap_common::RssContext;
+use sled_agent_multirack_join::MultirackJoinServiceError;
+use sled_agent_multirack_join::MultirackJoinServiceHandle;
+use sled_agent_multirack_join::MultirackJoinServiceState;
 use sled_agent_rack_setup::RackInitializeRequestParams;
 use sled_agent_rack_setup::SetupServiceError;
-use slog::Logger;
 use slog_error_chain::InlineErrorChain;
-use sprockets_tls::keys::SprocketsConfig;
 use std::mem;
-use std::net::Ipv6Addr;
 use std::sync::Arc;
 use std::sync::Mutex;
 use tokio::sync::oneshot;
@@ -34,8 +34,19 @@ pub enum RssAccessError {
     InitializationPanicked,
     #[error("RSS is already initialized")]
     AlreadyInitialized,
+    #[error("Multirack join in progress")]
+    MultirackJoinInProgress,
+    #[error("Multirack join failed: {message}")]
+    MultirackJoinFailed { message: String },
+    #[error("MultirackJoin panicked")]
+    MultirackJoinPanicked,
+    #[error("Already part of a multirack cluster")]
+    MultirackJoinCompleted,
 }
 
+/// A mechanism for accessing rack setup related functionality. We're
+/// using `RSS` as a catch all here. This type allows access to both rack
+/// initialization and mulitrack regional cluster join services.
 #[derive(Clone)]
 pub(crate) struct RssAccess {
     // Note: The `Mutex` here is a std mutex, not a tokio mutex, and thus not
@@ -59,6 +70,7 @@ impl RssAccess {
         let mut status = self.status.lock().unwrap();
 
         match &mut *status {
+            RssStatus::Uninitialized => RackOperationStatus::Uninitialized,
             RssStatus::Initializing { id, completion, step_rx } => {
                 let id = *id;
                 // This is our only chance to notice the initialization task has
@@ -97,25 +109,56 @@ impl RssAccess {
             RssStatus::InitializationPanicked { id } => {
                 RackOperationStatus::InitializationPanicked { id: *id }
             }
-            RssStatus::Uninitialized => RackOperationStatus::Uninitialized,
+            RssStatus::MultirackJoinInProgress { id, .. } => {
+                RackOperationStatus::MultirackJoinInProgress { id: *id }
+            }
+            RssStatus::MultirackJoinCompleted { id } => {
+                RackOperationStatus::MultirackJoinCompleted { id: *id }
+            }
+            RssStatus::MultirackJoinFailed { id, err } => {
+                RackOperationStatus::MultirackJoinFailed {
+                    id: *id,
+                    message: InlineErrorChain::new(err).to_string(),
+                }
+            }
+            RssStatus::MultirackJoinPanicked { id } => {
+                RackOperationStatus::MultirackJoinPanicked { id: *id }
+            }
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub(crate) fn start_initializing(
         &self,
-        parent_log: &Logger,
-        sprockets: SprocketsConfig,
-        global_zone_bootstrap_ip: Ipv6Addr,
-        internal_disks_rx: &InternalDisksReceiver,
-        measurements: Arc<MeasurementsHandle>,
-        bootstore_node_handle: &bootstore::NodeHandle,
-        trust_quorum_handle: &trust_quorum::NodeTaskHandle,
+        ctx: RssContext,
         request: RackInitializeRequestParams,
     ) -> Result<RackInitUuid, RssAccessError> {
         let mut status = self.status.lock().unwrap();
 
         match &*status {
+            RssStatus::Uninitialized => {
+                let (completion_tx, completion) = oneshot::channel();
+                let id = RackInitUuid::new_v4();
+                let (step_tx, step_rx) = watch::channel(RssStep::Requested);
+                *status = RssStatus::Initializing { id, completion, step_rx };
+                mem::drop(status);
+                let status = Arc::clone(&self.status);
+                tokio::spawn(async move {
+                    let result = run_rss(ctx, request, step_tx).await;
+                    let new_status = match result {
+                        Ok(()) => RssStatus::Initialized { id: Some(id) },
+                        Err(err) => RssStatus::InitializationFailed { id, err },
+                    };
+
+                    // Order here is critical: store the new status in the
+                    // shared mutex _before_ signaling on the channel that
+                    // initialization has completed; otherwise, callers waiting
+                    // on the channel could see an incomplete status.
+                    *status.lock().unwrap() = new_status;
+                    _ = completion_tx.send(());
+                });
+                Ok(id)
+            }
+
             RssStatus::Initializing { .. } => {
                 Err(RssAccessError::StillInitializing)
             }
@@ -131,47 +174,141 @@ impl RssAccess {
                 Err(RssAccessError::InitializationPanicked)
             }
 
-            RssStatus::Uninitialized => {
-                let (completion_tx, completion) = oneshot::channel();
-                let id = RackInitUuid::new_v4();
-                let (step_tx, step_rx) = watch::channel(RssStep::Requested);
-                *status = RssStatus::Initializing { id, completion, step_rx };
-                mem::drop(status);
-                let parent_log = parent_log.clone();
-                let internal_disks_rx = internal_disks_rx.clone();
-                let bootstore_node_handle = bootstore_node_handle.clone();
-                let status = Arc::clone(&self.status);
-                let trust_quorum_handle = trust_quorum_handle.clone();
-                tokio::spawn(async move {
-                    let result = rack_initialize(
-                        &parent_log,
-                        sprockets,
-                        global_zone_bootstrap_ip,
-                        internal_disks_rx,
-                        measurements,
-                        bootstore_node_handle,
-                        trust_quorum_handle,
-                        request,
-                        step_tx,
-                    )
-                    .await;
-                    let new_status = match result {
-                        Ok(()) => RssStatus::Initialized { id: Some(id) },
-                        Err(err) => RssStatus::InitializationFailed { id, err },
-                    };
+            RssStatus::MultirackJoinInProgress { .. } => {
+                Err(RssAccessError::MultirackJoinInProgress)
+            }
+            RssStatus::MultirackJoinCompleted { .. } => {
+                Err(RssAccessError::MultirackJoinCompleted)
+            }
+            RssStatus::MultirackJoinFailed { err, .. } => {
+                Err(RssAccessError::MultirackJoinFailed {
+                    message: InlineErrorChain::new(err).to_string(),
+                })
+            }
+            RssStatus::MultirackJoinPanicked { .. } => {
+                Err(RssAccessError::MultirackJoinPanicked)
+            }
+        }
+    }
 
-                    // Order here is critical: store the new status in the
-                    // shared mutex _before_ signaling on the channel that
-                    // initialization has completed; otherwise, callers waiting
-                    // on the channel could see an incomplete status.
+    pub(crate) fn start_multirack_join(
+        &self,
+        ctx: RssContext,
+        request: MultirackJoinRequest,
+    ) -> Result<MultirackJoinUuid, RssAccessError> {
+        let mut status = self.status.lock().unwrap();
+
+        match &mut *status {
+            RssStatus::Uninitialized => {
+                let id = MultirackJoinUuid::new_v4();
+                let MultirackJoinServiceHandle {
+                    join_handle,
+                    input_tx,
+                    output_rx,
+                } = MultirackJoinServiceHandle::spawn(ctx, request);
+                *status = RssStatus::MultirackJoinInProgress {
+                    id,
+                    input_tx,
+                    output_rx,
+                };
+                mem::drop(status);
+                let status = Arc::clone(&self.status);
+
+                // Spawn a task that waits for the multirack join service task to exit
+                tokio::spawn(async move {
+                    let new_status = match join_handle.await {
+                        Ok(Ok(())) => {
+                            RssStatus::MultirackJoinCompleted { id: Some(id) }
+                        }
+                        Ok(Err(err)) => {
+                            RssStatus::MultirackJoinFailed { id, err }
+                        }
+                        Err(_) => RssStatus::MultirackJoinPanicked { id },
+                    };
                     *status.lock().unwrap() = new_status;
-                    _ = completion_tx.send(());
                 });
+
                 Ok(id)
+            }
+
+            RssStatus::Initializing { .. } => {
+                Err(RssAccessError::StillInitializing)
+            }
+            RssStatus::Initialized { .. } => {
+                Err(RssAccessError::AlreadyInitialized)
+            }
+            RssStatus::InitializationFailed { err, .. } => {
+                Err(RssAccessError::InitializationFailed {
+                    message: InlineErrorChain::new(err).to_string(),
+                })
+            }
+            RssStatus::InitializationPanicked { .. } => {
+                Err(RssAccessError::InitializationPanicked)
+            }
+
+            RssStatus::MultirackJoinInProgress { id, input_tx, .. } => {
+                // We allow updating the input so that we don't always require a
+                // clean slate like in RSS.
+                input_tx.send_if_modified(|saved| {
+                    if &request != saved {
+                        *saved = request;
+                        true
+                    } else {
+                        false
+                    }
+                });
+                Ok(*id)
+            }
+            RssStatus::MultirackJoinCompleted { .. } => {
+                Err(RssAccessError::MultirackJoinCompleted)
+            }
+            RssStatus::MultirackJoinFailed { err, .. } => {
+                Err(RssAccessError::MultirackJoinFailed {
+                    message: InlineErrorChain::new(err).to_string(),
+                })
+            }
+            RssStatus::MultirackJoinPanicked { .. } => {
+                Err(RssAccessError::MultirackJoinPanicked)
+            }
+        }
+    }
+
+    pub(crate) fn get_multirack_join_state(
+        &self,
+    ) -> Result<MultirackJoinServiceState, RssConflictError> {
+        let mut status = self.status.lock().unwrap();
+
+        match &mut *status {
+            RssStatus::Uninitialized => {
+                Ok(MultirackJoinServiceState::Uninitialized)
+            }
+
+            RssStatus::Initializing { .. } => Err(RssConflictError),
+            RssStatus::Initialized { .. } => Err(RssConflictError),
+            RssStatus::InitializationFailed { .. } => Err(RssConflictError),
+            RssStatus::InitializationPanicked { .. } => Err(RssConflictError),
+
+            RssStatus::MultirackJoinInProgress { output_rx, .. } => {
+                let state = output_rx.borrow().clone();
+                Ok(state)
+            }
+            RssStatus::MultirackJoinCompleted { .. } => {
+                Ok(MultirackJoinServiceState::Completed)
+            }
+            RssStatus::MultirackJoinFailed { err, .. } => {
+                Ok(MultirackJoinServiceState::Failed(
+                    InlineErrorChain::new(err).to_string(),
+                ))
+            }
+            RssStatus::MultirackJoinPanicked { .. } => {
+                Ok(MultirackJoinServiceState::TaskPanicked)
             }
         }
     }
 }
+
+// RSS was run, and not the multirack join service
+pub struct RssConflictError;
 
 enum RssStatus {
     // Our two main primary states.
@@ -201,30 +338,27 @@ enum RssStatus {
     InitializationPanicked {
         id: RackInitUuid,
     },
-}
 
-#[allow(clippy::too_many_arguments)]
-async fn rack_initialize(
-    parent_log: &Logger,
-    sprockets: SprocketsConfig,
-    global_zone_bootstrap_ip: Ipv6Addr,
-    internal_disks_rx: InternalDisksReceiver,
-    measurements: Arc<MeasurementsHandle>,
-    bootstore_node_handle: bootstore::NodeHandle,
-    trust_quorum_handle: trust_quorum::NodeTaskHandle,
-    request: RackInitializeRequestParams,
-    step_tx: watch::Sender<RssStep>,
-) -> Result<(), SetupServiceError> {
-    RssHandle::run_rss(
-        parent_log,
-        sprockets,
-        request,
-        global_zone_bootstrap_ip,
-        internal_disks_rx,
-        measurements,
-        bootstore_node_handle,
-        trust_quorum_handle,
-        step_tx,
-    )
-    .await
+    // Tranistory states (which we may be in for a long time, even on human time
+    // scales, but should eventually leave).
+    MultirackJoinInProgress {
+        id: MultirackJoinUuid,
+        input_tx: watch::Sender<MultirackJoinRequest>,
+        output_rx: watch::Receiver<MultirackJoinServiceState>,
+    },
+
+    MultirackJoinCompleted {
+        // We can either be joined on startup (in which case `id` is None) or
+        // because join has completed (in which case `id` is Some).
+        id: Option<MultirackJoinUuid>,
+    },
+
+    // Terminal failure states; these require support intervention.
+    MultirackJoinFailed {
+        id: MultirackJoinUuid,
+        err: MultirackJoinServiceError,
+    },
+    MultirackJoinPanicked {
+        id: MultirackJoinUuid,
+    },
 }

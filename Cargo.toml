@@ -148,10 +148,12 @@ members = [
     "sled-agent/api",
     "sled-agent/bootstrap-agent-lockstep-api",
     "sled-agent/bootstrap-agent-lockstep-types",
+    "sled-agent/bootstrap-common",
     "sled-agent/config-reconciler",
     "sled-agent/early-networking",
     "sled-agent/health-monitor",
     "sled-agent/measurements",
+    "sled-agent/multirack-join",
     "sled-agent/rack-setup",
     "sled-agent/repo-depot-api",
     "sled-agent/types",
@@ -338,10 +340,12 @@ default-members = [
     "sled-agent/api",
     "sled-agent/bootstrap-agent-lockstep-api",
     "sled-agent/bootstrap-agent-lockstep-types",
+    "sled-agent/bootstrap-common",
     "sled-agent/config-reconciler",
     "sled-agent/early-networking",
     "sled-agent/health-monitor",
     "sled-agent/measurements",
+    "sled-agent/multirack-join",
     "sled-agent/rack-setup",
     "sled-agent/repo-depot-api",
     "sled-agent/types",
@@ -798,11 +802,13 @@ similar-asserts = "1.7.0"
 # server zones.
 sled = "=0.34.7"
 sled-agent-api = { path = "sled-agent/api" }
+sled-agent-bootstrap-common = { path = "sled-agent/bootstrap-common" }
 sled-agent-client = { path = "clients/sled-agent-client" }
 sled-agent-config-reconciler = { path = "sled-agent/config-reconciler" }
 sled-agent-early-networking = { path = "sled-agent/early-networking" }
 sled-agent-health-monitor = { path = "sled-agent/health-monitor" }
 sled-agent-measurements = { path = "sled-agent/measurements" }
+sled-agent-multirack-join = { path = "sled-agent/multirack-join" }
 sled-agent-rack-setup = { path = "sled-agent/rack-setup" }
 sled-agent-types = { path = "sled-agent/types" }
 sled-agent-types-versions = { path = "sled-agent/types/versions" }

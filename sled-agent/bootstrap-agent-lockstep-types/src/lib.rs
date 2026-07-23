@@ -22,6 +22,7 @@ use omicron_common::api::external::AllowedSourceIps;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::UserId;
 use omicron_common::api::internal::nexus::Certificate;
+use omicron_uuid_kinds::MultirackJoinUuid;
 use omicron_uuid_kinds::RackInitUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -235,6 +236,19 @@ fn validate_external_dns(
     Ok(())
 }
 
+#[derive(Clone, Deserialize, Serialize, PartialEq, JsonSchema)]
+pub struct MultirackJoinRequest {
+    /// The set of peers required to initialize trust quorum
+    ///
+    /// Unlike RSS, this is not optional for multirack setups. Bootstrap
+    /// addresses are discovered by the bootstrap agent and mapped to the
+    /// `BaseboardId`s.
+    pub trust_quorum_peers: BTreeSet<BaseboardId>,
+
+    /// The rack network configuration for this joining rack
+    pub rack_network_config: RackNetworkConfig,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "snake_case", tag = "type")]
 pub enum BootstrapAddressDiscovery {
@@ -257,6 +271,7 @@ pub struct RecoverySiloConfig {
 #[derive(Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "status", rename_all = "snake_case")]
 pub enum RackOperationStatus {
+    Uninitialized,
     Initializing {
         id: RackInitUuid,
         step: RssStep,
@@ -272,7 +287,20 @@ pub enum RackOperationStatus {
     InitializationPanicked {
         id: RackInitUuid,
     },
-    Uninitialized,
+    MultirackJoinInProgress {
+        // Status is queried via a different API
+        id: MultirackJoinUuid,
+    },
+    MultirackJoinCompleted {
+        id: Option<MultirackJoinUuid>,
+    },
+    MultirackJoinFailed {
+        id: MultirackJoinUuid,
+        message: String,
+    },
+    MultirackJoinPanicked {
+        id: MultirackJoinUuid,
+    },
 }
 
 /// Steps we go through during initial rack setup.

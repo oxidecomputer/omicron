@@ -925,6 +925,7 @@ dependencies = [
  "dropshot",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
+ "sled-agent-multirack-join",
 ]
 
 [[package]]
@@ -961,6 +962,7 @@ dependencies = [
  "sled-agent-types",
  "sled-hardware-types",
  "strum 0.27.2",
+ "trust-quorum-types",
 ]
 
 [[package]]
@@ -9619,11 +9621,13 @@ dependencies = [
  "sha3 0.10.8",
  "signal-hook",
  "sled-agent-api",
+ "sled-agent-bootstrap-common",
  "sled-agent-client",
  "sled-agent-config-reconciler",
  "sled-agent-early-networking",
  "sled-agent-health-monitor",
  "sled-agent-measurements",
+ "sled-agent-multirack-join",
  "sled-agent-rack-setup",
  "sled-agent-resolvable-files",
  "sled-agent-types",
@@ -13778,6 +13782,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "sled-agent-bootstrap-common"
+version = "0.1.0"
+dependencies = [
+ "bootstore",
+ "camino",
+ "omicron-ledger",
+ "serde",
+ "sled-agent-config-reconciler",
+ "sled-agent-measurements",
+ "slog",
+ "slog-error-chain",
+ "sprockets-tls",
+ "thiserror 2.0.18",
+ "trust-quorum",
+]
+
+[[package]]
 name = "sled-agent-client"
 version = "0.1.0"
 dependencies = [
@@ -13930,6 +13951,41 @@ dependencies = [
 ]
 
 [[package]]
+name = "sled-agent-multirack-join"
+version = "0.1.0"
+dependencies = [
+ "bootstore",
+ "bootstrap-agent-lockstep-types",
+ "camino",
+ "camino-tempfile",
+ "itertools 0.14.0",
+ "nexus-types",
+ "omicron-common",
+ "omicron-ddm-admin-client",
+ "omicron-ledger",
+ "omicron-test-utils",
+ "omicron-uuid-kinds",
+ "omicron-workspace-hack",
+ "oxnet",
+ "schemars 0.8.22",
+ "serde",
+ "sled-agent-bootstrap-common",
+ "sled-agent-types",
+ "sled-hardware-types",
+ "sled-storage",
+ "slog",
+ "slog-error-chain",
+ "static_assertions",
+ "thiserror 2.0.18",
+ "tokio",
+ "toml 0.8.23",
+ "trust-quorum",
+ "trust-quorum-protocol",
+ "trust-quorum-types",
+ "uuid",
+]
+
+[[package]]
 name = "sled-agent-rack-setup"
 version = "0.1.0"
 dependencies = [
@@ -13965,6 +14021,7 @@ dependencies = [
  "reqwest 0.13.2",
  "schemars 0.8.22",
  "serde",
+ "sled-agent-bootstrap-common",
  "sled-agent-client",
  "sled-agent-config-reconciler",
  "sled-agent-types",
