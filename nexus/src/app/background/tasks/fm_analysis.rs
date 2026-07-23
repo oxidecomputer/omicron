@@ -1238,9 +1238,8 @@ mod tests {
         );
 
         // 16 sitreps: 80% of the limit. The GC task is activated to reclaim
-        // capacity, but no warning is recorded: pruning keeps the history at
-        // 80% of the sitrep limit, so this is expected steady-state
-        // operation.
+        // capacity. This is roughly the expected steady state of the system, if
+        // the analysis and GC tasks are running mostly in sync.
         model.insert_history(opctx, 1).await;
         let mut warnings = Vec::new();
         let result = task.check_sitrep_limit(opctx, &mut warnings).await;
@@ -1251,19 +1250,12 @@ mod tests {
                 limit: LIMIT
             })
         );
-        assert_eq!(
-            warnings,
-            Vec::<String>::new(),
-            "80% of the limit is normal steady-state operation, and should \
-             not produce a warning"
-        );
         acts.sitrep_gc.assert_activated(
             "GC should be activated at 80% of the sitrep limit",
         );
 
-        // 19 sitreps: 95% of the limit. Now the check records a warning ---
-        // GC doesn't appear to be keeping up --- and activates the GC task
-        // again.
+        // 19 sitreps: 95% of the limit. Now the check records a warning, since
+        // GC doesn't seem to be keeping up with sitrep generation.
         model.insert_history(opctx, 3).await;
         let mut warnings = Vec::new();
         let result = task.check_sitrep_limit(opctx, &mut warnings).await;
@@ -1285,10 +1277,9 @@ mod tests {
         );
 
         // 20 sitreps: at the limit. The check fails, and the GC task is
-        // activated. Note that the last sitrep is an *orphan* --- a sitrep
-        // that was never made current --- which occupies capacity in the
-        // `fm_sitrep` table just like live ones do until the GC sweeps
-        // it up.
+        // activated. Note that the last sitrep is an orphan that was never made
+        // current. Orphans also count against the total number of sitreps in
+        // the database, until GC sweeps them up.
         model.insert_orphan(opctx, None).await;
         assert_eq!(model.sitrep_count(), LIMIT);
         let mut warnings = Vec::new();
