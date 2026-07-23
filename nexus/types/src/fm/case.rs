@@ -8,6 +8,7 @@ use crate::fm::DiagnosisEngineKind;
 use crate::fm::Ereport;
 use crate::fm::EreportId;
 use crate::fm::FactPayload;
+use crate::fm::{DiskFact, SagaFact};
 use crate::support_bundle::BundleDataSelection;
 use iddqd::{IdOrdItem, IdOrdMap};
 use omicron_uuid_kinds::{
@@ -208,6 +209,34 @@ pub struct FactMetadata {
     /// Debug-only.
     pub created_sitrep_id: SitrepUuid,
     pub comment: String,
+}
+
+impl Fact {
+    /// The saga payload, or a [`ForeignFact`] error if this fact belongs to
+    /// a different diagnosis engine.
+    pub fn as_saga(&self) -> Result<&SagaFact, ForeignFact> {
+        self.payload.as_saga().ok_or_else(|| self.foreign_fact())
+    }
+
+    /// The physical-disk payload, or a [`ForeignFact`] error if this fact
+    /// belongs to a different diagnosis engine.
+    pub fn as_physical_disk(&self) -> Result<&DiskFact, ForeignFact> {
+        self.payload.as_physical_disk().ok_or_else(|| self.foreign_fact())
+    }
+
+    fn foreign_fact(&self) -> ForeignFact {
+        ForeignFact { fact_id: self.metadata.id, actual: self.payload.engine() }
+    }
+}
+
+/// Error returned by [`Fact::as_saga`] and friends: the fact's payload is
+/// owned by a different diagnosis engine than the caller's.
+#[derive(Clone, Debug, Eq, PartialEq, thiserror::Error)]
+#[error("fact {fact_id} belongs to the {actual} diagnosis engine")]
+pub struct ForeignFact {
+    pub fact_id: FactUuid,
+    /// The engine that owns the fact's payload.
+    pub actual: DiagnosisEngineKind,
 }
 
 impl IdOrdItem for Fact {

@@ -10,7 +10,10 @@ use chrono::Utc;
 use fm::analysis_input::InvalidInputs;
 use futures::future::BoxFuture;
 use iddqd::IdOrdMap;
+use nexus_db_model::DbMetadataNexusState;
 use nexus_db_model::PhysicalDiskPolicy;
+use nexus_db_model::SagaReasonAbandoned;
+use nexus_db_model::SagaState;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::datastore;
@@ -21,6 +24,10 @@ use nexus_types::in_service_disk::InServiceDisk;
 use nexus_types::internal_api::background::FmAnalysisStatus;
 use nexus_types::internal_api::background::fm_analysis as status;
 use nexus_types::inventory;
+use nexus_types::observed_saga::{
+    ObservedSaga, ObservedSagaState, SagaAbandonInfo, SagaAbandonReason,
+    SagaOwnerState,
+};
 use omicron_uuid_kinds::AlertUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
@@ -181,6 +188,27 @@ impl FmAnalysis {
                 };
             }
             Err(PreparationError::InvalidInputs(
+                err @ InvalidInputs::MissingInput { .. },
+            )) => {
+                // A missing input is a bug in this task: `prepare_inputs`
+                // must provide every required input to the builder.
+                let error = InlineErrorChain::new(&err);
+                slog::error!(
+                    opctx.log,
+                    "fault management analysis preparation failed";
+                    &error,
+                );
+                return FmAnalysisStatus {
+                    parent_sitrep_id,
+                    inv_collection_id: Some(inv_collection_id),
+                    known_classes,
+                    outcome: status::Outcome::PreparationError(
+                        error.to_string(),
+                    ),
+                    warnings,
+                };
+            }
+            Err(PreparationError::InvalidInputs(
                 InvalidInputs::InventoryStale {
                     parent_inv_id,
                     next_inv_min_time_started,
@@ -241,11 +269,13 @@ impl FmAnalysis {
         let in_service_disks =
             Arc::new(self.load_in_service_disks(opctx, &mut warnings).await?);
 
-        let mut builder = fm::analysis_input::Input::builder(
-            parent_sitrep.clone(),
-            inv,
-            in_service_disks,
-        )?;
+        let observed_sagas =
+            Arc::new(self.prepare_observed_sagas(opctx).await?);
+
+        let mut builder =
+            fm::analysis_input::Input::builder(parent_sitrep.clone(), inv)?
+                .in_service_disks(in_service_disks)
+                .observed_sagas(observed_sagas);
         self.load_ereporter_restarts(opctx, &mut builder)
             .await
             .context("failed to load ereporter restarts")?;
@@ -267,7 +297,7 @@ impl FmAnalysis {
         .await
         .context("failed to load existing support bundle markers")?;
 
-        let (input, report) = builder.build();
+        let (input, report) = builder.build()?;
         Ok((input, status::PreparationStatus { warnings, report }))
     }
 
@@ -330,6 +360,119 @@ impl FmAnalysis {
             }
         }
         Ok(in_service_disks)
+    }
+
+    /// Build the saga diagnosis engine's input: every non-terminal saga,
+    /// annotated with the timestamp of its latest node event (the progress
+    /// signal) and the state of its owning Nexus.
+    async fn prepare_observed_sagas(
+        &self,
+        opctx: &OpContext,
+    ) -> anyhow::Result<IdOrdMap<ObservedSaga>> {
+        use std::collections::BTreeMap;
+
+        // All unfinished (running, unwinding, or abandoned) sagas. Completed
+        // sagas are excluded; a parent case whose saga is absent from this
+        // set is closed by the engine.
+        let sagas = self
+            .datastore
+            .saga_list_unfinished_batched(opctx)
+            .await
+            .context("failed to list unfinished sagas")?;
+
+        // Latest node-event time per saga: the last durably-recorded step.
+        let saga_ids: Vec<_> = sagas.iter().map(|s| s.id).collect();
+        let last_event_times: BTreeMap<
+            steno::SagaId,
+            Option<chrono::DateTime<Utc>>,
+        > = self
+            .datastore
+            .saga_latest_node_event_times(opctx, &saga_ids)
+            .await
+            .context("failed to load saga node-event times")?
+            .into_iter()
+            .map(|(id, t)| (id.0, t))
+            .collect();
+
+        // Classify each owning Nexus (current_sec) against db_metadata_nexus.
+        let nexus_states: BTreeMap<OmicronZoneUuid, DbMetadataNexusState> =
+            self.datastore
+                .get_db_metadata_nexus_in_state(
+                    opctx,
+                    DbMetadataNexusState::ALL.to_vec(),
+                )
+                .await
+                .context("failed to load db_metadata_nexus records")?
+                .into_iter()
+                .map(|n| (n.nexus_id(), n.state()))
+                .collect();
+
+        let mut observed = IdOrdMap::new();
+        for saga in sagas {
+            let saga_state = match saga.saga_state {
+                SagaState::Running => ObservedSagaState::Running,
+                SagaState::Unwinding => ObservedSagaState::Unwinding,
+                SagaState::Abandoned => {
+                    // `SagaSummary` is validated at load against the saga
+                    // table's CHECK constraints: an abandoned summary always
+                    // carries its metadata.
+                    let metadata =
+                        saga.abandon_metadata.with_context(|| {
+                            format!(
+                                "abandoned saga {} has no abandonment \
+                                 metadata",
+                                saga.id.0,
+                            )
+                        })?;
+                    ObservedSagaState::Abandoned(SagaAbandonInfo {
+                        time: metadata.time,
+                        reason: match metadata.reason {
+                            SagaReasonAbandoned::Omdb => {
+                                SagaAbandonReason::Omdb
+                            }
+                            SagaReasonAbandoned::Unrecoverable => {
+                                SagaAbandonReason::Unrecoverable
+                            }
+                        },
+                        comment: metadata.comment,
+                    })
+                }
+                // The query filters to unfinished states; defend anyway.
+                SagaState::Done => continue,
+            };
+            let current_sec = saga
+                .current_sec
+                .map(|sec| OmicronZoneUuid::from_untyped_uuid(sec.0));
+            let owner_state =
+                current_sec.map(|sec_id| match nexus_states.get(&sec_id) {
+                    Some(DbMetadataNexusState::Active) => {
+                        SagaOwnerState::Active
+                    }
+                    Some(DbMetadataNexusState::NotYet) => {
+                        SagaOwnerState::NotYet
+                    }
+                    Some(DbMetadataNexusState::Quiesced) => {
+                        SagaOwnerState::Quiesced
+                    }
+                    None => SagaOwnerState::Absent,
+                });
+            let last_event_time =
+                last_event_times.get(&saga.id.0).copied().flatten();
+            observed
+                .insert_unique(ObservedSaga {
+                    saga_id: saga.id.0,
+                    saga_name: saga.name,
+                    saga_state,
+                    time_created: saga.time_created,
+                    current_sec,
+                    last_event_time,
+                    owner_state,
+                })
+                .expect(
+                    "saga.id is a primary key, so duplicates are impossible",
+                );
+        }
+        Ok(observed)
     }
 
     async fn load_ereporter_restarts(

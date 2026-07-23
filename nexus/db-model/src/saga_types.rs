@@ -274,21 +274,6 @@ impl SagaRow {
     pub fn adopt_generation(&self) -> super::Generation {
         self.adopt_generation
     }
-
-    fn is_abandon_metadata_empty(&self) -> bool {
-        self.abandon_comment.is_none()
-            && self.abandon_reason.is_none()
-            && self.abandon_time.is_none()
-    }
-
-    // Returns the abandonment metadata iff all three columns are set.
-    fn valid_abandon_metadata(&self) -> Option<AbandonMetadata> {
-        Some(AbandonMetadata {
-            time: self.abandon_time?,
-            reason: self.abandon_reason?,
-            comment: self.abandon_comment.clone()?,
-        })
-    }
 }
 
 /// Abandonment metadata for a saga.
@@ -302,6 +287,76 @@ pub struct AbandonMetadata {
     pub time: DateTime<Utc>,
     pub reason: SagaReasonAbandoned,
     pub comment: String,
+}
+
+impl AbandonMetadata {
+    /// Validates the three nullable abandonment columns against `saga_state`
+    /// and bundles them: all three set (and the saga abandoned) yields
+    /// `Some`, all three unset (and the saga not abandoned) yields `None`,
+    /// and any other combination is an [`Error::internal_error`].
+    fn from_columns(
+        saga_id: SagaId,
+        saga_state: SagaState,
+        abandon_time: Option<DateTime<Utc>>,
+        abandon_reason: Option<SagaReasonAbandoned>,
+        abandon_comment: Option<String>,
+    ) -> Result<Option<Self>, Error> {
+        let all_empty = abandon_time.is_none()
+            && abandon_reason.is_none()
+            && abandon_comment.is_none();
+        // If present and valid, convert the three nullable abandonment
+        // columns into `AbandonMetadata`.
+        let metadata = match (&abandon_time, &abandon_reason, &abandon_comment)
+        {
+            (Some(time), Some(reason), Some(comment)) => {
+                Some(AbandonMetadata {
+                    time: *time,
+                    reason: *reason,
+                    comment: comment.clone(),
+                })
+            }
+            _ => None,
+        };
+
+        // A partially-populated set is impossible per the
+        // `abandoned_requires_metadata` and
+        // `not_abandoned_requires_no_metadata` CHECK constraints, so treat
+        // it as corruption.
+        if !all_empty && metadata.is_none() {
+            return Err(Error::internal_error(&format!(
+                "saga {saga_id}: abandonment metadata is partially populated. \
+                abandon_time: {abandon_time:?} abandon_reason {abandon_reason:?} \
+                abandon_comment: {abandon_comment:?}"
+            )));
+        }
+
+        // The abandon metadata must be present exactly when the saga is
+        // abandoned.
+        match saga_state {
+            SagaState::Abandoned => {
+                let metadata = metadata.ok_or_else(|| {
+                    Error::internal_error(&format!(
+                        "saga {saga_id}: abandoned but has no abandonment \
+                        metadata"
+                    ))
+                })?;
+
+                Ok(Some(metadata))
+            }
+            SagaState::Done | SagaState::Running | SagaState::Unwinding => {
+                if let Some(metadata) = metadata {
+                    return Err(Error::internal_error(&format!(
+                        "saga {saga_id}: has abandonment metadata but is not \
+                        abandoned. abandon_time: {:?} abandon_reason {:?} \
+                        abandon_comment: {:?}",
+                        metadata.time, metadata.reason, metadata.comment
+                    )));
+                }
+
+                Ok(None)
+            }
+        }
+    }
 }
 
 /// A saga loaded and validated from the database or built in memory for
@@ -386,11 +441,6 @@ impl TryFrom<SagaRow> for Saga {
     type Error = Error;
 
     fn try_from(row: SagaRow) -> Result<Self, Self::Error> {
-        let is_abandon_metadata_empty = row.is_abandon_metadata_empty();
-        // If present and valid, convert the three nullable abandonment columns
-        // into `AbandonMetadata`.
-        let valid_abandon_metadata = row.valid_abandon_metadata();
-
         let SagaRow {
             id,
             creator,
@@ -406,43 +456,13 @@ impl TryFrom<SagaRow> for Saga {
             abandon_comment,
         } = row;
 
-        // A partially-populated set is impossible per the
-        // `abandoned_requires_metadata` and
-        // `not_abandoned_requires_no_metadata` CHECK constraints, so treat
-        // it as corruption.
-        if !is_abandon_metadata_empty && valid_abandon_metadata.is_none() {
-            return Err(Error::internal_error(&format!(
-                "saga {id}: abandonment metadata is partially populated. \
-                abandon_time: {abandon_time:?} abandon_reason {abandon_reason:?} \
-                abandon_comment: {abandon_comment:?}"
-            )));
-        }
-
-        // The abandon metadata must be present exactly when the saga is
-        // abandoned.
-        let abandon_metadata = match saga_state {
-            SagaState::Abandoned => {
-                let metadata = valid_abandon_metadata.ok_or_else(|| {
-                    Error::internal_error(&format!(
-                        "saga {id}: abandoned but has no abandonment metadata"
-                    ))
-                })?;
-
-                Some(metadata)
-            }
-            SagaState::Done | SagaState::Running | SagaState::Unwinding => {
-                if let Some(metadata) = valid_abandon_metadata {
-                    return Err(Error::internal_error(&format!(
-                        "saga {id}: has abandonment metadata but is not \
-                        abandoned. abandon_time: {:?} abandon_reason {:?} \
-                        abandon_comment: {:?}",
-                        metadata.time, metadata.reason, metadata.comment
-                    )));
-                }
-
-                None
-            }
-        };
+        let abandon_metadata = AbandonMetadata::from_columns(
+            id,
+            saga_state,
+            abandon_time,
+            abandon_reason,
+            abandon_comment,
+        )?;
 
         Ok(Saga {
             id,
@@ -486,6 +506,90 @@ impl From<&Saga> for SagaRow {
             abandon_reason,
             abandon_comment,
         }
+    }
+}
+
+/// The raw queryable projection behind [`SagaSummary`], with the three
+/// nullable abandonment columns unbundled. Reads validate it into a
+/// [`SagaSummary`] via `SagaSummary::try_from`.
+///
+/// Like [`SagaRow`], this is `pub` only so Diesel can name the type at query
+/// sites and `#[doc(hidden)]` to signal that it's internal.
+#[doc(hidden)]
+#[derive(Queryable, Selectable, Clone, Debug, PartialEq)]
+#[diesel(table_name = saga)]
+pub struct SagaSummaryRow {
+    id: SagaId,
+    name: String,
+    time_created: chrono::DateTime<chrono::Utc>,
+    saga_state: SagaState,
+    current_sec: Option<SecId>,
+
+    // Abandonment metadata. These are only set when `saga_state` is
+    // `Abandoned` and are `None` otherwise.
+    abandon_time: Option<DateTime<Utc>>,
+    abandon_reason: Option<SagaReasonAbandoned>,
+    abandon_comment: Option<String>,
+}
+
+impl SagaSummaryRow {
+    pub fn id(&self) -> SagaId {
+        self.id
+    }
+}
+
+/// The subset of a `saga` row needed to identify and classify a saga,
+/// omitting the DAG (by far the widest column in the table).
+///
+/// Used by queries that inspect saga state in bulk, like fault-management
+/// analysis, where fetching the DAG for every row would be wasteful.
+///
+/// As with [`Saga`], the three abandon metadata columns are bundled into a
+/// single all-or-none `abandon_metadata` field; reads go through
+/// `TryFrom<SagaSummaryRow>`, which rejects rows whose metadata is
+/// inconsistent with `saga_state`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SagaSummary {
+    pub id: SagaId,
+    pub name: String,
+    pub time_created: chrono::DateTime<chrono::Utc>,
+    pub saga_state: SagaState,
+    pub current_sec: Option<SecId>,
+    // Abandon metadata, present only when `saga_state` is `Abandoned`.
+    pub abandon_metadata: Option<AbandonMetadata>,
+}
+
+impl TryFrom<SagaSummaryRow> for SagaSummary {
+    type Error = Error;
+
+    fn try_from(row: SagaSummaryRow) -> Result<Self, Self::Error> {
+        let SagaSummaryRow {
+            id,
+            name,
+            time_created,
+            saga_state,
+            current_sec,
+            abandon_time,
+            abandon_reason,
+            abandon_comment,
+        } = row;
+
+        let abandon_metadata = AbandonMetadata::from_columns(
+            id,
+            saga_state,
+            abandon_time,
+            abandon_reason,
+            abandon_comment,
+        )?;
+
+        Ok(SagaSummary {
+            id,
+            name,
+            time_created,
+            saga_state,
+            current_sec,
+            abandon_metadata,
+        })
     }
 }
 

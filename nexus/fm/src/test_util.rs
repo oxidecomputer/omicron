@@ -15,6 +15,7 @@ use nexus_types::fm::ereport::{
 use nexus_types::fm::{Sitrep, SitrepVersion};
 use nexus_types::in_service_disk::InServiceDisk;
 use nexus_types::inventory;
+use nexus_types::observed_saga::ObservedSaga;
 use omicron_test_utils::dev;
 use omicron_uuid_kinds::EreporterRestartKind;
 use omicron_uuid_kinds::EreporterRestartUuid;
@@ -69,8 +70,11 @@ impl FmTest {
         parent_sitrep: Option<Arc<(SitrepVersion, Sitrep)>>,
         inv: Arc<inventory::Collection>,
         in_service_disks: Arc<IdOrdMap<InServiceDisk>>,
+        observed_sagas: Arc<IdOrdMap<ObservedSaga>>,
     ) -> Result<Builder, InvalidInputs> {
-        let mut builder = Input::builder(parent_sitrep, inv, in_service_disks)?;
+        let mut builder = Input::builder(parent_sitrep, inv)?
+            .in_service_disks(in_service_disks)
+            .observed_sagas(observed_sagas);
         builder.add_ereporter_restarts(
             self.reporters.ereporter_restarts().iter().cloned(),
         );

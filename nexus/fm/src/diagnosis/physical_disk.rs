@@ -84,10 +84,8 @@ impl BiHashItem for ParsedDiskCase {
 /// sitrep with no path to closure.
 #[derive(Debug, Eq, PartialEq, thiserror::Error)]
 enum UninterpretableCase {
-    #[error(
-        "fact {fact_id} does not belong to the physical-disk diagnosis engine"
-    )]
-    ForeignFactPayload { fact_id: FactUuid },
+    #[error(transparent)]
+    ForeignFact(#[from] fm::case::ForeignFact),
     #[error(
         "facts reference different physical disks ({expected} and {found}, \
          1 expected)"
@@ -105,11 +103,7 @@ fn parse_case(case: &fm::Case) -> Result<ParsedDiskCase, UninterpretableCase> {
     for fact in case.facts.iter() {
         // Every fact on a physical-disk case must carry a physical-disk
         // payload; a foreign payload is a data-model violation.
-        let Some(disk_fact) = fact.payload.as_physical_disk() else {
-            return Err(UninterpretableCase::ForeignFactPayload {
-                fact_id: fact.metadata.id,
-            });
-        };
+        let disk_fact = fact.as_physical_disk()?;
         match disk_fact {
             DiskFact::ZpoolUnhealthy(payload) => {
                 let payload = *payload;
@@ -184,6 +178,11 @@ pub(super) fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
             Err(reason) => {
                 // Close the cases we couldn't interpret, so they don't ride
                 // along as open-but-unprocessable in every future sitrep.
+                builder
+                    .log_warning("closing uninterpretable Disk case")
+                    .kv("case_id", case.id)
+                    .kv("reason", reason.to_string())
+                    .finish();
                 builder
                     .cases
                     .case_mut(&case.id)
@@ -420,10 +419,11 @@ mod tests {
                 s,
             ))
         });
-        let builder =
-            Input::builder(parent, Arc::new(collection), Arc::new(in_service))
-                .expect("input builder should accept fresh inventory");
-        let (input, _report) = builder.build();
+        let builder = Input::builder(parent, Arc::new(collection))
+            .expect("input builder should accept fresh inventory")
+            .in_service_disks(Arc::new(in_service))
+            .with_empty_defaults();
+        let (input, _report) = builder.build().expect("all inputs provided");
         input
     }
 
@@ -1072,6 +1072,54 @@ mod tests {
             }
         }
         assert!(open[0].case.is_open());
+        logctx.cleanup_successful();
+    }
+
+    /// A Disk case carrying a saga fact payload is a data-model violation;
+    /// the engine closes it as uninterpretable.
+    #[test]
+    fn foreign_payload_case_is_closed() {
+        let (logctx, collection, _zpools) =
+            setup("disk_foreign_payload_closed");
+        let inv_id = collection.id;
+        let in_service = mk_in_service(std::iter::empty());
+        let parent_id = SitrepUuid::new_v4();
+        let case_id = omicron_uuid_kinds::CaseUuid::new_v4();
+        let foreign_fact = fm::case::Fact {
+            metadata: fm::case::FactMetadata {
+                id: omicron_uuid_kinds::FactUuid::new_v4(),
+                created_sitrep_id: parent_id,
+                comment: "a fact belonging to the saga engine".to_string(),
+            },
+            payload: fm::FactPayload::Saga(fm::SagaFact::Abandoned(
+                fm::SagaAbandonedFactPayload {
+                    saga_id: steno::SagaId(uuid::Uuid::from_u128(1)),
+                },
+            )),
+        };
+        let parent = make_parent_sitrep(
+            parent_id,
+            inv_id,
+            [make_disk_case(case_id, parent_id, [foreign_fact])],
+        );
+
+        let input = build_input(collection, Some(parent), in_service);
+        let (sitrep, report) = run_analyze(&logctx.log, &input);
+
+        let case = sitrep
+            .cases
+            .get(&case_id)
+            .expect("case should still be in the output sitrep");
+        assert!(
+            !case.is_open(),
+            "case with a foreign fact payload should be closed",
+        );
+        let report_str = format!("{}", report.display_multiline(0));
+        assert!(
+            report_str.contains("cannot interpret case"),
+            "close comment should say the case was uninterpretable, got: \
+             {report_str}",
+        );
         logctx.cleanup_successful();
     }
 }
