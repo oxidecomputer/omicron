@@ -100,7 +100,7 @@ async fn test_unauthorized() {
             ZpoolHealth::Online,
         )
         .await;
-    disk_test.propagate_datasets_to_sleds().await;
+    disk_test.propagate_storage_to_sleds().await;
 
     let client = &cptestctx.external_client;
     let log = &cptestctx.logctx.log;
