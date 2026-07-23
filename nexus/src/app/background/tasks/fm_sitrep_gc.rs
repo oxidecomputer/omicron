@@ -145,22 +145,19 @@ mod tests {
             model.insert_orphan(opctx, stale_parent).await;
         }
 
-        // Make sure everything --- including the orphans --- exists.
+        // Make sure everything, including the orphans, exists.
         model.assert_matches(opctx).await;
 
-        // Activate the background task.
-        let status = dbg!(task.actually_activate(opctx).await);
-        assert_eq!(status.errors, Vec::<String>::new());
+        // Activate the background task. The orphans should all be gone,
+        // while the current sitrep and its ancestor remain.
+        let status = run_gc_and_check(&mut task, &mut model, opctx).await;
+        // Independently of the model's simulation: all 7 orphans were
+        // deleted, and the (well under-limit) history was not pruned.
         assert_eq!(status.orphaned_sitreps_deleted, 7);
         assert_eq!(
             status.history_pruning_status,
             Ok(status::HistoryPruningStatus::BelowLimit { count: 2 })
         );
-
-        // Now, the orphans should all be gone, while the current sitrep and
-        // its ancestor remain.
-        model.record_gc(None);
-        model.assert_matches(opctx).await;
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -184,20 +181,17 @@ mod tests {
 
         // Below the limit: nothing should be pruned.
         model.insert_history(opctx, 3).await; // v1..=v3
-        let status = dbg!(task.actually_activate(opctx).await);
+        let status = run_gc_and_check(&mut task, &mut model, opctx).await;
         assert_eq!(status.history_limit, LIMIT);
         assert_eq!(
             status.history_pruning_status,
             Ok(status::HistoryPruningStatus::BelowLimit { count: 3 })
         );
-        assert_eq!(status.orphaned_sitreps_deleted, 0);
-        assert_eq!(status.errors, Vec::<String>::new());
-        model.assert_matches(opctx).await;
 
         // Exactly at the limit: the limit check fires, but the newest `LIMIT`
         // versions are the entire history, so nothing is actually deleted.
         model.insert_history(opctx, 2).await; // v4, v5
-        let status = dbg!(task.actually_activate(opctx).await);
+        let status = run_gc_and_check(&mut task, &mut model, opctx).await;
         assert_eq!(
             status.history_pruning_status,
             Ok(status::HistoryPruningStatus::Pruned {
@@ -205,15 +199,12 @@ mod tests {
                 newest_version_pruned: 0,
             })
         );
-        assert_eq!(status.orphaned_sitreps_deleted, 0);
-        assert_eq!(status.errors, Vec::<String>::new());
-        model.assert_matches(opctx).await;
 
         // Over the limit: versions 1..=3 should be pruned from the history,
         // and the sitreps they referenced --- now orphaned --- should be
         // deleted by the orphan sweep in the same activation.
         model.insert_history(opctx, 3).await; // v6..=v8
-        let status = dbg!(task.actually_activate(opctx).await);
+        let status = run_gc_and_check(&mut task, &mut model, opctx).await;
         assert_eq!(
             status.history_pruning_status,
             Ok(status::HistoryPruningStatus::Pruned {
@@ -222,16 +213,13 @@ mod tests {
             })
         );
         assert_eq!(status.orphaned_sitreps_deleted, 3);
-        assert_eq!(status.errors, Vec::<String>::new());
-        model.record_gc(Some(3));
-        model.assert_matches(opctx).await;
 
         // Prune again, now that the minimum history version is no longer 1.
         // This checks that the pruning arithmetic is anchored on the latest
         // version rather than on the row count: history is v4..=v10 (7 rows),
         // so v4 and v5 should go.
         model.insert_history(opctx, 2).await; // v9, v10
-        let status = dbg!(task.actually_activate(opctx).await);
+        let status = run_gc_and_check(&mut task, &mut model, opctx).await;
         assert_eq!(
             status.history_pruning_status,
             Ok(status::HistoryPruningStatus::Pruned {
@@ -240,11 +228,34 @@ mod tests {
             })
         );
         assert_eq!(status.orphaned_sitreps_deleted, 2);
-        assert_eq!(status.errors, Vec::<String>::new());
-        model.record_gc(Some(5));
-        model.assert_matches(opctx).await;
 
         db.terminate().await;
         logctx.cleanup_successful();
+    }
+
+    /// Run a GC activation and check both the task's reported status and
+    /// the database contents against the model's simulation of what GC
+    /// should do with the task's configured `history_limit`.
+    async fn run_gc_and_check(
+        task: &mut SitrepGc,
+        model: &mut SitrepModel,
+        opctx: &OpContext,
+    ) -> Status {
+        let status = dbg!(task.actually_activate(opctx).await);
+        let expected = model.simulate_gc(task.history_limit);
+        assert_eq!(
+            status.history_pruning_status,
+            Ok(expected.pruning),
+            "the task's reported pruning status should match the model's \
+             simulation"
+        );
+        assert_eq!(
+            status.orphaned_sitreps_deleted, expected.orphans_deleted,
+            "the task's reported orphan deletions should match the model's \
+             simulation"
+        );
+        assert_eq!(status.errors, Vec::<String>::new());
+        model.assert_matches(opctx).await;
+        status
     }
 }

@@ -7,10 +7,12 @@
 use crate::context::OpContext;
 use crate::db::DataStore;
 use crate::db::IsLimitReached;
+use crate::db::datastore::fm;
 use crate::db::datastore::fm::InsertSitrepError;
 use chrono::Utc;
 use nexus_types::fm::Sitrep;
 use nexus_types::fm::SitrepMetadata;
+use nexus_types::internal_api::background::fm_sitrep_gc::HistoryPruningStatus;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::Generation;
@@ -18,6 +20,7 @@ use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SitrepUuid;
 use std::collections::BTreeSet;
+use std::num::NonZeroU32;
 use std::sync::Arc;
 
 /// An in-memory model of the expected contents of the sitrep tables.
@@ -50,8 +53,11 @@ use std::sync::Arc;
 /// Expected effects on the database that happen *outside* the model's own
 /// insert methods are recorded explicitly.
 ///
-/// - When GC is performed, call [`Self::record_gc`] for a sitrep that is being
-///   deleted.
+/// - When a GC activation runs, call [`Self::simulate_gc`] with the task's
+///   configured history limit. The model computes what the GC should do
+///   given that limit, applies those effects to itself, and returns them so
+///   that the test can compare the task's reported status against the
+///   model's prediction.
 /// - When a sitrep is made current by the code under test, rather than the
 ///   model, call [`Self::record_committed`] with the ID of the newly
 ///   committed sitrep.
@@ -84,9 +90,18 @@ impl SitrepModel {
     /// The number of rows expected in the `fm_sitrep` table: live
     /// history entries, plus orphans the GC has not yet deleted.
     pub fn sitrep_count(&self) -> u64 {
-        let live_history =
-            self.history.len() - (self.earliest_live_version as usize - 1);
-        (live_history + self.live_orphans.len()) as u64
+        (self.history_count() + self.live_orphans.len()) as u64
+    }
+
+    /// The number of rows expected in the `fm_sitrep_history` table.
+    pub fn history_count(&self) -> usize {
+        (self.history.len() + 1) - self.earliest_live_version as usize
+    }
+
+    pub fn latest_version(&self) -> u32 {
+        u32::try_from(self.history.len()).expect(
+            "total number of sitreps in test exceeds a u32, that's wacky",
+        )
     }
 
     /// Insert `n` empty sitreps through the real insert path
@@ -183,31 +198,68 @@ impl SitrepModel {
         eprintln!("model: recorded sitrep {id} at v{}", self.history.len());
     }
 
-    /// Record the expected effects of a sitrep GC activation: all
-    /// outstanding orphans are collected, and, if `newest_version_pruned`
-    /// is `Some`, history versions up to and including it are pruned (and
-    /// their sitreps collected by the same activation's orphan sweep).
-    pub fn record_gc(&mut self, newest_version_pruned: Option<u32>) {
-        if let Some(version) = newest_version_pruned {
-            assert!(
-                (version as usize) < self.history.len(),
-                "the current sitrep (v{}) must never be pruned",
-                self.history.len(),
-            );
-            self.earliest_live_version =
-                self.earliest_live_version.max(version + 1);
-        }
-        let gced = std::mem::take(&mut self.live_orphans);
+    /// Simulate a sitrep GC activation with the given `history_limit`,
+    /// applying its expected effects to the model and returning them as an
+    /// [`ExpectedGc`], so that the test can compare the task's reported
+    /// status against the model's prediction.
+    ///
+    /// This simulates what the GC task *should* do:
+    ///
+    /// - If the history table holds fewer than `history_limit` rows, nothing
+    ///   is pruned.
+    /// - Otherwise, the newest `history_limit` versions are kept, and every
+    ///   version at or below `latest_version - history_limit` is pruned.
+    /// - All orphaned sitreps, including those newly orphaned by pruning
+    ///   the history, are deleted by the orphan sweep.
+    pub fn simulate_gc(&mut self, history_limit: NonZeroU32) -> ExpectedGc {
+        let latest_version = self.latest_version();
+        let history_count = u32::try_from(self.history_count())
+            .expect("test current history count exceeds u32");
+        let history_limit = history_limit.get();
         eprintln!(
-            "model: recorded GC:\n  \
-             newest version pruned: {newest_version_pruned:?}, \
-             earliest live version now v{}",
+            "model: simulating GC with history_limit={history_limit}, \
+             latest_version=v{latest_version}, history_count={history_count}"
+        );
+        let mut history_pruned = 0;
+        let pruning = if history_count < history_limit {
+            HistoryPruningStatus::BelowLimit { count: history_count.into() }
+        } else {
+            let newest_version_pruned = latest_version - history_limit;
+            // The versions pruned are
+            // `earliest_live_version..=newest_version_pruned`.
+            // Note that the indices in `history` are 0-indexed, while versions
+            // start at 1, so we must subtract to find the starting index. Since
+            // `newest_version_pruned` is 1 more than the index of the newest
+            // live version, the end index for this slice is already exclusive.
+            let earliest_pruned_idx = self.earliest_live_version as usize - 1;
+            let to_prune = &self.history
+                [earliest_pruned_idx..newest_version_pruned as usize];
+            for &id in to_prune {
+                let v = self.earliest_live_version + history_pruned;
+                eprintln!("  - pruned v{v} (sitrep {id}) from history");
+                self.live_orphans.insert(id);
+                history_pruned += 1;
+            }
+            self.earliest_live_version = newest_version_pruned + 1;
+            HistoryPruningStatus::Pruned {
+                n_pruned: history_pruned as usize,
+                newest_version_pruned,
+            }
+        };
+        let gced = std::mem::take(&mut self.live_orphans);
+        let orphans_deleted = gced.len();
+        eprintln!(
+            "model: simulated GC with history limit {history_limit}:\n  \
+             pruning: {pruning:?}, \
+             earliest live version now v{}, \
+             expecting {orphans_deleted} orphaned sitreps deleted",
             self.earliest_live_version,
         );
         for orphan in &gced {
             eprintln!("  - GC'd: {orphan}")
         }
         self.gced_orphans.extend(gced);
+        ExpectedGc { pruning, orphans_deleted }
     }
 
     /// Assert that the database contents match this model:
@@ -218,6 +270,7 @@ impl SitrepModel {
     /// - sitreps for pruned history versions and collected orphans have
     ///   been deleted, while live history sitreps and uncollected orphans
     ///   exist;
+    /// - no child tables for deleted sitreps exist in the database;
     /// - the total `fm_sitrep` row count matches [`Self::sitrep_count`]
     ///   (catching stray rows that the per-ID checks above cannot, since a
     ///   sitrep this model never learned about has an unknown ID).
@@ -314,6 +367,17 @@ impl SitrepModel {
     }
 }
 
+/// The expected outcome of a sitrep GC activation, as computed by
+/// [`SitrepModel::simulate_gc`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ExpectedGc {
+    /// The pruning status the GC task should report.
+    pub pruning: HistoryPruningStatus,
+    /// The number of orphaned sitreps the task's orphan sweep should delete,
+    /// including sitreps newly orphaned by pruning the history.
+    pub orphans_deleted: usize,
+}
+
 /// Returns an empty test [`Sitrep`] with the given ID, parent, and comment.
 fn test_sitrep(
     id: SitrepUuid,
@@ -358,9 +422,16 @@ async fn assert_sitrep_deleted(
 ) {
     match datastore.fm_sitrep_metadata_read(opctx, id).await {
         Ok(_) => {
-            panic!("sitrep {id} should have been deleted, but it still exists")
+            panic!(
+                "sitrep {id} should have been deleted, but its metadata row \
+                 still exists"
+            )
         }
         Err(Error::NotFound { .. }) => {}
-        Err(e) => panic!("unexpected error reading sitrep {id}: {e}"),
+        Err(e) => {
+            panic!("unexpected error reading sitrep metadata for {id}: {e}")
+        }
     }
+
+    fm::test_utils::ensure_sitrep_children_fully_deleted(datastore, id).await;
 }
