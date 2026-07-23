@@ -909,6 +909,8 @@ pub enum SitrepLoadStatus {
 /// The status of a `fm_sitrep_gc` background task activation.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct SitrepGcStatus {
+    /// The maximum number of entries to retain in the history table.
+    pub history_limit: u32,
     pub history_pruning_status: fm_sitrep_gc::HistoryPruningStatus,
     pub history_pruning_outcome: fm_sitrep_gc::HistoryPruningOutcome,
     pub orphaned_sitreps_deleted: usize,
@@ -927,15 +929,29 @@ pub mod fm_sitrep_gc {
     /// history table.
     #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
     pub struct HistoryPruningStatus {
-        pub limit: u32,
+        /// The number of batched delete queries executed by this activation.
         pub batches: usize,
+        /// The total number of history table entries deleted by this
+        /// activation, across all batches.
         pub sitreps_pruned: usize,
+        /// The range of sitrep versions deleted by this activation
+        /// (oldest..=newest), if any were deleted.
         pub versions_pruned: Option<RangeInclusive<u32>>,
     }
 
+    /// Describes how the history pruning part of a GC activation ended.
     #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
     pub enum HistoryPruningOutcome {
+        /// The history table was already within the limit (with `count`
+        /// entries), so nothing was deleted.
         NotPruned { count: u64 },
+        /// Entries were pruned from the history table, which is now within
+        /// the limit (with `count` entries remaining). The details of what
+        /// was pruned are recorded in [`HistoryPruningStatus`].
+        Pruned { count: u64 },
+        /// A pruning query failed. Any batches that completed before the
+        /// error still happened, and are recorded in
+        /// [`HistoryPruningStatus`].
         Error(String),
     }
 

@@ -772,9 +772,9 @@ task: "fm_sitrep_gc"
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     pruning sitrep history table:
-      max sitreps to keep:   2000
-      status: no sitreps pruned
-      current count:            1
+      max sitreps to keep: 2000
+      status: within limit (nothing was pruned)
+      current count:          1
     garbage collecting orphaned sitreps:
       batch size:                                                               1000
       orphaned sitreps deleted:                                                    <ORPHANED_SITREPS_DELETED_REDACTED>
@@ -1493,9 +1493,9 @@ task: "fm_sitrep_gc"
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     pruning sitrep history table:
-      max sitreps to keep:   2000
-      status: no sitreps pruned
-      current count:            1
+      max sitreps to keep: 2000
+      status: within limit (nothing was pruned)
+      current count:          1
     garbage collecting orphaned sitreps:
       batch size:                                                               1000
       orphaned sitreps deleted:                                                    <ORPHANED_SITREPS_DELETED_REDACTED>
