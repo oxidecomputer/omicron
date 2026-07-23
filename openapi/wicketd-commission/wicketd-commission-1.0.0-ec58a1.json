@@ -2638,7 +2638,7 @@
             "type": "object",
             "properties": {
               "age": {
-                "description": "How long it has been since this reading was fetched.\n\nA large value means wicketd has not successfully read this service processor recently, even if `refresh_error` is `None`.\n\nThis age applies to the state reading alone. The cabooses and root-of-trust information for this service processor are re-read only when its reported state changes or when a prior read of them failed, so they may be older than this age. In particular, writing a new image to the inactive service-processor slot does not change the reported state, so `caboose_inactive` may remain stale until the service processor resets.",
+                "description": "How long it has been since this reading was fetched.\n\nA large value means wicketd has not successfully read this service processor recently, even if `refresh_error` is `None`.\n\nThis age applies to the state reading alone. The cabooses and RoT information for this SP are re-read only when its reported state changes or when a prior read of them failed, so they may be older than this age. In particular, writing a new image to the inactive service-processor slot does not change the reported state, so `caboose_inactive` may remain stale until the service processor resets.",
                 "allOf": [
                   {
                     "$ref": "#/components/schemas/Duration"
@@ -3427,7 +3427,7 @@
         }
       },
       "UnmatchedBootstrapPeer": {
-        "description": "A peer discovered on the bootstrap network that could not be matched to any sled reported by MGS.\n\nBootstrap peers are matched to sleds by the baseboard identity each peer's bootstrap agent reports about itself. A peer appears here instead of contributing a `BootstrapSled::ip` when that identity matches no sled: either transiently, because the sled's service processor has not been read from MGS yet, or persistently, because the peer could not identify its own baseboard (or reports an identity that disagrees with MGS). A persistent entry here means the peer's address has been discovered but rack setup will not be able to use it.",
+        "description": "A peer discovered on the bootstrap network that could not be matched to any sled reported by MGS.\n\nBootstrap peers are matched to sleds by the baseboard identity each peer's bootstrap agent reports about itself. A peer appears here instead of contributing a `BootstrapSled::ip` when that match wasn't successful: either transiently, because the sled's SP has not been read from MGS yet, or persistently, because the peer could not identify its own baseboard (or reports an identity that disagrees with MGS). A persistent entry here means the peer's address has been discovered but rack setup will not be able to use it.",
         "type": "object",
         "properties": {
           "identity": {
