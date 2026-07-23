@@ -1237,17 +1237,6 @@ pub(crate) async fn multicast_group_attach_with_sources(
     put_upsert::<_, MulticastGroupMember>(client, &url, &body).await;
 }
 
-/// Wait for multiple groups to become "Active".
-pub(crate) async fn wait_for_groups_active(
-    client: &ClientTestContext,
-    group_names: &[&str],
-) -> Vec<MulticastGroup> {
-    let wait_futures =
-        group_names.iter().map(|name| wait_for_group_active(client, name));
-
-    ops::join_all(wait_futures).await
-}
-
 /// Clean up multiple instances, handling various states properly.
 ///
 /// This function handles the complete instance lifecycle for cleanup:

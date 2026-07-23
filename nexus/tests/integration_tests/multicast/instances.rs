@@ -210,6 +210,25 @@ async fn test_multicast_lifecycle(cptestctx: &ControlPlaneTestContext) {
             MulticastGroupMemberState::Left, // Stopped instance
         )
         .await;
+
+        let members = nexus_test_utils::http_testing::NexusRequest::iter_collection_authn::<
+            MulticastGroupMember,
+        >(
+            client,
+            &mcast_group_members_url(group_name),
+            &format!("project={PROJECT_NAME}"),
+            None,
+        )
+        .await
+        .expect("Should list multicast group members")
+        .all_items;
+
+        assert_eq!(
+            members.len(),
+            1,
+            "Instance should be the sole member of {group_name}"
+        );
+        assert_eq!(members[0].parent_id, instances[3].identity.id);
     }
 
     // Detach operations and idempotency
@@ -283,185 +302,6 @@ async fn test_multicast_lifecycle(cptestctx: &ControlPlaneTestContext) {
         wait_for_group_deleted(cptestctx, group_names[1]),
         wait_for_group_deleted(cptestctx, group_names[2]),
         wait_for_group_deleted(cptestctx, group_names[3]),
-    )
-    .await;
-}
-
-#[nexus_test]
-async fn test_multicast_group_attach_conflicts(
-    cptestctx: &ControlPlaneTestContext,
-) {
-    let client = &cptestctx.external_client;
-
-    // Create project and pools in parallel
-    ops::join3(
-        create_default_ip_pools(&client),
-        create_project(client, PROJECT_NAME),
-        create_multicast_ip_pool_with_range(
-            &client,
-            "mcast-pool-conflicts",
-            (224, 23, 0, 1),   // Unique range: 224.23.0.1
-            (224, 23, 0, 255), // to 224.23.0.255
-        ),
-    )
-    .await;
-
-    // Create first instance (implicit model: first instance creates the group)
-    instance_for_multicast_groups(
-        cptestctx,
-        PROJECT_NAME,
-        "mcast-instance-1",
-        false,
-        &[],
-    )
-    .await;
-
-    // Add instance1 to group (group implicitly creates if it doesn't exist)
-    multicast_group_attach(
-        cptestctx,
-        PROJECT_NAME,
-        "mcast-instance-1",
-        "mcast-group-1",
-    )
-    .await;
-
-    // Wait for group to become Active before proceeding
-    wait_for_group_active(client, "mcast-group-1").await;
-
-    // Create second instance and add to same multicast group
-    // This should succeed (multicast groups can have multiple members, unlike floating IPs)
-    instance_for_multicast_groups(
-        cptestctx,
-        PROJECT_NAME,
-        "mcast-instance-2",
-        false,
-        &[],
-    )
-    .await;
-    multicast_group_attach(
-        cptestctx,
-        PROJECT_NAME,
-        "mcast-instance-2",
-        "mcast-group-1",
-    )
-    .await;
-
-    // Wait for reconciler
-    wait_for_multicast_reconciler(&cptestctx.lockstep_client).await;
-
-    // Verify both instances are members of the group
-    let members =
-        nexus_test_utils::http_testing::NexusRequest::iter_collection_authn::<
-            MulticastGroupMember,
-        >(
-            client,
-            &mcast_group_members_url("mcast-group-1"),
-            &format!("project={PROJECT_NAME}"),
-            None,
-        )
-        .await
-        .expect("Should list multicast group members")
-        .all_items;
-
-    assert_eq!(
-        members.len(),
-        2,
-        "Multicast group should support multiple members (unlike floating IPs)"
-    );
-
-    cleanup_instances(
-        cptestctx,
-        client,
-        PROJECT_NAME,
-        &["mcast-instance-1", "mcast-instance-2"],
-    )
-    .await;
-    wait_for_group_deleted(cptestctx, "mcast-group-1").await;
-}
-
-#[nexus_test]
-async fn test_multicast_group_attach_multiple(
-    cptestctx: &ControlPlaneTestContext,
-) {
-    let client = &cptestctx.external_client;
-
-    // Create project and pools in parallel
-    ops::join3(
-        create_default_ip_pools(&client),
-        create_project(client, PROJECT_NAME),
-        create_multicast_ip_pool(&client, "mcast-pool"),
-    )
-    .await;
-
-    let group_names =
-        ["limit-test-group-0", "limit-test-group-1", "limit-test-group-2"];
-
-    // Create instance first (groups will be implicitly created when attached)
-    let instance = instance_for_multicast_groups(
-        cptestctx,
-        PROJECT_NAME,
-        "mcast-instance-1",
-        false,
-        &[], // No groups at creation
-    )
-    .await;
-
-    // Attach instance to multiple groups (implicitly creates each group)
-    let multicast_group_names = &group_names;
-    for group_name in multicast_group_names {
-        multicast_group_attach(
-            cptestctx,
-            PROJECT_NAME,
-            "mcast-instance-1",
-            group_name,
-        )
-        .await;
-    }
-
-    // Wait for all groups to become active in parallel
-    wait_for_groups_active(client, multicast_group_names).await;
-
-    // Wait for members to reach "Left" state for each group
-    // (instance is stopped, so member starts in "Left" state with no sled_id)
-    for group_name in multicast_group_names {
-        wait_for_member_state(
-            cptestctx,
-            group_name,
-            instance.identity.id,
-            MulticastGroupMemberState::Left,
-        )
-        .await;
-    }
-
-    // Verify instance is member of multiple groups
-    for group_name in multicast_group_names {
-        let members_url = mcast_group_members_url(group_name);
-        let members = nexus_test_utils::http_testing::NexusRequest::iter_collection_authn::<MulticastGroupMember>(
-             client,
-             &members_url,
-             &format!("project={PROJECT_NAME}"),
-             None,
-         )
-         .await
-         .expect("Should list multicast group members")
-         .all_items;
-
-        assert_eq!(
-            members.len(),
-            1,
-            "Instance should be member of group {group_name}"
-        );
-        assert_eq!(members[0].parent_id, instance.identity.id);
-    }
-
-    cleanup_instances(cptestctx, client, PROJECT_NAME, &["mcast-instance-1"])
-        .await;
-    // Groups are implicitly deleted when last member (instance) is removed
-    // Only 3 groups were created (group_names[0..3])
-    ops::join3(
-        wait_for_group_deleted(cptestctx, group_names[0]),
-        wait_for_group_deleted(cptestctx, group_names[1]),
-        wait_for_group_deleted(cptestctx, group_names[2]),
     )
     .await;
 }

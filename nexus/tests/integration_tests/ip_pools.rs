@@ -4,6 +4,8 @@
 
 //! Integration tests for operating on IP Pools
 
+use std::net::{Ipv4Addr, Ipv6Addr};
+
 use crate::integration_tests::instances::create_project_and_pool;
 use crate::integration_tests::instances::instance_wait_for_state;
 use dropshot::HttpErrorResponseBody;
@@ -1157,102 +1159,171 @@ async fn test_bad_ip_ranges(
     }
 }
 
-/// Test that multicast pools reject reserved IPv4 multicast address ranges.
+/// Test multicast pool range validation at the pool level.
 ///
 /// This test ensures operators receive immediate feedback when configuring
 /// IP pools, preventing users from encountering Dendrite errors later when
 /// allocating addresses for multicast groups.
 ///
-/// TODO: Add IPv6 reserved range tests (ff00::/16 reserved-scope, ff01::/16
-/// interface-local, ff02::/16 link-local) once IPv6 multicast support is
-/// enabled. The validation code exists and matches Dendrite's validation
+/// TODO: Add remaining IPv6 reserved range tests (ff00::/16 reserved-scope,
+/// ff01::/16 interface-local) once IPv6 multicast support is enabled. The
+/// validation code exists and matches Dendrite's validation
 /// (see dendrite/dpd/src/mcast/validate.rs).
 #[nexus_test]
-async fn test_ip_pool_multicast_rejects_reserved_ranges(
+async fn test_ip_pool_multicast_range_validation(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
 
-    // Create a multicast pool
-    let pool_params = IpPoolCreate {
-        identity: IdentityMetadataCreateParams {
-            name: "mcast-reserved-test".parse().unwrap(),
-            description: "Test rejection of reserved multicast ranges"
-                .to_string(),
-        },
-        ip_version: IpVersion::V4,
-        pool_type: IpPoolType::Multicast,
-        assignment: IpPoolAssignment::Silos,
-    };
-    object_create::<_, IpPool>(client, "/v1/system/ip-pools", &pool_params)
-        .await;
+    // Expected outcome of adding a range: accepted, or rejected with a
+    // message containing the given substring (None skips the message check)
+    enum Expect {
+        Ok,
+        Reject(Option<&'static str>),
+    }
 
-    let add_url = "/v1/system/ip-pools/mcast-reserved-test/ranges/add";
+    for (name, version) in [
+        ("mcast-v4-validation", IpVersion::V4),
+        ("mcast-v6-validation", IpVersion::V6),
+    ] {
+        let pool_params = IpPoolCreate {
+            identity: IdentityMetadataCreateParams {
+                name: name.parse().unwrap(),
+                description: "multicast pool for range validation".to_string(),
+            },
+            ip_version: version,
+            pool_type: IpPoolType::Multicast,
+            assignment: IpPoolAssignment::Silos,
+        };
+        object_create::<_, IpPool>(client, "/v1/system/ip-pools", &pool_params)
+            .await;
+    }
 
-    // IPv4 link-local multicast (224.0.0.0/24) should be rejected
-    let link_local_range = IpRange::V4(
-        Ipv4Range::new(
-            std::net::Ipv4Addr::new(224, 0, 0, 10),
-            std::net::Ipv4Addr::new(224, 0, 0, 20),
-        )
-        .unwrap(),
-    );
-    let error = object_create_error(
-        client,
-        add_url,
-        &link_local_range,
-        StatusCode::BAD_REQUEST,
-    )
-    .await;
-    assert!(error.message.contains("link-local multicast"));
+    let v4_url = "/v1/system/ip-pools/mcast-v4-validation/ranges/add";
+    let v6_url = "/v1/system/ip-pools/mcast-v6-validation/ranges/add";
 
-    // IPv4 GLOP multicast (233.0.0.0/8) is allowed (customer may have use case)
-    let glop_range = IpRange::V4(
-        Ipv4Range::new(
-            std::net::Ipv4Addr::new(233, 1, 0, 1),
-            std::net::Ipv4Addr::new(233, 1, 0, 10),
-        )
-        .unwrap(),
-    );
-    object_create::<_, IpPoolRange>(client, add_url, &glop_range).await;
+    let cases = [
+        (
+            v4_url,
+            "IPv4 unicast range",
+            IpRange::V4(
+                Ipv4Range::new(
+                    Ipv4Addr::new(10, 0, 0, 1),
+                    Ipv4Addr::new(10, 0, 0, 255),
+                )
+                .unwrap(),
+            ),
+            Expect::Reject(None),
+        ),
+        (
+            v4_url,
+            "IPv4 link-local multicast (224.0.0.0/24)",
+            IpRange::V4(
+                Ipv4Range::new(
+                    Ipv4Addr::new(224, 0, 0, 10),
+                    Ipv4Addr::new(224, 0, 0, 20),
+                )
+                .unwrap(),
+            ),
+            Expect::Reject(Some("link-local multicast")),
+        ),
+        (
+            v4_url,
+            "range straddling the link-local boundary",
+            IpRange::V4(
+                Ipv4Range::new(
+                    Ipv4Addr::new(224, 0, 0, 0),
+                    Ipv4Addr::new(224, 0, 1, 0),
+                )
+                .unwrap(),
+            ),
+            Expect::Reject(Some("link-local multicast")),
+        ),
+        (
+            v4_url,
+            "GLOP multicast (233.0.0.0/8), allowed for customer use",
+            IpRange::V4(
+                Ipv4Range::new(
+                    Ipv4Addr::new(233, 1, 0, 1),
+                    Ipv4Addr::new(233, 1, 0, 10),
+                )
+                .unwrap(),
+            ),
+            Expect::Ok,
+        ),
+        (
+            v4_url,
+            "admin-scoped multicast (239.0.0.0/8), allowed for customer use",
+            IpRange::V4(
+                Ipv4Range::new(
+                    Ipv4Addr::new(239, 10, 0, 1),
+                    Ipv4Addr::new(239, 10, 0, 10),
+                )
+                .unwrap(),
+            ),
+            Expect::Ok,
+        ),
+        (
+            v4_url,
+            "valid ASM range",
+            IpRange::V4(
+                Ipv4Range::new(
+                    Ipv4Addr::new(225, 1, 0, 1),
+                    Ipv4Addr::new(225, 1, 0, 10),
+                )
+                .unwrap(),
+            ),
+            Expect::Ok,
+        ),
+        (
+            v6_url,
+            "IPv6 link-local multicast (ff02::/16)",
+            IpRange::V6(
+                Ipv6Range::new(
+                    Ipv6Addr::new(0xff02, 0, 0, 0, 0, 0, 0, 1),
+                    Ipv6Addr::new(0xff02, 0, 0, 0, 0, 0, 0, 255),
+                )
+                .unwrap(),
+            ),
+            Expect::Reject(None),
+        ),
+        (
+            v6_url,
+            "IPv6 site-local multicast (ff05::/16)",
+            IpRange::V6(
+                Ipv6Range::new(
+                    Ipv6Addr::new(0xff05, 0, 0, 0, 0, 0, 0, 1),
+                    Ipv6Addr::new(0xff05, 0, 0, 0, 0, 0, 0, 255),
+                )
+                .unwrap(),
+            ),
+            Expect::Ok,
+        ),
+    ];
 
-    // IPv4 admin-scoped multicast (239.0.0.0/8) is allowed (customer may have use case)
-    let admin_scoped_range = IpRange::V4(
-        Ipv4Range::new(
-            std::net::Ipv4Addr::new(239, 10, 0, 1),
-            std::net::Ipv4Addr::new(239, 10, 0, 10),
-        )
-        .unwrap(),
-    );
-    object_create::<_, IpPoolRange>(client, add_url, &admin_scoped_range).await;
-
-    // Valid ASM range (225.0.0.0 - 231.255.255.255) should succeed
-    let valid_asm_range = IpRange::V4(
-        Ipv4Range::new(
-            std::net::Ipv4Addr::new(225, 1, 0, 1),
-            std::net::Ipv4Addr::new(225, 1, 0, 10),
-        )
-        .unwrap(),
-    );
-    object_create::<_, IpPoolRange>(client, add_url, &valid_asm_range).await;
-
-    // Ranges that touch reserved boundaries should be rejected
-    // Range starting in valid space but ending in link-local
-    let boundary_range_low = IpRange::V4(
-        Ipv4Range::new(
-            std::net::Ipv4Addr::new(224, 0, 0, 0),
-            std::net::Ipv4Addr::new(224, 0, 1, 0),
-        )
-        .unwrap(),
-    );
-    let error = object_create_error(
-        client,
-        add_url,
-        &boundary_range_low,
-        StatusCode::BAD_REQUEST,
-    )
-    .await;
-    assert!(error.message.contains("link-local multicast"));
+    for (url, label, range, expect) in cases {
+        match expect {
+            Expect::Ok => {
+                object_create::<_, IpPoolRange>(client, url, &range).await;
+            }
+            Expect::Reject(msg) => {
+                let error = object_create_error(
+                    client,
+                    url,
+                    &range,
+                    StatusCode::BAD_REQUEST,
+                )
+                .await;
+                if let Some(msg) = msg {
+                    assert!(
+                        error.message.contains(msg),
+                        "{label}: expected error containing {msg:?}, received {:?}",
+                        error.message
+                    );
+                }
+            }
+        }
+    }
 }
 
 #[nexus_test]

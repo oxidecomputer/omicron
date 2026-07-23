@@ -182,9 +182,11 @@ async fn create_test_instance(
     .await
 }
 
-/// Test omdb multicast pools command.
+/// Test omdb multicast pools, groups, members, and info commands.
+///
+/// This consolidated test verifies all multicast commands work with actual data.
 #[nexus_test]
-async fn test_omdb_multicast_pools(cptestctx: &ControlPlaneTestContext) {
+async fn test_omdb_multicast_commands(cptestctx: &ControlPlaneTestContext) {
     let db_url = cptestctx.database.listen_url().to_string();
     let client = &cptestctx.external_client;
 
@@ -195,10 +197,15 @@ async fn test_omdb_multicast_pools(cptestctx: &ControlPlaneTestContext) {
         "Expected empty pool message, got: {output}"
     );
 
-    // Create a multicast pool (no silo linking needed for pools-only test)
-    create_multicast_ip_pool(client, "test-mcast-pool", None).await;
+    // Setup: create pools and project
+    join3(
+        create_default_ip_pools(client),
+        create_project(client, PROJECT_NAME),
+        create_multicast_pool_linked(client, "test-mcast-pool", None),
+    )
+    .await;
 
-    // Now should show the pool with all columns
+    // Test: omdb db multicast pools
     let output = run_omdb(&db_url, &["db", "multicast", "pools"]);
     // pool name
     assert!(
@@ -215,23 +222,6 @@ async fn test_omdb_multicast_pools(cptestctx: &ControlPlaneTestContext) {
         output.contains("224.1.255.255"),
         "Expected last address in output, got: {output}"
     );
-}
-
-/// Test omdb multicast groups, members, and info commands.
-///
-/// This consolidated test verifies all multicast commands work with actual data.
-#[nexus_test]
-async fn test_omdb_multicast_commands(cptestctx: &ControlPlaneTestContext) {
-    let db_url = cptestctx.database.listen_url().to_string();
-    let client = &cptestctx.external_client;
-
-    // Setup: create pools and project
-    join3(
-        create_default_ip_pools(client),
-        create_project(client, PROJECT_NAME),
-        create_multicast_pool_linked(client, "test-mcast-pool", None),
-    )
-    .await;
 
     // Create an instance without multicast groups first
     let instance = create_test_instance(
