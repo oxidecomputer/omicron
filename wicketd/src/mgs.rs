@@ -943,6 +943,7 @@ mod tests {
                 caboose_b: Fetched::NotRead,
                 stage0: stage0.clone(),
                 stage0next: Stage0Fetch::Unsupported,
+                image_errors: None,
             }));
             let record = record_with_data(sled(0), Fetched::NotRead, rot);
             let rot_inventory = record
