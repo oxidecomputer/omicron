@@ -114,17 +114,9 @@ impl SitrepGc {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::Utc;
-    use nexus_db_queries::db::datastore::fm::InsertSitrepError;
     use nexus_db_queries::db::pub_test_utils::TestDatabase;
-    use nexus_types::fm;
-    use omicron_common::api::external::Error;
-    use omicron_common::api::external::Generation;
+    use nexus_db_queries::db::pub_test_utils::fm::SitrepModel;
     use omicron_test_utils::dev;
-    use omicron_uuid_kinds::CollectionUuid;
-    use omicron_uuid_kinds::OmicronZoneUuid;
-    use omicron_uuid_kinds::SitrepUuid;
-    use std::collections::BTreeSet;
 
     #[tokio::test]
     async fn test_orphaned_sitrep_gc() {
@@ -133,164 +125,126 @@ mod tests {
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
         let mut task = SitrepGc::new(datastore.clone());
+        let mut model = SitrepModel::new(datastore.clone());
 
-        // First, insert an initial sitrep. This should succeed.
-        let sitrep1 = fm::Sitrep {
-            metadata: fm::SitrepMetadata {
-                id: SitrepUuid::new_v4(),
-                inv_collection_id: CollectionUuid::new_v4(),
-                creator_id: OmicronZoneUuid::new_v4(),
-                comment: "test sitrep v1".to_string(),
-                time_created: Utc::now(),
-                parent_sitrep_id: None,
-                next_inv_min_time_started: Utc::now(),
-                alert_generation: Generation::new(),
-                support_bundle_generation: Generation::new(),
-            },
-            cases: Default::default(),
-            ereports_by_id: Default::default(),
-        };
-        datastore
-            .fm_sitrep_insert(&opctx, sitrep1.clone(), None)
-            .await
-            .expect("inserting initial sitrep should succeed");
+        // First, insert an initial sitrep (v1).
+        model.insert_history(opctx, 1).await;
 
         // Now, create some orphaned sitreps which also have no parent.
-        let mut orphans = BTreeSet::new();
-        for i in 1..5 {
-            insert_orphan(&datastore, &opctx, &mut orphans, None, 1, i).await;
+        for _ in 0..4 {
+            model.insert_orphan(opctx, None).await;
         }
 
-        // Next, create a new sitrep which descends from sitrep 1.
-        let sitrep2 = fm::Sitrep {
-            metadata: fm::SitrepMetadata {
-                id: SitrepUuid::new_v4(),
-                inv_collection_id: CollectionUuid::new_v4(),
-                creator_id: OmicronZoneUuid::new_v4(),
-                comment: "test sitrep v2".to_string(),
-                time_created: Utc::now(),
-                parent_sitrep_id: Some(sitrep1.metadata.id),
-                next_inv_min_time_started: Utc::now(),
-                alert_generation: Generation::new(),
-                support_bundle_generation: Generation::new(),
-            },
-            cases: Default::default(),
-            ereports_by_id: Default::default(),
-        };
-        datastore
-            .fm_sitrep_insert(&opctx, sitrep2.clone(), None)
-            .await
-            .expect("inserting child sitrep should succeed");
+        // Next, create a new current sitrep (v2), which descends from v1.
+        model.insert_history(opctx, 1).await;
 
-        // Now, create some orphaned sitreps which also descend from sitrep 1.
-        for i in 1..4 {
-            insert_orphan(
-                &datastore,
-                &opctx,
-                &mut orphans,
-                Some(sitrep1.metadata.id),
-                2,
-                i,
-            )
-            .await;
+        // Now, create some orphaned sitreps which also descend from the
+        // (no longer current) v1.
+        let stale_parent = Some(model.history[0]);
+        for _ in 0..3 {
+            model.insert_orphan(opctx, stale_parent).await;
         }
 
-        // Make sure the orphans exist.
-        for &id in &orphans {
-            match datastore.fm_sitrep_metadata_read(&opctx, id).await {
-                Ok(_) => {}
-                Err(Error::NotFound { .. }) => {
-                    panic!("orphaned sitrep {id} should exist");
-                }
-                Err(e) => {
-                    panic!(
-                        "unexpected error reading orphaned sitrep {id}: {e}"
-                    );
-                }
-            }
-        }
+        // Make sure everything --- including the orphans --- exists.
+        model.assert_matches(opctx).await;
 
         // Activate the background task.
         let status = dbg!(task.actually_activate(opctx).await);
-
-        // Now, the orphans should all be gone.
-        for &id in &orphans {
-            match datastore.fm_sitrep_metadata_read(&opctx, id).await {
-                Ok(_) => {
-                    panic!(
-                        "orphaned sitrep {id} should have been deleted, \
-                         but it appears to still exist!"
-                    )
-                }
-                Err(Error::NotFound { .. }) => {
-                    // Okay, it's gone.
-                }
-                Err(e) => {
-                    panic!(
-                        "unexpected error reading orphaned sitrep {id}: {e}"
-                    );
-                }
-            }
-        }
-        // But the non-orphaned sitreps should still be there!
-        datastore
-            .fm_sitrep_metadata_read(&opctx, sitrep1.id())
-            .await
-            .expect("sitrep 1 should still exist");
-        datastore
-            .fm_sitrep_metadata_read(&opctx, sitrep2.id())
-            .await
-            .expect("sitrep 2 should still exist");
-
         assert_eq!(status.errors, Vec::<String>::new());
         assert_eq!(status.orphaned_sitreps_deleted, 7);
+        assert_eq!(
+            status.history_pruning_status,
+            Ok(status::HistoryPruningStatus::BelowLimit { count: 2 })
+        );
+
+        // Now, the orphans should all be gone, while the current sitrep and
+        // its ancestor remain.
+        model.record_gc(None);
+        model.assert_matches(opctx).await;
 
         db.terminate().await;
         logctx.cleanup_successful();
     }
 
-    async fn insert_orphan(
-        datastore: &DataStore,
-        opctx: &OpContext,
-        orphans: &mut BTreeSet<SitrepUuid>,
-        parent_sitrep_id: Option<SitrepUuid>,
-        v: usize,
-        i: usize,
-    ) {
-        let sitrep = fm::Sitrep {
-            metadata: fm::SitrepMetadata {
-                id: SitrepUuid::new_v4(),
-                inv_collection_id: CollectionUuid::new_v4(),
-                creator_id: OmicronZoneUuid::new_v4(),
-                comment: format!("test sitrep v{i}; orphan {i}"),
-                time_created: Utc::now(),
-                next_inv_min_time_started: Utc::now(),
-                parent_sitrep_id,
-                alert_generation: Generation::new(),
-                support_bundle_generation: Generation::new(),
-            },
-            // We could populate the orphan sitreps with cases and ereports
-            // here, but there's a unit test
-            // `test_sitrep_delete_deletes_cases()` in the
-            // `nexus_db_queries::db::datastore::fm` module which ensures that
-            // deleting a sitrep removes all the other records associated with
-            // it, so it should be safe to trust that this works properly.
-            cases: Default::default(),
-            ereports_by_id: Default::default(),
-        };
-        match datastore.fm_sitrep_insert(&opctx, sitrep, None).await {
-            Ok(_) => {
-                panic!("inserting sitrep v{v} orphan {i} should not succeed")
-            }
-            Err(InsertSitrepError::ParentNotCurrent(id)) => {
-                orphans.insert(id);
-            }
-            Err(InsertSitrepError::Other(e)) => {
-                panic!(
-                    "expected inserting sitrep v{v} orphan {i} to fail because \
-                     its parent is out of date, but saw an unexpected error: {e}"
-                );
-            }
-        }
+    /// Tests that the GC task prunes the sitrep history table down to (at
+    /// most) `history_limit` entries, and that the sitreps whose history
+    /// entries were pruned are garbage-collected as orphans *in the same
+    /// activation* (i.e., pruning runs before the orphan sweep).
+    #[tokio::test]
+    async fn test_history_pruning() {
+        let logctx = dev::test_setup_log("test_history_pruning");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        const LIMIT: u32 = 5;
+        let mut task = SitrepGc::new(datastore.clone());
+        task.history_limit = NonZeroU32::new(LIMIT).unwrap();
+
+        let mut model = SitrepModel::new(datastore.clone());
+
+        // Below the limit: nothing should be pruned.
+        model.insert_history(opctx, 3).await; // v1..=v3
+        let status = dbg!(task.actually_activate(opctx).await);
+        assert_eq!(status.history_limit, LIMIT);
+        assert_eq!(
+            status.history_pruning_status,
+            Ok(status::HistoryPruningStatus::BelowLimit { count: 3 })
+        );
+        assert_eq!(status.orphaned_sitreps_deleted, 0);
+        assert_eq!(status.errors, Vec::<String>::new());
+        model.assert_matches(opctx).await;
+
+        // Exactly at the limit: the limit check fires, but the newest `LIMIT`
+        // versions are the entire history, so nothing is actually deleted.
+        model.insert_history(opctx, 2).await; // v4, v5
+        let status = dbg!(task.actually_activate(opctx).await);
+        assert_eq!(
+            status.history_pruning_status,
+            Ok(status::HistoryPruningStatus::Pruned {
+                n_pruned: 0,
+                newest_version_pruned: 0,
+            })
+        );
+        assert_eq!(status.orphaned_sitreps_deleted, 0);
+        assert_eq!(status.errors, Vec::<String>::new());
+        model.assert_matches(opctx).await;
+
+        // Over the limit: versions 1..=3 should be pruned from the history,
+        // and the sitreps they referenced --- now orphaned --- should be
+        // deleted by the orphan sweep in the same activation.
+        model.insert_history(opctx, 3).await; // v6..=v8
+        let status = dbg!(task.actually_activate(opctx).await);
+        assert_eq!(
+            status.history_pruning_status,
+            Ok(status::HistoryPruningStatus::Pruned {
+                n_pruned: 3,
+                newest_version_pruned: 3,
+            })
+        );
+        assert_eq!(status.orphaned_sitreps_deleted, 3);
+        assert_eq!(status.errors, Vec::<String>::new());
+        model.record_gc(Some(3));
+        model.assert_matches(opctx).await;
+
+        // Prune again, now that the minimum history version is no longer 1.
+        // This checks that the pruning arithmetic is anchored on the latest
+        // version rather than on the row count: history is v4..=v10 (7 rows),
+        // so v4 and v5 should go.
+        model.insert_history(opctx, 2).await; // v9, v10
+        let status = dbg!(task.actually_activate(opctx).await);
+        assert_eq!(
+            status.history_pruning_status,
+            Ok(status::HistoryPruningStatus::Pruned {
+                n_pruned: 2,
+                newest_version_pruned: 5,
+            })
+        );
+        assert_eq!(status.orphaned_sitreps_deleted, 2);
+        assert_eq!(status.errors, Vec::<String>::new());
+        model.record_gc(Some(5));
+        model.assert_matches(opctx).await;
+
+        db.terminate().await;
+        logctx.cleanup_successful();
     }
 }
