@@ -1794,7 +1794,7 @@ pub(crate) mod test_utils {
     // ---------------------------------------------------------------
 
     pub(super) struct SitrepChildTableCounts {
-        counts: BTreeMap<String, i64>,
+        pub(super) counts: BTreeMap<String, i64>,
     }
 
     impl SitrepChildTableCounts {
@@ -1846,17 +1846,6 @@ pub(crate) mod test_utils {
 
         pub(super) fn all_empty(&self) -> bool {
             self.counts.values().all(|&count| count == 0)
-        }
-
-        pub(super) fn empty_tables(&self) -> Vec<String> {
-            self.counts
-                .iter()
-                .filter_map(
-                    |(table, &count)| {
-                        if count == 0 { Some(table.clone()) } else { None }
-                    },
-                )
-                .collect()
         }
 
         pub(super) fn non_empty_tables(&self) -> Vec<String> {
@@ -3847,6 +3836,21 @@ mod tests {
 
         db.terminate().await;
         logctx.cleanup_successful();
+    }
+
+    // This one lives here because the pub test utils don't need it, and rustc
+    // warns it's unused if it lives there.
+    impl SitrepChildTableCounts {
+        fn empty_tables(&self) -> Vec<String> {
+            self.counts
+                .iter()
+                .filter_map(
+                    |(table, &count)| {
+                        if count == 0 { Some(table.clone()) } else { None }
+                    },
+                )
+                .collect()
+        }
     }
 
     async fn ensure_sitrep_fully_populated(
