@@ -10631,6 +10631,7 @@ dependencies = [
  "rstest",
  "schemars 0.8.22",
  "serde",
+ "serde_json",
  "strum 0.27.2",
  "thiserror 2.0.18",
  "uuid",
