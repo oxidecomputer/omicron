@@ -5,11 +5,12 @@
 use std::collections::BTreeMap;
 use std::collections::btree_map;
 use thiserror::Error;
-use wicket_common::rack_setup::BgpAuthKey;
+use wicket_common::rack_setup::BgpAuthKeyInfo;
 use wicket_common::rack_setup::BgpAuthKeyStatus;
 use wicket_common::rack_setup::DisplaySlice;
-use wicketd_api::SetBgpAuthKeyStatus;
+use wicketd_commission_types::rack_setup::BgpAuthKey;
 use wicketd_commission_types::rack_setup::BgpAuthKeyId;
+use wicketd_commission_types::rack_setup::SetBgpAuthKeyStatus;
 
 #[derive(Clone, Debug, PartialEq, Eq, Error)]
 pub(crate) enum BgpAuthKeyError {
@@ -71,7 +72,9 @@ impl BgpAuthKeys {
             .map(|(key_id, key)| {
                 let status = key
                     .as_ref()
-                    .map(|key| BgpAuthKeyStatus::Set { info: key.info() })
+                    .map(|key| BgpAuthKeyStatus::Set {
+                        info: BgpAuthKeyInfo::for_key(key),
+                    })
                     .unwrap_or(BgpAuthKeyStatus::Unset);
                 (key_id.clone(), status)
             })

@@ -35,11 +35,11 @@ use std::sync::OnceLock;
 use wicket_common::inventory::MgsV1Inventory;
 use wicket_common::inventory::SledInventory;
 use wicket_common::inventory::SpIdentifier;
-use wicket_common::rack_setup::BgpAuthKey;
 use wicket_common::rack_setup::BgpAuthKeyStatus;
 use wicket_common::rack_setup::BootstrapSledDescription;
-use wicketd_api::SetBgpAuthKeyStatus;
+use wicketd_commission_types::rack_setup::BgpAuthKey;
 use wicketd_commission_types::rack_setup::BgpAuthKeyId;
+use wicketd_commission_types::rack_setup::SetBgpAuthKeyStatus;
 
 #[derive(Default)]
 pub(crate) struct RssOrMultirackJoinConfigCommon {
