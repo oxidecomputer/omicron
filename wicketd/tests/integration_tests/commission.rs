@@ -14,16 +14,16 @@ use clap::Parser;
 use gateway_messages::SpPort;
 use gateway_test_utils::setup as gateway_setup;
 use http::StatusCode;
-use iddqd::IdOrdMap;
+use iddqd::{IdOrdMap, id_ord_map};
 use omicron_test_utils::dev::poll::{CondCheckError, wait_for_condition};
 use sp_sim::ROT_STAGING_DEVEL_SIGN;
 use wicket_common::example::ExampleRackSetupData;
 use wicket_common::rack_setup::CurrentRssUserConfigInsensitive;
 use wicketd_commission_types::rack_setup::PutRssUserConfigInsensitive;
 use wicketd_commission_types_versions::latest::inventory::{
-    IgnitionFaults, LocationInfo, PowerState, RotImageValidity, RotInfo,
-    SlotCaboose, SpIdentifier, SpIgnitionInfo, SpInfo, SpInventoryParams,
-    SpStateInfo, SpType, SwitchSlot,
+    BaseboardId, BootstrapSled, IgnitionFaults, InventoryParams, LocationInfo,
+    PowerState, RotImageValidity, RotInfo, SlotCaboose, SpIdentifier,
+    SpIgnitionInfo, SpInfo, SpStateInfo, SpType, SwitchSlot,
 };
 use wicketd_commission_types_versions::latest::rack_setup::{
     BgpAuthKey, BgpAuthKeyId, CertificatePem, NewPasswordHash, PrivateKeyPem,
@@ -42,7 +42,7 @@ async fn wait_for_sp_inventory(
         || async {
             let result: Cond<IdOrdMap<SpInfo>> = match ctx
                 .commission_client
-                .get_sp_inventory(&SpInventoryParams::default())
+                .get_inventory(&InventoryParams::default())
                 .await
             {
                 Ok(resp) => {
@@ -140,9 +140,9 @@ async fn test_commission_inventory() {
     let force_refresh: BTreeSet<_> = sps.iter().map(|sp| sp.id).collect();
     let refreshed = ctx
         .commission_client
-        .get_sp_inventory(&SpInventoryParams { force_refresh })
+        .get_inventory(&InventoryParams { force_refresh })
         .await
-        .expect("get_sp_inventory with force_refresh succeeded")
+        .expect("get_inventory with force_refresh succeeded")
         .into_inner();
     assert!(
         refreshed.mgs_last_seen < Duration::from_secs(30),
@@ -169,7 +169,7 @@ async fn test_commission_inventory() {
 
     let err = ctx
         .commission_client
-        .get_sp_inventory(&SpInventoryParams {
+        .get_inventory(&InventoryParams {
             force_refresh: [SpIdentifier { typ: SpType::Sled, slot: 99 }]
                 .into_iter()
                 .collect(),
@@ -184,25 +184,35 @@ async fn test_commission_inventory() {
         .await
         .expect("get_bootstrap_sleds succeeded")
         .into_inner();
-    let ids: Vec<_> = bootstrap.sleds.iter().map(|s| s.id).collect();
+    // No bootstrap IPs are discovered in the test environment, so every sled's
+    // `ip` is None.
+    //
+    // TODO: We should try to maybe make the test environment richer so that
+    // bootstrap IPs can be discovered and matched?
     assert_eq!(
-        ids,
-        vec![
-            SpIdentifier { typ: SpType::Sled, slot: 0 },
-            SpIdentifier { typ: SpType::Sled, slot: 1 },
-        ],
-    );
-    let serial_numbers: Vec<_> =
-        bootstrap.sleds.iter().map(|s| s.serial_number.clone()).collect();
-    assert_eq!(serial_numbers, vec!["SimGimlet00", "SimGimlet01"]);
-    assert!(
-        bootstrap.sleds.iter().all(|s| s.ip.is_none()),
-        "no bootstrap IPs discovered in the test environment"
+        bootstrap.sleds,
+        id_ord_map! {
+            BootstrapSled {
+                id: SpIdentifier { typ: SpType::Sled, slot: 0 },
+                baseboard: sim_gimlet_baseboard("SimGimlet00"),
+                ip: None,
+            },
+            BootstrapSled {
+                id: SpIdentifier { typ: SpType::Sled, slot: 1 },
+                baseboard: sim_gimlet_baseboard("SimGimlet01"),
+                ip: None,
+            },
+        },
     );
     assert!(
         bootstrap.unmatched_peers.is_empty(),
         "no bootstrap peers are discovered in the test environment: {:?}",
         bootstrap.unmatched_peers,
+    );
+    assert!(
+        bootstrap.unidentified_peers.is_empty(),
+        "no bootstrap peers are discovered in the test environment: {:?}",
+        bootstrap.unidentified_peers,
     );
 
     let location = wait_for_condition(
@@ -603,16 +613,12 @@ fn sled_cabooses_ready(sp: &SpInfo) -> bool {
 }
 
 fn assert_sim_gimlet_state(state: &SpStateInfo, serial_number: &str) {
-    let SpStateInfo::Read {
-        serial_number: actual_serial_number,
-        power_state,
-        refresh_error,
-        age,
-    } = state
+    let SpStateInfo::Read { baseboard, power_state, refresh_error, age } =
+        state
     else {
         panic!("sled state as reported by sp-sim should be read: {state:?}");
     };
-    assert_eq!(actual_serial_number, serial_number);
+    assert_eq!(*baseboard, sim_gimlet_baseboard(serial_number));
     // sp-sim gimlets start in power state A0 (see sp-sim/src/gimlet.rs).
     assert_eq!(*power_state, PowerState::A0);
     // The sim reads succeed.
@@ -621,6 +627,15 @@ fn assert_sim_gimlet_state(state: &SpStateInfo, serial_number: &str) {
         *age < Duration::from_secs(30),
         "a just-read sim SP has a small reading age, got {age:?}",
     );
+}
+
+fn sim_gimlet_baseboard(serial_number: &str) -> BaseboardId {
+    BaseboardId {
+        // sp-sim gimlets always report model "i86pc" (see sp-sim's gimlet
+        // config).
+        part_number: "i86pc".to_string(),
+        serial_number: serial_number.to_string(),
+    }
 }
 
 fn sim_ignition_present() -> SpIgnitionInfo {

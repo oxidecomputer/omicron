@@ -5,6 +5,7 @@
 //! Re-exports of the latest versions of all published types.
 
 pub mod inventory {
+    pub use crate::v1::inventory::BaseboardId;
     pub use crate::v1::inventory::BootstrapSled;
     pub use crate::v1::inventory::Caboose;
     pub use crate::v1::inventory::CmisDatapath;
@@ -14,6 +15,8 @@ pub mod inventory {
     pub use crate::v1::inventory::FetchError;
     pub use crate::v1::inventory::GetBootstrapSledsResponse;
     pub use crate::v1::inventory::IgnitionFaults;
+    pub use crate::v1::inventory::Inventory;
+    pub use crate::v1::inventory::InventoryParams;
     pub use crate::v1::inventory::LocationInfo;
     pub use crate::v1::inventory::PowerState;
     pub use crate::v1::inventory::ReceiverPower;
@@ -28,8 +31,6 @@ pub mod inventory {
     pub use crate::v1::inventory::SpIdentifier;
     pub use crate::v1::inventory::SpIgnitionInfo;
     pub use crate::v1::inventory::SpInfo;
-    pub use crate::v1::inventory::SpInventory;
-    pub use crate::v1::inventory::SpInventoryParams;
     pub use crate::v1::inventory::SpStateInfo;
     pub use crate::v1::inventory::SpType;
     pub use crate::v1::inventory::Stage0Caboose;

@@ -23,11 +23,9 @@ pub use gateway_types_versions::v1::component::{
 };
 pub use gateway_types_versions::v1::rot::{RotImageError, RotSlot};
 pub use sled_agent_types_versions::v1::early_networking::SwitchSlot;
+pub use sled_hardware_types::BaseboardId;
 
-/// A minimal projection of a firmware caboose.
-///
-/// Only the fields the commissioning client needs are included; the remaining
-/// caboose fields (git commit, name, and epoch) are intentionally omitted.
+/// A firmware caboose.
 #[derive(
     Debug,
     Clone,
@@ -45,6 +43,10 @@ pub struct Caboose {
     pub version: String,
     /// The board name the firmware was built for.
     pub board: String,
+    /// The name of the firmware image.
+    pub name: String,
+    /// The git commit the firmware was built from.
+    pub git_commit: String,
     /// The signer of this firmware image, if the image is signed.
     ///
     /// For a root of trust, this is the hex-encoded hash of the public key used
@@ -52,6 +54,11 @@ pub struct Caboose {
     /// (such as service-processor images). Commissioning uses it to match an
     /// active RoT slot against the corresponding signed TUF artifact.
     pub sign: Option<String>,
+    /// The anti-rollback epoch declared by this image, if it declares one.
+    ///
+    /// This is the `EPOC` caboose key, carried through as the string the image
+    /// records; it is `None` for firmware built before the key existed.
+    pub epoch: Option<String>,
 }
 
 /// An error wicketd encountered while fetching a piece of inventory from MGS.
@@ -166,7 +173,7 @@ pub enum RotInfo {
         slot_b: RotSlotInfo,
         /// The stage0 bootloader.
         stage0: RotStage0Info,
-        /// The pending stage0next bootloader.
+        /// The pending stage0 bootloader.
         stage0next: RotStage0Info,
     },
 }
@@ -218,10 +225,10 @@ pub struct RotStage0Info {
     pub validity: RotImageValidity,
 }
 
-/// The service processor's state, read together from MGS.
+/// The service processor's state, read from MGS.
 ///
-/// The serial number and power state are always read together from the same
-/// service-processor state, so they are reported as a single unit.
+/// The baseboard identity and power state are always read together from the
+/// same service-processor state, so they are reported as a single unit.
 #[derive(
     Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema,
 )]
@@ -239,8 +246,8 @@ pub enum SpStateInfo {
     },
     /// The service processor's state was read.
     Read {
-        /// The baseboard serial number reported by the service processor.
-        serial_number: String,
+        /// The baseboard identity reported by the service processor.
+        baseboard: BaseboardId,
         /// The host power state.
         power_state: PowerState,
         /// The error from a more recent state fetch that failed while this
@@ -287,7 +294,7 @@ pub struct IgnitionFaults {
 ///
 /// This has no per-SP `Error` variant: ignition is fetched rack-wide in a
 /// single request, so a fetch failure is not attributable to any one SP. A
-/// failed ignition fetch is reported once on `SpInventory.ignition_fetch_error`
+/// failed ignition fetch is reported once on `Inventory::ignition_fetch_error`
 /// instead.
 #[derive(
     Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema,
@@ -351,12 +358,12 @@ impl IdOrdItem for SpInfo {
     id_upcast!();
 }
 
-/// Inventory across all service processors.
+/// Inventory across all service processors and switch transceivers.
 ///
 /// This type cannot derive `Eq` because transceiver optical-power readings are
 /// floating-point.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-pub struct SpInventory {
+pub struct Inventory {
     /// How long it has been since wicketd last received a successful response
     /// from MGS.
     ///
@@ -722,10 +729,10 @@ pub struct LocationInfo {
     pub sled_serial: Option<String>,
 }
 
-/// Parameters for the SP inventory endpoint.
+/// Parameters for the inventory endpoint.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct SpInventoryParams {
+pub struct InventoryParams {
     /// Refresh the state of these service processors from MGS before returning,
     /// rather than returning their cached state. Service processors not listed
     /// here are returned from the cache.
@@ -756,8 +763,8 @@ pub struct SpInventoryParams {
 pub struct BootstrapSled {
     /// The service processor for this sled (its type and slot).
     pub id: SpIdentifier,
-    /// The sled's baseboard serial number.
-    pub serial_number: String,
+    /// The sled's baseboard identity, as reported by its service processor.
+    pub baseboard: BaseboardId,
     /// The sled's bootstrap-network address, once it has been discovered.
     pub ip: Option<Ipv6Addr>,
 }
@@ -780,13 +787,21 @@ pub struct GetBootstrapSledsResponse {
     /// See `BootstrapSled` for when a sled appears here and when its `ip` is
     /// populated.
     pub sleds: IdOrdMap<BootstrapSled>,
-    /// Bootstrap-network peers that could not be matched to any sled in
-    /// `sleds`.
+    /// Bootstrap-network peers that identified themselves, but could not be
+    /// matched to any sled in `sleds`.
     ///
     /// Reported so that "a peer is on the bootstrap network but cannot be
     /// matched to inventory" is distinguishable from "the sled has not been
     /// discovered on the bootstrap network yet" (a `None` `BootstrapSled::ip`).
-    pub unmatched_peers: Vec<UnmatchedBootstrapPeer>,
+    pub unmatched_peers: IdOrdMap<UnmatchedBootstrapPeer>,
+    /// The addresses of bootstrap-network peers that could not identify their
+    /// own baseboard at all.
+    ///
+    /// Such a peer has no identity to match against MGS, so it can never
+    /// contribute a `BootstrapSled::ip` and is reported by address alone. On
+    /// rack hardware this set is expected to stay empty; a peer here is either
+    /// not an Oxide sled or cannot read its own baseboard.
+    pub unidentified_peers: BTreeSet<Ipv6Addr>,
 }
 
 /// A peer discovered on the bootstrap network that could not be matched to
@@ -796,16 +811,25 @@ pub struct GetBootstrapSledsResponse {
 /// bootstrap agent reports about itself. A peer appears here instead of
 /// contributing a `BootstrapSled::ip` when that match wasn't successful: either
 /// transiently, because the sled's SP has not been read from MGS yet, or
-/// persistently, because the peer could not identify its own baseboard (or
-/// reports an identity that disagrees with MGS). A persistent entry here means
-/// the peer's address has been discovered but rack setup will not be able to
-/// use it.
+/// persistently, because the peer reports an identity that disagrees with MGS.
+/// A persistent entry here means the peer's address has been discovered but
+/// rack setup will not be able to use it.
 #[derive(
     Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema,
 )]
 pub struct UnmatchedBootstrapPeer {
     /// The baseboard identity the peer reported about itself.
-    pub identity: String,
+    pub baseboard: BaseboardId,
     /// The peer's bootstrap-network address.
     pub ip: Ipv6Addr,
+}
+
+impl IdOrdItem for UnmatchedBootstrapPeer {
+    type Key<'a> = &'a BaseboardId;
+
+    fn key(&self) -> Self::Key<'_> {
+        &self.baseboard
+    }
+
+    id_upcast!();
 }

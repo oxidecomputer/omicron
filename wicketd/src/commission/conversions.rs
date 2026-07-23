@@ -10,7 +10,7 @@ use std::net::Ipv6Addr;
 use bootstrap_agent_lockstep_types as bootstrap;
 use gateway_types::rot::RotImageError;
 use iddqd::IdOrdMap;
-use sled_hardware_types::Baseboard;
+use sled_hardware_types::{Baseboard, UnknownBaseboardError};
 use transceiver_controller::message::ExtendedStatus;
 use transceiver_controller::{
     CmisDatapath, CmisDatapathState, CmisLaneStatus, Datapath, Monitors,
@@ -31,19 +31,15 @@ use crate::mgs::{
 use crate::transceivers::{GetTransceiversResponse, SwitchTransceivers};
 
 fn caboose_to_ct(caboose: &SpComponentCaboose) -> ct_inv::Caboose {
-    let SpComponentCaboose {
-        version,
-        board,
-        sign,
-        // The remaining fields are not projected by the commission API.
-        git_commit: _,
-        name: _,
-        epoch: _,
-    } = caboose;
+    let SpComponentCaboose { version, board, name, git_commit, sign, epoch } =
+        caboose;
     ct_inv::Caboose {
         version: version.clone(),
         board: board.clone(),
+        name: name.clone(),
+        git_commit: git_commit.clone(),
         sign: sign.clone(),
+        epoch: epoch.clone(),
     }
 }
 
@@ -193,10 +189,10 @@ pub(crate) fn sp_info_to_ct(record: &SpRecord) -> ct_inv::SpInfo {
         }) => {
             let SpState {
                 serial_number,
+                model,
                 power_state,
                 // The remaining identity fields are not projected by the
                 // commission API.
-                model: _,
                 revision: _,
                 hubris_archive_id: _,
                 base_mac_address: _,
@@ -206,7 +202,10 @@ pub(crate) fn sp_info_to_ct(record: &SpRecord) -> ct_inv::SpInfo {
             } = state;
             (
                 ct_inv::SpStateInfo::Read {
-                    serial_number: serial_number.clone(),
+                    baseboard: ct_inv::BaseboardId {
+                        part_number: model.clone(),
+                        serial_number: serial_number.clone(),
+                    },
                     power_state: *power_state,
                     refresh_error: last_state_fetch_error
                         .as_ref()
@@ -242,27 +241,33 @@ pub(crate) fn bootstrap_sleds_to_ct(
     records: &IdOrdMap<SpRecord>,
     ddm_discovered_sleds: &BTreeMap<Baseboard, Ipv6Addr>,
 ) -> ct_inv::GetBootstrapSledsResponse {
-    let mut matched = BTreeSet::new();
+    // Use the BaseboardId (part number + serial number) to match peers to sleds
+    let mut unidentified_peers = BTreeSet::new();
+    for (baseboard, ip) in ddm_discovered_sleds {
+        match ct_inv::BaseboardId::try_from(baseboard.clone()) {
+            Ok(baseboard) => {
+                peers.insert(baseboard, *ip);
+            }
+            // A peer that cannot identify its own baseboard can't be matched at
+            // all, so report the address alone.
+            Err(UnknownBaseboardError) => {
+                unidentified_peers.insert(*ip);
+            }
+        }
+    }
+
     let sleds = IdOrdMap::from_iter_unique(records.iter().filter_map(
         |record| {
             if record.id.typ != SpType::Sled {
                 return None;
             }
             let state = &record.data.as_ref()?.state;
-            let baseboard = Baseboard::new_gimlet(
-                state.serial_number.clone(),
-                state.model.clone(),
-                state.revision,
-            );
-            let ip = ddm_discovered_sleds.get(&baseboard).copied();
-            if ip.is_some() {
-                matched.insert(baseboard);
-            }
-            Some(ct_inv::BootstrapSled {
-                id: record.id,
+            let baseboard = ct_inv::BaseboardId {
+                part_number: state.model.clone(),
                 serial_number: state.serial_number.clone(),
-                ip,
-            })
+            };
+            let ip = peers.remove(&baseboard);
+            Some(ct_inv::BootstrapSled { id: record.id, baseboard, ip })
         },
     ))
     .expect(
@@ -270,17 +275,20 @@ pub(crate) fn bootstrap_sleds_to_ct(
          BootstrapSleds have unique ids",
     );
 
-    // Also collect and return unmatched peers.
-    let unmatched_peers = ddm_discovered_sleds
-        .iter()
-        .filter(|(baseboard, _)| !matched.contains(*baseboard))
-        .map(|(baseboard, ip)| ct_inv::UnmatchedBootstrapPeer {
-            identity: baseboard.to_string(),
-            ip: *ip,
-        })
-        .collect();
+    // Anything left over couldn't be matched to a sled in inventory.
+    let remaining = peers.into_iter().map(|(baseboard, ip)| {
+        ct_inv::UnmatchedBootstrapPeer { baseboard, ip }
+    });
+    let unmatched_peers = IdOrdMap::from_iter_unique(remaining).expect(
+        "the remaining peers are keyed by BaseboardId, so the projected \
+         UnmatchedBootstrapPeers have unique baseboards",
+    );
 
-    ct_inv::GetBootstrapSledsResponse { sleds, unmatched_peers }
+    ct_inv::GetBootstrapSledsResponse {
+        sleds,
+        unmatched_peers,
+        unidentified_peers,
+    }
 }
 
 pub(crate) fn transceivers_to_ct(
@@ -603,6 +611,7 @@ mod tests {
     use super::*;
     use crate::mgs::{RotData, RotImageErrors};
     use gateway_types::component::PowerState;
+    use iddqd::id_ord_map;
     use sled_agent_types::early_networking::SwitchSlot;
     use std::collections::BTreeMap;
     use std::time::Duration;
@@ -745,40 +754,39 @@ mod tests {
     }
 
     #[test]
-    fn caboose_projects_sign() {
-        let with_sign = SpComponentCaboose {
+    fn caboose_projects_every_field() {
+        let full = SpComponentCaboose {
             git_commit: "abc".to_string(),
             board: "gimlet".to_string(),
             name: "sp".to_string(),
             version: "1.0.0".to_string(),
             sign: Some("deadbeef".to_string()),
-            epoch: None,
+            epoch: Some("3".to_string()),
         };
         assert_eq!(
-            caboose_to_ct(&with_sign),
+            caboose_to_ct(&full),
             ct_inv::Caboose {
                 version: "1.0.0".to_string(),
                 board: "gimlet".to_string(),
+                name: "sp".to_string(),
+                git_commit: "abc".to_string(),
                 sign: Some("deadbeef".to_string()),
+                epoch: Some("3".to_string()),
             },
         );
 
-        let without_sign = SpComponentCaboose {
-            git_commit: "abc".to_string(),
-            board: "gimlet".to_string(),
-            name: "sp".to_string(),
-            version: "1.0.0".to_string(),
-            sign: None,
-            epoch: None,
-        };
-        assert_eq!(caboose_to_ct(&without_sign).sign, None);
+        let unsigned =
+            SpComponentCaboose { sign: None, epoch: None, ..full.clone() };
+        let projected = caboose_to_ct(&unsigned);
+        assert_eq!(projected.sign, None);
+        assert_eq!(projected.epoch, None);
     }
 
     #[test]
     fn fetch_error_projects_message_and_age() {
         // This is the projection applied to every wicketd fetch error,
         // including the rack-wide ignition-list error surfaced on
-        // `SpInventory::ignition_fetch_error`.
+        // `Inventory::ignition_fetch_error`.
         let error = mgs_fetch_error_observed_ago(
             "ignition list fetch failed",
             Duration::from_secs(2),
@@ -851,7 +859,7 @@ mod tests {
             last_state_fetch_error: Some(mgs_fetch_error("mgs flaked")),
         };
         let ct_inv::SpStateInfo::Read {
-            serial_number,
+            baseboard,
             power_state,
             refresh_error,
             age,
@@ -859,7 +867,7 @@ mod tests {
         else {
             panic!("a stale-but-real reading projects to Read");
         };
-        assert_eq!(serial_number, "SimGimlet01");
+        assert_eq!(baseboard, baseboard_id("SimGimlet01"));
         assert_eq!(power_state, PowerState::A0);
         assert!(age < Duration::from_secs(30));
         let refresh_error = refresh_error
@@ -874,7 +882,7 @@ mod tests {
             last_state_fetch_error: None,
         };
         let ct_inv::SpStateInfo::Read {
-            serial_number,
+            baseboard,
             power_state,
             refresh_error,
             age,
@@ -882,7 +890,7 @@ mod tests {
         else {
             panic!("a reading with no recorded error projects to Read");
         };
-        assert_eq!(serial_number, "SimGimlet01");
+        assert_eq!(baseboard, baseboard_id("SimGimlet01"));
         assert_eq!(power_state, PowerState::A0);
         assert_eq!(
             refresh_error, None,
@@ -923,27 +931,33 @@ mod tests {
         }
     }
 
+    fn baseboard_id(serial_number: &str) -> ct_inv::BaseboardId {
+        ct_inv::BaseboardId {
+            part_number: "model".to_string(),
+            serial_number: serial_number.to_string(),
+        }
+    }
+
     #[test]
-    fn bootstrap_sleds_project_ips_and_unmatched_peers() {
-        let mut records = IdOrdMap::new();
-        records
-            .insert_unique(read_sled_record(0, "SimGimlet00"))
-            .expect("sled 0 is unique");
-        records
-            .insert_unique(read_sled_record(1, "SimGimlet01"))
-            .expect("sled 1 is unique");
-        records
-            .insert_unique(SpRecord {
-                id: sled(2),
+    fn bootstrap_sleds_project_ips_unmatched_and_unidentified_peers() {
+        let records = id_ord_map! {
+            read_sled_record(0, "SimGimlet00"),
+            read_sled_record(1, "SimGimlet01"),
+            read_sled_record(2, "SimGimlet02"),
+            SpRecord {
+                id: sled(3),
                 ignition: None,
                 data: None,
                 last_state_fetch_error: None,
-            })
-            .expect("sled 2 is unique");
+            },
+        };
 
-        let sled0_ip: Ipv6Addr = "fdb0::1".parse().expect("valid IPv6 address");
-        let unknown_ip: Ipv6Addr =
-            "fdb0::2".parse().expect("valid IPv6 address");
+        let ip = |last: u16| -> Ipv6Addr {
+            format!("fdb0::{last}").parse().expect("valid IPv6 address")
+        };
+        let (sled0_ip, sled1_ip, stranger_ip, unidentified_ip) =
+            (ip(1), ip(2), ip(3), ip(4));
+
         let mut ddm = BTreeMap::new();
         ddm.insert(
             Baseboard::new_gimlet(
@@ -953,18 +967,37 @@ mod tests {
             ),
             sled0_ip,
         );
-        ddm.insert(Baseboard::unknown(), unknown_ip);
+        // Make sled 1's peer report a different _revision_ from what MGS
+        // reports. The identity is part number + serial number, so it still
+        // matches.
+        ddm.insert(
+            Baseboard::new_gimlet(
+                "SimGimlet01".to_string(),
+                "model".to_string(),
+                4,
+            ),
+            sled1_ip,
+        );
+        ddm.insert(
+            Baseboard::new_gimlet(
+                "SimGimlet99".to_string(),
+                "model".to_string(),
+                0,
+            ),
+            stranger_ip,
+        );
+        ddm.insert(Baseboard::unknown(), unidentified_ip);
 
         let response = bootstrap_sleds_to_ct(&records, &ddm);
 
         assert_eq!(
             response.sleds.len(),
-            2,
-            "sled 2 has no state reading, so it is absent: {:?}",
+            3,
+            "sled 3 has no state reading, so it is absent: {:?}",
             response.sleds,
         );
         let sled0_entry = response.sleds.get(&sled(0)).expect("sled 0 present");
-        assert_eq!(sled0_entry.serial_number, "SimGimlet00");
+        assert_eq!(sled0_entry.baseboard, baseboard_id("SimGimlet00"));
         assert_eq!(
             sled0_entry.ip,
             Some(sled0_ip),
@@ -972,17 +1005,31 @@ mod tests {
         );
         let sled1_entry = response.sleds.get(&sled(1)).expect("sled 1 present");
         assert_eq!(
-            sled1_entry.ip, None,
-            "sled 1 has no DDM entry, so no address yet",
+            sled1_entry.ip,
+            Some(sled1_ip),
+            "sled 1 matches despite the peer reporting a different revision",
+        );
+        let sled2_entry = response.sleds.get(&sled(2)).expect("sled 2 present");
+        assert_eq!(
+            sled2_entry.ip, None,
+            "sled 2 has no DDM entry, so no address yet",
         );
 
         assert_eq!(
             response.unmatched_peers,
-            vec![ct_inv::UnmatchedBootstrapPeer {
-                identity: "unknown".to_string(),
-                ip: unknown_ip,
-            }],
-            "the unknown-baseboard peer is surfaced as unmatched",
+            id_ord_map! {
+                ct_inv::UnmatchedBootstrapPeer {
+                    baseboard: baseboard_id("SimGimlet99"),
+                    ip: stranger_ip,
+                },
+            },
+            "the peer matching no sled in inventory is surfaced as unmatched",
+        );
+        assert_eq!(
+            response.unidentified_peers,
+            BTreeSet::from([unidentified_ip]),
+            "the peer that could not identify its own baseboard is surfaced \
+             by address alone",
         );
     }
 
@@ -1430,13 +1477,13 @@ mod tests {
             monitors: Ok(Monitors::default()),
         };
         let response = GetTransceiversResponse::Response {
-            transceivers: [SwitchTransceivers {
-                switch: SwitchSlot::Switch0,
-                transceivers: vec![transceiver],
-                updated_at: tokio::time::Instant::now(),
-            }]
-            .into_iter()
-            .collect(),
+            transceivers: id_ord_map! {
+                SwitchTransceivers {
+                    switch: SwitchSlot::Switch0,
+                    transceivers: vec![transceiver],
+                    updated_at: tokio::time::Instant::now(),
+                },
+            },
         };
 
         let switches = transceivers_to_ct(response);

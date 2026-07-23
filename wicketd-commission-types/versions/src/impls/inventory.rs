@@ -134,7 +134,7 @@ impl TransceiverDatapath {
 mod tests {
     use super::*;
     use crate::v1::inventory::{CmisDatapath, CmisDatapathState};
-    use iddqd::IdOrdMap;
+    use iddqd::id_ord_map;
 
     #[test]
     fn fault_flag_is_asserted() {
@@ -204,23 +204,19 @@ mod tests {
             tx_lol: FaultFlag::Clear,
             tx_fault: FaultFlag::Asserted,
         };
-        let datapaths: IdOrdMap<CmisDatapath> = [
+        let datapaths = id_ord_map! {
             CmisDatapath {
                 application: 1,
-                lanes: [
+                lanes: id_ord_map! {
                     lane(0, FaultFlag::Asserted),
                     lane(1, FaultFlag::Clear),
-                ]
-                .into_iter()
-                .collect(),
+                },
             },
             CmisDatapath {
                 application: 2,
-                lanes: [lane(0, FaultFlag::Unsupported)].into_iter().collect(),
+                lanes: id_ord_map! { lane(0, FaultFlag::Unsupported) },
             },
-        ]
-        .into_iter()
-        .collect();
+        };
         let datapath = TransceiverDatapath::Cmis { datapaths };
         let views: Vec<_> =
             datapath.iter_lane_faults().expect("datapath was read").collect();

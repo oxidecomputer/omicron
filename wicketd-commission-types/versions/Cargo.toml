@@ -18,6 +18,7 @@ schemars.workspace = true
 semver.workspace = true
 serde.workspace = true
 sled-agent-types-versions.workspace = true
+sled-hardware-types.workspace = true
 slog-error-chain.workspace = true
 
 [dev-dependencies]

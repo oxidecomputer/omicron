@@ -54,10 +54,10 @@ const PUT_REPOSITORY_MAX_BYTES: usize = 4 * 1024 * 1024 * 1024;
 pub trait WicketdCommissionApi {
     type Context;
 
-    /// Get inventory of all service processors visible to wicketd
+    /// Get inventory of all service processors and transceivers visible to wicketd
     ///
-    /// The response also carries the switch transceiver (optical module)
-    /// inventory, which wicketd reads independently of MGS.
+    /// The switch transceiver (optical module) inventory is read independently
+    /// of MGS.
     ///
     /// If `force_refresh` is non-empty, the request will wait for the listed SPs
     /// to report fresh data, or return a 503 if they do not respond within the
@@ -69,12 +69,12 @@ pub trait WicketdCommissionApi {
         // POST mostly because GET-with-body has somewhat spotty support. In
         // principle this is somewhere between GET and POST.
         method = POST,
-        path = "/inventory/sps",
+        path = "/inventory",
     }]
-    async fn get_sp_inventory(
+    async fn get_inventory(
         rqctx: RequestContext<Self::Context>,
-        params: TypedBody<latest::inventory::SpInventoryParams>,
-    ) -> Result<HttpResponseOk<latest::inventory::SpInventory>, HttpError>;
+        params: TypedBody<latest::inventory::InventoryParams>,
+    ) -> Result<HttpResponseOk<latest::inventory::Inventory>, HttpError>;
 
     /// Report the physical location (switch and sled) wicketd is running at
     ///

@@ -16,8 +16,8 @@ use wicketd_commission_api::{
     WicketdCommissionApi, wicketd_commission_api_mod,
 };
 use wicketd_commission_types::inventory::{
-    GetBootstrapSledsResponse, LocationInfo, SpIdentifier, SpInventory,
-    SpInventoryParams, SwitchSlot,
+    GetBootstrapSledsResponse, Inventory, InventoryParams, LocationInfo,
+    SpIdentifier, SwitchSlot,
 };
 use wicketd_commission_types::rack_setup::{
     BgpAuthKey, BgpAuthKeyPath, CertificatePem, CertificateUploadResponse,
@@ -80,10 +80,10 @@ pub enum WicketdCommissionApiImpl {}
 impl WicketdCommissionApi for WicketdCommissionApiImpl {
     type Context = Arc<ServerContext>;
 
-    async fn get_sp_inventory(
+    async fn get_inventory(
         rqctx: RequestContext<Self::Context>,
-        params: TypedBody<SpInventoryParams>,
-    ) -> Result<HttpResponseOk<SpInventory>, HttpError> {
+        params: TypedBody<InventoryParams>,
+    ) -> Result<HttpResponseOk<Inventory>, HttpError> {
         let ctx = rqctx.context();
         let force_refresh = params.into_inner().force_refresh;
 
@@ -141,7 +141,7 @@ impl WicketdCommissionApi for WicketdCommissionApiImpl {
         let ignition_fetch_error = last_ignition_fetch_error
             .as_ref()
             .map(conversions::fetch_error_to_ct);
-        Ok(HttpResponseOk(SpInventory {
+        Ok(HttpResponseOk(Inventory {
             mgs_last_seen,
             sps: sp_infos,
             ignition_fetch_error,

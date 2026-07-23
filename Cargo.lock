@@ -17701,6 +17701,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sled-agent-types-versions",
+ "sled-hardware-types",
  "slog-error-chain",
  "test-strategy",
  "toml 0.8.23",

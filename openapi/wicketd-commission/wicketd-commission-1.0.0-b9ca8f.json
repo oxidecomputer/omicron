@@ -70,16 +70,16 @@
         }
       }
     },
-    "/inventory/sps": {
+    "/inventory": {
       "post": {
-        "summary": "Get inventory of all service processors visible to wicketd",
-        "description": "The response also carries the switch transceiver (optical module) inventory, which wicketd reads independently of MGS.\n\nIf `force_refresh` is non-empty, the request will wait for the listed SPs to report fresh data, or return a 503 if they do not respond within the server-side timeout. A 503 is also returned if wicketd has not completed its initial fetch of the MGS inventory.\n\nReturns 400 if any SP listed in `force_refresh` is unknown.",
-        "operationId": "get_sp_inventory",
+        "summary": "Get inventory of all service processors and transceivers visible to wicketd",
+        "description": "The switch transceiver (optical module) inventory is read independently of MGS.\n\nIf `force_refresh` is non-empty, the request will wait for the listed SPs to report fresh data, or return a 503 if they do not respond within the server-side timeout. A 503 is also returned if wicketd has not completed its initial fetch of the MGS inventory.\n\nReturns 400 if any SP listed in `force_refresh` is unknown.",
+        "operationId": "get_inventory",
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/SpInventoryParams"
+                "$ref": "#/components/schemas/InventoryParams"
               }
             }
           },
@@ -91,7 +91,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SpInventory"
+                  "$ref": "#/components/schemas/Inventory"
                 }
               }
             }
@@ -526,6 +526,24 @@
           }
         ]
       },
+      "BaseboardId": {
+        "description": "A representation of a Baseboard ID as used in the inventory subsystem.\n\nThis type is essentially the same as a `Baseboard` except it doesn't have a revision or HW type (Gimlet, PC, Unknown).",
+        "type": "object",
+        "properties": {
+          "part_number": {
+            "description": "Oxide Part Number",
+            "type": "string"
+          },
+          "serial_number": {
+            "description": "Serial number (unique for a given part number)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "part_number",
+          "serial_number"
+        ]
+      },
       "BgpAuthKey": {
         "description": "Describes the actual authentication key to use with a BGP peer.\n\nCurrently, only TCP-MD5 authentication is supported.",
         "oneOf": [
@@ -606,6 +624,14 @@
         "description": "A sled as seen on the bootstrap network.\n\nA sled is reported here once its service processor's state has been read from MGS. (A populated cubby whose state has not yet been polled is absent until it is.)\n\nA sled's `ip` becomes `Some` once it has been discovered on the bootstrap network; sleds still missing an address report `None`.",
         "type": "object",
         "properties": {
+          "baseboard": {
+            "description": "The sled's baseboard identity, as reported by its service processor.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/BaseboardId"
+              }
+            ]
+          },
           "id": {
             "description": "The service processor for this sled (its type and slot).",
             "allOf": [
@@ -619,23 +645,32 @@
             "description": "The sled's bootstrap-network address, once it has been discovered.",
             "type": "string",
             "format": "ipv6"
-          },
-          "serial_number": {
-            "description": "The sled's baseboard serial number.",
-            "type": "string"
           }
         },
         "required": [
-          "id",
-          "serial_number"
+          "baseboard",
+          "id"
         ]
       },
       "Caboose": {
-        "description": "A minimal projection of a firmware caboose.\n\nOnly the fields the commissioning client needs are included; the remaining caboose fields (git commit, name, and epoch) are intentionally omitted.",
+        "description": "A firmware caboose.",
         "type": "object",
         "properties": {
           "board": {
             "description": "The board name the firmware was built for.",
+            "type": "string"
+          },
+          "epoch": {
+            "nullable": true,
+            "description": "The anti-rollback epoch declared by this image, if it declares one.\n\nThis is the `EPOC` caboose key, carried through as the string the image records; it is `None` for firmware built before the key existed.",
+            "type": "string"
+          },
+          "git_commit": {
+            "description": "The git commit the firmware was built from.",
+            "type": "string"
+          },
+          "name": {
+            "description": "The name of the firmware image.",
             "type": "string"
           },
           "sign": {
@@ -650,6 +685,8 @@
         },
         "required": [
           "board",
+          "git_commit",
+          "name",
           "version"
         ]
       },
@@ -1033,16 +1070,38 @@
             },
             "uniqueItems": true
           },
+          "unidentified_peers": {
+            "description": "The addresses of bootstrap-network peers that could not identify their own baseboard at all.\n\nSuch a peer has no identity to match against MGS, so it can never contribute a `BootstrapSled::ip` and is reported by address alone. On rack hardware this set is expected to stay empty; a peer here is either not an Oxide sled or cannot read its own baseboard.",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "ipv6"
+            },
+            "uniqueItems": true
+          },
           "unmatched_peers": {
-            "description": "Bootstrap-network peers that could not be matched to any sled in `sleds`.\n\nReported so that \"a peer is on the bootstrap network but cannot be matched to inventory\" is distinguishable from \"the sled has not been discovered on the bootstrap network yet\" (a `None` `BootstrapSled::ip`).",
+            "title": "IdOrdMap",
+            "description": "Bootstrap-network peers that identified themselves, but could not be matched to any sled in `sleds`.\n\nReported so that \"a peer is on the bootstrap network but cannot be matched to inventory\" is distinguishable from \"the sled has not been discovered on the bootstrap network yet\" (a `None` `BootstrapSled::ip`).",
+            "x-rust-type": {
+              "crate": "iddqd",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/UnmatchedBootstrapPeer"
+                }
+              ],
+              "path": "iddqd::IdOrdMap",
+              "version": "*"
+            },
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/UnmatchedBootstrapPeer"
-            }
+            },
+            "uniqueItems": true
           }
         },
         "required": [
           "sleds",
+          "unidentified_peers",
           "unmatched_peers"
         ]
       },
@@ -1073,6 +1132,88 @@
           "rot",
           "sp"
         ]
+      },
+      "Inventory": {
+        "description": "Inventory across all service processors and switch transceivers.\n\nThis type cannot derive `Eq` because transceiver optical-power readings are floating-point.",
+        "type": "object",
+        "properties": {
+          "ignition_fetch_error": {
+            "nullable": true,
+            "description": "The rack-wide ignition-list fetch error, if the most recent ignition fetch failed.\n\nIgnition is fetched for the whole rack in a single request, so a failure is reported once here rather than per SP. `None` means the last ignition fetch succeeded (or none has failed yet); the per-SP `ignition` fields then reflect that most recent successful fetch.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/FetchError"
+              }
+            ]
+          },
+          "mgs_last_seen": {
+            "description": "How long it has been since wicketd last received a successful response from MGS.\n\nA large value indicates that MGS might be down. This is a duration rather than a timestamp because wicketd and its clients keep independent clocks, and commissioning runs before time is synced.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Duration"
+              }
+            ]
+          },
+          "sps": {
+            "title": "IdOrdMap",
+            "description": "The inventory of each SP.",
+            "x-rust-type": {
+              "crate": "iddqd",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/SpInfo"
+                }
+              ],
+              "path": "iddqd::IdOrdMap",
+              "version": "*"
+            },
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SpInfo"
+            },
+            "uniqueItems": true
+          },
+          "transceivers": {
+            "title": "IdOrdMap",
+            "description": "The switch transceiver (optical module) inventory, keyed by switch.\n\nwicketd reads transceiver state from the switches independently of MGS. A switch that wicketd has never successfully read is absent from this map rather than present and empty, so a caller can tell \"this switch reported no transceivers\" from \"we have never heard from this switch\". An empty map means no switch has been read yet.",
+            "x-rust-type": {
+              "crate": "iddqd",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/SwitchTransceivers"
+                }
+              ],
+              "path": "iddqd::IdOrdMap",
+              "version": "*"
+            },
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SwitchTransceivers"
+            },
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "mgs_last_seen",
+          "sps",
+          "transceivers"
+        ]
+      },
+      "InventoryParams": {
+        "description": "Parameters for the inventory endpoint.",
+        "type": "object",
+        "properties": {
+          "force_refresh": {
+            "description": "Refresh the state of these service processors from MGS before returning, rather than returning their cached state. Service processors not listed here are returned from the cache.",
+            "default": [],
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SpIdentifier"
+            },
+            "uniqueItems": true
+          }
+        },
+        "additionalProperties": false
       },
       "IpNet": {
         "x-rust-type": {
@@ -2005,7 +2146,7 @@
                 ]
               },
               "stage0next": {
-                "description": "The pending stage0next bootloader.",
+                "description": "The pending stage0 bootloader.",
                 "allOf": [
                   {
                     "$ref": "#/components/schemas/RotStage0Info"
@@ -2374,7 +2515,7 @@
         ]
       },
       "SpIgnitionInfo": {
-        "description": "The ignition state of a service processor.\n\nThis has no per-SP `Error` variant: ignition is fetched rack-wide in a single request, so a fetch failure is not attributable to any one SP. A failed ignition fetch is reported once on `SpInventory.ignition_fetch_error` instead.",
+        "description": "The ignition state of a service processor.\n\nThis has no per-SP `Error` variant: ignition is fetched rack-wide in a single request, so a fetch failure is not attributable to any one SP. A failed ignition fetch is reported once on `Inventory::ignition_fetch_error` instead.",
         "oneOf": [
           {
             "description": "The ignition state has not been read yet.",
@@ -2509,90 +2650,8 @@
           "state"
         ]
       },
-      "SpInventory": {
-        "description": "Inventory across all service processors.\n\nThis type cannot derive `Eq` because transceiver optical-power readings are floating-point.",
-        "type": "object",
-        "properties": {
-          "ignition_fetch_error": {
-            "nullable": true,
-            "description": "The rack-wide ignition-list fetch error, if the most recent ignition fetch failed.\n\nIgnition is fetched for the whole rack in a single request, so a failure is reported once here rather than per SP. `None` means the last ignition fetch succeeded (or none has failed yet); the per-SP `ignition` fields then reflect that most recent successful fetch.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/FetchError"
-              }
-            ]
-          },
-          "mgs_last_seen": {
-            "description": "How long it has been since wicketd last received a successful response from MGS.\n\nA large value indicates that MGS might be down. This is a duration rather than a timestamp because wicketd and its clients keep independent clocks, and commissioning runs before time is synced.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Duration"
-              }
-            ]
-          },
-          "sps": {
-            "title": "IdOrdMap",
-            "description": "The inventory of each SP.",
-            "x-rust-type": {
-              "crate": "iddqd",
-              "parameters": [
-                {
-                  "$ref": "#/components/schemas/SpInfo"
-                }
-              ],
-              "path": "iddqd::IdOrdMap",
-              "version": "*"
-            },
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/SpInfo"
-            },
-            "uniqueItems": true
-          },
-          "transceivers": {
-            "title": "IdOrdMap",
-            "description": "The switch transceiver (optical module) inventory, keyed by switch.\n\nwicketd reads transceiver state from the switches independently of MGS. A switch that wicketd has never successfully read is absent from this map rather than present and empty, so a caller can tell \"this switch reported no transceivers\" from \"we have never heard from this switch\". An empty map means no switch has been read yet.",
-            "x-rust-type": {
-              "crate": "iddqd",
-              "parameters": [
-                {
-                  "$ref": "#/components/schemas/SwitchTransceivers"
-                }
-              ],
-              "path": "iddqd::IdOrdMap",
-              "version": "*"
-            },
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/SwitchTransceivers"
-            },
-            "uniqueItems": true
-          }
-        },
-        "required": [
-          "mgs_last_seen",
-          "sps",
-          "transceivers"
-        ]
-      },
-      "SpInventoryParams": {
-        "description": "Parameters for the SP inventory endpoint.",
-        "type": "object",
-        "properties": {
-          "force_refresh": {
-            "description": "Refresh the state of these service processors from MGS before returning, rather than returning their cached state. Service processors not listed here are returned from the cache.",
-            "default": [],
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/SpIdentifier"
-            },
-            "uniqueItems": true
-          }
-        },
-        "additionalProperties": false
-      },
       "SpStateInfo": {
-        "description": "The service processor's state, read together from MGS.\n\nThe serial number and power state are always read together from the same service-processor state, so they are reported as a single unit.",
+        "description": "The service processor's state, read from MGS.\n\nThe baseboard identity and power state are always read together from the same service-processor state, so they are reported as a single unit.",
         "oneOf": [
           {
             "description": "The service processor's state has not been read yet.",
@@ -2645,6 +2704,14 @@
                   }
                 ]
               },
+              "baseboard": {
+                "description": "The baseboard identity reported by the service processor.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/BaseboardId"
+                  }
+                ]
+              },
               "power_state": {
                 "description": "The host power state.",
                 "allOf": [
@@ -2662,10 +2729,6 @@
                   }
                 ]
               },
-              "serial_number": {
-                "description": "The baseboard serial number reported by the service processor.",
-                "type": "string"
-              },
               "state": {
                 "type": "string",
                 "enum": [
@@ -2675,8 +2738,8 @@
             },
             "required": [
               "age",
+              "baseboard",
               "power_state",
-              "serial_number",
               "state"
             ]
           }
@@ -3427,12 +3490,16 @@
         }
       },
       "UnmatchedBootstrapPeer": {
-        "description": "A peer discovered on the bootstrap network that could not be matched to any sled reported by MGS.\n\nBootstrap peers are matched to sleds by the baseboard identity each peer's bootstrap agent reports about itself. A peer appears here instead of contributing a `BootstrapSled::ip` when that match wasn't successful: either transiently, because the sled's SP has not been read from MGS yet, or persistently, because the peer could not identify its own baseboard (or reports an identity that disagrees with MGS). A persistent entry here means the peer's address has been discovered but rack setup will not be able to use it.",
+        "description": "A peer discovered on the bootstrap network that could not be matched to any sled reported by MGS.\n\nBootstrap peers are matched to sleds by the baseboard identity each peer's bootstrap agent reports about itself. A peer appears here instead of contributing a `BootstrapSled::ip` when that match wasn't successful: either transiently, because the sled's SP has not been read from MGS yet, or persistently, because the peer reports an identity that disagrees with MGS. A persistent entry here means the peer's address has been discovered but rack setup will not be able to use it.",
         "type": "object",
         "properties": {
-          "identity": {
+          "baseboard": {
             "description": "The baseboard identity the peer reported about itself.",
-            "type": "string"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/BaseboardId"
+              }
+            ]
           },
           "ip": {
             "description": "The peer's bootstrap-network address.",
@@ -3441,7 +3508,7 @@
           }
         },
         "required": [
-          "identity",
+          "baseboard",
           "ip"
         ]
       },
