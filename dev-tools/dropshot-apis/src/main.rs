@@ -351,7 +351,7 @@ fn all_apis() -> anyhow::Result<ManagedApis> {
                 ),
                 contact_url: Some("https://oxide.computer"),
                 contact_email: Some("api@oxide.computer"),
-                extra: to_value(ApiBoundary::External),
+                extra: to_value(ApiBoundary::Internal),
             },
             api_description: wicketd_commission_api_mod::stub_api_description,
             ident: "wicketd-commission",

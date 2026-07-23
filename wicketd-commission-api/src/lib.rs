@@ -15,7 +15,36 @@ use iddqd::IdOrdMap;
 use omicron_uuid_kinds::RackInitUuid;
 use wicketd_commission_types_versions::latest;
 
-api_versions!([(1, INITIAL),]);
+// NOTE: The commission API is server-side versioned, but changing it requires
+// coordinating with rkdeploy (it must stay on the oldest version supported
+// across all Omicron versions it supports.) So it's worth not revising this API
+// too frequently.
+api_versions!([
+    // WHEN CHANGING THE API (part 1 of 2):
+    //
+    // +- Pick a new semver and define it in the list below.  The list MUST
+    // |  remain sorted, which generally means that your version should go at
+    // |  the very top.
+    // |
+    // |  Duplicate this line, uncomment the *second* copy, update that copy for
+    // |  your new API version, and leave the first copy commented out as an
+    // |  example for the next person.
+    // v
+    // (next_int, IDENT),
+    (1, INITIAL),
+]);
+
+// WHEN CHANGING THE API (part 2 of 2):
+//
+// The call to `api_versions!` above defines constants of type
+// `semver::Version` that you can use in your Dropshot API definition to specify
+// the version when a particular endpoint was added or removed.  For example, if
+// you used:
+//
+//     (2, ADD_FOOBAR)
+//
+// Then you could use `VERSION_ADD_FOOBAR` as the version in which endpoints
+// were added or removed.
 
 /// Full release repositories are currently (2026) well over 1 GiB and continue
 /// to grow.
