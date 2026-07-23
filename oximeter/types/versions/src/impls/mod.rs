@@ -4,6 +4,7 @@
 
 //! Functional code for the latest versions of types.
 
+pub(crate) mod cache;
 pub(crate) mod histogram;
 pub(crate) mod interned;
 mod producer;

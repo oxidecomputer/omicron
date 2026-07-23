@@ -64,6 +64,8 @@ pub mod traits {
 }
 
 pub mod types {
+    pub use crate::impls::cache::CacheStats;
+    pub use crate::impls::cache::FieldSetCache;
     pub use crate::impls::interned::InternedString;
     pub use crate::v1::types::Cumulative;
     pub use crate::v1::types::Datum;
@@ -77,6 +79,8 @@ pub mod types {
     pub use crate::v1::types::ProducerRegistry;
     pub use crate::v1::types::ProducerResults;
     pub use crate::v1::types::ProducerResultsItem;
+    pub use crate::v1::types::RawProducerResults;
+    pub use crate::v1::types::RawProducerResultsItem;
     pub use crate::v1::types::Sample;
 
     // Use by both type definition and impls, but not pub.
