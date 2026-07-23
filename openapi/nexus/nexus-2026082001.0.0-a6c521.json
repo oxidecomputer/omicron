@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "2026082002.0.0"
+    "version": "2026082001.0.0"
   },
   "paths": {
     "/device/auth": {
@@ -4477,7 +4477,7 @@
           "experimental"
         ],
         "summary": "Join multicast group by name, IP address, or UUID",
-        "description": "Groups can be referenced by name, IP address, or UUID. If the group doesn't exist, it's implicitly created with an auto-allocated IP from a multicast pool linked to the caller's silo. When referencing by UUID, the group must already exist.\n\nSource IPs are optional for ASM addresses but required for SSM addresses (232.0.0.0/8 for IPv4, ff3x::/32 for IPv6). Duplicate source IPs in a single request are rejected. Per-member source list is capped at 32, and the union of source IPs across all members of a single group is capped at 256.",
+        "description": "Groups can be referenced by name, IP address, or UUID. If the group doesn't exist, it's implicitly created with an auto-allocated IP from a multicast pool linked to the caller's silo. When referencing by UUID, the group must already exist.\n\nSource IPs are optional for ASM addresses but required for SSM addresses (232.0.0.0/8 for IPv4, the per-scope ff3x::/32 blocks for IPv6, per RFC 4607). Duplicate source IPs in a single request are rejected. Per-member source list is capped at 32, and the union of source IPs across all members of a single group is capped at 256.",
         "operationId": "instance_multicast_group_join",
         "parameters": [
           {
@@ -6303,7 +6303,7 @@
           "experimental"
         ],
         "summary": "List members of multicast group",
-        "description": "The group can be specified by name, UUID, or multicast IP address.",
+        "description": "The group can be specified by name, UUID, or multicast IP address. Probe-parented members are omitted from pages in this version. The page token still advances over them, so a page may be shorter than the limit or empty before the end of the list.",
         "operationId": "multicast_group_member_list",
         "parameters": [
           {
@@ -25299,7 +25299,7 @@
         ]
       },
       "MulticastGroupMember": {
-        "description": "View of a Multicast Group Member.\n\nA member may be parented by either an instance or a probe. The `kind` discriminator selects how to interpret `parent_id`.",
+        "description": "View of a Multicast Group Member (instance belonging to a multicast group)",
         "type": "object",
         "properties": {
           "description": {
@@ -25311,13 +25311,10 @@
             "type": "string",
             "format": "uuid"
           },
-          "kind": {
-            "description": "Discriminator for `parent_id`.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/MulticastGroupMemberParentKind"
-              }
-            ]
+          "instance_id": {
+            "description": "The ID of the instance that is a member of this group.",
+            "type": "string",
+            "format": "uuid"
           },
           "multicast_group_id": {
             "description": "The ID of the multicast group this member belongs to.",
@@ -25336,11 +25333,6 @@
                 "$ref": "#/components/schemas/Name"
               }
             ]
-          },
-          "parent_id": {
-            "description": "The UUID of the parent (instance or probe) that owns this membership.",
-            "type": "string",
-            "format": "uuid"
           },
           "source_ips": {
             "description": "Source IP addresses for this member's multicast subscription.\n\n- **ASM**: Sources are optional. Empty array means any source is allowed. Non-empty array enables source filtering (IGMPv3/MLDv2). - **SSM**: Sources are required for SSM addresses (232/8, ff3x::/32).",
@@ -25368,23 +25360,14 @@
         "required": [
           "description",
           "id",
-          "kind",
+          "instance_id",
           "multicast_group_id",
           "multicast_ip",
           "name",
-          "parent_id",
           "source_ips",
           "state",
           "time_created",
           "time_modified"
-        ]
-      },
-      "MulticastGroupMemberParentKind": {
-        "description": "Kind of resource that owns a multicast group member.\n\nSelects how to interpret `parent_id`: an instance or a probe.",
-        "type": "string",
-        "enum": [
-          "instance",
-          "probe"
         ]
       },
       "MulticastGroupMemberResultsPage": {
@@ -26409,14 +26392,6 @@
         "properties": {
           "description": {
             "type": "string"
-          },
-          "multicast_groups": {
-            "description": "Multicast groups to enroll this probe as a member of at creation time. Each entry specifies a group (by name, UUID, or IP address), plus optional source IPs and IP version, matching the instance join shape. Non-existent groups are created automatically when given an IP covered by a multicast pool.\n\nIf empty (the default), this leaves the probe unenrolled. Probe memberships are fixed at creation. Recreate the probe to change or modify them.",
-            "default": [],
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/MulticastGroupJoinSpec"
-            }
           },
           "name": {
             "$ref": "#/components/schemas/Name"

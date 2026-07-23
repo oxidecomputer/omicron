@@ -4477,7 +4477,7 @@
           "experimental"
         ],
         "summary": "Join multicast group by name, IP address, or UUID",
-        "description": "Groups can be referenced by name, IP address, or UUID. If the group doesn't exist, it's implicitly created with an auto-allocated IP from a multicast pool linked to the caller's silo. When referencing by UUID, the group must already exist.\n\nSource IPs are optional for ASM addresses but required for SSM addresses (232.0.0.0/8 for IPv4, ff3x::/32 for IPv6). Duplicate IPs in the request are automatically deduplicated, with a maximum of 64 source IPs allowed.",
+        "description": "Groups can be referenced by name, IP address, or UUID. If the group doesn't exist, it's implicitly created with an auto-allocated IP from a multicast pool linked to the caller's silo. When referencing by UUID, the group must already exist.\n\nSource IPs are optional for ASM addresses but required for SSM addresses (232.0.0.0/8 for IPv4, the per-scope ff3x::/32 blocks for IPv6, per RFC 4607). Duplicate IPs in the request are automatically deduplicated, with a maximum of 64 source IPs allowed.",
         "operationId": "instance_multicast_group_join",
         "parameters": [
           {

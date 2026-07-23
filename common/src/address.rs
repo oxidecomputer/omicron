@@ -143,9 +143,10 @@ pub const MAX_SOURCE_IPS_PER_GROUP: usize = 256;
 
 /// Check if an IP is in the SSM (Source-Specific Multicast) range.
 ///
-/// SSM ranges per [RFC 4607 §1]:
-/// - IPv4: 232.0.0.0/8
-/// - IPv6: ff3x::/32 (all SSM scopes)
+/// Ranges checked:
+/// - IPv4: 232.0.0.0/8, per [RFC 4607 §1]
+/// - IPv6: the sixteen per-scope ff3x::/32 blocks (see
+///   [`IPV6_SSM_SUBNETS`]), not the broader ff30::/12 prefix
 ///
 /// [RFC 4607 §1]: https://www.rfc-editor.org/rfc/rfc4607#section-1
 pub fn is_ssm_address(ip: std::net::IpAddr) -> bool {
