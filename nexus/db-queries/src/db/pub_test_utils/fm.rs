@@ -12,7 +12,7 @@ use crate::db::datastore::fm::InsertSitrepError;
 use chrono::Utc;
 use nexus_types::fm::Sitrep;
 use nexus_types::fm::SitrepMetadata;
-use nexus_types::internal_api::background::fm_sitrep_gc::HistoryPruningStatus;
+use nexus_types::internal_api::background::fm_sitrep_gc::HistoryPruningOutcome;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::Generation;
@@ -21,6 +21,7 @@ use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SitrepUuid;
 use std::collections::BTreeSet;
 use std::num::NonZeroU32;
+use std::ops::RangeInclusive;
 use std::sync::Arc;
 
 /// An in-memory model of the expected contents of the sitrep tables.
@@ -205,26 +206,31 @@ impl SitrepModel {
     ///
     /// This simulates what the GC task *should* do:
     ///
-    /// - If the history table holds no more than `history_limit` rows, nothing
-    ///   is pruned.
+    /// - If the history table holds no more than `history_limit` rows,
+    ///   nothing is pruned.
     /// - Otherwise, the newest `history_limit` versions are kept, and every
-    ///   version at or below `latest_version - history_limit` is pruned.
-    ///   `Pruned` is only reported when at least one row was deleted.
+    ///   version at or below `latest_version - history_limit` is pruned,
+    ///   oldest versions first.
+    /// - Either way, the pruning loop should end by observing that the
+    ///   history table is within the limit, reporting the number of entries
+    ///   that remain: [`HistoryPruningOutcome::Pruned`] if this activation
+    ///   pruned something, and [`HistoryPruningOutcome::NotPruned`] if it
+    ///   didn't.
     /// - All orphaned sitreps, including those newly orphaned by pruning
     ///   the history, are deleted by the orphan sweep.
     pub fn simulate_gc(&mut self, history_limit: NonZeroU32) -> ExpectedGc {
+        let history_limit = history_limit.get();
         let latest_version = self.latest_version();
         let history_count = u32::try_from(self.history_count())
             .expect("test current history count exceeds u32");
-        let history_limit = history_limit.get();
         eprintln!(
             "model: simulating GC with history_limit={history_limit}, \
              latest_version=v{latest_version}, history_count={history_count}"
         );
-        let mut history_pruned = 0;
-        let pruning = if history_count <= history_limit {
-            HistoryPruningStatus::NotPruned { count: history_count.into() }
-        } else {
+        let mut versions_pruned = None;
+        let mut history_pruned: u32 = 0;
+        if history_count > history_limit {
+            let oldest_version_pruned = self.earliest_live_version;
             let newest_version_pruned = latest_version - history_limit;
             // The versions pruned are
             // `earliest_live_version..=newest_version_pruned`.
@@ -242,16 +248,24 @@ impl SitrepModel {
                 history_pruned += 1;
             }
             self.earliest_live_version = newest_version_pruned + 1;
-            HistoryPruningStatus::Pruned {
-                n_pruned: history_pruned as usize,
-                newest_version_pruned,
-            }
+            versions_pruned =
+                Some(oldest_version_pruned..=newest_version_pruned);
+        }
+        // Either way, the pruning loop terminates by observing that the
+        // history table is within the limit. If we pruned anything, exactly
+        // `limit` entries remain; otherwise, the count is unchanged.
+        let outcome = if history_pruned > 0 {
+            HistoryPruningOutcome::Pruned { count: u64::from(history_limit) }
+        } else {
+            HistoryPruningOutcome::NotPruned { count: history_count.into() }
         };
         let gced = std::mem::take(&mut self.live_orphans);
         let orphans_deleted = gced.len();
         eprintln!(
             "model: simulated GC with history limit {history_limit}:\n  \
-             pruning: {pruning:?}, \
+             sitreps_pruned: {history_pruned}, \
+             versions_pruned: {versions_pruned:?}, \
+             outcome: {outcome:?}, \
              earliest live version now v{}, \
              expecting {orphans_deleted} orphaned sitreps deleted",
             self.earliest_live_version,
@@ -260,7 +274,12 @@ impl SitrepModel {
             eprintln!("  - GC'd: {orphan}")
         }
         self.gced_orphans.extend(gced);
-        ExpectedGc { pruning, orphans_deleted }
+        ExpectedGc {
+            sitreps_pruned: history_pruned as usize,
+            versions_pruned,
+            outcome,
+            orphans_deleted,
+        }
     }
 
     /// Assert that the database contents match this model:
@@ -372,8 +391,13 @@ impl SitrepModel {
 /// [`SitrepModel::simulate_gc`].
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ExpectedGc {
-    /// The pruning status the GC task should report.
-    pub pruning: HistoryPruningStatus,
+    /// The total number of history table entries that should be pruned.
+    pub sitreps_pruned: usize,
+    /// The range of versions that should be pruned (oldest..=newest), if
+    /// any.
+    pub versions_pruned: Option<RangeInclusive<u32>>,
+    /// The outcome the pruning loop should end with.
+    pub outcome: HistoryPruningOutcome,
     /// The number of orphaned sitreps the task's orphan sweep should delete,
     /// including sitreps newly orphaned by pruning the history.
     pub orphans_deleted: usize,

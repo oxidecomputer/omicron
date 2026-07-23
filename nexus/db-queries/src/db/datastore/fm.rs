@@ -47,7 +47,6 @@ use nexus_db_schema::schema::fm_sitrep_history::dsl as history_dsl;
 use nexus_db_schema::schema::fm_support_bundle_request::dsl as support_bundle_req_dsl;
 use nexus_types::fm;
 use nexus_types::fm::Sitrep;
-use nexus_types::internal_api::background::fm_sitrep_gc::HistoryPruningStatus;
 use nexus_types::support_bundle::{BundleData, BundleDataSelection};
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
@@ -162,19 +161,21 @@ pub struct HistoryPruningParams {
 }
 
 /// Describes the status of pruning old records from the end of the sitrep
-/// history table.
+/// history table (returned by [`DataStore::fm_sitrep_history_prune`]).
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum HistoryPruningStatus {
+pub enum HistoryPruningResult {
     /// The history table holds no more than the configured limit of
     /// entries, so nothing was pruned.
     NotPruned { count: u64 },
     /// The history table exceeded the limit, and the oldest `n_pruned`
-    /// entries were deleted. `newest_version_pruned` is the version of the
-    /// newest entry that was deleted, while oldest_version_pruned
+    /// entries were deleted.
     Pruned {
+        /// The number of entries that were deleted.
         n_pruned: usize,
-        oldest_version_pruned: u32,
-        newest_version_pruned: u32,
+        /// The version number of the oldest sitrep that was pruned.
+        oldest_pruned: u32,
+        /// The version number of the newest sitrep that was pruned.
+        newest_pruned: u32,
     },
 }
 
@@ -1692,11 +1693,26 @@ impl DataStore {
             })
     }
 
+    /// Prune the `fm_sitrep_history` table if more than `limit` records exist,
+    /// deleting up to `batch_size` records.
+    ///
+    /// This function will first check if more than `limit` records exist, and
+    /// then deletes up to `batch_size` records. It will never delete records
+    /// that result in *less than* `limit` records remaining in the table, so if
+    /// the current number of records is less than `limit + batch_size`, fewer
+    /// than `batch_size` records will be deleted. If more than `limit +
+    /// batch_size` records exist, only `batch_size` records will be deleted.
+    ///
+    /// If anything is deleted, this function returns
+    /// [`HistoryPruningResult::Pruned`]. Callers who wish to prune the table
+    /// to exactly `limit` records should call this function in a loop until it
+    /// returns [`HistoryPruningResult::NotPruned`], indicating that the table
+    /// has reached the desired size.
     pub async fn fm_sitrep_history_prune(
         &self,
         opctx: &OpContext,
         HistoryPruningParams { limit, batch_size }: HistoryPruningParams,
-    ) -> Result<HistoryPruningStatus, Error> {
+    ) -> Result<HistoryPruningResult, Error> {
         // The "full" table scan below is treated as a complex operation. (This
         // should only be called from the FM analysis and sitrep GC background
         // tasks, for which complex operations are allowed.)
@@ -1734,7 +1750,7 @@ impl DataStore {
 
                     // If the history table is below the limit, we're done here.
                     if let db::IsLimitReached::No { count } = limit_reached {
-                        return Ok(HistoryPruningStatus::NotPruned {
+                        return Ok(HistoryPruningResult::NotPruned {
                             count,
                         });
                     }
@@ -1787,30 +1803,30 @@ impl DataStore {
                     // *will* prune, ensuring that we prune no more than
                     // `batch_size` records. We do this by determining the
                     // newest version we would delete if we deleted up to
-                    // `earliest_version + batch_size` records, and then taking
+                    // `oldest_version + batch_size` records, and then taking
                     // the minimum of that and the newest version we're allowed
                     // to prune.
-                    let earliest_version: u32 = history_dsl::fm_sitrep_history
+                    let oldest_pruned: u32 = history_dsl::fm_sitrep_history
                         .select(diesel::dsl::min(history_dsl::version))
                         .first_async::<Option<SqlU32>>(&conn)
                         .await?
                         .ok_or_else(|| {
                             let e = Error::internal_error(
-                                    "min(...) only returns NULL if the \
-                                    table is empty, and we know it isn't, \
-                                    so this should be impossible."
+                                "min(...) only returns NULL if the table is \
+                                 empty, and we know it isn't, so this should \
+                                 be impossible.",
                             );
                             err.bail(TransactionError::CustomError(e))
-                        })?.
-                        into();
-                    let newest_version_pruned = {
+                        })?
+                        .into();
+                    let newest_pruned = {
                         let max_pruned = batch_size.get() - 1;
                         newest_prunable_version
-                            .min(earliest_version.saturating_add(max_pruned))
+                            .min(oldest_pruned.saturating_add(max_pruned))
                     };
 
                     let n_pruned = diesel::delete(history_dsl::fm_sitrep_history)
-                        .filter(history_dsl::version.le(SqlU32(newest_version_pruned)))
+                        .filter(history_dsl::version.le(SqlU32(newest_pruned)))
                         .execute_async(&conn)
                         .await?;
 
@@ -1823,14 +1839,15 @@ impl DataStore {
                     // don't say that we pruned something if we didn't actually
                     // delete anything.
                     if n_pruned == 0 {
-                        return Ok(HistoryPruningStatus::NotPruned {
+                        return Ok(HistoryPruningResult::NotPruned {
                             count: u64::from(limit),
                         });
                     }
 
-                    Ok(HistoryPruningStatus::Pruned {
+                    Ok(HistoryPruningResult::Pruned {
                         n_pruned,
-                        newest_version_pruned,
+                        oldest_pruned,
+                        newest_pruned,
                     })
                 }
             })
@@ -3580,8 +3597,10 @@ mod tests {
 
         // Run the unified GC, which should clean up the deeply-orphaned
         // children (and any normal orphans too).
-        let result =
-            datastore.fm_sitrep_gc_orphans(opctx).await.expect("GC orphans");
+        let result = datastore
+            .fm_sitrep_gc_orphans(opctx, SQL_BATCH_SIZE)
+            .await
+            .expect("GC orphans");
         assert_eq!(
             result.child_tables[&SitrepChildTable::Case].rows_deleted,
             1
@@ -4238,7 +4257,7 @@ mod tests {
             handles.push(tokio::spawn(async move {
                 while !stop.load(Ordering::Relaxed) {
                     let result = datastore
-                        .fm_sitrep_gc_orphans(&opctx)
+                        .fm_sitrep_gc_orphans(&opctx, SQL_BATCH_SIZE)
                         .await
                         .unwrap_or_else(|e| {
                             panic!(
