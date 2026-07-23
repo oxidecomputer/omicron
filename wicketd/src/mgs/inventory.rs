@@ -203,11 +203,11 @@ impl MgsFetchError {
 #[derive(Clone, Debug)]
 pub(crate) struct FetchedSpData {
     pub(crate) state: SpState,
-    pub(super) components: Fetched<Vec<SpComponentInfo>>,
-    pub(super) caboose_active: Fetched<SpComponentCaboose>,
-    pub(super) caboose_inactive: Fetched<SpComponentCaboose>,
-    pub(super) rot: RotFetch,
-    pub(super) mgs_received: Instant,
+    pub(crate) components: Fetched<Vec<SpComponentInfo>>,
+    pub(crate) caboose_active: Fetched<SpComponentCaboose>,
+    pub(crate) caboose_inactive: Fetched<SpComponentCaboose>,
+    pub(crate) rot: RotFetch,
+    pub(crate) mgs_received: Instant,
 }
 
 /// The outcome of the most recent attempt to fetch one piece of SP data.

@@ -497,7 +497,7 @@ pub(crate) struct SpRecord {
 
     /// The most recent state-fetch error for this SP, or `None` if the last
     /// state fetch succeeded (or fetching hasn't failed yet).
-    last_state_fetch_error: Option<MgsFetchError>,
+    pub(crate) last_state_fetch_error: Option<MgsFetchError>,
 }
 
 impl SpRecord {
