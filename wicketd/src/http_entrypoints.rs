@@ -9,10 +9,10 @@ use crate::context::CommonConfigContainer;
 use crate::context::RssOrMultirackJoinConfig;
 use crate::http_helpers::ba_lockstep_client;
 use crate::http_helpers::ba_lockstep_error_to_http;
-use crate::http_helpers::inventory_err_to_http;
 use crate::http_helpers::mgs_inventory_or_unavail;
 use crate::http_helpers::start_update;
 use crate::mgs::GetInventoryResponse as GetMgsInventoryResponse;
+use crate::mgs::records_to_mgs_inventory;
 use crate::multirack_config::CurrentMultirackJoinConfig;
 use crate::transceivers::GetTransceiversResponse;
 use bootstrap_agent_lockstep_client::ClientInfo as _;
@@ -384,22 +384,50 @@ impl WicketdApi for WicketdApiImpl {
             .await
         {
             Ok(GetMgsInventoryResponse::Response {
-                inventory,
+                sps,
                 mgs_last_seen,
-            }) => Some((inventory, mgs_last_seen)),
+                // The (currently frozen) wicketd API surfaces only the lossy
+                // `MgsV1Inventory` projection of the per-SP records.
+                //
+                // TODO: surface the richer per-SP records and fetch errors once
+                // rkdeploy is on the stable commissioning API.
+                last_ignition_fetch_error: _,
+            }) => Some((records_to_mgs_inventory(&sps), mgs_last_seen)),
             Ok(GetMgsInventoryResponse::Unavailable) => None,
             Err(err) => {
-                return Err(inventory_err_to_http(err));
+                return Err(err.to_http_error());
             }
         };
 
         // Fetch the transceiver information from the SP.
         let maybe_transceiver_inventory =
             match rqctx.context().transceiver_handle.get_transceivers() {
-                GetTransceiversResponse::Response {
-                    transceivers,
-                    transceivers_last_seen,
-                } => Some((transceivers, transceivers_last_seen)),
+                GetTransceiversResponse::Response { transceivers } => {
+                    // transceivers tracks the last_seen for each switch
+                    // independently. But the (currently frozen) wicketd API
+                    // wire shape only has a single last_seen field. So we must
+                    // pick: min or max? We choose max here, so that if one of
+                    // the fetch tasks is wedged, the timestamp indicates that.
+                    //
+                    // TODO: clean this up (report per-switch last_seen) once
+                    // rkdeploy is on the stable commissioning API.
+                    let last_seen = transceivers
+                        .iter()
+                        .map(|switch| switch.updated_at.elapsed())
+                        .max();
+                    last_seen.map(|last_seen| {
+                        // The (currently frozen) wicketd API is a HashMap, so
+                        // collect into that.
+                        //
+                        // TODO: switch to IdOrdMap once rkdeploy is on the
+                        // stable commissioning API.
+                        let inventory = transceivers
+                            .into_iter()
+                            .map(|switch| (switch.switch, switch.transceivers))
+                            .collect();
+                        (inventory, last_seen)
+                    })
+                }
                 GetTransceiversResponse::Unavailable => None,
             };
 
