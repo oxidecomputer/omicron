@@ -45,22 +45,19 @@ const CHANNEL_CAPACITY: usize = 8;
 
 /// Response to a request for MGS-specific inventory information.
 #[derive(Debug)]
-pub(crate) enum GetInventoryResponse {
-    Response {
-        /// Every per-SP record the manager holds.
-        ///
-        /// Consumers that speak the (currently frozen) unstable wicketd API
-        /// project this down to `MgsV1Inventory`.
-        sps: IdOrdMap<SpRecord>,
+pub(crate) struct GetInventoryResponse {
+    /// Every per-SP record the manager holds.
+    ///
+    /// Consumers that speak the (currently frozen) unstable wicketd API
+    /// project this down to `MgsV1Inventory`.
+    pub(crate) sps: IdOrdMap<SpRecord>,
 
-        /// The most recent ignition-list fetch error, or `None` if the last
-        /// ignition fetch succeeded (or none has failed yet).
-        #[cfg_attr(not(test), expect(dead_code))]
-        last_ignition_fetch_error: Option<MgsFetchError>,
+    /// The most recent ignition-list fetch error, or `None` if the last
+    /// ignition fetch succeeded (or none has failed yet).
+    #[cfg_attr(not(test), expect(dead_code))]
+    pub(crate) last_ignition_fetch_error: Option<MgsFetchError>,
 
-        mgs_last_seen: Duration,
-    },
-    Unavailable,
+    pub(crate) mgs_last_seen: Duration,
 }
 
 #[derive(Debug)]
@@ -339,19 +336,10 @@ impl MgsManager {
         &self,
         mgs_last_seen: Instant,
     ) -> GetInventoryResponse {
-        // Inventory is available only once at least one record is populated
-        // (see `SpRecord::is_populated`): a map holding nothing but error-only
-        // records still reads as unavailable.
-        if !self.records.iter().any(SpRecord::is_populated) {
-            GetInventoryResponse::Unavailable
-        } else {
-            GetInventoryResponse::Response {
-                sps: self.records.clone(),
-                last_ignition_fetch_error: self
-                    .last_ignition_fetch_error
-                    .clone(),
-                mgs_last_seen: mgs_last_seen.elapsed(),
-            }
+        GetInventoryResponse {
+            sps: self.records.clone(),
+            last_ignition_fetch_error: self.last_ignition_fetch_error.clone(),
+            mgs_last_seen: mgs_last_seen.elapsed(),
         }
     }
 
@@ -587,16 +575,19 @@ impl IdOrdItem for SpRecord {
     id_upcast!();
 }
 
-/// Project the per-SP records into the frozen `MgsV1Inventory` wire type.
+/// Project the per-SP records into the frozen `MgsV1Inventory` wire type,
+/// returning `None` if no records have been populated successfully.
 pub(crate) fn records_to_mgs_inventory(
     records: &IdOrdMap<SpRecord>,
-) -> MgsV1Inventory {
-    let sps = records
-        .iter()
-        .filter(|record| record.is_populated())
-        .map(SpRecord::to_sp_inventory)
-        .collect();
-    MgsV1Inventory { sps }
+) -> Option<MgsV1Inventory> {
+    let inventory = MgsV1Inventory {
+        sps: records
+            .iter()
+            .filter(|record| record.is_populated())
+            .map(SpRecord::to_sp_inventory)
+            .collect(),
+    };
+    if inventory.sps.is_empty() { None } else { Some(inventory) }
 }
 
 struct WaitingForRefresh {
@@ -690,20 +681,6 @@ mod tests {
         }
     }
 
-    /// Fetch the current inventory and unwrap it as available, panicking if the
-    /// manager still reports `Unavailable`.
-    fn expect_inventory(
-        manager: &MgsManager,
-        now: Instant,
-    ) -> IdOrdMap<SpRecord> {
-        let GetInventoryResponse::Response { sps, .. } =
-            manager.current_inventory(now)
-        else {
-            panic!("expected inventory to be available");
-        };
-        sps
-    }
-
     /// Return the recorded state-fetch error message for `id`, or `None` if the
     /// record carries no error.
     ///
@@ -725,9 +702,11 @@ mod tests {
         let mut manager = dummy_manager();
         let now = Instant::now();
 
-        // (a) A failed fetch is recorded via the same method `run()` dispatches
-        // to. It creates a record for the SP but does not by itself make
-        // inventory available.
+        // (a) A failed fetch is recorded through the same path `run()` uses. It
+        // creates an error-only record. `current_inventory` still returns that
+        // record (so the commissioning API can surface the error), but an
+        // error-only record is dropped from the frozen wire projection, which
+        // stays empty.
         manager.record_sp_state_fetch_error(
             sled(0),
             mgs_fetch_error("first failure"),
@@ -740,29 +719,33 @@ mod tests {
             !record.is_populated(),
             "an error-only record carries no fetched data: {record:?}",
         );
-        match manager.current_inventory(now) {
-            GetInventoryResponse::Unavailable => {}
-            other => panic!("expected Unavailable, got {other:?}"),
-        }
+        let sps = manager.current_inventory(now).sps;
+        assert!(
+            records_to_mgs_inventory(&sps).is_none(),
+            "the error-only record is excluded, so there is no wire inventory",
+        );
 
         // (b) A second error for the same SP overwrites the first; the overwrite
-        // is asserted at step (c), once inventory is available.
+        // is asserted at step (c), once a populated record makes the wire
+        // projection non-empty.
         manager.record_sp_state_fetch_error(
             sled(0),
             mgs_fetch_error("second failure"),
         );
 
-        // (c) Once any SP reports state, inventory becomes available. The
-        // error-only record for sled 0 is excluded from the wire-visible
-        // projection while sled 1's data appears; sled 0's error reflects the
-        // latest failure, and the successfully-read sled 1 has no error.
+        // (c) Once any SP reports state, its record is populated and the wire
+        // projection becomes non-empty. The error-only record for sled 0 is
+        // excluded from that projection while sled 1's data appears; sled 0's
+        // error reflects the latest failure, and the successfully-read sled 1
+        // has no error.
         manager.update_inventory_with_sp(
             sled(1),
             fetched_sp_data(sled(1)),
             now,
         );
-        let sps = expect_inventory(&manager, now);
-        let inventory = records_to_mgs_inventory(&sps);
+        let sps = manager.current_inventory(now).sps;
+        let inventory = records_to_mgs_inventory(&sps)
+            .expect("sled 1 is populated, so the projection is non-empty");
         assert!(
             inventory.sps.get(&sled(0)).is_none(),
             "the error-only record for sled 0 is excluded from inventory",
@@ -788,7 +771,7 @@ mod tests {
             fetched_sp_data(sled(0)),
             now,
         );
-        let sps = expect_inventory(&manager, now);
+        let sps = manager.current_inventory(now).sps;
         assert_eq!(
             sp_fetch_error_message(&sps, sled(0)),
             None,
@@ -801,7 +784,7 @@ mod tests {
             sled(0),
             mgs_fetch_error("third failure"),
         );
-        let sps = expect_inventory(&manager, now);
+        let sps = manager.current_inventory(now).sps;
         let sled0_record = sps.get(&sled(0)).expect("sled 0's record exists");
         assert!(
             sled0_record.data.is_some(),
@@ -813,7 +796,8 @@ mod tests {
             Some("third failure"),
             "the fresh error is recorded alongside the retained data",
         );
-        let inventory = records_to_mgs_inventory(&sps);
+        let inventory = records_to_mgs_inventory(&sps)
+            .expect("sled 0 is populated, so the projection is non-empty");
         let sled0 = inventory
             .sps
             .get(&sled(0))
@@ -825,6 +809,55 @@ mod tests {
         assert_eq!(
             state.serial_number, "serial-0",
             "the projected state is the one from the successful fetch",
+        );
+    }
+
+    #[test]
+    fn error_only_map_is_available_and_surfaces_errors() {
+        let mut manager = dummy_manager();
+        let now = Instant::now();
+
+        // Having heard nothing at all yields an empty record map.
+        assert!(
+            manager.current_inventory(now).sps.is_empty(),
+            "no fetches yet, so the record map is empty",
+        );
+
+        manager.record_sp_state_fetch_error(
+            sled(0),
+            mgs_fetch_error("sled 0 unreachable"),
+        );
+        manager.record_sp_state_fetch_error(
+            sled(1),
+            mgs_fetch_error("sled 1 unreachable"),
+        );
+
+        let sps = manager.current_inventory(now).sps;
+
+        // The frozen wire projection has nowhere to put these errors, so it is
+        // empty...
+        assert!(
+            records_to_mgs_inventory(&sps).is_none(),
+            "error-only records are excluded, so there is no wire inventory",
+        );
+        // ...but the errors are still recorded internally.
+        assert_eq!(
+            sps.get(&sled(0))
+                .expect("sled 0's record exists")
+                .last_state_fetch_error
+                .as_ref()
+                .expect("sled 0's error is retained")
+                .message,
+            "sled 0 unreachable",
+        );
+        assert_eq!(
+            sps.get(&sled(1))
+                .expect("sled 1's record exists")
+                .last_state_fetch_error
+                .as_ref()
+                .expect("sled 1's error is retained")
+                .message,
+            "sled 1 unreachable",
         );
     }
 
@@ -875,13 +908,11 @@ mod tests {
             manager.waiting_for_update.is_empty(),
             "the waiter fires once every SP has refreshed",
         );
-        let GetInventoryResponse::Response { sps, .. } = reply_rx
+        let sps = reply_rx
             .try_recv()
             .expect("the waiter received a response")
             .expect("the response is not an error")
-        else {
-            panic!("expected inventory to be available");
-        };
+            .sps;
         assert_eq!(
             sp_fetch_error_message(&sps, sled(0)),
             None,
@@ -899,15 +930,16 @@ mod tests {
             mgs_fetch_error("mgs is unhappy"),
         );
 
-        // An ignition update populates data for sled 0 (so inventory becomes
-        // available) but must not clear the recorded state-fetch error.
+        // An ignition update populates data for sled 0 (so it shows up in the
+        // wire projection) but must not clear the recorded state-fetch error.
         let mut sps = BTreeMap::new();
         sps.insert(sled(0), SpIgnition::Absent);
         let ignition = FetchedIgnitionState { sps, mgs_received: now };
         manager.update_inventory_with_ignition(ignition, &BTreeMap::new(), now);
 
-        let sps = expect_inventory(&manager, now);
-        let inventory = records_to_mgs_inventory(&sps);
+        let sps = manager.current_inventory(now).sps;
+        let inventory = records_to_mgs_inventory(&sps)
+            .expect("sled 0 is populated, so the projection is non-empty");
         assert!(
             inventory.sps.get(&sled(0)).is_some(),
             "the ignition update gave sled 0 data, so it appears in inventory",
@@ -1051,14 +1083,14 @@ mod tests {
         let mut manager = dummy_manager();
         let now = Instant::now();
 
-        // An ignition fetch error by itself does not make inventory available.
+        // An ignition fetch error by itself creates no records.
         manager.record_ignition_fetch_error(mgs_fetch_error(
             "ignition is unhappy",
         ));
-        match manager.current_inventory(now) {
-            GetInventoryResponse::Unavailable => {}
-            other => panic!("expected Unavailable, got {other:?}"),
-        }
+        assert!(
+            manager.current_inventory(now).sps.is_empty(),
+            "an ignition error alone creates no records",
+        );
 
         // Once an SP has data, the ignition error is exposed in the response.
         manager.update_inventory_with_sp(
@@ -1066,12 +1098,8 @@ mod tests {
             fetched_sp_data(sled(0)),
             now,
         );
-        let GetInventoryResponse::Response {
-            last_ignition_fetch_error, ..
-        } = manager.current_inventory(now)
-        else {
-            panic!("expected inventory to be available");
-        };
+        let GetInventoryResponse { last_ignition_fetch_error, .. } =
+            manager.current_inventory(now);
         let error = last_ignition_fetch_error
             .expect("the ignition fetch error is reported");
         assert_eq!(error.message, "ignition is unhappy");
@@ -1081,12 +1109,8 @@ mod tests {
         sps.insert(sled(0), SpIgnition::Absent);
         let ignition = FetchedIgnitionState { sps, mgs_received: now };
         manager.update_inventory_with_ignition(ignition, &BTreeMap::new(), now);
-        let GetInventoryResponse::Response {
-            last_ignition_fetch_error, ..
-        } = manager.current_inventory(now)
-        else {
-            panic!("expected inventory to be available");
-        };
+        let GetInventoryResponse { last_ignition_fetch_error, .. } =
+            manager.current_inventory(now);
         assert!(
             last_ignition_fetch_error.is_none(),
             "a successful ignition fetch clears the recorded error",
