@@ -104,6 +104,7 @@ gateway-types.workspace = true
 illumos-utils.workspace = true
 internal-dns-resolver.workspace = true
 itertools.workspace = true
+libc.workspace = true
 nexus-inventory.workspace = true
 nexus-reconfigurator-planning.workspace = true
 nexus-test-utils.workspace = true
@@ -120,6 +121,7 @@ rcgen.workspace = true
 regex.workspace = true
 rustls.workspace = true
 sha2.workspace = true
+socket2.workspace = true
 subprocess.workspace = true
 term.workspace = true
 
