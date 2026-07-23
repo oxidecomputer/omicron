@@ -108,6 +108,7 @@ pub struct ImageVersion {
     Copy,
     PartialEq,
     Eq,
+    Hash,
     PartialOrd,
     Ord,
     Deserialize,

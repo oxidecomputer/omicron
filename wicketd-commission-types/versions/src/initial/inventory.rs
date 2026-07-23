@@ -20,7 +20,7 @@ use serde::{Deserialize, Serialize};
 pub use gateway_types_versions::v1::component::{
     PowerState, SpIdentifier, SpType,
 };
-pub use gateway_types_versions::v1::rot::RotSlot;
+pub use gateway_types_versions::v1::rot::{RotImageError, RotSlot};
 pub use sled_agent_types_versions::v1::early_networking::SwitchSlot;
 
 /// A minimal projection of a firmware caboose.
@@ -54,15 +54,38 @@ pub struct Caboose {
     pub sign: Option<String>,
 }
 
+/// An error wicketd encountered while fetching a piece of inventory from MGS.
+///
+/// This is the wire projection of wicketd's internal fetch error. Each fetched
+/// item that can fail on its own (the SP state, a caboose slot, the stage0
+/// bootloader caboose, or the rack-wide ignition list) reports one of these
+/// when its most recent fetch failed.
+#[derive(
+    Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema,
+)]
+pub struct FetchError {
+    /// A description of what went wrong.
+    pub message: String,
+    /// How long ago this error was observed. A small value means the fetch is
+    /// still failing now. A large value means it has not been refreshed in a
+    /// while: for a top-level fetch (the SP state or the rack-wide ignition
+    /// list) that the poller retries on its own schedule, the poller may be
+    /// wedged; for a sub-fetch error (a caboose slot or the stage0 bootloader
+    /// caboose, which only refresh on a successful `sp_get`), it instead means
+    /// the enclosing SP fetch has stopped succeeding.
+    pub age: Duration,
+}
+
 /// The stage0 (or pending stage0next) bootloader caboose for a root of trust.
 ///
-/// The three states are kept distinct because they mean different things to a
+/// The four states are kept distinct because they mean different things to a
 /// caller:
 ///
 /// * `unsupported`: this RoT version does not report a stage0 bootloader
 ///   caboose at all.
 /// * `not_read`: the RoT version supports reporting a stage0 caboose, but it
 ///   has not been read yet.
+/// * `error`: reading the stage0 caboose was attempted and failed.
 /// * `read`: the stage0 caboose was read.
 #[derive(
     Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema,
@@ -73,6 +96,11 @@ pub enum Stage0Caboose {
     Unsupported,
     /// The stage0 bootloader caboose is supported but has not been read yet.
     NotRead,
+    /// Reading the stage0 bootloader caboose failed.
+    Error {
+        /// What went wrong reading the caboose.
+        error: FetchError,
+    },
     /// The stage0 bootloader caboose was read.
     Read {
         /// The caboose that was read.
@@ -81,6 +109,10 @@ pub enum Stage0Caboose {
 }
 
 /// The caboose for a single firmware slot, including whether it was read.
+///
+/// A caboose that could not be read is reported as `error` rather than
+/// `not_read`, so that a caller waiting for a caboose to appear can tell a
+/// transient "not yet" from a read that keeps failing.
 #[derive(
     Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema,
 )]
@@ -88,6 +120,11 @@ pub enum Stage0Caboose {
 pub enum SlotCaboose {
     /// The caboose for this slot has not been read yet.
     NotRead,
+    /// Reading the caboose for this slot failed.
+    Error {
+        /// What went wrong reading the caboose.
+        error: FetchError,
+    },
     /// The caboose for this slot was read.
     Read {
         /// The caboose that was read.
@@ -96,35 +133,113 @@ pub enum SlotCaboose {
 }
 
 /// Root-of-trust information for a single service processor.
+///
+/// The root of trust is reached through its service processor, so it has its
+/// own read state: an SP that responds may still be unable to talk to its RoT.
 #[derive(
     Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema,
 )]
-pub struct RotInfo {
-    /// The currently-active RoT image slot.
-    pub active: RotSlot,
-    /// The caboose of the image in slot A.
-    pub caboose_a: SlotCaboose,
-    /// The caboose of the image in slot B.
-    pub caboose_b: SlotCaboose,
-    /// The caboose of the stage0 bootloader.
-    pub caboose_stage0: Stage0Caboose,
-    /// The caboose of the pending stage0next bootloader.
-    pub caboose_stage0next: Stage0Caboose,
+#[serde(tag = "state", rename_all = "snake_case")]
+// The `Read` variant legitimately carries four caboose slots, so it dwarfs the
+// error and not-read variants; boxing would only complicate matching on a
+// published wire type.
+#[allow(clippy::large_enum_variant)]
+pub enum RotInfo {
+    /// The root of trust has not been read yet.
+    NotRead,
+    /// The service processor reported that it cannot reach its root of trust.
+    ///
+    /// This is the SP's own report (from its `SpState.rot`), not a wicketd
+    /// fetch error: the SP responded, but told us it could not talk to its RoT.
+    /// It therefore carries only a message, with no `kind` or `age`, unlike a
+    /// `FetchError`.
+    Error {
+        /// The failure the service processor reported for its root of trust.
+        message: String,
+    },
+    /// The root of trust was read.
+    Read {
+        /// The currently-active RoT image slot.
+        active: RotSlot,
+        /// The image in slot A.
+        slot_a: RotSlotInfo,
+        /// The image in slot B.
+        slot_b: RotSlotInfo,
+        /// The stage0 bootloader.
+        stage0: RotStage0Info,
+        /// The pending stage0next bootloader.
+        stage0next: RotStage0Info,
+    },
+}
+
+/// One root-of-trust firmware slot.
+///
+/// The caboose says what firmware is in the slot; `image_error` says whether
+/// the RoT considers that image usable. The two are read from different
+/// sources, so a slot can have a readable caboose and still be unbootable.
+#[derive(
+    Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema,
+)]
+pub struct RotSlotInfo {
+    /// The caboose of the image in this slot.
+    pub caboose: SlotCaboose,
+    /// Why the RoT considers this image invalid, if it does.
+    ///
+    /// `None` means the image is valid, or that this RoT version does not
+    /// report per-slot image validity.
+    pub image_error: Option<RotImageError>,
+}
+
+/// The stage0 (or stage0next) bootloader slot.
+#[derive(
+    Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema,
+)]
+pub struct RotStage0Info {
+    /// The caboose of the bootloader in this slot.
+    pub caboose: Stage0Caboose,
+    /// Why the RoT considers this bootloader image invalid, if it does.
+    ///
+    /// `None` means the image is valid, or that this RoT version does not
+    /// report per-slot image validity.
+    pub image_error: Option<RotImageError>,
 }
 
 /// The service processor's state, read together from MGS.
 ///
 /// The serial number and power state are always read together from the same
-/// service-processor state, so they are presented as a single unit that is
-/// either entirely present or entirely absent.
+/// service-processor state, so they are reported as a single unit.
 #[derive(
     Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema,
 )]
-pub struct SpStateInfo {
-    /// The service processor's serial number.
-    pub serial_number: String,
-    /// The host power state.
-    pub power_state: PowerState,
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum SpStateInfo {
+    /// The service processor's state has not been read yet.
+    NotRead,
+    /// Reading the service processor's state failed.
+    Error {
+        /// What went wrong reading the state.
+        ///
+        /// The error's `kind` says whether the failure looks transient (so a
+        /// caller waiting for this service processor should keep waiting) or
+        /// permanent (so retrying is unlikely to help on its own).
+        error: FetchError,
+    },
+    /// The service processor's state was read.
+    Read {
+        /// The service processor's serial number.
+        serial_number: String,
+        /// The host power state.
+        power_state: PowerState,
+        /// The error from a more recent state fetch that failed while this
+        /// older reading still stands, if any.
+        ///
+        /// The reading remains primary: a stale-but-real reading beats no
+        /// reading. `Some` means the most recent `sp_get` failed but an earlier
+        /// one succeeded, so the concurrent failure is surfaced here rather than
+        /// displacing the reading. `None` means the most recent fetch succeeded
+        /// (or none has failed since).
+        refresh_error: Option<FetchError>,
+    },
 }
 
 /// The faults ignition reports for a present service processor.
@@ -143,6 +258,11 @@ pub struct IgnitionFaults {
 }
 
 /// The ignition state of a service processor.
+///
+/// This has no per-SP `Error` variant: ignition is fetched rack-wide in a
+/// single request, so a fetch failure is not attributable to any one SP. A
+/// failed ignition fetch is reported once on `SpInventory.ignition_fetch_error`
+/// instead.
 #[derive(
     Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema,
 )]
@@ -162,22 +282,26 @@ pub enum SpIgnitionInfo {
 }
 
 /// A single service processor's inventory.
+///
+/// The state, ignition, caboose, and root-of-trust fields are read from MGS
+/// independently of one another, so each carries its own read state and they
+/// may disagree about how much is known.
 #[derive(
     Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema,
 )]
 pub struct SpInfo {
     /// Identifies the service processor by type and slot.
     pub id: SpIdentifier,
-    /// The service processor's state, if it has been read.
-    pub state: Option<SpStateInfo>,
+    /// The service processor's state.
+    pub state: SpStateInfo,
     /// The ignition state of this service processor.
     pub ignition: SpIgnitionInfo,
     /// The caboose of the active service-processor firmware slot.
     pub caboose_active: SlotCaboose,
     /// The caboose of the inactive service-processor firmware slot.
     pub caboose_inactive: SlotCaboose,
-    /// Root-of-trust information, if it has been read.
-    pub rot: Option<RotInfo>,
+    /// Root-of-trust information.
+    pub rot: RotInfo,
 }
 
 impl IdOrdItem for SpInfo {
@@ -198,10 +322,20 @@ impl IdOrdItem for SpInfo {
 pub struct SpInventory {
     /// How long it has been since wicketd last heard from MGS.
     ///
-    /// A large value indicates that MGS might be down.
+    /// A large value indicates that MGS might be down. This is a duration
+    /// rather than a timestamp because wicketd and its clients keep
+    /// independent clocks, and commissioning runs before time is synced.
     pub mgs_last_seen: Duration,
     /// The inventory of each SP.
     pub sps: IdOrdMap<SpInfo>,
+    /// The rack-wide ignition-list fetch error, if the most recent ignition
+    /// fetch failed.
+    ///
+    /// Ignition is fetched for the whole rack in a single request, so a failure
+    /// is reported once here rather than per SP. `None` means the last ignition
+    /// fetch succeeded (or none has failed yet); the per-SP `ignition` fields
+    /// then reflect that most recent successful fetch.
+    pub ignition_fetch_error: Option<FetchError>,
     /// The switch transceiver (optical module) inventory.
     pub transceivers: TransceiverInventory,
 }
@@ -214,13 +348,16 @@ pub struct SpInventory {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum TransceiverInventory {
-    /// The transceiver inventory has not been read yet.
+    /// No switch's transceiver inventory has been read yet.
     NotRead,
-    /// The transceiver inventory was read.
+    /// At least one switch's transceiver inventory was read.
     Read {
-        /// How long it has been since the transceiver inventory was last read.
-        last_seen: Duration,
-        /// The transceivers in each switch.
+        /// The transceivers in each switch that has been read.
+        ///
+        /// A switch that wicketd has never successfully read is absent from
+        /// this map rather than present and empty, so a caller can tell "this
+        /// switch reported no transceivers" from "we have never heard from
+        /// this switch".
         switches: IdOrdMap<SwitchTransceivers>,
     },
 }
@@ -230,6 +367,12 @@ pub enum TransceiverInventory {
 pub struct SwitchTransceivers {
     /// The switch these transceivers belong to.
     pub switch: SwitchSlot,
+    /// How long it has been since this switch's transceivers were read.
+    ///
+    /// This is tracked per switch because wicketd polls each switch with its
+    /// own task: a large value here means this switch's poller is wedged, even
+    /// if the other switch is being read normally.
+    pub last_seen: Duration,
     /// The transceivers in this switch, keyed by front port.
     pub transceivers: IdOrdMap<Transceiver>,
 }
@@ -328,14 +471,34 @@ pub enum TransceiverMonitors {
     },
     /// The monitoring data was read.
     Read {
-        /// Per-lane received optical power, in milliwatts.
+        /// Per-lane received optical power.
         ///
         /// `None` if the module does not report received power.
-        rx_power_mw: Option<Vec<f32>>,
+        rx_power: Option<Vec<ReceiverPower>>,
         /// Per-lane transmitted optical power, in milliwatts.
         ///
         /// `None` if the module does not report transmitted power.
         tx_power_mw: Option<Vec<f32>>,
+    },
+}
+
+/// A received optical power measurement from one lane.
+///
+/// Modules report received power in one of two ways, and the two are not
+/// directly comparable, so the kind of measurement is carried alongside the
+/// value rather than being flattened away.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ReceiverPower {
+    /// An average optical power measurement, in milliwatts.
+    Average {
+        /// The measured power, in milliwatts.
+        value_mw: f32,
+    },
+    /// A peak-to-peak optical power measurement, in milliwatts.
+    PeakToPeak {
+        /// The measured power, in milliwatts.
+        value_mw: f32,
     },
 }
 

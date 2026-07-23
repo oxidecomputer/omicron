@@ -234,6 +234,52 @@
         }
       }
     },
+    "/rack-setup/config/bgp-auth-key/{key_id}": {
+      "put": {
+        "summary": "Set the BGP authentication key for a key ID",
+        "description": "A BGP peer in the RSS configuration may reference an authentication key by ID; the key material itself is set here, and rack setup is rejected until every referenced key ID has been set. Keys are write-only: this API never returns key material.\n\nReturns 400 if the key ID is not referenced by the current RSS configuration.",
+        "operationId": "put_bgp_auth_key",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key_id",
+            "description": "The key ID, as referenced by a BGP peer in the RSS configuration.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/BgpAuthKeyId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BgpAuthKey"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SetBgpAuthKeyStatus"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/rack-setup/config/cert": {
       "post": {
         "summary": "Add an external certificate",
@@ -492,6 +538,31 @@
             "required": [
               "allow",
               "ips"
+            ]
+          }
+        ]
+      },
+      "BgpAuthKey": {
+        "description": "Describes the actual authentication key to use with a BGP peer.\n\nCurrently, only TCP-MD5 authentication is supported.",
+        "oneOf": [
+          {
+            "description": "TCP-MD5 authentication.",
+            "type": "object",
+            "properties": {
+              "key": {
+                "description": "The pre-shared key.",
+                "type": "string"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "tcp_md5"
+                ]
+              }
+            },
+            "required": [
+              "key",
+              "kind"
             ]
           }
         ]
@@ -927,6 +998,28 @@
               "unsupported"
             ]
           }
+        ]
+      },
+      "FetchError": {
+        "description": "An error wicketd encountered while fetching a piece of inventory from MGS.\n\nThis is the wire projection of wicketd's internal fetch error. Each fetched item that can fail on its own (the SP state, a caboose slot, the stage0 bootloader caboose, or the rack-wide ignition list) reports one of these when its most recent fetch failed.",
+        "type": "object",
+        "properties": {
+          "age": {
+            "description": "How long ago this error was observed. A small value means the fetch is still failing now. A large value means it has not been refreshed in a while: for a top-level fetch (the SP state or the rack-wide ignition list) that the poller retries on its own schedule, the poller may be wedged; for a sub-fetch error (a caboose slot or the stage0 bootloader caboose, which only refresh on a successful `sp_get`), it instead means the enclosing SP fetch has stopped succeeding.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Duration"
+              }
+            ]
+          },
+          "message": {
+            "description": "A description of what went wrong.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "age",
+          "message"
         ]
       },
       "IgnitionFaults": {
@@ -1673,6 +1766,53 @@
         "type": "string",
         "format": "uuid"
       },
+      "ReceiverPower": {
+        "description": "A received optical power measurement from one lane.\n\nModules report received power in one of two ways, and the two are not directly comparable, so the kind of measurement is carried alongside the value rather than being flattened away.",
+        "oneOf": [
+          {
+            "description": "An average optical power measurement, in milliwatts.",
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "average"
+                ]
+              },
+              "value_mw": {
+                "description": "The measured power, in milliwatts.",
+                "type": "number",
+                "format": "float"
+              }
+            },
+            "required": [
+              "kind",
+              "value_mw"
+            ]
+          },
+          {
+            "description": "A peak-to-peak optical power measurement, in milliwatts.",
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "peak_to_peak"
+                ]
+              },
+              "value_mw": {
+                "description": "The measured power, in milliwatts.",
+                "type": "number",
+                "format": "float"
+              }
+            },
+            "required": [
+              "kind",
+              "value_mw"
+            ]
+          }
+        ]
+      },
       "RepositoryDescription": {
         "description": "A description of the TUF repository currently held by wicketd.",
         "type": "object",
@@ -1685,57 +1825,122 @@
           }
         }
       },
+      "RotImageError": {
+        "type": "string",
+        "enum": [
+          "unchecked",
+          "first_page_erased",
+          "partially_programmed",
+          "invalid_length",
+          "header_not_programmed",
+          "bootloader_too_small",
+          "bad_magic",
+          "header_image_size",
+          "unaligned_length",
+          "unsupported_type",
+          "reset_vector_not_thumb2",
+          "reset_vector",
+          "signature"
+        ]
+      },
       "RotInfo": {
-        "description": "Root-of-trust information for a single service processor.",
-        "type": "object",
-        "properties": {
-          "active": {
-            "description": "The currently-active RoT image slot.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/RotSlot"
+        "description": "Root-of-trust information for a single service processor.\n\nThe root of trust is reached through its service processor, so it has its own read state: an SP that responds may still be unable to talk to its RoT.",
+        "oneOf": [
+          {
+            "description": "The root of trust has not been read yet.",
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "not_read"
+                ]
               }
+            },
+            "required": [
+              "state"
             ]
           },
-          "caboose_a": {
-            "description": "The caboose of the image in slot A.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/SlotCaboose"
+          {
+            "description": "The service processor reported that it cannot reach its root of trust.\n\nThis is the SP's own report (from its `SpState.rot`), not a wicketd fetch error: the SP responded, but told us it could not talk to its RoT. It therefore carries only a message, with no `kind` or `age`, unlike a `FetchError`.",
+            "type": "object",
+            "properties": {
+              "message": {
+                "description": "The failure the service processor reported for its root of trust.",
+                "type": "string"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "error"
+                ]
               }
+            },
+            "required": [
+              "message",
+              "state"
             ]
           },
-          "caboose_b": {
-            "description": "The caboose of the image in slot B.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/SlotCaboose"
+          {
+            "description": "The root of trust was read.",
+            "type": "object",
+            "properties": {
+              "active": {
+                "description": "The currently-active RoT image slot.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/RotSlot"
+                  }
+                ]
+              },
+              "slot_a": {
+                "description": "The image in slot A.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/RotSlotInfo"
+                  }
+                ]
+              },
+              "slot_b": {
+                "description": "The image in slot B.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/RotSlotInfo"
+                  }
+                ]
+              },
+              "stage0": {
+                "description": "The stage0 bootloader.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/RotStage0Info"
+                  }
+                ]
+              },
+              "stage0next": {
+                "description": "The pending stage0next bootloader.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/RotStage0Info"
+                  }
+                ]
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "read"
+                ]
               }
-            ]
-          },
-          "caboose_stage0": {
-            "description": "The caboose of the stage0 bootloader.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Stage0Caboose"
-              }
-            ]
-          },
-          "caboose_stage0next": {
-            "description": "The caboose of the pending stage0next bootloader.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Stage0Caboose"
-              }
+            },
+            "required": [
+              "active",
+              "slot_a",
+              "slot_b",
+              "stage0",
+              "stage0next",
+              "state"
             ]
           }
-        },
-        "required": [
-          "active",
-          "caboose_a",
-          "caboose_b",
-          "caboose_stage0",
-          "caboose_stage0next"
         ]
       },
       "RotSlot": {
@@ -1768,6 +1973,58 @@
               "slot"
             ]
           }
+        ]
+      },
+      "RotSlotInfo": {
+        "description": "One root-of-trust firmware slot.\n\nThe caboose says what firmware is in the slot; `image_error` says whether the RoT considers that image usable. The two are read from different sources, so a slot can have a readable caboose and still be unbootable.",
+        "type": "object",
+        "properties": {
+          "caboose": {
+            "description": "The caboose of the image in this slot.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SlotCaboose"
+              }
+            ]
+          },
+          "image_error": {
+            "nullable": true,
+            "description": "Why the RoT considers this image invalid, if it does.\n\n`None` means the image is valid, or that this RoT version does not report per-slot image validity.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RotImageError"
+              }
+            ]
+          }
+        },
+        "required": [
+          "caboose"
+        ]
+      },
+      "RotStage0Info": {
+        "description": "The stage0 (or stage0next) bootloader slot.",
+        "type": "object",
+        "properties": {
+          "caboose": {
+            "description": "The caboose of the bootloader in this slot.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Stage0Caboose"
+              }
+            ]
+          },
+          "image_error": {
+            "nullable": true,
+            "description": "Why the RoT considers this bootloader image invalid, if it does.\n\n`None` means the image is valid, or that this RoT version does not report per-slot image validity.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RotImageError"
+              }
+            ]
+          }
+        },
+        "required": [
+          "caboose"
         ]
       },
       "RouteConfig": {
@@ -1886,6 +2143,31 @@
           }
         ]
       },
+      "SetBgpAuthKeyStatus": {
+        "oneOf": [
+          {
+            "description": "The key was accepted and replaced an old key.",
+            "type": "string",
+            "enum": [
+              "replaced"
+            ]
+          },
+          {
+            "description": "The key was accepted, and is the same as the existing key.",
+            "type": "string",
+            "enum": [
+              "unchanged"
+            ]
+          },
+          {
+            "description": "The key was accepted and is new.",
+            "type": "string",
+            "enum": [
+              "added"
+            ]
+          }
+        ]
+      },
       "Sff8636LaneFaults": {
         "description": "The fault flags for one SFF-8636 lane.\n\nSFF-8636 always reports all five flags, so these are plain booleans.",
         "type": "object",
@@ -1920,7 +2202,7 @@
         ]
       },
       "SlotCaboose": {
-        "description": "The caboose for a single firmware slot, including whether it was read.",
+        "description": "The caboose for a single firmware slot, including whether it was read.\n\nA caboose that could not be read is reported as `error` rather than `not_read`, so that a caller waiting for a caboose to appear can tell a transient \"not yet\" from a read that keeps failing.",
         "oneOf": [
           {
             "description": "The caboose for this slot has not been read yet.",
@@ -1934,6 +2216,30 @@
               }
             },
             "required": [
+              "state"
+            ]
+          },
+          {
+            "description": "Reading the caboose for this slot failed.",
+            "type": "object",
+            "properties": {
+              "error": {
+                "description": "What went wrong reading the caboose.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/FetchError"
+                  }
+                ]
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "error"
+                ]
+              }
+            },
+            "required": [
+              "error",
               "state"
             ]
           },
@@ -1981,7 +2287,7 @@
         ]
       },
       "SpIgnitionInfo": {
-        "description": "The ignition state of a service processor.",
+        "description": "The ignition state of a service processor.\n\nThis has no per-SP `Error` variant: ignition is fetched rack-wide in a single request, so a fetch failure is not attributable to any one SP. A failed ignition fetch is reported once on `SpInventory.ignition_fetch_error` instead.",
         "oneOf": [
           {
             "description": "The ignition state has not been read yet.",
@@ -2045,7 +2351,7 @@
         ]
       },
       "SpInfo": {
-        "description": "A single service processor's inventory.",
+        "description": "A single service processor's inventory.\n\nThe state, ignition, caboose, and root-of-trust fields are read from MGS independently of one another, so each carries its own read state and they may disagree about how much is known.",
         "type": "object",
         "properties": {
           "caboose_active": {
@@ -2081,8 +2387,7 @@
             ]
           },
           "rot": {
-            "nullable": true,
-            "description": "Root-of-trust information, if it has been read.",
+            "description": "Root-of-trust information.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/RotInfo"
@@ -2090,8 +2395,7 @@
             ]
           },
           "state": {
-            "nullable": true,
-            "description": "The service processor's state, if it has been read.",
+            "description": "The service processor's state.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/SpStateInfo"
@@ -2103,15 +2407,26 @@
           "caboose_active",
           "caboose_inactive",
           "id",
-          "ignition"
+          "ignition",
+          "rot",
+          "state"
         ]
       },
       "SpInventory": {
         "description": "Inventory across all service processors.\n\nThis type cannot derive `Eq` because transceiver optical-power readings are floating-point.",
         "type": "object",
         "properties": {
+          "ignition_fetch_error": {
+            "nullable": true,
+            "description": "The rack-wide ignition-list fetch error, if the most recent ignition fetch failed.\n\nIgnition is fetched for the whole rack in a single request, so a failure is reported once here rather than per SP. `None` means the last ignition fetch succeeded (or none has failed yet); the per-SP `ignition` fields then reflect that most recent successful fetch.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/FetchError"
+              }
+            ]
+          },
           "mgs_last_seen": {
-            "description": "How long it has been since wicketd last heard from MGS.\n\nA large value indicates that MGS might be down.",
+            "description": "How long it has been since wicketd last heard from MGS.\n\nA large value indicates that MGS might be down. This is a duration rather than a timestamp because wicketd and its clients keep independent clocks, and commissioning runs before time is synced.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/Duration"
@@ -2168,25 +2483,85 @@
         "additionalProperties": false
       },
       "SpStateInfo": {
-        "description": "The service processor's state, read together from MGS.\n\nThe serial number and power state are always read together from the same service-processor state, so they are presented as a single unit that is either entirely present or entirely absent.",
-        "type": "object",
-        "properties": {
-          "power_state": {
-            "description": "The host power state.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/PowerState"
+        "description": "The service processor's state, read together from MGS.\n\nThe serial number and power state are always read together from the same service-processor state, so they are reported as a single unit.",
+        "oneOf": [
+          {
+            "description": "The service processor's state has not been read yet.",
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "not_read"
+                ]
               }
+            },
+            "required": [
+              "state"
             ]
           },
-          "serial_number": {
-            "description": "The service processor's serial number.",
-            "type": "string"
+          {
+            "description": "Reading the service processor's state failed.",
+            "type": "object",
+            "properties": {
+              "error": {
+                "description": "What went wrong reading the state.\n\nThe error's `kind` says whether the failure looks transient (so a caller waiting for this service processor should keep waiting) or permanent (so retrying is unlikely to help on its own).",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/FetchError"
+                  }
+                ]
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "error"
+                ]
+              }
+            },
+            "required": [
+              "error",
+              "state"
+            ]
+          },
+          {
+            "description": "The service processor's state was read.",
+            "type": "object",
+            "properties": {
+              "power_state": {
+                "description": "The host power state.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/PowerState"
+                  }
+                ]
+              },
+              "refresh_error": {
+                "nullable": true,
+                "description": "The error from a more recent state fetch that failed while this older reading still stands, if any.\n\nThe reading remains primary: a stale-but-real reading beats no reading. `Some` means the most recent `sp_get` failed but an earlier one succeeded, so the concurrent failure is surfaced here rather than displacing the reading. `None` means the most recent fetch succeeded (or none has failed since).",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/FetchError"
+                  }
+                ]
+              },
+              "serial_number": {
+                "description": "The service processor's serial number.",
+                "type": "string"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "read"
+                ]
+              }
+            },
+            "required": [
+              "power_state",
+              "serial_number",
+              "state"
+            ]
           }
-        },
-        "required": [
-          "power_state",
-          "serial_number"
         ]
       },
       "SpType": {
@@ -2224,7 +2599,7 @@
         ]
       },
       "Stage0Caboose": {
-        "description": "The stage0 (or pending stage0next) bootloader caboose for a root of trust.\n\nThe three states are kept distinct because they mean different things to a caller:\n\n* `unsupported`: this RoT version does not report a stage0 bootloader caboose at all. * `not_read`: the RoT version supports reporting a stage0 caboose, but it has not been read yet. * `read`: the stage0 caboose was read.",
+        "description": "The stage0 (or pending stage0next) bootloader caboose for a root of trust.\n\nThe four states are kept distinct because they mean different things to a caller:\n\n* `unsupported`: this RoT version does not report a stage0 bootloader caboose at all. * `not_read`: the RoT version supports reporting a stage0 caboose, but it has not been read yet. * `error`: reading the stage0 caboose was attempted and failed. * `read`: the stage0 caboose was read.",
         "oneOf": [
           {
             "description": "This RoT version does not report a stage0 bootloader caboose.",
@@ -2253,6 +2628,30 @@
               }
             },
             "required": [
+              "state"
+            ]
+          },
+          {
+            "description": "Reading the stage0 bootloader caboose failed.",
+            "type": "object",
+            "properties": {
+              "error": {
+                "description": "What went wrong reading the caboose.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/FetchError"
+                  }
+                ]
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "error"
+                ]
+              }
+            },
+            "required": [
+              "error",
               "state"
             ]
           },
@@ -2446,6 +2845,14 @@
         "description": "The transceivers in a single switch.",
         "type": "object",
         "properties": {
+          "last_seen": {
+            "description": "How long it has been since this switch's transceivers were read.\n\nThis is tracked per switch because wicketd polls each switch with its own task: a large value here means this switch's poller is wedged, even if the other switch is being read normally.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Duration"
+              }
+            ]
+          },
           "switch": {
             "description": "The switch these transceivers belong to.",
             "allOf": [
@@ -2475,6 +2882,7 @@
           }
         },
         "required": [
+          "last_seen",
           "switch",
           "transceivers"
         ]
@@ -2617,7 +3025,7 @@
         "description": "The switch transceiver (optical module) inventory.\n\nwicketd reads transceiver state from the switches independently of MGS, so it is presented as its own read/not-read unit rather than folded into the per-SP inventory.",
         "oneOf": [
           {
-            "description": "The transceiver inventory has not been read yet.",
+            "description": "No switch's transceiver inventory has been read yet.",
             "type": "object",
             "properties": {
               "state": {
@@ -2632,17 +3040,9 @@
             ]
           },
           {
-            "description": "The transceiver inventory was read.",
+            "description": "At least one switch's transceiver inventory was read.",
             "type": "object",
             "properties": {
-              "last_seen": {
-                "description": "How long it has been since the transceiver inventory was last read.",
-                "allOf": [
-                  {
-                    "$ref": "#/components/schemas/Duration"
-                  }
-                ]
-              },
               "state": {
                 "type": "string",
                 "enum": [
@@ -2651,7 +3051,7 @@
               },
               "switches": {
                 "title": "IdOrdMap",
-                "description": "The transceivers in each switch.",
+                "description": "The transceivers in each switch that has been read.\n\nA switch that wicketd has never successfully read is absent from this map rather than present and empty, so a caller can tell \"this switch reported no transceivers\" from \"we have never heard from this switch\".",
                 "x-rust-type": {
                   "crate": "iddqd",
                   "parameters": [
@@ -2670,7 +3070,6 @@
               }
             },
             "required": [
-              "last_seen",
               "state",
               "switches"
             ]
@@ -2704,13 +3103,12 @@
             "description": "The monitoring data was read.",
             "type": "object",
             "properties": {
-              "rx_power_mw": {
+              "rx_power": {
                 "nullable": true,
-                "description": "Per-lane received optical power, in milliwatts.\n\n`None` if the module does not report received power.",
+                "description": "Per-lane received optical power.\n\n`None` if the module does not report received power.",
                 "type": "array",
                 "items": {
-                  "type": "number",
-                  "format": "float"
+                  "$ref": "#/components/schemas/ReceiverPower"
                 }
               },
               "state": {

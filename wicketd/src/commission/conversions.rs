@@ -4,16 +4,19 @@
 
 //! Conversions between internal and commission types.
 
+use std::collections::BTreeMap;
+use std::net::Ipv6Addr;
+
 use bootstrap_agent_lockstep_types as bootstrap;
 use iddqd::IdOrdMap;
-use sled_agent_types::early_networking::SwitchSlot;
+use sled_hardware_types::Baseboard;
 use transceiver_controller::message::ExtendedStatus;
 use transceiver_controller::{
     CmisDatapath, CmisDatapathState, CmisLaneStatus, Datapath, Monitors,
-    Sff8636Datapath, Vendor, VendorInfo,
+    ReceiverPower, Sff8636Datapath, Vendor, VendorInfo,
 };
 use wicket_common::inventory::{
-    RotInventory, SpComponentCaboose, SpIgnition, SpInventory, Transceiver,
+    SpComponentCaboose, SpIgnition, SpType, Transceiver,
 };
 use wicketd_commission_types::inventory as ct_inv;
 use wicketd_commission_types::rack_setup::{
@@ -21,9 +24,12 @@ use wicketd_commission_types::rack_setup::{
 };
 use wicketd_commission_types::update::StartUpdateOptions;
 
-use crate::transceivers::GetTransceiversResponse;
+use crate::mgs::{
+    Fetched, FetchedSpData, MgsFetchError, RotFetch, SpRecord, Stage0Fetch,
+};
+use crate::transceivers::{GetTransceiversResponse, SwitchTransceivers};
 
-fn caboose_to_ct(caboose: SpComponentCaboose) -> ct_inv::Caboose {
+fn caboose_to_ct(caboose: &SpComponentCaboose) -> ct_inv::Caboose {
     let SpComponentCaboose {
         version,
         board,
@@ -33,46 +39,86 @@ fn caboose_to_ct(caboose: SpComponentCaboose) -> ct_inv::Caboose {
         name: _,
         epoch: _,
     } = caboose;
-    ct_inv::Caboose { version, board, sign }
+    ct_inv::Caboose {
+        version: version.clone(),
+        board: board.clone(),
+        sign: sign.clone(),
+    }
+}
+
+/// Project a wicketd fetch error onto the commission wire type.
+///
+/// The observation instant becomes an `age` (how long ago the error was seen),
+/// computed at read time, since wicketd and its clients keep independent clocks.
+pub(crate) fn fetch_error_to_ct(error: &MgsFetchError) -> ct_inv::FetchError {
+    ct_inv::FetchError {
+        message: error.message.clone(),
+        age: error.observed_at.elapsed(),
+    }
 }
 
 fn slot_caboose_to_ct(
-    caboose: Option<SpComponentCaboose>,
+    caboose: &Fetched<SpComponentCaboose>,
 ) -> ct_inv::SlotCaboose {
     match caboose {
-        None => ct_inv::SlotCaboose::NotRead,
-        Some(caboose) => {
+        Fetched::NotRead => ct_inv::SlotCaboose::NotRead,
+        Fetched::Error(error) => {
+            ct_inv::SlotCaboose::Error { error: fetch_error_to_ct(error) }
+        }
+        Fetched::Read(caboose) => {
             ct_inv::SlotCaboose::Read { caboose: caboose_to_ct(caboose) }
         }
     }
 }
 
-fn stage0_caboose_to_ct(
-    caboose: Option<Option<SpComponentCaboose>>,
-) -> ct_inv::Stage0Caboose {
-    match caboose {
-        None => ct_inv::Stage0Caboose::Unsupported,
-        Some(None) => ct_inv::Stage0Caboose::NotRead,
-        Some(Some(caboose)) => {
+fn stage0_caboose_to_ct(stage0: &Stage0Fetch) -> ct_inv::Stage0Caboose {
+    match stage0 {
+        Stage0Fetch::Unsupported => ct_inv::Stage0Caboose::Unsupported,
+        Stage0Fetch::Supported(Fetched::NotRead) => {
+            ct_inv::Stage0Caboose::NotRead
+        }
+        Stage0Fetch::Supported(Fetched::Error(error)) => {
+            ct_inv::Stage0Caboose::Error { error: fetch_error_to_ct(error) }
+        }
+        Stage0Fetch::Supported(Fetched::Read(caboose)) => {
             ct_inv::Stage0Caboose::Read { caboose: caboose_to_ct(caboose) }
         }
     }
 }
 
-fn rot_info_to_ct(rot: RotInventory) -> ct_inv::RotInfo {
-    let RotInventory {
-        active,
-        caboose_a,
-        caboose_b,
-        caboose_stage0,
-        caboose_stage0next,
-    } = rot;
-    ct_inv::RotInfo {
-        active,
-        caboose_a: slot_caboose_to_ct(caboose_a),
-        caboose_b: slot_caboose_to_ct(caboose_b),
-        caboose_stage0: stage0_caboose_to_ct(caboose_stage0),
-        caboose_stage0next: stage0_caboose_to_ct(caboose_stage0next),
+fn rot_info_to_ct(data: Option<&FetchedSpData>) -> ct_inv::RotInfo {
+    // Without SP data at all, the RoT has not been read; the RoT's own read
+    // state lives inside a successful SP fetch.
+    let Some(data) = data else {
+        return ct_inv::RotInfo::NotRead;
+    };
+
+    match &data.rot {
+        // The SP itself reported it could not reach its RoT. This is the SP's
+        // report (from SpState.rot), not a wicketd fetch error, so it stays
+        // message-only.
+        RotFetch::CommunicationFailed { message } => {
+            ct_inv::RotInfo::Error { message: message.clone() }
+        }
+        RotFetch::Read(rot) => ct_inv::RotInfo::Read {
+            active: rot.active,
+            slot_a: ct_inv::RotSlotInfo {
+                caboose: slot_caboose_to_ct(&rot.caboose_a),
+                image_error: rot.slot_a_error,
+            },
+            slot_b: ct_inv::RotSlotInfo {
+                caboose: slot_caboose_to_ct(&rot.caboose_b),
+                image_error: rot.slot_b_error,
+            },
+            stage0: ct_inv::RotStage0Info {
+                caboose: stage0_caboose_to_ct(&rot.stage0),
+                image_error: rot.stage0_error,
+            },
+            stage0next: ct_inv::RotStage0Info {
+                caboose: stage0_caboose_to_ct(&rot.stage0next),
+                image_error: rot.stage0next_error,
+            },
+        },
     }
 }
 
@@ -102,28 +148,84 @@ fn ignition_to_ct(ignition: Option<SpIgnition>) -> ct_inv::SpIgnitionInfo {
     }
 }
 
-pub(crate) fn sp_info_to_ct(sp: SpInventory) -> ct_inv::SpInfo {
-    let SpInventory {
-        id,
-        ignition,
+pub(crate) fn sp_info_to_ct(record: &SpRecord) -> ct_inv::SpInfo {
+    let SpRecord { id, ignition, data, last_state_fetch_error } = record;
+
+    // The SP's state, cabooses, and RoT all live inside a single successful SP
+    // fetch, so they are populated together when `data` is present and unread
+    // when it is absent.
+    let (state, caboose_active, caboose_inactive) = match data {
+        // A stale-but-real reading beats no reading, so the reading stays
+        // primary. If the most recent fetch failed while this older reading
+        // still stands, that concurrent failure rides alongside on
+        // `refresh_error` rather than displacing the reading.
+        Some(FetchedSpData {
+            state,
+            // Not projected by the commission API.
+            components: _,
+            caboose_active,
+            caboose_inactive,
+            // The RoT is projected separately by `rot_info_to_ct` below, off the
+            // whole `data`.
+            rot: _,
+            mgs_received: _,
+        }) => (
+            ct_inv::SpStateInfo::Read {
+                serial_number: state.serial_number.clone(),
+                power_state: state.power_state,
+                refresh_error: last_state_fetch_error
+                    .as_ref()
+                    .map(fetch_error_to_ct),
+            },
+            slot_caboose_to_ct(caboose_active),
+            slot_caboose_to_ct(caboose_inactive),
+        ),
+        None => {
+            let state = match last_state_fetch_error {
+                Some(error) => ct_inv::SpStateInfo::Error {
+                    error: fetch_error_to_ct(error),
+                },
+                None => ct_inv::SpStateInfo::NotRead,
+            };
+            (state, ct_inv::SlotCaboose::NotRead, ct_inv::SlotCaboose::NotRead)
+        }
+    };
+
+    ct_inv::SpInfo {
+        id: *id,
         state,
+        ignition: ignition_to_ct(ignition.clone()),
         caboose_active,
         caboose_inactive,
-        rot,
-        // The raw MGS component list is not projected by the commission API.
-        components: _,
-    } = sp;
-    ct_inv::SpInfo {
-        id,
-        state: state.map(|s| ct_inv::SpStateInfo {
-            serial_number: s.serial_number,
-            power_state: s.power_state,
-        }),
-        ignition: ignition_to_ct(ignition),
-        caboose_active: slot_caboose_to_ct(caboose_active),
-        caboose_inactive: slot_caboose_to_ct(caboose_inactive),
-        rot: rot.map(rot_info_to_ct),
+        rot: rot_info_to_ct(data.as_ref()),
     }
+}
+
+pub(crate) fn bootstrap_sleds_to_ct(
+    records: &IdOrdMap<SpRecord>,
+    ddm_discovered_sleds: &BTreeMap<Baseboard, Ipv6Addr>,
+) -> IdOrdMap<ct_inv::BootstrapSled> {
+    IdOrdMap::from_iter_unique(records.iter().filter_map(|record| {
+        if record.id.typ != SpType::Sled {
+            return None;
+        }
+        let state = &record.data.as_ref()?.state;
+        let baseboard = Baseboard::new_gimlet(
+            state.serial_number.clone(),
+            state.model.clone(),
+            state.revision,
+        );
+        let ip = ddm_discovered_sleds.get(&baseboard).copied();
+        Some(ct_inv::BootstrapSled {
+            id: record.id,
+            serial_number: state.serial_number.clone(),
+            ip,
+        })
+    }))
+    .expect(
+        "the manager's SP records are keyed by SpIdentifier, so the projected \
+         BootstrapSleds have unique ids",
+    )
 }
 
 pub(crate) fn transceivers_to_ct(
@@ -133,31 +235,23 @@ pub(crate) fn transceivers_to_ct(
         GetTransceiversResponse::Unavailable => {
             ct_inv::TransceiverInventory::NotRead
         }
-        GetTransceiversResponse::Response {
-            transceivers,
-            transceivers_last_seen,
-        } => {
+        GetTransceiversResponse::Response { transceivers } => {
             let switches = IdOrdMap::from_iter_unique(
-                transceivers.into_iter().map(|(switch, transceivers)| {
-                    switch_transceivers_to_ct(switch, transceivers)
-                }),
+                transceivers.into_iter().map(switch_transceivers_to_ct),
             )
             .expect(
                 "the internal transceiver inventory is keyed by SwitchSlot, so \
                  the projected SwitchTransceivers have unique switch keys",
             );
-            ct_inv::TransceiverInventory::Read {
-                last_seen: transceivers_last_seen,
-                switches,
-            }
+            ct_inv::TransceiverInventory::Read { switches }
         }
     }
 }
 
 fn switch_transceivers_to_ct(
-    switch: SwitchSlot,
-    transceivers: Vec<Transceiver>,
+    read: SwitchTransceivers,
 ) -> ct_inv::SwitchTransceivers {
+    let SwitchTransceivers { switch, transceivers, updated_at } = read;
     let transceivers = IdOrdMap::from_iter_unique(
         transceivers.into_iter().map(transceiver_to_ct),
     )
@@ -165,7 +259,11 @@ fn switch_transceivers_to_ct(
         "a switch reports at most one transceiver per front port, so the \
          projected Transceivers have unique port keys",
     );
-    ct_inv::SwitchTransceivers { switch, transceivers }
+    ct_inv::SwitchTransceivers {
+        switch,
+        last_seen: updated_at.elapsed(),
+        transceivers,
+    }
 }
 
 fn transceiver_to_ct(transceiver: Transceiver) -> ct_inv::Transceiver {
@@ -236,11 +334,22 @@ fn transceiver_monitors_to_ct(
             transmitter_bias_current: _,
             aux_monitors: _,
         }) => ct_inv::TransceiverMonitors::Read {
-            rx_power_mw: receiver_power.map(|powers| {
-                powers.into_iter().map(|power| power.value()).collect()
+            rx_power: receiver_power.map(|powers| {
+                powers.into_iter().map(receiver_power_to_ct).collect()
             }),
             tx_power_mw: transmitter_power,
         },
+    }
+}
+
+fn receiver_power_to_ct(power: ReceiverPower) -> ct_inv::ReceiverPower {
+    match power {
+        ReceiverPower::Average(value_mw) => {
+            ct_inv::ReceiverPower::Average { value_mw }
+        }
+        ReceiverPower::PeakToPeak(value_mw) => {
+            ct_inv::ReceiverPower::PeakToPeak { value_mw }
+        }
     }
 }
 
@@ -426,13 +535,101 @@ pub(crate) fn password_hash_to_internal(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::{BTreeMap, HashMap};
+    use crate::mgs::RotData;
+    use gateway_types::component::PowerState;
+    use sled_agent_types::early_networking::SwitchSlot;
+    use std::collections::BTreeMap;
     use std::time::Duration;
+    use tokio::time::Instant;
     use transceiver_controller::{
         ApplicationDescriptor, CmisDatapathState, ConnectorType,
         HostElectricalInterfaceId, Identifier, MediaInterfaceId, MediaType,
         Oui, OutputStatus, ReceiverPower, SffComplianceCode,
     };
+    use wicket_common::inventory::{
+        RotSlot, RotState, SpIdentifier, SpState, SpType,
+    };
+
+    fn sled(slot: u16) -> SpIdentifier {
+        SpIdentifier { typ: SpType::Sled, slot }
+    }
+
+    fn sample_caboose(version: &str) -> SpComponentCaboose {
+        SpComponentCaboose {
+            git_commit: "commit".to_string(),
+            board: "board".to_string(),
+            name: "name".to_string(),
+            version: version.to_string(),
+            sign: None,
+            epoch: None,
+        }
+    }
+
+    fn mgs_fetch_error(message: &str) -> MgsFetchError {
+        MgsFetchError {
+            message: message.to_string(),
+            observed_at: Instant::now(),
+        }
+    }
+
+    /// An `MgsFetchError` whose observation instant is `ago` in the past, so its
+    /// projected `age` is at least `ago`.
+    fn mgs_fetch_error_observed_ago(
+        message: &str,
+        ago: Duration,
+    ) -> MgsFetchError {
+        MgsFetchError {
+            message: message.to_string(),
+            observed_at: Instant::now()
+                .checked_sub(ago)
+                .expect("monotonic clock is far enough past its epoch"),
+        }
+    }
+
+    /// An `SpState` carrying `rot`; the non-RoT fields are filler.
+    fn sp_state(serial_number: &str, rot: RotState) -> SpState {
+        SpState {
+            serial_number: serial_number.to_string(),
+            model: "model".to_string(),
+            revision: 0,
+            hubris_archive_id: "archive".to_string(),
+            base_mac_address: [0; 6],
+            power_state: PowerState::A0,
+            rot,
+        }
+    }
+
+    /// A V3 RoT state with an error on slot B and on stage0next, exercising the
+    /// per-slot image-error projection.
+    fn rot_state_v3_with_errors() -> RotState {
+        RotState::V3 {
+            active: RotSlot::A,
+            persistent_boot_preference: RotSlot::A,
+            pending_persistent_boot_preference: None,
+            transient_boot_preference: None,
+            slot_a_fwid: "slot-a".to_string(),
+            slot_b_fwid: "slot-b".to_string(),
+            stage0_fwid: "stage0".to_string(),
+            stage0next_fwid: "stage0next".to_string(),
+            slot_a_error: None,
+            slot_b_error: Some(ct_inv::RotImageError::Signature),
+            stage0_error: None,
+            stage0next_error: Some(ct_inv::RotImageError::BadMagic),
+        }
+    }
+
+    /// Wrap `state` and `rot` into `FetchedSpData` with the other sub-items
+    /// unread.
+    fn fetched_data(state: SpState, rot: RotFetch) -> FetchedSpData {
+        FetchedSpData {
+            state,
+            components: Fetched::NotRead,
+            caboose_active: Fetched::NotRead,
+            caboose_inactive: Fetched::NotRead,
+            rot,
+            mgs_received: Instant::now(),
+        }
+    }
 
     fn sample_application_descriptor() -> ApplicationDescriptor {
         ApplicationDescriptor {
@@ -492,7 +689,7 @@ mod tests {
             epoch: None,
         };
         assert_eq!(
-            caboose_to_ct(with_sign),
+            caboose_to_ct(&with_sign),
             ct_inv::Caboose {
                 version: "1.0.0".to_string(),
                 board: "gimlet".to_string(),
@@ -508,7 +705,260 @@ mod tests {
             sign: None,
             epoch: None,
         };
-        assert_eq!(caboose_to_ct(without_sign).sign, None);
+        assert_eq!(caboose_to_ct(&without_sign).sign, None);
+    }
+
+    #[test]
+    fn fetch_error_projects_message_and_age() {
+        // This is the projection applied to every wicketd fetch error,
+        // including the rack-wide ignition-list error surfaced on
+        // `SpInventory::ignition_fetch_error`.
+        let error = mgs_fetch_error_observed_ago(
+            "ignition list fetch failed",
+            Duration::from_secs(2),
+        );
+        let projected = fetch_error_to_ct(&error);
+        assert_eq!(projected.message, "ignition list fetch failed");
+        assert!(
+            projected.age >= Duration::from_secs(2),
+            "age is derived from the observation instant: {:?}",
+            projected.age,
+        );
+    }
+
+    #[test]
+    fn sp_state_error_projects_from_error_only_record() {
+        // An SP we have only ever failed to reach: no data, only a recorded
+        // state-fetch error. The record must still project (error-only records
+        // are visible to the commission API), with the error on `state` and
+        // every other sub-item unread.
+        let id = sled(3);
+        let record = SpRecord {
+            id,
+            ignition: None,
+            data: None,
+            last_state_fetch_error: Some(mgs_fetch_error_observed_ago(
+                "mgs unreachable",
+                Duration::from_secs(1),
+            )),
+        };
+
+        let info = sp_info_to_ct(&record);
+        assert_eq!(info.id, id);
+        let ct_inv::SpStateInfo::Error { error } = &info.state else {
+            panic!("expected a state error, got {:?}", info.state);
+        };
+        assert_eq!(error.message, "mgs unreachable");
+        assert!(error.age >= Duration::from_secs(1));
+        assert_eq!(info.ignition, ct_inv::SpIgnitionInfo::NotRead);
+        assert_eq!(info.caboose_active, ct_inv::SlotCaboose::NotRead);
+        assert_eq!(info.caboose_inactive, ct_inv::SlotCaboose::NotRead);
+        assert_eq!(info.rot, ct_inv::RotInfo::NotRead);
+    }
+
+    #[test]
+    fn sp_state_prefers_stale_reading_over_recorded_error() {
+        // A newer fetch failed, but we still hold a prior reading: the reading
+        // stays primary, and the concurrent failure rides alongside on
+        // `refresh_error` rather than displacing it.
+        let id = sled(1);
+        let stale_reading = || {
+            fetched_data(
+                sp_state(
+                    "SimGimlet01",
+                    RotState::CommunicationFailed {
+                        message: "rot down".to_string(),
+                    },
+                ),
+                RotFetch::CommunicationFailed {
+                    message: "rot down".to_string(),
+                },
+            )
+        };
+
+        // With a recorded error, the reading wins and `refresh_error` carries
+        // the concurrent failure's message.
+        let record = SpRecord {
+            id,
+            ignition: None,
+            data: Some(stale_reading()),
+            last_state_fetch_error: Some(mgs_fetch_error("mgs flaked")),
+        };
+        let ct_inv::SpStateInfo::Read {
+            serial_number,
+            power_state,
+            refresh_error,
+        } = sp_info_to_ct(&record).state
+        else {
+            panic!("a stale-but-real reading projects to Read");
+        };
+        assert_eq!(serial_number, "SimGimlet01");
+        assert_eq!(power_state, PowerState::A0);
+        let refresh_error = refresh_error
+            .expect("the concurrent failure is surfaced on refresh_error");
+        assert_eq!(refresh_error.message, "mgs flaked");
+
+        // With no recorded error, the same reading carries no `refresh_error`.
+        let record = SpRecord {
+            id,
+            ignition: None,
+            data: Some(stale_reading()),
+            last_state_fetch_error: None,
+        };
+        assert_eq!(
+            sp_info_to_ct(&record).state,
+            ct_inv::SpStateInfo::Read {
+                serial_number: "SimGimlet01".to_string(),
+                power_state: PowerState::A0,
+                refresh_error: None,
+            },
+            "a reading with no recorded error carries no refresh_error",
+        );
+    }
+
+    #[test]
+    fn sp_state_not_read_when_only_ignition_present() {
+        // Ignition placed the SP, but its state has never been read and no
+        // fetch has failed: the state projects to `NotRead`, not `Error`.
+        let record = SpRecord {
+            id: sled(2),
+            ignition: Some(SpIgnition::Absent),
+            data: None,
+            last_state_fetch_error: None,
+        };
+        assert_eq!(sp_info_to_ct(&record).state, ct_inv::SpStateInfo::NotRead);
+    }
+
+    #[test]
+    fn slot_caboose_projects_all_states() {
+        assert_eq!(
+            slot_caboose_to_ct(&Fetched::NotRead),
+            ct_inv::SlotCaboose::NotRead,
+        );
+
+        let projected = slot_caboose_to_ct(&Fetched::Error(mgs_fetch_error(
+            "caboose read failed",
+        )));
+        let ct_inv::SlotCaboose::Error { error } = projected else {
+            panic!("expected a slot caboose error, got {projected:?}");
+        };
+        assert_eq!(error.message, "caboose read failed");
+
+        let projected =
+            slot_caboose_to_ct(&Fetched::Read(sample_caboose("1.0.0")));
+        let ct_inv::SlotCaboose::Read { caboose } = projected else {
+            panic!("expected a read slot caboose, got {projected:?}");
+        };
+        assert_eq!(caboose.version, "1.0.0");
+    }
+
+    #[test]
+    fn stage0_caboose_projects_all_states() {
+        assert_eq!(
+            stage0_caboose_to_ct(&Stage0Fetch::Unsupported),
+            ct_inv::Stage0Caboose::Unsupported,
+        );
+        assert_eq!(
+            stage0_caboose_to_ct(&Stage0Fetch::Supported(Fetched::NotRead)),
+            ct_inv::Stage0Caboose::NotRead,
+        );
+
+        let projected = stage0_caboose_to_ct(&Stage0Fetch::Supported(
+            Fetched::Error(mgs_fetch_error("stage0 read failed")),
+        ));
+        let ct_inv::Stage0Caboose::Error { error } = projected else {
+            panic!("expected a stage0 caboose error, got {projected:?}");
+        };
+        assert_eq!(error.message, "stage0 read failed");
+
+        let projected = stage0_caboose_to_ct(&Stage0Fetch::Supported(
+            Fetched::Read(sample_caboose("2.0.0")),
+        ));
+        let ct_inv::Stage0Caboose::Read { caboose } = projected else {
+            panic!("expected a read stage0 caboose, got {projected:?}");
+        };
+        assert_eq!(caboose.version, "2.0.0");
+    }
+
+    #[test]
+    fn rot_info_projects_not_read_and_comm_failure() {
+        // No SP data at all is "not read", not an error.
+        assert_eq!(rot_info_to_ct(None), ct_inv::RotInfo::NotRead);
+
+        // The SP told us it cannot reach its RoT: message-only error.
+        let data = fetched_data(
+            sp_state(
+                "serial",
+                RotState::CommunicationFailed {
+                    message: "rot unreachable".to_string(),
+                },
+            ),
+            RotFetch::CommunicationFailed {
+                message: "rot unreachable".to_string(),
+            },
+        );
+        assert_eq!(
+            rot_info_to_ct(Some(&data)),
+            ct_inv::RotInfo::Error { message: "rot unreachable".to_string() },
+        );
+    }
+
+    #[test]
+    fn rot_info_read_projects_cabooses_and_image_errors() {
+        let rot = RotFetch::Read(Box::new(RotData {
+            active: RotSlot::A,
+            caboose_a: Fetched::Read(sample_caboose("rot-a")),
+            caboose_b: Fetched::Error(mgs_fetch_error("slot b caboose failed")),
+            stage0: Stage0Fetch::Supported(Fetched::NotRead),
+            stage0next: Stage0Fetch::Supported(Fetched::Read(sample_caboose(
+                "stage0next",
+            ))),
+            slot_a_error: None,
+            slot_b_error: Some(ct_inv::RotImageError::Signature),
+            stage0_error: None,
+            stage0next_error: Some(ct_inv::RotImageError::BadMagic),
+        }));
+        let data =
+            fetched_data(sp_state("serial", rot_state_v3_with_errors()), rot);
+
+        let ct_inv::RotInfo::Read {
+            active,
+            slot_a,
+            slot_b,
+            stage0,
+            stage0next,
+        } = rot_info_to_ct(Some(&data))
+        else {
+            panic!("expected a read RoT");
+        };
+        assert_eq!(active, ct_inv::RotSlot::A);
+
+        // Slot A: caboose read, no image error.
+        let ct_inv::SlotCaboose::Read { caboose } = &slot_a.caboose else {
+            panic!("expected slot A caboose read, got {:?}", slot_a.caboose);
+        };
+        assert_eq!(caboose.version, "rot-a");
+        assert_eq!(slot_a.image_error, None);
+
+        // Slot B: caboose fetch failed, and the V3 state reports an image error.
+        let ct_inv::SlotCaboose::Error { error } = &slot_b.caboose else {
+            panic!("expected slot B caboose error, got {:?}", slot_b.caboose);
+        };
+        assert_eq!(error.message, "slot b caboose failed");
+        assert_eq!(slot_b.image_error, Some(ct_inv::RotImageError::Signature));
+
+        // stage0: supported but unread; stage0next: read, with an image error.
+        assert_eq!(stage0.caboose, ct_inv::Stage0Caboose::NotRead);
+        assert_eq!(stage0.image_error, None);
+        let ct_inv::Stage0Caboose::Read { caboose } = &stage0next.caboose
+        else {
+            panic!("expected stage0next read, got {:?}", stage0next.caboose);
+        };
+        assert_eq!(caboose.version, "stage0next");
+        assert_eq!(
+            stage0next.image_error,
+            Some(ct_inv::RotImageError::BadMagic),
+        );
     }
 
     #[test]
@@ -562,16 +1012,20 @@ mod tests {
         assert_eq!(
             transceiver_monitors_to_ct(Ok(monitors)),
             ct_inv::TransceiverMonitors::Read {
-                rx_power_mw: Some(vec![1.5, 2.5]),
+                rx_power: Some(vec![
+                    ct_inv::ReceiverPower::Average { value_mw: 1.5 },
+                    ct_inv::ReceiverPower::PeakToPeak { value_mw: 2.5 },
+                ]),
                 tx_power_mw: Some(vec![3.5]),
             },
+            "average and peak-to-peak readings stay distinguishable",
         );
 
         // A module reporting no power monitoring stays None.
         assert_eq!(
             transceiver_monitors_to_ct(Ok(Monitors::default())),
             ct_inv::TransceiverMonitors::Read {
-                rx_power_mw: None,
+                rx_power: None,
                 tx_power_mw: None,
             },
         );
@@ -775,20 +1229,19 @@ mod tests {
             monitors: Ok(Monitors::default()),
         };
         let response = GetTransceiversResponse::Response {
-            transceivers: HashMap::from([(
-                SwitchSlot::Switch0,
-                vec![transceiver],
-            )]),
-            transceivers_last_seen: Duration::from_secs(3),
+            transceivers: [SwitchTransceivers {
+                switch: SwitchSlot::Switch0,
+                transceivers: vec![transceiver],
+                updated_at: tokio::time::Instant::now(),
+            }]
+            .into_iter()
+            .collect(),
         };
 
         let projected = transceivers_to_ct(response);
-        let ct_inv::TransceiverInventory::Read { last_seen, switches } =
-            projected
-        else {
+        let ct_inv::TransceiverInventory::Read { switches } = projected else {
             panic!("expected Read inventory, got {projected:?}");
         };
-        assert_eq!(last_seen, Duration::from_secs(3));
 
         let switch = switches
             .iter()

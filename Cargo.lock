@@ -10486,6 +10486,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "oximeter-load-test"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "clap",
+ "dropshot",
+ "omicron-common",
+ "omicron-workspace-hack",
+ "oxide-tokio-rt",
+ "oximeter",
+ "oximeter-producer",
+ "oximeter-types",
+ "rand 0.9.2",
+ "uuid",
+]
+
+[[package]]
 name = "oximeter-macro-impl"
 version = "0.1.0"
 dependencies = [

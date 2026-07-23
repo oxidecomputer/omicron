@@ -3,8 +3,51 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::v1::inventory::{
-    CmisLaneStatus, FaultFlag, Sff8636LaneFaults, TransceiverDatapath,
+    CmisLaneStatus, FaultFlag, RotInfo, Sff8636LaneFaults, SlotCaboose,
+    SpStateInfo, Stage0Caboose, TransceiverDatapath,
 };
+
+impl SpStateInfo {
+    /// Returns true if the service processor's state was read.
+    pub fn is_read(&self) -> bool {
+        match self {
+            SpStateInfo::Read { .. } => true,
+            SpStateInfo::NotRead | SpStateInfo::Error { .. } => false,
+        }
+    }
+}
+
+impl RotInfo {
+    /// Returns true if the root of trust was read.
+    pub fn is_read(&self) -> bool {
+        match self {
+            RotInfo::Read { .. } => true,
+            RotInfo::NotRead | RotInfo::Error { .. } => false,
+        }
+    }
+}
+
+impl SlotCaboose {
+    /// Returns true if this slot's caboose was read.
+    pub fn is_read(&self) -> bool {
+        match self {
+            SlotCaboose::Read { .. } => true,
+            SlotCaboose::NotRead | SlotCaboose::Error { .. } => false,
+        }
+    }
+}
+
+impl Stage0Caboose {
+    /// Returns true if the stage0 caboose was read.
+    pub fn is_read(&self) -> bool {
+        match self {
+            Stage0Caboose::Read { .. } => true,
+            Stage0Caboose::Unsupported
+            | Stage0Caboose::NotRead
+            | Stage0Caboose::Error { .. } => false,
+        }
+    }
+}
 
 impl FaultFlag {
     pub fn is_asserted(&self) -> bool {

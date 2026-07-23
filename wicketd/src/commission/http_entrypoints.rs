@@ -8,11 +8,10 @@ use std::time::Duration;
 use bootstrap_agent_lockstep_client::ClientInfo as _;
 use dropshot::{
     ApiDescription, HttpError, HttpResponseOk, HttpResponseUpdatedNoContent,
-    RequestContext, StreamingBody, TypedBody,
+    Path, RequestContext, StreamingBody, TypedBody,
 };
 use iddqd::IdOrdMap;
 use omicron_uuid_kinds::RackInitUuid;
-use wicket_common::inventory::SledInventory;
 use wicketd_commission_api::{
     WicketdCommissionApi, wicketd_commission_api_mod,
 };
@@ -21,8 +20,9 @@ use wicketd_commission_types::inventory::{
     SwitchSlot,
 };
 use wicketd_commission_types::rack_setup::{
-    CertificateUploadResponse, PutRecoveryUserPasswordHash,
-    PutRssUserConfigInsensitive, RackOperationStatus,
+    BgpAuthKey, BgpAuthKeyPath, CertificateUploadResponse,
+    PutRecoveryUserPasswordHash, PutRssUserConfigInsensitive,
+    RackOperationStatus, SetBgpAuthKeyStatus,
 };
 use wicketd_commission_types::update::{
     ClearUpdateStateParams, ClearUpdateStateResponse, RepositoryDescription,
@@ -35,15 +35,38 @@ use crate::ServerContext;
 use crate::helpers::SpIdentifierDisplay;
 use crate::http_helpers::{
     ba_lockstep_client, ba_lockstep_error_to_http, http_error_with_message,
-    inventory_unavailable, mgs_inventory_or_unavail, start_update,
+    mgs_inventory_or_unavail, shutdown_to_http, start_update,
 };
-use crate::mgs::GetInventoryResponse as MgsInventoryResponse;
+use crate::mgs::{
+    GetInventoryResponse as MgsInventoryResponse, MgsHandle, ShutdownInProgress,
+};
 
 /// How long to wait for a forced SP refresh.
 ///
 /// This is comfortably above the ~1s it takes to do a normal refresh, and below
 /// Progenitor's default 15s client timeout.
 const SP_REFRESH_TIMEOUT: Duration = Duration::from_secs(10);
+
+async fn cached_inventory_or_timeout(
+    mgs_handle: &MgsHandle,
+    timeout: Duration,
+) -> Result<MgsInventoryResponse, HttpError> {
+    match tokio::time::timeout(timeout, mgs_handle.get_cached_inventory()).await
+    {
+        Ok(Ok(response)) => Ok(response),
+        Ok(Err(err @ ShutdownInProgress)) => Err(shutdown_to_http(err)),
+        Err(_elapsed) => Err(http_error_with_message(
+            dropshot::ErrorStatusCode::SERVICE_UNAVAILABLE,
+            Some("MgsInventoryTimeout".to_string()),
+            format!(
+                "timed out after {}s waiting for MGS inventory; MGS may be \
+                 down or wicketd may not yet have established contact with it \
+                 (see wicketd logs for details)",
+                timeout.as_secs(),
+            ),
+        )),
+    }
+}
 
 type CommissionApiDescription = ApiDescription<Arc<ServerContext>>;
 
@@ -88,43 +111,53 @@ impl WicketdCommissionApi for WicketdCommissionApiImpl {
         })?
         .map_err(|err| err.to_http_error())?;
 
-        match response {
-            MgsInventoryResponse::Response { inventory, mgs_last_seen } => {
-                let sps = IdOrdMap::from_iter_unique(
-                    inventory.sps.into_iter().map(conversions::sp_info_to_ct),
-                )
-                .expect(
-                    "MGS inventory holds at most one entry per SpIdentifier, \
-                     so the projected SpInfos have unique ids",
-                );
-                let transceivers = conversions::transceivers_to_ct(
-                    ctx.transceiver_handle.get_transceivers(),
-                );
-                Ok(HttpResponseOk(SpInventory {
-                    mgs_last_seen,
-                    sps,
-                    transceivers,
-                }))
-            }
-            MgsInventoryResponse::Unavailable => Err(inventory_unavailable()),
-        }
+        let MgsInventoryResponse {
+            sps,
+            last_ignition_fetch_error,
+            mgs_last_seen,
+        } = response;
+
+        // Iterate the manager's records directly rather than the
+        // (frozen wire) projection, so an SP that has only ever failed
+        // to respond — an error-only record, absent from the frozen
+        // projection — is still visible to the commission API.
+        let sp_infos = IdOrdMap::from_iter_unique(
+            sps.iter().map(conversions::sp_info_to_ct),
+        )
+        .expect(
+            "the manager's SP records are keyed by SpIdentifier, so \
+             the projected SpInfos have unique ids",
+        );
+        let transceivers = conversions::transceivers_to_ct(
+            ctx.transceiver_handle.get_transceivers(),
+        );
+        let ignition_fetch_error = last_ignition_fetch_error
+            .as_ref()
+            .map(conversions::fetch_error_to_ct);
+        Ok(HttpResponseOk(SpInventory {
+            mgs_last_seen,
+            sps: sp_infos,
+            ignition_fetch_error,
+            transceivers,
+        }))
     }
 
     async fn get_location(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<LocationInfo>, HttpError> {
         let ctx = rqctx.context();
-        let inventory = mgs_inventory_or_unavail(&ctx.mgs_handle).await?;
+        let response =
+            cached_inventory_or_timeout(&ctx.mgs_handle, SP_REFRESH_TIMEOUT)
+                .await?;
 
         let switch_id =
             ctx.local_switch_id().await.map_err(|err| err.to_http_error())?;
 
-        let switch_serial = inventory
+        let switch_serial = response
             .sps
-            .iter()
-            .find(|sp| sp.id == switch_id)
-            .and_then(|sp| sp.state.as_ref())
-            .map(|state| state.serial_number.clone());
+            .get(&switch_id)
+            .and_then(|record| record.data.as_ref())
+            .map(|data| data.state.serial_number.clone());
 
         let sled_serial =
             ctx.baseboard.as_ref().map(|b| b.identifier().to_string());
@@ -155,22 +188,14 @@ impl WicketdCommissionApi for WicketdCommissionApiImpl {
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<IdOrdMap<BootstrapSled>>, HttpError> {
         let ctx = rqctx.context();
-        let inventory = mgs_inventory_or_unavail(&ctx.mgs_handle).await?;
+        let response =
+            cached_inventory_or_timeout(&ctx.mgs_handle, SP_REFRESH_TIMEOUT)
+                .await?;
 
         let ddm_discovered_sleds = ctx.bootstrap_peers.sleds();
-        let sled_inventory =
-            SledInventory::new(&inventory, &ddm_discovered_sleds, &ctx.log);
-
-        let sleds = IdOrdMap::from_iter_unique(
-            sled_inventory.sleds.into_iter().map(|desc| BootstrapSled {
-                id: desc.id,
-                serial_number: desc.baseboard.identifier().to_string(),
-                ip: desc.bootstrap_ip,
-            }),
-        )
-        .expect(
-            "SledInventory holds at most one sled per SpIdentifier, so the \
-             projected BootstrapSleds have unique ids",
+        let sleds = conversions::bootstrap_sleds_to_ct(
+            &response.sps,
+            &ddm_discovered_sleds,
         );
 
         Ok(HttpResponseOk(sleds))
@@ -344,6 +369,22 @@ impl WicketdCommissionApi for WicketdCommissionApiImpl {
             .map_err(|err| HttpError::for_bad_request(None, err))?;
 
         Ok(HttpResponseOk(response))
+    }
+
+    async fn put_bgp_auth_key(
+        rqctx: RequestContext<Self::Context>,
+        path: Path<BgpAuthKeyPath>,
+        body: TypedBody<BgpAuthKey>,
+    ) -> Result<HttpResponseOk<SetBgpAuthKeyStatus>, HttpError> {
+        let ctx = rqctx.context();
+        let BgpAuthKeyPath { key_id } = path.into_inner();
+
+        let mut guard = ctx.rss_or_multirack_join_config.lock().unwrap();
+        let status = guard
+            .set_bgp_auth_key(key_id, body.into_inner())
+            .map_err(|err| HttpError::for_bad_request(None, err.to_string()))?;
+
+        Ok(HttpResponseOk(status))
     }
 
     async fn put_rss_config_recovery_user_password_hash(

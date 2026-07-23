@@ -140,7 +140,7 @@ async fn test_create_large_local_storage_disk(
             .await;
     }
 
-    disk_test.propagate_datasets_to_sleds().await;
+    disk_test.propagate_storage_to_sleds().await;
 
     create_project_and_pool(&client).await;
 

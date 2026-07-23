@@ -11,8 +11,8 @@ use chrono::Utc;
 use futures::future::BoxFuture;
 use nexus_auth::authz;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db;
 use nexus_db_queries::db::DataStore;
-use nexus_db_queries::db::datastore::BlueprintLimitReachedOutput;
 use nexus_reconfigurator_planning::planner::Planner;
 use nexus_reconfigurator_planning::planner::PlannerRng;
 use nexus_reconfigurator_preparation::PlanningInputFromDb;
@@ -353,7 +353,7 @@ impl BlueprintPlanner {
             .check_blueprint_limit_reached(opctx, self.blueprint_limit)
             .await
         {
-            Ok(BlueprintLimitReachedOutput::Yes) => {
+            Ok(db::IsLimitReached::Yes) => {
                 error!(
                     &opctx.log,
                     "blueprint count at or over limit, not running \
@@ -365,7 +365,7 @@ impl BlueprintPlanner {
                     report: report.clone(),
                 });
             }
-            Ok(BlueprintLimitReachedOutput::No { count }) => count,
+            Ok(db::IsLimitReached::No { count }) => count,
             Err(error) => {
                 error!(
                     &opctx.log,

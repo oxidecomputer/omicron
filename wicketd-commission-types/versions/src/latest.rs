@@ -11,11 +11,16 @@ pub mod inventory {
     pub use crate::v1::inventory::CmisDatapathState;
     pub use crate::v1::inventory::CmisLaneStatus;
     pub use crate::v1::inventory::FaultFlag;
+    pub use crate::v1::inventory::FetchError;
     pub use crate::v1::inventory::IgnitionFaults;
     pub use crate::v1::inventory::LocationInfo;
     pub use crate::v1::inventory::PowerState;
+    pub use crate::v1::inventory::ReceiverPower;
+    pub use crate::v1::inventory::RotImageError;
     pub use crate::v1::inventory::RotInfo;
     pub use crate::v1::inventory::RotSlot;
+    pub use crate::v1::inventory::RotSlotInfo;
+    pub use crate::v1::inventory::RotStage0Info;
     pub use crate::v1::inventory::Sff8636LaneFaults;
     pub use crate::v1::inventory::SlotCaboose;
     pub use crate::v1::inventory::SpIdentifier;
@@ -38,7 +43,9 @@ pub mod inventory {
 
 pub mod rack_setup {
     pub use crate::v1::rack_setup::AllowedSourceIps;
+    pub use crate::v1::rack_setup::BgpAuthKey;
     pub use crate::v1::rack_setup::BgpAuthKeyId;
+    pub use crate::v1::rack_setup::BgpAuthKeyPath;
     pub use crate::v1::rack_setup::BgpConfig;
     pub use crate::v1::rack_setup::CertificateUploadResponse;
     pub use crate::v1::rack_setup::IpAllowList;
@@ -59,6 +66,7 @@ pub mod rack_setup {
     pub use crate::v1::rack_setup::RouterLifetimeConfig;
     pub use crate::v1::rack_setup::RouterPeerIpAddr;
     pub use crate::v1::rack_setup::RssStepInfo;
+    pub use crate::v1::rack_setup::SetBgpAuthKeyStatus;
     pub use crate::v1::rack_setup::TxEqConfig;
     pub use crate::v1::rack_setup::UplinkAddress;
     pub use crate::v1::rack_setup::UplinkIpNet;

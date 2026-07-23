@@ -7,8 +7,8 @@
 //! This is a small surface intended for the rack commissioning tool (rkdeploy).
 
 use dropshot::{
-    HttpError, HttpResponseOk, HttpResponseUpdatedNoContent, RequestContext,
-    StreamingBody, TypedBody,
+    HttpError, HttpResponseOk, HttpResponseUpdatedNoContent, Path,
+    RequestContext, StreamingBody, TypedBody,
 };
 use dropshot_api_manager_types::api_versions;
 use iddqd::IdOrdMap;
@@ -208,6 +208,28 @@ pub trait WicketdCommissionApi {
         body: TypedBody<String>,
     ) -> Result<
         HttpResponseOk<latest::rack_setup::CertificateUploadResponse>,
+        HttpError,
+    >;
+
+    /// Set the BGP authentication key for a key ID
+    ///
+    /// A BGP peer in the RSS configuration may reference an authentication key
+    /// by ID; the key material itself is set here, and rack setup is rejected
+    /// until every referenced key ID has been set. Keys are write-only: this
+    /// API never returns key material.
+    ///
+    /// Returns 400 if the key ID is not referenced by the current RSS
+    /// configuration.
+    #[endpoint {
+        method = PUT,
+        path = "/rack-setup/config/bgp-auth-key/{key_id}",
+    }]
+    async fn put_bgp_auth_key(
+        rqctx: RequestContext<Self::Context>,
+        path: Path<latest::rack_setup::BgpAuthKeyPath>,
+        body: TypedBody<latest::rack_setup::BgpAuthKey>,
+    ) -> Result<
+        HttpResponseOk<latest::rack_setup::SetBgpAuthKeyStatus>,
         HttpError,
     >;
 

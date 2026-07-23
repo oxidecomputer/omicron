@@ -491,6 +491,50 @@ impl<'de> Deserialize<'de> for UserSpecifiedRouterPeerAddr {
 )]
 pub struct BgpAuthKeyId(pub(crate) Name);
 
+/// Describes the actual authentication key to use with a BGP peer.
+///
+/// Currently, only TCP-MD5 authentication is supported.
+#[derive(Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum BgpAuthKey {
+    /// TCP-MD5 authentication.
+    TcpMd5 {
+        /// The pre-shared key.
+        key: String,
+    },
+}
+
+// Ensure that the key is not displayed in debug output.
+impl fmt::Debug for BgpAuthKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            BgpAuthKey::TcpMd5 { key: _ } => {
+                f.debug_struct("TcpMd5").field("key", &"********").finish()
+            }
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum SetBgpAuthKeyStatus {
+    /// The key was accepted and replaced an old key.
+    Replaced,
+
+    /// The key was accepted, and is the same as the existing key.
+    Unchanged,
+
+    /// The key was accepted and is new.
+    Added,
+}
+
+/// Identifies the BGP authentication key being set.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+pub struct BgpAuthKeyPath {
+    /// The key ID, as referenced by a BGP peer in the RSS configuration.
+    pub key_id: BgpAuthKeyId,
+}
+
 /// The result of uploading half of a certificate/key pair.
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
 #[serde(tag = "status", rename_all = "snake_case")]

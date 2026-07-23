@@ -18,16 +18,16 @@ use iddqd::IdOrdMap;
 use omicron_test_utils::dev::poll::{CondCheckError, wait_for_condition};
 use sp_sim::ROT_STAGING_DEVEL_SIGN;
 use wicket_common::example::ExampleRackSetupData;
-use wicket_common::rack_setup::{BgpAuthKey, CurrentRssUserConfigInsensitive};
-use wicketd_client::types::PutBgpAuthKeyBody;
+use wicket_common::rack_setup::CurrentRssUserConfigInsensitive;
 use wicketd_commission_types::rack_setup::PutRssUserConfigInsensitive;
 use wicketd_commission_types_versions::latest::inventory::{
-    IgnitionFaults, LocationInfo, PowerState, SlotCaboose, SpIdentifier,
-    SpIgnitionInfo, SpInfo, SpInventoryParams, SpStateInfo, SpType, SwitchSlot,
-    TransceiverInventory,
+    IgnitionFaults, LocationInfo, PowerState, RotInfo, SlotCaboose,
+    SpIdentifier, SpIgnitionInfo, SpInfo, SpInventoryParams, SpStateInfo,
+    SpType, SwitchSlot, TransceiverInventory,
 };
 use wicketd_commission_types_versions::latest::rack_setup::{
-    NewPasswordHash, PutRecoveryUserPasswordHash,
+    BgpAuthKey, BgpAuthKeyId, NewPasswordHash, PutRecoveryUserPasswordHash,
+    SetBgpAuthKeyStatus,
 };
 use wicketd_commission_types_versions::latest::update::{
     StartUpdateOptions, StartUpdateParams, UpdateState, UpdateTargets,
@@ -82,7 +82,7 @@ async fn test_commission_inventory() {
         [0u16, 1].iter().all(|slot| {
             sps.get(&SpIdentifier { typ: SpType::Sled, slot: *slot })
                 .is_some_and(|sp| {
-                    sp.state.is_some()
+                    sp.state.is_read()
                         && sp.ignition != SpIgnitionInfo::NotRead
                         && sled_cabooses_ready(sp)
                 })
@@ -97,7 +97,7 @@ async fn test_commission_inventory() {
         .expect("sled 0 present");
     assert_eq!(
         sled0.state,
-        Some(sim_gimlet_state("SimGimlet00")),
+        sim_gimlet_state("SimGimlet00"),
         "sled 0 state as reported by sp-sim"
     );
 
@@ -109,9 +109,15 @@ async fn test_commission_inventory() {
         sp_caboose.sign, None,
         "sp-sim service-processor cabooses carry no signature: {sp_caboose:?}",
     );
-    let rot = sled0.rot.as_ref().expect("sled 0 RoT info present");
-    let SlotCaboose::Read { caboose: rot_caboose } = &rot.caboose_a else {
-        panic!("sled 0 RoT slot A caboose should be read: {rot:?}");
+    let RotInfo::Read { slot_a, .. } = &sled0.rot else {
+        panic!("sled 0 RoT info should be read: {sled0:?}");
+    };
+    assert_eq!(
+        slot_a.image_error, None,
+        "sp-sim reports no image error for RoT slot A: {slot_a:?}",
+    );
+    let SlotCaboose::Read { caboose: rot_caboose } = &slot_a.caboose else {
+        panic!("sled 0 RoT slot A caboose should be read: {slot_a:?}");
     };
     assert_eq!(
         rot_caboose.sign.as_deref(),
@@ -125,7 +131,7 @@ async fn test_commission_inventory() {
         .expect("sled 1 present");
     assert_eq!(
         sled1.state,
-        Some(sim_gimlet_state("SimGimlet01")),
+        sim_gimlet_state("SimGimlet01"),
         "sled 1 state as reported by sp-sim"
     );
 
@@ -169,7 +175,7 @@ async fn test_commission_inventory() {
         .expect("sled 0 present after forced refresh");
     assert_eq!(
         refreshed_sled0.state,
-        Some(sim_gimlet_state("SimGimlet00")),
+        sim_gimlet_state("SimGimlet00"),
         "sled 0 state after forced refresh: {refreshed:?}"
     );
 
@@ -208,7 +214,18 @@ async fn test_commission_inventory() {
         || async {
             let result: Cond<LocationInfo> =
                 match ctx.commission_client.get_location().await {
-                    Ok(resp) => Ok(resp.into_inner()),
+                    // get_location returns a 200 once the local switch slot is
+                    // known. But the switch serial is best-effort and remains
+                    // None until it is available in inventory. Keep retrying
+                    // until it is populated.
+                    Ok(resp) => {
+                        let location = resp.into_inner();
+                        if location.switch_serial.is_some() {
+                            Ok(location)
+                        } else {
+                            Err(CondCheckError::NotYet { status: None })
+                        }
+                    }
                     Err(err) if err.is_retryable() => {
                         Err(CondCheckError::NotYet { status: None })
                     }
@@ -264,7 +281,7 @@ async fn test_commission_start_update() {
     // Wait until sled 0's SP is populated.
     wait_for_sp_inventory(&ctx, |sps| {
         sps.get(&SpIdentifier { typ: SpType::Sled, slot: 0 })
-            .is_some_and(|sp| sp.state.is_some())
+            .is_some_and(|sp| sp.state.is_read())
     })
     .await;
 
@@ -429,7 +446,7 @@ async fn test_commission_rss_config() {
     wait_for_sp_inventory(&ctx, |sps| {
         [0u16, 1].iter().all(|slot| {
             sps.get(&SpIdentifier { typ: SpType::Sled, slot: *slot })
-                .is_some_and(|sp| sp.state.is_some())
+                .is_some_and(|sp| sp.state.is_read())
         })
     })
     .await;
@@ -516,23 +533,62 @@ async fn test_commission_rss_config() {
         "external_jumbo_frames_opt_in_enabled stored"
     );
 
-    let key_body = PutBgpAuthKeyBody {
-        key: BgpAuthKey::TcpMd5 { key: "md5-secret".to_owned() },
-    };
+    // The example RSS config references key ID "bgp-key-1", so rack setup can
+    // only run once that key has been set through the commission API.
+    let key_id: BgpAuthKeyId =
+        "bgp-key-1".parse().expect("bgp-key-1 is a valid key ID");
+    let key = BgpAuthKey::TcpMd5 { key: "md5-secret".to_owned() };
+
     let status = ctx
-        .wicketd_client
-        .put_bgp_auth_key(
-            &"bgp-key-1".parse().expect("bgp-key-1 is a valid key ID"),
-            &key_body,
-        )
+        .commission_client
+        .put_bgp_auth_key(&key_id, &key)
         .await
         .expect("valid BGP auth key ID accepted")
-        .into_inner()
-        .status;
-    match status {
-        wicketd_client::types::SetBgpAuthKeyStatus::Added => {}
-        other => panic!("expected the key to be added, got {other:?}"),
-    }
+        .into_inner();
+    assert_eq!(
+        status,
+        SetBgpAuthKeyStatus::Added,
+        "the key had not been set before"
+    );
+
+    // Setting the same key again is reported as unchanged, and a different key
+    // as a replacement.
+    let status = ctx
+        .commission_client
+        .put_bgp_auth_key(&key_id, &key)
+        .await
+        .expect("re-setting the same key succeeds")
+        .into_inner();
+    assert_eq!(
+        status,
+        SetBgpAuthKeyStatus::Unchanged,
+        "the same key was already set"
+    );
+
+    let status = ctx
+        .commission_client
+        .put_bgp_auth_key(
+            &key_id,
+            &BgpAuthKey::TcpMd5 { key: "md5-secret-2".to_owned() },
+        )
+        .await
+        .expect("replacing the key succeeds")
+        .into_inner();
+    assert_eq!(
+        status,
+        SetBgpAuthKeyStatus::Replaced,
+        "a different key was already set"
+    );
+
+    // A key ID the RSS config does not reference is rejected.
+    let unknown: BgpAuthKeyId =
+        "bgp-key-nope".parse().expect("bgp-key-nope is a valid key ID");
+    let err = ctx
+        .commission_client
+        .put_bgp_auth_key(&unknown, &key)
+        .await
+        .expect_err("a key ID absent from the RSS config is rejected");
+    assert_client_error_message(&err, StatusCode::BAD_REQUEST, "bgp-key-nope");
 
     ctx.teardown().await;
 }
@@ -541,27 +597,21 @@ fn recovery_hash(hash: &str) -> PutRecoveryUserPasswordHash {
     PutRecoveryUserPasswordHash { hash: NewPasswordHash(hash.to_string()) }
 }
 
-fn slot_caboose_is_read(caboose: &SlotCaboose) -> bool {
-    match caboose {
-        SlotCaboose::Read { .. } => true,
-        SlotCaboose::NotRead => false,
-    }
-}
-
 fn sled_cabooses_ready(sp: &SpInfo) -> bool {
     // Cabooses are ready once active SP and RoT slot A are read.
-    slot_caboose_is_read(&sp.caboose_active)
-        && sp
-            .rot
-            .as_ref()
-            .is_some_and(|rot| slot_caboose_is_read(&rot.caboose_a))
+    let RotInfo::Read { slot_a, .. } = &sp.rot else {
+        return false;
+    };
+    sp.caboose_active.is_read() && slot_a.caboose.is_read()
 }
 
 fn sim_gimlet_state(serial_number: &str) -> SpStateInfo {
-    SpStateInfo {
+    SpStateInfo::Read {
         serial_number: serial_number.to_string(),
         // sp-sim gimlets start in power state A0 (see sp-sim/src/gimlet.rs).
         power_state: PowerState::A0,
+        // The sim reads succeed, so no refresh error rides alongside.
+        refresh_error: None,
     }
 }
 

@@ -585,8 +585,8 @@ pub async fn run_standalone_server(
     };
 
     let blueprint = {
-        let omicron_physical_disks_config =
-            server.sled_agent.omicron_physical_disks_list()?;
+        let sled_config =
+            server.sled_agent.omicron_sled_config().unwrap_or_default();
         let underlay_address = match server.http_server.local_addr() {
             SocketAddr::V4(_) => {
                 bail!("sled_agent_ip must be v6")
@@ -613,7 +613,7 @@ pub async fn run_standalone_server(
             subnet,
             last_allocated_ip_subnet_offset,
             config: SledConfig {
-                disks: omicron_physical_disks_config
+                disks: sled_config
                     .disks
                     .into_iter()
                     .map(|config| BlueprintPhysicalDiskConfig {
@@ -624,7 +624,11 @@ pub async fn run_standalone_server(
                         pool_id: config.pool_id,
                     })
                     .collect(),
-                datasets: server.sled_agent.datasets_config_list()?.datasets,
+                datasets: sled_config
+                    .datasets
+                    .into_iter()
+                    .map(|config| (config.id, config))
+                    .collect(),
                 zones,
             },
         });
