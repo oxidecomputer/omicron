@@ -481,15 +481,24 @@ impl DataStore {
                             .is_null(),
                     )
                     .filter(
+                        rendezvous_local_storage_unencrypted_dataset::no_provision
+                            .eq(false),
+                    )
+                    .filter(
                         rendezvous_local_storage_unencrypted_dataset::pool_id.eq(dsl::id),
                     )
                     .single_value(),
-                //
+                // Return the ID: this query must have the same filter
+                // conditions as the previous one that returns size_used.
                 rendezvous_local_storage_unencrypted_dataset::table
                     .select(rendezvous_local_storage_unencrypted_dataset::id)
                     .filter(
                         rendezvous_local_storage_unencrypted_dataset::time_tombstoned
                             .is_null(),
+                    )
+                    .filter(
+                        rendezvous_local_storage_unencrypted_dataset::no_provision
+                            .eq(false),
                     )
                     .filter(
                         rendezvous_local_storage_unencrypted_dataset::pool_id.eq(dsl::id),
