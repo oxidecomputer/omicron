@@ -1175,8 +1175,11 @@ mod tests {
     ///
     /// - below 80% of the limit, the capacity is reported and nothing else
     ///   happens;
-    /// - at or above 80% (but below the limit), a warning is recorded and the
-    ///   GC task is poked to try to free up space;
+    /// - at or above 80% (but below 95%), the GC task is poked to free up
+    ///   space, but no warning is recorded: steady-state pruning keeps the
+    ///   history at 80% of the sitrep limit, so this is normal operation;
+    /// - at or above 95%, the GC task is poked *and* a warning is recorded,
+    ///   as this suggests GC isn't keeping up;
     /// - at the limit, the check fails with `LimitReached` and the GC task is
     ///   poked.
     #[tokio::test]
@@ -1185,7 +1188,7 @@ mod tests {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
-        const LIMIT: u64 = 10;
+        const LIMIT: u64 = 20;
         let (_sitrep_tx, sitrep_rx) = watch::channel(None);
         let (_inv_tx, inv_rx) = watch::channel(None);
         let acts = activators();
@@ -1201,8 +1204,8 @@ mod tests {
 
         let mut model = SitrepModel::new(datastore.clone());
 
-        // 5 sitreps: 50% of the limit. No warning, no GC activation.
-        model.insert_history(opctx, 5).await;
+        // 10 sitreps: 50% of the limit. No warning, no GC activation.
+        model.insert_history(opctx, 10).await;
         let mut warnings = Vec::new();
         let result = task.check_sitrep_limit(opctx, &mut warnings).await;
         assert_eq!(
@@ -1217,9 +1220,9 @@ mod tests {
             "GC should not be activated at 50% of the sitrep limit",
         );
 
-        // 7 sitreps: 70% of the limit. Still no warning and no GC activation
-        // (the 60% tier only changes what gets logged).
-        model.insert_history(opctx, 2).await;
+        // 15 sitreps: 75% of the limit, just below the GC-activation tier.
+        // Still no warning and no GC activation.
+        model.insert_history(opctx, 5).await;
         let mut warnings = Vec::new();
         let result = task.check_sitrep_limit(opctx, &mut warnings).await;
         assert_eq!(
@@ -1231,12 +1234,37 @@ mod tests {
         );
         assert_eq!(warnings, Vec::<String>::new());
         acts.sitrep_gc.assert_not_activated(
-            "GC should not be activated at 70% of the sitrep limit",
+            "GC should not be activated at 75% of the sitrep limit",
         );
 
-        // 8 sitreps: 80% of the limit. The check still succeeds, but a
-        // warning is recorded and the GC task is activated.
+        // 16 sitreps: 80% of the limit. The GC task is activated to reclaim
+        // capacity, but no warning is recorded: pruning keeps the history at
+        // 80% of the sitrep limit, so this is expected steady-state
+        // operation.
         model.insert_history(opctx, 1).await;
+        let mut warnings = Vec::new();
+        let result = task.check_sitrep_limit(opctx, &mut warnings).await;
+        assert_eq!(
+            result,
+            Ok(status::SitrepCapacity {
+                count: model.sitrep_count(),
+                limit: LIMIT
+            })
+        );
+        assert_eq!(
+            warnings,
+            Vec::<String>::new(),
+            "80% of the limit is normal steady-state operation, and should \
+             not produce a warning"
+        );
+        acts.sitrep_gc.assert_activated(
+            "GC should be activated at 80% of the sitrep limit",
+        );
+
+        // 19 sitreps: 95% of the limit. Now the check records a warning ---
+        // GC doesn't appear to be keeping up --- and activates the GC task
+        // again.
+        model.insert_history(opctx, 3).await;
         let mut warnings = Vec::new();
         let result = task.check_sitrep_limit(opctx, &mut warnings).await;
         assert_eq!(
@@ -1249,19 +1277,18 @@ mod tests {
         assert_eq!(
             warnings.len(),
             1,
-            "expected a capacity warning at 80% of the limit, got: \
+            "expected a capacity warning at 95% of the limit, got: \
              {warnings:?}"
         );
         acts.sitrep_gc.assert_activated(
-            "GC should be activated at 80% of the sitrep limit",
+            "GC should be activated at 95% of the sitrep limit",
         );
 
-        // 10 sitreps: at the limit. The check fails, and the GC task is
-        // activated. Note that the last two sitreps are *orphans* ---
-        // sitreps that were never made current --- which occupy capacity in
-        // the `fm_sitrep` table just like live ones do until the GC sweeps
-        // them up.
-        model.insert_orphan(opctx, None).await;
+        // 20 sitreps: at the limit. The check fails, and the GC task is
+        // activated. Note that the last sitrep is an *orphan* --- a sitrep
+        // that was never made current --- which occupies capacity in the
+        // `fm_sitrep` table just like live ones do until the GC sweeps
+        // it up.
         model.insert_orphan(opctx, None).await;
         assert_eq!(model.sitrep_count(), LIMIT);
         let mut warnings = Vec::new();

@@ -61,7 +61,7 @@ impl SitrepGc {
             .fm_sitrep_history_prune(&opctx, self.history_limit)
             .await
         {
-            Ok(status::HistoryPruningStatus::BelowLimit { count }) => {
+            Ok(status::HistoryPruningStatus::NotPruned { count }) => {
                 slog::debug!(
                     &opctx.log,
                     "sitrep history depth is below the limit, no entries were \
@@ -69,7 +69,7 @@ impl SitrepGc {
                     "sitrep_history_count" => count,
                     "sitrep_history_limit" => self.history_limit.get(),
                 );
-                Ok(status::HistoryPruningStatus::BelowLimit { count })
+                Ok(status::HistoryPruningStatus::NotPruned { count })
             }
             Ok(status::HistoryPruningStatus::Pruned {
                 n_pruned,
@@ -190,7 +190,7 @@ mod tests {
         assert_eq!(status.orphaned_sitreps_deleted, 7);
         assert_eq!(
             status.history_pruning_status,
-            Ok(status::HistoryPruningStatus::BelowLimit { count: 2 })
+            Ok(status::HistoryPruningStatus::NotPruned { count: 2 })
         );
 
         db.terminate().await;
@@ -219,7 +219,7 @@ mod tests {
         assert_eq!(status.history_limit, LIMIT);
         assert_eq!(
             status.history_pruning_status,
-            Ok(status::HistoryPruningStatus::BelowLimit { count: 3 })
+            Ok(status::HistoryPruningStatus::NotPruned { count: 3 })
         );
 
         // Exactly at the limit: the limit check fires, but the newest `LIMIT`
@@ -228,10 +228,7 @@ mod tests {
         let status = run_gc_and_check(&mut task, &mut model, opctx).await;
         assert_eq!(
             status.history_pruning_status,
-            Ok(status::HistoryPruningStatus::Pruned {
-                n_pruned: 0,
-                newest_version_pruned: 0,
-            })
+            Ok(status::HistoryPruningStatus::NotPruned { count: 5 })
         );
 
         // Over the limit: versions 1..=3 should be pruned from the history,
@@ -247,6 +244,17 @@ mod tests {
             })
         );
         assert_eq!(status.orphaned_sitreps_deleted, 3);
+
+        // Exactly at the limit again, but this time the earliest history
+        // version is v4, not v1, since we pruned v1 previously. This is the
+        // expected steady state of the system, since we try to keep exactly
+        // `LIMIT` rows in the history table.
+        let status = run_gc_and_check(&mut task, &mut model, opctx).await;
+        assert_eq!(
+            status.history_pruning_status,
+            Ok(status::HistoryPruningStatus::NotPruned { count: 5 })
+        );
+        assert_eq!(status.orphaned_sitreps_deleted, 0);
 
         // Prune again, now that the minimum history version is no longer 1.
         // This checks that the pruning arithmetic is anchored on the latest
