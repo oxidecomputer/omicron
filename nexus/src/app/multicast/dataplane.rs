@@ -44,11 +44,11 @@
 //! the non-elected drop. Delivery reaching only the non-elected switch
 //! drops until slot ownership moves.
 //!
-//! TODO(RFD 488 §sect-external-mcast, mcastd): couple NAT ownership to
-//! upstream delivery. The elected switch originates IGMP/MLD membership
-//! reports on its uplinks (host-side proxy reporting, RFC 4605), a new
-//! owner reports and confirms delivery before the NAT ingress entry
-//! moves, and the old owner leaves last.
+//! TODO: couple NAT ownership to upstream delivery (RFD 488 "External
+//! Multicast", eventually mcastd). The elected switch originates IGMP/MLD
+//! membership reports on its uplinks (host-side proxy reporting, RFC
+//! 4605), a new owner reports and confirms delivery before the NAT
+//! ingress entry moves, and the old owner leaves last.
 //!
 //! ## Source Filtering (IGMPv3/MLDv2)
 //!
@@ -92,7 +92,7 @@ use omicron_uuid_kinds::{GenericUuid, MulticastGroupUuid};
 use sled_agent_types::early_networking::SwitchSlot;
 
 use super::select_switch_slot;
-use crate::app::dpd_clients;
+use crate::app::dpd_switches;
 
 /// Trait for extracting external responses from mixed DPD response types.
 trait IntoExternalResponse {
@@ -129,13 +129,13 @@ impl IntoExternalResponse for MulticastGroupResponse {
     }
 }
 
-/// Convert an [`IpAddr`] into a DPD [`UnderlayMulticastIpv6`],
+/// Convert an `IpAddr` into a DPD `UnderlayMulticastIpv6`,
 /// rejecting IPv4.
 ///
 /// Note: named without the `Ipv6` suffix because the input type is the general
 /// `IpAddr`.
 trait IntoUnderlayMulticast {
-    /// Convert to [`UnderlayMulticastIpv6`], rejecting IPv4 addresses.
+    /// Convert to `UnderlayMulticastIpv6`, rejecting IPv4 addresses.
     fn into_underlay_multicast(self) -> Result<UnderlayMulticastIpv6, Error>;
 }
 
@@ -166,6 +166,11 @@ pub(crate) type MulticastDataplaneResult<T> = Result<T, Error>;
 /// front-port uplink members with [`dpd_client::types::Direction::External`].
 pub(crate) struct MulticastDataplaneClient {
     dpd_clients: HashMap<SwitchSlot, dpd_client::Client>,
+    /// Whether every Dendrite instance advertised in DNS produced a client.
+    ///
+    /// Non-destructive operations tolerate a partial map, but tag-based
+    /// deletion refuses to run over one (see [`Self::remove_groups`]).
+    discovery_complete: bool,
     log: Logger,
 }
 
@@ -206,9 +211,9 @@ fn single_external_owner(slots: &[SwitchSlot]) -> Option<SwitchSlot> {
     }
 }
 
-/// Bound DPD client construction. On timeout (or DNS failure) we yield
-/// an empty client map rather than failing the pass: group operations
-/// skip with no switches, but DB-only member-state transitions
+/// Bound DPD client construction. On timeout or DNS failure we yield an
+/// empty client map rather than failing the pass. Group operations fail
+/// with no switches and are retried, but DB-only member-state transitions
 /// ("Joining" → "Left" when the instance is stopped) still proceed.
 const DPD_CLIENT_BUILD_TIMEOUT: Duration =
     // Caps the internal-DNS retry budget for `_dendrite._tcp` so a DPD
@@ -218,17 +223,32 @@ const DPD_CLIENT_BUILD_TIMEOUT: Duration =
 impl MulticastDataplaneClient {
     /// Create a new client - builds fresh DPD clients for current switch
     /// topology.
+    ///
+    /// The client map holds every switch whose Dendrite zone is advertised
+    /// in internal DNS and whose DPD reports a slot. A missing switch (DNS
+    /// gap or unreachable management plane) is tolerated rather than fatal:
+    /// election proceeds over the visible set, and drift detection evicts a
+    /// stale external entry once the switch is visible again. Destructive
+    /// tag-based cleanup is the exception and requires complete discovery
+    /// (see [`Self::remove_groups`]). See [`DPD_CLIENT_BUILD_TIMEOUT`].
     pub(crate) async fn new(
         resolver: Resolver,
         log: Logger,
     ) -> MulticastDataplaneResult<Self> {
-        let dpd_clients = match tokio::time::timeout(
+        let (dpd_clients, discovery_complete) = match tokio::time::timeout(
             DPD_CLIENT_BUILD_TIMEOUT,
-            dpd_clients(&resolver, &log),
+            dpd_switches(&resolver, &log),
         )
         .await
         {
-            Ok(Ok(clients)) => clients,
+            Ok(Ok((switches, advertised))) => {
+                let complete = switches.len() == advertised;
+                let clients = switches
+                    .into_iter()
+                    .map(|(slot, (_addr, client))| (slot, client))
+                    .collect();
+                (clients, complete)
+            }
             Ok(Err(e)) => {
                 warn!(
                     log,
@@ -236,7 +256,7 @@ impl MulticastDataplaneClient {
                      client map";
                     "error" => %e,
                 );
-                HashMap::new()
+                (HashMap::new(), false)
             }
             Err(_) => {
                 warn!(
@@ -245,10 +265,10 @@ impl MulticastDataplaneClient {
                      client map";
                     "timeout" => ?DPD_CLIENT_BUILD_TIMEOUT,
                 );
-                HashMap::new()
+                (HashMap::new(), false)
             }
         };
-        Ok(Self { dpd_clients, log })
+        Ok(Self { dpd_clients, discovery_complete, log })
     }
 
     /// Compute DPD source filter from aggregated member source state.
@@ -706,7 +726,7 @@ impl MulticastDataplaneClient {
     }
 
     /// Update a multicast group's sources and forwarding in the dataplane.
-    /// The dpd tag is immutable, so a rename never reaches the switches.
+    /// The DPD tag is immutable, so a rename never reaches the switches.
     ///
     /// Membership is left untouched here: underlay members are owned by
     /// mg-lower/DDM and are not rewritten by this client.
@@ -753,7 +773,7 @@ impl MulticastDataplaneClient {
         // lifetime and shared by the external and underlay entries. Drift
         // repair below recreates a missing external entry with this tag,
         // matching `create_groups`. The user-facing name must not be used,
-        // since dpd tags never change after creation.
+        // since DPD tags never change after creation.
         let db_tag = params.external_group.tag.clone().ok_or_else(|| {
             Error::internal_error("multicast group missing tag")
         })?;
@@ -885,7 +905,7 @@ impl MulticastDataplaneClient {
                     } else {
                         // The external entry shares the underlay group's tag
                         // (both are created with the same tag in
-                        // `create_groups`, and dpd tags are immutable), so the
+                        // `create_groups`, and DPD tags are immutable), so the
                         // underlay tag read above authorizes this delete.
                         self.dpd_ensure_external_deleted(
                             client,
@@ -1229,6 +1249,30 @@ impl MulticastDataplaneClient {
         );
 
         let dpd_clients = &self.dpd_clients;
+        if dpd_clients.is_empty() {
+            // An empty client map means switch state could not be reached
+            // (see [`DPD_CLIENT_BUILD_TIMEOUT`]). Vacuous success here would
+            // let callers delete DB records while the switch entries remain
+            // orphaned, so fail and let the caller retry.
+            return Err(Error::internal_error(
+                "no switches were available for multicast group cleanup",
+            ));
+        }
+
+        if !self.discovery_complete {
+            // Tag-based reset is the last dataplane step before the caller
+            // deletes the DB rows. Once those rows are gone nothing drives
+            // cleanup on a switch that was missing from discovery, so the
+            // stale entries would be orphaned.
+            //
+            // We require the full advertised switch set and let the caller
+            // retry on a later pass.
+            return Err(Error::internal_error(
+                "multicast group cleanup requires every switch advertised \
+                 in DNS, but Dendrite discovery was partial",
+            ));
+        }
+
         let dpd_tag: MulticastTag = tag
             .parse()
             .map_err(|_| Error::internal_error("invalid multicast tag"))?;

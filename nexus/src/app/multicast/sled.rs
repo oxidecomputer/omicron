@@ -115,7 +115,7 @@ impl MulticastSledClient {
     /// Sled-agent resolves the active Propolis under its per-instance state
     /// lock and configures OPTE port-level multicast filters. The member's
     /// per-instance source IPs are passed for SSM filtering. If no active
-    /// VMM is registered the call is a noop since the OPTE port is gone.
+    /// VMM is registered the call is a no-op since the OPTE port is gone.
     pub(crate) async fn subscribe_instance(
         &self,
         opctx: &OpContext,

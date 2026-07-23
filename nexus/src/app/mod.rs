@@ -1292,11 +1292,16 @@ pub enum Unimpl {
 ///
 /// A switch appears in the result only when its Dendrite service resolves and
 /// reports a slot, so the address and the client are always consistent for a
-/// given slot. Switches we cannot reach are omitted.
+/// given slot.
+///
+/// Switches we cannot reach are omitted. The second element of
+/// the result is the number of Dendrite instances advertised in DNS, so
+/// callers can tell a complete mapping from a partial one.
 async fn dpd_switches(
     resolver: &internal_dns_resolver::Resolver,
     log: &slog::Logger,
-) -> Result<HashMap<SwitchSlot, (Ipv6Addr, dpd_client::Client)>, String> {
+) -> Result<(HashMap<SwitchSlot, (Ipv6Addr, dpd_client::Client)>, usize), String>
+{
     let dpd_socketaddrs = match resolver
         .lookup_all_socket_v6(ServiceName::Dendrite)
         .await
@@ -1366,7 +1371,21 @@ async fn dpd_switches(
         mappings.insert(location, (*addr.ip(), client));
     }
 
-    Ok(mappings)
+    // A dendrite advertised in DNS that fails to report a slot leaves the
+    // result partial. Callers tolerate this (drift detection reconverges
+    // multicast forwarder placement once the switch is visible again), but
+    // surface it for operators.
+    if mappings.len() < dpd_socketaddrs.len() {
+        warn!(
+            log,
+            "some dendrite instances advertised in DNS did not report a \
+             switch slot";
+            "advertised" => dpd_socketaddrs.len(),
+            "reported" => mappings.len(),
+        );
+    }
+
+    Ok((mappings, dpd_socketaddrs.len()))
 }
 
 /// Returns a mapping of clients for the Dendrite daemons of reachable switch zones.
@@ -1378,6 +1397,7 @@ pub(crate) async fn dpd_clients(
 ) -> Result<HashMap<SwitchSlot, dpd_client::Client>, String> {
     Ok(dpd_switches(resolver, log)
         .await?
+        .0
         .into_iter()
         .map(|(slot, (_addr, client))| (slot, client))
         .collect())
@@ -1397,6 +1417,7 @@ pub(crate) async fn dpd_switch_underlay_addrs(
 ) -> Result<HashMap<SwitchSlot, Ipv6Addr>, String> {
     Ok(dpd_switches(resolver, log)
         .await?
+        .0
         .into_iter()
         .map(|(slot, (addr, _client))| (slot, addr))
         .collect())

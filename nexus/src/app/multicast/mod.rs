@@ -26,7 +26,7 @@
 //! IP is allocated from the multicast pool on creation and returned on
 //! deletion.
 //!
-//! Groups use their UUID as the dpd tag for switch configuration. This avoids
+//! Groups use their UUID as the DPD tag for switch configuration. This avoids
 //! races when group names are reused after deletion.
 //!
 //! # Authorization

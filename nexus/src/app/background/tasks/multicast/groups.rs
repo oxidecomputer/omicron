@@ -86,10 +86,13 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use anyhow::{Context, anyhow};
 use futures::future::try_join_all;
 use futures::stream::{self, StreamExt};
+use oxnet::MulticastMac;
 use slog::{debug, error, info, trace, warn};
 
-use dpd_client::types::IpSrc;
-use nexus_db_model::{MulticastGroup, MulticastGroupState, SqlU8};
+use dpd_client::types::{IpSrc, MacAddr, NatTarget, Vni};
+use nexus_db_model::{
+    MulticastGroup, MulticastGroupState, SqlU8, UnderlayMulticastGroup,
+};
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::datastore::multicast::EnsureUnderlayResult;
 use nexus_db_queries::db::datastore::multicast::members::SourceFilterState;
@@ -114,6 +117,12 @@ use crate::app::sagas;
 /// Check if DPD tag matches the database group's tag.
 ///
 /// Tags use format `{uuid}:{ip}` to prevent collision when group names are reused.
+///
+/// No Nexus-managed path produces a mismatch: every switch entry is written
+/// with the database tag, and teardown removes the entries before the row is
+/// deleted. A mismatch therefore implies direct DPD API mutation or a
+/// Dendrite defect, and the reconciler cannot repair it in-band because DPD
+/// authorizes updates and deletes against the tag already on the switch.
 fn dpd_state_matches_tag(
     dpd_group: &dpd_client::types::MulticastGroupExternalResponse,
     db_group: &MulticastGroup,
@@ -183,6 +192,31 @@ fn dpd_state_matches_sources(
             }
         }
     }
+}
+
+/// Check if DPD forwarding configuration matches what Nexus programs.
+///
+/// The NAT target is a pure function of database state: the underlay group's
+/// IPv6 address, the multicast MAC derived from it, and the external group's
+/// VNI (mirroring the dataplane create and update paths). Egress VLAN tagging
+/// is not yet supported, so the expected `vlan_id` is `None`.
+fn dpd_state_matches_forwarding(
+    dpd_group: &dpd_client::types::MulticastGroupExternalResponse,
+    db_group: &MulticastGroup,
+    underlay_group: &UnderlayMulticastGroup,
+) -> bool {
+    let IpAddr::V6(underlay_ipv6) = underlay_group.multicast_ip.ip() else {
+        return false;
+    };
+
+    let expected = NatTarget {
+        internal_ip: underlay_ipv6,
+        inner_mac: MacAddr { a: underlay_ipv6.derive_multicast_mac() },
+        vni: Vni::from(u32::from(db_group.vni.0)),
+    };
+
+    dpd_group.internal_forwarding.nat_target.as_ref() == Some(&expected)
+        && dpd_group.external_forwarding.vlan_id.is_none()
 }
 
 /// Per-pass counters for placement and election drift observed while
@@ -845,7 +879,8 @@ impl MulticastGroupReconciler {
     /// External group handler for groups in "Active" state.
     ///
     /// Checks if the group's DPD state matches the database state. If not,
-    /// we make dataplane calls to sync. This self-corrects any DPD drift.
+    /// we make dataplane calls to sync. This self-corrects DPD drift, with
+    /// the exception of tag drift (see [`dpd_state_matches_tag`]).
     async fn handle_active_external_group(
         &self,
         opctx: &OpContext,
@@ -881,70 +916,65 @@ impl MulticastGroupReconciler {
         // Check if DPD state matches DB state (read-before-write for drift
         // detection). The check also reports which switch currently owns the
         // entry, threaded into the update below so it elects the same switch.
-        let (needs_update, incumbent_switch) = match dataplane_client
+        //
+        // A fetch failure skips this group's pass rather than updating with
+        // no incumbent. The hash election could move ownership away from the
+        // unobserved owner, and if the subsequent removal from that switch
+        // also failed, both switches would replicate the group's traffic.
+        // The next pass retries once the slot owner can be observed.
+        let check = dataplane_client
             .fetch_external_group_for_drift_check(
                 group_id,
                 group.multicast_ip.ip(),
                 underlay_group.multicast_ip.ip(),
             )
             .await
-        {
-            Ok(check) => {
-                if check.misplaced {
-                    self.drift_counters
-                        .entries_misplaced
-                        .fetch_add(1, Ordering::Relaxed);
+            .context("failed to fetch active group from DPD for drift check")?;
+
+        if check.misplaced {
+            self.drift_counters
+                .entries_misplaced
+                .fetch_add(1, Ordering::Relaxed);
+        }
+
+        let needs_update = match &check.elected_config {
+            Some(dpd_group) => {
+                let tag_matches = dpd_state_matches_tag(dpd_group, group);
+                let sources_match =
+                    dpd_state_matches_sources(dpd_group, &source_filter, group);
+                let forwarding_matches = dpd_state_matches_forwarding(
+                    dpd_group,
+                    group,
+                    &underlay_group,
+                );
+
+                let needs_update =
+                    !tag_matches || !sources_match || !forwarding_matches;
+
+                if needs_update {
+                    debug!(
+                        opctx.log,
+                        "detected DPD state mismatch for active group";
+                        "group_id" => %group.id(),
+                        "tag_matches" => tag_matches,
+                        "sources_match" => sources_match,
+                        "forwarding_matches" => forwarding_matches
+                    );
                 }
 
-                let needs_update = match &check.elected_config {
-                    Some(dpd_group) => {
-                        let tag_matches =
-                            dpd_state_matches_tag(dpd_group, group);
-                        let sources_match = dpd_state_matches_sources(
-                            dpd_group,
-                            &source_filter,
-                            group,
-                        );
-
-                        let needs_update = !tag_matches || !sources_match;
-
-                        if needs_update {
-                            debug!(
-                                opctx.log,
-                                "detected DPD state mismatch for active group";
-                                "group_id" => %group.id(),
-                                "tag_matches" => tag_matches,
-                                "sources_match" => sources_match
-                            );
-                        }
-
-                        needs_update
-                    }
-                    None => {
-                        // Absent or misplaced in DPD, so re-issue the update.
-                        debug!(
-                            opctx.log,
-                            "active group not correctly placed in DPD, will update";
-                            "group_id" => %group.id()
-                        );
-                        true
-                    }
-                };
-
-                (needs_update, check.incumbent_switch)
+                needs_update
             }
-            Err(e) => {
-                // Error fetching from DPD -> log and retry. Without an
-                // observed owner the update falls back to the hash election.
-                warn!(
+            None => {
+                // Absent or misplaced in DPD, so re-issue the update.
+                debug!(
                     opctx.log,
-                    "error fetching active group from DPD, will retry update";
-                    "group_id" => %group.id(),
-                    "error" => %e
+                    "active group not correctly placed in DPD, will update";
+                    "group_id" => %group.id()
                 );
-                (true, None)
+                true
             }
         };
+        let incumbent_switch = check.incumbent_switch;
 
         // Track whether DPD is in the desired state for this group, either
         // because we just synced it or because it was already in sync. MRIB
@@ -1318,7 +1348,7 @@ mod tests {
             has_any_source_member: false,
         };
 
-        let group = create_group("232.1.1.1"); // SSM address
+        let group = create_group("232.1.1.1");
 
         // DPD has matching sources
         let dpd_group = create_dpd_group(Some(vec![
@@ -1360,7 +1390,7 @@ mod tests {
             has_any_source_member: true, // Ignored for SSM
         };
 
-        let group = create_group("232.1.1.1"); // SSM address
+        let group = create_group("232.1.1.1");
 
         // DPD should have specific sources (RFC 4607 compliance)
         let dpd_group = create_dpd_group(Some(vec![
@@ -1384,7 +1414,7 @@ mod tests {
             has_any_source_member: false,
         };
 
-        let group = create_group("224.1.1.1"); // ASM address
+        let group = create_group("224.1.1.1");
 
         // DPD has matching specific sources
         let dpd_group = create_dpd_group(Some(vec![IpSrc::Exact(
@@ -1410,7 +1440,7 @@ mod tests {
             has_any_source_member: true,
         };
 
-        let group = create_group("224.1.1.1"); // ASM address
+        let group = create_group("224.1.1.1");
 
         // DPD has None (correct: any-source canonicalizes to None)
         let dpd_group = create_dpd_group(None);
@@ -1431,7 +1461,7 @@ mod tests {
             has_any_source_member: false,
         };
 
-        let group = create_group("224.1.1.1"); // ASM address
+        let group = create_group("224.1.1.1");
 
         // DPD has None (correct: no sources configured)
         let dpd_group = create_dpd_group(None);

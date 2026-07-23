@@ -35,8 +35,8 @@ use nexus_test_utils::http_testing::{
 };
 use nexus_test_utils::resource_helpers::{
     create_default_ip_pools, create_instance, create_project, link_ip_pool,
-    object_create_error, object_delete, object_delete_error, object_get,
-    object_get_error, object_put_error,
+    object_create, object_create_error, object_delete, object_delete_error,
+    object_get, object_get_error, object_put_error,
 };
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::instance::InstanceState;
@@ -1516,10 +1516,13 @@ async fn test_pool_range_allocation(cptestctx: &ControlPlaneTestContext) {
     .await;
 }
 
-/// Drives the probe-multicast end-to-end path for both v4 and v6 in one
-/// test: pre-create the multicast group via an instance attach, then
-/// create a probe enrolling in the same group at probe-create time, then
-/// verify the probe membership row appears in the group's member list.
+/// Drives the probe-multicast path for v4 end-to-end and asserts v6
+/// memberships are rejected at probe create. The v4 leg pre-creates the
+/// multicast group via an instance attach, creates a probe enrolling in
+/// the same group at probe-create time, and verifies the probe membership
+/// row appears in the group's member list. The v6 leg exercises the
+/// create-time rejection through every request form, since the in-zone
+/// joiner cannot pin an IPv6 interface scope yet.
 #[nexus_test]
 async fn test_probe_multicast_member(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
@@ -1536,14 +1539,20 @@ async fn test_probe_multicast_member(cptestctx: &ControlPlaneTestContext) {
         (224, 50, 0, 50),
     )
     .await;
-    enroll_probe_in_group(
+    materialize_group_via_instance(
         cptestctx,
         project_name,
         "probe-mcast-v4-group",
         "primer-instance-v4",
+        IpVersion::V4,
+    )
+    .await;
+    enroll_probe_in_group(
+        cptestctx,
+        project_name,
+        "probe-mcast-v4-group",
         "probe-mcaster-v4",
         &v4_default_pool,
-        IpVersion::V4,
     )
     .await;
 
@@ -1551,38 +1560,79 @@ async fn test_probe_multicast_member(cptestctx: &ControlPlaneTestContext) {
     // by-name auto-create needs `ip_version` to disambiguate which
     // pool to allocate the group from.
     create_multicast_ip_pool_v6(client, "probe-mcast-v6-pool").await;
-    enroll_probe_in_group(
+    materialize_group_via_instance(
         cptestctx,
         project_name,
         "probe-mcast-v6-group",
         "primer-instance-v6",
-        "probe-mcaster-v6",
-        &v4_default_pool,
         IpVersion::V6,
     )
     .await;
+
+    // Probe create rejects IPv6 memberships in every request form: a name
+    // resolving to an existing IPv6 group (post-resolution check), a
+    // literal IPv6 group address, and an explicit `ip_version` hint (both
+    // rejected before group resolution).
+    let v6_group = get_multicast_group(client, "probe-mcast-v6-group").await;
+    let v6_specs = [
+        MulticastGroupJoinSpec {
+            group: "probe-mcast-v6-group".parse::<Name>().unwrap().into(),
+            source_ips: None,
+            ip_version: None,
+        },
+        MulticastGroupJoinSpec {
+            group: v6_group.multicast_ip.into(),
+            source_ips: None,
+            ip_version: None,
+        },
+        MulticastGroupJoinSpec {
+            group: "probe-mcast-v6-group".parse::<Name>().unwrap().into(),
+            source_ips: None,
+            ip_version: Some(IpVersion::V6),
+        },
+    ];
+    for spec in v6_specs {
+        let probe_body = ProbeCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "probe-mcaster-v6".parse().unwrap(),
+                description: "IPv6 membership rejection".to_owned(),
+            },
+            sled: SLED_AGENT_UUID.parse().unwrap(),
+            pool_selector: PoolSelector::Explicit {
+                pool: v4_default_pool.identity.name.clone().into(),
+            },
+            multicast_groups: vec![spec],
+        };
+        let error = object_create_error(
+            client,
+            &format!("/experimental/v1/probes?project={project_name}"),
+            &probe_body,
+            StatusCode::BAD_REQUEST,
+        )
+        .await;
+        assert!(
+            error.message.contains(
+                "probes do not support IPv6 multicast group memberships"
+            ),
+            "Received unexpected error message: {}",
+            error.message
+        );
+    }
 }
 
-/// Inner step shared by the v4 and v6 setups of
-/// [`test_probe_multicast_member`]. Materializes `group_name` by attaching
-/// `instance_name`, drives it to "Joined", then creates `probe_name`
-/// enrolling in the same group and asserts the probe row appears in the
-/// group's member list. `unicast_pool` supplies the probe's external IP, which
-/// is separate from the multicast pool.
-async fn enroll_probe_in_group(
+/// Materializes `group_name` by attaching `instance_name` and driving the
+/// member to "Joined", so later steps run against an "Active" group.
+///
+/// Group creation has no direct API and instance join auto-creates.
+/// `ip_version` selects the multicast pool when multiple are linked.
+async fn materialize_group_via_instance(
     cptestctx: &ControlPlaneTestContext,
     project_name: &str,
     group_name: &str,
     instance_name: &str,
-    probe_name: &str,
-    unicast_pool: &IpPool,
     ip_version: IpVersion,
 ) {
     let client = &cptestctx.external_client;
-
-    // Materialize the group via an instance attach. Group creation has no
-    // direct API and instance join auto-creates. `ip_version` selects the
-    // multicast pool when multiple are linked.
     let instance = create_instance(client, project_name, instance_name).await;
     let join_url = format!(
         "/v1/instances/{instance_name}/multicast-groups/{group_name}?project={project_name}"
@@ -1594,8 +1644,6 @@ async fn enroll_probe_in_group(
     let _: MulticastGroupMember =
         put_upsert(client, &join_url, &join_params).await;
 
-    // Drive instance member to "Joined" so the group is "Active" and the
-    // probe-side enrollment lands in a steady state.
     wait_for_member_state(
         cptestctx,
         group_name,
@@ -1603,8 +1651,23 @@ async fn enroll_probe_in_group(
         nexus_db_model::MulticastGroupMemberState::Joined,
     )
     .await;
+}
 
-    // Create a probe enrolling in the same group at create time. Use an
+/// Creates `probe_name` enrolling in `group_name` at create time and
+/// asserts the probe row appears in the group's member list.
+///
+/// `unicast_pool` supplies the probe's external IP, which is separate
+/// from the multicast pool.
+async fn enroll_probe_in_group(
+    cptestctx: &ControlPlaneTestContext,
+    project_name: &str,
+    group_name: &str,
+    probe_name: &str,
+    unicast_pool: &IpPool,
+) {
+    let client = &cptestctx.external_client;
+
+    // Create a probe enrolling in the group at create time. Use an
     // explicit unicast pool selector since the probe's external IP is
     // unicast (the multicast group is separate from that pool).
     let probe_body = ProbeCreate {
@@ -1710,4 +1773,174 @@ async fn test_probe_multicast_member_source_cap(
         "expected no probes after rejected create. Received {:?}",
         probes.items,
     );
+}
+
+/// Probe create must not leave an implicitly created group behind when the
+/// request is rejected.
+///
+/// Four rejection paths are covered. A missing name whose auto-create
+/// would land in an IPv6-only multicast pool fails pool selection through
+/// the V4 default hint rather than minting an IPv6 group that the
+/// post-resolution check would reject only after creation. The same
+/// missing name listed twice trips the duplicate check before any
+/// resolution runs, so the first spec cannot create the group. An IP spec
+/// aliased by its generated name trips the duplicate check only after the
+/// IP spec has implicitly created the group, so the rejection must roll
+/// the creation back. And a duplicate probe name fails probe creation
+/// after resolution has already created a requested group, which is
+/// likewise rolled back.
+#[nexus_test]
+async fn test_probe_multicast_member_no_group_leak(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let project_name = "probe-mcast-leak";
+    create_project(client, project_name).await;
+    let (v4_default_pool, _v6_default_pool) =
+        create_default_ip_pools(client).await;
+
+    let probe_body =
+        |probe_name: &str, specs: Vec<MulticastGroupJoinSpec>| ProbeCreate {
+            identity: IdentityMetadataCreateParams {
+                name: probe_name.parse().unwrap(),
+                description: "group leak rejection".to_owned(),
+            },
+            sled: SLED_AGENT_UUID.parse().unwrap(),
+            pool_selector: PoolSelector::Explicit {
+                pool: v4_default_pool.identity.name.clone().into(),
+            },
+            multicast_groups: specs,
+        };
+    let probes_url = format!("/experimental/v1/probes?project={project_name}");
+
+    // Only an IPv6 multicast pool is linked, so a by-name auto-create
+    // without the V4 default hint would mint an IPv6 group here.
+    create_multicast_ip_pool_v6(client, "probe-mcast-leak-v6-pool").await;
+    let error = object_create_error(
+        client,
+        &probes_url,
+        &probe_body(
+            "probe-leak-v6-pool",
+            vec![MulticastGroupJoinSpec {
+                group: "no-such-group".parse::<Name>().unwrap().into(),
+                source_ips: None,
+                ip_version: None,
+            }],
+        ),
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+    assert!(
+        error.message.contains("failed to resolve multicast group"),
+        "Received unexpected error message: {}",
+        error.message
+    );
+
+    // With an IPv4 multicast pool linked, the first duplicate spec could
+    // auto-create the group if resolution ran before the duplicate check.
+    create_multicast_ip_pool_with_range(
+        client,
+        "probe-mcast-leak-v4-pool",
+        (224, 60, 0, 10),
+        (224, 60, 0, 50),
+    )
+    .await;
+
+    let dup_spec = || MulticastGroupJoinSpec {
+        group: "dup-group".parse::<Name>().unwrap().into(),
+        source_ips: None,
+        ip_version: None,
+    };
+    let error = object_create_error(
+        client,
+        &probes_url,
+        &probe_body("probe-leak-dup", vec![dup_spec(), dup_spec()]),
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+    assert!(
+        error.message.contains("Duplicate multicast group"),
+        "Received unexpected error message: {}",
+        error.message
+    );
+
+    // Aliased identifiers: the IP spec implicitly creates the group and the
+    // generated-name spec resolves to the same ID, so the in-loop duplicate
+    // check fires only after the creation, which the rejection rolls back.
+    let error = object_create_error(
+        client,
+        &probes_url,
+        &probe_body(
+            "probe-leak-alias",
+            vec![
+                MulticastGroupJoinSpec {
+                    group: "224.60.0.20".parse().unwrap(),
+                    source_ips: None,
+                    ip_version: None,
+                },
+                MulticastGroupJoinSpec {
+                    group: "mcast-224-60-0-20".parse().unwrap(),
+                    source_ips: None,
+                    ip_version: None,
+                },
+            ],
+        ),
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+    assert!(
+        error.message.contains("Duplicate multicast group"),
+        "Received unexpected error message: {}",
+        error.message
+    );
+
+    // Duplicate probe name: resolution creates the requested group before
+    // probe creation fails on the conflicting name, so the failure must
+    // roll the creation back. The conflict surfaces from the probe's
+    // default network interface create, whose datastore error mapping
+    // yields a 500 rather than a 400 name conflict.
+    let _held: Probe = object_create(
+        client,
+        &probes_url,
+        &probe_body("probe-leak-held", vec![]),
+    )
+    .await;
+    object_create_error(
+        client,
+        &probes_url,
+        &probe_body(
+            "probe-leak-held",
+            vec![MulticastGroupJoinSpec {
+                group: "224.60.0.30".parse().unwrap(),
+                source_ips: None,
+                ip_version: None,
+            }],
+        ),
+        StatusCode::INTERNAL_SERVER_ERROR,
+    )
+    .await;
+
+    // No rejection may leave a group behind, and only the successfully
+    // created probe may remain.
+    let groups = list_multicast_groups(client).await;
+    assert!(
+        groups.is_empty(),
+        "expected no multicast groups after rejected creates. Received {groups:?}",
+    );
+    let probes: ResultsPage<nexus_types_versions::latest::probe::ProbeInfo> =
+        NexusRequest::object_get(client, &probes_url)
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute()
+            .await
+            .unwrap()
+            .parsed_body()
+            .unwrap();
+    assert_eq!(
+        probes.items.len(),
+        1,
+        "expected only the successfully created probe after rejected \
+         creates. Received {:?}",
+        probes.items,
+    );
+    assert_eq!(probes.items[0].name.as_str(), "probe-leak-held");
 }

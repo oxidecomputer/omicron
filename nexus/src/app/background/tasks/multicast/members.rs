@@ -1325,7 +1325,7 @@ impl MulticastGroupReconciler {
         if !updated {
             debug!(
                 opctx.log,
-                "skipping Left→Joining transition due to concurrent update";
+                "skipping 'Left' → 'Joining' transition due to concurrent update";
                 "member_id" => %member.id,
                 "group_id" => %group.id()
             );
@@ -1570,7 +1570,7 @@ impl MulticastGroupReconciler {
             if !updated {
                 debug!(
                     ctx.opctx.log,
-                    "skipping Joining→Joined transition due to concurrent update";
+                    "skipping 'Joining' → 'Joined' transition due to concurrent update";
                     "member_id" => %ctx.member.id,
                     "group_id" => %ctx.group.id()
                 );
@@ -1939,7 +1939,7 @@ mod tests {
             .expect("Should sweep empty groups");
         assert_eq!(
             marked, 0,
-            "Fresh Creating orphan must survive a live grace window"
+            "Fresh 'Creating' orphan must survive a live grace period"
         );
         let fetched = datastore
             .multicast_group_fetch(&opctx, orphan_id)
@@ -1948,7 +1948,7 @@ mod tests {
         assert_eq!(
             fetched.state,
             MulticastGroupState::Creating,
-            "Shielded orphan should remain Creating"
+            "Shielded orphan should remain 'Creating'"
         );
 
         // A zero grace window elapses immediately, so the same orphan is now
@@ -1964,7 +1964,7 @@ mod tests {
             .expect("Should sweep empty groups");
         assert_eq!(
             marked, 1,
-            "Orphan past the grace window should be reaped by the sweep"
+            "An orphan past the grace period should be reaped by the sweep"
         );
         let deleting = datastore
             .multicast_groups_list_by_state(
@@ -1976,7 +1976,7 @@ mod tests {
             .expect("Should list deleting groups");
         assert!(
             deleting.iter().any(|g| g.id() == orphan.id()),
-            "Reaped orphan should be marked Deleting"
+            "Reaped orphan should be marked 'Deleting'"
         );
 
         db.terminate().await;

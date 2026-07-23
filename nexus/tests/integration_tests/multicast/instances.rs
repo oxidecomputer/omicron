@@ -22,6 +22,7 @@
 use std::collections::BTreeSet;
 use std::net::IpAddr;
 
+use dpd_client::types as dpd_types;
 use http::{Method, StatusCode};
 
 use nexus_db_model::{MemberParentRef, MulticastGroupMemberState};
@@ -42,6 +43,10 @@ use nexus_types::external_api::multicast::{
 };
 use nexus_types::internal_api::params::InstanceMigrateRequest;
 
+use super::*;
+use crate::integration_tests::instances::{
+    instance_simulate, instance_wait_for_state, vmm_simulate_on_sled,
+};
 use nexus_types_versions::latest::instance::Instance;
 use omicron_common::address::{
     MAX_SOURCE_IPS_PER_GROUP, MAX_SOURCE_IPS_PER_MEMBER,
@@ -51,11 +56,6 @@ use omicron_common::api::external::{
 };
 use omicron_nexus::TestInterfaces;
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid, MulticastGroupUuid};
-
-use super::*;
-use crate::integration_tests::instances::{
-    instance_simulate, instance_wait_for_state, vmm_simulate_on_sled,
-};
 
 const PROJECT_NAME: &str = "test-project";
 
@@ -671,6 +671,7 @@ async fn test_multicast_migration_scenarios(
         "external group should exist on exactly one elected switch before \
          migration, found on {external_switches:?}"
     );
+    let init_owner = external_switches[0];
 
     // Migrate instance
     let source_sled = nexus
@@ -732,10 +733,10 @@ async fn test_multicast_migration_scenarios(
     // target sled is owned by `ddmd`, derived from DDM peer subscriptions, and
     // is not asserted here. Migration does not change the designated forwarder,
     // so the external group still exists on exactly one elected switch.
-    let mut external_switches = Vec::new();
+    let mut external_switches_after_migration = Vec::new();
     for (slot, dpd) in nexus_test_utils::dpd_clients_by_switch(cptestctx) {
         match dpd.multicast_group_get(&multicast_ip).await {
-            Ok(_) => external_switches.push(slot),
+            Ok(_) => external_switches_after_migration.push(slot),
             Err(e) if e.status() == Some(StatusCode::NOT_FOUND) => {}
             Err(e) => panic!(
                 "unexpected DPD error querying external group \
@@ -744,10 +745,135 @@ async fn test_multicast_migration_scenarios(
         }
     }
     assert_eq!(
-        external_switches.len(),
+        external_switches_after_migration.len(),
         1,
         "external group should exist on exactly one elected switch after \
-         migration, found on {external_switches:?}"
+         migration, found on {external_switches_after_migration:?}"
+    );
+    assert_eq!(
+        external_switches_after_migration[0], init_owner,
+        "instance migration should not move external-group ownership"
+    );
+
+    // Put a duplicate external entry on the other switch.
+    let dpd_clients = nexus_test_utils::dpd_clients_by_switch(cptestctx);
+    let non_owner = *dpd_clients
+        .keys()
+        .find(|slot| **slot != init_owner)
+        .expect("two DPD switches should be available");
+    let owner_dpd = &dpd_clients[&init_owner];
+    let owner_response = owner_dpd
+        .multicast_group_get(&multicast_ip)
+        .await
+        .expect("owner should have the external group")
+        .into_inner();
+    let duplicate_entry = match owner_response {
+        dpd_types::MulticastGroupResponse::External {
+            group_ip,
+            tag,
+            internal_forwarding,
+            external_forwarding,
+            sources,
+            ..
+        } => dpd_types::MulticastGroupCreateExternalEntry {
+            group_ip,
+            tag: Some(tag),
+            internal_forwarding,
+            external_forwarding,
+            sources,
+        },
+        dpd_types::MulticastGroupResponse::Underlay { .. } => {
+            panic!("Expected an external group from the owner DPD")
+        }
+    };
+    dpd_clients[&non_owner]
+        .multicast_group_create_external(&duplicate_entry)
+        .await
+        .expect("should inject a duplicate external group");
+
+    let mut duplicate_slots = Vec::new();
+    for (slot, dpd) in &dpd_clients {
+        if dpd.multicast_group_get(&multicast_ip).await.is_ok() {
+            duplicate_slots.push(*slot);
+        }
+    }
+    // The map iterates in slot order, which need not match election order.
+    let mut both_slots = vec![init_owner, non_owner];
+    both_slots.sort();
+    assert_eq!(
+        duplicate_slots, both_slots,
+        "test setup should create an external duplicate on both switches"
+    );
+
+    // The next pass must keep the incumbent and remove the duplicate.
+    activate_multicast_reconciler(lockstep_client).await;
+
+    let mut repaired_slots = Vec::new();
+    for (slot, dpd) in &dpd_clients {
+        if dpd.multicast_group_get(&multicast_ip).await.is_ok() {
+            repaired_slots.push(*slot);
+        }
+    }
+    assert_eq!(
+        repaired_slots,
+        vec![init_owner],
+        "drift repair should retain the incumbent and evict the duplicate"
+    );
+
+    // Move the sole entry to the other switch.
+    //
+    // The hash still selects init_owner. The observed sole owner must win.
+    let owner_response = owner_dpd
+        .multicast_group_get(&multicast_ip)
+        .await
+        .expect("repaired owner should have the external group")
+        .into_inner();
+    let moved_entry = match owner_response {
+        dpd_types::MulticastGroupResponse::External {
+            group_ip,
+            tag,
+            internal_forwarding,
+            external_forwarding,
+            sources,
+            ..
+        } => dpd_types::MulticastGroupCreateExternalEntry {
+            group_ip,
+            tag: Some(tag),
+            internal_forwarding,
+            external_forwarding,
+            sources,
+        },
+        dpd_types::MulticastGroupResponse::Underlay { .. } => {
+            panic!("Expected an external group from the repaired owner DPD")
+        }
+    };
+    let delete_tag: dpd_types::MulticastTag = moved_entry
+        .tag
+        .as_deref()
+        .expect("injected entry should have a tag")
+        .parse()
+        .expect("DB multicast tag should be valid for DPD");
+    owner_dpd
+        .multicast_group_delete(&multicast_ip, &delete_tag)
+        .await
+        .expect("should remove the original external owner");
+    dpd_clients[&non_owner]
+        .multicast_group_create_external(&moved_entry)
+        .await
+        .expect("should create the external group on the new owner");
+
+    activate_multicast_reconciler(lockstep_client).await;
+
+    let mut incumbent_slots = Vec::new();
+    for (slot, dpd) in &dpd_clients {
+        if dpd.multicast_group_get(&multicast_ip).await.is_ok() {
+            incumbent_slots.push(*slot);
+        }
+    }
+    assert_eq!(
+        incumbent_slots,
+        vec![non_owner],
+        "drift check should preserve a sole incumbent over the hash"
     );
 
     // Verify sled-agent state after migration: the target sled should

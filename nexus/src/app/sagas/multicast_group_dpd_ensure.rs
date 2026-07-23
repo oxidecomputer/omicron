@@ -216,7 +216,7 @@ async fn mgde_update_dataplane(
     let GroupData { external_group, underlay_group, source_filter } =
         sagactx.lookup::<GroupData>("group_data")?;
 
-    // Use MulticastDataplaneClient for consistent DPD operations
+    // Use MulticastDataplaneClient for consistent DPD operations.
     let dataplane = MulticastDataplaneClient::new(
         osagactx.nexus().resolver().clone(),
         osagactx.log().clone(),
@@ -422,10 +422,10 @@ mod test {
     async fn test_action_failure_can_unwind_idempotently(
         cptestctx: &ControlPlaneTestContext,
     ) {
-        // Test that repeated rollback attempts don't cause issues
         let nexus = &cptestctx.server.server_context().nexus;
         let opctx = test_helpers::test_opctx(cptestctx);
 
+        // Non-existent group IDs make the fetch action fail, driving unwind.
         let params = Params {
             serialized_authn: Serialized::for_opctx(&opctx),
             external_group_id: Uuid::new_v4(),
@@ -445,64 +445,29 @@ mod test {
     }
 
     #[nexus_test(server = crate::Server)]
-    async fn test_params_serialization(cptestctx: &ControlPlaneTestContext) {
+    async fn test_params_serialization_and_dag_structure(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
         let opctx = test_helpers::test_opctx(cptestctx);
         let params = new_test_params(&opctx);
 
-        // Test that parameters can be serialized and deserialized
         let serialized = serde_json::to_string(&params).unwrap();
         let deserialized: Params = serde_json::from_str(&serialized).unwrap();
-
         assert_eq!(params.external_group_id, deserialized.external_group_id);
         assert_eq!(params.underlay_group_id, deserialized.underlay_group_id);
-    }
 
-    #[nexus_test(server = crate::Server)]
-    async fn test_saga_dag_structure(cptestctx: &ControlPlaneTestContext) {
-        let opctx = test_helpers::test_opctx(cptestctx);
-        let params = new_test_params(&opctx);
-        let dag =
-            create_saga_dag::<SagaMulticastGroupDpdEnsure>(params).unwrap();
+        // Build the DAG from the round-tripped params.
+        let dag = create_saga_dag::<SagaMulticastGroupDpdEnsure>(deserialized)
+            .unwrap();
 
-        // Verify the DAG has the expected structure
         let nodes: Vec<_> = dag.get_nodes().collect();
         assert!(nodes.len() >= 2); // Should have at least our 2 main actions
 
-        // Verify expected node labels exist
         let node_labels: std::collections::HashSet<_> =
             nodes.iter().map(|node| node.label()).collect();
 
         assert!(node_labels.contains("FetchGroupData"));
         assert!(node_labels.contains("UpdateDataplane"));
-    }
-
-    /// Verify saga handles missing groups gracefully when executed with
-    /// non-existent group IDs.
-    #[nexus_test(server = crate::Server)]
-    async fn test_saga_handles_missing_groups(
-        cptestctx: &ControlPlaneTestContext,
-    ) {
-        let nexus = &cptestctx.server.server_context().nexus;
-        let opctx = test_helpers::test_opctx(cptestctx);
-
-        // Create params with non-existent UUIDs
-        let params = Params {
-            serialized_authn: Serialized::for_opctx(&opctx),
-            external_group_id: Uuid::new_v4(), // Non-existent
-            underlay_group_id: Uuid::new_v4(), // Non-existent
-        };
-
-        // Execute the saga: should fail gracefully when fetching non-existent groups
-        let result = nexus
-            .sagas
-            .saga_execute::<SagaMulticastGroupDpdEnsure>(params)
-            .await;
-
-        // Saga should fail (groups don't exist)
-        assert!(
-            result.is_err(),
-            "Saga should fail when groups don't exist in database"
-        );
     }
 
     /// Test that the saga accepts "Active" groups (crash recovery) but
@@ -522,10 +487,8 @@ mod test {
         let datastore = nexus.datastore();
         let opctx = test_helpers::test_opctx(cptestctx);
 
-        // Setup: Create IP pools
         create_default_ip_pools(client).await;
 
-        // Create multicast IP pool
         let pool_name = "saga-state-pool";
         let pool_params = IpPoolCreate {
             identity: IdentityMetadataCreateParams {
@@ -539,7 +502,6 @@ mod test {
         object_create::<_, IpPool>(client, "/v1/system/ip-pools", &pool_params)
             .await;
 
-        // Add multicast IP range
         let asm_range = IpRange::V4(
             Ipv4Range::new(
                 Ipv4Addr::new(224, 70, 0, 1),
@@ -550,7 +512,6 @@ mod test {
         let range_url = format!("/v1/system/ip-pools/{}/ranges/add", pool_name);
         object_create::<_, IpPoolRange>(client, &range_url, &asm_range).await;
 
-        // Link pool to silo
         link_ip_pool(client, pool_name, &DEFAULT_SILO.id(), false).await;
 
         let group_params = MulticastGroupCreate {
