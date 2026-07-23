@@ -87,29 +87,36 @@ impl WicketdCommissionApi for WicketdCommissionApiImpl {
         let ctx = rqctx.context();
         let force_refresh = params.into_inner().force_refresh;
 
-        let response = tokio::time::timeout(
-            SP_REFRESH_TIMEOUT,
-            ctx.mgs_handle.get_inventory_refreshing_sps(force_refresh.clone()),
-        )
-        .await
-        .map_err(|_elapsed| {
-            http_error_with_message(
-                dropshot::ErrorStatusCode::SERVICE_UNAVAILABLE,
-                Some("SpRefreshTimeout".to_string()),
-                format!(
-                    "timed out after {}s waiting for refreshed state of [{}]; \
-                     the SPs may be unresponsive or MGS may be down (see \
-                     wicketd logs for details)",
-                    SP_REFRESH_TIMEOUT.as_secs(),
-                    force_refresh
-                        .iter()
-                        .map(|id| SpIdentifierDisplay(*id).to_string())
-                        .collect::<Vec<_>>()
-                        .join(", "),
+        let response = if force_refresh.is_empty() {
+            cached_inventory_or_timeout(&ctx.mgs_handle, SP_REFRESH_TIMEOUT)
+                .await?
+        } else {
+            tokio::time::timeout(
+                SP_REFRESH_TIMEOUT,
+                ctx.mgs_handle.get_inventory_refreshing_sps(
+                    force_refresh.iter().copied().collect(),
                 ),
             )
-        })?
-        .map_err(|err| err.to_http_error())?;
+            .await
+            .map_err(|_elapsed| {
+                http_error_with_message(
+                    dropshot::ErrorStatusCode::SERVICE_UNAVAILABLE,
+                    Some("SpRefreshTimeout".to_string()),
+                    format!(
+                        "timed out after {}s waiting for refreshed state of \
+                         [{}]; the SPs may be unresponsive or MGS may be down \
+                         (see wicketd logs for details)",
+                        SP_REFRESH_TIMEOUT.as_secs(),
+                        force_refresh
+                            .iter()
+                            .map(|id| SpIdentifierDisplay(*id).to_string())
+                            .collect::<Vec<_>>()
+                            .join(", "),
+                    ),
+                )
+            })?
+            .map_err(|err| err.to_http_error())?
+        };
 
         let MgsInventoryResponse {
             sps,

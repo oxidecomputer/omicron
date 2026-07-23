@@ -85,7 +85,7 @@
       }
     },
     "/inventory/sps": {
-      "get": {
+      "post": {
         "summary": "Get inventory of all service processors visible to wicketd",
         "description": "If `force_refresh` is non-empty, the request will wait for the listed SPs to report fresh data, or return a 503 if they do not respond within the server-side timeout.\n\nReturns 400 if the SP is unknown.",
         "operationId": "get_sp_inventory",
@@ -194,7 +194,7 @@
     "/rack-setup/config": {
       "put": {
         "summary": "Update (a subset of) the current RSS configuration",
-        "description": "Sensitive values (certificates and the recovery password hash) are not set through this endpoint.",
+        "description": "Sensitive values (certificates, the recovery password hash, and BGP authentication keys) are not set through this endpoint.",
         "operationId": "put_rss_config",
         "requestBody": {
           "content": {
@@ -1451,7 +1451,7 @@
         "additionalProperties": false
       },
       "PutRssUserConfigInsensitive": {
-        "description": "The portion of the RSS configuration that can be posted in one shot.\n\nIt is provided by the operator uploading a TOML file. Sensitive values (certificates and the recovery password hash) are set separately.",
+        "description": "The portion of the RSS configuration that can be posted in one shot.\n\nIt is provided by the operator uploading a TOML file. Sensitive values (certificates, the recovery password hash, and BGP authentication keys) are set separately.",
         "type": "object",
         "properties": {
           "allowed_source_ips": {
@@ -1843,6 +1843,65 @@
           "signature"
         ]
       },
+      "RotImageValidity": {
+        "description": "Whether the root of trust considers a firmware image valid.\n\nOlder RoT firmware does not report image validity at all; `Unsupported` distinguishes that case from a definite `Valid`, the same way `Unsupported` does for transceiver fault flags.",
+        "oneOf": [
+          {
+            "description": "The RoT reports this image as valid.",
+            "type": "object",
+            "properties": {
+              "validity": {
+                "type": "string",
+                "enum": [
+                  "valid"
+                ]
+              }
+            },
+            "required": [
+              "validity"
+            ]
+          },
+          {
+            "description": "The RoT reports this image as invalid.",
+            "type": "object",
+            "properties": {
+              "error": {
+                "description": "Why the RoT considers the image invalid.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/RotImageError"
+                  }
+                ]
+              },
+              "validity": {
+                "type": "string",
+                "enum": [
+                  "invalid"
+                ]
+              }
+            },
+            "required": [
+              "error",
+              "validity"
+            ]
+          },
+          {
+            "description": "This RoT firmware version does not report image validity.",
+            "type": "object",
+            "properties": {
+              "validity": {
+                "type": "string",
+                "enum": [
+                  "unsupported"
+                ]
+              }
+            },
+            "required": [
+              "validity"
+            ]
+          }
+        ]
+      },
       "RotInfo": {
         "description": "Root-of-trust information for a single service processor.\n\nThe root of trust is reached through its service processor, so it has its own read state: an SP that responds may still be unable to talk to its RoT.",
         "oneOf": [
@@ -1862,7 +1921,7 @@
             ]
           },
           {
-            "description": "The service processor reported that it cannot reach its root of trust.\n\nThis is the SP's own report (from its `SpState.rot`), not a wicketd fetch error: the SP responded, but told us it could not talk to its RoT. It therefore carries only a message, with no `kind` or `age`, unlike a `FetchError`.",
+            "description": "The service processor reported that it cannot reach its root of trust.\n\nThis is the SP's own report (from its `SpState.rot`), not a wicketd fetch error: the SP responded, but told us it could not talk to its RoT. It therefore carries only a message, with no `age`, unlike a `FetchError`.",
             "type": "object",
             "properties": {
               "message": {
@@ -1976,7 +2035,7 @@
         ]
       },
       "RotSlotInfo": {
-        "description": "One root-of-trust firmware slot.\n\nThe caboose says what firmware is in the slot; `image_error` says whether the RoT considers that image usable. The two are read from different sources, so a slot can have a readable caboose and still be unbootable.",
+        "description": "One root-of-trust firmware slot.\n\nThe caboose says what firmware is in the slot; `validity` says whether the RoT considers that image usable. The two are read from different sources, so a slot can have a readable caboose and still be unbootable.",
         "type": "object",
         "properties": {
           "caboose": {
@@ -1987,18 +2046,18 @@
               }
             ]
           },
-          "image_error": {
-            "nullable": true,
-            "description": "Why the RoT considers this image invalid, if it does.\n\n`None` means the image is valid, or that this RoT version does not report per-slot image validity.",
+          "validity": {
+            "description": "Whether the RoT considers this image valid.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/RotImageError"
+                "$ref": "#/components/schemas/RotImageValidity"
               }
             ]
           }
         },
         "required": [
-          "caboose"
+          "caboose",
+          "validity"
         ]
       },
       "RotStage0Info": {
@@ -2013,18 +2072,18 @@
               }
             ]
           },
-          "image_error": {
-            "nullable": true,
-            "description": "Why the RoT considers this bootloader image invalid, if it does.\n\n`None` means the image is valid, or that this RoT version does not report per-slot image validity.",
+          "validity": {
+            "description": "Whether the RoT considers this bootloader image valid.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/RotImageError"
+                "$ref": "#/components/schemas/RotImageValidity"
               }
             ]
           }
         },
         "required": [
-          "caboose"
+          "caboose",
+          "validity"
         ]
       },
       "RouteConfig": {
@@ -2133,7 +2192,7 @@
               "state": {
                 "type": "string",
                 "enum": [
-                  "counter"
+                  "progress"
                 ]
               }
             },
@@ -2308,6 +2367,14 @@
             "description": "Ignition reports the service processor as present.",
             "type": "object",
             "properties": {
+              "ctrl_detect_0": {
+                "description": "Whether ignition controller 0 detects this target.\n\nIgnition is wired to both switches, and each switch's controller reports detection independently. `false` on one controller while the other detects the target indicates a broken ignition path (for example, a bad cable) to that controller's switch.",
+                "type": "boolean"
+              },
+              "ctrl_detect_1": {
+                "description": "Whether ignition controller 1 detects this target.\n\nSee `ctrl_detect_0`.",
+                "type": "boolean"
+              },
               "faults": {
                 "description": "The faults ignition reports for the service processor.",
                 "allOf": [
@@ -2328,6 +2395,8 @@
               }
             },
             "required": [
+              "ctrl_detect_0",
+              "ctrl_detect_1",
               "faults",
               "power",
               "state"
@@ -2426,7 +2495,7 @@
             ]
           },
           "mgs_last_seen": {
-            "description": "How long it has been since wicketd last heard from MGS.\n\nA large value indicates that MGS might be down. This is a duration rather than a timestamp because wicketd and its clients keep independent clocks, and commissioning runs before time is synced.",
+            "description": "How long it has been since wicketd last received a successful response from MGS.\n\nA large value indicates that MGS might be down. This is a duration rather than a timestamp because wicketd and its clients keep independent clocks, and commissioning runs before time is synced.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/Duration"
@@ -2477,7 +2546,8 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/SpIdentifier"
-            }
+            },
+            "uniqueItems": true
           }
         },
         "additionalProperties": false
@@ -2505,7 +2575,7 @@
             "type": "object",
             "properties": {
               "error": {
-                "description": "What went wrong reading the state.\n\nThe error's `kind` says whether the failure looks transient (so a caller waiting for this service processor should keep waiting) or permanent (so retrying is unlikely to help on its own).",
+                "description": "What went wrong reading the state.\n\nThe error's `message` describes the failure; its `age` says how recently the failure was last observed.",
                 "allOf": [
                   {
                     "$ref": "#/components/schemas/FetchError"
@@ -2528,6 +2598,14 @@
             "description": "The service processor's state was read.",
             "type": "object",
             "properties": {
+              "age": {
+                "description": "How long it has been since this reading was fetched.\n\nThe cabooses and root-of-trust information for this service processor are refreshed together with this reading, so this age applies to them as well. A large value means wicketd has not successfully read this service processor recently, even if `refresh_error` is `None`.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Duration"
+                  }
+                ]
+              },
               "power_state": {
                 "description": "The host power state.",
                 "allOf": [
@@ -2557,6 +2635,7 @@
               }
             },
             "required": [
+              "age",
               "power_state",
               "serial_number",
               "state"
@@ -2846,7 +2925,7 @@
         "type": "object",
         "properties": {
           "last_seen": {
-            "description": "How long it has been since this switch's transceivers were read.\n\nThis is tracked per switch because wicketd polls each switch with its own task: a large value here means this switch's poller is wedged, even if the other switch is being read normally.",
+            "description": "How long it has been since this switch's transceivers were last read successfully.\n\nThis is tracked per switch because wicketd polls each switch with its own task: a large value here means this switch's transceivers have not been read recently (the switch may be unreachable, or the poller may be stuck), even if the other switch is being read normally.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/Duration"
@@ -2888,7 +2967,7 @@
         ]
       },
       "Transceiver": {
-        "description": "A single transceiver (optical module) in a switch front port.\n\nThe four categories of state (`status`, `vendor`, `monitors`, and `datapath`) are read independently, so each can be reported or fail on its own.",
+        "description": "A single transceiver (optical module) in a switch front port.\n\nThe five categories of state (`status`, `power`, `vendor`, `monitors`, and `datapath`) are read independently, so each can be reported or fail on its own.",
         "type": "object",
         "properties": {
           "datapath": {
@@ -2911,6 +2990,14 @@
             "description": "The front port the transceiver sits in (for example, `qsfp0`).",
             "type": "string"
           },
+          "power": {
+            "description": "Module power status.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TransceiverPower"
+              }
+            ]
+          },
           "status": {
             "description": "Module presence and power status.",
             "allOf": [
@@ -2932,37 +3019,44 @@
           "datapath",
           "monitors",
           "port",
+          "power",
           "status",
           "vendor"
         ]
       },
       "TransceiverDatapath": {
-        "description": "The per-lane datapath fault state of a transceiver module.\n\nSFF-8636 and CMIS modules describe their datapaths very differently, so this projection preserves each spec's native structure rather than flattening both into a single lane list. Clients can aggregate faults across both specs using the `iter_lane_faults` helper on this type.",
+        "description": "The per-lane datapath fault state of a transceiver module.\n\nSFF-8636 and CMIS modules describe their datapaths very differently, so this projection preserves each spec's native structure rather than flattening both into a single lane list. The Rust client types provide an `iter_lane_faults` helper to aggregate faults across both specs.",
         "oneOf": [
           {
             "description": "The datapath state could not be read.",
             "type": "object",
             "properties": {
-              "message": {
-                "description": "The error encountered while reading the datapath state.",
-                "type": "string"
-              },
-              "state": {
+              "kind": {
                 "type": "string",
                 "enum": [
                   "error"
                 ]
+              },
+              "message": {
+                "description": "The error encountered while reading the datapath state.",
+                "type": "string"
               }
             },
             "required": [
-              "message",
-              "state"
+              "kind",
+              "message"
             ]
           },
           {
             "description": "An SFF-8636 module.",
             "type": "object",
             "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "sff8636"
+                ]
+              },
               "lanes": {
                 "description": "The fault flags for each of the module's four lanes, in lane order.",
                 "type": "array",
@@ -2971,17 +3065,11 @@
                 },
                 "minItems": 4,
                 "maxItems": 4
-              },
-              "state": {
-                "type": "string",
-                "enum": [
-                  "sff8636"
-                ]
               }
             },
             "required": [
-              "lanes",
-              "state"
+              "kind",
+              "lanes"
             ]
           },
           {
@@ -3007,7 +3095,7 @@
                 },
                 "uniqueItems": true
               },
-              "state": {
+              "kind": {
                 "type": "string",
                 "enum": [
                   "cmis"
@@ -3016,7 +3104,7 @@
             },
             "required": [
               "datapaths",
-              "state"
+              "kind"
             ]
           }
         ]
@@ -3129,6 +3217,81 @@
             },
             "required": [
               "state"
+            ]
+          }
+        ]
+      },
+      "TransceiverPower": {
+        "description": "The power status of a transceiver module.",
+        "oneOf": [
+          {
+            "description": "The power mode could not be read.",
+            "type": "object",
+            "properties": {
+              "message": {
+                "description": "The error encountered while reading the power mode.",
+                "type": "string"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "error"
+                ]
+              }
+            },
+            "required": [
+              "message",
+              "state"
+            ]
+          },
+          {
+            "description": "The power mode was read.",
+            "type": "object",
+            "properties": {
+              "mode": {
+                "description": "The module's power mode.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/TransceiverPowerMode"
+                  }
+                ]
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "read"
+                ]
+              }
+            },
+            "required": [
+              "mode",
+              "state"
+            ]
+          }
+        ]
+      },
+      "TransceiverPowerMode": {
+        "description": "The power mode of a transceiver module.",
+        "oneOf": [
+          {
+            "description": "The module is powered off.",
+            "type": "string",
+            "enum": [
+              "off"
+            ]
+          },
+          {
+            "description": "The module is in low-power mode; it will not establish a link or carry traffic, but can be managed and queried.",
+            "type": "string",
+            "enum": [
+              "low"
+            ]
+          },
+          {
+            "description": "The module is in high-power mode.",
+            "type": "string",
+            "enum": [
+              "high"
             ]
           }
         ]

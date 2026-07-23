@@ -295,10 +295,17 @@ pub(crate) struct RotData {
     pub caboose_b: Fetched<SpComponentCaboose>,
     pub stage0: Stage0Fetch,
     pub stage0next: Stage0Fetch,
-    pub slot_a_error: Option<RotImageError>,
-    pub slot_b_error: Option<RotImageError>,
-    pub stage0_error: Option<RotImageError>,
-    pub stage0next_error: Option<RotImageError>,
+    /// Image validity as reported by the RoT, if this RoT version reports it.
+    pub image_errors: Option<RotImageErrors>,
+}
+
+/// Per-slot image validity as reported by an RoT that supports reporting them.
+#[derive(Clone, Debug)]
+pub(crate) struct RotImageErrors {
+    pub slot_a: Option<RotImageError>,
+    pub slot_b: Option<RotImageError>,
+    pub stage0: Option<RotImageError>,
+    pub stage0next: Option<RotImageError>,
 }
 
 /// A stage0 (or stage0next) bootloader caboose.
@@ -496,19 +503,13 @@ async fn sp_fetching_task(
         {
             match &state.rot {
                 RotState::V2 { active, .. } => {
-                    // RotState::V2 doesn't have the RotImageError information
-                    // required to produce the `..._error` fields, so we must
-                    // specify None here.
                     rot = Some(RotFetch::Read(Box::new(RotData {
                         active: *active,
                         caboose_a: Fetched::NotRead,
                         caboose_b: Fetched::NotRead,
                         stage0: Stage0Fetch::Unsupported,
                         stage0next: Stage0Fetch::Unsupported,
-                        slot_a_error: None,
-                        slot_b_error: None,
-                        stage0_error: None,
-                        stage0next_error: None,
+                        image_errors: None,
                     })));
                 }
                 RotState::V3 {
@@ -525,10 +526,12 @@ async fn sp_fetching_task(
                         caboose_b: Fetched::NotRead,
                         stage0: Stage0Fetch::Supported(Fetched::NotRead),
                         stage0next: Stage0Fetch::Supported(Fetched::NotRead),
-                        slot_a_error: *slot_a_error,
-                        slot_b_error: *slot_b_error,
-                        stage0_error: *stage0_error,
-                        stage0next_error: *stage0next_error,
+                        image_errors: Some(RotImageErrors {
+                            slot_a: *slot_a_error,
+                            slot_b: *slot_b_error,
+                            stage0: *stage0_error,
+                            stage0next: *stage0next_error,
+                        }),
                     })));
                 }
                 RotState::CommunicationFailed { message } => {

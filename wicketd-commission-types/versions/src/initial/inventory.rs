@@ -9,6 +9,7 @@
 //! the large and less stable internal inventory type graph (MGS inventory) does
 //! not leak into this stable API.
 
+use std::collections::BTreeSet;
 use std::net::Ipv6Addr;
 use std::time::Duration;
 
@@ -151,7 +152,7 @@ pub enum RotInfo {
     ///
     /// This is the SP's own report (from its `SpState.rot`), not a wicketd
     /// fetch error: the SP responded, but told us it could not talk to its RoT.
-    /// It therefore carries only a message, with no `kind` or `age`, unlike a
+    /// It therefore carries only a message, with no `age`, unlike a
     /// `FetchError`.
     Error {
         /// The failure the service processor reported for its root of trust.
@@ -172,9 +173,30 @@ pub enum RotInfo {
     },
 }
 
+/// Whether the root of trust considers a firmware image valid.
+///
+/// Older RoT firmware does not report image validity at all; `Unsupported`
+/// distinguishes that case from a definite `Valid`, the same way `Unsupported`
+/// does for transceiver fault flags.
+#[derive(
+    Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema,
+)]
+#[serde(tag = "validity", rename_all = "snake_case")]
+pub enum RotImageValidity {
+    /// The RoT reports this image as valid.
+    Valid,
+    /// The RoT reports this image as invalid.
+    Invalid {
+        /// Why the RoT considers the image invalid.
+        error: RotImageError,
+    },
+    /// This RoT firmware version does not report image validity.
+    Unsupported,
+}
+
 /// One root-of-trust firmware slot.
 ///
-/// The caboose says what firmware is in the slot; `image_error` says whether
+/// The caboose says what firmware is in the slot; `validity` says whether
 /// the RoT considers that image usable. The two are read from different
 /// sources, so a slot can have a readable caboose and still be unbootable.
 #[derive(
@@ -183,11 +205,8 @@ pub enum RotInfo {
 pub struct RotSlotInfo {
     /// The caboose of the image in this slot.
     pub caboose: SlotCaboose,
-    /// Why the RoT considers this image invalid, if it does.
-    ///
-    /// `None` means the image is valid, or that this RoT version does not
-    /// report per-slot image validity.
-    pub image_error: Option<RotImageError>,
+    /// Whether the RoT considers this image valid.
+    pub validity: RotImageValidity,
 }
 
 /// The stage0 (or stage0next) bootloader slot.
@@ -197,11 +216,8 @@ pub struct RotSlotInfo {
 pub struct RotStage0Info {
     /// The caboose of the bootloader in this slot.
     pub caboose: Stage0Caboose,
-    /// Why the RoT considers this bootloader image invalid, if it does.
-    ///
-    /// `None` means the image is valid, or that this RoT version does not
-    /// report per-slot image validity.
-    pub image_error: Option<RotImageError>,
+    /// Whether the RoT considers this bootloader image valid.
+    pub validity: RotImageValidity,
 }
 
 /// The service processor's state, read together from MGS.
@@ -219,9 +235,8 @@ pub enum SpStateInfo {
     Error {
         /// What went wrong reading the state.
         ///
-        /// The error's `kind` says whether the failure looks transient (so a
-        /// caller waiting for this service processor should keep waiting) or
-        /// permanent (so retrying is unlikely to help on its own).
+        /// The error's `message` describes the failure; its `age` says how
+        /// recently the failure was last observed.
         error: FetchError,
     },
     /// The service processor's state was read.
@@ -239,6 +254,14 @@ pub enum SpStateInfo {
         /// displacing the reading. `None` means the most recent fetch succeeded
         /// (or none has failed since).
         refresh_error: Option<FetchError>,
+        /// How long it has been since this reading was fetched.
+        ///
+        /// The cabooses and root-of-trust information for this service
+        /// processor are refreshed together with this reading, so this age
+        /// applies to them as well. A large value means wicketd has not
+        /// successfully read this service processor recently, even if
+        /// `refresh_error` is `None`.
+        age: Duration,
     },
 }
 
@@ -276,6 +299,17 @@ pub enum SpIgnitionInfo {
         power: bool,
         /// The faults ignition reports for the service processor.
         faults: IgnitionFaults,
+        /// Whether ignition controller 0 detects this target.
+        ///
+        /// Ignition is wired to both switches, and each switch's controller
+        /// reports detection independently. `false` on one controller while
+        /// the other detects the target indicates a broken ignition path (for
+        /// example, a bad cable) to that controller's switch.
+        ctrl_detect_0: bool,
+        /// Whether ignition controller 1 detects this target.
+        ///
+        /// See `ctrl_detect_0`.
+        ctrl_detect_1: bool,
     },
     /// Ignition reports the service processor as absent.
     Absent,
@@ -320,7 +354,8 @@ impl IdOrdItem for SpInfo {
 /// floating-point.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct SpInventory {
-    /// How long it has been since wicketd last heard from MGS.
+    /// How long it has been since wicketd last received a successful response
+    /// from MGS.
     ///
     /// A large value indicates that MGS might be down. This is a duration
     /// rather than a timestamp because wicketd and its clients keep
@@ -367,11 +402,13 @@ pub enum TransceiverInventory {
 pub struct SwitchTransceivers {
     /// The switch these transceivers belong to.
     pub switch: SwitchSlot,
-    /// How long it has been since this switch's transceivers were read.
+    /// How long it has been since this switch's transceivers were last read
+    /// successfully.
     ///
     /// This is tracked per switch because wicketd polls each switch with its
-    /// own task: a large value here means this switch's poller is wedged, even
-    /// if the other switch is being read normally.
+    /// own task: a large value here means this switch's transceivers have not
+    /// been read recently (the switch may be unreachable, or the poller may be
+    /// stuck), even if the other switch is being read normally.
     pub last_seen: Duration,
     /// The transceivers in this switch, keyed by front port.
     pub transceivers: IdOrdMap<Transceiver>,
@@ -389,7 +426,7 @@ impl IdOrdItem for SwitchTransceivers {
 
 /// A single transceiver (optical module) in a switch front port.
 ///
-/// The four categories of state (`status`, `vendor`, `monitors`, and
+/// The five categories of state (`status`, `power`, `vendor`, `monitors`, and
 /// `datapath`) are read independently, so each can be reported or fail on its
 /// own.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -398,6 +435,8 @@ pub struct Transceiver {
     pub port: String,
     /// Module presence and power status.
     pub status: TransceiverStatus,
+    /// Module power status.
+    pub power: TransceiverPower,
     /// Vendor identification.
     pub vendor: TransceiverVendor,
     /// Optical power monitors.
@@ -436,6 +475,39 @@ pub enum TransceiverStatus {
         /// Whether the module's power is good.
         power_good: bool,
     },
+}
+
+/// The power status of a transceiver module.
+#[derive(
+    Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema,
+)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum TransceiverPower {
+    /// The power mode could not be read.
+    Error {
+        /// The error encountered while reading the power mode.
+        message: String,
+    },
+    /// The power mode was read.
+    Read {
+        /// The module's power mode.
+        mode: TransceiverPowerMode,
+    },
+}
+
+/// The power mode of a transceiver module.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum TransceiverPowerMode {
+    /// The module is powered off.
+    Off,
+    /// The module is in low-power mode; it will not establish a link or carry
+    /// traffic, but can be managed and queried.
+    Low,
+    /// The module is in high-power mode.
+    High,
 }
 
 /// The vendor identification of a transceiver module.
@@ -506,10 +578,10 @@ pub enum ReceiverPower {
 ///
 /// SFF-8636 and CMIS modules describe their datapaths very differently, so this
 /// projection preserves each spec's native structure rather than flattening
-/// both into a single lane list. Clients can aggregate faults across both specs
-/// using the `iter_lane_faults` helper on this type.
+/// both into a single lane list. The Rust client types provide an
+/// `iter_lane_faults` helper to aggregate faults across both specs.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(tag = "state", rename_all = "snake_case")]
+#[serde(tag = "kind", rename_all = "snake_case")]
 pub enum TransceiverDatapath {
     /// The datapath state could not be read.
     Error {
@@ -663,7 +735,7 @@ pub struct SpInventoryParams {
     /// rather than returning their cached state. Service processors not listed
     /// here are returned from the cache.
     #[serde(default)]
-    pub force_refresh: Vec<SpIdentifier>,
+    pub force_refresh: BTreeSet<SpIdentifier>,
 }
 
 /// A sled as seen on the bootstrap network.

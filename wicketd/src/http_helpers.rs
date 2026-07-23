@@ -30,9 +30,6 @@ use crate::mgs::ShutdownInProgress;
 use crate::mgs::records_to_mgs_inventory;
 
 // Get the current inventory or return a 503 Unavailable.
-//
-// Note that 503 is returned if we can't get the MGS-based inventory. If we fail
-// to get the transceivers, that's not considered a fatal 503.
 pub(crate) async fn mgs_inventory_or_unavail(
     mgs_handle: &MgsHandle,
 ) -> Result<MgsV1Inventory, HttpError> {

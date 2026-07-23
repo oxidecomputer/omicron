@@ -24,7 +24,7 @@ use crate::http_helpers::shutdown_to_http;
 // This somewhat awkward `#[cfg(test)]` is because RotData is used by a test in
 // conversions.rs.
 #[cfg(test)]
-pub(crate) use self::inventory::RotData;
+pub(crate) use self::inventory::{RotData, RotImageErrors};
 pub(crate) use self::inventory::{
     Fetched, FetchedSpData, MgsFetchError, RotFetch, Stage0Fetch,
 };
@@ -1012,10 +1012,7 @@ mod tests {
                 caboose_b: Fetched::NotRead,
                 stage0: stage0.clone(),
                 stage0next: Stage0Fetch::Unsupported,
-                slot_a_error: None,
-                slot_b_error: None,
-                stage0_error: None,
-                stage0next_error: None,
+                image_errors: None,
             }));
             let record = record_with_data(sled(0), Fetched::NotRead, rot);
             let rot_inventory = record

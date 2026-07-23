@@ -277,7 +277,7 @@ pub enum RunningProgress {
     /// The step reported progress.
     ///
     /// `progress` carries the counter if the report included one.
-    Counter {
+    Progress {
         /// The reported progress counter, if the report included one.
         progress: Option<StepProgress>,
     },

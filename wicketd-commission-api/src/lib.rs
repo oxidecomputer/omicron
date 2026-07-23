@@ -33,7 +33,7 @@ pub trait WicketdCommissionApi {
     ///
     /// Returns 400 if the SP is unknown.
     #[endpoint {
-        method = GET,
+        method = POST,
         path = "/inventory/sps",
     }]
     async fn get_sp_inventory(
@@ -149,8 +149,8 @@ pub trait WicketdCommissionApi {
 
     /// Update (a subset of) the current RSS configuration
     ///
-    /// Sensitive values (certificates and the recovery password hash) are not
-    /// set through this endpoint.
+    /// Sensitive values (certificates, the recovery password hash, and BGP
+    /// authentication keys) are not set through this endpoint.
     #[endpoint {
         method = PUT,
         path = "/rack-setup/config",

@@ -38,7 +38,8 @@ pub use omicron_common::api::internal::shared::{
 /// The portion of the RSS configuration that can be posted in one shot.
 ///
 /// It is provided by the operator uploading a TOML file. Sensitive values
-/// (certificates and the recovery password hash) are set separately.
+/// (certificates, the recovery password hash, and BGP authentication keys) are
+/// set separately.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct PutRssUserConfigInsensitive {
@@ -631,9 +632,15 @@ impl JsonSchema for UserSpecifiedImportExportPolicy {
 /// This shares its name with the validated `omicron_passwords::NewPasswordHash`
 /// it converts into, but holds an unvalidated string. The hash is validated (as
 /// an Argon2id PHC string) only at the wicketd conversion boundary.
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[derive(Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 #[serde(transparent)]
 pub struct NewPasswordHash(pub String);
+
+impl fmt::Debug for NewPasswordHash {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("NewPasswordHash").field(&"********").finish()
+    }
+}
 
 /// The body of a request to set the recovery-silo user password hash.
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]

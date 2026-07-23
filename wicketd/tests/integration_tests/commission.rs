@@ -21,9 +21,9 @@ use wicket_common::example::ExampleRackSetupData;
 use wicket_common::rack_setup::CurrentRssUserConfigInsensitive;
 use wicketd_commission_types::rack_setup::PutRssUserConfigInsensitive;
 use wicketd_commission_types_versions::latest::inventory::{
-    IgnitionFaults, LocationInfo, PowerState, RotInfo, SlotCaboose,
-    SpIdentifier, SpIgnitionInfo, SpInfo, SpInventoryParams, SpStateInfo,
-    SpType, SwitchSlot, TransceiverInventory,
+    IgnitionFaults, LocationInfo, PowerState, RotImageValidity, RotInfo,
+    SlotCaboose, SpIdentifier, SpIgnitionInfo, SpInfo, SpInventoryParams,
+    SpStateInfo, SpType, SwitchSlot, TransceiverInventory,
 };
 use wicketd_commission_types_versions::latest::rack_setup::{
     BgpAuthKey, BgpAuthKeyId, NewPasswordHash, PutRecoveryUserPasswordHash,
@@ -95,11 +95,7 @@ async fn test_commission_inventory() {
     let sled0 = sps
         .get(&SpIdentifier { typ: SpType::Sled, slot: 0 })
         .expect("sled 0 present");
-    assert_eq!(
-        sled0.state,
-        sim_gimlet_state("SimGimlet00"),
-        "sled 0 state as reported by sp-sim"
-    );
+    assert_sim_gimlet_state(&sled0.state, "SimGimlet00");
 
     let SlotCaboose::Read { caboose: sp_caboose } = &sled0.caboose_active
     else {
@@ -113,8 +109,9 @@ async fn test_commission_inventory() {
         panic!("sled 0 RoT info should be read: {sled0:?}");
     };
     assert_eq!(
-        slot_a.image_error, None,
-        "sp-sim reports no image error for RoT slot A: {slot_a:?}",
+        slot_a.validity,
+        RotImageValidity::Valid,
+        "sp-sim reports RoT slot A as a valid V3 image: {slot_a:?}",
     );
     let SlotCaboose::Read { caboose: rot_caboose } = &slot_a.caboose else {
         panic!("sled 0 RoT slot A caboose should be read: {slot_a:?}");
@@ -129,11 +126,7 @@ async fn test_commission_inventory() {
     let sled1 = sps
         .get(&SpIdentifier { typ: SpType::Sled, slot: 1 })
         .expect("sled 1 present");
-    assert_eq!(
-        sled1.state,
-        sim_gimlet_state("SimGimlet01"),
-        "sled 1 state as reported by sp-sim"
-    );
+    assert_sim_gimlet_state(&sled1.state, "SimGimlet01");
 
     for sled in [&sled0, &sled1] {
         assert_eq!(
@@ -144,7 +137,7 @@ async fn test_commission_inventory() {
     }
 
     // Force a refresh.
-    let force_refresh: Vec<_> = sps.iter().map(|sp| sp.id).collect();
+    let force_refresh: BTreeSet<_> = sps.iter().map(|sp| sp.id).collect();
     let refreshed = ctx
         .commission_client
         .get_sp_inventory(&SpInventoryParams { force_refresh })
@@ -173,16 +166,14 @@ async fn test_commission_inventory() {
         .sps
         .get(&SpIdentifier { typ: SpType::Sled, slot: 0 })
         .expect("sled 0 present after forced refresh");
-    assert_eq!(
-        refreshed_sled0.state,
-        sim_gimlet_state("SimGimlet00"),
-        "sled 0 state after forced refresh: {refreshed:?}"
-    );
+    assert_sim_gimlet_state(&refreshed_sled0.state, "SimGimlet00");
 
     let err = ctx
         .commission_client
         .get_sp_inventory(&SpInventoryParams {
-            force_refresh: vec![SpIdentifier { typ: SpType::Sled, slot: 99 }],
+            force_refresh: [SpIdentifier { typ: SpType::Sled, slot: 99 }]
+                .into_iter()
+                .collect(),
         })
         .await
         .expect_err("force_refresh of a nonexistent SP is rejected");
@@ -605,14 +596,25 @@ fn sled_cabooses_ready(sp: &SpInfo) -> bool {
     sp.caboose_active.is_read() && slot_a.caboose.is_read()
 }
 
-fn sim_gimlet_state(serial_number: &str) -> SpStateInfo {
-    SpStateInfo::Read {
-        serial_number: serial_number.to_string(),
-        // sp-sim gimlets start in power state A0 (see sp-sim/src/gimlet.rs).
-        power_state: PowerState::A0,
-        // The sim reads succeed, so no refresh error rides alongside.
-        refresh_error: None,
-    }
+fn assert_sim_gimlet_state(state: &SpStateInfo, serial_number: &str) {
+    let SpStateInfo::Read {
+        serial_number: actual_serial_number,
+        power_state,
+        refresh_error,
+        age,
+    } = state
+    else {
+        panic!("sled state as reported by sp-sim should be read: {state:?}");
+    };
+    assert_eq!(actual_serial_number, serial_number);
+    // sp-sim gimlets start in power state A0 (see sp-sim/src/gimlet.rs).
+    assert_eq!(*power_state, PowerState::A0);
+    // The sim reads succeed.
+    assert_eq!(*refresh_error, None);
+    assert!(
+        *age < Duration::from_secs(30),
+        "a just-read sim SP has a small reading age, got {age:?}",
+    );
 }
 
 fn sim_ignition_present() -> SpIgnitionInfo {
@@ -621,6 +623,8 @@ fn sim_ignition_present() -> SpIgnitionInfo {
     SpIgnitionInfo::Present {
         power: true,
         faults: IgnitionFaults { a3: false, a2: false, rot: false, sp: false },
+        ctrl_detect_0: true,
+        ctrl_detect_1: false,
     }
 }
 
@@ -630,7 +634,7 @@ fn sim_ignition_present() -> SpIgnitionInfo {
 // to be changed with this hash are the instructions given to individuals
 // running this program who then want to log in as this user. For more on what's
 // supported, see the API docs for this type and the specific constraints in the
-// nexus-passwords crate.
+// omicron-passwords crate.
 //
 // The hash was generated via:
 // `cargo run --example argon2 -- --input oxide`.

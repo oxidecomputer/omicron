@@ -17,6 +17,7 @@ pub mod inventory {
     pub use crate::v1::inventory::PowerState;
     pub use crate::v1::inventory::ReceiverPower;
     pub use crate::v1::inventory::RotImageError;
+    pub use crate::v1::inventory::RotImageValidity;
     pub use crate::v1::inventory::RotInfo;
     pub use crate::v1::inventory::RotSlot;
     pub use crate::v1::inventory::RotSlotInfo;
@@ -37,6 +38,8 @@ pub mod inventory {
     pub use crate::v1::inventory::TransceiverDatapath;
     pub use crate::v1::inventory::TransceiverInventory;
     pub use crate::v1::inventory::TransceiverMonitors;
+    pub use crate::v1::inventory::TransceiverPower;
+    pub use crate::v1::inventory::TransceiverPowerMode;
     pub use crate::v1::inventory::TransceiverStatus;
     pub use crate::v1::inventory::TransceiverVendor;
 }

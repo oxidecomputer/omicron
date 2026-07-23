@@ -8,12 +8,13 @@ use std::collections::BTreeMap;
 use std::net::Ipv6Addr;
 
 use bootstrap_agent_lockstep_types as bootstrap;
+use gateway_types::rot::RotImageError;
 use iddqd::IdOrdMap;
 use sled_hardware_types::Baseboard;
 use transceiver_controller::message::ExtendedStatus;
 use transceiver_controller::{
     CmisDatapath, CmisDatapathState, CmisLaneStatus, Datapath, Monitors,
-    ReceiverPower, Sff8636Datapath, Vendor, VendorInfo,
+    PowerMode, PowerState, ReceiverPower, Sff8636Datapath, Vendor, VendorInfo,
 };
 use wicket_common::inventory::{
     SpComponentCaboose, SpIgnition, SpType, Transceiver,
@@ -104,21 +105,39 @@ fn rot_info_to_ct(data: Option<&FetchedSpData>) -> ct_inv::RotInfo {
             active: rot.active,
             slot_a: ct_inv::RotSlotInfo {
                 caboose: slot_caboose_to_ct(&rot.caboose_a),
-                image_error: rot.slot_a_error,
+                validity: image_validity(
+                    rot.image_errors.as_ref().map(|e| e.slot_a),
+                ),
             },
             slot_b: ct_inv::RotSlotInfo {
                 caboose: slot_caboose_to_ct(&rot.caboose_b),
-                image_error: rot.slot_b_error,
+                validity: image_validity(
+                    rot.image_errors.as_ref().map(|e| e.slot_b),
+                ),
             },
             stage0: ct_inv::RotStage0Info {
                 caboose: stage0_caboose_to_ct(&rot.stage0),
-                image_error: rot.stage0_error,
+                validity: image_validity(
+                    rot.image_errors.as_ref().map(|e| e.stage0),
+                ),
             },
             stage0next: ct_inv::RotStage0Info {
                 caboose: stage0_caboose_to_ct(&rot.stage0next),
-                image_error: rot.stage0next_error,
+                validity: image_validity(
+                    rot.image_errors.as_ref().map(|e| e.stage0next),
+                ),
             },
         },
+    }
+}
+
+fn image_validity(
+    error: Option<Option<RotImageError>>,
+) -> ct_inv::RotImageValidity {
+    match error {
+        None => ct_inv::RotImageValidity::Unsupported,
+        Some(None) => ct_inv::RotImageValidity::Valid,
+        Some(Some(error)) => ct_inv::RotImageValidity::Invalid { error },
     }
 }
 
@@ -128,14 +147,14 @@ fn ignition_to_ct(ignition: Option<SpIgnition>) -> ct_inv::SpIgnitionInfo {
         Some(SpIgnition::Absent) => ct_inv::SpIgnitionInfo::Absent,
         Some(SpIgnition::Present {
             power,
+            ctrl_detect_0,
+            ctrl_detect_1,
             flt_a3,
             flt_a2,
             flt_rot,
             flt_sp,
-            // The remaining fields are not projected by the commission API.
+            // The ignition target's id is not projected by the commission API.
             id: _,
-            ctrl_detect_0: _,
-            ctrl_detect_1: _,
         }) => ct_inv::SpIgnitionInfo::Present {
             power,
             faults: ct_inv::IgnitionFaults {
@@ -144,6 +163,8 @@ fn ignition_to_ct(ignition: Option<SpIgnition>) -> ct_inv::SpIgnitionInfo {
                 rot: flt_rot,
                 sp: flt_sp,
             },
+            ctrl_detect_0,
+            ctrl_detect_1,
         },
     }
 }
@@ -165,10 +186,10 @@ pub(crate) fn sp_info_to_ct(record: &SpRecord) -> ct_inv::SpInfo {
             components: _,
             caboose_active,
             caboose_inactive,
+            mgs_received,
             // The RoT is projected separately by `rot_info_to_ct` below, off the
             // whole `data`.
             rot: _,
-            mgs_received: _,
         }) => (
             ct_inv::SpStateInfo::Read {
                 serial_number: state.serial_number.clone(),
@@ -176,6 +197,7 @@ pub(crate) fn sp_info_to_ct(record: &SpRecord) -> ct_inv::SpInfo {
                 refresh_error: last_state_fetch_error
                     .as_ref()
                     .map(fetch_error_to_ct),
+                age: mgs_received.elapsed(),
             },
             slot_caboose_to_ct(caboose_active),
             slot_caboose_to_ct(caboose_inactive),
@@ -270,18 +292,38 @@ fn transceiver_to_ct(transceiver: Transceiver) -> ct_inv::Transceiver {
     let Transceiver {
         port,
         status,
+        power,
         vendor,
         datapath,
         monitors,
-        // The power mode is not projected by the commission API.
-        power: _,
     } = transceiver;
     ct_inv::Transceiver {
         port,
         status: transceiver_status_to_ct(status),
+        power: transceiver_power_to_ct(power),
         vendor: transceiver_vendor_to_ct(vendor),
         monitors: transceiver_monitors_to_ct(monitors),
         datapath: transceiver_datapath_to_ct(datapath),
+    }
+}
+
+fn transceiver_power_to_ct(
+    power: Result<PowerMode, String>,
+) -> ct_inv::TransceiverPower {
+    match power {
+        Err(message) => ct_inv::TransceiverPower::Error { message },
+        Ok(PowerMode {
+            state,
+            // The software-override flag is not projected by the commission API.
+            software_override: _,
+        }) => {
+            let mode = match state {
+                PowerState::Off => ct_inv::TransceiverPowerMode::Off,
+                PowerState::Low => ct_inv::TransceiverPowerMode::Low,
+                PowerState::High => ct_inv::TransceiverPowerMode::High,
+            };
+            ct_inv::TransceiverPower::Read { mode }
+        }
     }
 }
 
@@ -535,7 +577,7 @@ pub(crate) fn password_hash_to_internal(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::mgs::RotData;
+    use crate::mgs::{RotData, RotImageErrors};
     use gateway_types::component::PowerState;
     use sled_agent_types::early_networking::SwitchSlot;
     use std::collections::BTreeMap;
@@ -547,7 +589,7 @@ mod tests {
         Oui, OutputStatus, ReceiverPower, SffComplianceCode,
     };
     use wicket_common::inventory::{
-        RotSlot, RotState, SpIdentifier, SpState, SpType,
+        RotSlot, RotState, SpIdentifier, SpIgnitionSystemType, SpState, SpType,
     };
 
     fn sled(slot: u16) -> SpIdentifier {
@@ -788,12 +830,14 @@ mod tests {
             serial_number,
             power_state,
             refresh_error,
+            age,
         } = sp_info_to_ct(&record).state
         else {
             panic!("a stale-but-real reading projects to Read");
         };
         assert_eq!(serial_number, "SimGimlet01");
         assert_eq!(power_state, PowerState::A0);
+        assert!(age < Duration::from_secs(30));
         let refresh_error = refresh_error
             .expect("the concurrent failure is surfaced on refresh_error");
         assert_eq!(refresh_error.message, "mgs flaked");
@@ -805,15 +849,22 @@ mod tests {
             data: Some(stale_reading()),
             last_state_fetch_error: None,
         };
+        let ct_inv::SpStateInfo::Read {
+            serial_number,
+            power_state,
+            refresh_error,
+            age,
+        } = sp_info_to_ct(&record).state
+        else {
+            panic!("a reading with no recorded error projects to Read");
+        };
+        assert_eq!(serial_number, "SimGimlet01");
+        assert_eq!(power_state, PowerState::A0);
         assert_eq!(
-            sp_info_to_ct(&record).state,
-            ct_inv::SpStateInfo::Read {
-                serial_number: "SimGimlet01".to_string(),
-                power_state: PowerState::A0,
-                refresh_error: None,
-            },
+            refresh_error, None,
             "a reading with no recorded error carries no refresh_error",
         );
+        assert!(age < Duration::from_secs(30));
     }
 
     #[test]
@@ -913,10 +964,12 @@ mod tests {
             stage0next: Stage0Fetch::Supported(Fetched::Read(sample_caboose(
                 "stage0next",
             ))),
-            slot_a_error: None,
-            slot_b_error: Some(ct_inv::RotImageError::Signature),
-            stage0_error: None,
-            stage0next_error: Some(ct_inv::RotImageError::BadMagic),
+            image_errors: Some(RotImageErrors {
+                slot_a: None,
+                slot_b: Some(ct_inv::RotImageError::Signature),
+                stage0: None,
+                stage0next: Some(ct_inv::RotImageError::BadMagic),
+            }),
         }));
         let data =
             fetched_data(sp_state("serial", rot_state_v3_with_errors()), rot);
@@ -938,26 +991,77 @@ mod tests {
             panic!("expected slot A caboose read, got {:?}", slot_a.caboose);
         };
         assert_eq!(caboose.version, "rot-a");
-        assert_eq!(slot_a.image_error, None);
+        assert_eq!(slot_a.validity, ct_inv::RotImageValidity::Valid);
 
         // Slot B: caboose fetch failed, and the V3 state reports an image error.
         let ct_inv::SlotCaboose::Error { error } = &slot_b.caboose else {
             panic!("expected slot B caboose error, got {:?}", slot_b.caboose);
         };
         assert_eq!(error.message, "slot b caboose failed");
-        assert_eq!(slot_b.image_error, Some(ct_inv::RotImageError::Signature));
+        assert_eq!(
+            slot_b.validity,
+            ct_inv::RotImageValidity::Invalid {
+                error: ct_inv::RotImageError::Signature,
+            },
+        );
 
         // stage0: supported but unread; stage0next: read, with an image error.
         assert_eq!(stage0.caboose, ct_inv::Stage0Caboose::NotRead);
-        assert_eq!(stage0.image_error, None);
+        assert_eq!(stage0.validity, ct_inv::RotImageValidity::Valid);
         let ct_inv::Stage0Caboose::Read { caboose } = &stage0next.caboose
         else {
             panic!("expected stage0next read, got {:?}", stage0next.caboose);
         };
         assert_eq!(caboose.version, "stage0next");
         assert_eq!(
-            stage0next.image_error,
-            Some(ct_inv::RotImageError::BadMagic),
+            stage0next.validity,
+            ct_inv::RotImageValidity::Invalid {
+                error: ct_inv::RotImageError::BadMagic,
+            },
+        );
+    }
+
+    #[test]
+    fn rot_info_read_projects_unsupported_validity_for_v2() {
+        let rot = RotFetch::Read(Box::new(RotData {
+            active: RotSlot::A,
+            caboose_a: Fetched::NotRead,
+            caboose_b: Fetched::NotRead,
+            stage0: Stage0Fetch::Unsupported,
+            stage0next: Stage0Fetch::Unsupported,
+            image_errors: None,
+        }));
+        let data = fetched_data(
+            sp_state(
+                "serial",
+                RotState::V2 {
+                    active: RotSlot::A,
+                    persistent_boot_preference: RotSlot::A,
+                    pending_persistent_boot_preference: None,
+                    transient_boot_preference: None,
+                    slot_a_sha3_256_digest: None,
+                    slot_b_sha3_256_digest: None,
+                },
+            ),
+            rot,
+        );
+
+        let ct_inv::RotInfo::Read {
+            slot_a,
+            slot_b,
+            stage0,
+            stage0next,
+            ..
+        } = rot_info_to_ct(Some(&data))
+        else {
+            panic!("expected a read RoT");
+        };
+        assert_eq!(slot_a.validity, ct_inv::RotImageValidity::Unsupported);
+        assert_eq!(slot_b.validity, ct_inv::RotImageValidity::Unsupported);
+        assert_eq!(stage0.validity, ct_inv::RotImageValidity::Unsupported);
+        assert_eq!(
+            stage0next.validity,
+            ct_inv::RotImageValidity::Unsupported,
         );
     }
 
@@ -1218,7 +1322,6 @@ mod tests {
             status: Ok(ExtendedStatus::PRESENT
                 | ExtendedStatus::ENABLED
                 | ExtendedStatus::POWER_GOOD),
-            // The power mode is not included in the projection.
             power: Err("power mode not read".to_string()),
             vendor: Ok(sample_vendor_info()),
             datapath: Ok(Datapath::Sff8636 {
@@ -1267,6 +1370,77 @@ mod tests {
                 name: "Acme".to_string(),
                 part: "PN-1".to_string(),
                 serial: "SN-1".to_string(),
+            },
+        );
+        assert_eq!(
+            port.power,
+            ct_inv::TransceiverPower::Error {
+                message: "power mode not read".to_string(),
+            },
+        );
+    }
+
+    #[test]
+    fn transceiver_power_projects_modes() {
+        assert_eq!(
+            transceiver_power_to_ct(Err("power mode read failed".to_string())),
+            ct_inv::TransceiverPower::Error {
+                message: "power mode read failed".to_string(),
+            },
+        );
+
+        let cases = [
+            (
+                transceiver_controller::PowerState::Off,
+                ct_inv::TransceiverPowerMode::Off,
+            ),
+            (
+                transceiver_controller::PowerState::Low,
+                ct_inv::TransceiverPowerMode::Low,
+            ),
+            (
+                transceiver_controller::PowerState::High,
+                ct_inv::TransceiverPowerMode::High,
+            ),
+        ];
+        for (state, expected) in cases {
+            assert_eq!(
+                transceiver_power_to_ct(Ok(PowerMode {
+                    state,
+                    software_override: Some(true),
+                })),
+                ct_inv::TransceiverPower::Read { mode: expected },
+                "power state {state:?} projects to {expected:?}",
+            );
+        }
+    }
+
+    #[test]
+    fn ignition_present_projects_ctrl_detect() {
+        let projected = ignition_to_ct(Some(SpIgnition::Present {
+            id: SpIgnitionSystemType::Gimlet,
+            power: true,
+            // Use distinct values for ctrl_detect_0 and ctrl_detect_1 to ensure
+            // that the values aren't accidentally transposed during conversion.
+            ctrl_detect_0: true,
+            ctrl_detect_1: false,
+            flt_a3: false,
+            flt_a2: false,
+            flt_rot: false,
+            flt_sp: false,
+        }));
+        assert_eq!(
+            projected,
+            ct_inv::SpIgnitionInfo::Present {
+                power: true,
+                faults: ct_inv::IgnitionFaults {
+                    a3: false,
+                    a2: false,
+                    rot: false,
+                    sp: false,
+                },
+                ctrl_detect_0: true,
+                ctrl_detect_1: false,
             },
         );
     }

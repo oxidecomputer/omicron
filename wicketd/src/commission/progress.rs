@@ -137,13 +137,13 @@ fn running_progress<S: EngineSpec>(
     kind: &ProgressEventKind<S>,
 ) -> RunningProgress {
     match kind.leaf_progress() {
-        LeafProgress::Progress(counter) => RunningProgress::Counter {
+        LeafProgress::Progress(counter) => RunningProgress::Progress {
             progress: counter.map(step_progress_from_counter),
         },
         LeafProgress::WaitingForProgress => RunningProgress::WaitingForProgress,
         // Unknown means an event couldn't be deserialized. The EventBuffer
         // drops these events so this branch is unreachable in practice.
-        LeafProgress::Unknown => RunningProgress::Counter { progress: None },
+        LeafProgress::Unknown => RunningProgress::Progress { progress: None },
     }
 }
 
