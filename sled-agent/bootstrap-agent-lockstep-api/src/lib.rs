@@ -76,7 +76,7 @@ pub trait BootstrapAgentLockstepApi {
         body: TypedBody<MultirackJoinRequest>,
     ) -> Result<HttpResponseOk<MultirackJoinUuid>, HttpError>;
 
-    /// Get the current status of the multirack join
+    /// Get the current state of the multirack join
     #[endpoint {
         method = GET,
         path = "/multirack-join",

@@ -246,8 +246,18 @@ impl RssAccess {
                 Err(RssAccessError::InitializationPanicked)
             }
 
-            RssStatus::MultirackJoinInProgress { .. } => {
-                Err(RssAccessError::MultirackJoinInProgress)
+            RssStatus::MultirackJoinInProgress { id, input_tx, .. } => {
+                // We allow updating the input so that we don't always require a
+                // clean slate like in RSS.
+                input_tx.send_if_modified(|saved| {
+                    if &request != saved {
+                        *saved = request;
+                        true
+                    } else {
+                        false
+                    }
+                });
+                Ok(*id)
             }
             RssStatus::MultirackJoinCompleted { .. } => {
                 Err(RssAccessError::MultirackJoinCompleted)
