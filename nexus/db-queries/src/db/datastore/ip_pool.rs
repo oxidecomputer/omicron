@@ -836,16 +836,24 @@ impl DataStore {
         opctx: &OpContext,
         pool: IpPool,
     ) -> CreateResult<IpPool> {
-        use nexus_db_schema::schema::ip_pool::dsl;
+        let conn = self.pool_connection_authorized(opctx).await?;
+        Self::ip_pool_create_on_connection(&conn, opctx, pool).await
+    }
+
+    pub(crate) async fn ip_pool_create_on_connection(
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        opctx: &OpContext,
+        pool: IpPool,
+    ) -> CreateResult<IpPool> {
         opctx
             .authorize(authz::Action::CreateChild, &authz::IP_POOL_LIST)
             .await?;
+        use nexus_db_schema::schema::ip_pool::dsl;
         let pool_name = pool.name().as_str().to_string();
-
         diesel::insert_into(dsl::ip_pool)
             .values(pool)
             .returning(IpPool::as_returning())
-            .get_result_async(&*self.pool_connection_authorized(opctx).await?)
+            .get_result_async(conn)
             .await
             .map_err(|e| {
                 public_error_from_diesel(
@@ -2678,6 +2686,7 @@ mod test {
     };
     use crate::db::pagination::Paginator;
     use crate::db::pub_test_utils::TestDatabase;
+    use crate::db::pub_test_utils::helpers::create_service_ip_pool;
     use crate::db::raw_query_builder::expectorate_query_contents;
     use assert_matches::assert_matches;
     use async_bb8_diesel::AsyncRunQueryDsl as _;
@@ -2931,6 +2940,10 @@ mod test {
             dev::test_setup_log("test_ip_pools_assigned_to_system_services");
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // Create the v4 and v6 system-service pools the loop expects to find.
+        create_service_ip_pool(opctx, datastore, IpVersion::V4.into()).await;
+        create_service_ip_pool(opctx, datastore, IpVersion::V6.into()).await;
 
         for version in [IpVersion::V4, IpVersion::V6] {
             // confirm system services pools are identified correctly
@@ -4298,6 +4311,7 @@ mod test {
                 .expect("Failed to create IP pool");
             oxide_pools.push(pool);
         }
+        oxide_pools.sort_by_key(|pool| pool.id());
         assert_eq!(oxide_pools.len(), N_POOLS);
 
         let fetch_paginated = |assignment| async move {
@@ -4329,33 +4343,13 @@ mod test {
         assert_eq!(customer_pools.len(), customer_pools_found.len());
         assert_eq!(customer_pools, customer_pools_found);
 
-        // Paginate all those assigned for system services use.
-        //
-        // Note that we have 2 extra pools today, which are the builtin service
-        // pools. These will go away in the future, so we'll unfortunately need
-        // to update this test at that time. Until then, fetch those service
-        // pools explicitly and add them.
+        // Paginate all those assigned for system services use. These are
+        // exactly the pools we created above; the test datastore has no other
+        // system-service pools.
         let oxide_reserved_found =
             fetch_paginated(IpPoolAssignment::SystemServices).await;
-        let pools = datastore
-            .ip_pools_service_lookup_both_versions(opctx)
-            .await
-            .unwrap();
-        let mut all_oxide_pools = pools
-            .ipv4
-            .iter()
-            .map(|p| &p.db_pool)
-            .chain(pools.ipv6.iter().map(|p| &p.db_pool))
-            .cloned()
-            .collect::<Vec<_>>();
-        all_oxide_pools.sort_by_key(|pool| pool.id());
-        assert_eq!(oxide_reserved_found, all_oxide_pools);
-
-        // And assert all the ones we made are in here too.
-        assert_eq!(all_oxide_pools.len(), oxide_pools.len() + 2);
-        for p in oxide_pools.iter() {
-            assert!(all_oxide_pools.contains(p));
-        }
+        assert_eq!(oxide_pools.len(), oxide_reserved_found.len());
+        assert_eq!(oxide_pools, oxide_reserved_found);
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -5737,14 +5731,13 @@ mod test {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
-        // Fetch the pools.
-        let pools = datastore
-            .ip_pools_service_lookup_both_versions(opctx)
-            .await
-            .unwrap();
-
-        let ipv4 = pools.ipv4.into_iter().next().unwrap();
-        let ipv6 = pools.ipv6.into_iter().next().unwrap();
+        // Create the v4 and v6 system-service pools we exercise below.
+        let ipv4 =
+            create_service_ip_pool(opctx, datastore, IpVersion::V4.into())
+                .await;
+        let ipv6 =
+            create_service_ip_pool(opctx, datastore, IpVersion::V6.into())
+                .await;
 
         // We should be able to delete one of these.
         let _ = datastore
@@ -5811,14 +5804,13 @@ mod test {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
-        // Fetch the pools.
-        let pools = datastore
-            .ip_pools_service_lookup_both_versions(opctx)
-            .await
-            .unwrap();
-
-        let ipv4 = pools.ipv4.into_iter().next().unwrap();
-        let ipv6 = pools.ipv6.into_iter().next().unwrap();
+        // Create the v4 and v6 system-service pools we exercise below.
+        let ipv4 =
+            create_service_ip_pool(opctx, datastore, IpVersion::V4.into())
+                .await;
+        let ipv6 =
+            create_service_ip_pool(opctx, datastore, IpVersion::V6.into())
+                .await;
 
         // We should be able to assign one of these for silo use.
         let _ = datastore
@@ -5895,13 +5887,13 @@ mod test {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
-        // Get pool, add a range, allocate an external IP.
-        let pools = datastore
-            .ip_pools_service_lookup_both_versions(opctx)
-            .await
-            .unwrap();
-        let ipv4 = pools.ipv4.into_iter().next().unwrap();
-
+        // Create the v4 system-service pool, add a range, allocate an external
+        // IP. Also create a v6 pool so that reassigning the v4 pool for silo
+        // use is allowed at the end (more than one system-service pool remains).
+        let ipv4 =
+            create_service_ip_pool(opctx, datastore, IpVersion::V4.into())
+                .await;
+        create_service_ip_pool(opctx, datastore, IpVersion::V6.into()).await;
         let ip_range = IpRange::V4(Ipv4Range {
             first: Ipv4Addr::new(1, 1, 1, 1),
             last: Ipv4Addr::new(1, 1, 1, 10),

@@ -1070,6 +1070,7 @@ impl DataStore {
 mod tests {
     use super::*;
     use crate::db::pub_test_utils::TestDatabase;
+    use crate::db::pub_test_utils::helpers::create_service_ip_pool;
     use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
     use nexus_db_fixed_data::vpc_subnet::NEXUS_VPC_SUBNET;
     use nexus_types::external_api::instance::PrivateIpStackCreate;
@@ -1102,6 +1103,15 @@ mod tests {
             dev::test_setup_log("test_service_network_interfaces_list");
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // A system-service IP pool must exist for listing and creating service
+        // NICs to authorize against.
+        create_service_ip_pool(
+            &opctx,
+            &datastore,
+            omicron_common::api::external::IpVersion::V4,
+        )
+        .await;
 
         // No IPs, to start
         let nics = read_all_service_nics(&datastore, &opctx).await;
