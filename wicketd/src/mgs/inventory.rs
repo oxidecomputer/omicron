@@ -9,6 +9,7 @@ use gateway_client::types::SpComponentInfo;
 use gateway_messages::SpComponent;
 use gateway_types::component::SpState;
 use gateway_types::ignition::SpIgnition;
+use gateway_types::rot::RotImageError;
 use gateway_types::rot::RotState;
 use slog::Logger;
 use slog::warn;
@@ -21,6 +22,7 @@ use tokio::time::Instant;
 use tokio::time::interval;
 use tokio_stream::wrappers::ReceiverStream;
 use wicket_common::inventory::RotInventory;
+use wicket_common::inventory::RotSlot;
 use wicket_common::inventory::SpIdentifier;
 
 // Frequency at which we fetch state from our local ignition controller (via our
@@ -155,17 +157,10 @@ async fn ignition_fetching_task(
 pub(super) enum SpFetchResult {
     /// The SP's state was fetched successfully.
     ///
-    /// The returned `FetchedSpData` can still carry partial results, from two
-    /// sources:
-    ///
-    /// 1. The follow-up sub-fetches that run after `sp_get` (SP components, SP
-    ///    cabooses, and RoT cabooses) record their own failures. Most such
-    ///    failures are recorded as `None`; the RoT stage0 and stage0next cabooses
-    ///    instead record failures as `Some(None)`, where the outer `Some` records
-    ///    that the slot exists and the inner `None` records the failed fetch.
-    /// 2. If `sp_get` succeeds but the state reports
-    ///    `RotState::CommunicationFailed`, the result carries `rot: None` and
-    ///    no RoT sub-fetch is attempted at all.
+    /// There may still be partial failures here, because the follow-up
+    /// sub-fetches (for SP components and cabooses) that run after a successful
+    /// `sp_get` each record their own outcome as a [`Fetched`] field on the
+    /// returned data rather than failing the whole result.
     Data(
         // Boxed because `FetchedSpData` is large relative to the error variant.
         Box<FetchedSpData>,
@@ -185,8 +180,10 @@ pub(super) enum SpFetchResult {
 /// * One of the variants holds an unread response body, and we don't want to
 ///   hold on to an open connection persistently.
 #[derive(Clone, Debug)]
-pub struct MgsFetchError {
+pub(crate) struct MgsFetchError {
+    #[cfg_attr(not(test), expect(dead_code))]
     pub message: String,
+    #[expect(dead_code)]
     pub observed_at: Instant,
 }
 
@@ -207,11 +204,124 @@ impl MgsFetchError {
 #[derive(Clone, Debug)]
 pub(crate) struct FetchedSpData {
     pub(crate) state: SpState,
-    pub(super) components: Option<Vec<SpComponentInfo>>,
-    pub(super) caboose_active: Option<SpComponentCaboose>,
-    pub(super) caboose_inactive: Option<SpComponentCaboose>,
-    pub(super) rot: Option<RotInventory>,
-    pub(super) mgs_received: Instant,
+    pub(crate) components: Fetched<Vec<SpComponentInfo>>,
+    pub(crate) caboose_active: Fetched<SpComponentCaboose>,
+    pub(crate) caboose_inactive: Fetched<SpComponentCaboose>,
+    pub(crate) rot: RotFetch,
+    pub(crate) mgs_received: Instant,
+}
+
+/// The outcome of the most recent attempt to fetch one piece of SP data.
+#[derive(Clone, Debug)]
+pub(crate) enum Fetched<T> {
+    /// Not attempted yet, or invalidated by an SP state or ignition change.
+    NotRead,
+    /// The most recent attempt failed.
+    #[cfg_attr(not(test), expect(dead_code))]
+    Error(MgsFetchError),
+    /// The most recent attempt succeeded.
+    Read(T),
+}
+
+impl<T: Clone> Fetched<T> {
+    fn is_read(&self) -> bool {
+        match self {
+            Fetched::Read(_) => true,
+            Fetched::NotRead | Fetched::Error(_) => false,
+        }
+    }
+
+    /// Project to the frozen wire representation, which cannot express the
+    /// difference between "not read" and "failed".
+    pub(super) fn to_option(&self) -> Option<T> {
+        match self {
+            Fetched::Read(value) => Some(value.clone()),
+            Fetched::NotRead | Fetched::Error(_) => None,
+        }
+    }
+}
+
+/// The most recent RoT information for an SP.
+///
+/// Unlike the other sub-items, the RoT has no separate "not read" state: the
+/// SP's `sp_get` response always carries an `SpState.rot`, so the only states
+/// are either that the SP cannot reach its RoT or a successful read.
+#[derive(Clone, Debug)]
+pub(crate) enum RotFetch {
+    /// The SP reported it cannot talk to its RoT (from `SpState.rot`).
+    CommunicationFailed {
+        #[expect(dead_code)]
+        message: String,
+    },
+    Read(Box<RotData>),
+}
+
+impl RotFetch {
+    fn is_read(&self) -> bool {
+        match self {
+            RotFetch::Read(_) => true,
+            RotFetch::CommunicationFailed { .. } => false,
+        }
+    }
+
+    /// Project to the frozen `RotInventory` wire type. A communication failure
+    /// becomes `None`.
+    pub(super) fn to_rot_inventory(&self) -> Option<RotInventory> {
+        match self {
+            RotFetch::CommunicationFailed { .. } => None,
+            RotFetch::Read(data) => Some(RotInventory {
+                active: data.active,
+                caboose_a: data.caboose_a.to_option(),
+                caboose_b: data.caboose_b.to_option(),
+                caboose_stage0: data.stage0.to_option_option(),
+                caboose_stage0next: data.stage0next.to_option_option(),
+            }),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct RotData {
+    pub active: RotSlot,
+    pub caboose_a: Fetched<SpComponentCaboose>,
+    pub caboose_b: Fetched<SpComponentCaboose>,
+    pub stage0: Stage0Fetch,
+    pub stage0next: Stage0Fetch,
+    /// Image validity as reported by the RoT, if this RoT version reports it.
+    #[expect(dead_code)]
+    pub image_errors: Option<RotImageErrors>,
+}
+
+/// Per-slot image validity as reported by an RoT that supports reporting them.
+#[derive(Clone, Debug)]
+#[expect(dead_code)]
+pub(crate) struct RotImageErrors {
+    pub slot_a: Option<RotImageError>,
+    pub slot_b: Option<RotImageError>,
+    pub stage0: Option<RotImageError>,
+    pub stage0next: Option<RotImageError>,
+}
+
+/// A stage0 (or stage0next) bootloader caboose.
+#[derive(Clone, Debug)]
+pub(crate) enum Stage0Fetch {
+    /// This RoT version (V2) does not report stage0 bootloader cabooses.
+    Unsupported,
+    Supported(Fetched<SpComponentCaboose>),
+}
+
+impl Stage0Fetch {
+    /// Project to the frozen wire representation. The outer `Option`
+    /// distinguishes "this RoT version has no stage0" (`None`) from "stage0
+    /// exists"; the inner `Option` is the fetch outcome.
+    pub(super) fn to_option_option(
+        &self,
+    ) -> Option<Option<SpComponentCaboose>> {
+        match self {
+            Stage0Fetch::Unsupported => None,
+            Stage0Fetch::Supported(fetched) => Some(fetched.to_option()),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -319,9 +429,11 @@ async fn sp_fetching_task(
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
     let mut prev_state = None;
-    let mut components = None;
-    let mut caboose_active = None;
-    let mut caboose_inactive = None;
+    let mut components = Fetched::NotRead;
+    let mut caboose_active = Fetched::NotRead;
+    let mut caboose_inactive = Fetched::NotRead;
+    // `None` means the RoT cache has not been built yet (never populated, or
+    // reset by an ignition change).
     let mut rot = None;
 
     loop {
@@ -334,9 +446,9 @@ async fn sp_fetching_task(
                 // When our ignition state changes, clear out all cached data
                 // and recreate `ticker`.
                 prev_state = None;
-                components = None;
-                caboose_active = None;
-                caboose_inactive = None;
+                components = Fetched::NotRead;
+                caboose_active = Fetched::NotRead;
+                caboose_inactive = Fetched::NotRead;
                 rot = None;
 
                 ticker = interval(
@@ -375,32 +487,55 @@ async fn sp_fetching_task(
         };
         let mut mgs_received = Instant::now();
 
-        if rot.is_none() || prev_state.as_ref() != Some(&state) {
+        // Rebuild the RoT cache when it has not yet resolved to `RotData` (never
+        // built, or last resolved to a communication failure) or the state
+        // changed. This mirrors the old `rot.is_none() || prev_state != state`
+        // condition, since a communication failure used to reset `rot` to
+        // `None`.
+        if !rot.as_ref().is_some_and(RotFetch::is_read)
+            || prev_state.as_ref() != Some(&state)
+        {
             match &state.rot {
                 RotState::V2 { active, .. } => {
-                    rot = Some(RotInventory {
+                    rot = Some(RotFetch::Read(Box::new(RotData {
                         active: *active,
-                        caboose_a: None,
-                        caboose_b: None,
-                        caboose_stage0: None,
-                        caboose_stage0next: None,
-                    });
+                        caboose_a: Fetched::NotRead,
+                        caboose_b: Fetched::NotRead,
+                        stage0: Stage0Fetch::Unsupported,
+                        stage0next: Stage0Fetch::Unsupported,
+                        image_errors: None,
+                    })));
                 }
-                RotState::V3 { active, .. } => {
-                    rot = Some(RotInventory {
+                RotState::V3 {
+                    active,
+                    slot_a_error,
+                    slot_b_error,
+                    stage0_error,
+                    stage0next_error,
+                    ..
+                } => {
+                    rot = Some(RotFetch::Read(Box::new(RotData {
                         active: *active,
-                        caboose_a: None,
-                        caboose_b: None,
-                        caboose_stage0: Some(None),
-                        caboose_stage0next: Some(None),
-                    });
+                        caboose_a: Fetched::NotRead,
+                        caboose_b: Fetched::NotRead,
+                        stage0: Stage0Fetch::Supported(Fetched::NotRead),
+                        stage0next: Stage0Fetch::Supported(Fetched::NotRead),
+                        image_errors: Some(RotImageErrors {
+                            slot_a: *slot_a_error,
+                            slot_b: *slot_b_error,
+                            stage0: *stage0_error,
+                            stage0next: *stage0next_error,
+                        }),
+                    })));
                 }
                 RotState::CommunicationFailed { message } => {
                     warn!(
                         log, "Failed to get RoT state from SP";
                         "message" => message,
                     );
-                    rot = None;
+                    rot = Some(RotFetch::CommunicationFailed {
+                        message: message.clone(),
+                    });
                 }
             }
         }
@@ -410,12 +545,12 @@ async fn sp_fetching_task(
         // state has changed or we previously failed to fetch them after such a
         // state change.
 
-        if prev_state.as_ref() != Some(&state) || components.is_none() {
+        if prev_state.as_ref() != Some(&state) || !components.is_read() {
             components =
                 match mgs_client.sp_component_list(&id.typ, id.slot).await {
                     Ok(response) => {
                         mgs_received = Instant::now();
-                        Some(response.into_inner().components)
+                        Fetched::Read(response.into_inner().components)
                     }
                     Err(err) => {
                         warn!(
@@ -423,12 +558,12 @@ async fn sp_fetching_task(
                             "sp" => ?id,
                             "err" => %err,
                         );
-                        None
+                        Fetched::Error(MgsFetchError::new(&err))
                     }
                 };
         }
 
-        if prev_state.as_ref() != Some(&state) || caboose_active.is_none() {
+        if prev_state.as_ref() != Some(&state) || !caboose_active.is_read() {
             caboose_active = match mgs_client
                 .sp_component_caboose_get(
                     &id.typ,
@@ -440,7 +575,7 @@ async fn sp_fetching_task(
             {
                 Ok(response) => {
                     mgs_received = Instant::now();
-                    Some(response.into_inner())
+                    Fetched::Read(response.into_inner())
                 }
                 Err(err) => {
                     warn!(
@@ -448,12 +583,12 @@ async fn sp_fetching_task(
                         "sp" => ?id,
                         "err" => %err,
                     );
-                    None
+                    Fetched::Error(MgsFetchError::new(&err))
                 }
             };
         }
 
-        if prev_state.as_ref() != Some(&state) || caboose_inactive.is_none() {
+        if prev_state.as_ref() != Some(&state) || !caboose_inactive.is_read() {
             caboose_inactive = match mgs_client
                 .sp_component_caboose_get(
                     &id.typ,
@@ -465,7 +600,7 @@ async fn sp_fetching_task(
             {
                 Ok(response) => {
                     mgs_received = Instant::now();
-                    Some(response.into_inner())
+                    Fetched::Read(response.into_inner())
                 }
                 Err(err) => {
                     warn!(
@@ -473,13 +608,13 @@ async fn sp_fetching_task(
                         "sp" => ?id,
                         "err" => %err,
                     );
-                    None
+                    Fetched::Error(MgsFetchError::new(&err))
                 }
             };
         }
 
-        if let Some(rot) = rot.as_mut() {
-            if prev_state.as_ref() != Some(&state) || rot.caboose_a.is_none() {
+        if let Some(RotFetch::Read(rot)) = rot.as_mut() {
+            if prev_state.as_ref() != Some(&state) || !rot.caboose_a.is_read() {
                 rot.caboose_a = match mgs_client
                     .sp_component_caboose_get(
                         &id.typ,
@@ -491,7 +626,7 @@ async fn sp_fetching_task(
                 {
                     Ok(response) => {
                         mgs_received = Instant::now();
-                        Some(response.into_inner())
+                        Fetched::Read(response.into_inner())
                     }
                     Err(err) => {
                         warn!(
@@ -499,12 +634,12 @@ async fn sp_fetching_task(
                             "sp" => ?id,
                             "err" => %err,
                         );
-                        None
+                        Fetched::Error(MgsFetchError::new(&err))
                     }
                 };
             }
 
-            if prev_state.as_ref() != Some(&state) || rot.caboose_b.is_none() {
+            if prev_state.as_ref() != Some(&state) || !rot.caboose_b.is_read() {
                 rot.caboose_b = match mgs_client
                     .sp_component_caboose_get(
                         &id.typ,
@@ -516,7 +651,7 @@ async fn sp_fetching_task(
                 {
                     Ok(response) => {
                         mgs_received = Instant::now();
-                        Some(response.into_inner())
+                        Fetched::Read(response.into_inner())
                     }
                     Err(err) => {
                         warn!(
@@ -524,14 +659,16 @@ async fn sp_fetching_task(
                             "sp" => ?id,
                             "err" => %err,
                         );
-                        None
+                        Fetched::Error(MgsFetchError::new(&err))
                     }
                 };
             }
 
-            if let Some(v) = &rot.caboose_stage0 {
-                if prev_state.as_ref() != Some(&state) || v.is_none() {
-                    rot.caboose_stage0 = match mgs_client
+            if let Stage0Fetch::Supported(caboose_stage0) = &mut rot.stage0 {
+                if prev_state.as_ref() != Some(&state)
+                    || !caboose_stage0.is_read()
+                {
+                    *caboose_stage0 = match mgs_client
                         .sp_component_caboose_get(
                             &id.typ,
                             id.slot,
@@ -542,7 +679,7 @@ async fn sp_fetching_task(
                     {
                         Ok(response) => {
                             mgs_received = Instant::now();
-                            Some(Some(response.into_inner()))
+                            Fetched::Read(response.into_inner())
                         }
                         Err(err) => {
                             warn!(
@@ -550,15 +687,19 @@ async fn sp_fetching_task(
                                 "sp" => ?id,
                                 "err" => %err,
                             );
-                            Some(None)
+                            Fetched::Error(MgsFetchError::new(&err))
                         }
                     };
                 }
             }
 
-            if let Some(v) = &rot.caboose_stage0next {
-                if prev_state.as_ref() != Some(&state) || v.is_none() {
-                    rot.caboose_stage0next = match mgs_client
+            if let Stage0Fetch::Supported(caboose_stage0next) =
+                &mut rot.stage0next
+            {
+                if prev_state.as_ref() != Some(&state)
+                    || !caboose_stage0next.is_read()
+                {
+                    *caboose_stage0next = match mgs_client
                         .sp_component_caboose_get(
                             &id.typ,
                             id.slot,
@@ -569,7 +710,7 @@ async fn sp_fetching_task(
                     {
                         Ok(response) => {
                             mgs_received = Instant::now();
-                            Some(Some(response.into_inner()))
+                            Fetched::Read(response.into_inner())
                         }
                         Err(err) => {
                             warn!(
@@ -577,19 +718,26 @@ async fn sp_fetching_task(
                                 "sp" => ?id,
                                 "err" => %err,
                             );
-                            Some(None)
+                            Fetched::Error(MgsFetchError::new(&err))
                         }
                     };
                 }
             }
         }
 
+        // The RoT rebuild step above always leaves `rot` populated: it runs
+        // whenever `rot` is not already `Some(RotFetch::Read(_))`, and every
+        // arm assigns `Some(..)`.
+        let rot = rot
+            .clone()
+            .expect("RoT cache is populated by the rebuild step above");
+
         let emit = SpFetchResult::Data(Box::new(FetchedSpData {
             state,
             components: components.clone(),
             caboose_active: caboose_active.clone(),
             caboose_inactive: caboose_inactive.clone(),
-            rot: rot.clone(),
+            rot,
             mgs_received,
         }));
 

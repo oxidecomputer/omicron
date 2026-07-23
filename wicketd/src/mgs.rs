@@ -21,10 +21,11 @@ use crate::helpers::SpIdentifierDisplay;
 use crate::http_helpers::http_error_with_message;
 use crate::http_helpers::shutdown_to_http;
 
-pub use self::inventory::MgsFetchError;
+pub(crate) use self::inventory::{FetchedSpData, MgsFetchError};
+
 use self::inventory::{
-    FetchedIgnitionState, FetchedSpData, IgnitionPresence,
-    IgnitionStateFetcher, SpFetchResult, SpStateFetcher,
+    FetchedIgnitionState, IgnitionPresence, IgnitionStateFetcher,
+    SpFetchResult, SpStateFetcher,
 };
 
 mod inventory;
@@ -42,7 +43,7 @@ const CHANNEL_CAPACITY: usize = 8;
 
 /// Response to a request for MGS-specific inventory information.
 #[derive(Debug)]
-pub enum GetInventoryResponse {
+pub(crate) enum GetInventoryResponse {
     Response {
         /// Every per-SP record the manager holds.
         ///
@@ -109,7 +110,7 @@ impl GetInventoryError {
 }
 
 impl MgsHandle {
-    pub async fn get_cached_inventory(
+    pub(crate) async fn get_cached_inventory(
         &self,
     ) -> Result<GetInventoryResponse, ShutdownInProgress> {
         match self.get_inventory_refreshing_sps(Vec::new()).await {
@@ -127,7 +128,7 @@ impl MgsHandle {
         }
     }
 
-    pub async fn get_inventory_refreshing_sps(
+    pub(crate) async fn get_inventory_refreshing_sps(
         &self,
         force_refresh: Vec<SpIdentifier>,
     ) -> Result<GetInventoryResponse, GetInventoryError> {
@@ -485,7 +486,7 @@ impl MgsManager {
 
 /// A single SP's record in the manager's inventory map.
 #[derive(Clone, Debug)]
-pub struct SpRecord {
+pub(crate) struct SpRecord {
     pub id: SpIdentifier,
     pub ignition: Option<SpIgnition>,
 
@@ -494,7 +495,7 @@ pub struct SpRecord {
 
     /// The most recent state-fetch error for this SP, or `None` if the last
     /// state fetch succeeded (or fetching hasn't failed yet).
-    pub last_state_fetch_error: Option<MgsFetchError>,
+    pub(crate) last_state_fetch_error: Option<MgsFetchError>,
 }
 
 impl SpRecord {
@@ -521,10 +522,10 @@ impl SpRecord {
                     mgs_received: _,
                 }) => (
                     Some(state.clone()),
-                    components.clone(),
-                    caboose_active.clone(),
-                    caboose_inactive.clone(),
-                    rot.clone(),
+                    components.to_option(),
+                    caboose_active.to_option(),
+                    caboose_inactive.to_option(),
+                    rot.to_rot_inventory(),
                 ),
                 None => (None, None, None, None, None),
             };
@@ -571,10 +572,14 @@ struct WaitingForRefresh {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use crate::mgs::inventory::{Fetched, RotData, RotFetch, Stage0Fetch};
     use gateway_types::component::{PowerState, SpState};
     use gateway_types::rot::RotState;
     use std::net::Ipv6Addr;
-    use wicket_common::inventory::SpType;
+    use wicket_common::inventory::{
+        RotSlot, SpComponentCaboose, SpComponentInfo, SpType,
+    };
 
     fn dummy_manager() -> MgsManager {
         let log = Logger::root(slog::Discard, o!());
@@ -600,14 +605,47 @@ mod tests {
         }
     }
 
+    fn caboose(version: &str) -> SpComponentCaboose {
+        SpComponentCaboose {
+            git_commit: "commit".to_string(),
+            board: "board".to_string(),
+            name: "name".to_string(),
+            version: version.to_string(),
+            sign: None,
+            epoch: None,
+        }
+    }
+
     fn fetched_sp_data(id: SpIdentifier) -> FetchedSpData {
         FetchedSpData {
             state: sp_state(id.slot),
-            components: None,
-            caboose_active: None,
-            caboose_inactive: None,
-            rot: None,
+            components: Fetched::NotRead,
+            caboose_active: Fetched::NotRead,
+            caboose_inactive: Fetched::NotRead,
+            rot: RotFetch::CommunicationFailed {
+                message: "rot is unhappy".to_string(),
+            },
             mgs_received: Instant::now(),
+        }
+    }
+
+    fn record_with_data(
+        id: SpIdentifier,
+        components: Fetched<Vec<SpComponentInfo>>,
+        rot: RotFetch,
+    ) -> SpRecord {
+        SpRecord {
+            id,
+            ignition: None,
+            data: Some(FetchedSpData {
+                state: sp_state(id.slot),
+                components,
+                caboose_active: Fetched::NotRead,
+                caboose_inactive: Fetched::NotRead,
+                rot,
+                mgs_received: Instant::now(),
+            }),
+            last_state_fetch_error: None,
         }
     }
 
@@ -844,6 +882,93 @@ mod tests {
             sp_fetch_error_message(&sps, sled(0)),
             Some("mgs is unhappy"),
             "sled 0's error survives the ignition update",
+        );
+    }
+
+    #[test]
+    fn sub_fetch_error_projects_to_none() {
+        // A sub-fetch failure (here, the SP component list) does not have a
+        // representation in the unstable API, so it is projected to `None`.
+        // (But it is still tracked internally.)
+        let error = MgsFetchError {
+            message: "component list failed".to_string(),
+            observed_at: Instant::now(),
+        };
+        let record = record_with_data(
+            sled(0),
+            Fetched::Error(error),
+            RotFetch::CommunicationFailed { message: "rot".to_string() },
+        );
+
+        let inventory = record.to_sp_inventory();
+        assert!(
+            inventory.components.is_none(),
+            "a failed component fetch collapses to None on the wire",
+        );
+
+        let Some(FetchedSpData { components: Fetched::Error(err), .. }) =
+            &record.data
+        else {
+            panic!("the record still carries the component fetch error");
+        };
+        assert_eq!(err.message, "component list failed");
+    }
+
+    #[test]
+    fn stage0_fetch_projection_table() {
+        // * Unsupported -> None
+        // * Supported(NotRead) -> Some(None)
+        // * Supported(Error) -> Some(None)
+        // * Supported(Read(c)) -> Some(Some(c))
+        let cases: [(Stage0Fetch, Option<Option<SpComponentCaboose>>); 4] = [
+            (Stage0Fetch::Unsupported, None),
+            (Stage0Fetch::Supported(Fetched::NotRead), Some(None)),
+            (
+                Stage0Fetch::Supported(Fetched::Error(MgsFetchError {
+                    message: "stage0 failed".to_string(),
+                    observed_at: Instant::now(),
+                })),
+                Some(None),
+            ),
+            (
+                Stage0Fetch::Supported(Fetched::Read(caboose("stage0"))),
+                Some(Some(caboose("stage0"))),
+            ),
+        ];
+
+        for (stage0, expected) in cases {
+            let rot = RotFetch::Read(Box::new(RotData {
+                active: RotSlot::A,
+                caboose_a: Fetched::NotRead,
+                caboose_b: Fetched::NotRead,
+                stage0: stage0.clone(),
+                stage0next: Stage0Fetch::Unsupported,
+                image_errors: None,
+            }));
+            let record = record_with_data(sled(0), Fetched::NotRead, rot);
+            let rot_inventory = record
+                .to_sp_inventory()
+                .rot
+                .expect("RoT data projects to Some");
+            assert_eq!(
+                rot_inventory.caboose_stage0, expected,
+                "stage0 {stage0:?} should project to {expected:?}",
+            );
+        }
+    }
+
+    #[test]
+    fn rot_communication_failure_projects_to_none() {
+        let record = record_with_data(
+            sled(0),
+            Fetched::NotRead,
+            RotFetch::CommunicationFailed {
+                message: "rot is unreachable".to_string(),
+            },
+        );
+        assert!(
+            record.to_sp_inventory().rot.is_none(),
+            "an RoT communication failure projects to rot: None",
         );
     }
 
