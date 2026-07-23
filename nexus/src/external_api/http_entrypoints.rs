@@ -639,10 +639,10 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 nexus.silo_lookup(&opctx, scan_params.selector.silo.clone())?;
             let users = nexus
                 .silo_list_users(&opctx, &silo_lookup, &pag_params)
-                .await?
-                .into_iter()
-                .map(|i| i.into())
-                .collect();
+                .await?;
+            let users = nexus
+                .silo_users_into_views_by_silo(&opctx, &silo_lookup, users)
+                .await?;
             Ok(HttpResponseOk(ScanById::results_page(
                 &query,
                 users,
@@ -672,7 +672,10 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let user = nexus
                 .silo_user_fetch(&opctx, &silo_lookup, path.user_id)
                 .await?;
-            Ok(HttpResponseOk(user.into()))
+            let user = nexus
+                .silo_user_into_view_by_silo(&opctx, &silo_lookup, user)
+                .await?;
+            Ok(HttpResponseOk(user))
         };
         apictx
             .context
@@ -795,7 +798,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let user = nexus
                 .local_idp_create_user(&opctx, &silo_lookup, new_user_params)
                 .await?;
-            Ok(HttpResponseCreated(user.into()))
+            // A newly-created user is not a member of any groups
+            Ok(HttpResponseCreated(user.into_view(Vec::new())))
         })
         .await
     }
@@ -7525,10 +7529,12 @@ impl NexusExternalApi for NexusExternalApiImpl {
             } else {
                 nexus.silo_users_list_current(&opctx, &pagparams).await?
             };
+            let users =
+                nexus.silo_users_into_views_current(&opctx, users).await?;
 
             Ok(HttpResponseOk(ScanById::results_page(
                 &query,
-                users.into_iter().map(|i| i.into()).collect(),
+                users,
                 &|_, user: &User| user.id.into_untyped_uuid(),
             )?))
         };
@@ -7551,7 +7557,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 crate::context::op_context_for_external_api(&rqctx).await?;
             let (.., user) =
                 nexus.current_silo_user_lookup(&opctx, path.user_id).await?;
-            Ok(HttpResponseOk(user.into()))
+            let user = nexus.silo_user_into_view_current(&opctx, user).await?;
+            Ok(HttpResponseOk(user))
         };
         apictx
             .context
@@ -7765,6 +7772,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
             let user = nexus.silo_user_fetch_self(&opctx).await?;
+            let user = nexus.silo_user_into_view_current(&opctx, user).await?;
             let (authz_silo, silo) =
                 nexus.current_silo_lookup(&opctx)?.fetch().await?;
 
@@ -7786,7 +7794,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 };
 
             Ok(HttpResponseOk(user::CurrentUser {
-                user: user.into(),
+                user,
                 silo_name: silo.name().clone(),
                 fleet_viewer,
                 silo_admin,

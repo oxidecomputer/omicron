@@ -25,7 +25,9 @@ use omicron_common::api::external::UpdateResult;
 use omicron_uuid_kinds::BuiltInUserUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SiloGroupUuid;
+use omicron_uuid_kinds::SiloUserUuid;
 use ref_cast::RefCast;
+use std::collections::HashMap;
 use uuid::Uuid;
 
 impl super::Nexus {
@@ -135,6 +137,101 @@ impl super::Nexus {
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<SiloGroup> {
         self.db_datastore.silo_groups_for_self(opctx, pagparams).await
+    }
+
+    /// Fetch the group memberships of each of the given users, keyed by user
+    /// ID, for embedding in `User` views. Each user's groups are sorted by
+    /// (display_name, id).
+    async fn silo_user_groups(
+        &self,
+        opctx: &OpContext,
+        authz_silo: &authz::Silo,
+        users: &[SiloUser],
+    ) -> Result<HashMap<SiloUserUuid, Vec<user::UserGroup>>, Error> {
+        let user_ids: Vec<SiloUserUuid> =
+            users.iter().map(|u| u.id()).collect();
+        let mut groups_by_user: HashMap<SiloUserUuid, Vec<user::UserGroup>> =
+            HashMap::new();
+        for (user_id, group) in self
+            .db_datastore
+            .silo_groups_for_users(opctx, authz_silo, &user_ids)
+            .await?
+        {
+            groups_by_user.entry(user_id).or_default().push(group.into());
+        }
+        for groups in groups_by_user.values_mut() {
+            groups.sort_by(|a, b| {
+                (&a.display_name, a.id).cmp(&(&b.display_name, b.id))
+            });
+        }
+        Ok(groups_by_user)
+    }
+
+    /// Convert users to `User` views, embedding each user's group memberships
+    pub(crate) async fn silo_users_into_views(
+        &self,
+        opctx: &OpContext,
+        authz_silo: &authz::Silo,
+        users: Vec<SiloUser>,
+    ) -> ListResultVec<user::User> {
+        let mut groups_by_user =
+            self.silo_user_groups(opctx, authz_silo, &users).await?;
+        Ok(users
+            .into_iter()
+            .map(|u| {
+                let groups = groups_by_user.remove(&u.id()).unwrap_or_default();
+                u.into_view(groups)
+            })
+            .collect())
+    }
+
+    /// Like [`Self::silo_users_into_views`], for users in the current silo
+    pub(crate) async fn silo_users_into_views_current(
+        &self,
+        opctx: &OpContext,
+        users: Vec<SiloUser>,
+    ) -> ListResultVec<user::User> {
+        let authz_silo = opctx
+            .authn
+            .silo_required()
+            .internal_context("converting silo users to views")?;
+        self.silo_users_into_views(opctx, &authz_silo, users).await
+    }
+
+    /// Like [`Self::silo_users_into_views`], for a single user in the given
+    /// silo
+    pub(crate) async fn silo_user_into_view_by_silo(
+        &self,
+        opctx: &OpContext,
+        silo_lookup: &lookup::Silo<'_>,
+        user: SiloUser,
+    ) -> Result<user::User, Error> {
+        let (authz_silo,) = silo_lookup.lookup_for(authz::Action::Read).await?;
+        let mut views =
+            self.silo_users_into_views(opctx, &authz_silo, vec![user]).await?;
+        Ok(views.pop().expect("one user in, one view out"))
+    }
+
+    /// Like [`Self::silo_users_into_views_current`], for a single user
+    pub(crate) async fn silo_user_into_view_current(
+        &self,
+        opctx: &OpContext,
+        user: SiloUser,
+    ) -> Result<user::User, Error> {
+        let mut views =
+            self.silo_users_into_views_current(opctx, vec![user]).await?;
+        Ok(views.pop().expect("one user in, one view out"))
+    }
+
+    /// Like [`Self::silo_users_into_views`], for users in the given silo
+    pub(crate) async fn silo_users_into_views_by_silo(
+        &self,
+        opctx: &OpContext,
+        silo_lookup: &lookup::Silo<'_>,
+        users: Vec<SiloUser>,
+    ) -> ListResultVec<user::User> {
+        let (authz_silo,) = silo_lookup.lookup_for(authz::Action::Read).await?;
+        self.silo_users_into_views(opctx, &authz_silo, users).await
     }
 
     // Silo groups

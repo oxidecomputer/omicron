@@ -43,7 +43,7 @@ async fn test_silo_group_users(cptestctx: &ControlPlaneTestContext) {
 
     // no groups to start with
     let groups =
-        objects_list_page_authz::<user::User>(client, &"/v1/groups").await;
+        objects_list_page_authz::<user::Group>(client, &"/v1/groups").await;
     assert_eq!(groups.items.len(), 0);
 
     let authz_silo = authz::Silo::new(
@@ -71,7 +71,7 @@ async fn test_silo_group_users(cptestctx: &ControlPlaneTestContext) {
 
     // now we have a group
     let groups =
-        objects_list_page_authz::<user::User>(client, &"/v1/groups").await;
+        objects_list_page_authz::<user::Group>(client, &"/v1/groups").await;
     assert_eq!(groups.items.len(), 1);
 
     let group = groups.items.get(0).unwrap();
@@ -116,6 +116,13 @@ async fn test_silo_group_users(cptestctx: &ControlPlaneTestContext) {
     let user_ids = group_users.items.iter().map(|g| g.id).collect();
 
     assert_same_items(user_ids, vec![USER_TEST_UNPRIVILEGED.id()]);
+
+    // the user's membership shows up in the embedded groups field
+    let group_user = group_users.items.get(0).unwrap();
+    assert_eq!(
+        group_user.groups,
+        vec![user::UserGroup { id: group.id, display_name: group_name }]
+    );
 }
 
 #[nexus_test]
