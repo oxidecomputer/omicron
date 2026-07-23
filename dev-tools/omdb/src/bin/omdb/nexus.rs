@@ -3740,15 +3740,15 @@ fn print_task_fm_sitrep_gc(details: &serde_json::Value) {
             println!("{ERRICON}   {STATUS} failed!");
             println!("        > {error}")
         }
-        Ok(HistoryPruningStatus::BelowLimit { count }) => {
-            println!("      {STATUS} below limit (no sitreps pruned)");
+        Ok(HistoryPruningStatus::NotPruned { count }) => {
+            println!("      {STATUS} no sitreps pruned");
             println!("      {SITREP_COUNT:<P_WIDTH$}{count:>NUM_WIDTH$}");
         }
         Ok(HistoryPruningStatus::Pruned {
             n_pruned,
             newest_version_pruned,
         }) => {
-            println!("      {STATUS} limit reached");
+            println!("      {STATUS} history limit reached");
             println!("      {PRUNED:<P_WIDTH$}{n_pruned:>NUM_WIDTH$}");
             println!(
                 "      {LATEST_VERSION_PRUNED:<P_WIDTH$}v{newest_version_pruned}"

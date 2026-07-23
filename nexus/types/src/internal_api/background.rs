@@ -927,7 +927,12 @@ pub mod fm_sitrep_gc {
     /// history table.
     #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
     pub enum HistoryPruningStatus {
-        BelowLimit { count: u64 },
+        /// The history table holds no more than the configured limit of
+        /// entries, so nothing was pruned.
+        NotPruned { count: u64 },
+        /// The history table exceeded the limit, and the oldest `n_pruned`
+        /// entries were deleted. `newest_version_pruned` is the version of the
+        /// newest entry that was deleted.
         Pruned { n_pruned: usize, newest_version_pruned: u32 },
     }
 

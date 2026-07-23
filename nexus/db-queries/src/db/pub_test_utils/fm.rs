@@ -205,10 +205,11 @@ impl SitrepModel {
     ///
     /// This simulates what the GC task *should* do:
     ///
-    /// - If the history table holds fewer than `history_limit` rows, nothing
+    /// - If the history table holds no more than `history_limit` rows, nothing
     ///   is pruned.
     /// - Otherwise, the newest `history_limit` versions are kept, and every
     ///   version at or below `latest_version - history_limit` is pruned.
+    ///   `Pruned` is only reported when at least one row was deleted.
     /// - All orphaned sitreps, including those newly orphaned by pruning
     ///   the history, are deleted by the orphan sweep.
     pub fn simulate_gc(&mut self, history_limit: NonZeroU32) -> ExpectedGc {
@@ -221,8 +222,8 @@ impl SitrepModel {
              latest_version=v{latest_version}, history_count={history_count}"
         );
         let mut history_pruned = 0;
-        let pruning = if history_count < history_limit {
-            HistoryPruningStatus::BelowLimit { count: history_count.into() }
+        let pruning = if history_count <= history_limit {
+            HistoryPruningStatus::NotPruned { count: history_count.into() }
         } else {
             let newest_version_pruned = latest_version - history_limit;
             // The versions pruned are

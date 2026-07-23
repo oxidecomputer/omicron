@@ -1712,7 +1712,7 @@ impl DataStore {
 
                     // If the history table is below the limit, we're done here.
                     if let db::IsLimitReached::No { count } = limit_reached {
-                        return Ok(HistoryPruningStatus::BelowLimit {
+                        return Ok(HistoryPruningStatus::NotPruned {
                             count,
                         });
                     }
@@ -1753,6 +1753,20 @@ impl DataStore {
                         .filter(history_dsl::version.le(SqlU32(newest_version_pruned)))
                         .execute_async(&conn)
                         .await?;
+
+                    // If the delete removed no rows, every version at or below
+                    // `newest_version_pruned` was already pruned by a previous
+                    // activation. Because there are no gaps in the version
+                    // numbers assigned to sitreps as they are committed, this
+                    // means we are exactly at the limit. This is the expected
+                    // steady state if everything is more or less in sync.So,
+                    // don't say that we pruned something if we didn't actually
+                    // delete anything.
+                    if n_pruned == 0 {
+                        return Ok(HistoryPruningStatus::NotPruned {
+                            count: u64::from(limit),
+                        });
+                    }
 
                     Ok(HistoryPruningStatus::Pruned { n_pruned, newest_version_pruned })
                 }
