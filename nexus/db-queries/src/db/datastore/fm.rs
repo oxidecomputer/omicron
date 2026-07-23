@@ -149,8 +149,33 @@ pub struct ChildTableGcStats {
 pub struct GcOrphansResult {
     pub sitreps_deleted: usize,
     pub sitrep_metadata_batches: usize,
-    pub batch_size: u32,
     pub child_tables: BTreeMap<SitrepChildTable, ChildTableGcStats>,
+}
+
+/// Parameters for sitrep history table pruning. This is a struct because I
+/// really didn't like having the function take two positional arguments that
+/// were both `NonZeroU32`s that you could get backwards.
+#[derive(Copy, Clone)]
+pub struct HistoryPruningParams {
+    pub limit: NonZeroU32,
+    pub batch_size: NonZeroU32,
+}
+
+/// Describes the status of pruning old records from the end of the sitrep
+/// history table.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum HistoryPruningStatus {
+    /// The history table holds no more than the configured limit of
+    /// entries, so nothing was pruned.
+    NotPruned { count: u64 },
+    /// The history table exceeded the limit, and the oldest `n_pruned`
+    /// entries were deleted. `newest_version_pruned` is the version of the
+    /// newest entry that was deleted, while oldest_version_pruned
+    Pruned {
+        n_pruned: usize,
+        oldest_version_pruned: u32,
+        newest_version_pruned: u32,
+    },
 }
 
 impl DataStore {
@@ -1367,6 +1392,7 @@ impl DataStore {
     pub async fn fm_sitrep_gc_orphans(
         &self,
         opctx: &OpContext,
+        batch_size: NonZeroU32,
     ) -> Result<GcOrphansResult, Error> {
         let conn = self.pool_connection_authorized(opctx).await?;
 
@@ -1382,8 +1408,7 @@ impl DataStore {
                 sitrep_metadata_batches += 1;
                 let (deleted, next_marker) =
                     Self::delete_orphaned_sitrep_metadata_query(
-                        marker,
-                        SQL_BATCH_SIZE,
+                        marker, batch_size,
                     )
                     .get_result_async::<(i64, Option<Uuid>)>(&*conn)
                     .await
@@ -1415,9 +1440,7 @@ impl DataStore {
                 stats.batches += 1;
                 let (rows_deleted, next_marker) =
                     Self::deeply_orphaned_batch_query(
-                        table,
-                        marker,
-                        SQL_BATCH_SIZE,
+                        table, marker, batch_size,
                     )
                     .get_result_async::<(i64, Option<Uuid>)>(&*conn)
                     .await
@@ -1442,7 +1465,6 @@ impl DataStore {
         let result = GcOrphansResult {
             sitreps_deleted,
             sitrep_metadata_batches,
-            batch_size: SQL_BATCH_SIZE.get(),
             child_tables,
         };
 
@@ -1673,7 +1695,7 @@ impl DataStore {
     pub async fn fm_sitrep_history_prune(
         &self,
         opctx: &OpContext,
-        deletion_threshold: NonZeroU32,
+        HistoryPruningParams { limit, batch_size }: HistoryPruningParams,
     ) -> Result<HistoryPruningStatus, Error> {
         // The "full" table scan below is treated as a complex operation. (This
         // should only be called from the FM analysis and sitrep GC background
@@ -1683,7 +1705,7 @@ impl DataStore {
         // TODO(eliza): there should probably be an authz object for the fm sitrep?
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
 
-        let limit = deletion_threshold.get();
+        let limit = limit.get();
         let limit_query = check_if_limit_reached::LimitQuery::new(
             history_dsl::fm_sitrep_history,
             u64::from(limit),
@@ -1718,36 +1740,74 @@ impl DataStore {
                     }
 
                     // Otherwise, we need to delete old versions that are over
-                    // the limit. To do this, we will determine the latest
-                    // version, subtract the limit to keep from that version to
-                    // determine the first version to delete, and delete all
-                    // versions less than or equal to that version number.
-                    let latest_version = Self::fm_current_sitrep_version_on_conn(&conn)
+                    // the limit. We want to delete the oldest version first,
+                    // and we want to delete up to `batch_size` records per
+                    // query. Doing this in a batched way is a little bit
+                    // complicated, because Postgres does not support `LIMIT` or
+                    // `ORDER BY` clauses on `DELETE` statements.
+                    //
+                    // First, determine the newest version that we are ALLOWED
+                    // to prune. We may not actually delete this one, if the
+                    // batch size limits us to deleting fewer rows than the
+                    // number that are above the limit.
+                    let newest_prunable_version = {
+                        // The latest prunable version is the latest version
+                        // minus the limit. So we must first determine the
+                        // latest version...
+                        let latest_version = Self::fm_current_sitrep_version_on_conn(&conn)
+                            .await?
+                            .ok_or_else(|| {
+                                let e = Error::InternalError {
+                                    internal_message: format!(
+                                        "if the sitrep history table count is \
+                                        over the limit ({limit}), there must \
+                                        be a latest version! this makes no \
+                                        sense",
+                                    ),
+                                };
+                                err.bail(TransactionError::CustomError(e))
+                            })?
+                            .version.0;
+                        latest_version
+                            .checked_sub(limit)
+                            .ok_or_else(|| {
+                                let e = Error::InternalError {
+                                    internal_message: format!(
+                                        "if the history table is over the limit, \
+                                         subtracing the limit ({limit}) from the \
+                                         latest version (v{latest_version}) should \
+                                         give us a version to prune!",
+                                    ),
+                                };
+                                err.bail(TransactionError::CustomError(e))
+                            })?
+                    };
+
+                    // Next, determine the newest version that we actually
+                    // *will* prune, ensuring that we prune no more than
+                    // `batch_size` records. We do this by determining the
+                    // newest version we would delete if we deleted up to
+                    // `earliest_version + batch_size` records, and then taking
+                    // the minimum of that and the newest version we're allowed
+                    // to prune.
+                    let earliest_version: u32 = history_dsl::fm_sitrep_history
+                        .select(diesel::dsl::min(history_dsl::version))
+                        .first_async::<Option<SqlU32>>(&conn)
                         .await?
                         .ok_or_else(|| {
-                            let e = Error::InternalError {
-                                internal_message: format!(
-                                    "if the sitrep history table count is over \
-                                     a non-zero limit ({limit}), there must be \
-                                     a latest version! this makes no sense",
-                                ),
-                            };
+                            let e = Error::internal_error(
+                                    "min(...) only returns NULL if the \
+                                    table is empty, and we know it isn't, \
+                                    so this should be impossible."
+                            );
                             err.bail(TransactionError::CustomError(e))
-                        })?
-                        .version.0;
-                    let newest_version_pruned = latest_version
-                        .checked_sub(limit)
-                        .ok_or_else(|| {
-                            let e = Error::InternalError {
-                                internal_message: format!(
-                                    "if the history table is over the limit, \
-                                     subtracing the limit ({limit}) from the \
-                                     latest version (v{latest_version}) should \
-                                     give us a version to prune!",
-                                ),
-                            };
-                            err.bail(TransactionError::CustomError(e))
-                        })?;
+                        })?.
+                        into();
+                    let newest_version_pruned = {
+                        let max_pruned = batch_size.get() - 1;
+                        newest_prunable_version
+                            .min(earliest_version.saturating_add(max_pruned))
+                    };
 
                     let n_pruned = diesel::delete(history_dsl::fm_sitrep_history)
                         .filter(history_dsl::version.le(SqlU32(newest_version_pruned)))
