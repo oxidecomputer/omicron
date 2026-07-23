@@ -289,14 +289,8 @@ fn switch_transceivers_to_ct(
 }
 
 fn transceiver_to_ct(transceiver: Transceiver) -> ct_inv::Transceiver {
-    let Transceiver {
-        port,
-        status,
-        power,
-        vendor,
-        datapath,
-        monitors,
-    } = transceiver;
+    let Transceiver { port, status, power, vendor, datapath, monitors } =
+        transceiver;
     ct_inv::Transceiver {
         port,
         status: transceiver_status_to_ct(status),
@@ -1047,11 +1041,7 @@ mod tests {
         );
 
         let ct_inv::RotInfo::Read {
-            slot_a,
-            slot_b,
-            stage0,
-            stage0next,
-            ..
+            slot_a, slot_b, stage0, stage0next, ..
         } = rot_info_to_ct(Some(&data))
         else {
             panic!("expected a read RoT");
@@ -1059,10 +1049,7 @@ mod tests {
         assert_eq!(slot_a.validity, ct_inv::RotImageValidity::Unsupported);
         assert_eq!(slot_b.validity, ct_inv::RotImageValidity::Unsupported);
         assert_eq!(stage0.validity, ct_inv::RotImageValidity::Unsupported);
-        assert_eq!(
-            stage0next.validity,
-            ct_inv::RotImageValidity::Unsupported,
-        );
+        assert_eq!(stage0next.validity, ct_inv::RotImageValidity::Unsupported);
     }
 
     #[test]

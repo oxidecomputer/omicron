@@ -23,8 +23,6 @@ use crate::http_helpers::shutdown_to_http;
 
 // This somewhat awkward `#[cfg(test)]` is because RotData is used by a test in
 // conversions.rs.
-#[cfg(test)]
-pub(crate) use self::inventory::{RotData, RotImageErrors};
 pub(crate) use self::inventory::{
     Fetched, FetchedSpData, MgsFetchError, RotFetch, Stage0Fetch,
 };
@@ -32,6 +30,8 @@ use self::inventory::{
     FetchedIgnitionState, IgnitionPresence, IgnitionStateFetcher,
     SpFetchResult, SpStateFetcher,
 };
+#[cfg(test)]
+pub(crate) use self::inventory::{RotData, RotImageErrors};
 
 mod inventory;
 
