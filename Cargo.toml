@@ -784,7 +784,7 @@ rustls = "0.23.40"
 rustls-pemfile = "2.2.0"
 rustyline = "14.0.0"
 rustix = "1.1.2"
-samael = { version = "0.0.19", features = ["xmlsec"] }
+samael = { version = "0.0.22", features = ["xmlsec"] }
 schemars = "0.8.22"
 scopeguard = "1.2.0"
 secrecy = "0.10.3"
@@ -1155,3 +1155,4 @@ path = "workspace-hack"
 [patch."https://github.com/oxidecomputer/omicron"]
 omicron-uuid-kinds = { path = "uuid-kinds" }
 omicron-common = { path = "common" }
+
