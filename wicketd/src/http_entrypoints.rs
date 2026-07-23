@@ -395,10 +395,32 @@ impl WicketdApi for WicketdApiImpl {
         // Fetch the transceiver information from the SP.
         let maybe_transceiver_inventory =
             match rqctx.context().transceiver_handle.get_transceivers() {
-                GetTransceiversResponse::Response {
-                    transceivers,
-                    transceivers_last_seen,
-                } => Some((transceivers, transceivers_last_seen)),
+                GetTransceiversResponse::Response { transceivers } => {
+                    // transceivers tracks the last_seen for each switch
+                    // independently. But the (currently frozen) wicketd API
+                    // wire shape only has a single last_seen field. So we must
+                    // pick: min or max? We choose max here, so that if one of
+                    // the fetch tasks is wedged, the timestamp indicates that.
+                    //
+                    // TODO: clean this up (report per-switch last_seen) once
+                    // rkdeploy is on the stable commissioning API.
+                    let last_seen = transceivers
+                        .iter()
+                        .map(|switch| switch.updated_at.elapsed())
+                        .max();
+                    last_seen.map(|last_seen| {
+                        // The (currently frozen) wicketd API is a HashMap, so
+                        // collect into that.
+                        //
+                        // TODO: switch to IdOrdMap once rkdeploy is on the
+                        // stable commissioning API.
+                        let inventory = transceivers
+                            .into_iter()
+                            .map(|switch| (switch.switch, switch.transceivers))
+                            .collect();
+                        (inventory, last_seen)
+                    })
+                }
                 GetTransceiversResponse::Unavailable => None,
             };
 
