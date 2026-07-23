@@ -5290,7 +5290,7 @@ pub trait NexusExternalApi {
     async fn networking_switch_port_settings_create_v2026_05_07_00(
         rqctx: RequestContext<Self::Context>,
         new_settings: TypedBody<
-            v2026_04_16_00::networking::SwitchPortSettingsCreate,
+            v2026_05_07_00::networking::SwitchPortSettingsCreate,
         >,
     ) -> Result<
         HttpResponseCreated<v2026_05_07_00::networking::SwitchPortSettings>,
