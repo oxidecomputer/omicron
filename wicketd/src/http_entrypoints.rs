@@ -12,6 +12,7 @@ use crate::http_helpers::ba_lockstep_error_to_http;
 use crate::http_helpers::mgs_inventory_or_unavail;
 use crate::http_helpers::start_update;
 use crate::mgs::GetInventoryResponse as GetMgsInventoryResponse;
+use crate::mgs::records_to_mgs_inventory;
 use crate::multirack_config::CurrentMultirackJoinConfig;
 use crate::transceivers::GetTransceiversResponse;
 use bootstrap_agent_lockstep_client::ClientInfo as _;
@@ -382,10 +383,14 @@ impl WicketdApi for WicketdApiImpl {
             .get_inventory_refreshing_sps(force_refresh)
             .await
         {
-            Ok(GetMgsInventoryResponse::Response {
-                inventory,
-                mgs_last_seen,
-            }) => Some((inventory, mgs_last_seen)),
+            Ok(GetMgsInventoryResponse::Response { sps, mgs_last_seen }) => {
+                // The (currently frozen) wicketd API surfaces only the lossy
+                // `MgsV1Inventory` projection of the per-SP records.
+                //
+                // TODO: surface the richer per-SP records once rkdeploy is on
+                // the stable commissioning API.
+                Some((records_to_mgs_inventory(&sps), mgs_last_seen))
+            }
             Ok(GetMgsInventoryResponse::Unavailable) => None,
             Err(err) => {
                 return Err(err.to_http_error());

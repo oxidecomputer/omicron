@@ -27,6 +27,7 @@ use crate::helpers::sps_to_string;
 use crate::mgs::GetInventoryResponse;
 use crate::mgs::MgsHandle;
 use crate::mgs::ShutdownInProgress;
+use crate::mgs::records_to_mgs_inventory;
 
 // Get the current inventory or return a 503 Unavailable.
 //
@@ -36,7 +37,9 @@ pub(crate) async fn mgs_inventory_or_unavail(
     mgs_handle: &MgsHandle,
 ) -> Result<MgsV1Inventory, HttpError> {
     match mgs_handle.get_cached_inventory().await {
-        Ok(GetInventoryResponse::Response { inventory, .. }) => Ok(inventory),
+        Ok(GetInventoryResponse::Response { sps, .. }) => {
+            Ok(records_to_mgs_inventory(&sps))
+        }
         Ok(GetInventoryResponse::Unavailable) => Err(inventory_unavailable()),
         Err(err @ ShutdownInProgress) => Err(shutdown_to_http(err)),
     }
@@ -209,21 +212,13 @@ pub(crate) async fn start_update(
     let mut self_update = None;
     let mut maybe_self_update = BTreeSet::new();
 
-    // Next, do we have the states of the target SP?
-    let sp_states: BTreeMap<_, _> = match inventory {
-        GetInventoryResponse::Response { inventory, .. } => inventory
-            .sps
-            .into_iter()
-            .filter_map(|sp| {
-                if targets.contains(&sp.id) {
-                    if let Some(sp_state) = sp.state {
-                        Some((sp.id, sp_state))
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                }
+    // Next, do we have the states of the target SPs?
+    let sp_states: BTreeMap<_, _> = match &inventory {
+        GetInventoryResponse::Response { sps, .. } => targets
+            .iter()
+            .filter_map(|target| {
+                let state = sps.get(target)?.data.as_ref()?.state.clone();
+                Some((*target, state))
             })
             .collect(),
         GetInventoryResponse::Unavailable => BTreeMap::new(),

@@ -151,9 +151,15 @@ async fn ignition_fetching_task(
     }
 }
 
-pub(super) struct FetchedSpData {
+pub(super) struct FetchedSpMessage {
     pub(super) id: SpIdentifier,
-    pub(super) state: SpState,
+    pub(super) data: FetchedSpData,
+}
+
+/// The most recent state fetched for a single SP, minus its identifier.
+#[derive(Clone, Debug)]
+pub(crate) struct FetchedSpData {
+    pub(crate) state: SpState,
     pub(super) components: Option<Vec<SpComponentInfo>>,
     pub(super) caboose_active: Option<SpComponentCaboose>,
     pub(super) caboose_inactive: Option<SpComponentCaboose>,
@@ -197,7 +203,7 @@ impl SpStateFetcher {
         id: SpIdentifier,
         mgs_client: gateway_client::Client,
         log: Logger,
-    ) -> (Self, ReceiverStream<FetchedSpData>) {
+    ) -> (Self, ReceiverStream<FetchedSpMessage>) {
         // We only want one outstanding request at a time; if our consumer is
         // behind, we don't need to request new state MGS until they can handle
         // our results.
@@ -252,7 +258,7 @@ impl SpStateFetcher {
 
 async fn sp_fetching_task(
     id: SpIdentifier,
-    tx: mpsc::Sender<FetchedSpData>,
+    tx: mpsc::Sender<FetchedSpMessage>,
     mut fetch_now: mpsc::Receiver<()>,
     mut ignition_presence: watch::Receiver<Option<IgnitionPresence>>,
     mgs_client: gateway_client::Client,
@@ -522,14 +528,16 @@ async fn sp_fetching_task(
             }
         }
 
-        let emit = FetchedSpData {
+        let emit = FetchedSpMessage {
             id,
-            state,
-            components: components.clone(),
-            caboose_active: caboose_active.clone(),
-            caboose_inactive: caboose_inactive.clone(),
-            rot: rot.clone(),
-            mgs_received,
+            data: FetchedSpData {
+                state,
+                components: components.clone(),
+                caboose_active: caboose_active.clone(),
+                caboose_inactive: caboose_inactive.clone(),
+                rot: rot.clone(),
+                mgs_received,
+            },
         };
 
         // If our receiver is gone, we'll exit - there's no one left for

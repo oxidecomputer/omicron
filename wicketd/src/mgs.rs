@@ -8,6 +8,7 @@
 use dropshot::HttpError;
 use futures::StreamExt;
 use gateway_types::ignition::SpIgnition;
+use iddqd::{IdOrdItem, IdOrdMap, id_upcast};
 use slog::{Logger, info, o, warn};
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::SocketAddrV6;
@@ -21,7 +22,7 @@ use crate::http_helpers::http_error_with_message;
 use crate::http_helpers::shutdown_to_http;
 
 use self::inventory::{
-    FetchedIgnitionState, FetchedSpData, IgnitionPresence,
+    FetchedIgnitionState, FetchedSpData, FetchedSpMessage, IgnitionPresence,
     IgnitionStateFetcher, SpStateFetcher,
 };
 
@@ -41,7 +42,14 @@ const CHANNEL_CAPACITY: usize = 8;
 /// Response to a request for MGS-specific inventory information.
 #[derive(Debug)]
 pub enum GetInventoryResponse {
-    Response { inventory: MgsV1Inventory, mgs_last_seen: Duration },
+    Response {
+        /// Every per-SP record the manager holds.
+        ///
+        /// Consumers that speak the (currently frozen) unstable wicketd API
+        /// project this down to `MgsV1Inventory`.
+        sps: IdOrdMap<SpRecord>,
+        mgs_last_seen: Duration,
+    },
     Unavailable,
 }
 
@@ -169,7 +177,7 @@ pub struct MgsManager {
     tx: mpsc::Sender<MgsRequest>,
     rx: mpsc::Receiver<MgsRequest>,
     mgs_client: gateway_client::Client,
-    inventory: BTreeMap<SpIdentifier, SpInventory>,
+    records: IdOrdMap<SpRecord>,
 
     // Our clients can request an immediate refresh for a particular set of SPs.
     // When they do, we don't want to reply to them until we get updates for
@@ -190,7 +198,7 @@ impl MgsManager {
             tx,
             rx,
             mgs_client,
-            inventory: BTreeMap::new(),
+            records: IdOrdMap::new(),
             waiting_for_update: Vec::new(),
         }
     }
@@ -261,7 +269,7 @@ impl MgsManager {
 
                 Some((_, sp)) = sp_data_streams.next() => {
                     last_successful_mgs_response =
-                        last_successful_mgs_response.max(sp.mgs_received);
+                        last_successful_mgs_response.max(sp.data.mgs_received);
                     self.update_inventory_with_sp(
                         sp,
                         last_successful_mgs_response,
@@ -289,15 +297,11 @@ impl MgsManager {
         &self,
         mgs_last_seen: Instant,
     ) -> GetInventoryResponse {
-        if self.inventory.is_empty() {
+        if self.records.is_empty() {
             GetInventoryResponse::Unavailable
         } else {
-            let inventory = MgsV1Inventory {
-                sps: self.inventory.values().cloned().collect(),
-            };
-
             GetInventoryResponse::Response {
-                inventory,
+                sps: self.records.clone(),
                 mgs_last_seen: mgs_last_seen.elapsed(),
             }
         }
@@ -382,10 +386,8 @@ impl MgsManager {
         mgs_last_seen: Instant,
     ) {
         for (id, ignition) in ignition.sps {
-            let entry = self
-                .inventory
-                .entry(id)
-                .or_insert_with(|| SpInventory::new(id));
+            let mut entry =
+                self.records.entry(id).or_insert_with(|| SpRecord::new(id));
 
             // Update our handle with the current ignition state so it can
             // (potentially) adjust its polling frequency.
@@ -416,27 +418,91 @@ impl MgsManager {
 
     fn update_inventory_with_sp(
         &mut self,
-        sp: FetchedSpData,
+        sp: FetchedSpMessage,
         mgs_last_seen: Instant,
     ) {
-        let entry = self
-            .inventory
-            .entry(sp.id)
-            .or_insert_with(|| SpInventory::new(sp.id));
-        entry.state = Some(sp.state);
-        entry.components = sp.components;
-        entry.caboose_active = sp.caboose_active;
-        entry.caboose_inactive = sp.caboose_inactive;
-        entry.rot = sp.rot;
+        let id = sp.id;
+        // Scope the `record` RefMut so it is dropped before we access `&mut
+        // self` again below.
+        {
+            let mut record =
+                self.records.entry(id).or_insert_with(|| SpRecord::new(id));
+            record.data = Some(sp.data);
+        }
 
         // Scan any pending waiters and remove this SP from their list; if that
         // was the last thing they needed, `check_completed_waiters()` will send
         // them a response.
         for waiting in &mut self.waiting_for_update {
-            waiting.sps_to_refresh.remove(&sp.id);
+            waiting.sps_to_refresh.remove(&id);
         }
         self.check_completed_waiters(mgs_last_seen);
     }
+}
+
+/// A single SP's record in the manager's inventory map.
+#[derive(Clone, Debug)]
+pub struct SpRecord {
+    pub id: SpIdentifier,
+    pub ignition: Option<SpIgnition>,
+
+    /// Data from the most recent successful fetch.
+    pub(crate) data: Option<FetchedSpData>,
+}
+
+impl SpRecord {
+    fn new(id: SpIdentifier) -> Self {
+        Self { id, ignition: None, data: None }
+    }
+
+    /// Project this record into the frozen `SpInventory` wire type.
+    fn to_sp_inventory(&self) -> SpInventory {
+        let (state, components, caboose_active, caboose_inactive, rot) =
+            match &self.data {
+                Some(FetchedSpData {
+                    state,
+                    components,
+                    caboose_active,
+                    caboose_inactive,
+                    rot,
+                    mgs_received: _,
+                }) => (
+                    Some(state.clone()),
+                    components.clone(),
+                    caboose_active.clone(),
+                    caboose_inactive.clone(),
+                    rot.clone(),
+                ),
+                None => (None, None, None, None, None),
+            };
+        SpInventory {
+            id: self.id,
+            ignition: self.ignition.clone(),
+            state,
+            components,
+            caboose_active,
+            caboose_inactive,
+            rot,
+        }
+    }
+}
+
+impl IdOrdItem for SpRecord {
+    type Key<'a> = SpIdentifier;
+
+    fn key(&self) -> Self::Key<'_> {
+        self.id
+    }
+
+    id_upcast!();
+}
+
+/// Project the per-SP records into the frozen `MgsV1Inventory` wire type.
+pub(crate) fn records_to_mgs_inventory(
+    records: &IdOrdMap<SpRecord>,
+) -> MgsV1Inventory {
+    let sps = records.iter().map(SpRecord::to_sp_inventory).collect();
+    MgsV1Inventory { sps }
 }
 
 struct WaitingForRefresh {
