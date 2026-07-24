@@ -241,7 +241,9 @@ pub(crate) fn bootstrap_sleds_to_ct(
     records: &IdOrdMap<SpRecord>,
     ddm_discovered_sleds: &BTreeMap<Baseboard, Ipv6Addr>,
 ) -> ct_inv::GetBootstrapSledsResponse {
-    // Use the BaseboardId (part number + serial number) to match peers to sleds
+    // Use the BaseboardId (part number + serial number) to match peers to
+    // sleds.
+    let mut peers = BTreeMap::new();
     let mut unidentified_peers = BTreeSet::new();
     for (baseboard, ip) in ddm_discovered_sleds {
         match ct_inv::BaseboardId::try_from(baseboard.clone()) {
