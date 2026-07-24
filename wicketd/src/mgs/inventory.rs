@@ -9,6 +9,7 @@ use gateway_client::types::SpComponentInfo;
 use gateway_messages::SpComponent;
 use gateway_types::component::SpState;
 use gateway_types::ignition::SpIgnition;
+use gateway_types::rot::RotImageError;
 use gateway_types::rot::RotState;
 use slog::Logger;
 use slog::warn;
@@ -298,6 +299,19 @@ pub(crate) struct RotData {
     pub caboose_b: Fetched<SpComponentCaboose>,
     pub stage0: Stage0Fetch,
     pub stage0next: Stage0Fetch,
+    /// Image validity as reported by the RoT, if this RoT version reports it.
+    #[expect(dead_code)]
+    pub image_errors: Option<RotImageErrors>,
+}
+
+/// Per-slot image validity as reported by an RoT that supports reporting them.
+#[derive(Clone, Debug)]
+#[expect(dead_code)]
+pub(crate) struct RotImageErrors {
+    pub slot_a: Option<RotImageError>,
+    pub slot_b: Option<RotImageError>,
+    pub stage0: Option<RotImageError>,
+    pub stage0next: Option<RotImageError>,
 }
 
 /// A stage0 (or stage0next) bootloader caboose.
@@ -501,15 +515,29 @@ async fn sp_fetching_task(
                         caboose_b: Fetched::NotRead,
                         stage0: Stage0Fetch::Unsupported,
                         stage0next: Stage0Fetch::Unsupported,
+                        image_errors: None,
                     })));
                 }
-                RotState::V3 { active, .. } => {
+                RotState::V3 {
+                    active,
+                    slot_a_error,
+                    slot_b_error,
+                    stage0_error,
+                    stage0next_error,
+                    ..
+                } => {
                     rot = Some(RotFetch::Read(Box::new(RotData {
                         active: *active,
                         caboose_a: Fetched::NotRead,
                         caboose_b: Fetched::NotRead,
                         stage0: Stage0Fetch::Supported(Fetched::NotRead),
                         stage0next: Stage0Fetch::Supported(Fetched::NotRead),
+                        image_errors: Some(RotImageErrors {
+                            slot_a: *slot_a_error,
+                            slot_b: *slot_b_error,
+                            stage0: *stage0_error,
+                            stage0next: *stage0next_error,
+                        }),
                     })));
                 }
                 RotState::CommunicationFailed { message } => {
