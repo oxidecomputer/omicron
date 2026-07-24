@@ -30,6 +30,8 @@
 use crate::Nexus;
 use crate::app::external_client::ExternalClientBuilder;
 use crate::app::external_client::ExternalHttpClient;
+use crate::app::external_client::ExternalIpError;
+use crate::app::external_client::ExternalUrlError;
 use crate::app::external_dns;
 use anyhow::Context;
 use chrono::TimeDelta;
@@ -479,32 +481,52 @@ impl<'a> ReceiverClient<'a> {
                 return Err(e).context(MSG);
             }
         };
+        let handle_ext_url_error = |err: ExternalUrlError| {
+            // Log a different message depending on whether the webhook
+            // receiver URL is an invalid URL, or if it was rejected by the
+            // external IP policy.
+            let msg = match &err {
+                // If the URL just straight up cannot be parsed, that's not a
+                // security policy violation.
+                ExternalUrlError::IntoUrl(_) => "not a valid URL",
+                // We cannot check against the external IP policy if RSS hasn't
+                // run yet (this code really shouldn't be running at all, since
+                // no one can have created a receiver config in the first
+                // place!)
+                ExternalUrlError::NotExternalIp(
+                    ExternalIpError::RackNotInitialized { .. },
+                ) => {
+                    return Err(anyhow::anyhow!(err));
+                }
+                // Any other error indicates that the external IP policy did not
+                // allow the request to be sent.
+                _ => "rejected by external IP policy",
+            };
+            slog::warn!(
+                &opctx.log,
+                "cannot deliver webhook requests to this endpoint: {msg}";
+                "endpoint" => %self.rx.endpoint,
+                "alert_id" => %delivery.alert_id,
+                "alert_class" => %alert_class,
+                "delivery_id" => %delivery.id,
+                "delivery_trigger" => %delivery.triggered_by,
+                "error" => InlineErrorChain::new(&err),
+            );
+            Ok(WebhookDeliveryAttempt {
+                id: WebhookDeliveryAttemptUuid::new_v4().into(),
+                delivery_id: delivery.id,
+                rx_id: delivery.rx_id,
+                attempt: SqlU8::new(delivery.attempts.0 + 1),
+                result: WebhookDeliveryAttemptResult::FailedUnreachable,
+                response_status: None,
+                response_duration: None,
+                time_created: chrono::Utc::now(),
+                deliverator_id: self.nexus_id.into(),
+            })
+        };
         let mut request = match self.client.post(&self.rx.endpoint) {
             Ok(req) => req,
-            Err(err) => {
-                slog::warn!(
-                    &opctx.log,
-                    "webhook receiver URL was rejected by the external IP \
-                     policy";
-                     "endpoint" => %self.rx.endpoint,
-                    "alert_id" => %delivery.alert_id,
-                    "alert_class" => %alert_class,
-                    "delivery_id" => %delivery.id,
-                    "delivery_trigger" => %delivery.triggered_by,
-                    "error" => InlineErrorChain::new(&err),
-                );
-                return Ok(WebhookDeliveryAttempt {
-                    id: WebhookDeliveryAttemptUuid::new_v4().into(),
-                    delivery_id: delivery.id,
-                    rx_id: delivery.rx_id,
-                    attempt: SqlU8::new(delivery.attempts.0 + 1),
-                    result: WebhookDeliveryAttemptResult::FailedUnreachable,
-                    response_status: None,
-                    response_duration: None,
-                    time_created: chrono::Utc::now(),
-                    deliverator_id: self.nexus_id.into(),
-                });
-            }
+            Err(err) => return handle_ext_url_error(err),
         }
         .header(HDR_RX_ID, self.hdr_rx_id.clone())
         .header(HDR_DELIVERY_ID, delivery.id.to_string())
@@ -551,30 +573,7 @@ impl<'a> ReceiverClient<'a> {
         // trying to classify it as a wire-level error below.
         let request_fut = match self.client.execute(request) {
             Ok(request_fut) => request_fut,
-            Err(error) => {
-                slog::warn!(
-                    &opctx.log,
-                    "webhook receiver URL was rejected by the external IP \
-                     policy";
-                    "endpoint" => %self.rx.endpoint,
-                    "alert_id" => %delivery.alert_id,
-                    "alert_class" => %alert_class,
-                    "delivery_id" => %delivery.id,
-                    "delivery_trigger" => %delivery.triggered_by,
-                    "error" => InlineErrorChain::new(&error),
-                );
-                return Ok(WebhookDeliveryAttempt {
-                    id: WebhookDeliveryAttemptUuid::new_v4().into(),
-                    delivery_id: delivery.id,
-                    rx_id: delivery.rx_id,
-                    attempt: SqlU8::new(delivery.attempts.0 + 1),
-                    result: WebhookDeliveryAttemptResult::FailedUnreachable,
-                    response_status: None,
-                    response_duration: None,
-                    time_created: chrono::Utc::now(),
-                    deliverator_id: self.nexus_id.into(),
-                });
-            }
+            Err(err) => return handle_ext_url_error(err),
         };
         let t0 = Instant::now();
         let result = request_fut.await;
