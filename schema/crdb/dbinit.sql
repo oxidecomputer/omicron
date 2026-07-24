@@ -7500,6 +7500,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.webhook_delivery_attempt (
     time_created TIMESTAMPTZ NOT NULL,
     -- UUID of the Nexus who did this delivery attempt.
     deliverator_id UUID NOT NULL,
+    unreachable_reason STRING,
 
     -- Attempt numbers start at 1
     CONSTRAINT attempts_start_at_1 CHECK (attempt >= 1),
@@ -7529,8 +7530,15 @@ CREATE TABLE IF NOT EXISTS omicron.public.webhook_delivery_attempt (
                 response_duration IS NULL
             )
         )
+    ),
+
+    -- If the result is 'failed_unreachable', we must also record the error
+    -- message. Otherwise, that field must be NULL.
+    CONSTRAINT unreachable_reason_iff_unreachable CHECK (
+        (result = 'failed_unreachable' AND unreachable_reason IS NOT NULL) OR
+        (result != 'failed_unreachable' AND unreachable_reason IS NULL)
     )
-);
+)
 
 CREATE INDEX IF NOT EXISTS lookup_attempts_for_webhook_delivery
 ON omicron.public.webhook_delivery_attempt (

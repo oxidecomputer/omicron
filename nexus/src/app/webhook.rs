@@ -527,6 +527,7 @@ impl<'a> ReceiverClient<'a> {
                 // allow the request to be sent.
                 _ => ERR_IP_POLICY,
             };
+            let error = InlineErrorChain::new(&err);
             slog::warn!(
                 &opctx.log,
                 "{msg}";
@@ -535,7 +536,7 @@ impl<'a> ReceiverClient<'a> {
                 "alert_class" => %alert_class,
                 "delivery_id" => %delivery.id,
                 "delivery_trigger" => %delivery.triggered_by,
-                "error" => InlineErrorChain::new(&err),
+                &error
             );
             Ok(WebhookDeliveryAttempt {
                 id: WebhookDeliveryAttemptUuid::new_v4().into(),
@@ -547,6 +548,7 @@ impl<'a> ReceiverClient<'a> {
                 response_duration: None,
                 time_created: chrono::Utc::now(),
                 deliverator_id: self.nexus_id.into(),
+                unreachable_reason: Some(error.to_string()),
             })
         };
         let mut request = match self.client.post(&self.rx.endpoint) {
@@ -615,7 +617,9 @@ impl<'a> ReceiverClient<'a> {
         let t0 = Instant::now();
         let result = request_fut.await;
         let duration = t0.elapsed();
-        let (delivery_result, status) = match result {
+        let mut response_status = None;
+        let mut unreachable_reason = None;
+        let delivery_result = match result {
             // Builder errors are our fault, that's weird!
             Err(e) if e.is_builder() => {
                 const MSG: &str =
@@ -643,6 +647,7 @@ impl<'a> ReceiverClient<'a> {
                         // Anything else indicates that the IP was rejected by
                         // the external IP policy.
                         _ => {
+                            let error = InlineErrorChain::new(&e);
                             slog::warn!(
                                 &opctx.log,
                                 // This message should contain the same string
@@ -655,13 +660,10 @@ impl<'a> ReceiverClient<'a> {
                                 "alert_class" => %alert_class,
                                 "delivery_id" => %delivery.id,
                                 "delivery_trigger" => %delivery.triggered_by,
-                                "error" => InlineErrorChain::new(&e),
+                                &error,
                             );
-
-                            (
-                                WebhookDeliveryAttemptResult::FailedUnreachable,
-                                None,
-                            )
+                            unreachable_reason = Some(error.to_string());
+                            WebhookDeliveryAttemptResult::FailedUnreachable
                         }
                     }
                 } else if let Some(status) = e.status() {
@@ -675,18 +677,19 @@ impl<'a> ReceiverClient<'a> {
                         "response_status" => ?status,
                         "response_duration" => ?duration,
                     );
-                    (
-                        WebhookDeliveryAttemptResult::FailedHttpError,
-                        Some(status),
-                    )
+                    response_status = Some(status);
+                    WebhookDeliveryAttemptResult::FailedHttpError
                 } else {
+                    let error = InlineErrorChain::new(&e);
                     let result = if e.is_connect() {
+                        unreachable_reason = Some(error.to_string());
                         WebhookDeliveryAttemptResult::FailedUnreachable
                     } else if e.is_timeout() {
                         WebhookDeliveryAttemptResult::FailedTimeout
                     } else if e.is_redirect() {
                         WebhookDeliveryAttemptResult::FailedHttpError
                     } else {
+                        unreachable_reason = Some(error.to_string());
                         WebhookDeliveryAttemptResult::FailedUnreachable
                     };
                     slog::warn!(
@@ -696,13 +699,14 @@ impl<'a> ReceiverClient<'a> {
                         "alert_class" => %alert_class,
                         "delivery_id" => %delivery.id,
                         "delivery_trigger" => %delivery.triggered_by,
-                        "error" => InlineErrorChain::new(&e),
+                        &error,
                     );
-                    (result, None)
+                    result
                 }
             }
             Ok(rsp) => {
                 let status = rsp.status();
+                response_status = Some(status);
                 if status.is_success() {
                     slog::debug!(
                         &opctx.log,
@@ -714,7 +718,7 @@ impl<'a> ReceiverClient<'a> {
                         "response_status" => ?status,
                         "response_duration" => ?duration,
                     );
-                    (WebhookDeliveryAttemptResult::Succeeded, Some(status))
+                    WebhookDeliveryAttemptResult::Succeeded
                 } else {
                     slog::warn!(
                         &opctx.log,
@@ -726,21 +730,19 @@ impl<'a> ReceiverClient<'a> {
                         "response_status" => ?status,
                         "response_duration" => ?duration,
                     );
-                    (
-                        WebhookDeliveryAttemptResult::FailedHttpError,
-                        Some(status),
-                    )
+                    WebhookDeliveryAttemptResult::FailedHttpError
                 }
             }
         };
         // only include a response duration if we actually got a response back
-        let response_duration = status.map(|_| {
+        let response_duration = response_status.map(|_| {
             TimeDelta::from_std(duration).expect(
                 "because we set a 30-second response timeout, there is no \
                     way a response duration could ever exceed the max \
                     representable TimeDelta of `i64::MAX` milliseconds",
             )
         });
+        let response_status = response_status.map(|s| s.as_u16().into());
 
         Ok(WebhookDeliveryAttempt {
             id: WebhookDeliveryAttemptUuid::new_v4().into(),
@@ -748,10 +750,11 @@ impl<'a> ReceiverClient<'a> {
             rx_id: delivery.rx_id,
             attempt: SqlU8::new(delivery.attempts.0 + 1),
             result: delivery_result,
-            response_status: status.map(|s| s.as_u16().into()),
+            response_status,
             response_duration,
             time_created: chrono::Utc::now(),
             deliverator_id: self.nexus_id.into(),
+            unreachable_reason,
         })
     }
 }
