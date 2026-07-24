@@ -773,7 +773,7 @@ task: "fm_sitrep_gc"
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     pruning sitrep history table:
       max sitreps to keep: 2000
-      status: within limit (nothing was pruned)
+      status: within limit (nothing was deleted)
       current count:          1
     garbage collecting orphaned sitreps:
       batch size:                                                               1000
@@ -1494,7 +1494,7 @@ task: "fm_sitrep_gc"
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     pruning sitrep history table:
       max sitreps to keep: 2000
-      status: within limit (nothing was pruned)
+      status: within limit (nothing was deleted)
       current count:          1
     garbage collecting orphaned sitreps:
       batch size:                                                               1000
