@@ -4091,7 +4091,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_router_configuration_by_name ON omicron
 CREATE TABLE IF NOT EXISTS omicron.public.router_configuration_bgp_peer (
     router_configuration_id UUID NOT NULL,
     name STRING(63) NOT NULL,
-    addr INET,
+    addr INET CHECK (host(addr) != '0.0.0.0' AND host(addr) != '::'),
     port_name TEXT NOT NULL,
     remote_asn INT8,
     allowed_import INET[],
