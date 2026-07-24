@@ -3130,9 +3130,9 @@ mod tests {
     use super::*;
 
     use crate::db::pub_test_utils::TestDatabase;
+    use crate::db::pub_test_utils::helpers::create_service_ip_pool;
     use crate::db::raw_query_builder::QueryBuilder;
     use gateway_types::rot::RotSlot;
-    use nexus_db_model::IpVersion;
     use nexus_inventory::now_db_precision;
     use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
     use nexus_reconfigurator_planning::blueprint_builder::Ensure;
@@ -4431,19 +4431,12 @@ mod tests {
         for pool_range in
             example.system.external_ip_policy().clone().into_raw_ranges()
         {
-            // This looks up the pool again for each range; we only need at most
-            // two (one V4, one V6), but our example system doesn't have many
-            // ranges so this should be fine.
-            let service_pools = datastore
-                .ip_pools_service_lookup_by_version(
-                    &opctx,
-                    pool_range.version().into(),
-                    std::num::NonZeroU32::new(1).unwrap(),
-                )
-                .await
-                .expect("lookup service ip pools");
+            // Create (idempotently) the service pool of the appropriate version
+            // for each range. We only need at most two (one V4, one V6), but our
+            // example system doesn't have many ranges so this should be fine.
             let service_pool =
-                service_pools.first().expect("service ip pool for version");
+                create_service_ip_pool(&opctx, datastore, pool_range.version())
+                    .await;
             datastore
                 .ip_pool_add_range(
                     &opctx,
@@ -4527,15 +4520,12 @@ mod tests {
                     .map(|(ip, _nic)| ip.ip())
             })
             .expect("found external IP");
-        let service_pools = datastore
-            .ip_pools_service_lookup_by_version(
-                &opctx,
-                IpVersion::V4,
-                std::num::NonZeroU32::new(1).unwrap(),
-            )
-            .await
-            .expect("lookup service ip pools");
-        let service_pool = service_pools.first().expect("v4 service ip pool");
+        let service_pool = create_service_ip_pool(
+            &opctx,
+            datastore,
+            omicron_common::api::external::IpVersion::V4,
+        )
+        .await;
         datastore
             .ip_pool_add_range(
                 &opctx,
