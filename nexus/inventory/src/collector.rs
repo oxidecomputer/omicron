@@ -154,7 +154,7 @@ impl<'a> Collector<'a> {
             // First, fetch the state of the SP.  If that fails, report the
             // error but continue.
             let result =
-                client.sp_get(&sp.type_, sp.slot).await.with_context(|| {
+                client.sp_get(&sp.typ, sp.slot).await.with_context(|| {
                     format!(
                         "MGS {:?}: fetching state of SP {:?}",
                         client.baseurl(),
@@ -172,7 +172,7 @@ impl<'a> Collector<'a> {
             // Record the state that we found.
             let Some(baseboard_id) = in_progress.found_sp_state(
                 client.baseurl(),
-                sp.type_,
+                sp.typ,
                 sp.slot,
                 sp_state,
             ) else {
@@ -186,13 +186,13 @@ impl<'a> Collector<'a> {
             // collected already. Generally, we'd only get here for the first
             // MGS client.  Assuming that one succeeds, the other(s) will skip
             // this loop.
-            if matches!(sp.type_, SpType::Sled) {
+            if matches!(sp.typ, SpType::Sled) {
                 if !in_progress
                     .found_host_phase_1_active_slot_already(&baseboard_id)
                 {
                     let result = client
                         .sp_component_active_slot_get(
-                            &sp.type_,
+                            &sp.typ,
                             sp.slot,
                             SpComponent::HOST_CPU_BOOT_FLASH.const_as_str(),
                         )
@@ -256,7 +256,7 @@ impl<'a> Collector<'a> {
 
                     let result = client
                         .host_phase_1_flash_hash_calculate_with_timeout(
-                            sp.type_,
+                            sp.typ,
                             sp.slot,
                             phase1_slot,
                             PHASE1_HASH_TIMEOUT,
@@ -313,9 +313,7 @@ impl<'a> Collector<'a> {
                 };
 
                 let result = client
-                    .sp_component_caboose_get(
-                        &sp.type_, sp.slot, component, slot,
-                    )
+                    .sp_component_caboose_get(&sp.typ, sp.slot, component, slot)
                     .await
                     .with_context(|| {
                         format!(
@@ -362,12 +360,12 @@ impl<'a> Collector<'a> {
 
                 let result = match which {
                     RotPageWhich::Cmpa => client
-                        .sp_rot_cmpa_get(&sp.type_, sp.slot, component)
+                        .sp_rot_cmpa_get(&sp.typ, sp.slot, component)
                         .await
                         .map(|response| response.into_inner().base64_data),
                     RotPageWhich::CfpaActive => client
                         .sp_rot_cfpa_get(
-                            &sp.type_,
+                            &sp.typ,
                             sp.slot,
                             component,
                             &GetCfpaParams { slot: RotCfpaSlot::Active },
@@ -376,7 +374,7 @@ impl<'a> Collector<'a> {
                         .map(|response| response.into_inner().base64_data),
                     RotPageWhich::CfpaInactive => client
                         .sp_rot_cfpa_get(
-                            &sp.type_,
+                            &sp.typ,
                             sp.slot,
                             component,
                             &GetCfpaParams { slot: RotCfpaSlot::Inactive },
@@ -385,7 +383,7 @@ impl<'a> Collector<'a> {
                         .map(|response| response.into_inner().base64_data),
                     RotPageWhich::CfpaScratch => client
                         .sp_rot_cfpa_get(
-                            &sp.type_,
+                            &sp.typ,
                             sp.slot,
                             component,
                             &GetCfpaParams { slot: RotCfpaSlot::Scratch },

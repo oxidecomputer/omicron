@@ -10,25 +10,6 @@
 # components' package-manifest.toml files, which we probably have available, so
 # we could still incorporate that information.
 #
-# TODO The following items from package-manifest.toml are currently ignored
-# because they are assumed not to contain servers or clients that we care about:
-#
-# - faux_mgs
-# - crucible_dtrace
-# - mg-ddm
-#
-# The following were at one point included here, but do not appear to contain
-# Progenitor clients or APIs, so they're left out to avoid needing to create and
-# process clones of these repos:
-#
-# - pumpkind
-# - thundermuffin
-#
-# If we do wind up processing package-manifest.toml, we may want to maintain an
-# explicit list of items that we ignore so that we can fail when something is
-# neither included nor ignored so that we can be sure we're not missing
-# anything.
-#
 # TODO The metadata here overlaps with metadata hardcoded in
 # `dev-tools/dropshot-apis`.
 

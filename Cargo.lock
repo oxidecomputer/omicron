@@ -448,7 +448,7 @@ dependencies = [
  "rats-corim 0.1.0 (git+https://github.com/oxidecomputer/rats-corim)",
  "salty",
  "serde",
- "serde_with 3.17.0",
+ "serde_with 3.21.0",
  "sha3 0.10.8",
  "static_assertions",
  "thiserror 2.0.18",
@@ -467,7 +467,7 @@ dependencies = [
  "rats-corim 0.1.0 (git+https://github.com/oxidecomputer/rats-corim)",
  "salty",
  "serde",
- "serde_with 3.17.0",
+ "serde_with 3.21.0",
  "sha3 0.10.8",
  "static_assertions",
  "thiserror 2.0.18",
@@ -486,7 +486,7 @@ dependencies = [
  "rats-corim 0.1.0 (git+https://github.com/oxidecomputer/rats-corim)",
  "salty",
  "serde",
- "serde_with 3.17.0",
+ "serde_with 3.21.0",
  "sha3 0.10.8",
  "static_assertions",
  "thiserror 2.0.18",
@@ -903,7 +903,7 @@ dependencies = [
  "rand 0.8.6",
  "secrecy 0.10.3",
  "serde",
- "serde_with 3.17.0",
+ "serde_with 3.21.0",
  "sha3 0.10.8",
  "sled-hardware-types",
  "slog",
@@ -931,7 +931,7 @@ dependencies = [
  "sled-agent-types",
  "sled-agent-types-versions",
  "sled-hardware-types",
- "tufaceous-artifact",
+ "tufaceous-artifact 0.1.0",
 ]
 
 [[package]]
@@ -998,6 +998,15 @@ dependencies = [
  "sled-agent-types",
  "sled-hardware-types",
  "strum 0.27.2",
+]
+
+[[package]]
+name = "bs58"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bf88ba1141d185c399bee5288d850d63b8369520c1eafc32a0430b5b6c287bf4"
+dependencies = [
+ "tinyvec",
 ]
 
 [[package]]
@@ -1777,6 +1786,27 @@ dependencies = [
 [[package]]
 name = "common"
 version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/dendrite?rev=04a52a3240a26c58f03e1cf40353d67ff69d76b6#04a52a3240a26c58f03e1cf40353d67ff69d76b6"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "oxnet",
+ "rand 0.9.2",
+ "schemars 0.8.22",
+ "serde",
+ "serde_json",
+ "slog",
+ "slog-async",
+ "slog-bunyan",
+ "slog-term",
+ "smf 0.10.0",
+ "thiserror 2.0.18",
+ "tokio",
+]
+
+[[package]]
+name = "common"
+version = "0.1.0"
 source = "git+https://github.com/oxidecomputer/dendrite?rev=cc0c307c617f2988aafdca4e3bd35ea178b64801#cc0c307c617f2988aafdca4e3bd35ea178b64801"
 dependencies = [
  "anyhow",
@@ -1993,7 +2023,7 @@ dependencies = [
  "omicron-workspace-hack",
  "serde_json",
  "sha2 0.10.9",
- "tufaceous-artifact",
+ "tufaceous-artifact 0.1.0",
  "uuid",
 ]
 
@@ -3100,6 +3130,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "digest-io"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2de63d600bc7fab91180bc17385f29b342468dc8ef2af09dceba450a293de3da"
+dependencies = [
+ "digest 0.11.3",
+]
+
+[[package]]
 name = "dirs-next"
 version = "2.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3298,6 +3337,30 @@ dependencies = [
  "oxnet",
  "progenitor 0.13.0",
  "regress 0.10.5",
+ "reqwest 0.13.2",
+ "schemars 0.8.22",
+ "serde",
+ "serde_json",
+ "slog",
+ "tokio",
+ "transceiver-controller 0.1.1 (git+https://github.com/oxidecomputer/transceiver-control?branch=main)",
+ "uuid",
+]
+
+[[package]]
+name = "dpd-client"
+version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/dendrite?rev=04a52a3240a26c58f03e1cf40353d67ff69d76b6#04a52a3240a26c58f03e1cf40353d67ff69d76b6"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "common 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=04a52a3240a26c58f03e1cf40353d67ff69d76b6)",
+ "crc8",
+ "futures",
+ "http",
+ "oxnet",
+ "progenitor 0.14.0",
+ "regress 0.11.1",
  "reqwest 0.13.2",
  "schemars 0.8.22",
  "serde",
@@ -4273,6 +4336,7 @@ dependencies = [
  "futures",
  "gateway-client",
  "gateway-messages",
+ "gateway-types",
  "omicron-common",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
@@ -4287,7 +4351,7 @@ dependencies = [
  "termios",
  "tokio",
  "tokio-tungstenite 0.23.1",
- "tufaceous-artifact",
+ "tufaceous-artifact 0.1.0",
  "uuid",
 ]
 
@@ -4424,7 +4488,7 @@ dependencies = [
  "serde",
  "test-strategy",
  "thiserror 2.0.18",
- "tufaceous-artifact",
+ "tufaceous-artifact 0.1.0",
  "uuid",
 ]
 
@@ -5811,6 +5875,8 @@ dependencies = [
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "oxide-tokio-rt",
+ "oxide-update-engine",
+ "oxide-update-engine-types",
  "partial-io",
  "proptest",
  "reqwest 0.13.2",
@@ -5829,9 +5895,8 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tokio-stream",
- "tufaceous-artifact",
+ "tufaceous-artifact 0.1.0",
  "tufaceous-lib",
- "update-engine",
 ]
 
 [[package]]
@@ -5846,11 +5911,11 @@ dependencies = [
  "omicron-common",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
+ "oxide-update-engine-types",
  "schemars 0.8.22",
  "serde",
  "slog",
- "tufaceous-artifact",
- "update-engine",
+ "tufaceous-artifact 0.1.0",
  "uuid",
 ]
 
@@ -5861,6 +5926,7 @@ dependencies = [
  "omicron-common",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
+ "oxide-update-engine-types",
  "progenitor 0.14.0",
  "regress 0.10.5",
  "reqwest 0.13.2",
@@ -5868,7 +5934,6 @@ dependencies = [
  "serde",
  "serde_json",
  "slog",
- "update-engine",
 ]
 
 [[package]]
@@ -5882,15 +5947,16 @@ dependencies = [
  "libc",
  "omicron-common",
  "omicron-workspace-hack",
+ "oxide-update-engine",
+ "oxide-update-engine-types",
  "proptest",
  "schemars 0.8.22",
  "serde",
  "serde_json",
- "serde_with 3.17.0",
+ "serde_with 3.21.0",
  "test-strategy",
  "thiserror 2.0.18",
  "tokio",
- "update-engine",
 ]
 
 [[package]]
@@ -6022,7 +6088,7 @@ dependencies = [
  "slog-error-chain",
  "test-strategy",
  "thiserror 2.0.18",
- "tufaceous-artifact",
+ "tufaceous-artifact 0.1.0",
 ]
 
 [[package]]
@@ -6641,7 +6707,7 @@ dependencies = [
 [[package]]
 name = "lldpd-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/lldp#54b266174d4de9628bca9c97b0db176e16f12154"
+source = "git+https://github.com/oxidecomputer/lldp?rev=54b266174d4de9628bca9c97b0db176e16f12154#54b266174d4de9628bca9c97b0db176e16f12154"
 dependencies = [
  "chrono",
  "futures",
@@ -6660,7 +6726,7 @@ dependencies = [
 [[package]]
 name = "lldpd-common"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/lldp#54b266174d4de9628bca9c97b0db176e16f12154"
+source = "git+https://github.com/oxidecomputer/lldp?rev=54b266174d4de9628bca9c97b0db176e16f12154#54b266174d4de9628bca9c97b0db176e16f12154"
 dependencies = [
  "anyhow",
  "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?branch=main)",
@@ -6677,7 +6743,7 @@ dependencies = [
 [[package]]
 name = "lldpd-types-versions"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/lldp#54b266174d4de9628bca9c97b0db176e16f12154"
+source = "git+https://github.com/oxidecomputer/lldp?rev=54b266174d4de9628bca9c97b0db176e16f12154#54b266174d4de9628bca9c97b0db176e16f12154"
 dependencies = [
  "chrono",
  "protocol",
@@ -7233,7 +7299,7 @@ dependencies = [
  "schemars 0.8.22",
  "serde",
  "serde_json",
- "serde_with 3.17.0",
+ "serde_with 3.21.0",
  "sled-agent-types",
  "tokio-postgres",
  "toml 0.8.23",
@@ -7351,7 +7417,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "trust-quorum-protocol",
- "tufaceous-artifact",
+ "tufaceous-artifact 0.1.0",
  "uuid",
 ]
 
@@ -7432,7 +7498,7 @@ dependencies = [
  "semver 1.0.28",
  "serde",
  "serde_json",
- "serde_with 3.17.0",
+ "serde_with 3.21.0",
  "sha2 0.10.9",
  "sled-agent-client",
  "sled-agent-types",
@@ -7449,7 +7515,7 @@ dependencies = [
  "tokio",
  "trust-quorum-protocol",
  "trust-quorum-types",
- "tufaceous-artifact",
+ "tufaceous-artifact 0.1.0",
  "url",
  "usdt 0.5.0",
  "uuid",
@@ -7513,7 +7579,7 @@ dependencies = [
  "serde_json",
  "slog-error-chain",
  "trust-quorum-types",
- "tufaceous-artifact",
+ "tufaceous-artifact 0.1.0",
  "uuid",
 ]
 
@@ -7540,6 +7606,7 @@ dependencies = [
  "serde_json",
  "slog",
  "slog-error-chain",
+ "strum 0.27.2",
  "thiserror 2.0.18",
  "typed-rng",
 ]
@@ -7608,7 +7675,7 @@ dependencies = [
  "swrite",
  "thiserror 2.0.18",
  "tokio",
- "tufaceous-artifact",
+ "tufaceous-artifact 0.1.0",
  "typed-rng",
  "uuid",
 ]
@@ -7742,7 +7809,7 @@ dependencies = [
  "tokio-stream",
  "tokio-util",
  "trust-quorum-types",
- "tufaceous-artifact",
+ "tufaceous-artifact 0.1.0",
  "uuid",
 ]
 
@@ -7786,7 +7853,7 @@ dependencies = [
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "sled-agent-types",
- "tufaceous-artifact",
+ "tufaceous-artifact 0.1.0",
 ]
 
 [[package]]
@@ -7862,6 +7929,8 @@ dependencies = [
  "omicron-test-utils",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
+ "oxide-update-engine",
+ "oxide-update-engine-types",
  "oxnet",
  "pq-sys",
  "reqwest 0.13.2",
@@ -7870,7 +7939,6 @@ dependencies = [
  "slog",
  "slog-error-chain",
  "tokio",
- "update-engine",
  "uuid",
 ]
 
@@ -7932,8 +8000,8 @@ dependencies = [
  "tokio",
  "toml 0.8.23",
  "transient-dns-server",
- "tufaceous",
- "tufaceous-artifact",
+ "tufaceous 0.1.0",
+ "tufaceous-artifact 0.1.0",
  "tufaceous-lib",
  "typed-rng",
  "update-common",
@@ -8009,7 +8077,7 @@ dependencies = [
  "swrite",
  "sync-ptr",
  "thiserror 2.0.18",
- "tufaceous-artifact",
+ "tufaceous-artifact 0.1.0",
  "typed-rng",
  "uuid",
 ]
@@ -8108,7 +8176,7 @@ dependencies = [
  "chrono",
  "crucible-agent-client",
  "dns-service-client",
- "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=cc0c307c617f2988aafdca4e3bd35ea178b64801)",
+ "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=04a52a3240a26c58f03e1cf40353d67ff69d76b6)",
  "dropshot",
  "fmd-adm-sys",
  "futures",
@@ -8176,6 +8244,7 @@ dependencies = [
  "async-trait",
  "base64 0.22.1",
  "bootstrap-agent-lockstep-types",
+ "camino",
  "chrono",
  "clap",
  "clickhouse-admin-types",
@@ -8209,6 +8278,9 @@ dependencies = [
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "openssl",
+ "owo-colors 4.3.0",
+ "oxide-update-engine",
+ "oxide-update-engine-types",
  "oximeter-db",
  "oxnet",
  "oxql-types",
@@ -8219,7 +8291,7 @@ dependencies = [
  "semver 1.0.28",
  "serde",
  "serde_json",
- "serde_with 3.17.0",
+ "serde_with 3.21.0",
  "sled-agent-types",
  "sled-agent-types-versions",
  "sled-hardware-types",
@@ -8236,9 +8308,8 @@ dependencies = [
  "tough",
  "trust-quorum-protocol",
  "trust-quorum-types",
- "tufaceous-artifact",
+ "tufaceous-artifact 0.1.0",
  "unicode-width 0.1.14",
- "update-engine",
  "url",
  "uuid",
 ]
@@ -8276,7 +8347,7 @@ dependencies = [
  "strum 0.27.2",
  "thiserror 2.0.18",
  "tough",
- "tufaceous-artifact",
+ "tufaceous-artifact 0.1.0",
  "url",
  "uuid",
 ]
@@ -8795,7 +8866,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_urlencoded",
- "serde_with 3.17.0",
+ "serde_with 3.21.0",
  "slog",
  "slog-error-chain",
  "strum 0.27.2",
@@ -8803,7 +8874,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "toml 0.8.23",
- "tufaceous-artifact",
+ "tufaceous-artifact 0.1.0",
  "uuid",
 ]
 
@@ -8959,7 +9030,7 @@ dependencies = [
  "tokio-stream",
  "tokio-tungstenite 0.23.1",
  "toml 0.8.23",
- "tufaceous-artifact",
+ "tufaceous-artifact 0.1.0",
  "uuid",
  "zip 4.6.1",
 ]
@@ -8970,7 +9041,7 @@ version = "0.1.0"
 dependencies = [
  "omicron-workspace-hack",
  "serde",
- "serde_with 3.17.0",
+ "serde_with 3.21.0",
  "vergen-gitcl",
 ]
 
@@ -9044,6 +9115,7 @@ dependencies = [
  "omicron-deployment-graph",
  "omicron-test-utils",
  "omicron-workspace-hack",
+ "omicron-zone-package",
  "parse-display",
  "petgraph 0.8.3",
  "serde",
@@ -9082,7 +9154,7 @@ dependencies = [
  "display-error-chain",
  "dns-server",
  "dns-service-client",
- "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=cc0c307c617f2988aafdca4e3bd35ea178b64801)",
+ "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=04a52a3240a26c58f03e1cf40353d67ff69d76b6)",
  "dropshot",
  "ereport-types",
  "expectorate",
@@ -9164,6 +9236,8 @@ dependencies = [
  "openssl",
  "oxide-client",
  "oxide-tokio-rt",
+ "oxide-update-engine",
+ "oxide-update-engine-types",
  "oximeter",
  "oximeter-client",
  "oximeter-collector",
@@ -9201,7 +9275,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_urlencoded",
- "serde_with 3.17.0",
+ "serde_with 3.21.0",
  "sha2 0.10.9",
  "similar-asserts",
  "sled-agent-client",
@@ -9227,11 +9301,10 @@ dependencies = [
  "tokio-util",
  "tough",
  "trust-quorum-types",
- "tufaceous",
- "tufaceous-artifact",
+ "tufaceous 0.1.0",
+ "tufaceous-artifact 0.1.0",
  "tufaceous-lib",
  "update-common",
- "update-engine",
  "usdt 0.5.0",
  "uuid",
  "zip 4.6.1",
@@ -9300,6 +9373,7 @@ dependencies = [
  "csv",
  "daft",
  "diesel",
+ "display-error-chain",
  "dropshot",
  "dyn-clone",
  "erebor",
@@ -9345,9 +9419,12 @@ dependencies = [
  "omicron-workspace-hack",
  "owo-colors 4.3.0",
  "oxide-tokio-rt",
+ "oxide-update-engine-display",
+ "oxide-update-engine-types",
  "oximeter-client",
  "oximeter-db",
  "oxnet",
+ "parallel-task-set",
  "petgraph 0.8.3",
  "pq-sys",
  "ratatui",
@@ -9371,9 +9448,8 @@ dependencies = [
  "textwrap 0.16.2",
  "tokio",
  "trust-quorum-types",
- "tufaceous-artifact",
+ "tufaceous-artifact 0.1.0",
  "unicode-width 0.1.14",
- "update-engine",
  "url",
  "uuid",
  "zip 4.6.1",
@@ -9432,7 +9508,7 @@ dependencies = [
  "schemars 0.8.22",
  "secrecy 0.10.3",
  "serde",
- "serde_with 3.17.0",
+ "serde_with 3.21.0",
  "thiserror 2.0.18",
 ]
 
@@ -9469,6 +9545,9 @@ dependencies = [
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "oxide-tokio-rt",
+ "oxide-update-engine",
+ "oxide-update-engine-display",
+ "oxide-update-engine-types",
  "pq-sys",
  "qorb",
  "repo-depot-client",
@@ -9476,7 +9555,6 @@ dependencies = [
  "slog",
  "supports-color 3.0.2",
  "tokio",
- "update-engine",
  "uuid",
 ]
 
@@ -9503,7 +9581,6 @@ dependencies = [
  "semver 1.0.28",
  "serde",
  "serde_json",
- "sha2 0.10.9",
  "shell-words",
  "slog",
  "slog-async",
@@ -9511,7 +9588,9 @@ dependencies = [
  "tar",
  "tokio",
  "toml 0.8.23",
- "tufaceous-artifact",
+ "tufaceous 0.2.0",
+ "tufaceous-artifact 0.1.0",
+ "tufaceous-artifact 0.2.0",
  "tufaceous-lib",
  "update-common",
 ]
@@ -9550,7 +9629,7 @@ dependencies = [
  "slog-error-chain",
  "tokio",
  "tokio-util",
- "tufaceous-artifact",
+ "tufaceous-artifact 0.1.0",
  "update-common",
 ]
 
@@ -9686,8 +9765,8 @@ dependencies = [
  "trust-quorum",
  "trust-quorum-protocol",
  "trust-quorum-types",
- "tufaceous-artifact",
- "tufaceous-brand-metadata",
+ "tufaceous-artifact 0.1.0",
+ "tufaceous-brand-metadata 0.1.0",
  "usdt 0.5.0",
  "uuid",
  "walkdir",
@@ -9769,8 +9848,10 @@ dependencies = [
  "bitflags 2.11.0",
  "bstr",
  "buf-list",
+ "byte-wrapper",
  "bytes",
  "camino",
+ "cc",
  "chacha20 0.10.0",
  "chrono",
  "cipher 0.5.2",
@@ -9877,8 +9958,8 @@ dependencies = [
  "serde",
  "serde_core",
  "serde_json",
- "serde_with 3.17.0",
- "serde_with_macros 3.17.0",
+ "serde_with 3.21.0",
+ "serde_with_macros 3.21.0",
  "sha2 0.10.9",
  "sha3 0.10.8",
  "simd-adler32",
@@ -10176,6 +10257,57 @@ dependencies = [
 ]
 
 [[package]]
+name = "oxide-update-engine"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ec6b4a92c5a78d61609cf956eb428620899f15ffc8881b13260c5168b5fa37ef"
+dependencies = [
+ "cancel-safe-futures",
+ "debug-ignore",
+ "derive-where",
+ "futures",
+ "linear-map",
+ "oxide-update-engine-types",
+ "slog",
+ "tokio",
+]
+
+[[package]]
+name = "oxide-update-engine-display"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fc5a0881ad15043d989eed86f7116c7fce97f1624b73bc41ae029d10ca1003d7"
+dependencies = [
+ "chrono",
+ "debug-ignore",
+ "derive-where",
+ "libsw",
+ "owo-colors 4.3.0",
+ "oxide-update-engine-types",
+ "slog",
+ "swrite",
+ "unicode-width 0.2.0",
+]
+
+[[package]]
+name = "oxide-update-engine-types"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "44b6f7a67e6e404c276d40fccf9b0927e92852e560289d6ea771ce092981cefe"
+dependencies = [
+ "anyhow",
+ "derive-where",
+ "indent_write",
+ "indexmap 2.14.0",
+ "newtype-uuid",
+ "petgraph 0.8.3",
+ "schemars 0.8.22",
+ "serde",
+ "serde_json",
+ "uuid",
+]
+
+[[package]]
 name = "oxide-vpc"
 version = "0.1.0"
 source = "git+https://github.com/oxidecomputer/opte?rev=ab2941cdf2ab067429a4a68ab2389d2960620b57#ab2941cdf2ab067429a4a68ab2389d2960620b57"
@@ -10382,6 +10514,24 @@ dependencies = [
  "slog-term",
  "thiserror 2.0.18",
  "tokio",
+ "uuid",
+]
+
+[[package]]
+name = "oximeter-load-test"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "clap",
+ "dropshot",
+ "omicron-common",
+ "omicron-workspace-hack",
+ "oxide-tokio-rt",
+ "oximeter",
+ "oximeter-producer",
+ "oximeter-types",
+ "rand 0.9.2",
  "uuid",
 ]
 
@@ -11799,7 +11949,7 @@ dependencies = [
 [[package]]
 name = "protocol"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/lldp#54b266174d4de9628bca9c97b0db176e16f12154"
+source = "git+https://github.com/oxidecomputer/lldp?rev=54b266174d4de9628bca9c97b0db176e16f12154#54b266174d4de9628bca9c97b0db176e16f12154"
 dependencies = [
  "anyhow",
  "schemars 0.8.22",
@@ -12122,7 +12272,7 @@ dependencies = [
  "clap",
  "hex",
  "serde",
- "serde_with 3.17.0",
+ "serde_with 3.21.0",
  "strum 0.26.3",
  "thiserror 2.0.18",
 ]
@@ -12137,7 +12287,7 @@ dependencies = [
  "clap",
  "hex",
  "serde",
- "serde_with 3.17.0",
+ "serde_with 3.21.0",
  "strum 0.26.3",
  "thiserror 2.0.18",
 ]
@@ -12149,6 +12299,12 @@ source = "git+https://github.com/oxidecomputer/rust-cpuid.git?rev=a4cf01df76f354
 dependencies = [
  "bitflags 2.11.0",
 ]
+
+[[package]]
+name = "rawzip"
+version = "0.4.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9d9575f44c8cf85bc843ad666dcdf20d05a7753772bef56eb2a5140282b32150"
 
 [[package]]
 name = "rayon"
@@ -12228,8 +12384,8 @@ dependencies = [
  "tabled 0.15.0",
  "tokio",
  "toml 0.8.23",
- "tufaceous",
- "tufaceous-artifact",
+ "tufaceous 0.1.0",
+ "tufaceous-artifact 0.1.0",
  "tufaceous-lib",
  "update-common",
  "uuid",
@@ -12262,7 +12418,7 @@ dependencies = [
  "slog",
  "swrite",
  "tokio",
- "tufaceous-artifact",
+ "tufaceous-artifact 0.1.0",
 ]
 
 [[package]]
@@ -12433,7 +12589,7 @@ dependencies = [
  "omicron-workspace-hack",
  "schemars 0.8.22",
  "serde",
- "tufaceous-artifact",
+ "tufaceous-artifact 0.1.0",
 ]
 
 [[package]]
@@ -12593,13 +12749,13 @@ dependencies = [
 
 [[package]]
 name = "rpassword"
-version = "7.4.0"
+version = "7.5.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "66d4c8b64f049c6721ec8ccec37ddfc3d641c4a7fca57e8f2a89de509c73df39"
+checksum = "2da316a15f47e3d053de9cb2c439650bd8fa4aaeb9365f2e5f27f492ff73c196"
 dependencies = [
  "libc",
  "rtoolbox",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -13548,11 +13704,12 @@ dependencies = [
 
 [[package]]
 name = "serde_with"
-version = "3.17.0"
+version = "3.21.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "381b283ce7bc6b476d903296fb59d0d36633652b633b27f64db4fb46dcbfc3b9"
+checksum = "76a5c54c7310e7b8b9577c286d7e399ddd876c3e12b3ed917a8aabc4b96e9e8c"
 dependencies = [
  "base64 0.22.1",
+ "bs58",
  "chrono",
  "hex",
  "indexmap 1.9.3",
@@ -13562,7 +13719,7 @@ dependencies = [
  "schemars 1.2.1",
  "serde_core",
  "serde_json",
- "serde_with_macros 3.17.0",
+ "serde_with_macros 3.21.0",
  "time",
 ]
 
@@ -13580,11 +13737,11 @@ dependencies = [
 
 [[package]]
 name = "serde_with_macros"
-version = "3.17.0"
+version = "3.21.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a6d4e30573c8cb306ed6ab1dca8423eec9a463ea0e155f45399455e0368b27e0"
+checksum = "84d57bc0c8b9a17920c178daa6bb924850d54a9c97ab45194bb8c17ad66bb660"
 dependencies = [
- "darling 0.21.3",
+ "darling 0.23.0",
  "proc-macro2",
  "quote",
  "syn 2.0.117",
@@ -13837,7 +13994,7 @@ dependencies = [
  "sled-hardware-types",
  "slog-error-chain",
  "trust-quorum-types",
- "tufaceous-artifact",
+ "tufaceous-artifact 0.1.0",
  "uuid",
  "x509-cert",
 ]
@@ -13921,7 +14078,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "trust-quorum-types",
- "tufaceous-artifact",
+ "tufaceous-artifact 0.1.0",
  "xshell",
  "zone",
 ]
@@ -14072,7 +14229,7 @@ dependencies = [
  "slog",
  "slog-error-chain",
  "thiserror 2.0.18",
- "tufaceous-artifact",
+ "tufaceous-artifact 0.1.0",
 ]
 
 [[package]]
@@ -14089,7 +14246,7 @@ dependencies = [
  "sha2 0.10.9",
  "sled-agent-types",
  "sled-storage",
- "tufaceous-artifact",
+ "tufaceous-artifact 0.1.0",
 ]
 
 [[package]]
@@ -14100,7 +14257,7 @@ dependencies = [
  "assert_matches",
  "chrono",
  "daft",
- "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=cc0c307c617f2988aafdca4e3bd35ea178b64801)",
+ "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=04a52a3240a26c58f03e1cf40353d67ff69d76b6)",
  "dropshot",
  "either",
  "futures",
@@ -14159,7 +14316,7 @@ dependencies = [
  "swrite",
  "test-strategy",
  "thiserror 2.0.18",
- "tufaceous-artifact",
+ "tufaceous-artifact 0.1.0",
  "uuid",
 ]
 
@@ -14193,7 +14350,7 @@ dependencies = [
  "schemars 0.8.22",
  "serde",
  "serde_json",
- "serde_with 3.17.0",
+ "serde_with 3.21.0",
  "sha3 0.10.8",
  "sled-hardware-types",
  "slog",
@@ -14203,7 +14360,7 @@ dependencies = [
  "thiserror 2.0.18",
  "toml 0.8.23",
  "trust-quorum-types-versions",
- "tufaceous-artifact",
+ "tufaceous-artifact 0.1.0",
  "uuid",
 ]
 
@@ -14988,7 +15145,7 @@ dependencies = [
  "slog-error-chain",
  "tokio",
  "tokio-util",
- "tufaceous-artifact",
+ "tufaceous-artifact 0.1.0",
  "uuid",
  "zip 4.6.1",
 ]
@@ -15198,9 +15355,9 @@ checksum = "55937e1799185b12863d447f42597ed69d9928686b8d88a1df17376a097d8369"
 
 [[package]]
 name = "tar"
-version = "0.4.45"
+version = "0.4.46"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "22692a6476a21fa75fdfc11d452fda482af402c008cdbaf3476414e122040973"
+checksum = "3f6221d9a6003c78398e3b239969f352578258df48c8eb051caadae0015bc840"
 dependencies = [
  "filetime",
  "libc",
@@ -16148,7 +16305,7 @@ dependencies = [
  "secrecy 0.10.3",
  "serde",
  "serde_json",
- "serde_with 3.17.0",
+ "serde_with 3.21.0",
  "sha3 0.10.8",
  "sled-agent-measurements",
  "sled-agent-types",
@@ -16195,7 +16352,7 @@ dependencies = [
  "secrecy 0.10.3",
  "serde",
  "serde_json",
- "serde_with 3.17.0",
+ "serde_with 3.21.0",
  "sha3 0.10.8",
  "sled-agent-types",
  "sled-hardware-types",
@@ -16255,7 +16412,7 @@ dependencies = [
  "rand 0.9.2",
  "schemars 0.8.22",
  "serde",
- "serde_with 3.17.0",
+ "serde_with 3.21.0",
  "sled-hardware-types",
  "slog",
  "slog-error-chain",
@@ -16286,7 +16443,7 @@ dependencies = [
 [[package]]
 name = "tufaceous"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#a7d440f5a111c7e3504e8eb125c105d7baf0deab"
+source = "git+https://github.com/oxidecomputer/tufaceous?branch=v1#95395cecb019b851519232468472212efce1e42d"
 dependencies = [
  "anyhow",
  "camino",
@@ -16300,14 +16457,48 @@ dependencies = [
  "slog-envlogger",
  "slog-term",
  "tokio",
- "tufaceous-artifact",
+ "tufaceous-artifact 0.1.0",
  "tufaceous-lib",
+]
+
+[[package]]
+name = "tufaceous"
+version = "0.2.0"
+source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#de59b9508e99da8fc39a70d29e4d69300325b220"
+dependencies = [
+ "atomicwrites",
+ "aws-lc-rs",
+ "bytes",
+ "camino",
+ "camino-tempfile",
+ "chrono",
+ "ciborium",
+ "daft",
+ "digest-io",
+ "flate2",
+ "futures-util",
+ "hex",
+ "hubtools 0.4.7 (git+https://github.com/oxidecomputer/hubtools.git?rev=2b1ef9b38d75563ea800baa3b17327eec17b1b7a)",
+ "rats-corim 0.1.0 (git+https://github.com/oxidecomputer/rats-corim.git?rev=f0d5d5168d3d31487a56df32c676b0c6240bcc6b)",
+ "rawzip",
+ "semver 1.0.28",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "slog",
+ "tar",
+ "thiserror 2.0.18",
+ "tokio",
+ "tough",
+ "tufaceous-artifact 0.2.0",
+ "tufaceous-brand-metadata 0.2.0",
+ "url",
 ]
 
 [[package]]
 name = "tufaceous-artifact"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#a7d440f5a111c7e3504e8eb125c105d7baf0deab"
+source = "git+https://github.com/oxidecomputer/tufaceous?branch=v1#95395cecb019b851519232468472212efce1e42d"
 dependencies = [
  "daft",
  "hex",
@@ -16322,21 +16513,45 @@ dependencies = [
 ]
 
 [[package]]
+name = "tufaceous-artifact"
+version = "0.2.0"
+source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#de59b9508e99da8fc39a70d29e4d69300325b220"
+dependencies = [
+ "byte-wrapper",
+ "daft",
+ "hubtools 0.4.7 (git+https://github.com/oxidecomputer/hubtools.git?rev=2b1ef9b38d75563ea800baa3b17327eec17b1b7a)",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "tufaceous-brand-metadata"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#a7d440f5a111c7e3504e8eb125c105d7baf0deab"
+source = "git+https://github.com/oxidecomputer/tufaceous?branch=v1#95395cecb019b851519232468472212efce1e42d"
 dependencies = [
  "semver 1.0.28",
  "serde",
  "serde_json",
  "tar",
- "tufaceous-artifact",
+ "tufaceous-artifact 0.1.0",
+]
+
+[[package]]
+name = "tufaceous-brand-metadata"
+version = "0.2.0"
+source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#de59b9508e99da8fc39a70d29e4d69300325b220"
+dependencies = [
+ "serde",
+ "serde_json",
+ "tar",
+ "tufaceous-artifact 0.2.0",
 ]
 
 [[package]]
 name = "tufaceous-lib"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#a7d440f5a111c7e3504e8eb125c105d7baf0deab"
+source = "git+https://github.com/oxidecomputer/tufaceous?branch=v1#95395cecb019b851519232468472212efce1e42d"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -16369,8 +16584,8 @@ dependencies = [
  "tokio",
  "toml 0.8.23",
  "tough",
- "tufaceous-artifact",
- "tufaceous-brand-metadata",
+ "tufaceous-artifact 0.1.0",
+ "tufaceous-brand-metadata 0.1.0",
  "url",
  "zip 4.6.1",
 ]
@@ -16668,49 +16883,10 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tough",
- "tufaceous",
- "tufaceous-artifact",
- "tufaceous-brand-metadata",
+ "tufaceous 0.1.0",
+ "tufaceous-artifact 0.1.0",
+ "tufaceous-brand-metadata 0.1.0",
  "tufaceous-lib",
-]
-
-[[package]]
-name = "update-engine"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "buf-list",
- "bytes",
- "camino",
- "camino-tempfile",
- "cancel-safe-futures",
- "chrono",
- "clap",
- "debug-ignore",
- "derive-where",
- "either",
- "futures",
- "indent_write",
- "indexmap 2.14.0",
- "indicatif",
- "indoc 2.0.7",
- "libsw",
- "linear-map",
- "omicron-test-utils",
- "omicron-workspace-hack",
- "owo-colors 4.3.0",
- "petgraph 0.8.3",
- "schemars 0.8.22",
- "serde",
- "serde_json",
- "serde_with 3.17.0",
- "slog",
- "supports-color 3.0.2",
- "swrite",
- "tokio",
- "tokio-stream",
- "unicode-width 0.1.14",
- "uuid",
 ]
 
 [[package]]
@@ -17274,6 +17450,7 @@ dependencies = [
  "futures",
  "hex",
  "humantime",
+ "iddqd",
  "indexmap 2.14.0",
  "indicatif",
  "itertools 0.14.0",
@@ -17282,6 +17459,8 @@ dependencies = [
  "omicron-passwords",
  "omicron-workspace-hack",
  "owo-colors 4.3.0",
+ "oxide-update-engine-display",
+ "oxide-update-engine-types",
  "proptest",
  "ratatui",
  "reqwest 0.13.2",
@@ -17305,12 +17484,12 @@ dependencies = [
  "toml 0.8.23",
  "toml_edit 0.22.27",
  "transceiver-controller 0.1.1 (git+https://github.com/oxidecomputer/transceiver-control)",
- "tufaceous-artifact",
+ "tufaceous-artifact 0.1.0",
  "tui-tree-widget",
  "unicode-width 0.1.14",
- "update-engine",
  "wicket-common",
  "wicketd-client",
+ "wicketd-commission-types",
  "zeroize",
 ]
 
@@ -17319,14 +17498,17 @@ name = "wicket-common"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=cc0c307c617f2988aafdca4e3bd35ea178b64801)",
+ "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=04a52a3240a26c58f03e1cf40353d67ff69d76b6)",
  "dropshot",
  "gateway-client",
  "gateway-types",
+ "iddqd",
  "maplit",
  "omicron-common",
  "omicron-workspace-hack",
  "owo-colors 4.3.0",
+ "oxide-update-engine",
+ "oxide-update-engine-types",
  "oxnet",
  "schemars 0.8.22",
  "semver 1.0.28",
@@ -17340,8 +17522,7 @@ dependencies = [
  "tokio",
  "toml 0.8.23",
  "transceiver-controller 0.1.1 (git+https://github.com/oxidecomputer/transceiver-control)",
- "tufaceous-artifact",
- "update-engine",
+ "tufaceous-artifact 0.1.0",
  "wicketd-commission-types",
 ]
 
@@ -17385,7 +17566,7 @@ dependencies = [
  "clap",
  "debug-ignore",
  "display-error-chain",
- "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=cc0c307c617f2988aafdca4e3bd35ea178b64801)",
+ "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=04a52a3240a26c58f03e1cf40353d67ff69d76b6)",
  "dropshot",
  "either",
  "expectorate",
@@ -17403,6 +17584,7 @@ dependencies = [
  "http-body-util",
  "hubtools 0.4.7 (git+https://github.com/oxidecomputer/hubtools.git?rev=2b1ef9b38d75563ea800baa3b17327eec17b1b7a)",
  "hyper",
+ "iddqd",
  "illumos-utils",
  "installinator",
  "installinator-api",
@@ -17422,6 +17604,8 @@ dependencies = [
  "openapi-lint",
  "openapiv3",
  "oxide-tokio-rt",
+ "oxide-update-engine",
+ "oxide-update-engine-types",
  "oxnet",
  "rand 0.9.2",
  "reqwest 0.13.2",
@@ -17448,16 +17632,16 @@ dependencies = [
  "toml 0.8.23",
  "tough",
  "transceiver-controller 0.1.1 (git+https://github.com/oxidecomputer/transceiver-control)",
- "tufaceous",
- "tufaceous-artifact",
+ "tufaceous 0.1.0",
+ "tufaceous-artifact 0.1.0",
  "tufaceous-lib",
  "update-common",
- "update-engine",
  "uuid",
  "wicket",
  "wicket-common",
  "wicketd-api",
  "wicketd-client",
+ "wicketd-commission-types",
 ]
 
 [[package]]
@@ -17477,7 +17661,7 @@ dependencies = [
  "serde",
  "sled-hardware-types",
  "slog",
- "tufaceous-artifact",
+ "tufaceous-artifact 0.1.0",
  "wicket-common",
  "wicketd-commission-types",
 ]
@@ -17492,6 +17676,7 @@ dependencies = [
  "omicron-common",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
+ "oxide-update-engine-types",
  "progenitor 0.14.0",
  "regress 0.10.5",
  "reqwest 0.13.2",
@@ -17502,9 +17687,9 @@ dependencies = [
  "sled-agent-types",
  "sled-hardware-types",
  "slog",
- "update-engine",
  "uuid",
  "wicket-common",
+ "wicketd-commission-types-versions",
 ]
 
 [[package]]
@@ -17519,14 +17704,17 @@ dependencies = [
 name = "wicketd-commission-types-versions"
 version = "0.1.0"
 dependencies = [
+ "gateway-types-versions",
  "omicron-common",
  "omicron-workspace-hack",
  "oxnet",
+ "proptest",
  "schemars 0.8.22",
  "serde",
  "serde_json",
  "sled-agent-types-versions",
  "slog-error-chain",
+ "test-strategy",
  "toml 0.8.23",
 ]
 

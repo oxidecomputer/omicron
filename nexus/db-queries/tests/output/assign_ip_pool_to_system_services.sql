@@ -35,3 +35,14 @@ WHERE
         AS INT8
     )
     = 1
+RETURNING
+  id,
+  name,
+  description,
+  time_created,
+  time_modified,
+  time_deleted,
+  ip_version,
+  rcgen,
+  assignment,
+  pool_type

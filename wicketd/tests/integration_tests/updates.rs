@@ -22,6 +22,7 @@ use omicron_common::{
     },
 };
 use omicron_uuid_kinds::{InternalZpoolUuid, MupdateUuid};
+use oxide_update_engine_types::spec::SerializableError;
 use sled_agent_config_reconciler::{
     InternalDiskDetails, InternalDisksReceiver, InternalDisksWithBootDisk,
 };
@@ -31,19 +32,20 @@ use sled_storage::config::MountConfig;
 use tokio::sync::oneshot;
 use tufaceous_artifact::{ArtifactHashId, ArtifactKind, KnownArtifactKind};
 use update_common::artifacts::UpdatePlan;
-use update_engine::NestedError;
 use wicket::OutputKind;
 use wicket_common::{
     inventory::{SpIdentifier, SpType},
     rack_update::{
-        ClearUpdateStateResponse, ExitMessage, RackUpdateStatus,
-        StartUpdateOptions, UpdateState,
+        ExitMessage, RackUpdateStatus, StartUpdateOptions, UpdateState,
     },
     update_events::{StepEventKind, UpdateComponent},
 };
 use wicketd::{RunningUpdateState, StartUpdateError};
 use wicketd_client::types::{
     GetInventoryParams, GetInventoryResponse, StartUpdateParams,
+};
+use wicketd_commission_types::update::{
+    ClearUpdateStateResponse, UpdateTargets,
 };
 
 /// The list of zone file names defined in fake-non-semver.toml.
@@ -153,7 +155,7 @@ async fn test_updates() {
         "all expected installable kinds present"
     );
 
-    let target_sp = SpIdentifier { type_: SpType::Sled, slot: 0 };
+    let target_sp = SpIdentifier { typ: SpType::Sled, slot: 0 };
 
     // Ensure wicketd knows our target_sp (which is simulated) is online and
     // available to update.
@@ -210,7 +212,10 @@ async fn test_updates() {
 
     // Now, try starting the update on SP 0.
     let options = StartUpdateOptions::default();
-    let params = StartUpdateParams { targets: vec![target_sp], options };
+    let params = StartUpdateParams {
+        targets: UpdateTargets::single(target_sp),
+        options,
+    };
     wicketd_testctx
         .wicketd_client
         .post_start_update(&params)
@@ -231,7 +236,7 @@ async fn test_updates() {
 
         let event_report = wicketd_testctx
             .wicketd_client
-            .get_update_sp(&target_sp.type_, target_sp.slot)
+            .get_update_sp(&target_sp.typ, target_sp.slot)
             .await
             .expect("get_update_sp successful")
             .into_inner();
@@ -330,17 +335,14 @@ async fn test_updates() {
             .expect("wicket rack-update clear failed");
 
         // stdout should contain a JSON object.
-        let response: Result<ClearUpdateStateResponse, NestedError> =
+        let response: Result<ClearUpdateStateResponse, SerializableError> =
             serde_json::from_slice(&stdout).expect("stdout is valid JSON");
         assert_eq!(
             response.expect("expected Ok response"),
             ClearUpdateStateResponse {
-                cleared: btreeset![SpIdentifier {
-                    type_: SpType::Sled,
-                    slot: 0
-                }],
+                cleared: btreeset![SpIdentifier { typ: SpType::Sled, slot: 0 }],
                 no_update_data: btreeset![SpIdentifier {
-                    type_: SpType::Sled,
+                    typ: SpType::Sled,
                     slot: 1
                 }],
             }
@@ -370,7 +372,7 @@ async fn test_updates() {
     // Check to see that the update state for SP 0 was cleared.
     let event_report = wicketd_testctx
         .wicketd_client
-        .get_update_sp(&target_sp.type_, target_sp.slot)
+        .get_update_sp(&target_sp.typ, target_sp.slot)
         .await
         .expect("get_update_sp successful")
         .into_inner();
@@ -785,8 +787,8 @@ async fn test_update_races() {
         .expect("bytes read and archived");
 
     // Now start an update.
-    let sp = SpIdentifier { slot: 0, type_: SpType::Sled };
-    let sps: BTreeSet<_> = vec![sp].into_iter().collect();
+    let sp = SpIdentifier { slot: 0, typ: SpType::Sled };
+    let sps = UpdateTargets::single(sp);
 
     let (sender, receiver) = oneshot::channel();
     wicketd_testctx

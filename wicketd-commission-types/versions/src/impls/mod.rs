@@ -5,3 +5,4 @@
 //! Functional code for the latest versions of types.
 
 mod rack_setup;
+mod update;

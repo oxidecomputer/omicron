@@ -267,10 +267,17 @@ mod tests {
 
     #[test]
     fn invalid_router_peer_address() {
-        let invalid_inputs =
-            ["foobar", "not-an-ip", "banana", "1.2.3.4.5", "hello world"];
+        const NOT_AN_IP: &str = "expected `unnumbered` or an IP address";
+        let invalid_inputs = [
+            ("foobar", NOT_AN_IP),
+            ("not-an-ip", NOT_AN_IP),
+            ("banana", NOT_AN_IP),
+            ("1.2.3.4.5", NOT_AN_IP),
+            ("hello world", NOT_AN_IP),
+            ("0.0.0.0", "unspecified address is not allowed"),
+        ];
 
-        for input in invalid_inputs {
+        for (input, expected_detail) in invalid_inputs {
             let toml_input = format!("addr = \"{input}\"\n");
             match toml::from_str::<RouterPeerAddressWrapper>(&toml_input) {
                 Ok(addr) => panic!("unexpected success: parsed {addr:?}"),
@@ -278,7 +285,8 @@ mod tests {
                     let err = err.to_string();
                     assert!(
                         err.contains(&format!(
-                            "invalid router peer address `{input}`"
+                            "invalid router peer address `{input}`: \
+                             {expected_detail}"
                         )),
                         "unexpected error for input `{input}`: {err}"
                     );
@@ -331,10 +339,17 @@ mod tests {
 
     #[test]
     fn invalid_uplink_address() {
-        let invalid_inputs =
-            ["foobar", "not-an-ipnet", "banana", "1.2.3.4.5", "hello world"];
+        const NOT_AN_IPNET: &str = "expected `addrconf` or an IP network";
+        let invalid_inputs = [
+            ("foobar", NOT_AN_IPNET),
+            ("not-an-ipnet", NOT_AN_IPNET),
+            ("banana", NOT_AN_IPNET),
+            ("1.2.3.4.5", NOT_AN_IPNET),
+            ("hello world", NOT_AN_IPNET),
+            ("0.0.0.0/8", "unspecified address is not allowed"),
+        ];
 
-        for input in invalid_inputs {
+        for (input, expected_detail) in invalid_inputs {
             let toml_input = format!("addr = \"{input}\"\n");
             match toml::from_str::<UplinkAddressWrapper>(&toml_input) {
                 Ok(addr) => panic!("unexpected success: parsed {addr:?}"),
@@ -342,7 +357,7 @@ mod tests {
                     let err = err.to_string();
                     assert!(
                         err.contains(&format!(
-                            "invalid uplink ipnet `{input}`"
+                            "invalid uplink ipnet `{input}`: {expected_detail}"
                         )),
                         "unexpected error for input `{input}`: {err}"
                     );

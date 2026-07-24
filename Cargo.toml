@@ -47,6 +47,7 @@ members = [
     "dev-tools/omicron-dev",
     "dev-tools/omicron-dev-lib",
     "dev-tools/omicron-deployment-graph",
+    "dev-tools/oximeter-load-test",
     "dev-tools/oxlog",
     "dev-tools/pins",
     "dev-tools/reconfigurator-cli",
@@ -178,7 +179,6 @@ members = [
     "trust-quorum/types/versions",
     "typed-rng",
     "update-common",
-    "update-engine",
     "uuid-kinds",
     "wicket-common",
     "wicket-dbg",
@@ -240,6 +240,7 @@ default-members = [
     "dev-tools/omicron-dev",
     "dev-tools/omicron-dev-lib",
     "dev-tools/omicron-deployment-graph",
+    "dev-tools/oximeter-load-test",
     "dev-tools/oxlog",
     "dev-tools/pins",
     "dev-tools/reconfigurator-cli",
@@ -373,7 +374,6 @@ default-members = [
     "test-utils",
     "typed-rng",
     "update-common",
-    "update-engine",
     "uuid-kinds",
     "wicket-common",
     "wicket-dbg",
@@ -516,7 +516,7 @@ digest = "0.10.7"
 dns-server = { path = "dns-server" }
 dns-server-api = { path = "dns-server-api" }
 dns-service-client = { path = "clients/dns-service-client" }
-dpd-client = { git = "https://github.com/oxidecomputer/dendrite", rev = "cc0c307c617f2988aafdca4e3bd35ea178b64801" }
+dpd-client = { git = "https://github.com/oxidecomputer/dendrite", rev = "04a52a3240a26c58f03e1cf40353d67ff69d76b6" }
 dropshot = { version = "0.17.1", features = [ "usdt-probes" ] }
 dropshot-api-manager = "0.7.2"
 dropshot-api-manager-types = "0.7.2"
@@ -616,8 +616,8 @@ libipcc = { git = "https://github.com/oxidecomputer/ipcc-rs", rev = "524eb8f1250
 libnvme = { git = "https://github.com/oxidecomputer/libnvme", rev = "dd5bb221d327a1bc9287961718c3c10d6bd37da0" }
 linear-map = "1.2.0"
 live-tests-macros = { path = "live-tests/macros" }
-lldpd_client = { git = "https://github.com/oxidecomputer/lldp", package = "lldpd-client" }
-lldp_protocol = { git = "https://github.com/oxidecomputer/lldp", package = "protocol" }
+lldpd_client = { git = "https://github.com/oxidecomputer/lldp", rev = "54b266174d4de9628bca9c97b0db176e16f12154", package = "lldpd-client" }
+lldp_protocol = { git = "https://github.com/oxidecomputer/lldp", rev = "54b266174d4de9628bca9c97b0db176e16f12154", package = "protocol" }
 omicron-deployment-graph = { path = "dev-tools/omicron-deployment-graph" }
 macaddr = { version = "1.0.1", features = ["serde_std"] }
 maplit = "1.0.2"
@@ -692,6 +692,9 @@ omicron-workspace-hack = "0.1.0"
 omicron-zone-package = "0.12.3"
 oxide-client = { path = "clients/oxide-client" }
 oxide-tokio-rt = "0.1.4"
+oxide-update-engine = "0.1.2"
+oxide-update-engine-types = { version = "0.1.2", features = ["schemars08"] }
+oxide-update-engine-display = "0.1.2"
 oxide-vpc = { git = "https://github.com/oxidecomputer/opte", rev = "ab2941cdf2ab067429a4a68ab2389d2960620b57", features = [ "api", "std" ] }
 oxlog = { path = "dev-tools/oxlog" }
 oxnet = "0.1.5"
@@ -776,7 +779,7 @@ regress = "0.10.4"
 repo-depot-api = { path = "sled-agent/repo-depot-api" }
 repo-depot-client = { path = "clients/repo-depot-client" }
 reqwest = { version = "0.13", default-features = false }
-rpassword = "7.4.0"
+rpassword = "7.5.0"
 rstest = "0.25.0"
 rustfmt-wrapper = "0.2"
 rustls = "0.23.40"
@@ -876,16 +879,17 @@ tough = { version = "0.22.0" }
 transceiver-controller = { git = "https://github.com/oxidecomputer/transceiver-control", features = [ "api-traits" ] }
 transient-dns-server = { path = "dns-server/transient" }
 trybuild = "1.0.106"
-tufaceous = { git = "https://github.com/oxidecomputer/tufaceous", branch = "main" }
-tufaceous-artifact = { git = "https://github.com/oxidecomputer/tufaceous", branch = "main", features = ["proptest", "schemars"] }
-tufaceous-brand-metadata = { git = "https://github.com/oxidecomputer/tufaceous", branch = "main" }
-tufaceous-lib = { git = "https://github.com/oxidecomputer/tufaceous", branch = "main" }
+tufaceous = { git = "https://github.com/oxidecomputer/tufaceous", branch = "v1" }
+tufaceous-artifact = { git = "https://github.com/oxidecomputer/tufaceous", branch = "v1", features = ["proptest", "schemars"] }
+tufaceous-brand-metadata = { git = "https://github.com/oxidecomputer/tufaceous", branch = "v1" }
+tufaceous-lib = { git = "https://github.com/oxidecomputer/tufaceous", branch = "v1" }
+tufaceous-v2 = { git = "https://github.com/oxidecomputer/tufaceous", branch = "main", package = "tufaceous" }
+tufaceous-artifact-v2 = { git = "https://github.com/oxidecomputer/tufaceous", branch = "main", package = "tufaceous-artifact" }
 tui-tree-widget = "0.23.1"
 typed-rng = { path = "typed-rng" }
 typify = "0.3.0"
 unicode-width = "0.1.13"
 update-common = { path = "update-common" }
-update-engine = { path = "update-engine" }
 url = "2.5.4"
 usdt = "0.5.0"
 uuid = { version = "1.17.0", features = ["serde", "v4"] }
@@ -1120,7 +1124,8 @@ opt-level = 3
 # tufaceous-artifact = { path = "../tufaceous/artifact" }
 # tufaceous-brand-metadata = { path = "../tufaceous/brand-metadata" }
 # tufaceous-lib = { path = "../tufaceous/lib" }
-# Extra slash here to pretend to be a different source.
+# tufaceous-v2 = { path = "../tufaceous/lib", package = "tufaceous" }
+# tufaceous-artifact-v2 = { path = "../tufaceous/artifact", package = "tufaceous-artifact" }
 
 # [patch."https://github.com/oxidecomputer/typify"]
 # typify = { path = "../typify/typify" }

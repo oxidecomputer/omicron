@@ -36,12 +36,14 @@ pub enum SpType {
     Copy,
     PartialEq,
     Eq,
+    Hash,
     PartialOrd,
     Ord,
     Serialize,
     Deserialize,
     JsonSchema,
 )]
+#[cfg_attr(any(test, feature = "testing"), derive(test_strategy::Arbitrary))]
 pub struct SpIdentifier {
     #[serde(rename = "type")]
     pub typ: SpType,

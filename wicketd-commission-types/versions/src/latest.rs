@@ -6,6 +6,7 @@
 
 pub mod rack_setup {
     pub use crate::v1::rack_setup::AllowedSourceIps;
+    pub use crate::v1::rack_setup::BgpAuthKey;
     pub use crate::v1::rack_setup::BgpAuthKeyId;
     pub use crate::v1::rack_setup::BgpConfig;
     pub use crate::v1::rack_setup::CertificateUploadResponse;
@@ -23,6 +24,7 @@ pub mod rack_setup {
     pub use crate::v1::rack_setup::RouteConfig;
     pub use crate::v1::rack_setup::RouterLifetimeConfig;
     pub use crate::v1::rack_setup::RouterPeerIpAddr;
+    pub use crate::v1::rack_setup::SetBgpAuthKeyStatus;
     pub use crate::v1::rack_setup::TxEqConfig;
     pub use crate::v1::rack_setup::UplinkAddress;
     pub use crate::v1::rack_setup::UplinkIpNet;
@@ -32,4 +34,10 @@ pub mod rack_setup {
     pub use crate::v1::rack_setup::UserSpecifiedRackNetworkConfig;
     pub use crate::v1::rack_setup::UserSpecifiedRouterPeerAddr;
     pub use crate::v1::rack_setup::UserSpecifiedUplinkAddressConfig;
+}
+
+pub mod update {
+    pub use crate::v1::update::ClearUpdateStateResponse;
+    pub use crate::v1::update::EmptyUpdateTargets;
+    pub use crate::v1::update::UpdateTargets;
 }

@@ -28,7 +28,7 @@ use nexus_types::external_api::silo;
 use nexus_types::external_api::sled as sled_types;
 use nexus_types::inventory::SpType;
 use nexus_types::silo::silo_dns_name;
-use omicron_common::address::{Ipv6Subnet, RACK_PREFIX, get_64_subnet};
+use omicron_common::address::{Ipv6Subnet, RACK_PREFIX_LENGTH, get_64_subnet};
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::IdentityMetadataCreateParams;
@@ -423,25 +423,42 @@ impl super::Nexus {
                 },
             }?;
 
+            let (.., authz_bgp_announce_set) = self
+                .bgp_announce_set_lookup(
+                    opctx,
+                    announce_set_name.clone().into(),
+                )?
+                .lookup_for(authz::Action::Read)
+                .await
+                .map_err(|e| {
+                    Error::internal_error(&format!(
+                        "unable to lookup announce set for as {}: {e}",
+                        bgp_config.asn
+                    ))
+                })?;
+
             match self
                 .db_datastore
                 .bgp_config_create(
                     &opctx,
-                    &networking::BgpConfigCreate {
-                        identity: IdentityMetadataCreateParams {
-                            name: bgp_config_name,
-                            description: format!(
-                                "BGP config for AS {}",
-                                bgp_config.asn
-                            ),
+                    db::model::BgpConfig::from_config_create(
+                        &networking::BgpConfigCreate {
+                            identity: IdentityMetadataCreateParams {
+                                name: bgp_config_name,
+                                description: format!(
+                                    "BGP config for AS {}",
+                                    bgp_config.asn
+                                ),
+                            },
+                            asn: bgp_config.asn,
+                            bgp_announce_set_id: announce_set_name.into(),
+                            vrf: None,
+                            shaper: bgp_config.shaper.clone(),
+                            checker: bgp_config.checker.clone(),
+                            max_paths: bgp_config.max_paths,
                         },
-                        asn: bgp_config.asn,
-                        bgp_announce_set_id: announce_set_name.into(),
-                        vrf: None,
-                        shaper: bgp_config.shaper.clone(),
-                        checker: bgp_config.checker.clone(),
-                        max_paths: bgp_config.max_paths,
-                    },
+                        authz_bgp_announce_set.id(),
+                    ),
                 )
                 .await
             {
@@ -793,7 +810,7 @@ impl super::Nexus {
 
         let subnet = self.db_datastore.rack_subnet(opctx, self.rack_id).await?;
         let rack_subnet =
-            Ipv6Subnet::<RACK_PREFIX>::from(rack_subnet(Some(subnet))?);
+            Ipv6Subnet::<RACK_PREFIX_LENGTH>::from(rack_subnet(Some(subnet))?);
 
         let allocation = match self
             .db_datastore

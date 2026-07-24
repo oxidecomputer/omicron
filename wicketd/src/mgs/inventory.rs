@@ -151,9 +151,62 @@ async fn ignition_fetching_task(
     }
 }
 
-pub(super) struct FetchedSpData {
-    pub(super) id: SpIdentifier,
-    pub(super) state: SpState,
+/// The result of polling a single SP for its inventory.
+pub(super) enum SpFetchResult {
+    /// The SP's state was fetched successfully.
+    ///
+    /// The returned `FetchedSpData` can still carry partial results, from two
+    /// sources:
+    ///
+    /// 1. The follow-up sub-fetches that run after `sp_get` (SP components, SP
+    ///    cabooses, and RoT cabooses) record their own failures. Most such
+    ///    failures are recorded as `None`; the RoT stage0 and stage0next cabooses
+    ///    instead record failures as `Some(None)`, where the outer `Some` records
+    ///    that the slot exists and the inner `None` records the failed fetch.
+    /// 2. If `sp_get` succeeds but the state reports
+    ///    `RotState::CommunicationFailed`, the result carries `rot: None` and
+    ///    no RoT sub-fetch is attempted at all.
+    Data(
+        // Boxed because `FetchedSpData` is large relative to the error variant.
+        Box<FetchedSpData>,
+    ),
+
+    /// The SP state fetch failed.
+    StateFetchFailed(MgsFetchError),
+}
+
+/// An error that occurred while fetching a single piece of data from MGS.
+///
+/// This is derived from a `gateway_client::Error`, but we don't store that
+/// persistently for two reasons:
+///
+/// * `gateway_client::Error` is not `Clone`. This is not a large problem
+///   since we could `Arc` it. However...
+/// * One of the variants holds an unread response body, and we don't want to
+///   hold on to an open connection persistently.
+#[derive(Clone, Debug)]
+pub struct MgsFetchError {
+    pub message: String,
+    pub observed_at: Instant,
+}
+
+impl MgsFetchError {
+    fn new<E: std::fmt::Debug>(err: &gateway_client::Error<E>) -> Self {
+        Self {
+            // Use progenitor's alternate error formatter, which walks the error
+            // chain. `InlineErrorChain` would double-print the first cause here
+            // due to the way progenitor's error `Display` works. See the note
+            // in `http_helpers::ba_lockstep_error_to_http`.
+            message: format!("{err:#}"),
+            observed_at: Instant::now(),
+        }
+    }
+}
+
+/// The most recent state fetched for a single SP, minus its identifier.
+#[derive(Clone, Debug)]
+pub(crate) struct FetchedSpData {
+    pub(crate) state: SpState,
     pub(super) components: Option<Vec<SpComponentInfo>>,
     pub(super) caboose_active: Option<SpComponentCaboose>,
     pub(super) caboose_inactive: Option<SpComponentCaboose>,
@@ -197,7 +250,7 @@ impl SpStateFetcher {
         id: SpIdentifier,
         mgs_client: gateway_client::Client,
         log: Logger,
-    ) -> (Self, ReceiverStream<FetchedSpData>) {
+    ) -> (Self, ReceiverStream<SpFetchResult>) {
         // We only want one outstanding request at a time; if our consumer is
         // behind, we don't need to request new state MGS until they can handle
         // our results.
@@ -252,7 +305,7 @@ impl SpStateFetcher {
 
 async fn sp_fetching_task(
     id: SpIdentifier,
-    tx: mpsc::Sender<FetchedSpData>,
+    tx: mpsc::Sender<SpFetchResult>,
     mut fetch_now: mpsc::Receiver<()>,
     mut ignition_presence: watch::Receiver<Option<IgnitionPresence>>,
     mgs_client: gateway_client::Client,
@@ -300,7 +353,7 @@ async fn sp_fetching_task(
             }
         }
 
-        let state = match mgs_client.sp_get(&id.type_, id.slot).await {
+        let state = match mgs_client.sp_get(&id.typ, id.slot).await {
             Ok(response) => response.into_inner(),
             Err(err) => {
                 warn!(
@@ -308,6 +361,15 @@ async fn sp_fetching_task(
                     "sp" => ?id,
                     "err" => %err,
                 );
+                let failure =
+                    SpFetchResult::StateFetchFailed(MgsFetchError::new(&err));
+                if tx.send(failure).await.is_err() {
+                    warn!(
+                        log, "Receiver for SP state-fetching task is gone";
+                        "sp" => ?id,
+                    );
+                    break;
+                }
                 continue;
             }
         };
@@ -350,7 +412,7 @@ async fn sp_fetching_task(
 
         if prev_state.as_ref() != Some(&state) || components.is_none() {
             components =
-                match mgs_client.sp_component_list(&id.type_, id.slot).await {
+                match mgs_client.sp_component_list(&id.typ, id.slot).await {
                     Ok(response) => {
                         mgs_received = Instant::now();
                         Some(response.into_inner().components)
@@ -369,7 +431,7 @@ async fn sp_fetching_task(
         if prev_state.as_ref() != Some(&state) || caboose_active.is_none() {
             caboose_active = match mgs_client
                 .sp_component_caboose_get(
-                    &id.type_,
+                    &id.typ,
                     id.slot,
                     SpComponent::SP_ITSELF.const_as_str(),
                     0,
@@ -394,7 +456,7 @@ async fn sp_fetching_task(
         if prev_state.as_ref() != Some(&state) || caboose_inactive.is_none() {
             caboose_inactive = match mgs_client
                 .sp_component_caboose_get(
-                    &id.type_,
+                    &id.typ,
                     id.slot,
                     SpComponent::SP_ITSELF.const_as_str(),
                     1,
@@ -420,7 +482,7 @@ async fn sp_fetching_task(
             if prev_state.as_ref() != Some(&state) || rot.caboose_a.is_none() {
                 rot.caboose_a = match mgs_client
                     .sp_component_caboose_get(
-                        &id.type_,
+                        &id.typ,
                         id.slot,
                         SpComponent::ROT.const_as_str(),
                         0,
@@ -445,7 +507,7 @@ async fn sp_fetching_task(
             if prev_state.as_ref() != Some(&state) || rot.caboose_b.is_none() {
                 rot.caboose_b = match mgs_client
                     .sp_component_caboose_get(
-                        &id.type_,
+                        &id.typ,
                         id.slot,
                         SpComponent::ROT.const_as_str(),
                         1,
@@ -471,7 +533,7 @@ async fn sp_fetching_task(
                 if prev_state.as_ref() != Some(&state) || v.is_none() {
                     rot.caboose_stage0 = match mgs_client
                         .sp_component_caboose_get(
-                            &id.type_,
+                            &id.typ,
                             id.slot,
                             SpComponent::STAGE0.const_as_str(),
                             0,
@@ -498,7 +560,7 @@ async fn sp_fetching_task(
                 if prev_state.as_ref() != Some(&state) || v.is_none() {
                     rot.caboose_stage0next = match mgs_client
                         .sp_component_caboose_get(
-                            &id.type_,
+                            &id.typ,
                             id.slot,
                             SpComponent::STAGE0.const_as_str(),
                             1,
@@ -522,15 +584,14 @@ async fn sp_fetching_task(
             }
         }
 
-        let emit = FetchedSpData {
-            id,
+        let emit = SpFetchResult::Data(Box::new(FetchedSpData {
             state,
             components: components.clone(),
             caboose_active: caboose_active.clone(),
             caboose_inactive: caboose_inactive.clone(),
             rot: rot.clone(),
             mgs_received,
-        };
+        }));
 
         // If our receiver is gone, we'll exit - there's no one left for
         // us to send results to!

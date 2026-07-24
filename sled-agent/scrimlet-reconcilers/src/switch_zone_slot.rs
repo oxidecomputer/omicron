@@ -102,7 +102,7 @@ impl ThisSledSwitchSlot {
                 .await
                 .map(|resp| resp.into_inner())
             {
-                Ok(identity) => match (identity.type_, identity.slot) {
+                Ok(identity) => match (identity.typ, identity.slot) {
                     (SpType::Switch, 0) => {
                         return Ok(ThisSledSwitchSlot(SwitchSlot::Switch0));
                     }

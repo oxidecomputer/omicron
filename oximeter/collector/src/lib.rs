@@ -364,24 +364,7 @@ impl Oximeter {
         .await
         .expect("Expected an infinite retry loop initializing the timeseries database");
 
-        let dropshot_log = log.new(o!("component" => "dropshot"));
-        let server = ServerBuilder::new(
-            oximeter_api(),
-            Arc::clone(&agent),
-            dropshot_log,
-        )
-        .config(ConfigDropshot {
-            bind_address: SocketAddr::V6(args.address),
-            ..Default::default()
-        })
-        .version_policy(dropshot::VersionPolicy::Dynamic(Box::new(
-            dropshot::ClientSpecifiesVersionInHeader::new(
-                omicron_common::api::VERSION_HEADER,
-                oximeter_api::latest_version(),
-            ),
-        )))
-        .start()
-        .map_err(|e| Error::Server(e.to_string()))?;
+        let server = build_server(agent.clone(), args, &log)?;
 
         // Notify Nexus that this oximeter instance is available.
         let our_info = nexus_client::types::OximeterInfo {
@@ -404,21 +387,7 @@ impl Oximeter {
                     ))
                 };
 
-            match qorb::pool::Pool::new(
-                "oximeter-to-nexus".to_string(),
-                nexus_resolver,
-                Arc::new(NexusConnector { log: log.clone() }),
-                qorb::policy::Policy::default(),
-            ) {
-                Ok(pool) => {
-                    debug!(log, "registered USDT probes");
-                    pool
-                }
-                Err(err) => {
-                    error!(log, "failed to register USDT probes");
-                    err.into_inner()
-                }
-            }
+            build_nexus_pool(nexus_resolver, &log)
         };
 
         let notify_nexus = || async {
@@ -469,37 +438,21 @@ impl Oximeter {
         args: &OximeterArguments,
         nexus: SocketAddr,
         clickhouse: Option<SocketAddr>,
+        refresh_interval: Duration,
     ) -> Result<Self, Error> {
         let db_config = clickhouse.map(DbConfig::with_address);
         let agent = Arc::new(
             OximeterAgent::new_standalone(
                 args.id,
                 args.address,
-                crate::default_refresh_interval(),
+                refresh_interval,
                 db_config,
                 &log,
             )
             .await?,
         );
 
-        let dropshot_log = log.new(o!("component" => "dropshot"));
-        let server = ServerBuilder::new(
-            oximeter_api(),
-            Arc::clone(&agent),
-            dropshot_log,
-        )
-        .config(ConfigDropshot {
-            bind_address: SocketAddr::V6(args.address),
-            ..Default::default()
-        })
-        .version_policy(dropshot::VersionPolicy::Dynamic(Box::new(
-            dropshot::ClientSpecifiesVersionInHeader::new(
-                omicron_common::api::VERSION_HEADER,
-                oximeter_api::latest_version(),
-            ),
-        )))
-        .start()
-        .map_err(|e| Error::Server(e.to_string()))?;
+        let server = build_server(agent.clone(), args, log)?;
         info!(log, "started oximeter standalone server");
 
         // Notify the standalone nexus.
@@ -540,6 +493,11 @@ impl Oximeter {
         )
         .await
         .expect("Expected an infinite retry loop contacting Nexus");
+
+        // Poll the standalone nexus for collectors.
+        let nexus_resolver = Box::new(FixedResolver::new([nexus]));
+        let nexus_pool = build_nexus_pool(nexus_resolver, &log);
+        agent.ensure_producer_refresh_task(nexus_pool);
 
         Ok(Self { agent, server })
     }
@@ -592,5 +550,47 @@ impl Oximeter {
     /// Return the address of the server.
     pub fn server_address(&self) -> SocketAddr {
         self.server.local_addr()
+    }
+}
+
+fn build_server(
+    agent: Arc<OximeterAgent>,
+    args: &OximeterArguments,
+    log: &Logger,
+) -> Result<HttpServer<Arc<OximeterAgent>>, Error> {
+    let dropshot_log = log.new(o!("component" => "dropshot"));
+    ServerBuilder::new(oximeter_api(), agent, dropshot_log)
+        .config(ConfigDropshot {
+            bind_address: SocketAddr::V6(args.address),
+            ..Default::default()
+        })
+        .version_policy(dropshot::VersionPolicy::Dynamic(Box::new(
+            dropshot::ClientSpecifiesVersionInHeader::new(
+                omicron_common::api::VERSION_HEADER,
+                oximeter_api::latest_version(),
+            ),
+        )))
+        .start()
+        .map_err(|e| Error::Server(e.to_string()))
+}
+
+fn build_nexus_pool(
+    nexus_resolver: BoxedResolver,
+    log: &Logger,
+) -> qorb::pool::Pool<nexus_client::Client> {
+    match qorb::pool::Pool::new(
+        "oximeter-to-nexus".to_string(),
+        nexus_resolver,
+        Arc::new(NexusConnector { log: log.clone() }),
+        qorb::policy::Policy::default(),
+    ) {
+        Ok(pool) => {
+            debug!(log, "registered USDT probes");
+            pool
+        }
+        Err(err) => {
+            error!(log, "failed to register USDT probes");
+            err.into_inner()
+        }
     }
 }

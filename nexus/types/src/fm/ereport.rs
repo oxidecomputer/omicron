@@ -319,6 +319,15 @@ impl TryFrom<EreportFiltersParams> for EreportFilters {
 #[must_use = "this struct does nothing unless displayed"]
 pub struct DisplayEreportFilters<'a> {
     filters: &'a EreportFilters,
+    colored: bool,
+}
+
+impl DisplayEreportFilters<'_> {
+    /// If `colored` is true, style the output with ANSI terminal colors.
+    pub fn colored(mut self, colored: bool) -> Self {
+        self.colored = colored;
+        self
+    }
 }
 
 impl EreportFilters {
@@ -405,7 +414,7 @@ impl EreportFilters {
     }
 
     pub fn display(&self) -> DisplayEreportFilters<'_> {
-        DisplayEreportFilters { filters: self }
+        DisplayEreportFilters { filters: self, colored: false }
     }
 }
 
@@ -414,6 +423,8 @@ impl fmt::Display for DisplayEreportFilters<'_> {
         use itertools::Itertools;
 
         let filters = self.filters;
+        let styles = super::display::Styles::new(self.colored);
+        let heading = styles.heading();
 
         // Writes a semicolon-separated part to the formatter, tracking whether
         // we've written anything yet.
@@ -428,16 +439,17 @@ impl fmt::Display for DisplayEreportFilters<'_> {
             };
 
         if let Some(start) = filters.start_time() {
-            fmt_part(f, format_args!("start: {start}"))?;
+            fmt_part(f, format_args!("{}: {start}", heading.style("start")))?;
         }
         if let Some(end) = filters.end_time() {
-            fmt_part(f, format_args!("end: {end}"))?;
+            fmt_part(f, format_args!("{}: {end}", heading.style("end")))?;
         }
         if !filters.only_serials().is_empty() {
             fmt_part(
                 f,
                 format_args!(
-                    "serials: {}",
+                    "{}: {}",
+                    heading.style("serials"),
                     filters.only_serials().iter().format(", ")
                 ),
             )?;
@@ -446,7 +458,8 @@ impl fmt::Display for DisplayEreportFilters<'_> {
             fmt_part(
                 f,
                 format_args!(
-                    "classes: {}",
+                    "{}: {}",
+                    heading.style("classes"),
                     filters.only_classes().iter().format(", ")
                 ),
             )?;
@@ -454,7 +467,7 @@ impl fmt::Display for DisplayEreportFilters<'_> {
 
         // If no filters are set, display "none" rather than empty output.
         if empty {
-            write!(f, "none")?;
+            write!(f, "{}", styles.missing().style("none"))?;
         }
         Ok(())
     }
