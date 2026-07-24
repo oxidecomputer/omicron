@@ -110,10 +110,8 @@ impl DataStore {
     ) -> Result<(), Error> {
         use nexus_db_schema::schema::saga::dsl;
 
-        // Lower the validated saga into its raw row for insertion.
-        let row = db::saga_types::SagaRow::from(saga);
         diesel::insert_into(dsl::saga)
-            .values(row)
+            .values(saga)
             .execute_async(&*self.pool_connection_unauthorized().await?)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
@@ -180,7 +178,7 @@ impl DataStore {
             .filter(dsl::id.eq(saga_id))
             .filter(dsl::current_sec.eq(current_sec))
             .set::<SagaStateDbFields>(new_state.clone().into())
-            .check_if_exists::<db::saga_types::SagaRow>(saga_id)
+            .check_if_exists::<db::saga_types::Saga>(saga_id)
             .execute_and_check(&*self.pool_connection_unauthorized().await?)
             .await
             .map_err(|e| {
@@ -204,8 +202,8 @@ impl DataStore {
                     saga_id,
                     new_state,
                     current_sec,
-                    result.found.current_sec(),
-                    result.found.saga_state(),
+                    result.found.current_sec,
+                    result.found.saga_state,
                 )))
             }
         }
@@ -233,8 +231,8 @@ impl DataStore {
                         .eq_any(SagaState::RECOVERY_CANDIDATE_STATES),
                 )
                 .filter(dsl::current_sec.eq(sec_id))
-                .select(db::saga_types::SagaRow::as_select())
-                .load_async::<db::saga_types::SagaRow>(&*conn)
+                .select(db::saga_types::LoadedSaga::as_select())
+                .load_async::<db::saga_types::LoadedSaga>(&*conn)
                 .await
                 .map_err(|e| {
                     public_error_from_diesel(e, ErrorHandler::Server)
@@ -271,14 +269,14 @@ impl DataStore {
         use nexus_db_schema::schema::saga::dsl;
         let conn = self.pool_connection_authorized(opctx).await?;
 
-        let rows: Vec<db::saga_types::SagaRow> = dsl::saga
+        let rows: Vec<db::saga_types::LoadedSaga> = dsl::saga
             .filter(
                 dsl::saga_state
                     .eq_any(vec![SagaState::Running, SagaState::Unwinding]),
             )
             .filter(dsl::time_created.lt(time_limit))
             .limit(500)
-            .select(db::saga_types::SagaRow::as_select())
+            .select(db::saga_types::LoadedSaga::as_select())
             .load_async(&*conn)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
@@ -406,9 +404,8 @@ mod test {
     use chrono::TimeDelta;
     use db::queries::ALLOW_FULL_TABLE_SCAN_SQL;
     use nexus_db_model::Saga;
+    use nexus_db_model::SagaExecState;
     use nexus_db_model::SagaReasonAbandoned;
-    use nexus_db_model::SagaRow;
-    use nexus_db_model::SagaState;
     use nexus_db_model::{SagaNodeEvent, SecId};
     use omicron_common::api::external::Generation;
     use omicron_test_utils::dev;
@@ -446,12 +443,7 @@ mod test {
             .await
             .expect("Failed to access db connection");
         diesel::insert_into(nexus_db_schema::schema::saga::dsl::saga)
-            .values(
-                inserted_sagas
-                    .iter()
-                    .map(db::saga_types::SagaRow::from)
-                    .collect::<Vec<_>>(),
-            )
+            .values(inserted_sagas.iter().collect::<Vec<_>>())
             .execute_async(&*conn)
             .await
             .expect("Failed to insert test setup data");
@@ -466,12 +458,13 @@ mod test {
         assert!(
             !observed_sagas
                 .iter()
-                .any(|s| s.saga_state == SagaState::Abandoned)
+                .any(|s| matches!(s.saga_state, SagaExecState::Abandoned(_)))
         );
 
         // Remove the abandoned saga from the inserted set so that it can be
         // compared to the observed set.
-        inserted_sagas.retain(|s| s.saga_state != SagaState::Abandoned);
+        inserted_sagas
+            .retain(|s| !matches!(s.saga_state, SagaExecState::Abandoned(_)));
 
         // The observed list is sorted by ID, so sort the inserted list that way
         // too so that the lists can be tested for equality.
@@ -727,19 +720,17 @@ mod test {
         let saga_id: db::saga_types::SagaId = node_cx.saga_id.into();
         let found_saga = {
             use nexus_db_schema::schema::saga::dsl;
-            let row = dsl::saga
+            dsl::saga
                 .filter(dsl::id.eq(saga_id))
-                .select(SagaRow::as_select())
-                .first_async(&*conn)
+                .select(Saga::as_select())
+                .first_async::<Saga>(&*conn)
                 .await
-                .unwrap();
-            Saga::try_from(row).expect("row is a valid saga")
+                .expect("row is a valid saga")
         };
 
-        assert_eq!(found_saga.saga_state, SagaState::Abandoned);
-        let abandon = found_saga
-            .abandon_metadata
-            .expect("an abandoned saga should have abandonment metadata");
+        let SagaExecState::Abandoned(abandon) = found_saga.saga_state else {
+            panic!("an abandoned saga should be in the Abandoned state");
+        };
         assert_eq!(abandon.reason, SagaReasonAbandoned::Unrecoverable);
         assert_eq!(abandon.comment, "test".to_string());
 
@@ -875,8 +866,8 @@ mod test {
             .iter()
             .filter_map(|saga| {
                 ((saga.creator == sec_b || saga.creator == sec_c)
-                    && (saga.saga_state == SagaState::Running
-                        || saga.saga_state == SagaState::Unwinding))
+                    && (saga.saga_state == SagaExecState::Running
+                        || saga.saga_state == SagaExecState::Unwinding))
                     .then(|| saga.id)
             })
             .collect();
@@ -885,7 +876,7 @@ mod test {
             .filter_map(|saga| {
                 (saga.creator == sec_a
                     || saga.creator == sec_d
-                    || saga.saga_state == SagaState::Done)
+                    || saga.saga_state == SagaExecState::Done)
                     .then(|| saga.id)
             })
             .collect();
@@ -902,12 +893,7 @@ mod test {
             use nexus_db_schema::schema::saga::dsl;
             let conn = datastore.pool_connection_for_tests().await.unwrap();
             diesel::insert_into(dsl::saga)
-                .values(
-                    sagas_to_insert
-                        .iter()
-                        .map(db::saga_types::SagaRow::from)
-                        .collect::<Vec<_>>(),
-                )
+                .values(sagas_to_insert.iter().collect::<Vec<_>>())
                 .execute_async(&*conn)
                 .await
                 .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
@@ -931,8 +917,8 @@ mod test {
                 use nexus_db_schema::schema::saga::dsl;
                 conn.batch_execute_async(ALLOW_FULL_TABLE_SCAN_SQL).await?;
                 dsl::saga
-                    .select(nexus_db_model::SagaRow::as_select())
-                    .load_async(&conn)
+                    .select(Saga::as_select())
+                    .load_async::<Saga>(&conn)
                     .await
             })
             .await
@@ -940,18 +926,18 @@ mod test {
 
         for saga in all_sagas {
             println!("checking saga: {:?}", saga);
-            let current_sec = saga.current_sec().unwrap();
-            if sagas_affected.contains(&saga.id()) {
-                assert!(saga.creator() == sec_b || saga.creator() == sec_c);
+            let current_sec = saga.current_sec.unwrap();
+            if sagas_affected.contains(&saga.id) {
+                assert!(saga.creator == sec_b || saga.creator == sec_c);
                 assert_eq!(current_sec, sec_a);
-                assert_eq!(*saga.adopt_generation(), Generation::from(2));
+                assert_eq!(*saga.adopt_generation, Generation::from(2));
                 assert!(
-                    saga.saga_state() == SagaState::Running
-                        || saga.saga_state() == SagaState::Unwinding
+                    saga.saga_state == SagaExecState::Running
+                        || saga.saga_state == SagaExecState::Unwinding
                 );
-            } else if sagas_unaffected.contains(&saga.id()) {
-                assert_eq!(current_sec, saga.creator());
-                assert_eq!(*saga.adopt_generation(), Generation::from(1));
+            } else if sagas_unaffected.contains(&saga.id) {
+                assert_eq!(current_sec, saga.creator);
+                assert_eq!(*saga.adopt_generation, Generation::from(1));
                 // Its SEC and state could be anything since we've deliberately
                 // included sagas with various states and SECs that should not
                 // be affected by the reassignment.
@@ -996,13 +982,7 @@ mod test {
 
         let conn = datastore.pool_connection_for_tests().await.unwrap();
         diesel::insert_into(nexus_db_schema::schema::saga::dsl::saga)
-            .values(vec![
-                db::saga_types::SagaRow::from(&running),
-                db::saga_types::SagaRow::from(&running2),
-                db::saga_types::SagaRow::from(&unwinding),
-                db::saga_types::SagaRow::from(&done),
-                db::saga_types::SagaRow::from(&abandoned),
-            ])
+            .values(vec![&running, &running2, &unwinding, &done, &abandoned])
             .execute_async(&*conn)
             .await
             .expect("Failed to insert test setup data");
