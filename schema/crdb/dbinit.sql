@@ -4039,14 +4039,16 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_router_configuration_by_name ON omicron
 /*
  * A BGP peer within a router configuration. Peers are identified by name
  * within their parent router configuration. A null `addr` means the peer is
- * unnumbered. A null `allowed_import`/`allowed_export` means no filtering.
+ * unnumbered; `router_lifetime` (0 = disabled) is set only when the peer
+ * is unnumbered. A null `allowed_import`/`allowed_export` means no
+ * filtering.
  */
 CREATE TABLE IF NOT EXISTS omicron.public.router_configuration_bgp_peer (
     router_configuration_id UUID NOT NULL,
     name STRING(63) NOT NULL,
     addr INET,
     port_name TEXT NOT NULL,
-    remote_asn INT8 NOT NULL,
+    remote_asn INT8,
     allowed_import INET[],
     allowed_export INET[],
     hold_time INT8 NOT NULL,
@@ -4061,8 +4063,12 @@ CREATE TABLE IF NOT EXISTS omicron.public.router_configuration_bgp_peer (
     md5_auth_key TEXT,
     min_ttl INT2,
     vlan_id INT4,
-    router_lifetime INT4 NOT NULL CHECK (
+    router_lifetime INT4 CHECK (
         router_lifetime >= 0 AND router_lifetime <= 9000
+    ),
+
+    CONSTRAINT router_lifetime_iff_unnumbered_peer CHECK (
+        (addr IS NULL) != (router_lifetime IS NULL)
     ),
 
     PRIMARY KEY (router_configuration_id, name)

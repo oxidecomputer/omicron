@@ -130,6 +130,11 @@ pub enum BgpPeerKind {
         /// Name of the external port the peer is reachable on, such as
         /// `qsfp0`.
         port: Name,
+
+        /// Router lifetime in seconds advertised on the unnumbered link.
+        /// Defaults to 0 (disabled).
+        #[serde(default)]
+        router_lifetime: RouterLifetimeConfig,
     },
 }
 
@@ -142,8 +147,9 @@ pub struct RouterConfigurationBgpPeer {
     /// The peer to establish a BGP session with
     pub peer: BgpPeerKind,
 
-    /// The remote autonomous system number of the peer
-    pub remote_asn: u32,
+    /// Require that the peer has this autonomous system number. If not set,
+    /// any peer ASN is accepted.
+    pub remote_asn: Option<u32>,
 
     /// Import prefix filtering policy
     #[serde(default)]
@@ -190,11 +196,6 @@ pub struct RouterConfigurationBgpPeer {
 
     /// VLAN ID associated with this peer
     pub vlan_id: Option<u16>,
-
-    /// Router lifetime in seconds for unnumbered BGP peers. Defaults to 0
-    /// (disabled).
-    #[serde(default)]
-    pub router_lifetime: RouterLifetimeConfig,
 }
 
 /// Select a BGP peer within a router configuration

@@ -382,7 +382,7 @@ table! {
         name -> Text,
         addr -> Nullable<Inet>,
         port_name -> Text,
-        remote_asn -> Int8,
+        remote_asn -> Nullable<Int8>,
         allowed_import -> Nullable<Array<Inet>>,
         allowed_export -> Nullable<Array<Inet>>,
         hold_time -> Int8,
@@ -397,7 +397,7 @@ table! {
         md5_auth_key -> Nullable<Text>,
         min_ttl -> Nullable<Int2>,
         vlan_id -> Nullable<Int4>,
-        router_lifetime -> Int4,
+        router_lifetime -> Nullable<Int4>,
     }
 }
 
