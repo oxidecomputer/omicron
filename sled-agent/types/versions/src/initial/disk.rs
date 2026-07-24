@@ -4,7 +4,12 @@
 
 //! Disk types for the Sled Agent API.
 
+use iddqd::IdOrdItem;
+use iddqd::id_upcast;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
+use omicron_common::disk::DatasetName;
+use omicron_common::disk::SharedDatasetConfig;
+use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use schemars::JsonSchema;
@@ -102,6 +107,16 @@ pub struct OmicronPhysicalDiskConfig {
     pub pool_id: ZpoolUuid,
 }
 
+impl IdOrdItem for OmicronPhysicalDiskConfig {
+    type Key<'a> = PhysicalDiskUuid;
+
+    fn key(&self) -> Self::Key<'_> {
+        self.id
+    }
+
+    id_upcast!();
+}
+
 /// Uniquely identifies a disk.
 #[derive(
     Debug,
@@ -120,4 +135,40 @@ pub struct DiskIdentity {
     pub vendor: String,
     pub model: String,
     pub serial: String,
+}
+
+/// Configuration information necessary to request a single dataset.
+///
+/// These datasets are tracked directly by Nexus.
+#[derive(
+    Clone,
+    Debug,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+    PartialEq,
+    Eq,
+    Hash,
+    PartialOrd,
+    Ord,
+)]
+pub struct DatasetConfig {
+    /// The UUID of the dataset being requested
+    pub id: DatasetUuid,
+
+    /// The dataset's name
+    pub name: DatasetName,
+
+    #[serde(flatten)]
+    pub inner: SharedDatasetConfig,
+}
+
+impl IdOrdItem for DatasetConfig {
+    type Key<'a> = DatasetUuid;
+
+    fn key(&self) -> Self::Key<'_> {
+        self.id
+    }
+
+    id_upcast!();
 }

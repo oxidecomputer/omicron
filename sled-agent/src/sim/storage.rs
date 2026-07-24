@@ -468,11 +468,11 @@ impl CrucibleDataInner {
 #[cfg(test)]
 mod test {
     use super::*;
-    use omicron_common::disk::DatasetConfig;
     use omicron_common::disk::DatasetKind;
     use omicron_common::disk::DatasetName;
     use omicron_common::zpool_name::ZpoolName;
     use omicron_test_utils::dev::test_setup_log;
+    use sled_agent_types::disk::DatasetConfig;
 
     fn append_dataset_to_config(
         storage: &mut StorageInner,

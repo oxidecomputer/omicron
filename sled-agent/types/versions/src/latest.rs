@@ -45,6 +45,7 @@ pub mod diagnostics {
 }
 
 pub mod disk {
+    pub use crate::v1::disk::DatasetConfig;
     pub use crate::v1::disk::DiskEnsureBody;
     pub use crate::v1::disk::DiskIdentity;
     pub use crate::v1::disk::DiskPathParam;

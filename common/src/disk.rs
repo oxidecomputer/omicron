@@ -7,9 +7,6 @@
 use anyhow::bail;
 use camino::{Utf8Path, Utf8PathBuf};
 use daft::Diffable;
-use iddqd::IdOrdItem;
-use iddqd::id_upcast;
-use omicron_uuid_kinds::DatasetUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -312,42 +309,6 @@ pub struct SharedDatasetConfig {
 
     /// The lower bound on the amount of storage usable by this dataset
     pub reservation: Option<ByteCount>,
-}
-
-/// Configuration information necessary to request a single dataset.
-///
-/// These datasets are tracked directly by Nexus.
-#[derive(
-    Clone,
-    Debug,
-    Deserialize,
-    Serialize,
-    JsonSchema,
-    PartialEq,
-    Eq,
-    Hash,
-    PartialOrd,
-    Ord,
-)]
-pub struct DatasetConfig {
-    /// The UUID of the dataset being requested
-    pub id: DatasetUuid,
-
-    /// The dataset's name
-    pub name: DatasetName,
-
-    #[serde(flatten)]
-    pub inner: SharedDatasetConfig,
-}
-
-impl IdOrdItem for DatasetConfig {
-    type Key<'a> = DatasetUuid;
-
-    fn key(&self) -> Self::Key<'_> {
-        self.id
-    }
-
-    id_upcast!();
 }
 
 #[cfg(test)]

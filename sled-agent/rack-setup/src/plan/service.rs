@@ -44,8 +44,7 @@ use omicron_common::backoff::{
     BackoffError, retry_notify_ext, retry_policy_internal_service_aggressive,
 };
 use omicron_common::disk::{
-    CompressionAlgorithm, DatasetConfig, DatasetKind, DatasetName,
-    SharedDatasetConfig,
+    CompressionAlgorithm, DatasetKind, DatasetName, SharedDatasetConfig,
 };
 use omicron_common::policy::{
     BOUNDARY_NTP_REDUNDANCY, COCKROACHDB_REDUNDANCY,
@@ -63,6 +62,7 @@ use serde::{Deserialize, Serialize};
 use sled_agent_client::{
     Client as SledAgentClient, Error as SledAgentError, types as SledAgentTypes,
 };
+use sled_agent_types::disk::DatasetConfig;
 use sled_agent_types::disk::DiskVariant;
 use sled_agent_types::inventory::NetworkInterface;
 use sled_agent_types::inventory::NetworkInterfaceKind;

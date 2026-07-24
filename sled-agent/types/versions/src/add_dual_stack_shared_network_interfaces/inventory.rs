@@ -16,7 +16,6 @@ use omicron_common::api::internal::shared::PrivateIpv4Config;
 use omicron_common::api::internal::shared::PrivateIpv6Config;
 use omicron_common::{
     api::external::{self, ByteCount, Generation, Name, Vni},
-    disk::DatasetConfig,
     zpool_name::ZpoolName,
 };
 use omicron_ledger::Ledgerable;
@@ -29,6 +28,7 @@ use serde::{Deserialize, Serialize};
 use sled_hardware_types::SledCpuFamily;
 use uuid::Uuid;
 
+use crate::v1::disk::DatasetConfig;
 use crate::v1::disk::OmicronPhysicalDiskConfig;
 use crate::v1::inventory::{
     BootPartitionContents, ConfigReconcilerInventoryResult,

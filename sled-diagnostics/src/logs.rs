@@ -983,7 +983,6 @@ mod illumos_tests {
     use super::*;
 
     use illumos_utils::zfs::ZFS;
-    use omicron_common::disk::DatasetConfig;
     use omicron_common::disk::DatasetKind;
     use omicron_common::disk::DatasetName;
     use omicron_common::disk::SharedDatasetConfig;
@@ -991,6 +990,7 @@ mod illumos_tests {
     use omicron_test_utils::dev::test_setup_log;
     use omicron_uuid_kinds::DatasetUuid;
     use omicron_uuid_kinds::ExternalZpoolUuid;
+    use sled_agent_types::disk::DatasetConfig;
     use tokio::io::AsyncReadExt;
     use tokio::io::AsyncWriteExt;
     use zfs_test_harness::ZfsTestHarness;

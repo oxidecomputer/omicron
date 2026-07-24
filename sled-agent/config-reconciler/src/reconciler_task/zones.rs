@@ -1302,7 +1302,6 @@ mod tests {
     use illumos_utils::zpool::ZpoolName;
     use illumos_utils::zpool::ZpoolOrRamdisk;
     use omicron_common::address::SLED_PREFIX_LENGTH;
-    use omicron_common::disk::DatasetConfig;
     use omicron_common::disk::DatasetKind;
     use omicron_common::disk::DatasetName;
     use omicron_common::disk::SharedDatasetConfig;
@@ -1314,6 +1313,7 @@ mod tests {
     use omicron_uuid_kinds::MupdateOverrideUuid;
     use omicron_uuid_kinds::ZpoolUuid;
     use sled_agent_resolvable_files_examples::deserialize_error;
+    use sled_agent_types::disk::DatasetConfig;
     use sled_agent_types::inventory::OmicronZoneDataset;
     use sled_agent_types::inventory::OmicronZoneImageSource;
     use sled_agent_types::inventory::ZoneKind;

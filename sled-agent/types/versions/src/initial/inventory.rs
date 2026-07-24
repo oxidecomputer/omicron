@@ -20,7 +20,7 @@ use omicron_common::api::external::Generation;
 use omicron_common::api::external::MacAddr;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::Vni;
-use omicron_common::disk::{DatasetConfig, DatasetName};
+use omicron_common::disk::DatasetName;
 use omicron_common::snake_case_result;
 use omicron_common::snake_case_result::SnakeCaseResult;
 use omicron_common::update::OmicronInstallManifestSource;
@@ -40,6 +40,7 @@ use strum::EnumIter;
 use tufaceous_artifact::ArtifactHash;
 use uuid::Uuid;
 
+use super::disk::DatasetConfig;
 use super::disk::DiskIdentity;
 use super::disk::DiskVariant;
 use super::disk::M2Slot;
