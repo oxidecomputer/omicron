@@ -170,6 +170,12 @@ fn import_export_policy_from_db(
     }
 }
 
+/// A BGP peer for a [`RouterConfiguration`].
+///
+/// A numbered peer has `addr` set and `router_lifetime` null, while an
+/// unnumbered peer is the reverse; a CHECK constraint ensures exactly one of
+/// the two is set, so [`RouterConfigurationBgpPeer::peer()`] can rebuild the
+/// peer as a [`networking::BgpPeerKind`].
 #[derive(
     Queryable, Insertable, Selectable, Clone, Debug, Serialize, Deserialize,
 )]
@@ -179,7 +185,7 @@ pub struct RouterConfigurationBgpPeer {
     pub name: Name,
     pub addr: Option<IpNetwork>,
     pub port_name: Name,
-    pub remote_asn: SqlU32,
+    pub remote_asn: Option<SqlU32>,
     pub allowed_import: Option<Vec<IpNetwork>>,
     pub allowed_export: Option<Vec<IpNetwork>>,
     pub hold_time: SqlU32,
@@ -194,7 +200,7 @@ pub struct RouterConfigurationBgpPeer {
     pub md5_auth_key: Option<String>,
     pub min_ttl: Option<SqlU8>,
     pub vlan_id: Option<SqlU16>,
-    pub router_lifetime: SqlU16,
+    pub router_lifetime: Option<SqlU16>,
 }
 
 impl RouterConfigurationBgpPeer {
@@ -202,18 +208,20 @@ impl RouterConfigurationBgpPeer {
         router_configuration_id: RouterConfigurationUuid,
         peer: networking::RouterConfigurationBgpPeer,
     ) -> Self {
-        let (addr, port_name) = match peer.peer {
+        let (addr, port_name, router_lifetime) = match peer.peer {
             networking::BgpPeerKind::Numbered { addr, port } => {
-                (Some(addr.into()), port)
+                (Some(addr.into()), port, None)
             }
-            networking::BgpPeerKind::Unnumbered { port } => (None, port),
+            networking::BgpPeerKind::Unnumbered { port, router_lifetime } => {
+                (None, port, Some(router_lifetime.as_u16().into()))
+            }
         };
         Self {
             router_configuration_id: router_configuration_id.into(),
             name: peer.name.into(),
             addr,
             port_name: port_name.into(),
-            remote_asn: peer.remote_asn.into(),
+            remote_asn: peer.remote_asn.map(Into::into),
             allowed_import: import_export_policy_to_db(&peer.allowed_import),
             allowed_export: import_export_policy_to_db(&peer.allowed_export),
             hold_time: peer.hold_time.into(),
@@ -234,7 +242,37 @@ impl RouterConfigurationBgpPeer {
             md5_auth_key: peer.md5_auth_key,
             min_ttl: peer.min_ttl.map(Into::into),
             vlan_id: peer.vlan_id.map(Into::into),
-            router_lifetime: peer.router_lifetime.as_u16().into(),
+            router_lifetime,
+        }
+    }
+
+    /// Returns the peer (numbered or unnumbered) described by this row.
+    ///
+    /// Only fails if invalid data has been stored in the database.
+    pub fn peer(&self) -> Result<networking::BgpPeerKind, Error> {
+        let port = self.port_name.clone().into();
+        match (self.addr, self.router_lifetime) {
+            (Some(addr), None) => {
+                Ok(networking::BgpPeerKind::Numbered { addr: addr.ip(), port })
+            }
+            (None, Some(lifetime)) => {
+                let router_lifetime = RouterLifetimeConfig::new(*lifetime)
+                    .map_err(|err| {
+                        Error::internal_error(&format!(
+                            "invalid database contents: \
+                             could not convert RouterLifetimeConfig: {}",
+                            InlineErrorChain::new(&err)
+                        ))
+                    })?;
+                Ok(networking::BgpPeerKind::Unnumbered {
+                    port,
+                    router_lifetime,
+                })
+            }
+            (Some(_), Some(_)) | (None, None) => Err(Error::internal_error(
+                "invalid database contents: exactly one of addr and \
+                 router_lifetime must be set for a BGP peer",
+            )),
         }
     }
 }
@@ -245,21 +283,7 @@ impl TryFrom<RouterConfigurationBgpPeer>
     type Error = Error;
 
     fn try_from(value: RouterConfigurationBgpPeer) -> Result<Self, Error> {
-        let port = value.port_name.into();
-        let peer = match value.addr {
-            Some(addr) => {
-                networking::BgpPeerKind::Numbered { addr: addr.ip(), port }
-            }
-            None => networking::BgpPeerKind::Unnumbered { port },
-        };
-        let router_lifetime = RouterLifetimeConfig::new(*value.router_lifetime)
-            .map_err(|err| {
-                Error::internal_error(&format!(
-                    "invalid database contents: \
-                     could not convert RouterLifetimeConfig: {}",
-                    InlineErrorChain::new(&err)
-                ))
-            })?;
+        let peer = value.peer()?;
         let communities = value
             .communities
             .into_iter()
@@ -275,7 +299,7 @@ impl TryFrom<RouterConfigurationBgpPeer>
         Ok(Self {
             name: value.name.into(),
             peer,
-            remote_asn: value.remote_asn.into(),
+            remote_asn: value.remote_asn.map(Into::into),
             allowed_import: import_export_policy_from_db(value.allowed_import),
             allowed_export: import_export_policy_from_db(value.allowed_export),
             hold_time: value.hold_time.into(),
@@ -292,7 +316,6 @@ impl TryFrom<RouterConfigurationBgpPeer>
             md5_auth_key: value.md5_auth_key,
             min_ttl: value.min_ttl.map(|v| v.0),
             vlan_id: value.vlan_id.map(|v| v.0),
-            router_lifetime,
         })
     }
 }

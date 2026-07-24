@@ -337,7 +337,7 @@ fn demo_bgp_peer() -> RouterConfigurationBgpPeer {
             addr: "203.0.113.10".parse().unwrap(),
             port: "qsfp0".parse().unwrap(),
         },
-        remote_asn: 65001,
+        remote_asn: Some(65001),
         allowed_import: ImportExportPolicy::NoFiltering,
         allowed_export: ImportExportPolicy::NoFiltering,
         hold_time: 6,
@@ -352,7 +352,6 @@ fn demo_bgp_peer() -> RouterConfigurationBgpPeer {
         md5_auth_key: None,
         min_ttl: Some(255),
         vlan_id: None,
-        router_lifetime: Default::default(),
     }
 }
 
@@ -499,7 +498,7 @@ async fn test_router_configuration_sub_resources(
     // Update an entry, including a rename.
     let mut updated_peer = bgp_peer.clone();
     updated_peer.name = "spine2".parse().unwrap();
-    updated_peer.remote_asn = 65002;
+    updated_peer.remote_asn = Some(65002);
     let updated: RouterConfigurationBgpPeer =
         NexusRequest::object_put(client, &bgp_peer_url, Some(&updated_peer))
             .authn_as(AuthnMode::PrivilegedUser)

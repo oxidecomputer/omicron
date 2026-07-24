@@ -18975,6 +18975,15 @@
                   }
                 ]
               },
+              "router_lifetime": {
+                "description": "Router lifetime in seconds advertised on the unnumbered link. Defaults to 0 (disabled).",
+                "default": 0,
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/RouterLifetimeConfig"
+                  }
+                ]
+              },
               "type": {
                 "type": "string",
                 "enum": [
@@ -28364,19 +28373,11 @@
             ]
           },
           "remote_asn": {
-            "description": "The remote autonomous system number of the peer",
+            "nullable": true,
+            "description": "Require that the peer has this autonomous system number. If not set, any peer ASN is accepted.",
             "type": "integer",
             "format": "uint32",
             "minimum": 0
-          },
-          "router_lifetime": {
-            "description": "Router lifetime in seconds for unnumbered BGP peers. Defaults to 0 (disabled).",
-            "default": 0,
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/RouterLifetimeConfig"
-              }
-            ]
           },
           "vlan_id": {
             "nullable": true,
@@ -28394,8 +28395,7 @@
           "idle_hold_time",
           "keepalive",
           "name",
-          "peer",
-          "remote_asn"
+          "peer"
         ]
       },
       "RouterConfigurationCreate": {

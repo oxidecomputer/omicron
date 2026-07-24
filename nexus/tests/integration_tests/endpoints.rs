@@ -1060,8 +1060,9 @@ pub static DEMO_ROUTER_CONFIGURATION_BGP_PEER: LazyLock<
     name: "demo-bgp-peer".parse().unwrap(),
     peer: networking::BgpPeerKind::Unnumbered {
         port: "qsfp0".parse().unwrap(),
+        router_lifetime: Default::default(),
     },
-    remote_asn: 65001,
+    remote_asn: Some(65001),
     allowed_import: ImportExportPolicy::NoFiltering,
     allowed_export: ImportExportPolicy::NoFiltering,
     hold_time: 6,
@@ -1076,7 +1077,6 @@ pub static DEMO_ROUTER_CONFIGURATION_BGP_PEER: LazyLock<
     md5_auth_key: None,
     min_ttl: None,
     vlan_id: None,
-    router_lifetime: Default::default(),
 });
 pub const DEMO_ROUTER_CONFIGURATION_STATIC_ROUTES_URL: &'static str = "/v1/system/networking/router-configurations/demo-router-configuration/routes";
 pub const DEMO_ROUTER_CONFIGURATION_STATIC_ROUTE_URL: &'static str = "/v1/system/networking/router-configurations/demo-router-configuration/routes/demo-static-route";
