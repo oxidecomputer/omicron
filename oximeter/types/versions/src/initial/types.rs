@@ -6,6 +6,7 @@
 
 use super::histogram;
 use super::schema::TimeseriesName;
+use crate::impls::interned::InternedString;
 use crate::impls::traits::Producer;
 use bytes::Bytes;
 use chrono::DateTime;
@@ -138,7 +139,7 @@ pub enum FieldValue {
     Clone, Debug, Hash, PartialEq, Eq, JsonSchema, Serialize, Deserialize,
 )]
 pub struct Field {
-    pub name: String,
+    pub name: InternedString,
     pub value: FieldValue,
 }
 
@@ -262,8 +263,8 @@ pub struct Cumulative<T> {
 // A helper type for representing the name and fields derived from targets and metrics
 #[derive(Clone, Debug, PartialEq, JsonSchema, Deserialize, Serialize)]
 pub(crate) struct FieldSet {
-    pub name: String,
-    pub fields: BTreeMap<String, Field>,
+    pub name: InternedString,
+    pub fields: BTreeMap<InternedString, Field>,
 }
 
 /// A concrete type representing a single, timestamped measurement from a timeseries.

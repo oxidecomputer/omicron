@@ -38,8 +38,15 @@ impl FieldSchema {
     }
 }
 
+impl TimeseriesName {
+    /// Return the name as a `&str`.
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
 impl std::ops::Deref for TimeseriesName {
-    type Target = String;
+    type Target = str;
     fn deref(&self) -> &Self::Target {
         &self.0
     }
@@ -47,7 +54,7 @@ impl std::ops::Deref for TimeseriesName {
 
 impl From<TimeseriesName> for String {
     fn from(n: TimeseriesName) -> Self {
-        n.0
+        n.0.into()
     }
 }
 
@@ -60,7 +67,7 @@ impl std::fmt::Display for TimeseriesName {
 impl std::convert::TryFrom<&str> for TimeseriesName {
     type Error = MetricsError;
     fn try_from(s: &str) -> Result<Self, Self::Error> {
-        validate_timeseries_name(s).map(|s| TimeseriesName(s.to_string()))
+        validate_timeseries_name(s).map(|s| TimeseriesName(s.into()))
     }
 }
 
@@ -68,7 +75,7 @@ impl std::convert::TryFrom<String> for TimeseriesName {
     type Error = MetricsError;
     fn try_from(s: String) -> Result<Self, Self::Error> {
         validate_timeseries_name(&s)?;
-        Ok(TimeseriesName(s))
+        Ok(TimeseriesName(s.into()))
     }
 }
 
@@ -105,7 +112,7 @@ impl From<&Sample> for TimeseriesSchema {
         let mut field_schema = BTreeSet::new();
         for field in sample.target_fields() {
             let schema = FieldSchema {
-                name: field.name.clone(),
+                name: field.name.to_string(),
                 field_type: field.value.field_type(),
                 source: FieldSource::Target,
                 description: String::new(),
@@ -114,7 +121,7 @@ impl From<&Sample> for TimeseriesSchema {
         }
         for field in sample.metric_fields() {
             let schema = FieldSchema {
-                name: field.name.clone(),
+                name: field.name.to_string(),
                 field_type: field.value.field_type(),
                 source: FieldSource::Metric,
                 description: String::new(),
@@ -146,7 +153,7 @@ impl TimeseriesSchema {
         let mut field_schema = BTreeSet::new();
         for field in target.fields() {
             let schema = FieldSchema {
-                name: field.name.clone(),
+                name: field.name.to_string(),
                 field_type: field.value.field_type(),
                 source: FieldSource::Target,
                 description: String::new(),
@@ -155,7 +162,7 @@ impl TimeseriesSchema {
         }
         for field in metric.fields() {
             let schema = FieldSchema {
-                name: field.name.clone(),
+                name: field.name.to_string(),
                 field_type: field.value.field_type(),
                 source: FieldSource::Metric,
                 description: String::new(),

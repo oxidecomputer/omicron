@@ -228,7 +228,7 @@ fn extract_field_rows_from_block(
                 }
             };
             let this_field =
-                Field { name: field.name.clone(), value: field_value };
+                Field { name: field.name.as_str().into(), value: field_value };
             match field.source {
                 FieldSource::Target => target.push(this_field),
                 FieldSource::Metric => metric.push(this_field),
@@ -275,7 +275,7 @@ pub(crate) fn extract_fields_as_block(
         else {
             unreachable!();
         };
-        field_names.push(field.name.clone());
+        field_names.push(field.name.to_string());
 
         // Push the field value, which depends on the type.
         let values = entry.column_values_mut(columns::FIELD_VALUE).unwrap();

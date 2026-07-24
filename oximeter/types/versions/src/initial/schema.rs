@@ -6,6 +6,7 @@
 
 use super::types::DatumType;
 use super::types::FieldType;
+use crate::impls::interned::InternedString;
 use chrono::DateTime;
 use chrono::Utc;
 use parse_display::Display;
@@ -74,7 +75,7 @@ pub enum FieldSource {
     Debug, Clone, PartialEq, PartialOrd, Ord, Eq, Hash, Serialize, Deserialize,
 )]
 #[serde(try_from = "&str")]
-pub struct TimeseriesName(pub(crate) String);
+pub struct TimeseriesName(pub(crate) InternedString);
 
 impl JsonSchema for TimeseriesName {
     fn schema_name() -> String {

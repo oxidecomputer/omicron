@@ -150,6 +150,10 @@ name = "oxdb"
 doc = false
 
 [[bench]]
+name = "unroll"
+harness = false
+
+[[bench]]
 name = "protocol"
 harness = false
 

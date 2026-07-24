@@ -34,6 +34,7 @@ pub use traits::Target;
 pub use types::Datum;
 pub use types::DatumType;
 pub use types::Field;
+pub use types::InternedString;
 pub use types::FieldType;
 pub use types::FieldValue;
 pub use types::Measurement;
