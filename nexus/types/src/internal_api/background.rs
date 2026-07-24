@@ -906,24 +906,63 @@ pub enum SitrepLoadStatus {
     Loaded { version: crate::fm::SitrepVersion, time_loaded: DateTime<Utc> },
 }
 
-/// Per-child-table GC statistics, used by [`SitrepGcStatus`].
-#[derive(
-    Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq,
-)]
-pub struct ChildTableGcStats {
-    pub rows_deleted: usize,
-    pub batches: usize,
-}
-
 /// The status of a `fm_sitrep_gc` background task activation.
-#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct SitrepGcStatus {
+    /// The maximum number of entries to retain in the history table.
+    pub history_limit: u32,
+    pub history_pruning_status: fm_sitrep_gc::HistoryPruningStatus,
+    pub history_pruning_outcome: fm_sitrep_gc::HistoryPruningOutcome,
     pub orphaned_sitreps_deleted: usize,
     pub sitrep_metadata_batches: usize,
     pub batch_size: u32,
     /// Per-child-table statistics, keyed by table name.
-    pub child_tables: BTreeMap<String, ChildTableGcStats>,
+    pub child_tables: BTreeMap<String, fm_sitrep_gc::ChildTableGcStats>,
     pub errors: Vec<String>,
+}
+
+pub mod fm_sitrep_gc {
+    use super::*;
+    use std::ops::RangeInclusive;
+
+    /// Describes the status of pruning old records from the end of the sitrep
+    /// history table.
+    #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+    pub struct HistoryPruningStatus {
+        /// The number of batched delete queries executed by this activation.
+        pub batches: usize,
+        /// The total number of history table entries deleted by this
+        /// activation, across all batches.
+        pub sitreps_pruned: usize,
+        /// The range of sitrep versions deleted by this activation
+        /// (oldest..=newest), if any were deleted.
+        pub versions_pruned: Option<RangeInclusive<u32>>,
+    }
+
+    /// Describes how the history pruning part of a GC activation ended.
+    #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+    pub enum HistoryPruningOutcome {
+        /// The history table was already within the limit (with `count`
+        /// entries), so nothing was deleted.
+        NotPruned { count: u64 },
+        /// Entries were pruned from the history table, which is now within
+        /// the limit (with `count` entries remaining). The details of what
+        /// was pruned are recorded in [`HistoryPruningStatus`].
+        Pruned { count: u64 },
+        /// A pruning query failed. Any batches that completed before the
+        /// error still happened, and are recorded in
+        /// [`HistoryPruningStatus`].
+        Error(String),
+    }
+
+    /// Per-child-table GC statistics, used by [`SitrepGcStatus`].
+    #[derive(
+        Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq,
+    )]
+    pub struct ChildTableGcStats {
+        pub rows_deleted: usize,
+        pub batches: usize,
+    }
 }
 
 /// The status of a `fm_analysis` background task activation.
@@ -991,6 +1030,22 @@ pub mod fm_analysis {
         pub end_time: DateTime<Utc>,
         pub report: crate::fm::analysis_reports::AnalysisReport,
         pub outcome: AnalysisOutcome,
+        pub capacity: Option<SitrepCapacity>,
+    }
+
+    #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+    pub struct SitrepCapacity {
+        pub count: u64,
+        pub limit: u64,
+    }
+
+    impl SitrepCapacity {
+        // NOTE(eliza): this _could_ be implemented as a float to get a couple
+        // decimal places, but I don't really think we need to be that precise,
+        // and matching on ranges nicely is cute...
+        pub fn usage_percent(&self) -> u64 {
+            self.count.saturating_mul(100) / self.limit
+        }
     }
 
     #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -1001,6 +1056,10 @@ pub mod fm_analysis {
         /// Analysis produced a sitrep identical to the current sitrep,
         /// so we threw it away and did nothing.
         Unchanged,
+
+        /// Analysis produced a new sitrep, but the sitrep limit has been
+        /// reached, so it was not written to the database.
+        LimitReached { limit: u64 },
 
         /// Analysis produced a new sitrep, but we failed to make it
         /// the current sitrep.

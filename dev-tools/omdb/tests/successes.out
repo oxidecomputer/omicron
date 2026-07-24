@@ -709,6 +709,9 @@ task: "fm_analysis"
     =================================
     no changes from the current situation report (Some(..........<REDACTED_UUID>........... (sitrep)))
 
+    sitrep storage capacity: 0% used
+      limit:   2500
+      count:      1
     preparation report:
       parent sitrep:        ..........<REDACTED_UUID>...........
       inventory collection: ..........<REDACTED_UUID>...........
@@ -768,27 +771,32 @@ task: "fm_sitrep_gc"
   configured period: every <REDACTED_DURATION>s
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    batch size:                                                               1000
-    orphaned sitreps deleted:                                                    <ORPHANED_SITREPS_DELETED_REDACTED>
-      batches:                                                                   1
-    orphaned fm_alert_request rows deleted:                                      0
-      batches:                                                                   1
-    orphaned fm_case rows deleted:                                               0
-      batches:                                                                   1
-    orphaned fm_ereport_in_case rows deleted:                                    0
-      batches:                                                                   1
-    orphaned fm_fact_physical_disk rows deleted:                                 0
-      batches:                                                                   1
-    orphaned fm_sitrep_analysis_report rows deleted:                             <ORPHANED_FMSITREPANALYSISREPORT_ROWS_DELETED_REDACTED>
-      batches:                                                                   1
-    orphaned fm_support_bundle_request rows deleted:                             0
-      batches:                                                                   1
-    orphaned fm_support_bundle_request_data_selection_ereports rows deleted:     0
-      batches:                                                                   1
-    orphaned fm_support_bundle_request_data_selection_flags rows deleted:        0
-      batches:                                                                   1
-    orphaned fm_support_bundle_request_data_selection_host_info rows deleted:    0
-      batches:                                                                   1
+    pruning sitrep history table:
+      max sitreps to keep: 2000
+      status: within limit (nothing was deleted)
+      current count:          1
+    garbage collecting orphaned sitreps:
+      batch size:                                                               1000
+      orphaned sitreps deleted:                                                    <ORPHANED_SITREPS_DELETED_REDACTED>
+        batches:                                                                   1
+      orphaned fm_alert_request rows deleted:                                      0
+        batches:                                                                   1
+      orphaned fm_case rows deleted:                                               0
+        batches:                                                                   1
+      orphaned fm_ereport_in_case rows deleted:                                    0
+        batches:                                                                   1
+      orphaned fm_fact_physical_disk rows deleted:                                 0
+        batches:                                                                   1
+      orphaned fm_sitrep_analysis_report rows deleted:                             <ORPHANED_FMSITREPANALYSISREPORT_ROWS_DELETED_REDACTED>
+        batches:                                                                   1
+      orphaned fm_support_bundle_request rows deleted:                             0
+        batches:                                                                   1
+      orphaned fm_support_bundle_request_data_selection_ereports rows deleted:     0
+        batches:                                                                   1
+      orphaned fm_support_bundle_request_data_selection_flags rows deleted:        0
+        batches:                                                                   1
+      orphaned fm_support_bundle_request_data_selection_host_info rows deleted:    0
+        batches:                                                                   1
 
 task: "fm_sitrep_loader"
   configured period: every <REDACTED_DURATION>s
@@ -1422,6 +1430,9 @@ task: "fm_analysis"
     =================================
     no changes from the current situation report (Some(..........<REDACTED_UUID>........... (sitrep)))
 
+    sitrep storage capacity: 0% used
+      limit:   2500
+      count:      1
     preparation report:
       parent sitrep:        ..........<REDACTED_UUID>...........
       inventory collection: ..........<REDACTED_UUID>...........
@@ -1481,27 +1492,32 @@ task: "fm_sitrep_gc"
   configured period: every <REDACTED_DURATION>s
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    batch size:                                                               1000
-    orphaned sitreps deleted:                                                    <ORPHANED_SITREPS_DELETED_REDACTED>
-      batches:                                                                   1
-    orphaned fm_alert_request rows deleted:                                      0
-      batches:                                                                   1
-    orphaned fm_case rows deleted:                                               0
-      batches:                                                                   1
-    orphaned fm_ereport_in_case rows deleted:                                    0
-      batches:                                                                   1
-    orphaned fm_fact_physical_disk rows deleted:                                 0
-      batches:                                                                   1
-    orphaned fm_sitrep_analysis_report rows deleted:                             <ORPHANED_FMSITREPANALYSISREPORT_ROWS_DELETED_REDACTED>
-      batches:                                                                   1
-    orphaned fm_support_bundle_request rows deleted:                             0
-      batches:                                                                   1
-    orphaned fm_support_bundle_request_data_selection_ereports rows deleted:     0
-      batches:                                                                   1
-    orphaned fm_support_bundle_request_data_selection_flags rows deleted:        0
-      batches:                                                                   1
-    orphaned fm_support_bundle_request_data_selection_host_info rows deleted:    0
-      batches:                                                                   1
+    pruning sitrep history table:
+      max sitreps to keep: 2000
+      status: within limit (nothing was deleted)
+      current count:          1
+    garbage collecting orphaned sitreps:
+      batch size:                                                               1000
+      orphaned sitreps deleted:                                                    <ORPHANED_SITREPS_DELETED_REDACTED>
+        batches:                                                                   1
+      orphaned fm_alert_request rows deleted:                                      0
+        batches:                                                                   1
+      orphaned fm_case rows deleted:                                               0
+        batches:                                                                   1
+      orphaned fm_ereport_in_case rows deleted:                                    0
+        batches:                                                                   1
+      orphaned fm_fact_physical_disk rows deleted:                                 0
+        batches:                                                                   1
+      orphaned fm_sitrep_analysis_report rows deleted:                             <ORPHANED_FMSITREPANALYSISREPORT_ROWS_DELETED_REDACTED>
+        batches:                                                                   1
+      orphaned fm_support_bundle_request rows deleted:                             0
+        batches:                                                                   1
+      orphaned fm_support_bundle_request_data_selection_ereports rows deleted:     0
+        batches:                                                                   1
+      orphaned fm_support_bundle_request_data_selection_flags rows deleted:        0
+        batches:                                                                   1
+      orphaned fm_support_bundle_request_data_selection_host_info rows deleted:    0
+        batches:                                                                   1
 
 task: "fm_sitrep_loader"
   configured period: every <REDACTED_DURATION>s
