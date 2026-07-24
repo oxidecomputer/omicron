@@ -333,7 +333,8 @@ fn is_update_in_progress(
             blueprint,
             &v.to_string(),
         ) {
-            BlueprintTargetReleaseStatus::PreviousUpdateInProgress(_) => true,
+            BlueprintTargetReleaseStatus::PreviousUpdateInProgress { .. }
+                => true,
             // We don't consider a Mupdate as an "update in-progress" because
             // recofigurator is not driving this update.
             BlueprintTargetReleaseStatus::WaitingForMupdateToBeCleared { .. }
