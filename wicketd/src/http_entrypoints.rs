@@ -383,7 +383,7 @@ impl WicketdApi for WicketdApiImpl {
             .get_inventory_refreshing_sps(force_refresh)
             .await
         {
-            Ok(GetMgsInventoryResponse::Response {
+            Ok(GetMgsInventoryResponse {
                 sps,
                 mgs_last_seen,
                 // The (currently frozen) wicketd API surfaces only the lossy
@@ -392,8 +392,8 @@ impl WicketdApi for WicketdApiImpl {
                 // TODO: surface the richer per-SP records and fetch errors once
                 // rkdeploy is on the stable commissioning API.
                 last_ignition_fetch_error: _,
-            }) => Some((records_to_mgs_inventory(&sps), mgs_last_seen)),
-            Ok(GetMgsInventoryResponse::Unavailable) => None,
+            }) => records_to_mgs_inventory(&sps)
+                .map(|inventory| (inventory, mgs_last_seen)),
             Err(err) => {
                 return Err(err.to_http_error());
             }
