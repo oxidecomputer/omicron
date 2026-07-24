@@ -21,9 +21,10 @@ use wicket_common::example::ExampleRackSetupData;
 use wicket_common::rack_setup::CurrentRssUserConfigInsensitive;
 use wicketd_commission_types::rack_setup::PutRssUserConfigInsensitive;
 use wicketd_commission_types_versions::latest::inventory::{
-    BaseboardId, BootstrapSled, IgnitionFaults, InventoryParams, LocationInfo,
-    PowerState, RotImageValidity, RotInfo, SlotCaboose, SpIdentifier,
-    SpIgnitionInfo, SpInfo, SpStateInfo, SpType, SwitchSlot,
+    BaseboardId, BootstrapSled, BootstrapSledState, IgnitionControllerDetect,
+    IgnitionFaults, InventoryParams, LocationInfo, PowerState,
+    RotImageValidity, RotInfo, SlotCaboose, SpIdentifier, SpIgnitionInfo,
+    SpInfo, SpStateInfo, SpType, SwitchSlot,
 };
 use wicketd_commission_types_versions::latest::rack_setup::{
     BgpAuthKey, BgpAuthKeyId, CertificatePem, NewPasswordHash, PrivateKeyPem,
@@ -194,13 +195,17 @@ async fn test_commission_inventory() {
         id_ord_map! {
             BootstrapSled {
                 id: SpIdentifier { typ: SpType::Sled, slot: 0 },
-                baseboard: sim_gimlet_baseboard("SimGimlet00"),
-                ip: None,
+                state: BootstrapSledState::Read {
+                    baseboard: sim_gimlet_baseboard("SimGimlet00"),
+                    ip: None,
+                },
             },
             BootstrapSled {
                 id: SpIdentifier { typ: SpType::Sled, slot: 1 },
-                baseboard: sim_gimlet_baseboard("SimGimlet01"),
-                ip: None,
+                state: BootstrapSledState::Read {
+                    baseboard: sim_gimlet_baseboard("SimGimlet01"),
+                    ip: None,
+                },
             },
         },
     );
@@ -220,12 +225,12 @@ async fn test_commission_inventory() {
             let result: Cond<LocationInfo> =
                 match ctx.commission_client.get_location().await {
                     // get_location returns a 200 once the local switch slot is
-                    // known. But the switch serial is best-effort and remains
+                    // known. But the switch baseboard is best-effort and remains
                     // None until it is available in inventory. Keep retrying
                     // until it is populated.
                     Ok(resp) => {
                         let location = resp.into_inner();
-                        if location.switch_serial.is_some() {
+                        if location.switch_baseboard.is_some() {
                             Ok(location)
                         } else {
                             Err(CondCheckError::NotYet { status: None })
@@ -250,13 +255,20 @@ async fn test_commission_inventory() {
         "cabled to switch slot 0"
     );
     assert_eq!(
-        location.switch_serial.as_deref(),
-        Some("SimSidecar0"),
-        "switch 0 serial reported by sp-sim"
+        location.switch_baseboard,
+        Some(BaseboardId {
+            part_number: "FAKE_SIM_SIDECAR".to_string(),
+            serial_number: "SimSidecar0".to_string(),
+        }),
+        "switch 0 baseboard reported by sp-sim"
     );
     assert_eq!(
-        location.sled_serial, None,
-        "the harness sets no baseboard, so there is no sled serial"
+        location.sled_baseboard, None,
+        "the harness sets no baseboard, so wicketd cannot identify its sled"
+    );
+    assert_eq!(
+        location.sled_id, None,
+        "without a baseboard there is nothing to match against inventory"
     );
 
     ctx.teardown().await;
@@ -442,12 +454,20 @@ async fn test_commission_rss_config() {
         ))
         .await
         .expect("valid password hash accepted");
+    assert!(
+        recovery_password_set(&ctx).await,
+        "the accepted hash is recorded as set",
+    );
 
     // Clear out the user password hash.
     ctx.commission_client
         .delete_rss_config()
         .await
         .expect("delete_rss_config succeeded");
+    assert!(
+        !recovery_password_set(&ctx).await,
+        "deleting the RSS config clears the recovery password too",
+    );
 
     // Wait until both simulated sleds' SPs are available.
     wait_for_sp_inventory(&ctx, |sps| {
@@ -470,7 +490,15 @@ async fn test_commission_rss_config() {
 
     // Ensure that roundtripping the RSS config works.
     let mut internal = ExampleRackSetupData::non_empty().put_insensitive;
-    internal.bootstrap_sleds = [0u16, 1].into_iter().collect();
+    // This is a strict subset of the harness's two sleds. get_rss_config
+    // substitutes the full inventory whenever the stored bootstrap-sleds set
+    // is empty, so {0, 1} would equal that substitute and the assertion below
+    // would hold even if the config had never been stored. A strict subset
+    // cannot be produced by the substitute, so it distinguishes the two.
+    internal.bootstrap_sleds = std::iter::once(0u16).collect();
+    // The example config leaves this false, which is also the default, so flip
+    // it here to make the test meaningful.
+    internal.external_jumbo_frames_opt_in_enabled = true;
 
     ctx.commission_client
         .put_rss_config(&internal)
@@ -600,6 +628,17 @@ async fn test_commission_rss_config() {
     ctx.teardown().await;
 }
 
+// TODO-RAINCLAUDE: read back through the unstable API because the commission API has no config read-back endpoint
+async fn recovery_password_set(ctx: &WicketdTestContext) -> bool {
+    ctx.wicketd_client
+        .get_rss_config()
+        .await
+        .expect("get_rss_config succeeded")
+        .into_inner()
+        .sensitive
+        .recovery_silo_password_set
+}
+
 fn recovery_hash(hash: &str) -> PutRecoveryUserPasswordHash {
     PutRecoveryUserPasswordHash { hash: NewPasswordHash(hash.to_string()) }
 }
@@ -644,8 +683,7 @@ fn sim_ignition_present() -> SpIgnitionInfo {
     SpIgnitionInfo::Present {
         power: true,
         faults: IgnitionFaults { a3: false, a2: false, rot: false, sp: false },
-        ctrl_detect_0: true,
-        ctrl_detect_1: false,
+        ctrl_detect: IgnitionControllerDetect { switch0: true, switch1: false },
     }
 }
 

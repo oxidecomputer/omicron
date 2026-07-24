@@ -4,6 +4,6 @@
 
 //! Functional code for the latest versions of types.
 
-mod inventory;
+pub(crate) mod inventory;
 mod rack_setup;
 mod update;

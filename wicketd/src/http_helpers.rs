@@ -23,6 +23,7 @@ use wicketd_commission_types::update::UpdateTargets;
 
 use crate::ServerContext;
 use crate::helpers::SpIdentifierDisplay;
+use crate::helpers::baseboard_matches_sp_state;
 use crate::helpers::sps_to_string;
 use crate::mgs::GetInventoryResponse;
 use crate::mgs::MgsHandle;
@@ -232,10 +233,7 @@ pub(crate) async fn start_update(
         // refuse to try to update our own sled.
         match &ctx.baseboard {
             Some(baseboard) => {
-                if baseboard.identifier() == sp_state.serial_number
-                    && baseboard.model() == sp_state.model
-                    && baseboard.revision() == sp_state.revision
-                {
+                if baseboard_matches_sp_state(baseboard, sp_state) {
                     self_update = Some(*target);
                     continue;
                 }

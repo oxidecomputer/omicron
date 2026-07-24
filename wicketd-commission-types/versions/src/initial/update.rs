@@ -8,7 +8,7 @@
 
 use std::collections::BTreeSet;
 
-use iddqd::{IdOrdItem, id_upcast};
+use iddqd::{IdOrdItem, IdOrdMap, id_upcast};
 use schemars::JsonSchema;
 use semver::Version;
 use serde::{Deserialize, Serialize};
@@ -152,6 +152,18 @@ pub struct StartUpdateParams {
 pub struct ClearUpdateStateParams {
     /// The service processors to clear update state for.
     pub targets: UpdateTargets,
+}
+
+/// The response to a request for update progress.
+#[derive(
+    Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema,
+)]
+pub struct GetUpdateProgressResponse {
+    /// The service processors that have update state, and their progress.
+    ///
+    /// A service processor appears here only once an update has been started
+    /// for it, and disappears when its update state is cleared.
+    pub sps: IdOrdMap<SpUpdateProgress>,
 }
 
 /// Update progress for a single service processor.

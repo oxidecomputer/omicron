@@ -832,7 +832,7 @@ async fn test_update_races() {
         .await
         .expect("get_update_progress succeeded")
         .into_inner();
-    assert!(progress.is_empty(), "no updates in progress yet");
+    assert!(progress.sps.is_empty(), "no updates in progress yet");
 
     // Now start an update.
     let sp = SpIdentifier { slot: 0, typ: SpType::Sled };
@@ -1012,7 +1012,7 @@ async fn test_update_races() {
         .await
         .expect("get_update_progress succeeded")
         .into_inner();
-    assert!(progress.is_empty(), "update progress cleared for sled 0");
+    assert!(progress.sps.is_empty(), "update progress cleared for sled 0");
 
     let event_buffer = wicketd_testctx
         .wicketd_client

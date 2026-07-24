@@ -7,6 +7,7 @@
 use crate::SmfConfigValues;
 use crate::context::CommonConfigContainer;
 use crate::context::RssOrMultirackJoinConfig;
+use crate::helpers::baseboard_matches_sp_state;
 use crate::http_helpers::ba_lockstep_client;
 use crate::http_helpers::ba_lockstep_error_to_http;
 use crate::http_helpers::mgs_inventory_or_unavail;
@@ -512,10 +513,7 @@ impl WicketdApi for WicketdApiImpl {
             } else if let (Some(sled_baseboard), Some(state)) =
                 (sled_baseboard.as_ref(), sp.state.as_ref())
             {
-                if sled_baseboard.identifier() == state.serial_number
-                    && sled_baseboard.model() == state.model
-                    && sled_baseboard.revision() == state.revision
-                {
+                if baseboard_matches_sp_state(sled_baseboard, state) {
                     sled_id = Some(sp.id);
                 }
             }

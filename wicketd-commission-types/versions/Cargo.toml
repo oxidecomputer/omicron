@@ -20,6 +20,7 @@ serde.workspace = true
 sled-agent-types-versions.workspace = true
 sled-hardware-types.workspace = true
 slog-error-chain.workspace = true
+uuid.workspace = true
 
 [dev-dependencies]
 gateway-types-versions = { workspace = true, features = ["testing"] }

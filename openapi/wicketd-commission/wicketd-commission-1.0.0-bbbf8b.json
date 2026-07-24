@@ -73,7 +73,7 @@
     "/inventory": {
       "post": {
         "summary": "Get inventory of all service processors and transceivers visible to wicketd",
-        "description": "The switch transceiver (optical module) inventory is read independently of MGS.\n\nIf `force_refresh` is non-empty, the request will wait for the listed SPs to report fresh data, or return a 503 if they do not respond within the server-side timeout. A 503 is also returned if wicketd has not completed its initial fetch of the MGS inventory.\n\nReturns 400 if any SP listed in `force_refresh` is unknown.",
+        "description": "The switch transceiver (optical module) inventory is read independently of MGS.\n\nUntil wicketd has retrieved the service-processor list from MGS, this request blocks and then returns a 503. Once it has, requests are served immediately from wicketd's cache, so a 200 does not imply the inventory is populated: `sps` may be empty, or may hold service processors whose `state` is `not_read`, while wicketd's first poll of them is still in flight. Callers should wait until the data their need is present rather than assume that a 200 is a complete picture.\n\nIf `force_refresh` is non-empty, the request instead waits for the listed SPs to report fresh data, and returns a 503 if they do not respond within the server-side timeout. A non-empty `force_refresh` also forces a single rack-wide ignition refresh and waits for that too, so such a request can time out on the ignition fetch rather than on any of the listed SPs.\n\nReturns 400 if any SP listed in `force_refresh` is unknown.",
         "operationId": "get_inventory",
         "requestBody": {
           "content": {
@@ -140,7 +140,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RackOperationStatus"
+                  "$ref": "#/components/schemas/RackSetupStatus"
                 }
               }
             }
@@ -163,7 +163,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RackInitUuid"
+                  "$ref": "#/components/schemas/RunRackSetupResponse"
                 }
               }
             }
@@ -452,22 +452,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "title": "IdOrdMap_of_SpUpdateProgress",
-                  "x-rust-type": {
-                    "crate": "iddqd",
-                    "parameters": [
-                      {
-                        "$ref": "#/components/schemas/SpUpdateProgress"
-                      }
-                    ],
-                    "path": "iddqd::IdOrdMap",
-                    "version": "*"
-                  },
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/SpUpdateProgress"
-                  },
-                  "uniqueItems": true
+                  "$ref": "#/components/schemas/GetUpdateProgressResponse"
                 }
               }
             }
@@ -621,35 +606,103 @@
         ]
       },
       "BootstrapSled": {
-        "description": "A sled as seen on the bootstrap network.\n\nA sled is reported here once its service processor's state has been read from MGS. (A populated cubby whose state has not yet been polled is absent until it is.)\n\nA sled's `ip` becomes `Some` once it has been discovered on the bootstrap network; sleds still missing an address report `None`.",
+        "description": "A sled cubby that rack setup may be able to use.\n\nA cubby is reported here if its state has been read from MGS, if reading it failed, or if ignition says a sled is present in it. An empty cubby (one that ignition reports as absent, with nothing else known about it) is not reported at all.\n\nOnly a sled whose `state` is `read` can be commissioned. The other states exist so that a cubby which *should* be usable but is not can be told apart from an empty one.",
         "type": "object",
         "properties": {
-          "baseboard": {
-            "description": "The sled's baseboard identity, as reported by its service processor.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/BaseboardId"
-              }
-            ]
-          },
           "id": {
-            "description": "The service processor for this sled (its type and slot).",
+            "description": "The service processor for this cubby.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/SpIdentifier"
               }
             ]
           },
-          "ip": {
-            "nullable": true,
-            "description": "The sled's bootstrap-network address, once it has been discovered.",
-            "type": "string",
-            "format": "ipv6"
+          "state": {
+            "description": "What is known about the sled in this cubby.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/BootstrapSledState"
+              }
+            ]
           }
         },
         "required": [
-          "baseboard",
-          "id"
+          "id",
+          "state"
+        ]
+      },
+      "BootstrapSledState": {
+        "description": "What is known about the sled in a cubby.\n\nThe bootstrap-network address lives inside `read` because a sled is matched to its address by baseboard: without a baseboard there is no way to have learned an address, so the two are reported together rather than as independently-optional fields.",
+        "oneOf": [
+          {
+            "description": "Ignition reports a sled in this cubby, but its state has not been read from MGS yet.",
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "not_read"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          {
+            "description": "Reading this sled's state from MGS failed.\n\nA sled in this state cannot be commissioned until it can be read. The error says what went wrong and how recently; the cubby's entry in the SP inventory carries the same detail.",
+            "type": "object",
+            "properties": {
+              "error": {
+                "description": "What went wrong reading the sled's state.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/FetchError"
+                  }
+                ]
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "error"
+                ]
+              }
+            },
+            "required": [
+              "error",
+              "state"
+            ]
+          },
+          {
+            "description": "The sled's state was read from MGS.\n\nThe reading may be stale; the cubby's entry in the SP inventory reports its age and any more recent fetch failure.",
+            "type": "object",
+            "properties": {
+              "baseboard": {
+                "description": "The sled's baseboard identity, as reported by its service processor.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/BaseboardId"
+                  }
+                ]
+              },
+              "ip": {
+                "nullable": true,
+                "description": "The sled's bootstrap-network address, once it has been discovered.\n\n`None` means the sled has not yet been seen on the bootstrap network, or that it reports an identity disagreeing with MGS — in which case it appears in `unmatched_peers` instead.",
+                "type": "string",
+                "format": "ipv6"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "read"
+                ]
+              }
+            },
+            "required": [
+              "baseboard",
+              "state"
+            ]
+          }
         ]
       },
       "Caboose": {
@@ -662,7 +715,7 @@
           },
           "epoch": {
             "nullable": true,
-            "description": "The anti-rollback epoch declared by this image, if it declares one.\n\nThis is the `EPOC` caboose key, carried through as the string the image records; it is `None` for firmware built before the key existed.",
+            "description": "The anti-rollback epoch declared by this image, if it declares one.\n\nThis is the `EPOC` caboose key, carried through as the string the image records; it is `None` for firmware built before the key existed.\n\nAs with `sign`, this key is read separately and a failed read is reported as `None`.",
             "type": "string"
           },
           "git_commit": {
@@ -675,7 +728,7 @@
           },
           "sign": {
             "nullable": true,
-            "description": "The signer of this firmware image, if the image is signed.\n\nFor a root of trust, this is the hex-encoded hash of the public key used to sign the image; it is `None` for firmware that carries no signature (such as service-processor images). Commissioning uses it to match an active RoT slot against the corresponding signed TUF artifact.",
+            "description": "The signer of this firmware image, if the image is signed.\n\nFor a root of trust, this is the hex-encoded hash of the public key used to sign the image; it is `None` for firmware that carries no signature (such as service-processor images). Commissioning uses it to match an active RoT slot against the corresponding signed TUF artifact.\n\nThe `SIGN` caboose key is read separately from the rest of the caboose, and a failed read is reported as `None`. A caller matching artifacts by signature should treat an unexpected `None` as unknown rather than as a definitely-unsigned image.",
             "type": "string"
           },
           "version": {
@@ -1053,7 +1106,7 @@
         "properties": {
           "sleds": {
             "title": "IdOrdMap",
-            "description": "The sleds visible in the MGS inventory.\n\nSee `BootstrapSled` for when a sled appears here and when its `ip` is populated.",
+            "description": "The sled cubbies rack setup may be able to use, keyed by service processor.\n\nThis includes cubbies whose sled could not be read, so it is not a list of commissionable sleds: filter for entries whose `state` is `read`. See `BootstrapSled` for when a cubby appears here at all.",
             "x-rust-type": {
               "crate": "iddqd",
               "parameters": [
@@ -1103,6 +1156,52 @@
           "sleds",
           "unidentified_peers",
           "unmatched_peers"
+        ]
+      },
+      "GetUpdateProgressResponse": {
+        "description": "The response to a request for update progress.",
+        "type": "object",
+        "properties": {
+          "sps": {
+            "title": "IdOrdMap",
+            "description": "The service processors that have update state, and their progress.\n\nA service processor appears here only once an update has been started for it, and disappears when its update state is cleared.",
+            "x-rust-type": {
+              "crate": "iddqd",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/SpUpdateProgress"
+                }
+              ],
+              "path": "iddqd::IdOrdMap",
+              "version": "*"
+            },
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SpUpdateProgress"
+            },
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "sps"
+        ]
+      },
+      "IgnitionControllerDetect": {
+        "description": "Which switches' ignition controllers detect a target.\n\nIgnition is wired to both switches, and each switch's controller reports detection independently. `false` for one switch while the other detects the target indicates a broken ignition path (for example, a bad cable) to that switch. Rust clients can use the `detects` method to select the entry for a `SwitchSlot`, such as the one reported by a query for wicketd's location.",
+        "type": "object",
+        "properties": {
+          "switch0": {
+            "description": "Whether switch 0's ignition controller detects this target.",
+            "type": "boolean"
+          },
+          "switch1": {
+            "description": "Whether switch 1's ignition controller detects this target.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "switch0",
+          "switch1"
         ]
       },
       "IgnitionFaults": {
@@ -1320,6 +1419,36 @@
           "last"
         ]
       },
+      "LaneMonitors": {
+        "description": "The optical power monitors of one lane of a transceiver module.",
+        "type": "object",
+        "properties": {
+          "lane": {
+            "description": "The lane number within the module.",
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
+          },
+          "rx_power": {
+            "nullable": true,
+            "description": "The received optical power on this lane.\n\n`None` means the module does not implement received-power monitoring. Monitoring is a module-wide capability, so this is `None` either on every lane or on none of them.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ReceiverPower"
+              }
+            ]
+          },
+          "tx_power_mw": {
+            "nullable": true,
+            "description": "The transmitted optical power on this lane, in milliwatts.\n\n`None` means the module does not implement transmitted-power monitoring. As with `rx_power`, this is `None` either on every lane or on none of them.",
+            "type": "number",
+            "format": "float"
+          }
+        },
+        "required": [
+          "lane"
+        ]
+      },
       "LinkFec": {
         "description": "The forward error correction mode of a link.",
         "oneOf": [
@@ -1479,15 +1608,32 @@
         "description": "The physical location of the sled wicketd is running on.",
         "type": "object",
         "properties": {
-          "sled_serial": {
+          "sled_baseboard": {
             "nullable": true,
-            "description": "The serial number of the sled wicketd is running on, if known.\n\n`None` means wicketd was started without baseboard information.",
-            "type": "string"
+            "description": "The baseboard of the sled wicketd is running on.\n\n`None` means wicketd was started without baseboard information, or was given a baseboard it could not identify.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/BaseboardId"
+              }
+            ]
           },
-          "switch_serial": {
+          "sled_id": {
             "nullable": true,
-            "description": "The serial number of that switch, as reported by its service processor, if known.\n\n`None` means the switch's state has not been successfully read yet; the switch's entry in the SP inventory carries the details, including any fetch error.",
-            "type": "string"
+            "description": "The service processor of the sled wicketd is running on.\n\nThis is the sled that a request to update it will refuse to act on, so a caller planning updates can exclude it directly rather than matching on serial numbers.\n\n`None` means `sled_baseboard` is absent, or that no sled in the MGS inventory matches it yet.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SpIdentifier"
+              }
+            ]
+          },
+          "switch_baseboard": {
+            "nullable": true,
+            "description": "The baseboard of that switch, as reported by its service processor.\n\n`None` means the switch's state has not been successfully read yet; the switch's entry in the SP inventory carries the details, including any fetch error.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/BaseboardId"
+              }
+            ]
           },
           "switch_slot": {
             "description": "The slot of the switch this sled is cabled to.",
@@ -1710,75 +1856,86 @@
         "type": "string",
         "format": "uuid"
       },
-      "RackOperationStatus": {
-        "description": "The current status of any rack-level operation being performed.",
+      "RackOperation": {
+        "description": "A rack-level operation, in progress or most recently observed.",
+        "type": "object",
+        "properties": {
+          "id": {
+            "description": "The ID of the operation.\n\nThis correlates with the ID returned by the endpoint that started the operation; `kind` disambiguates which endpoint that was.",
+            "type": "string",
+            "format": "uuid"
+          },
+          "kind": {
+            "description": "The kind of operation.",
+            "type": "string"
+          },
+          "state": {
+            "description": "The state of the operation.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RackOperationState"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "state"
+        ]
+      },
+      "RackOperationState": {
+        "description": "The state of a rack-level operation.",
         "oneOf": [
           {
-            "description": "Rack initialization is in progress.",
+            "description": "The operation is in progress.",
             "type": "object",
             "properties": {
-              "id": {
-                "description": "The ID of the initialization operation.",
-                "allOf": [
-                  {
-                    "$ref": "#/components/schemas/RackInitUuid"
-                  }
-                ]
-              },
-              "status": {
-                "type": "string",
-                "enum": [
-                  "initializing"
-                ]
-              },
-              "step": {
-                "description": "Information about the current step.",
+              "current_step": {
+                "nullable": true,
+                "description": "Information about the current step, if a step is being reported.",
                 "allOf": [
                   {
                     "$ref": "#/components/schemas/RssStepInfo"
                   }
                 ]
-              }
-            },
-            "required": [
-              "id",
-              "status",
-              "step"
-            ]
-          },
-          {
-            "description": "The rack is initialized. `id` is `None` if the rack was already initialized on startup.",
-            "type": "object",
-            "properties": {
-              "id": {
-                "nullable": true,
-                "description": "The ID of the initialization operation, if one was performed.",
-                "allOf": [
-                  {
-                    "$ref": "#/components/schemas/RackInitUuid"
-                  }
-                ]
               },
-              "status": {
+              "state": {
                 "type": "string",
                 "enum": [
-                  "initialized"
+                  "in_progress"
                 ]
               }
             },
             "required": [
-              "status"
+              "state"
             ]
           },
           {
-            "description": "Rack initialization failed.",
+            "description": "The operation completed successfully.",
             "type": "object",
             "properties": {
-              "id": {
-                "description": "The ID of the initialization operation.",
+              "state": {
+                "type": "string",
+                "enum": [
+                  "completed"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          {
+            "description": "The operation failed.",
+            "type": "object",
+            "properties": {
+              "failed_step": {
+                "nullable": true,
+                "description": "Information about the step that failed, if known.\n\nThis is currently always absent, but is reserved for future use.",
                 "allOf": [
                   {
-                    "$ref": "#/components/schemas/RackInitUuid"
+                    "$ref": "#/components/schemas/RssStepInfo"
                   }
                 ]
               },
@@ -1786,157 +1943,89 @@
                 "description": "A message describing the failure.",
                 "type": "string"
               },
-              "status": {
+              "state": {
                 "type": "string",
                 "enum": [
-                  "initialization_failed"
+                  "failed"
                 ]
               }
             },
             "required": [
-              "id",
               "message",
-              "status"
+              "state"
             ]
           },
           {
-            "description": "Rack initialization panicked.",
+            "description": "The operation panicked.",
             "type": "object",
             "properties": {
-              "id": {
-                "description": "The ID of the initialization operation.",
-                "allOf": [
-                  {
-                    "$ref": "#/components/schemas/RackInitUuid"
-                  }
-                ]
-              },
-              "status": {
+              "state": {
                 "type": "string",
                 "enum": [
-                  "initialization_panicked"
+                  "panicked"
                 ]
               }
             },
             "required": [
-              "id",
-              "status"
-            ]
-          },
-          {
-            "description": "The rack is being reset.",
-            "type": "object",
-            "properties": {
-              "id": {
-                "description": "The ID of the reset operation.",
-                "allOf": [
-                  {
-                    "$ref": "#/components/schemas/RackResetUuid"
-                  }
-                ]
-              },
-              "status": {
-                "type": "string",
-                "enum": [
-                  "resetting"
-                ]
-              }
-            },
-            "required": [
-              "id",
-              "status"
-            ]
-          },
-          {
-            "description": "The rack is uninitialized. `reset_id` is `None` if it was uninitialized on startup, or `Some` if a reset operation completed.",
-            "type": "object",
-            "properties": {
-              "reset_id": {
-                "nullable": true,
-                "description": "The ID of the reset operation, if one was performed.",
-                "allOf": [
-                  {
-                    "$ref": "#/components/schemas/RackResetUuid"
-                  }
-                ]
-              },
-              "status": {
-                "type": "string",
-                "enum": [
-                  "uninitialized"
-                ]
-              }
-            },
-            "required": [
-              "status"
-            ]
-          },
-          {
-            "description": "Rack reset failed.",
-            "type": "object",
-            "properties": {
-              "id": {
-                "description": "The ID of the reset operation.",
-                "allOf": [
-                  {
-                    "$ref": "#/components/schemas/RackResetUuid"
-                  }
-                ]
-              },
-              "message": {
-                "description": "A message describing the failure.",
-                "type": "string"
-              },
-              "status": {
-                "type": "string",
-                "enum": [
-                  "reset_failed"
-                ]
-              }
-            },
-            "required": [
-              "id",
-              "message",
-              "status"
-            ]
-          },
-          {
-            "description": "Rack reset panicked.",
-            "type": "object",
-            "properties": {
-              "id": {
-                "description": "The ID of the reset operation.",
-                "allOf": [
-                  {
-                    "$ref": "#/components/schemas/RackResetUuid"
-                  }
-                ]
-              },
-              "status": {
-                "type": "string",
-                "enum": [
-                  "reset_panicked"
-                ]
-              }
-            },
-            "required": [
-              "id",
-              "status"
+              "state"
             ]
           }
         ]
       },
-      "RackResetUuid": {
-        "x-rust-type": {
-          "crate": "omicron-uuid-kinds",
-          "path": "omicron_uuid_kinds::RackResetUuid",
-          "version": "*"
+      "RackSetupStatus": {
+        "description": "The current state of rack setup.",
+        "type": "object",
+        "properties": {
+          "operation": {
+            "nullable": true,
+            "description": "The rack-level operation in progress or most recently observed, if any.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RackOperation"
+              }
+            ]
+          },
+          "rack_state": {
+            "description": "The overall state of the rack.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RackState"
+              }
+            ]
+          }
         },
-        "type": "string",
-        "format": "uuid"
+        "required": [
+          "rack_state"
+        ]
+      },
+      "RackState": {
+        "description": "The overall state of the rack.",
+        "oneOf": [
+          {
+            "description": "The rack is initialized: Nexus handoff has completed.",
+            "type": "string",
+            "enum": [
+              "initialized"
+            ]
+          },
+          {
+            "description": "The rack is uninitialized: it has never been set up, or a teardown removed all of it.\n\nThis is a clean starting point for rack setup.",
+            "type": "string",
+            "enum": [
+              "uninitialized"
+            ]
+          },
+          {
+            "description": "The rack is neither initialized nor uninitialized.\n\nSetup or teardown is in progress, or one started and did not complete cleanly. Either way, the rack sits somewhere between the two resting states, and how far it got is not reported here.",
+            "type": "string",
+            "enum": [
+              "other"
+            ]
+          }
+        ]
       },
       "ReceiverPower": {
-        "description": "A received optical power measurement from one lane.\n\nModules report received power in one of two ways, and the two are not directly comparable, so the kind of measurement is carried alongside the value rather than being flattened away.",
+        "description": "A received optical power measurement from one lane.\n\nModules report received power in one of two ways, and the two are not directly comparable, so the kind of measurement is carried alongside the value rather than being flattened away. See `peak_to_peak` for a caveat that applies to modules using the older management interface.",
         "oneOf": [
           {
             "description": "An average optical power measurement, in milliwatts.",
@@ -1960,7 +2049,7 @@
             ]
           },
           {
-            "description": "A peak-to-peak optical power measurement, in milliwatts.",
+            "description": "A peak-to-peak optical power measurement, in milliwatts.\n\nA module using the older SFF-8636 management interface reports a single bit that distinguishes an average measurement from everything else, so on such a module this may instead be a read of a received-power register the module never populates. Treat a peak-to-peak reading from an SFF-8636 module as unverified rather than as a measured value; a module's management interface is visible in the `kind` of its `datapath`. CMIS modules report an unimplemented received-power monitor separately, so on those this is a real measurement.",
             "type": "object",
             "properties": {
               "kind": {
@@ -2301,30 +2390,47 @@
         "maximum": 9000
       },
       "RssStepInfo": {
-        "description": "Information about the current RSS step.",
+        "description": "Information about a step of a rack-level operation.",
         "type": "object",
         "properties": {
           "description": {
-            "description": "A human-readable description of the current step.",
+            "description": "A human-readable description of the step.\n\nThis is free-form display text; it is not stable or parseable.",
             "type": "string"
           },
           "step": {
-            "description": "The 1-based index of the current step.",
+            "description": "The 1-based index of the step.\n\nThe invariant `step <= total_steps` always holds.",
             "type": "integer",
             "format": "uint32",
-            "minimum": 0
+            "minimum": 1
           },
           "total_steps": {
-            "description": "The total number of RSS steps.",
+            "description": "The total number of steps.",
             "type": "integer",
             "format": "uint32",
-            "minimum": 0
+            "minimum": 1
           }
         },
         "required": [
           "description",
           "step",
           "total_steps"
+        ]
+      },
+      "RunRackSetupResponse": {
+        "description": "The response to a request to run rack setup.",
+        "type": "object",
+        "properties": {
+          "id": {
+            "description": "The ID of the rack initialization that was started.\n\nA query for the state of rack setup reports this same ID, in untyped form, as `RackOperation::id` with `kind` set to `initialize`.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RackInitUuid"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id"
         ]
       },
       "RunningProgress": {
@@ -2536,13 +2642,13 @@
             "description": "Ignition reports the service processor as present.",
             "type": "object",
             "properties": {
-              "ctrl_detect_0": {
-                "description": "Whether ignition controller 0 detects this target.\n\nIgnition is wired to both switches, and each switch's controller reports detection independently. `false` on one controller while the other detects the target indicates a broken ignition path (for example, a bad cable) to that controller's switch.",
-                "type": "boolean"
-              },
-              "ctrl_detect_1": {
-                "description": "Whether ignition controller 1 detects this target.\n\nSee `ctrl_detect_0`.",
-                "type": "boolean"
+              "ctrl_detect": {
+                "description": "Which ignition controllers detect this target.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/IgnitionControllerDetect"
+                  }
+                ]
               },
               "faults": {
                 "description": "The faults ignition reports for the service processor.",
@@ -2564,8 +2670,7 @@
               }
             },
             "required": [
-              "ctrl_detect_0",
-              "ctrl_detect_1",
+              "ctrl_detect",
               "faults",
               "power",
               "state"
@@ -3235,34 +3340,52 @@
             ]
           },
           {
+            "description": "The module does not implement optical power monitoring.\n\nThis is the module's own report of its capabilities: for example, a passive copper cable has no optical power to measure. It is distinct from a successful read of zero lanes, so that \"this port cannot report optical power levels\" is not mistaken for \"this port reported no optical power\".",
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "unsupported"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          {
             "description": "The monitoring data was read.",
             "type": "object",
             "properties": {
-              "rx_power": {
-                "nullable": true,
-                "description": "Per-lane received optical power.\n\n`None` if the module does not report received power.",
+              "lanes": {
+                "title": "IdOrdMap",
+                "description": "The optical power monitors of each lane, keyed by lane number.\n\nA module implements received and transmitted power monitoring independently, so a lane carries whichever of the two it has, or both. A module that implements neither is reported as the `unsupported` variant.",
+                "x-rust-type": {
+                  "crate": "iddqd",
+                  "parameters": [
+                    {
+                      "$ref": "#/components/schemas/LaneMonitors"
+                    }
+                  ],
+                  "path": "iddqd::IdOrdMap",
+                  "version": "*"
+                },
                 "type": "array",
                 "items": {
-                  "$ref": "#/components/schemas/ReceiverPower"
-                }
+                  "$ref": "#/components/schemas/LaneMonitors"
+                },
+                "uniqueItems": true
               },
               "state": {
                 "type": "string",
                 "enum": [
                   "read"
                 ]
-              },
-              "tx_power_mw": {
-                "nullable": true,
-                "description": "Per-lane transmitted optical power, in milliwatts.\n\n`None` if the module does not report transmitted power.",
-                "type": "array",
-                "items": {
-                  "type": "number",
-                  "format": "float"
-                }
               }
             },
             "required": [
+              "lanes",
               "state"
             ]
           }
@@ -3370,16 +3493,40 @@
             "description": "The module status was read.",
             "type": "object",
             "properties": {
+              "disabled_by_sp": {
+                "description": "The service processor disabled this port.\n\nThe service processor does this on its own initiative, for example when a module that had initialized starts refusing I2C reads.",
+                "type": "boolean"
+              },
               "enabled": {
-                "description": "Whether the module is enabled (powered on).",
+                "description": "Whether the sidecar is supplying power to this port.",
+                "type": "boolean"
+              },
+              "fault_power_lost": {
+                "description": "The power supply came up and was then unexpectedly lost.",
+                "type": "boolean"
+              },
+              "fault_power_timeout": {
+                "description": "The power supply was enabled but did not come up.",
+                "type": "boolean"
+              },
+              "in_reset": {
+                "description": "Whether the module is held in reset.",
+                "type": "boolean"
+              },
+              "interrupt": {
+                "description": "Whether the module is asserting its interrupt line.\n\nThe module signals that something in its memory map warrants attention. This reports only that the line is asserted; the cause is not read.",
+                "type": "boolean"
+              },
+              "low_power_mode": {
+                "description": "Whether the module is held in low-power mode.\n\nThis is the control pin the service processor drives. It is not the same reading as the module's own reported power mode, which is carried separately; the two can disagree.",
                 "type": "boolean"
               },
               "power_good": {
-                "description": "Whether the module's power is good.",
+                "description": "Whether that power supply came up successfully.\n\n`enabled` without `power_good` means something went wrong, and `fault_power_timeout`, `fault_power_lost`, and `disabled_by_sp` say what. If none of those is set, power is enabled and has not come up for a reason the port does not report.",
                 "type": "boolean"
               },
               "present": {
-                "description": "Whether a transceiver module is present in the port.",
+                "description": "Whether a transceiver module is physically seated in the port.",
                 "type": "boolean"
               },
               "state": {
@@ -3390,7 +3537,13 @@
               }
             },
             "required": [
+              "disabled_by_sp",
               "enabled",
+              "fault_power_lost",
+              "fault_power_timeout",
+              "in_reset",
+              "interrupt",
+              "low_power_mode",
               "power_good",
               "present",
               "state"

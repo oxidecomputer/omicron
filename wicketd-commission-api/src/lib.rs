@@ -11,8 +11,6 @@ use dropshot::{
     RequestContext, StreamingBody, TypedBody,
 };
 use dropshot_api_manager_types::api_versions;
-use iddqd::IdOrdMap;
-use omicron_uuid_kinds::RackInitUuid;
 use wicketd_commission_types_versions::latest;
 
 // NOTE: The commission API is server-side versioned, but changing it requires
@@ -59,10 +57,20 @@ pub trait WicketdCommissionApi {
     /// The switch transceiver (optical module) inventory is read independently
     /// of MGS.
     ///
-    /// If `force_refresh` is non-empty, the request will wait for the listed SPs
-    /// to report fresh data, or return a 503 if they do not respond within the
-    /// server-side timeout. A 503 is also returned if wicketd has not completed
-    /// its initial fetch of the MGS inventory.
+    /// Until wicketd has retrieved the service-processor list from MGS, this
+    /// request blocks and then returns a 503. Once it has, requests are served
+    /// immediately from wicketd's cache, so a 200 does not imply the inventory
+    /// is populated: `sps` may be empty, or may hold service processors whose
+    /// `state` is `not_read`, while wicketd's first poll of them is still in
+    /// flight. Callers should wait until the data their need is present rather
+    /// than assume that a 200 is a complete picture.
+    ///
+    /// If `force_refresh` is non-empty, the request instead waits for the
+    /// listed SPs to report fresh data, and returns a 503 if they do not
+    /// respond within the server-side timeout. A non-empty `force_refresh`
+    /// also forces a single rack-wide ignition refresh and waits for that too,
+    /// so such a request can time out on the ignition fetch rather than on any
+    /// of the listed SPs.
     ///
     /// Returns 400 if any SP listed in `force_refresh` is unknown.
     #[endpoint {
@@ -137,7 +145,7 @@ pub trait WicketdCommissionApi {
     async fn get_update_progress(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<
-        HttpResponseOk<IdOrdMap<latest::update::SpUpdateProgress>>,
+        HttpResponseOk<latest::update::GetUpdateProgressResponse>,
         HttpError,
     >;
 
@@ -180,10 +188,7 @@ pub trait WicketdCommissionApi {
     }]
     async fn get_rack_setup_state(
         rqctx: RequestContext<Self::Context>,
-    ) -> Result<
-        HttpResponseOk<latest::rack_setup::RackOperationStatus>,
-        HttpError,
-    >;
+    ) -> Result<HttpResponseOk<latest::rack_setup::RackSetupStatus>, HttpError>;
 
     /// Update (a subset of) the current RSS configuration
     ///
@@ -291,5 +296,8 @@ pub trait WicketdCommissionApi {
     }]
     async fn post_run_rack_setup(
         rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<RackInitUuid>, HttpError>;
+    ) -> Result<
+        HttpResponseOk<latest::rack_setup::RunRackSetupResponse>,
+        HttpError,
+    >;
 }

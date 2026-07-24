@@ -17705,6 +17705,7 @@ dependencies = [
  "slog-error-chain",
  "test-strategy",
  "toml 0.8.23",
+ "uuid",
 ]
 
 [[package]]

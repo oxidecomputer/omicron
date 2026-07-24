@@ -6,16 +6,19 @@
 //!
 //! The root struct is [`PutRssUserConfigInsensitive`].
 
+use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::net::{IpAddr, Ipv6Addr};
+use std::num::NonZeroU32;
 
 use omicron_common::api::external::Name;
-use omicron_uuid_kinds::{RackInitUuid, RackResetUuid};
+use omicron_uuid_kinds::RackInitUuid;
 use oxnet::IpNet;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize, Serializer};
 use slog_error_chain::InlineErrorChain;
+use uuid::Uuid;
 
 // Re-exports of pinned types from sled-agent-types-versions.
 pub use sled_agent_types_versions::v1::early_networking::{
@@ -666,67 +669,115 @@ pub struct PutRecoveryUserPasswordHash {
     pub hash: NewPasswordHash,
 }
 
-/// Information about the current RSS step.
+/// The response to a request to run rack setup.
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-pub struct RssStepInfo {
-    /// The 1-based index of the current step.
-    pub step: u32,
-    /// The total number of RSS steps.
-    pub total_steps: u32,
-    /// A human-readable description of the current step.
-    pub description: String,
+pub struct RunRackSetupResponse {
+    /// The ID of the rack initialization that was started.
+    ///
+    /// A query for the state of rack setup reports this same ID, in untyped
+    /// form, as `RackOperation::id` with `kind` set to `initialize`.
+    pub id: RackInitUuid,
 }
 
-/// The current status of any rack-level operation being performed.
+/// The current state of rack setup.
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-#[serde(tag = "status", rename_all = "snake_case")]
-pub enum RackOperationStatus {
-    /// Rack initialization is in progress.
-    Initializing {
-        /// The ID of the initialization operation.
-        id: RackInitUuid,
-        /// Information about the current step.
-        step: RssStepInfo,
+pub struct RackSetupStatus {
+    /// The overall state of the rack.
+    pub rack_state: RackState,
+    /// The rack-level operation in progress or most recently observed, if any.
+    pub operation: Option<RackOperation>,
+}
+
+/// The overall state of the rack.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum RackState {
+    /// The rack is initialized: Nexus handoff has completed.
+    Initialized,
+    /// The rack is uninitialized: it has never been set up, or a teardown
+    /// removed all of it.
+    ///
+    /// This is a clean starting point for rack setup.
+    Uninitialized,
+    /// The rack is neither initialized nor uninitialized.
+    ///
+    /// Setup or teardown is in progress, or one started and did not complete
+    /// cleanly. Either way, the rack sits somewhere between the two resting
+    /// states, and how far it got is not reported here.
+    Other,
+}
+
+/// A rack-level operation, in progress or most recently observed.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+pub struct RackOperation {
+    /// The kind of operation.
+    pub kind: RackOperationKind,
+    /// The ID of the operation.
+    ///
+    /// This correlates with the ID returned by the endpoint that started the
+    /// operation; `kind` disambiguates which endpoint that was.
+    pub id: Uuid,
+    /// The state of the operation.
+    pub state: RackOperationState,
+}
+
+/// The kind of a rack-level operation.
+///
+/// This is an open set, represented on the wire as a plain string so that new
+/// operation kinds can be added without a breaking change to this API. A client
+/// must handle unknown values generically.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(transparent)]
+pub struct RackOperationKind(Cow<'static, str>);
+
+impl RackOperationKind {
+    /// The well-known kind for a rack initialization operation.
+    pub const INITIALIZE: Self = Self(Cow::Borrowed("initialize"));
+
+    /// The well-known kind for a rack reset operation.
+    pub const RESET: Self = Self(Cow::Borrowed("reset"));
+
+    /// Returns the operation kind as a string.
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+/// The state of a rack-level operation.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum RackOperationState {
+    /// The operation is in progress.
+    InProgress {
+        /// Information about the current step, if a step is being reported.
+        current_step: Option<RssStepInfo>,
     },
-    /// The rack is initialized. `id` is `None` if the rack was already
-    /// initialized on startup.
-    Initialized {
-        /// The ID of the initialization operation, if one was performed.
-        id: Option<RackInitUuid>,
-    },
-    /// Rack initialization failed.
-    InitializationFailed {
-        /// The ID of the initialization operation.
-        id: RackInitUuid,
+    /// The operation completed successfully.
+    Completed,
+    /// The operation failed.
+    Failed {
         /// A message describing the failure.
         message: String,
+        /// Information about the step that failed, if known.
+        ///
+        /// This is currently always absent, but is reserved for future use.
+        failed_step: Option<RssStepInfo>,
     },
-    /// Rack initialization panicked.
-    InitializationPanicked {
-        /// The ID of the initialization operation.
-        id: RackInitUuid,
-    },
-    /// The rack is being reset.
-    Resetting {
-        /// The ID of the reset operation.
-        id: RackResetUuid,
-    },
-    /// The rack is uninitialized. `reset_id` is `None` if it was uninitialized
-    /// on startup, or `Some` if a reset operation completed.
-    Uninitialized {
-        /// The ID of the reset operation, if one was performed.
-        reset_id: Option<RackResetUuid>,
-    },
-    /// Rack reset failed.
-    ResetFailed {
-        /// The ID of the reset operation.
-        id: RackResetUuid,
-        /// A message describing the failure.
-        message: String,
-    },
-    /// Rack reset panicked.
-    ResetPanicked {
-        /// The ID of the reset operation.
-        id: RackResetUuid,
-    },
+    /// The operation panicked.
+    Panicked,
+}
+
+/// Information about a step of a rack-level operation.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+pub struct RssStepInfo {
+    /// The 1-based index of the step.
+    ///
+    /// The invariant `step <= total_steps` always holds.
+    pub step: NonZeroU32,
+    /// The total number of steps.
+    pub total_steps: NonZeroU32,
+    /// A human-readable description of the step.
+    ///
+    /// This is free-form display text; it is not stable or parseable.
+    pub description: String,
 }

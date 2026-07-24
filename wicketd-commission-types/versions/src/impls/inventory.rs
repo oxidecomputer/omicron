@@ -2,10 +2,64 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use std::net::Ipv6Addr;
+
 use crate::v1::inventory::{
-    CmisLaneStatus, FaultFlag, RotInfo, Sff8636LaneFaults, SlotCaboose,
-    SpStateInfo, Stage0Caboose, TransceiverDatapath,
+    BaseboardId, BootstrapSledState, CmisLaneStatus, FaultFlag,
+    GetBootstrapSledsResponse, IgnitionControllerDetect, RotInfo,
+    Sff8636LaneFaults, SlotCaboose, SpIdentifier, SpStateInfo, Stage0Caboose,
+    SwitchSlot, TransceiverDatapath,
 };
+
+impl BootstrapSledState {
+    /// Returns true if this sled's state was read from MGS.
+    pub fn is_read(&self) -> bool {
+        match self {
+            BootstrapSledState::Read { .. } => true,
+            BootstrapSledState::NotRead | BootstrapSledState::Error { .. } => {
+                false
+            }
+        }
+    }
+}
+
+/// A cubby from a bootstrap-sleds response whose sled was successfully read.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ReadableBootstrapSled<'a> {
+    /// The service processor for this cubby.
+    pub id: SpIdentifier,
+    /// The sled's baseboard identity.
+    pub baseboard: &'a BaseboardId,
+    /// The sled's bootstrap-network address, once it has been discovered.
+    pub ip: Option<Ipv6Addr>,
+}
+
+impl GetBootstrapSledsResponse {
+    /// Iterates over just the cubbies whose sled was successfully read.
+    ///
+    /// These are the sleds that can be commissioned. Cubbies whose sled could
+    /// not be read are skipped, so a caller that only wants usable sleds does
+    /// not have to remember that `sleds` also carries unreadable ones.
+    pub fn readable(&self) -> impl Iterator<Item = ReadableBootstrapSled<'_>> {
+        self.sleds.iter().filter_map(|sled| match &sled.state {
+            BootstrapSledState::Read { baseboard, ip } => {
+                Some(ReadableBootstrapSled { id: sled.id, baseboard, ip: *ip })
+            }
+            BootstrapSledState::NotRead | BootstrapSledState::Error { .. } => {
+                None
+            }
+        })
+    }
+}
+
+impl IgnitionControllerDetect {
+    pub fn detects(&self, switch: SwitchSlot) -> bool {
+        match switch {
+            SwitchSlot::Switch0 => self.switch0,
+            SwitchSlot::Switch1 => self.switch1,
+        }
+    }
+}
 
 impl SpStateInfo {
     /// Returns true if the service processor's state was read.
@@ -64,6 +118,14 @@ impl FaultFlag {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct LaneFaultsView {
+    /// The CMIS application selector code this lane belongs to.
+    ///
+    /// `None` for an SFF-8636 module, which has no notion of applications.
+    /// CMIS lane numbers are unique only within a datapath, so this is needed
+    /// alongside `lane` to identify a lane on such a module.
+    pub application: Option<u8>,
+    /// The lane number within its datapath.
+    pub lane: u8,
     pub rx_los: FaultFlag,
     pub tx_los: FaultFlag,
     pub rx_lol: FaultFlag,
@@ -72,10 +134,12 @@ pub struct LaneFaultsView {
 }
 
 impl LaneFaultsView {
-    fn from_sff8636(lane: &Sff8636LaneFaults) -> Self {
+    fn from_sff8636(index: u8, lane: &Sff8636LaneFaults) -> Self {
         let Sff8636LaneFaults { rx_los, tx_los, rx_lol, tx_lol, tx_fault } =
             lane;
         LaneFaultsView {
+            application: None,
+            lane: index,
             rx_los: FaultFlag::from_sff(*rx_los),
             tx_los: FaultFlag::from_sff(*tx_los),
             rx_lol: FaultFlag::from_sff(*rx_lol),
@@ -84,17 +148,19 @@ impl LaneFaultsView {
         }
     }
 
-    fn from_cmis(lane: &CmisLaneStatus) -> Self {
+    fn from_cmis(application: u8, status: &CmisLaneStatus) -> Self {
         let CmisLaneStatus {
             rx_los,
             tx_los,
             rx_lol,
             tx_lol,
             tx_fault,
-            lane: _,
+            lane,
             state: _,
-        } = lane;
+        } = status;
         LaneFaultsView {
+            application: Some(application),
+            lane: *lane,
             rx_los: *rx_los,
             tx_los: *tx_los,
             rx_lol: *rx_lol,
@@ -117,13 +183,19 @@ impl TransceiverDatapath {
             TransceiverDatapath::Error { message } => {
                 return Err(message.as_str());
             }
-            TransceiverDatapath::Sff8636 { lanes } => {
-                lanes.iter().map(LaneFaultsView::from_sff8636).collect()
-            }
+            // TODO-RAINCLAUDE: SFF-8636 has no lane ids, so the array index is the lane number; zipping a u8 range keeps that a conversion-free fact
+            TransceiverDatapath::Sff8636 { lanes } => lanes
+                .iter()
+                .zip(0u8..)
+                .map(|(lane, index)| LaneFaultsView::from_sff8636(index, lane))
+                .collect(),
             TransceiverDatapath::Cmis { datapaths } => datapaths
                 .iter()
-                .flat_map(|datapath| datapath.lanes.iter())
-                .map(LaneFaultsView::from_cmis)
+                .flat_map(|datapath| {
+                    datapath.lanes.iter().map(|status| {
+                        LaneFaultsView::from_cmis(datapath.application, status)
+                    })
+                })
                 .collect(),
         };
         Ok(views.into_iter())
@@ -187,6 +259,11 @@ mod tests {
         let views: Vec<_> =
             datapath.iter_lane_faults().expect("datapath was read").collect();
         assert_eq!(views.len(), 4);
+        // SFF-8636 lanes are identified by position and their application is
+        // always None.
+        let ids: Vec<_> =
+            views.iter().map(|v| (v.application, v.lane)).collect();
+        assert_eq!(ids, vec![(None, 0), (None, 1), (None, 2), (None, 3)]);
         assert_eq!(views[0].rx_los, FaultFlag::Asserted);
         assert_eq!(views[0].tx_los, FaultFlag::Clear);
         assert_eq!(views[1].tx_fault, FaultFlag::Asserted);
@@ -221,11 +298,20 @@ mod tests {
         let views: Vec<_> =
             datapath.iter_lane_faults().expect("datapath was read").collect();
         assert_eq!(views.len(), 3);
+        // Note that two of these lanes are both numbered 0, so the application
+        // is part of the unique identifier.
+        let rx_los: Vec<_> =
+            views.iter().map(|v| (v.application, v.lane, v.rx_los)).collect();
+        assert_eq!(
+            rx_los,
+            vec![
+                (Some(1), 0, FaultFlag::Asserted),
+                (Some(1), 1, FaultFlag::Clear),
+                (Some(2), 0, FaultFlag::Unsupported),
+            ],
+            "each flag stays attached to the lane it came from",
+        );
         assert!(views.iter().all(|v| v.rx_lol == FaultFlag::Unsupported));
         assert!(views.iter().all(|v| v.tx_fault == FaultFlag::Asserted));
-        let rx_los: Vec<_> = views.iter().map(|v| v.rx_los).collect();
-        assert!(rx_los.contains(&FaultFlag::Asserted));
-        assert!(rx_los.contains(&FaultFlag::Clear));
-        assert!(rx_los.contains(&FaultFlag::Unsupported));
     }
 }

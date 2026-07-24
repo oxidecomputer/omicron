@@ -7,6 +7,7 @@
 pub mod inventory {
     pub use crate::v1::inventory::BaseboardId;
     pub use crate::v1::inventory::BootstrapSled;
+    pub use crate::v1::inventory::BootstrapSledState;
     pub use crate::v1::inventory::Caboose;
     pub use crate::v1::inventory::CmisDatapath;
     pub use crate::v1::inventory::CmisDatapathState;
@@ -14,9 +15,11 @@ pub mod inventory {
     pub use crate::v1::inventory::FaultFlag;
     pub use crate::v1::inventory::FetchError;
     pub use crate::v1::inventory::GetBootstrapSledsResponse;
+    pub use crate::v1::inventory::IgnitionControllerDetect;
     pub use crate::v1::inventory::IgnitionFaults;
     pub use crate::v1::inventory::Inventory;
     pub use crate::v1::inventory::InventoryParams;
+    pub use crate::v1::inventory::LaneMonitors;
     pub use crate::v1::inventory::LocationInfo;
     pub use crate::v1::inventory::PowerState;
     pub use crate::v1::inventory::ReceiverPower;
@@ -44,6 +47,9 @@ pub mod inventory {
     pub use crate::v1::inventory::TransceiverStatus;
     pub use crate::v1::inventory::TransceiverVendor;
     pub use crate::v1::inventory::UnmatchedBootstrapPeer;
+
+    pub use crate::impls::inventory::LaneFaultsView;
+    pub use crate::impls::inventory::ReadableBootstrapSled;
 }
 
 pub mod rack_setup {
@@ -68,11 +74,16 @@ pub mod rack_setup {
     pub use crate::v1::rack_setup::PrivateKeyPem;
     pub use crate::v1::rack_setup::PutRecoveryUserPasswordHash;
     pub use crate::v1::rack_setup::PutRssUserConfigInsensitive;
-    pub use crate::v1::rack_setup::RackOperationStatus;
+    pub use crate::v1::rack_setup::RackOperation;
+    pub use crate::v1::rack_setup::RackOperationKind;
+    pub use crate::v1::rack_setup::RackOperationState;
+    pub use crate::v1::rack_setup::RackSetupStatus;
+    pub use crate::v1::rack_setup::RackState;
     pub use crate::v1::rack_setup::RouteConfig;
     pub use crate::v1::rack_setup::RouterLifetimeConfig;
     pub use crate::v1::rack_setup::RouterPeerIpAddr;
     pub use crate::v1::rack_setup::RssStepInfo;
+    pub use crate::v1::rack_setup::RunRackSetupResponse;
     pub use crate::v1::rack_setup::SetBgpAuthKeyStatus;
     pub use crate::v1::rack_setup::TxEqConfig;
     pub use crate::v1::rack_setup::UplinkAddress;
@@ -89,6 +100,7 @@ pub mod update {
     pub use crate::v1::update::ClearUpdateStateParams;
     pub use crate::v1::update::ClearUpdateStateResponse;
     pub use crate::v1::update::EmptyUpdateTargets;
+    pub use crate::v1::update::GetUpdateProgressResponse;
     pub use crate::v1::update::RepositoryDescription;
     pub use crate::v1::update::RunningProgress;
     pub use crate::v1::update::SpUpdateProgress;

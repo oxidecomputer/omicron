@@ -6,10 +6,12 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::Ipv6Addr;
+use std::num::NonZeroU32;
 
 use bootstrap_agent_lockstep_types as bootstrap;
 use gateway_types::rot::RotImageError;
 use iddqd::IdOrdMap;
+use omicron_uuid_kinds::GenericUuid;
 use sled_hardware_types::{Baseboard, UnknownBaseboardError};
 use transceiver_controller::message::ExtendedStatus;
 use transceiver_controller::{
@@ -21,7 +23,8 @@ use wicket_common::inventory::{
 };
 use wicketd_commission_types::inventory as ct_inv;
 use wicketd_commission_types::rack_setup::{
-    NewPasswordHash, RackOperationStatus, RssStepInfo,
+    NewPasswordHash, RackOperation, RackOperationKind, RackOperationState,
+    RackSetupStatus, RackState, RssStepInfo,
 };
 use wicketd_commission_types::update::StartUpdateOptions;
 
@@ -159,8 +162,10 @@ fn ignition_to_ct(ignition: Option<SpIgnition>) -> ct_inv::SpIgnitionInfo {
                 rot: flt_rot,
                 sp: flt_sp,
             },
-            ctrl_detect_0,
-            ctrl_detect_1,
+            ctrl_detect: ct_inv::IgnitionControllerDetect {
+                switch0: ctrl_detect_0,
+                switch1: ctrl_detect_1,
+            },
         },
     }
 }
@@ -263,13 +268,8 @@ pub(crate) fn bootstrap_sleds_to_ct(
             if record.id.typ != SpType::Sled {
                 return None;
             }
-            let state = &record.data.as_ref()?.state;
-            let baseboard = ct_inv::BaseboardId {
-                part_number: state.model.clone(),
-                serial_number: state.serial_number.clone(),
-            };
-            let ip = peers.remove(&baseboard);
-            Some(ct_inv::BootstrapSled { id: record.id, baseboard, ip })
+            let state = bootstrap_sled_state_to_ct(record, &mut peers)?;
+            Some(ct_inv::BootstrapSled { id: record.id, state })
         },
     ))
     .expect(
@@ -290,6 +290,37 @@ pub(crate) fn bootstrap_sleds_to_ct(
         sleds,
         unmatched_peers,
         unidentified_peers,
+    }
+}
+
+fn bootstrap_sled_state_to_ct(
+    record: &SpRecord,
+    peers: &mut BTreeMap<ct_inv::BaseboardId, Ipv6Addr>,
+) -> Option<ct_inv::BootstrapSledState> {
+    // A stale-but-real data read is helpful, so a record with data is projected
+    // to Read even if the latest fetch failed.
+    // (`SpStateInfo::Read::refresh_error` reports that failure.)
+    if let Some(data) = &record.data {
+        let baseboard = ct_inv::BaseboardId {
+            part_number: data.state.model.clone(),
+            serial_number: data.state.serial_number.clone(),
+        };
+        let ip = peers.remove(&baseboard);
+        return Some(ct_inv::BootstrapSledState::Read { baseboard, ip });
+    }
+
+    if let Some(error) = &record.last_state_fetch_error {
+        return Some(ct_inv::BootstrapSledState::Error {
+            error: fetch_error_to_ct(error),
+        });
+    }
+
+    // We don't have any baseboard information, so ignition is all we have.
+    match &record.ignition {
+        Some(SpIgnition::Present { .. }) => {
+            Some(ct_inv::BootstrapSledState::NotRead)
+        }
+        Some(SpIgnition::Absent) | None => None,
     }
 }
 
@@ -314,17 +345,53 @@ fn switch_transceivers_to_ct(
     read: SwitchTransceivers,
 ) -> ct_inv::SwitchTransceivers {
     let SwitchTransceivers { switch, transceivers, updated_at } = read;
-    let transceivers = IdOrdMap::from_iter_unique(
-        transceivers.into_iter().map(transceiver_to_ct),
-    )
-    .expect(
-        "a switch reports at most one transceiver per front port, so the \
-         projected Transceivers have unique port keys",
-    );
+    let transceivers = transceivers_by_port(transceivers);
     ct_inv::SwitchTransceivers {
         switch,
         last_seen: updated_at.elapsed(),
         transceivers,
+    }
+}
+
+fn transceivers_by_port(
+    transceivers: Vec<Transceiver>,
+) -> IdOrdMap<ct_inv::Transceiver> {
+    // The incoming data is a Vec as opposed to an IdOrdMap or similar, so port
+    // uniqueness is not enforced by the type. Report the duplicate port instead
+    // of dropping one of the readings or panicking.
+    let mut by_port: IdOrdMap<ct_inv::Transceiver> = IdOrdMap::new();
+    for transceiver in transceivers {
+        let projected = transceiver_to_ct(transceiver);
+        let entry = if by_port.contains_key(projected.port.as_str()) {
+            duplicate_port_to_ct(projected.port)
+        } else {
+            projected
+        };
+        by_port.insert_overwrite(entry);
+    }
+    by_port
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+#[error(
+    "the switch reported front port {port} more than once, so its readings \
+     cannot be attributed to a single transceiver"
+)]
+struct DuplicateFrontPort {
+    port: String,
+}
+
+fn duplicate_port_to_ct(port: String) -> ct_inv::Transceiver {
+    let message = DuplicateFrontPort { port: port.clone() }.to_string();
+    ct_inv::Transceiver {
+        port,
+        status: ct_inv::TransceiverStatus::Error { message: message.clone() },
+        power: ct_inv::TransceiverPower::Error { message: message.clone() },
+        vendor: ct_inv::TransceiverVendor::Error { message: message.clone() },
+        monitors: ct_inv::TransceiverMonitors::Error {
+            message: message.clone(),
+        },
+        datapath: ct_inv::TransceiverDatapath::Error { message },
     }
 }
 
@@ -370,6 +437,13 @@ fn transceiver_status_to_ct(
             present: status.contains(ExtendedStatus::PRESENT),
             enabled: status.contains(ExtendedStatus::ENABLED),
             power_good: status.contains(ExtendedStatus::POWER_GOOD),
+            fault_power_timeout: status
+                .contains(ExtendedStatus::FAULT_POWER_TIMEOUT),
+            fault_power_lost: status.contains(ExtendedStatus::FAULT_POWER_LOST),
+            disabled_by_sp: status.contains(ExtendedStatus::DISABLED_BY_SP),
+            in_reset: status.contains(ExtendedStatus::RESET),
+            low_power_mode: status.contains(ExtendedStatus::LOW_POWER_MODE),
+            interrupt: status.contains(ExtendedStatus::INTERRUPT),
         },
     }
 }
@@ -409,13 +483,91 @@ fn transceiver_monitors_to_ct(
             supply_voltage: _,
             transmitter_bias_current: _,
             aux_monitors: _,
-        }) => ct_inv::TransceiverMonitors::Read {
-            rx_power: receiver_power.map(|powers| {
-                powers.into_iter().map(receiver_power_to_ct).collect()
-            }),
-            tx_power_mw: transmitter_power,
+        }) => match ReportedPower::new(receiver_power, transmitter_power) {
+            // If both rx and tx are missing, it's probably something like a
+            // passive copper cable. Mark the monitors as unsupported.
+            None => ct_inv::TransceiverMonitors::Unsupported,
+            Some(power) => match lane_monitors_to_ct(power) {
+                Ok(lanes) => ct_inv::TransceiverMonitors::Read { lanes },
+                Err(err) => ct_inv::TransceiverMonitors::Error {
+                    message: err.to_string(),
+                },
+            },
         },
     }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+enum ReportedPower {
+    Rx(Vec<ReceiverPower>),
+    Tx(Vec<f32>),
+    Both { rx: Vec<ReceiverPower>, tx: Vec<f32> },
+}
+
+impl ReportedPower {
+    fn new(
+        receiver_power: Option<Vec<ReceiverPower>>,
+        transmitter_power: Option<Vec<f32>>,
+    ) -> Option<Self> {
+        match (receiver_power, transmitter_power) {
+            (Some(rx), Some(tx)) => Some(Self::Both { rx, tx }),
+            (Some(rx), None) => Some(Self::Rx(rx)),
+            (None, Some(tx)) => Some(Self::Tx(tx)),
+            (None, None) => None,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+enum LaneMonitorsError {
+    #[error(
+        "module reported received power for {rx_lanes} lane(s) but \
+         transmitted power for {tx_lanes} lane(s); the two must describe the \
+         same lanes"
+    )]
+    MismatchedLaneCounts { rx_lanes: usize, tx_lanes: usize },
+
+    #[error(
+        "module reported optical power for {lanes} lanes, more than a lane \
+         number can represent"
+    )]
+    TooManyLanes { lanes: usize },
+}
+
+fn lane_monitors_to_ct(
+    power: ReportedPower,
+) -> Result<IdOrdMap<ct_inv::LaneMonitors>, LaneMonitorsError> {
+    // The SP sends a pair of vectors and not a vector of pairs, which means
+    // that type system can represent the receiver and transmitter power
+    // readings having different lengths. That's a nonsensical input, though, so
+    // catch it.
+    let (lane_count, rx, tx) = match power {
+        ReportedPower::Rx(rx) => (rx.len(), rx, Vec::new()),
+        ReportedPower::Tx(tx) => (tx.len(), Vec::new(), tx),
+        ReportedPower::Both { rx, tx } => {
+            if rx.len() != tx.len() {
+                return Err(LaneMonitorsError::MismatchedLaneCounts {
+                    rx_lanes: rx.len(),
+                    tx_lanes: tx.len(),
+                });
+            }
+            (rx.len(), rx, tx)
+        }
+    };
+
+    let lane_count = u8::try_from(lane_count)
+        .map_err(|_| LaneMonitorsError::TooManyLanes { lanes: lane_count })?;
+
+    let lanes = IdOrdMap::from_iter_unique((0..lane_count).map(|lane| {
+        let index = usize::from(lane);
+        ct_inv::LaneMonitors {
+            lane,
+            rx_power: rx.get(index).copied().map(receiver_power_to_ct),
+            tx_power_mw: tx.get(index).copied(),
+        }
+    }))
+    .expect("lane numbers come from a range, so they are unique");
+    Ok(lanes)
 }
 
 fn receiver_power_to_ct(power: ReceiverPower) -> ct_inv::ReceiverPower {
@@ -544,37 +696,104 @@ fn cmis_datapath_state_to_ct(
 }
 
 fn rss_step_to_ct(step: bootstrap::RssStep) -> RssStepInfo {
+    // RssStep::index() is 0-based, so +1 makes it 1-based.
+    let step_number =
+        u32::try_from(step.index() + 1).expect("RSS step number fits in a u32");
+    let total_steps =
+        u32::try_from(step.max_step()).expect("RSS step count fits in a u32");
     RssStepInfo {
-        // index() is 0-based, so add 1 to get the 1-based step index.
-        step: step.index() as u32 + 1,
-        total_steps: step.max_step() as u32,
+        step: NonZeroU32::new(step_number).expect("step index + 1 is nonzero"),
+        total_steps: NonZeroU32::new(total_steps)
+            .expect("RSS step count is nonzero"),
         description: step.description().to_string(),
     }
 }
 
-pub(crate) fn rack_operation_status_to_ct(
+pub(crate) fn rack_setup_status_to_ct(
     status: bootstrap::RackOperationStatus,
-) -> RackOperationStatus {
+) -> RackSetupStatus {
     use bootstrap::RackOperationStatus as B;
     match status {
-        B::Initializing { id, step } => {
-            RackOperationStatus::Initializing { id, step: rss_step_to_ct(step) }
-        }
-        B::Initialized { id } => RackOperationStatus::Initialized { id },
-        B::InitializationFailed { id, message } => {
-            RackOperationStatus::InitializationFailed { id, message }
-        }
-        B::InitializationPanicked { id } => {
-            RackOperationStatus::InitializationPanicked { id }
-        }
-        B::Resetting { id } => RackOperationStatus::Resetting { id },
-        B::Uninitialized { reset_id } => {
-            RackOperationStatus::Uninitialized { reset_id }
-        }
-        B::ResetFailed { id, message } => {
-            RackOperationStatus::ResetFailed { id, message }
-        }
-        B::ResetPanicked { id } => RackOperationStatus::ResetPanicked { id },
+        B::Uninitialized { reset_id: None } => RackSetupStatus {
+            rack_state: RackState::Uninitialized,
+            operation: None,
+        },
+        B::Uninitialized { reset_id: Some(id) } => RackSetupStatus {
+            rack_state: RackState::Uninitialized,
+            operation: Some(RackOperation {
+                kind: RackOperationKind::RESET,
+                id: id.into_untyped_uuid(),
+                state: RackOperationState::Completed,
+            }),
+        },
+        B::Initializing { id, step } => RackSetupStatus {
+            rack_state: RackState::Other,
+            operation: Some(RackOperation {
+                kind: RackOperationKind::INITIALIZE,
+                id: id.into_untyped_uuid(),
+                state: RackOperationState::InProgress {
+                    current_step: Some(rss_step_to_ct(step)),
+                },
+            }),
+        },
+        B::InitializationFailed { id, message } => RackSetupStatus {
+            rack_state: RackState::Other,
+            operation: Some(RackOperation {
+                kind: RackOperationKind::INITIALIZE,
+                id: id.into_untyped_uuid(),
+                state: RackOperationState::Failed {
+                    message,
+                    failed_step: None,
+                },
+            }),
+        },
+        B::InitializationPanicked { id } => RackSetupStatus {
+            rack_state: RackState::Other,
+            operation: Some(RackOperation {
+                kind: RackOperationKind::INITIALIZE,
+                id: id.into_untyped_uuid(),
+                state: RackOperationState::Panicked,
+            }),
+        },
+        B::Initialized { id: Some(id) } => RackSetupStatus {
+            rack_state: RackState::Initialized,
+            operation: Some(RackOperation {
+                kind: RackOperationKind::INITIALIZE,
+                id: id.into_untyped_uuid(),
+                state: RackOperationState::Completed,
+            }),
+        },
+        B::Initialized { id: None } => RackSetupStatus {
+            rack_state: RackState::Initialized,
+            operation: None,
+        },
+        B::Resetting { id } => RackSetupStatus {
+            rack_state: RackState::Other,
+            operation: Some(RackOperation {
+                kind: RackOperationKind::RESET,
+                id: id.into_untyped_uuid(),
+                state: RackOperationState::InProgress { current_step: None },
+            }),
+        },
+        B::ResetFailed { id, message } => RackSetupStatus {
+            rack_state: RackState::Other,
+            operation: Some(RackOperation {
+                kind: RackOperationKind::RESET,
+                id: id.into_untyped_uuid(),
+                state: RackOperationState::Failed {
+                    message,
+                    failed_step: None,
+                },
+            }),
+        },
+        B::ResetPanicked { id } => RackSetupStatus {
+            rack_state: RackState::Other,
+            operation: Some(RackOperation {
+                kind: RackOperationKind::RESET,
+                id: id.into_untyped_uuid(),
+                state: RackOperationState::Panicked,
+            }),
+        },
     }
 }
 
@@ -612,8 +831,10 @@ pub(crate) fn password_hash_to_internal(
 mod tests {
     use super::*;
     use crate::mgs::{RotData, RotImageErrors};
+    use bootstrap::RackOperationStatus as B;
     use gateway_types::component::PowerState;
     use iddqd::id_ord_map;
+    use omicron_uuid_kinds::{RackInitUuid, RackResetUuid};
     use sled_agent_types::early_networking::SwitchSlot;
     use std::collections::BTreeMap;
     use std::time::Duration;
@@ -623,6 +844,7 @@ mod tests {
         HostElectricalInterfaceId, Identifier, MediaInterfaceId, MediaType,
         Oui, OutputStatus, ReceiverPower, SffComplianceCode,
     };
+    use uuid::Uuid;
     use wicket_common::inventory::{
         RotSlot, RotState, SpIdentifier, SpIgnitionSystemType, SpState, SpType,
     };
@@ -914,6 +1136,19 @@ mod tests {
         assert_eq!(sp_info_to_ct(&record).state, ct_inv::SpStateInfo::NotRead);
     }
 
+    fn ignition_present() -> SpIgnition {
+        SpIgnition::Present {
+            id: SpIgnitionSystemType::Gimlet,
+            power: true,
+            ctrl_detect_0: true,
+            ctrl_detect_1: true,
+            flt_a3: false,
+            flt_a2: false,
+            flt_rot: false,
+            flt_sp: false,
+        }
+    }
+
     fn read_sled_record(slot: u16, serial_number: &str) -> SpRecord {
         SpRecord {
             id: sled(slot),
@@ -946,9 +1181,43 @@ mod tests {
             read_sled_record(0, "SimGimlet00"),
             read_sled_record(1, "SimGimlet01"),
             read_sled_record(2, "SimGimlet02"),
+            // Nothing at all is known about this cubby, so it is omitted.
             SpRecord {
                 id: sled(3),
                 ignition: None,
+                data: None,
+                last_state_fetch_error: None,
+            },
+            // Ignition says this cubby is empty, so it is omitted too.
+            SpRecord {
+                id: sled(4),
+                ignition: Some(SpIgnition::Absent),
+                data: None,
+                last_state_fetch_error: None,
+            },
+            // Ignition says a sled is present but reading it keeps failing -- it
+            // must stay visible because rack setup should have been able to use
+            // it.
+            SpRecord {
+                id: sled(5),
+                ignition: Some(ignition_present()),
+                data: None,
+                last_state_fetch_error: Some(mgs_fetch_error_observed_ago(
+                    "sp_get timed out",
+                    Duration::from_secs(3),
+                )),
+            },
+            // Ignition says a sled is present and we have not polled it yet.
+            SpRecord {
+                id: sled(6),
+                ignition: Some(ignition_present()),
+                data: None,
+                last_state_fetch_error: None,
+            },
+            // Not a sled, so it doesn't appear in bootstrap output.
+            SpRecord {
+                id: SpIdentifier { typ: SpType::Switch, slot: 0 },
+                ignition: Some(ignition_present()),
                 data: None,
                 last_state_fetch_error: None,
             },
@@ -992,29 +1261,66 @@ mod tests {
 
         let response = bootstrap_sleds_to_ct(&records, &ddm);
 
+        let reported: BTreeSet<_> =
+            response.sleds.iter().map(|sled| sled.id).collect();
         assert_eq!(
-            response.sleds.len(),
-            3,
-            "sled 3 has no state reading, so it is absent: {:?}",
+            reported,
+            BTreeSet::from([sled(0), sled(1), sled(2), sled(5), sled(6)]),
+            "cubby 3 (nothing known) and cubby 4 (ignition says empty) are \
+             omitted, the switch is not a sled, and everything else is \
+             reported: {:?}",
             response.sleds,
         );
-        let sled0_entry = response.sleds.get(&sled(0)).expect("sled 0 present");
-        assert_eq!(sled0_entry.baseboard, baseboard_id("SimGimlet00"));
+
         assert_eq!(
-            sled0_entry.ip,
-            Some(sled0_ip),
+            response.sleds.get(&sled(0)).expect("sled 0 present").state,
+            ct_inv::BootstrapSledState::Read {
+                baseboard: baseboard_id("SimGimlet00"),
+                ip: Some(sled0_ip),
+            },
             "sled 0's baseboard matches its DDM entry",
         );
-        let sled1_entry = response.sleds.get(&sled(1)).expect("sled 1 present");
         assert_eq!(
-            sled1_entry.ip,
-            Some(sled1_ip),
+            response.sleds.get(&sled(1)).expect("sled 1 present").state,
+            ct_inv::BootstrapSledState::Read {
+                baseboard: baseboard_id("SimGimlet01"),
+                ip: Some(sled1_ip),
+            },
             "sled 1 matches despite the peer reporting a different revision",
         );
-        let sled2_entry = response.sleds.get(&sled(2)).expect("sled 2 present");
         assert_eq!(
-            sled2_entry.ip, None,
+            response.sleds.get(&sled(2)).expect("sled 2 present").state,
+            ct_inv::BootstrapSledState::Read {
+                baseboard: baseboard_id("SimGimlet02"),
+                ip: None,
+            },
             "sled 2 has no DDM entry, so no address yet",
+        );
+
+        let sled5 = response.sleds.get(&sled(5)).expect("sled 5 present");
+        let ct_inv::BootstrapSledState::Error { error } = &sled5.state else {
+            panic!("a sled we keep failing to read is an error: {sled5:?}");
+        };
+        assert_eq!(error.message, "sp_get timed out");
+        assert!(
+            error.age >= Duration::from_secs(3),
+            "the error carries how long ago it was observed: {:?}",
+            error.age,
+        );
+
+        assert_eq!(
+            response.sleds.get(&sled(6)).expect("sled 6 present").state,
+            ct_inv::BootstrapSledState::NotRead,
+            "a sled ignition placed but that we have not polled is not_read",
+        );
+
+        let readable: Vec<_> =
+            response.readable().map(|sled| sled.id).collect();
+        assert_eq!(
+            readable,
+            vec![sled(0), sled(1), sled(2)],
+            "readable() skips the unreadable and unpolled cubbies, so a \
+             caller building an RSS config cannot pick one by accident",
         );
 
         assert_eq!(
@@ -1215,16 +1521,70 @@ mod tests {
 
     #[test]
     fn transceiver_status_projects_flags() {
+        // Simulate the situation where power is enabled but never comes up.
+        // The fault flags indicate why enabled is true but power_good is false.
         assert_eq!(
-            transceiver_status_to_ct(Ok(
-                ExtendedStatus::PRESENT | ExtendedStatus::POWER_GOOD
-            )),
+            transceiver_status_to_ct(Ok(ExtendedStatus::PRESENT
+                | ExtendedStatus::ENABLED
+                | ExtendedStatus::FAULT_POWER_TIMEOUT)),
             ct_inv::TransceiverStatus::Read {
                 present: true,
-                enabled: false,
-                power_good: true,
+                enabled: true,
+                power_good: false,
+                fault_power_timeout: true,
+                fault_power_lost: false,
+                disabled_by_sp: false,
+                in_reset: false,
+                low_power_mode: false,
+                interrupt: false,
             },
         );
+
+        let flags = |status| match transceiver_status_to_ct(Ok(status)) {
+            ct_inv::TransceiverStatus::Read {
+                present,
+                enabled,
+                power_good,
+                fault_power_timeout,
+                fault_power_lost,
+                disabled_by_sp,
+                in_reset,
+                low_power_mode,
+                interrupt,
+            } => vec![
+                present,
+                enabled,
+                power_good,
+                fault_power_timeout,
+                fault_power_lost,
+                disabled_by_sp,
+                in_reset,
+                low_power_mode,
+                interrupt,
+            ],
+            other => panic!("a read status projects to Read, got {other:?}"),
+        };
+        let bits = [
+            ExtendedStatus::PRESENT,
+            ExtendedStatus::ENABLED,
+            ExtendedStatus::POWER_GOOD,
+            ExtendedStatus::FAULT_POWER_TIMEOUT,
+            ExtendedStatus::FAULT_POWER_LOST,
+            ExtendedStatus::DISABLED_BY_SP,
+            ExtendedStatus::RESET,
+            ExtendedStatus::LOW_POWER_MODE,
+            ExtendedStatus::INTERRUPT,
+        ];
+        for (index, bit) in bits.into_iter().enumerate() {
+            let mut expected = vec![false; bits.len()];
+            expected[index] = true;
+            assert_eq!(
+                flags(bit),
+                expected,
+                "{bit:?} projects to field {index} and nothing else",
+            );
+        }
+
         assert_eq!(
             transceiver_status_to_ct(Err("status read failed".to_string())),
             ct_inv::TransceiverStatus::Error {
@@ -1258,28 +1618,68 @@ mod tests {
                 ReceiverPower::Average(1.5),
                 ReceiverPower::PeakToPeak(2.5),
             ]),
-            transmitter_power: Some(vec![3.5]),
+            transmitter_power: Some(vec![3.5, 4.5]),
             ..Default::default()
         };
         assert_eq!(
             transceiver_monitors_to_ct(Ok(monitors)),
             ct_inv::TransceiverMonitors::Read {
-                rx_power: Some(vec![
-                    ct_inv::ReceiverPower::Average { value_mw: 1.5 },
-                    ct_inv::ReceiverPower::PeakToPeak { value_mw: 2.5 },
-                ]),
-                tx_power_mw: Some(vec![3.5]),
+                lanes: id_ord_map! {
+                    ct_inv::LaneMonitors {
+                        lane: 0,
+                        rx_power: Some(ct_inv::ReceiverPower::Average {
+                            value_mw: 1.5,
+                        }),
+                        tx_power_mw: Some(3.5),
+                    },
+                    ct_inv::LaneMonitors {
+                        lane: 1,
+                        rx_power: Some(ct_inv::ReceiverPower::PeakToPeak {
+                            value_mw: 2.5,
+                        }),
+                        tx_power_mw: Some(4.5),
+                    },
+                },
             },
-            "average and peak-to-peak readings stay distinguishable",
+            "average and peak-to-peak readings stay distinguishable, and each \
+             stays attached to its own lane",
         );
 
-        // A module reporting no power monitoring stays None.
         assert_eq!(
-            transceiver_monitors_to_ct(Ok(Monitors::default())),
+            transceiver_monitors_to_ct(Ok(Monitors {
+                receiver_power: Some(vec![ReceiverPower::Average(1.5)]),
+                transmitter_power: None,
+                ..Default::default()
+            })),
             ct_inv::TransceiverMonitors::Read {
-                rx_power: None,
-                tx_power_mw: None,
+                lanes: id_ord_map! {
+                    ct_inv::LaneMonitors {
+                        lane: 0,
+                        rx_power: Some(ct_inv::ReceiverPower::Average {
+                            value_mw: 1.5,
+                        }),
+                        tx_power_mw: None,
+                    },
+                },
             },
+            "a module reporting received power but not transmitted power",
+        );
+        assert_eq!(
+            transceiver_monitors_to_ct(Ok(Monitors {
+                receiver_power: None,
+                transmitter_power: Some(vec![3.5]),
+                ..Default::default()
+            })),
+            ct_inv::TransceiverMonitors::Read {
+                lanes: id_ord_map! {
+                    ct_inv::LaneMonitors {
+                        lane: 0,
+                        rx_power: None,
+                        tx_power_mw: Some(3.5),
+                    },
+                },
+            },
+            "a module reporting transmitted power but not received power",
         );
 
         assert_eq!(
@@ -1287,6 +1687,85 @@ mod tests {
             ct_inv::TransceiverMonitors::Error {
                 message: "monitors read failed".to_string(),
             },
+        );
+    }
+
+    #[test]
+    fn transceiver_monitors_distinguish_unsupported_from_no_lanes() {
+        assert_eq!(
+            transceiver_monitors_to_ct(Ok(Monitors::default())),
+            ct_inv::TransceiverMonitors::Unsupported,
+            "a module implementing neither monitor is unsupported, not an \
+             empty read",
+        );
+
+        // A module that does implement a monitor but reports no lanes for it is
+        // marked as Read.
+        assert_eq!(
+            transceiver_monitors_to_ct(Ok(Monitors {
+                receiver_power: Some(Vec::new()),
+                transmitter_power: None,
+                ..Default::default()
+            })),
+            ct_inv::TransceiverMonitors::Read { lanes: IdOrdMap::new() },
+            "an implemented monitor reporting zero lanes is still a read",
+        );
+    }
+
+    #[test]
+    fn transceiver_monitors_reject_mismatched_lane_counts() {
+        let err = LaneMonitorsError::MismatchedLaneCounts {
+            rx_lanes: 2,
+            tx_lanes: 1,
+        };
+        assert_eq!(
+            lane_monitors_to_ct(ReportedPower::Both {
+                rx: vec![
+                    ReceiverPower::Average(1.5),
+                    ReceiverPower::Average(2.5),
+                ],
+                tx: vec![3.5],
+            }),
+            Err(err.clone()),
+        );
+        assert_eq!(
+            transceiver_monitors_to_ct(Ok(Monitors {
+                receiver_power: Some(vec![
+                    ReceiverPower::Average(1.5),
+                    ReceiverPower::Average(2.5),
+                ]),
+                transmitter_power: Some(vec![3.5]),
+                ..Default::default()
+            })),
+            ct_inv::TransceiverMonitors::Error { message: err.to_string() },
+            "the mismatch reaches the wire as a read error on the monitors",
+        );
+    }
+
+    #[test]
+    fn transceiver_monitors_reject_more_lanes_than_a_lane_number_holds() {
+        let too_many = usize::from(u8::MAX) + 1;
+        let err = LaneMonitorsError::TooManyLanes { lanes: too_many };
+        assert_eq!(
+            lane_monitors_to_ct(ReportedPower::Rx(vec![
+                ReceiverPower::Average(
+                    1.5
+                );
+                too_many
+            ])),
+            Err(err.clone()),
+        );
+        assert_eq!(
+            transceiver_monitors_to_ct(Ok(Monitors {
+                receiver_power: Some(vec![
+                    ReceiverPower::Average(1.5);
+                    too_many
+                ]),
+                transmitter_power: None,
+                ..Default::default()
+            })),
+            ct_inv::TransceiverMonitors::Error { message: err.to_string() },
+            "an unrepresentable lane count reaches the wire as a read error",
         );
     }
 
@@ -1463,6 +1942,72 @@ mod tests {
     }
 
     #[test]
+    fn duplicate_front_port_projects_as_a_contradiction() {
+        let readable = |port: &str| Transceiver {
+            port: port.to_string(),
+            status: Ok(ExtendedStatus::PRESENT),
+            power: Ok(PowerMode {
+                state: transceiver_controller::PowerState::High,
+                software_override: None,
+            }),
+            vendor: Ok(sample_vendor_info()),
+            datapath: Ok(Datapath::Sff8636 {
+                connector: ConnectorType::Unknown,
+                specification: SffComplianceCode::new(0x04, 0),
+                lanes: [Sff8636Datapath::default(); 4],
+            }),
+            monitors: Ok(Monitors::default()),
+        };
+
+        let projected = transceivers_by_port(vec![
+            readable("qsfp0"),
+            readable("qsfp1"),
+            readable("qsfp0"),
+        ]);
+
+        assert_eq!(projected.len(), 2, "one entry per port: {projected:?}");
+
+        let qsfp1 = projected.get("qsfp1").expect("qsfp1 present");
+        assert_eq!(
+            qsfp1.status,
+            ct_inv::TransceiverStatus::Read {
+                present: true,
+                enabled: false,
+                power_good: false,
+                fault_power_timeout: false,
+                fault_power_lost: false,
+                disabled_by_sp: false,
+                in_reset: false,
+                low_power_mode: false,
+                interrupt: false,
+            },
+            "the port reported once is unaffected by its neighbor",
+        );
+
+        let message =
+            DuplicateFrontPort { port: "qsfp0".to_string() }.to_string();
+        assert_eq!(
+            projected.get("qsfp0").expect("qsfp0 present"),
+            &ct_inv::Transceiver {
+                port: "qsfp0".to_string(),
+                status: ct_inv::TransceiverStatus::Error {
+                    message: message.clone(),
+                },
+                power: ct_inv::TransceiverPower::Error {
+                    message: message.clone(),
+                },
+                vendor: ct_inv::TransceiverVendor::Error {
+                    message: message.clone(),
+                },
+                monitors: ct_inv::TransceiverMonitors::Error {
+                    message: message.clone(),
+                },
+                datapath: ct_inv::TransceiverDatapath::Error { message },
+            },
+        );
+    }
+
+    #[test]
     fn transceivers_response_projects_by_switch_and_port() {
         let transceiver = Transceiver {
             port: "qsfp0".to_string(),
@@ -1506,6 +2051,12 @@ mod tests {
                 present: true,
                 enabled: true,
                 power_good: true,
+                fault_power_timeout: false,
+                fault_power_lost: false,
+                disabled_by_sp: false,
+                in_reset: false,
+                low_power_mode: false,
+                interrupt: false,
             },
         );
         assert_eq!(
@@ -1568,9 +2119,14 @@ mod tests {
             // that the values aren't accidentally transposed during conversion.
             ctrl_detect_0: true,
             ctrl_detect_1: false,
-            flt_a3: false,
+            // Likewise, use distinct values for each fault flag, so an
+            // accidental transposition among them (often) causes this test to
+            // fail.
+            //
+            // TODO: this should probably be a PBT.
+            flt_a3: true,
             flt_a2: false,
-            flt_rot: false,
+            flt_rot: true,
             flt_sp: false,
         }));
         assert_eq!(
@@ -1578,14 +2134,220 @@ mod tests {
             ct_inv::SpIgnitionInfo::Present {
                 power: true,
                 faults: ct_inv::IgnitionFaults {
-                    a3: false,
+                    a3: true,
                     a2: false,
-                    rot: false,
+                    rot: true,
                     sp: false,
                 },
-                ctrl_detect_0: true,
-                ctrl_detect_1: false,
+                ctrl_detect: ct_inv::IgnitionControllerDetect {
+                    switch0: true,
+                    switch1: false,
+                },
             },
+        );
+
+        let ct_inv::SpIgnitionInfo::Present { ctrl_detect, .. } = projected
+        else {
+            panic!("a present ignition target projects to Present");
+        };
+        assert!(
+            ctrl_detect.detects(SwitchSlot::Switch0),
+            "switch 0's controller detects this target",
+        );
+        assert!(
+            !ctrl_detect.detects(SwitchSlot::Switch1),
+            "switch 1's controller does not detect this target",
+        );
+    }
+
+    #[test]
+    fn rss_step_projects_one_based_index() {
+        let nonzero = |n: u32| NonZeroU32::new(n).expect("value is nonzero");
+
+        let first = rss_step_to_ct(bootstrap::RssStep::Requested);
+        assert_eq!(
+            first,
+            RssStepInfo {
+                step: nonzero(1),
+                total_steps: nonzero(16),
+                description: "Requested".to_string(),
+            },
+            "the first RSS step projects to a 1-based step 1 of 16",
+        );
+
+        let last = rss_step_to_ct(bootstrap::RssStep::NexusHandoff);
+        assert_eq!(
+            last,
+            RssStepInfo {
+                step: nonzero(16),
+                total_steps: nonzero(16),
+                description: "Handing off to Nexus".to_string(),
+            },
+            "the last RSS step projects to step 16 of 16",
+        );
+    }
+
+    #[test]
+    fn rack_setup_status_projects_every_variant() {
+        let nonzero = |n: u32| NonZeroU32::new(n).expect("value is nonzero");
+        let init_uuid: Uuid = "11111111-1111-4111-8111-111111111111"
+            .parse()
+            .expect("valid init uuid");
+        let reset_uuid: Uuid = "22222222-2222-4222-8222-222222222222"
+            .parse()
+            .expect("valid reset uuid");
+        let init_id = RackInitUuid::from_untyped_uuid(init_uuid);
+        let reset_id = RackResetUuid::from_untyped_uuid(reset_uuid);
+
+        assert_eq!(
+            rack_setup_status_to_ct(B::Uninitialized { reset_id: None }),
+            RackSetupStatus {
+                rack_state: RackState::Uninitialized,
+                operation: None,
+            },
+            "uninitialized on startup carries no operation",
+        );
+
+        assert_eq!(
+            rack_setup_status_to_ct(B::Uninitialized {
+                reset_id: Some(reset_id),
+            }),
+            RackSetupStatus {
+                rack_state: RackState::Uninitialized,
+                operation: Some(RackOperation {
+                    kind: RackOperationKind::RESET,
+                    id: reset_uuid,
+                    state: RackOperationState::Completed,
+                }),
+            },
+            "uninitialized after a completed reset carries the reset operation",
+        );
+
+        assert_eq!(
+            rack_setup_status_to_ct(B::Initializing {
+                id: init_id,
+                step: bootstrap::RssStep::SledInit,
+            }),
+            RackSetupStatus {
+                rack_state: RackState::Other,
+                operation: Some(RackOperation {
+                    kind: RackOperationKind::INITIALIZE,
+                    id: init_uuid,
+                    state: RackOperationState::InProgress {
+                        current_step: Some(RssStepInfo {
+                            step: nonzero(7),
+                            total_steps: nonzero(16),
+                            description: "Initializing sleds".to_string(),
+                        }),
+                    },
+                }),
+            },
+            "a rack part-way through setup is neither initialized nor \
+             uninitialized, and reports its current step",
+        );
+
+        assert_eq!(
+            rack_setup_status_to_ct(B::InitializationFailed {
+                id: init_id,
+                message: "init boom".to_string(),
+            }),
+            RackSetupStatus {
+                rack_state: RackState::Other,
+                operation: Some(RackOperation {
+                    kind: RackOperationKind::INITIALIZE,
+                    id: init_uuid,
+                    state: RackOperationState::Failed {
+                        message: "init boom".to_string(),
+                        failed_step: None,
+                    },
+                }),
+            },
+            "a setup that stopped part-way leaves the rack neither \
+             initialized nor uninitialized, and carries its message",
+        );
+
+        assert_eq!(
+            rack_setup_status_to_ct(B::InitializationPanicked { id: init_id }),
+            RackSetupStatus {
+                rack_state: RackState::Other,
+                operation: Some(RackOperation {
+                    kind: RackOperationKind::INITIALIZE,
+                    id: init_uuid,
+                    state: RackOperationState::Panicked,
+                }),
+            },
+            "a panicked setup leaves the rack part-way through, same as a \
+             failed one",
+        );
+
+        assert_eq!(
+            rack_setup_status_to_ct(B::Initialized { id: Some(init_id) }),
+            RackSetupStatus {
+                rack_state: RackState::Initialized,
+                operation: Some(RackOperation {
+                    kind: RackOperationKind::INITIALIZE,
+                    id: init_uuid,
+                    state: RackOperationState::Completed,
+                }),
+            },
+            "an initialized rack from a completed init carries that operation",
+        );
+
+        assert_eq!(
+            rack_setup_status_to_ct(B::Initialized { id: None }),
+            RackSetupStatus {
+                rack_state: RackState::Initialized,
+                operation: None,
+            },
+            "a rack initialized on startup carries no operation",
+        );
+
+        assert_eq!(
+            rack_setup_status_to_ct(B::Resetting { id: reset_id }),
+            RackSetupStatus {
+                rack_state: RackState::Other,
+                operation: Some(RackOperation {
+                    kind: RackOperationKind::RESET,
+                    id: reset_uuid,
+                    state: RackOperationState::InProgress {
+                        current_step: None
+                    },
+                }),
+            },
+            "a reset in progress reports no step and leaves the rack \
+             part-way through",
+        );
+
+        assert_eq!(
+            rack_setup_status_to_ct(B::ResetFailed {
+                id: reset_id,
+                message: "reset boom".to_string(),
+            }),
+            RackSetupStatus {
+                rack_state: RackState::Other,
+                operation: Some(RackOperation {
+                    kind: RackOperationKind::RESET,
+                    id: reset_uuid,
+                    state: RackOperationState::Failed {
+                        message: "reset boom".to_string(),
+                        failed_step: None,
+                    },
+                }),
+            },
+            "a failed reset carries its message and no failed step",
+        );
+
+        assert_eq!(
+            rack_setup_status_to_ct(B::ResetPanicked { id: reset_id }),
+            RackSetupStatus {
+                rack_state: RackState::Other,
+                operation: Some(RackOperation {
+                    kind: RackOperationKind::RESET,
+                    id: reset_uuid,
+                    state: RackOperationState::Panicked,
+                }),
+            },
+            "a panicked reset leaves the rack part-way through",
         );
     }
 }

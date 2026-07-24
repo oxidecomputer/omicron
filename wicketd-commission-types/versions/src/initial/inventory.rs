@@ -53,11 +53,19 @@ pub struct Caboose {
     /// to sign the image; it is `None` for firmware that carries no signature
     /// (such as service-processor images). Commissioning uses it to match an
     /// active RoT slot against the corresponding signed TUF artifact.
+    ///
+    /// The `SIGN` caboose key is read separately from the rest of the caboose,
+    /// and a failed read is reported as `None`. A caller matching artifacts by
+    /// signature should treat an unexpected `None` as unknown rather than as a
+    /// definitely-unsigned image.
     pub sign: Option<String>,
     /// The anti-rollback epoch declared by this image, if it declares one.
     ///
     /// This is the `EPOC` caboose key, carried through as the string the image
     /// records; it is `None` for firmware built before the key existed.
+    ///
+    /// As with `sign`, this key is read separately and a failed read is
+    /// reported as `None`.
     pub epoch: Option<String>,
 }
 
@@ -309,20 +317,28 @@ pub enum SpIgnitionInfo {
         power: bool,
         /// The faults ignition reports for the service processor.
         faults: IgnitionFaults,
-        /// Whether ignition controller 0 detects this target.
-        ///
-        /// Ignition is wired to both switches, and each switch's controller
-        /// reports detection independently. `false` on one controller while
-        /// the other detects the target indicates a broken ignition path (for
-        /// example, a bad cable) to that controller's switch.
-        ctrl_detect_0: bool,
-        /// Whether ignition controller 1 detects this target.
-        ///
-        /// See `ctrl_detect_0`.
-        ctrl_detect_1: bool,
+        /// Which ignition controllers detect this target.
+        ctrl_detect: IgnitionControllerDetect,
     },
     /// Ignition reports the service processor as absent.
     Absent,
+}
+
+/// Which switches' ignition controllers detect a target.
+///
+/// Ignition is wired to both switches, and each switch's controller reports
+/// detection independently. `false` for one switch while the other detects the
+/// target indicates a broken ignition path (for example, a bad cable) to that
+/// switch. Rust clients can use the `detects` method to select the entry for a
+/// `SwitchSlot`, such as the one reported by a query for wicketd's location.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema,
+)]
+pub struct IgnitionControllerDetect {
+    /// Whether switch 0's ignition controller detects this target.
+    pub switch0: bool,
+    /// Whether switch 1's ignition controller detects this target.
+    pub switch1: bool,
 }
 
 /// A single service processor's inventory.
@@ -462,12 +478,40 @@ pub enum TransceiverStatus {
     },
     /// The module status was read.
     Read {
-        /// Whether a transceiver module is present in the port.
+        /// Whether a transceiver module is physically seated in the port.
         present: bool,
-        /// Whether the module is enabled (powered on).
+        /// Whether the sidecar is supplying power to this port.
         enabled: bool,
-        /// Whether the module's power is good.
+        /// Whether that power supply came up successfully.
+        ///
+        /// `enabled` without `power_good` means something went wrong, and
+        /// `fault_power_timeout`, `fault_power_lost`, and `disabled_by_sp`
+        /// say what. If none of those is set, power is enabled and has not
+        /// come up for a reason the port does not report.
         power_good: bool,
+        /// The power supply was enabled but did not come up.
+        fault_power_timeout: bool,
+        /// The power supply came up and was then unexpectedly lost.
+        fault_power_lost: bool,
+        /// The service processor disabled this port.
+        ///
+        /// The service processor does this on its own initiative, for example
+        /// when a module that had initialized starts refusing I2C reads.
+        disabled_by_sp: bool,
+        /// Whether the module is held in reset.
+        in_reset: bool,
+        /// Whether the module is held in low-power mode.
+        ///
+        /// This is the control pin the service processor drives. It is not the
+        /// same reading as the module's own reported power mode, which is
+        /// carried separately; the two can disagree.
+        low_power_mode: bool,
+        /// Whether the module is asserting its interrupt line.
+        ///
+        /// The module signals that something in its memory map warrants
+        /// attention. This reports only that the line is asserted; the cause
+        /// is not read.
+        interrupt: bool,
     },
 }
 
@@ -535,24 +579,61 @@ pub enum TransceiverMonitors {
         /// The error encountered while reading the monitoring data.
         message: String,
     },
+    /// The module does not implement optical power monitoring.
+    ///
+    /// This is the module's own report of its capabilities: for example, a
+    /// passive copper cable has no optical power to measure. It is distinct
+    /// from a successful read of zero lanes, so that "this port cannot report
+    /// optical power levels" is not mistaken for "this port reported no optical
+    /// power".
+    Unsupported,
     /// The monitoring data was read.
     Read {
-        /// Per-lane received optical power.
+        /// The optical power monitors of each lane, keyed by lane number.
         ///
-        /// `None` if the module does not report received power.
-        rx_power: Option<Vec<ReceiverPower>>,
-        /// Per-lane transmitted optical power, in milliwatts.
-        ///
-        /// `None` if the module does not report transmitted power.
-        tx_power_mw: Option<Vec<f32>>,
+        /// A module implements received and transmitted power monitoring
+        /// independently, so a lane carries whichever of the two it has, or
+        /// both. A module that implements neither is reported as the
+        /// `unsupported` variant.
+        lanes: IdOrdMap<LaneMonitors>,
     },
+}
+
+/// The optical power monitors of one lane of a transceiver module.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct LaneMonitors {
+    /// The lane number within the module.
+    pub lane: u8,
+    /// The received optical power on this lane.
+    ///
+    /// `None` means the module does not implement received-power monitoring.
+    /// Monitoring is a module-wide capability, so this is `None` either on
+    /// every lane or on none of them.
+    pub rx_power: Option<ReceiverPower>,
+    /// The transmitted optical power on this lane, in milliwatts.
+    ///
+    /// `None` means the module does not implement transmitted-power
+    /// monitoring. As with `rx_power`, this is `None` either on every lane or
+    /// on none of them.
+    pub tx_power_mw: Option<f32>,
+}
+
+impl IdOrdItem for LaneMonitors {
+    type Key<'a> = u8;
+
+    fn key(&self) -> Self::Key<'_> {
+        self.lane
+    }
+
+    id_upcast!();
 }
 
 /// A received optical power measurement from one lane.
 ///
 /// Modules report received power in one of two ways, and the two are not
 /// directly comparable, so the kind of measurement is carried alongside the
-/// value rather than being flattened away.
+/// value rather than being flattened away. See `peak_to_peak` for a caveat
+/// that applies to modules using the older management interface.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ReceiverPower {
@@ -562,6 +643,15 @@ pub enum ReceiverPower {
         value_mw: f32,
     },
     /// A peak-to-peak optical power measurement, in milliwatts.
+    ///
+    /// A module using the older SFF-8636 management interface reports a single
+    /// bit that distinguishes an average measurement from everything else, so
+    /// on such a module this may instead be a read of a received-power
+    /// register the module never populates. Treat a peak-to-peak reading from
+    /// an SFF-8636 module as unverified rather than as a measured value; a
+    /// module's management interface is visible in the `kind` of its
+    /// `datapath`. CMIS modules report an unimplemented received-power monitor
+    /// separately, so on those this is a real measurement.
     PeakToPeak {
         /// The measured power, in milliwatts.
         value_mw: f32,
@@ -716,17 +806,26 @@ pub enum CmisDatapathState {
 pub struct LocationInfo {
     /// The slot of the switch this sled is cabled to.
     pub switch_slot: SwitchSlot,
-    /// The serial number of that switch, as reported by its service
-    /// processor, if known.
+    /// The baseboard of that switch, as reported by its service processor.
     ///
     /// `None` means the switch's state has not been successfully read yet;
     /// the switch's entry in the SP inventory carries the details, including
     /// any fetch error.
-    pub switch_serial: Option<String>,
-    /// The serial number of the sled wicketd is running on, if known.
+    pub switch_baseboard: Option<BaseboardId>,
+    /// The baseboard of the sled wicketd is running on.
     ///
-    /// `None` means wicketd was started without baseboard information.
-    pub sled_serial: Option<String>,
+    /// `None` means wicketd was started without baseboard information, or was
+    /// given a baseboard it could not identify.
+    pub sled_baseboard: Option<BaseboardId>,
+    /// The service processor of the sled wicketd is running on.
+    ///
+    /// This is the sled that a request to update it will refuse to act on, so
+    /// a caller planning updates can exclude it directly rather than matching
+    /// on serial numbers.
+    ///
+    /// `None` means `sled_baseboard` is absent, or that no sled in the MGS
+    /// inventory matches it yet.
+    pub sled_id: Option<SpIdentifier>,
 }
 
 /// Parameters for the inventory endpoint.
@@ -740,33 +839,63 @@ pub struct InventoryParams {
     pub force_refresh: BTreeSet<SpIdentifier>,
 }
 
-/// A sled as seen on the bootstrap network.
+/// A sled cubby that rack setup may be able to use.
 ///
-/// A sled is reported here once its service processor's state has been read
-/// from MGS. (A populated cubby whose state has not yet been polled is absent
-/// until it is.)
+/// A cubby is reported here if its state has been read from MGS, if reading it
+/// failed, or if ignition says a sled is present in it. An empty cubby (one
+/// that ignition reports as absent, with nothing else known about it) is not
+/// reported at all.
 ///
-/// A sled's `ip` becomes `Some` once it has been discovered on the bootstrap
-/// network; sleds still missing an address report `None`.
+/// Only a sled whose `state` is `read` can be commissioned. The other states
+/// exist so that a cubby which *should* be usable but is not can be told apart
+/// from an empty one.
 #[derive(
-    Debug,
-    Clone,
-    PartialEq,
-    Eq,
-    Hash,
-    PartialOrd,
-    Ord,
-    Serialize,
-    Deserialize,
-    JsonSchema,
+    Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema,
 )]
 pub struct BootstrapSled {
-    /// The service processor for this sled (its type and slot).
+    /// The service processor for this cubby.
     pub id: SpIdentifier,
-    /// The sled's baseboard identity, as reported by its service processor.
-    pub baseboard: BaseboardId,
-    /// The sled's bootstrap-network address, once it has been discovered.
-    pub ip: Option<Ipv6Addr>,
+    /// What is known about the sled in this cubby.
+    pub state: BootstrapSledState,
+}
+
+/// What is known about the sled in a cubby.
+///
+/// The bootstrap-network address lives inside `read` because a sled is matched
+/// to its address by baseboard: without a baseboard there is no way to have
+/// learned an address, so the two are reported together rather than as
+/// independently-optional fields.
+#[derive(
+    Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema,
+)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum BootstrapSledState {
+    /// Ignition reports a sled in this cubby, but its state has not been read
+    /// from MGS yet.
+    NotRead,
+    /// Reading this sled's state from MGS failed.
+    ///
+    /// A sled in this state cannot be commissioned until it can be read. The
+    /// error says what went wrong and how recently; the cubby's entry in the
+    /// SP inventory carries the same detail.
+    Error {
+        /// What went wrong reading the sled's state.
+        error: FetchError,
+    },
+    /// The sled's state was read from MGS.
+    ///
+    /// The reading may be stale; the cubby's entry in the SP inventory reports
+    /// its age and any more recent fetch failure.
+    Read {
+        /// The sled's baseboard identity, as reported by its service processor.
+        baseboard: BaseboardId,
+        /// The sled's bootstrap-network address, once it has been discovered.
+        ///
+        /// `None` means the sled has not yet been seen on the bootstrap
+        /// network, or that it reports an identity disagreeing with MGS — in
+        /// which case it appears in `unmatched_peers` instead.
+        ip: Option<Ipv6Addr>,
+    },
 }
 
 impl IdOrdItem for BootstrapSled {
@@ -782,10 +911,12 @@ impl IdOrdItem for BootstrapSled {
 /// The response to a bootstrap-sleds request.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct GetBootstrapSledsResponse {
-    /// The sleds visible in the MGS inventory.
+    /// The sled cubbies rack setup may be able to use, keyed by service
+    /// processor.
     ///
-    /// See `BootstrapSled` for when a sled appears here and when its `ip` is
-    /// populated.
+    /// This includes cubbies whose sled could not be read, so it is not a list
+    /// of commissionable sleds: filter for entries whose `state` is `read`.
+    /// See `BootstrapSled` for when a cubby appears here at all.
     pub sleds: IdOrdMap<BootstrapSled>,
     /// Bootstrap-network peers that identified themselves, but could not be
     /// matched to any sled in `sleds`.

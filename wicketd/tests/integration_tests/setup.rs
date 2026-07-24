@@ -157,6 +157,7 @@ pub async fn wait_for_sled0_progress(
                     Ok(resp) => {
                         match resp
                             .into_inner()
+                            .sps
                             .get(&SpIdentifier { typ: SpType::Sled, slot: 0 })
                         {
                             Some(entry) if reached(entry) => Ok(entry.clone()),

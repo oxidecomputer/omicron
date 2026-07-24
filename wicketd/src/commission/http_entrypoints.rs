@@ -11,28 +11,28 @@ use dropshot::{
     Path, RequestContext, StreamingBody, TypedBody,
 };
 use iddqd::IdOrdMap;
-use omicron_uuid_kinds::RackInitUuid;
 use wicketd_commission_api::{
     WicketdCommissionApi, wicketd_commission_api_mod,
 };
 use wicketd_commission_types::inventory::{
-    GetBootstrapSledsResponse, Inventory, InventoryParams, LocationInfo,
-    SpIdentifier, SwitchSlot,
+    BaseboardId, GetBootstrapSledsResponse, Inventory, InventoryParams,
+    LocationInfo, SpIdentifier, SpType, SwitchSlot,
 };
 use wicketd_commission_types::rack_setup::{
     BgpAuthKey, BgpAuthKeyPath, CertificatePem, CertificateUploadResponse,
     PrivateKeyPem, PutRecoveryUserPasswordHash, PutRssUserConfigInsensitive,
-    RackOperationStatus, SetBgpAuthKeyStatus,
+    RackSetupStatus, RunRackSetupResponse, SetBgpAuthKeyStatus,
 };
 use wicketd_commission_types::update::{
-    ClearUpdateStateParams, ClearUpdateStateResponse, RepositoryDescription,
-    SpUpdateProgress, StartUpdateParams,
+    ClearUpdateStateParams, ClearUpdateStateResponse,
+    GetUpdateProgressResponse, RepositoryDescription, StartUpdateParams,
 };
 
 use super::conversions;
 use super::progress;
 use crate::ServerContext;
 use crate::helpers::SpIdentifierDisplay;
+use crate::helpers::baseboard_matches_sp_state;
 use crate::http_helpers::{
     ba_lockstep_client, ba_lockstep_error_to_http, http_error_with_message,
     mgs_inventory_or_unavail, shutdown_to_http, start_update,
@@ -160,14 +160,34 @@ impl WicketdCommissionApi for WicketdCommissionApiImpl {
         let switch_id =
             ctx.local_switch_id().await.map_err(|err| err.to_http_error())?;
 
-        let switch_serial = response
+        let switch_baseboard = response
             .sps
             .get(&switch_id)
             .and_then(|record| record.data.as_ref())
-            .map(|data| data.state.serial_number.clone());
+            .map(|data| BaseboardId {
+                part_number: data.state.model.clone(),
+                serial_number: data.state.serial_number.clone(),
+            });
 
-        let sled_serial =
-            ctx.baseboard.as_ref().map(|b| b.identifier().to_string());
+        // sled_baseboard will be None if either the baseboard isn't known at
+        // all, or it is stored as `Unknown` (in which case
+        // BaseboardId::try_from returns an error).
+        let sled_baseboard = ctx
+            .baseboard
+            .as_ref()
+            .and_then(|b| BaseboardId::try_from(b.clone()).ok());
+
+        let sled_id = ctx.baseboard.as_ref().and_then(|baseboard| {
+            response
+                .sps
+                .iter()
+                .filter(|record| record.id.typ == SpType::Sled)
+                .find_map(|record| {
+                    let data = record.data.as_ref()?;
+                    baseboard_matches_sp_state(baseboard, &data.state)
+                        .then_some(record.id)
+                })
+        });
 
         let switch_slot = match switch_id.slot {
             0 => SwitchSlot::Switch0,
@@ -186,8 +206,9 @@ impl WicketdCommissionApi for WicketdCommissionApiImpl {
 
         Ok(HttpResponseOk(LocationInfo {
             switch_slot,
-            switch_serial,
-            sled_serial,
+            switch_baseboard,
+            sled_baseboard,
+            sled_id,
         }))
     }
 
@@ -227,7 +248,7 @@ impl WicketdCommissionApi for WicketdCommissionApiImpl {
 
     async fn get_update_progress(
         rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<IdOrdMap<SpUpdateProgress>>, HttpError> {
+    ) -> Result<HttpResponseOk<GetUpdateProgressResponse>, HttpError> {
         let ctx = rqctx.context();
         let event_reports = ctx.update_tracker.event_reports().await;
 
@@ -236,22 +257,21 @@ impl WicketdCommissionApi for WicketdCommissionApiImpl {
         //
         // TODO: once rkdeploy is on the published API, we can make
         // `event_reports` be an IdOrdMap and make this much simpler.
-        let mut entries = IdOrdMap::new();
+        let mut sps = IdOrdMap::new();
         for (sp_type, slots) in event_reports {
             for (slot, report) in slots {
-                entries
-                    .insert_unique(progress::sp_update_progress(
-                        SpIdentifier { typ: sp_type, slot },
-                        report,
-                    ))
-                    .expect(
-                        "event_reports is keyed by (sp_type, slot), so SP ids \
-                         are unique",
-                    );
+                sps.insert_unique(progress::sp_update_progress(
+                    SpIdentifier { typ: sp_type, slot },
+                    report,
+                ))
+                .expect(
+                    "event_reports is keyed by (sp_type, slot), so SP ids \
+                     are unique",
+                );
             }
         }
 
-        Ok(HttpResponseOk(entries))
+        Ok(HttpResponseOk(GetUpdateProgressResponse { sps }))
     }
 
     async fn post_start_update(
@@ -286,7 +306,7 @@ impl WicketdCommissionApi for WicketdCommissionApiImpl {
 
     async fn get_rack_setup_state(
         rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<RackOperationStatus>, HttpError> {
+    ) -> Result<HttpResponseOk<RackSetupStatus>, HttpError> {
         let ctx = rqctx.context();
 
         let client = ba_lockstep_client(ctx)?;
@@ -297,7 +317,7 @@ impl WicketdCommissionApi for WicketdCommissionApiImpl {
             .map_err(|err| ba_lockstep_error_to_http(err, "rack setup"))?
             .into_inner();
 
-        Ok(HttpResponseOk(conversions::rack_operation_status_to_ct(op_status)))
+        Ok(HttpResponseOk(conversions::rack_setup_status_to_ct(op_status)))
     }
 
     async fn put_rss_config(
@@ -416,7 +436,7 @@ impl WicketdCommissionApi for WicketdCommissionApiImpl {
 
     async fn post_run_rack_setup(
         rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<RackInitUuid>, HttpError> {
+    ) -> Result<HttpResponseOk<RunRackSetupResponse>, HttpError> {
         let ctx = rqctx.context();
         let log = &rqctx.log;
 
@@ -438,12 +458,12 @@ impl WicketdCommissionApi for WicketdCommissionApiImpl {
             client.baseurl()
         );
 
-        let init_id = client
+        let id = client
             .rack_initialize(&request)
             .await
             .map_err(|err| ba_lockstep_error_to_http(err, "rack setup"))?
             .into_inner();
 
-        Ok(HttpResponseOk(init_id))
+        Ok(HttpResponseOk(RunRackSetupResponse { id }))
     }
 }
