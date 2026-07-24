@@ -206,6 +206,23 @@ pub enum ExternalUrlError {
     Localhost { host: String },
 }
 
+impl ExternalIpError {
+    /// Traverses `error`'s cause chain to extract an [`ExternalIplError`], if
+    /// the provided error was caused by one.
+    pub fn downcast_from<'err>(
+        error: &'err (dyn std::error::Error + 'static),
+    ) -> Option<&'err Self> {
+        let mut next = Some(error);
+        while let Some(error) = next {
+            if let Some(e) = error.downcast_ref::<ExternalIpError>() {
+                return Some(e);
+            }
+            next = error.source();
+        }
+        None
+    }
+}
+
 /// A builder for [`ExternalHttpClient`]s, wrapping a
 /// [`reqwest::ClientBuilder`].
 ///
@@ -1249,16 +1266,7 @@ mod test {
         error: &(dyn std::error::Error + 'static),
         expected_ip: Ipv6Addr,
     ) {
-        let mut found_ip_error = None;
-        let mut next = Some(error);
-        while let Some(error) = next {
-            if let Some(e) = error.downcast_ref::<ExternalIpError>() {
-                found_ip_error = Some(e);
-                break;
-            }
-            next = error.source();
-        }
-        match found_ip_error {
+        match ExternalIpError::downcast_from(error) {
             Some(ExternalIpError::Underlay { ip, .. }) => assert_eq!(
                 *ip,
                 IpAddr::V6(expected_ip),

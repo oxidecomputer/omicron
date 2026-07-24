@@ -481,6 +481,10 @@ impl<'a> ReceiverClient<'a> {
                 return Err(e).context(MSG);
             }
         };
+        const ERR_BEFORE_RSS: &str =
+            "cannot deliver webhook requests before RSS";
+        const ERR_IP_POLICY: &str =
+            "webhook receiver endpoint URL rejected by external IP policy";
         let handle_ext_url_error = |err: ExternalUrlError| {
             // Log a different message depending on whether the webhook
             // receiver URL is an invalid URL, or if it was rejected by the
@@ -488,7 +492,9 @@ impl<'a> ReceiverClient<'a> {
             let msg = match &err {
                 // If the URL just straight up cannot be parsed, that's not a
                 // security policy violation.
-                ExternalUrlError::IntoUrl(_) => "not a valid URL",
+                ExternalUrlError::IntoUrl(_) => {
+                    "webhook receiver endpoint URL is not a valid URL"
+                }
                 // We cannot check against the external IP policy if RSS hasn't
                 // run yet (this code really shouldn't be running at all, since
                 // no one can have created a receiver config in the first
@@ -496,15 +502,15 @@ impl<'a> ReceiverClient<'a> {
                 ExternalUrlError::NotExternalIp(
                     ExternalIpError::RackNotInitialized { .. },
                 ) => {
-                    return Err(anyhow::anyhow!(err));
+                    return Err(err).context(ERR_BEFORE_RSS);
                 }
                 // Any other error indicates that the external IP policy did not
                 // allow the request to be sent.
-                _ => "rejected by external IP policy",
+                _ => ERR_IP_POLICY,
             };
             slog::warn!(
                 &opctx.log,
-                "cannot deliver webhook requests to this endpoint: {msg}";
+                "{msg}";
                 "endpoint" => %self.rx.endpoint,
                 "alert_id" => %delivery.alert_id,
                 "alert_class" => %alert_class,
@@ -595,7 +601,39 @@ impl<'a> ReceiverClient<'a> {
                 return Err(e).context(MSG);
             }
             Err(e) => {
-                if let Some(status) = e.status() {
+                if let Some(ip_error) = ExternalIpError::downcast_from(&e) {
+                    match ip_error {
+                        // This one's on us --- again, it shouldn't be possible
+                        // to deliver a webhook request if the rack hasn't been
+                        // RSSed yet, so that's weird!
+                        ExternalIpError::RackNotInitialized { .. } => {
+                            return Err(e).context(ERR_BEFORE_RSS);
+                        }
+                        // Anything else indicates that the IP was rejected by
+                        // the external IP policy.
+                        _ => {
+                            slog::warn!(
+                                &opctx.log,
+                                // This message should contain the same string
+                                // as the one we emit if it's rejected pre-DNS,
+                                // so that one can grep the logs for that
+                                // string.
+                                "{ERR_IP_POLICY} (after DNS resolution)";
+                                "endpoint" => %self.rx.endpoint,
+                                "alert_id" => %delivery.alert_id,
+                                "alert_class" => %alert_class,
+                                "delivery_id" => %delivery.id,
+                                "delivery_trigger" => %delivery.triggered_by,
+                                "error" => InlineErrorChain::new(&e),
+                            );
+
+                            (
+                                WebhookDeliveryAttemptResult::FailedUnreachable,
+                                None,
+                            )
+                        }
+                    }
+                } else if let Some(status) = e.status() {
                     slog::warn!(
                         &opctx.log,
                         "webhook receiver endpoint returned an HTTP error";
