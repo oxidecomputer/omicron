@@ -193,9 +193,7 @@ pub(super) enum SpFetchResult {
 ///   hold on to an open connection persistently.
 #[derive(Clone, Debug)]
 pub(crate) struct MgsFetchError {
-    #[cfg_attr(not(test), expect(dead_code))]
     pub message: String,
-    #[expect(dead_code)]
     pub observed_at: Instant,
 }
 
@@ -229,7 +227,6 @@ pub(crate) enum Fetched<T> {
     /// Not attempted yet, or invalidated by an SP state or ignition change.
     NotRead,
     /// The most recent attempt failed.
-    #[cfg_attr(not(test), expect(dead_code))]
     Error(MgsFetchError),
     /// The most recent attempt succeeded.
     Read(T),
@@ -262,7 +259,6 @@ impl<T: Clone> Fetched<T> {
 pub(crate) enum RotFetch {
     /// The SP reported it cannot talk to its RoT (from `SpState.rot`).
     CommunicationFailed {
-        #[expect(dead_code)]
         message: String,
     },
     Read(Box<RotData>),
@@ -300,13 +296,11 @@ pub(crate) struct RotData {
     pub stage0: Stage0Fetch,
     pub stage0next: Stage0Fetch,
     /// Image validity as reported by the RoT, if this RoT version reports it.
-    #[expect(dead_code)]
     pub image_errors: Option<RotImageErrors>,
 }
 
 /// Per-slot image validity as reported by an RoT that supports reporting them.
 #[derive(Clone, Debug)]
-#[expect(dead_code)]
 pub(crate) struct RotImageErrors {
     pub slot_a: Option<RotImageError>,
     pub slot_b: Option<RotImageError>,

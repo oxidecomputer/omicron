@@ -725,6 +725,13 @@ impl WicketdApi for WicketdApiImpl {
                 "listening address cannot be reconfigured".to_string(),
             ));
         }
+        if rqctx.commission_bind_address != smf_values.commission_address {
+            return Err(HttpError::for_bad_request(
+                None,
+                "commission listening address cannot be reconfigured"
+                    .to_string(),
+            ));
+        }
 
         if let Some(rack_subnet) = smf_values.rack_subnet {
             let resolver = Resolver::new_from_subnet(

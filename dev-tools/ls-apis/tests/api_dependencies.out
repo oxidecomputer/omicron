@@ -3,7 +3,7 @@ Bootstrap Agent (client: bootstrap-agent-client)
     consumed by: wicketd (omicron/wicketd) via 1 path
 
 Bootstrap Agent Lockstep API (client: bootstrap-agent-lockstep-client)
-    consumed by: wicketd (omicron/wicketd) via 2 paths
+    consumed by: wicketd (omicron/wicketd) via 1 path
 
 Clickhouse Cluster Admin for Keepers (client: clickhouse-admin-keeper-client)
     consumed by: omicron-nexus (omicron/nexus) via 3 paths
@@ -107,4 +107,6 @@ Sled Agent (client: sled-agent-client)
     consumed by: sled-agent-rack-setup (omicron/sled-agent/rack-setup) via 1 path [embedded in omicron-sled-agent; rack-init only]
 
 Wicketd (client: wicketd-client)
+
+Wicketd Commission (client: wicketd-commission-client)
 

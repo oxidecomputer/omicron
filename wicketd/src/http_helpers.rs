@@ -4,9 +4,9 @@
 
 //! Helper and utility code for the wicketd HTTP APIs.
 //!
-//! Currently this is only used for the main wicketd API implementation defined
-//! in `http_entrypoints.rs`. In the future, the same code will be used for the
-//! commission API (RFD 710).
+//! These helpers are shared by both the unstable wicketd API (defined in
+//! `http_entrypoints.rs`) and the stable commission API (defined in the
+//! `commission` module).
 
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
@@ -30,9 +30,6 @@ use crate::mgs::ShutdownInProgress;
 use crate::mgs::records_to_mgs_inventory;
 
 // Get the current inventory or return a 503 Unavailable.
-//
-// Note that 503 is returned if we can't get the MGS-based inventory. If we fail
-// to get the transceivers, that's not considered a fatal 503.
 pub(crate) async fn mgs_inventory_or_unavail(
     mgs_handle: &MgsHandle,
 ) -> Result<MgsV1Inventory, HttpError> {

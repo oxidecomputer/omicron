@@ -2,8 +2,4 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Version `INITIAL` of the wicketd commissioning API.
-
-pub mod inventory;
-pub mod rack_setup;
-pub mod update;
+pub use wicketd_commission_types_versions::latest::inventory::*;
