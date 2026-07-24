@@ -7538,7 +7538,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.webhook_delivery_attempt (
         (result = 'failed_unreachable' AND unreachable_reason IS NOT NULL) OR
         (result != 'failed_unreachable' AND unreachable_reason IS NULL)
     )
-)
+);
 
 CREATE INDEX IF NOT EXISTS lookup_attempts_for_webhook_delivery
 ON omicron.public.webhook_delivery_attempt (
@@ -9079,7 +9079,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '279.0.0', NULL)
+    (TRUE, NOW(), NOW(), '280.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
