@@ -18,7 +18,6 @@ use illumos_utils::zpool::Zpool;
 use illumos_utils::zpool::ZpoolName;
 use key_manager::StorageKeyRequester;
 use omicron_common::api::external::ByteCount;
-use omicron_common::disk::DiskManagementError;
 use omicron_common::disk::DiskVariant;
 use omicron_common::disk::OmicronPhysicalDiskConfig;
 use omicron_uuid_kinds::PhysicalDiskUuid;
@@ -55,6 +54,39 @@ use crate::disks_common::MaybeUpdatedDisk;
 use crate::disks_common::update_properties_from_raw_disk;
 use camino::Utf8PathBuf;
 use illumos_utils::zfs::Mountpoint;
+
+#[derive(Debug, thiserror::Error)]
+enum DiskManagementError {
+    #[error("Disk requested by control plane, but not found on device")]
+    NotFound,
+
+    #[error("Disk requested by control plane is an internal disk: {0}")]
+    InternalDiskControlPlaneRequest(PhysicalDiskUuid),
+
+    #[error("Expected zpool UUID of {expected}, but saw {observed}")]
+    ZpoolUuidMismatch { expected: ZpoolUuid, observed: ZpoolUuid },
+
+    #[error(
+        "Failed to access keys necessary to unlock storage. \
+         This error may be transient."
+    )]
+    KeyManager(String),
+
+    #[error("Other error starting disk management: {0}")]
+    Other(String),
+}
+
+impl DiskManagementError {
+    fn retryable(&self) -> bool {
+        match self {
+            Self::KeyManager(_) => true,
+            Self::NotFound
+            | Self::InternalDiskControlPlaneRequest(_)
+            | Self::ZpoolUuidMismatch { .. }
+            | Self::Other(_) => false,
+        }
+    }
+}
 
 /// Set of currently managed zpools.
 ///
