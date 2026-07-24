@@ -60,8 +60,6 @@ use uuid::Uuid;
 /// and 19m23s). Since sagas running longer than 15 minutes are so rare in
 /// practice, we use that as the threshold. Anything older is much more likely
 /// stuck than legitimately still in progress.
-// TODO-K: Remove in https://github.com/oxidecomputer/omicron/issues/10538
-#[cfg(test)]
 const STUCK_SAGA_THRESHOLD: TimeDelta = TimeDelta::minutes(15);
 
 /// Threshold at which we consider an inventory collection too old for the
@@ -629,16 +627,17 @@ impl super::Nexus {
             UpdateActivityState::Idle | UpdateActivityState::Stuck => {}
         };
 
+        let stuck_sagas = self
+            .datastore()
+            .saga_list_running_or_unwinding_older_than(
+                opctx,
+                Utc::now() - STUCK_SAGA_THRESHOLD,
+            )
+            .await;
+
         let checks = UpdateContactSupportChecksInput {
             inventory,
-            // TODO-K: Temporarily disabling the retrieval of stuck sagas.
-            // In https://github.com/oxidecomputer/omicron/issues/10531 we found
-            // some old unwinding sagas that didn't really affect the update
-            // process in any way. The actual new retrieval method will be in
-            // https://github.com/oxidecomputer/omicron/issues/10538, but to
-            // make sure we don't block the upcoming release, we are disabling
-            // saga reporting for now.
-            stuck_sagas: Ok(vec![]),
+            stuck_sagas,
             blueprint,
             current_target_version: current_target_version.cloned(),
             internal_update_status,
@@ -1313,11 +1312,10 @@ mod test {
         let version = fake_target_version();
         let blueprint =
             fake_blueprint(&cptestctx.logctx.log, &version, Utc::now(), false);
-        // There is a stuck active saga, but no update has ever been run. This
-        // should prompt the user to contact support, but we disabled stuck
-        // staga retrieval temporarily. Contact support should be false
+        // There is a stuck active saga, and no update has ever been run.
+        // contact_support should be true.
         assert!(
-            !nexus
+            nexus
                 .contact_support(
                     &opctx,
                     inventory,
