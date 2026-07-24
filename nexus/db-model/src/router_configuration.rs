@@ -26,7 +26,9 @@ use serde::{Deserialize, Serialize};
 use sled_agent_types::early_networking::ImportExportPolicy;
 use sled_agent_types::early_networking::MaxPathConfig;
 use sled_agent_types::early_networking::RouterLifetimeConfig;
+use sled_agent_types::early_networking::RouterPeerIpAddr;
 use slog_error_chain::InlineErrorChain;
+use std::net::IpAddr;
 use uuid::Uuid;
 
 /// The BGP configuration stored inline on a `router_configuration` row.
@@ -194,7 +196,7 @@ pub struct RouterConfigurationBgpPeer {
     pub delay_open: SqlU32,
     pub idle_hold_time: SqlU32,
     pub local_pref: Option<SqlU32>,
-    pub communities: Vec<i64>,
+    pub communities: Vec<SqlU32>,
     pub multi_exit_discriminator: Option<SqlU32>,
     pub enforce_first_as: bool,
     pub md5_auth_key: Option<String>,
@@ -210,7 +212,7 @@ impl RouterConfigurationBgpPeer {
     ) -> Self {
         let (addr, port_name, router_lifetime) = match peer.peer {
             networking::BgpPeerKind::Numbered { addr, port } => {
-                (Some(addr.into()), port, None)
+                (Some(IpAddr::from(addr).into()), port, None)
             }
             networking::BgpPeerKind::Unnumbered { port, router_lifetime } => {
                 (None, port, Some(router_lifetime.as_u16().into()))
@@ -230,11 +232,7 @@ impl RouterConfigurationBgpPeer {
             delay_open: peer.delay_open.into(),
             idle_hold_time: peer.idle_hold_time.into(),
             local_pref: peer.local_pref.map(Into::into),
-            communities: peer
-                .communities
-                .into_iter()
-                .map(|c| i64::from(c))
-                .collect(),
+            communities: peer.communities.into_iter().map(Into::into).collect(),
             multi_exit_discriminator: peer
                 .multi_exit_discriminator
                 .map(Into::into),
@@ -253,7 +251,15 @@ impl RouterConfigurationBgpPeer {
         let port = self.port_name.clone().into();
         match (self.addr, self.router_lifetime) {
             (Some(addr), None) => {
-                Ok(networking::BgpPeerKind::Numbered { addr: addr.ip(), port })
+                let addr =
+                    RouterPeerIpAddr::try_from(addr.ip()).map_err(|err| {
+                        Error::internal_error(&format!(
+                            "invalid database contents: \
+                             could not convert RouterPeerIpAddr: {}",
+                            InlineErrorChain::new(&err)
+                        ))
+                    })?;
+                Ok(networking::BgpPeerKind::Numbered { addr, port })
             }
             (None, Some(lifetime)) => {
                 let router_lifetime = RouterLifetimeConfig::new(*lifetime)
@@ -284,18 +290,6 @@ impl TryFrom<RouterConfigurationBgpPeer>
 
     fn try_from(value: RouterConfigurationBgpPeer) -> Result<Self, Error> {
         let peer = value.peer()?;
-        let communities = value
-            .communities
-            .into_iter()
-            .map(|c| {
-                u32::try_from(c).map_err(|_| {
-                    Error::internal_error(
-                        "invalid database contents: \
-                         BGP community out of range",
-                    )
-                })
-            })
-            .collect::<Result<Vec<_>, _>>()?;
         Ok(Self {
             name: value.name.into(),
             peer,
@@ -308,7 +302,11 @@ impl TryFrom<RouterConfigurationBgpPeer>
             delay_open: value.delay_open.into(),
             idle_hold_time: value.idle_hold_time.into(),
             local_pref: value.local_pref.map(Into::into),
-            communities,
+            communities: value
+                .communities
+                .into_iter()
+                .map(Into::into)
+                .collect(),
             multi_exit_discriminator: value
                 .multi_exit_discriminator
                 .map(Into::into),

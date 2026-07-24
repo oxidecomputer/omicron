@@ -36,6 +36,7 @@ use sled_agent_types_versions::v1::early_networking::ImportExportPolicy;
 use sled_agent_types_versions::v1::early_networking::SwitchSlot;
 use sled_agent_types_versions::v20::early_networking::MaxPathConfig;
 use sled_agent_types_versions::v20::early_networking::RouterLifetimeConfig;
+use sled_agent_types_versions::v30::early_networking::RouterPeerIpAddr;
 use std::net::IpAddr;
 use uuid::Uuid;
 
@@ -119,7 +120,7 @@ pub enum BgpPeerKind {
     /// A session with a specific peer address on a given port
     Numbered {
         /// Address of the peer.
-        addr: IpAddr,
+        addr: RouterPeerIpAddr,
 
         /// Name of the external port the peer is reachable on, such as
         /// `qsfp0`.
