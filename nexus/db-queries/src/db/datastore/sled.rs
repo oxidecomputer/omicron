@@ -487,15 +487,11 @@ impl<'a> CompleteLocalStorageAllocationLists<'a> {
             let candidate_datasets: HashSet<CandidateDataset> = zpools_for_sled
                 .iter()
                 .filter(|zpool_get_result| {
-                    // The total request size for the local storage dataset
-                    // allocation is the disk size plus the required
-                    // overhead.
-                    let request_size: i64 = request.size().to_bytes() as i64
-                        + request.required_dataset_overhead().to_bytes() as i64;
-
                     // Any zpool that has space for this local storage
                     // dataset allocation is considered a candidate.
-                    zpool_get_result.has_room_for_allocation(request_size)
+                    zpool_get_result.has_room_for_allocation(
+                        request.required_dataset_size(),
+                    )
                 })
                 .map(|zpool_get_result| CandidateDataset {
                     rendezvous_local_storage_unencrypted_dataset_id:
@@ -558,6 +554,8 @@ impl<'a> CompleteLocalStorageAllocationLists<'a> {
         &mut self,
         zpools_for_sled: IdOrdMap<ZpoolGetForSledReservationResult>,
     ) {
+        let mut removed = 0;
+
         self.queue.retain(|incomplete_allocation_list| {
             // An incomplete allocation list has a set of local storage
             // allocations that were matched to zpools with available space:
@@ -585,12 +583,14 @@ impl<'a> CompleteLocalStorageAllocationLists<'a> {
                         ) {
                             // Do not retain this incomplete list of
                             // allocations: one of them is no longer valid.
+                            removed += 1;
                             return false;
                         }
                     }
 
                     None => {
                         // Zpool doesn't exist anymore!
+                        removed += 1;
                         return false;
                     }
                 }
@@ -599,6 +599,45 @@ impl<'a> CompleteLocalStorageAllocationLists<'a> {
             // by default, continue searching further
             true
         });
+
+        if removed > 0 {
+            info!(self.log, "removed {removed} from queue");
+        }
+
+        removed = 0;
+
+        for allocation in &mut self.allocations_to_perform {
+            // Update the candidate datasets for an allocation based on the
+            // updated ZpoolGetForSledReservationResult.
+            allocation.candidate_datasets.retain(|candidate_dataset| {
+                match zpools_for_sled.get(&candidate_dataset.pool_id) {
+                    Some(zpool_for_sled) => {
+                        // Zpool still exists, does it still have room?
+
+                        if !zpool_for_sled.has_room_for_allocation(
+                            allocation.request.required_dataset_size(),
+                        ) {
+                            // Do not retain this as a candidate dataset, it no
+                            // longer has room.
+                            removed += 1;
+                            return false;
+                        }
+                    }
+
+                    None => {
+                        // Zpool doesn't exist anymore!
+                        removed += 1;
+                        return false;
+                    }
+                }
+
+                true
+            });
+        }
+
+        if removed > 0 {
+            info!(self.log, "removed {removed} from candidate datasets");
+        }
     }
 }
 
@@ -670,16 +709,9 @@ impl<'a> Iterator for CompleteLocalStorageAllocationLists<'a> {
                         local_storage_unencrypted_dataset_allocation_id:
                             DatasetUuid::new_v4(),
 
-                        required_dataset_size: {
-                            let request_size: i64 =
-                                request.request.size().to_bytes() as i64
-                                    + request
-                                        .request
-                                        .required_dataset_overhead()
-                                        .to_bytes()
-                                        as i64;
-                            request_size
-                        },
+                        required_dataset_size: request
+                            .request
+                            .required_dataset_size(),
 
                         local_storage_unencrypted_dataset_id: candidate_dataset
                             .rendezvous_local_storage_unencrypted_dataset_id,
@@ -1424,6 +1456,7 @@ impl DataStore {
                         "attempting to insert sled resource record";
                         "local_storage_required" => true,
                         "allocations" => ?allocations,
+                        "queue size" => complete_allocation_lists.queue.len(),
                     );
 
                     // Try to INSERT the record plus the new local storage
@@ -7359,6 +7392,170 @@ pub(in crate::db::datastore) mod test {
             .unwrap();
 
         assert_eq!(previously_target_vmm.state, SledResourceVmmState::Active,);
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    /// Ensure the iterator that searches through local storage allocations
+    /// bails out when a concurrent allocation occurs
+    #[tokio::test]
+    async fn local_storage_allocation_iterator_pruning() {
+        let logctx =
+            dev::test_setup_log("local_storage_allocation_iterator_pruning");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let config = LocalStorageTest {
+            // One sled, with ten U2
+            sleds: vec![LocalStorageTestSled {
+                sled_id: SledUuid::new_v4(),
+                sled_serial: String::from("sled_0"),
+                u2s: (0..10)
+                    .map(|i| LocalStorageTestSledU2 {
+                        physical_disk_id: PhysicalDiskUuid::new_v4(),
+                        physical_disk_serial: format!("phys{i}"),
+
+                        zpool_id: ZpoolUuid::new_v4(),
+                        control_plane_storage_buffer:
+                            external::ByteCount::from_gibibytes_u32(250),
+
+                        inventory_total_size:
+                            external::ByteCount::from_gibibytes_u32(1024),
+
+                        crucible_dataset_id: DatasetUuid::new_v4(),
+                        crucible_dataset_addr: format!(
+                            "[fd00:1122:3344:10{i}::1]:12345"
+                        )
+                        .parse()
+                        .unwrap(),
+
+                        local_storage_unencrypted_dataset_id:
+                            DatasetUuid::new_v4(),
+                    })
+                    .collect(),
+            }],
+            affinity_groups: vec![],
+            anti_affinity_groups: vec![],
+            // Two instances, with ten local storage disks each.
+            instances: vec![
+                LocalStorageTestInstance {
+                    id: InstanceUuid::new_v4(),
+                    name: "local1".to_string(),
+                    affinity: None,
+                    ncpus: 2,
+                    memory: external::ByteCount::from_gibibytes_u32(16),
+                    disks: (0..10)
+                        .map(|i| LocalStorageTestInstanceDisk {
+                            id: Uuid::new_v4(),
+                            name: external::Name::try_from(format!(
+                                "local1-{i}"
+                            ))
+                            .unwrap(),
+                            size: external::ByteCount::from_gibibytes_u32(512),
+                        })
+                        .collect(),
+                },
+                LocalStorageTestInstance {
+                    id: InstanceUuid::new_v4(),
+                    name: "local2".to_string(),
+                    ncpus: 2,
+                    memory: external::ByteCount::from_gibibytes_u32(16),
+                    affinity: None,
+                    disks: (0..10)
+                        .map(|i| LocalStorageTestInstanceDisk {
+                            id: Uuid::new_v4(),
+                            name: external::Name::try_from(format!(
+                                "local2-{i}"
+                            ))
+                            .unwrap(),
+                            size: external::ByteCount::from_gibibytes_u32(512),
+                        })
+                        .collect(),
+                },
+            ],
+        };
+
+        setup_local_storage_allocation_test(&opctx, datastore, &config).await;
+
+        // Create the iterator for the second instance's search
+
+        let instance_2_local_storage_disks: Vec<LocalStorageDisk> = {
+            let conn = datastore.pool_connection_for_tests().await.unwrap();
+
+            datastore
+                .instance_list_disks_on_conn(
+                    &conn,
+                    config.instances[1].id.into_untyped_uuid(),
+                    &PaginatedBy::Name(DataPageParams {
+                        marker: None,
+                        direction: dropshot::PaginationOrder::Ascending,
+                        limit: std::num::NonZeroU32::new(
+                            MAX_DISKS_PER_INSTANCE,
+                        )
+                        .unwrap(),
+                    }),
+                )
+                .await
+                .unwrap()
+                .into_iter()
+                .filter_map(|disk| match disk {
+                    db::datastore::Disk::LocalStorage(disk) => Some(disk),
+                    db::datastore::Disk::Crucible(_) => None,
+                })
+                .collect()
+        };
+
+        let mut iterator = {
+            let zpools_for_sled = datastore
+                .zpool_get_for_sled_reservation(&opctx, config.sleds[0].sled_id)
+                .await
+                .unwrap();
+
+            CompleteLocalStorageAllocationLists::new(
+                &logctx.log,
+                config.sleds[0].sled_id,
+                zpools_for_sled,
+                &instance_2_local_storage_disks,
+            )
+            .unwrap()
+        };
+
+        // Perform the concurrent reservation for first instance
+
+        {
+            let instance = Instance::from_local_storage_test_instance(
+                &config.instances[0],
+            );
+            let instance_id = instance.id;
+            let resources = instance.resources();
+
+            datastore
+                .sled_reservation_create(
+                    &opctx,
+                    instance_id,
+                    PropolisUuid::new_v4(),
+                    resources,
+                    db::model::SledReservationConstraints::none(),
+                    SledReservationReason::Start,
+                )
+                .await
+                .unwrap();
+        }
+
+        // After pruning, the iterator should not yield any more: the whole
+        // search space should have been pruned.
+
+        {
+            let zpools_for_sled = datastore
+                .zpool_get_for_sled_reservation(&opctx, config.sleds[0].sled_id)
+                .await
+                .unwrap();
+
+            iterator.prune_invalidated_allocation_lists(zpools_for_sled);
+        }
+
+        assert!(iterator.next().is_none());
 
         db.terminate().await;
         logctx.cleanup_successful();

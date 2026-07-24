@@ -300,8 +300,14 @@ impl LocalStorageDisk {
         self.model().slot()
     }
 
-    pub fn required_dataset_overhead(&self) -> external::ByteCount {
+    fn required_dataset_overhead(&self) -> external::ByteCount {
         self.disk_type_local_storage.required_dataset_overhead()
+    }
+
+    /// Size required for the disk's data plus overhead
+    pub fn required_dataset_size(&self) -> i64 {
+        self.size().to_bytes() as i64
+            + self.required_dataset_overhead().to_bytes() as i64
     }
 
     /// Return the full path to the local storage zvol's device
