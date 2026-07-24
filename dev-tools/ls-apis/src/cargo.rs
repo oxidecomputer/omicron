@@ -232,7 +232,7 @@ impl Workspace {
                      the workspace root ({:?})",
                     self.name,
                     pkgname,
-                    &self.workspace_root,
+                    self.workspace_root,
                 )
             })?;
         let path = cargo_toml_parent(&relative_path, &manifest_path)?;

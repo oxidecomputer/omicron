@@ -31,6 +31,7 @@ use transceiver_controller::ReceiverPower;
 use transceiver_controller::SffComplianceCode;
 use transceiver_controller::VendorInfo;
 use transceiver_controller::message::ExtendedStatus;
+use wicket_common::inventory::RotImageError;
 use wicket_common::inventory::RotState;
 use wicket_common::inventory::SpComponentCaboose;
 use wicket_common::inventory::SpComponentInfo;
@@ -913,14 +914,37 @@ fn inventory_description(component: &Component) -> Text<'_> {
                     );
                 }
                 if let Some(e) = stage0next_error {
-                    spans.push(
-                        vec![
-                            nest_bullet(),
-                            Span::styled("Image status: ", label_style),
-                            Span::styled(format!("Error: {e:?}"), bad_style),
-                        ]
-                        .into(),
-                    );
+                    // `FirstPageErased` can be an expected state, marking
+                    // it as an error causes confusion
+                    match e {
+                        RotImageError::FirstPageErased => {
+                            spans.push(
+                                vec![
+                                    nest_bullet(),
+                                    Span::styled("Image status: ", label_style),
+                                    Span::styled(
+                                        format!("Expected: {e:?}"),
+                                        warn_style,
+                                    ),
+                                ]
+                                .into(),
+                            );
+                        }
+
+                        _ => {
+                            spans.push(
+                                vec![
+                                    nest_bullet(),
+                                    Span::styled("Image status: ", label_style),
+                                    Span::styled(
+                                        format!("Error: {e:?}"),
+                                        bad_style,
+                                    ),
+                                ]
+                                .into(),
+                            );
+                        }
+                    }
                 } else {
                     spans.push(
                         vec![

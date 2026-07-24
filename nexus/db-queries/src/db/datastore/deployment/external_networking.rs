@@ -649,6 +649,7 @@ impl DataStore {
 mod tests {
     use super::*;
     use crate::db::pub_test_utils::TestDatabase;
+    use crate::db::pub_test_utils::helpers::create_service_ip_pool;
     use crate::db::queries::ALLOW_FULL_TABLE_SCAN_SQL;
     use anyhow::Context as _;
     use async_bb8_diesel::AsyncSimpleConnection;
@@ -845,16 +846,12 @@ mod tests {
             opctx: &OpContext,
             datastore: &DataStore,
         ) {
-            let service_pools = datastore
-                .ip_pools_service_lookup_by_version(
-                    &opctx,
-                    omicron_common::api::external::IpVersion::V4.into(),
-                    std::num::NonZeroU32::new(1).unwrap(),
-                )
-                .await
-                .expect("failed to find service IP pools");
-            let service_pool =
-                service_pools.first().expect("no v4 system services IP pool");
+            let service_pool = create_service_ip_pool(
+                opctx,
+                datastore,
+                omicron_common::api::external::IpVersion::V4,
+            )
+            .await;
             datastore
                 .ip_pool_add_range(
                     &opctx,
