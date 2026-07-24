@@ -86,6 +86,7 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyy_mm_dd_nn, IDENT),
+    (2026_07_24_00, METRICS_ADD_HERTZ),
     (2026_06_11_00, ADD_SYSTEM_IP_POOL_APIS),
     (2026_06_10_00, BGP_CONFIGURATION_UPDATE),
     (2026_06_08_00, INSTANCE_CPU_TYPE_TURIN_V2),
@@ -7778,7 +7779,7 @@ pub trait NexusExternalApi {
         method = GET,
         path = "/v1/system/timeseries/schemas",
         tags = ["system/metrics"],
-        versions = VERSION_METRICS_ADD_JOULES..
+        versions = VERSION_METRICS_ADD_HERTZ..
     }]
     async fn system_timeseries_schema_list(
         rqctx: RequestContext<Self::Context>,
@@ -7791,6 +7792,54 @@ pub trait NexusExternalApi {
         >,
         HttpError,
     >;
+
+    /// List timeseries schemas
+    #[endpoint {
+        operation_id = "system_timeseries_schema_list",
+        method = GET,
+        path = "/v1/system/timeseries/schemas",
+        tags = ["system/metrics"],
+        versions = VERSION_METRICS_ADD_JOULES..VERSION_METRICS_ADD_HERTZ
+    }]
+    async fn system_timeseries_schema_list_v2026_04_29_00(
+        rqctx: RequestContext<Self::Context>,
+        pag_params: Query<
+            PaginationParams<
+                EmptyScanParams,
+                oximeter_types_versions::v1::schema::TimeseriesName,
+            >,
+        >,
+    ) -> Result<
+        HttpResponseOk<
+            ResultsPage<oximeter_types_versions::v2::schema::TimeseriesSchema>,
+        >,
+        HttpError,
+    > {
+        use oximeter_types_versions::v2::schema::TimeseriesSchema;
+        use oximeter_types_versions::v3::schema::UnitsConversionHertzError;
+
+        let page =
+            Self::system_timeseries_schema_list(rqctx, pag_params).await?.0;
+        let items = page
+            .items
+            .into_iter()
+            .map(|item| {
+                TimeseriesSchema::try_from(item).map_err(
+                    |UnitsConversionHertzError| {
+                        HttpError::for_client_error(
+                            None,
+                            dropshot::ClientErrorStatusCode::BAD_REQUEST,
+                            "client version out of date: schema contains \
+                             new types of units (hertz)"
+                                .to_string(),
+                        )
+                    },
+                )
+            })
+            .collect::<Result<_, _>>()?;
+
+        Ok(HttpResponseOk(ResultsPage { items, next_page: page.next_page }))
+    }
 
     #[endpoint {
         operation_id = "system_timeseries_schema_list",
@@ -7814,7 +7863,9 @@ pub trait NexusExternalApi {
         HttpError,
     > {
         use oximeter_types_versions::v1::schema::TimeseriesSchema;
+        use oximeter_types_versions::v2::schema::TimeseriesSchema as TimeseriesSchemaV2;
         use oximeter_types_versions::v2::schema::UnitsConversionJoulesError;
+        use oximeter_types_versions::v3::schema::UnitsConversionHertzError;
 
         let page =
             Self::system_timeseries_schema_list(rqctx, pag_params).await?.0;
@@ -7822,17 +7873,29 @@ pub trait NexusExternalApi {
             .items
             .into_iter()
             .map(|item| {
-                TimeseriesSchema::try_from(item).map_err(
-                    |UnitsConversionJoulesError| {
+                TimeseriesSchemaV2::try_from(item)
+                    .map_err(|UnitsConversionHertzError| {
                         HttpError::for_client_error(
                             None,
                             dropshot::ClientErrorStatusCode::BAD_REQUEST,
                             "client version out of date: schema contains \
-                             new types of units (joules)"
+                             new types of units (hertz)"
                                 .to_string(),
                         )
-                    },
-                )
+                    })
+                    .and_then(|item| {
+                        TimeseriesSchema::try_from(item).map_err(
+                            |UnitsConversionJoulesError| {
+                                HttpError::for_client_error(
+                                    None,
+                                    dropshot::ClientErrorStatusCode::BAD_REQUEST,
+                                    "client version out of date: schema \
+                                     contains new types of units (joules)"
+                                        .to_string(),
+                                )
+                            },
+                        )
+                    })
             })
             .collect::<Result<_, _>>()?;
 

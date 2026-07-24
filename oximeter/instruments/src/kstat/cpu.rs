@@ -10,6 +10,8 @@ use crate::kstat::KstatList;
 use crate::kstat::KstatTarget;
 use crate::kstat::hrtime_to_utc;
 use crate::kstat::n_processors;
+use chrono::DateTime;
+use chrono::Utc;
 use kstat_rs::Data;
 use kstat_rs::Kstat;
 use kstat_rs::Named;
@@ -31,12 +33,17 @@ const CPU_NSEC_PREFIX: &str = "cpu_nsec_";
 /// These correspond to the `cpu_nsec_*` fields in the `cpu::sys` kstat.
 const CPU_MICROSTATES: &[&str] = &["idle", "user", "kernel", "dtrace", "intr"];
 
+/// The number of statistics we track from each `cpufreq` kstat: the effective
+/// and average frequencies, and the cumulative APERF / MPERF counters.
+const N_CPUFREQ_STATS: usize = 4;
+
 /// The maximum cardinality of the data we produce, per sampling interval.
 pub fn max_cardinality() -> usize {
-    CPU_MICROSTATES.len() * n_processors().unwrap_or(1024)
+    (CPU_MICROSTATES.len() + N_CPUFREQ_STATS) * n_processors().unwrap_or(1024)
 }
 
-/// CPU metrics for a sled, tracking microstate statistics across all cores.
+/// CPU metrics for a sled, tracking microstate and frequency statistics
+/// across all cores.
 #[derive(Clone, Debug)]
 pub struct SledCpu {
     /// The target for this sled's CPUs.
@@ -55,11 +62,121 @@ impl SledCpu {
     pub fn sled_id(&self) -> Uuid {
         self.target.sled_id
     }
+
+    /// Generate samples from a `cpu::sys` kstat's microstate counters.
+    fn microstate_samples(
+        &self,
+        creation_time: &DateTime<Utc>,
+        cpu_id: u32,
+        snapshot_time: DateTime<Utc>,
+        named: &[Named<'_>],
+        samples: &mut Vec<Sample>,
+    ) -> Result<(), Error> {
+        for named_data in named.iter() {
+            let Named { name, value } = named_data;
+
+            // Check if this is a cpu_nsec_* field we care about
+            let Some(state) = name.strip_prefix(CPU_NSEC_PREFIX) else {
+                continue;
+            };
+
+            // Only process states we know about
+            if !CPU_MICROSTATES.contains(&state) {
+                continue;
+            }
+
+            let datum = value.as_u64()?;
+            let metric = sled_cpu::CpuNsec {
+                cpu_id,
+                state: state.to_string().into(),
+                datum: Cumulative::with_start_time(*creation_time, datum),
+            };
+            let sample = Sample::new_with_timestamp(
+                snapshot_time,
+                &self.target,
+                &metric,
+            )
+            .map_err(Error::Sample)?;
+            samples.push(sample);
+        }
+        Ok(())
+    }
+
+    /// Generate samples from a `cpufreq` kstat's frequency statistics.
+    fn cpufreq_samples(
+        &self,
+        creation_time: &DateTime<Utc>,
+        cpu_id: u32,
+        snapshot_time: DateTime<Utc>,
+        named: &[Named<'_>],
+        samples: &mut Vec<Sample>,
+    ) -> Result<(), Error> {
+        // The frequency data is computed by the kernel over a window ending
+        // at `snapshot_hrtime`, up to about a second before the kstat was
+        // actually read. Prefer that as the sample timestamp, where present.
+        let timestamp = named
+            .iter()
+            .find(|nd| nd.name == "snapshot_hrtime")
+            .and_then(|nd| nd.value.as_u64().ok())
+            .map(|hrtime| hrtime_to_utc(hrtime as i64))
+            .transpose()?
+            .unwrap_or(snapshot_time);
+
+        for named_data in named.iter() {
+            let Named { name, value } = named_data;
+            let sample = match *name {
+                "effective_Hz" => Sample::new_with_timestamp(
+                    timestamp,
+                    &self.target,
+                    &sled_cpu::EffectiveFrequency {
+                        cpu_id,
+                        datum: value.as_u64()?,
+                    },
+                ),
+                "average_Hz" => Sample::new_with_timestamp(
+                    timestamp,
+                    &self.target,
+                    &sled_cpu::AverageFrequency {
+                        cpu_id,
+                        datum: value.as_u64()?,
+                    },
+                ),
+                "aperf_total" => Sample::new_with_timestamp(
+                    timestamp,
+                    &self.target,
+                    &sled_cpu::AperfTotal {
+                        cpu_id,
+                        datum: Cumulative::with_start_time(
+                            *creation_time,
+                            value.as_u64()?,
+                        ),
+                    },
+                ),
+                "mperf_total" => Sample::new_with_timestamp(
+                    timestamp,
+                    &self.target,
+                    &sled_cpu::MperfTotal {
+                        cpu_id,
+                        datum: Cumulative::with_start_time(
+                            *creation_time,
+                            value.as_u64()?,
+                        ),
+                    },
+                ),
+                _ => continue,
+            }
+            .map_err(Error::Sample)?;
+            samples.push(sample);
+        }
+        Ok(())
+    }
 }
 
 impl KstatTarget for SledCpu {
     fn interested(&self, kstat: &Kstat<'_>) -> bool {
-        self.time_synced && kstat.ks_module == "cpu" && kstat.ks_name == "sys"
+        self.time_synced
+            && ((kstat.ks_module == "cpu" && kstat.ks_name == "sys")
+                || (kstat.ks_module == "cpufreq" && kstat.ks_name == "cpufreq"))
     }
 
     fn to_samples(
@@ -77,32 +194,22 @@ impl KstatTarget for SledCpu {
                 return Err(Error::ExpectedNamedKstat);
             };
 
-            for named_data in named.iter() {
-                let Named { name, value } = named_data;
-
-                // Check if this is a cpu_nsec_* field we care about
-                let Some(state) = name.strip_prefix(CPU_NSEC_PREFIX) else {
-                    continue;
-                };
-
-                // Only process states we know about
-                if !CPU_MICROSTATES.contains(&state) {
-                    continue;
-                }
-
-                let datum = value.as_u64()?;
-                let metric = sled_cpu::CpuNsec {
+            if kstat.ks_module == "cpufreq" {
+                self.cpufreq_samples(
+                    creation_time,
                     cpu_id,
-                    state: state.to_string().into(),
-                    datum: Cumulative::with_start_time(*creation_time, datum),
-                };
-                let sample = Sample::new_with_timestamp(
                     snapshot_time,
-                    &self.target,
-                    &metric,
-                )
-                .map_err(Error::Sample)?;
-                samples.push(sample);
+                    named,
+                    &mut samples,
+                )?;
+            } else {
+                self.microstate_samples(
+                    creation_time,
+                    cpu_id,
+                    snapshot_time,
+                    named,
+                    &mut samples,
+                )?;
             }
         }
 
@@ -193,6 +300,53 @@ mod tests {
         if let Some(other_kstat) = ctl.filter(Some("link"), None, None).next() {
             assert!(!cpu.interested(&other_kstat));
         }
+
+        // Interested in cpufreq kstats, where the host provides them.
+        if let Some(freq_kstat) =
+            ctl.filter(Some("cpufreq"), Some(0), Some("cpufreq")).next()
+        {
+            assert!(cpu.interested(&freq_kstat));
+        }
+    }
+
+    #[test]
+    fn test_sled_cpu_cpufreq_samples() {
+        let target = SledCpuTarget {
+            rack_id: RACK_ID,
+            sled_id: SLED_ID,
+            sled_serial: SLED_SERIAL.into(),
+            sled_model: SLED_MODEL.into(),
+            sled_revision: SLED_REVISION,
+        };
+        let cpu = SledCpu::new(target, true);
+        let ctl = Ctl::new().unwrap();
+        let ctl = ctl.update().unwrap();
+
+        // Collect the cpufreq kstat for CPU 0, if the host provides it.
+        let Some(mut kstat) =
+            ctl.filter(Some("cpufreq"), Some(0), Some("cpufreq")).next()
+        else {
+            eprintln!("host does not provide cpufreq kstats, skipping");
+            return;
+        };
+        let creation_time = hrtime_to_utc(kstat.ks_crtime).unwrap();
+        let data = ctl.read(&mut kstat).unwrap();
+        let samples = cpu.to_samples(&[(creation_time, kstat, data)]).unwrap();
+        println!("{samples:#?}");
+
+        // We should have the two frequency gauges, plus the cumulative
+        // APERF/MPERF counters on hosts new enough to provide them.
+        let mut names: Vec<_> =
+            samples.iter().map(|s| s.timeseries_name.to_string()).collect();
+        names.sort();
+        assert!(
+            names.contains(&"sled_cpu:effective_frequency".to_string()),
+            "expected an effective_frequency sample, found {names:?}"
+        );
+        assert!(
+            names.contains(&"sled_cpu:average_frequency".to_string()),
+            "expected an average_frequency sample, found {names:?}"
+        );
     }
 
     #[test]

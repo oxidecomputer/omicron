@@ -44,3 +44,56 @@ datum_type = "cumulative_u64"
 versions = [
     { added_in = 1, fields = [ "cpu_id", "state" ] }
 ]
+
+[[metrics]]
+name = "effective_frequency"
+description = """\
+Effective frequency of the CPU while it was executing instructions, \
+averaged over a short (roughly one-second) window maintained by the host \
+kernel and ending at the sample time. Derived from the APERF/MPERF ratio, \
+so time spent idle does not contribute."""
+units = "hertz"
+datum_type = "u64"
+versions = [
+    { added_in = 1, fields = [ "cpu_id" ] }
+]
+
+[[metrics]]
+name = "average_frequency"
+description = """\
+Cycles actually executed by the CPU per second of wall-clock time, averaged \
+over a short (roughly one-second) window maintained by the host kernel and \
+ending at the sample time. This measures delivered work rather than a clock \
+speed: time spent idle counts as 0 Hz."""
+units = "hertz"
+datum_type = "u64"
+versions = [
+    { added_in = 1, fields = [ "cpu_id" ] }
+]
+
+[[metrics]]
+name = "aperf_total"
+description = """\
+Cumulative reading of the CPU's actual performance frequency clock counter \
+(APERF), which advances in proportion to the CPU's actual frequency while \
+it is executing instructions. Combined with mperf_total, the ratio of \
+deltas over a query window gives the true effective frequency for that \
+window."""
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [ "cpu_id" ] }
+]
+
+[[metrics]]
+name = "mperf_total"
+description = """\
+Cumulative reading of the CPU's maximum performance frequency clock counter \
+(MPERF), which advances at a fixed rate while the CPU is executing \
+instructions. Combined with aperf_total, the ratio of deltas over a query \
+window gives the true effective frequency for that window."""
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [ "cpu_id" ] }
+]

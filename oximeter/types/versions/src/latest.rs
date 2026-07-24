@@ -47,8 +47,8 @@ pub mod schema {
     pub use crate::v1::schema::TimeseriesName;
     pub use crate::v1::schema::default_schema_version;
 
-    pub use crate::v2::schema::TimeseriesSchema;
-    pub use crate::v2::schema::Units;
+    pub use crate::v3::schema::TimeseriesSchema;
+    pub use crate::v3::schema::Units;
 
     // Use by both type definition and impls, but not pub.
     pub(crate) use crate::v1::schema::TIMESERIES_NAME_REGEX;
