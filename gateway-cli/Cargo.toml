@@ -23,7 +23,7 @@ slog-term.workspace = true
 termios.workspace = true
 tokio = { workspace = true, features = [ "io-std", "rt-multi-thread", "macros", "time" ] }
 tokio-tungstenite.workspace = true
-tufaceous-artifact.workspace = true
+tufaceous-artifact-v2.workspace = true
 uuid.workspace = true
 
 gateway-client.workspace = true

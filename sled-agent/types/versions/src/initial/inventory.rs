@@ -39,7 +39,7 @@ use serde::{Deserialize, Serialize};
 // depend on sled-hardware-types.
 pub use sled_hardware_types::{Baseboard, SledCpuFamily};
 use strum::EnumIter;
-use tufaceous_artifact::ArtifactHash;
+use tufaceous_artifact_v2::ArtifactHash;
 use uuid::Uuid;
 
 use crate::impls::inventory::SourceNatConfigError;
@@ -130,7 +130,10 @@ pub enum HostPhase2DesiredContents {
     /// Set the phase 2 slot to the given artifact.
     ///
     /// The artifact will come from an unpacked and distributed TUF repo.
-    Artifact { hash: ArtifactHash },
+    Artifact {
+        #[schemars(schema_with = "ArtifactHash::v1_json_schema")]
+        hash: ArtifactHash,
+    },
 }
 
 /// Describes the desired contents for both host phase 2 slots.
@@ -179,6 +182,7 @@ pub struct BootPartitionContents {
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]
 pub struct BootPartitionDetails {
     pub header: BootImageHeader,
+    #[schemars(schema_with = "ArtifactHash::v1_json_schema")]
     pub artifact_hash: ArtifactHash,
     pub artifact_size: usize,
 }
@@ -333,6 +337,7 @@ pub struct ZoneArtifactInventory {
     pub expected_size: u64,
 
     /// The expected digest of the file's contents.
+    #[schemars(schema_with = "ArtifactHash::v1_json_schema")]
     pub expected_hash: ArtifactHash,
 
     /// The status of the artifact.
@@ -496,7 +501,10 @@ pub enum OmicronZoneImageSource {
     ///
     /// This originates from TUF repos uploaded to Nexus which are then
     /// replicated out to all sleds.
-    Artifact { hash: ArtifactHash },
+    Artifact {
+        #[schemars(schema_with = "ArtifactHash::v1_json_schema")]
+        hash: ArtifactHash,
+    },
 }
 
 impl OmicronZoneImageSource {

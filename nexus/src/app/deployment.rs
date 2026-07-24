@@ -795,8 +795,8 @@ mod tests {
     use nexus_types::deployment::BlueprintHostPhase2DesiredSlots;
     use omicron_test_utils::dev::test_setup_log;
     use omicron_uuid_kinds::MupdateOverrideUuid;
-    use tufaceous_artifact::ArtifactHash;
-    use tufaceous_artifact::ArtifactVersion;
+    use tufaceous_artifact_v2::ArtifactHash;
+    use tufaceous_artifact_v2::ArtifactVersion;
 
     fn make_os_artifact(
         version: &semver::Version,

@@ -49,7 +49,7 @@ use tokio::io::AsyncReadExt;
 use tokio::io::AsyncSeekExt;
 use tokio::io::AsyncWriteExt;
 use tokio_util::io::ReaderStream;
-use tufaceous_artifact::ArtifactHash;
+use tufaceous_artifact_v2::ArtifactHash;
 use zip::result::ZipError;
 
 #[derive(thiserror::Error, Debug)]

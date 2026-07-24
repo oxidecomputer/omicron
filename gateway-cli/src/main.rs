@@ -31,7 +31,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 use tokio_tungstenite::WebSocketStream;
 use tokio_tungstenite::tungstenite::protocol::Role;
-use tufaceous_artifact::ArtifactHash;
+use tufaceous_artifact_v2::ArtifactHash;
 use uuid::Uuid;
 
 mod picocom_map;

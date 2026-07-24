@@ -5,7 +5,7 @@
 //! developer REPL for driving blueprint planning
 
 use anyhow::{Context, anyhow, bail, ensure};
-use camino::Utf8PathBuf;
+use camino::{Utf8Path, Utf8PathBuf};
 use chrono::{DateTime, Utc};
 use clap::ValueEnum;
 use clap::{Args, Parser, Subcommand};
@@ -21,9 +21,7 @@ use nexus_reconfigurator_blippy::Blippy;
 use nexus_reconfigurator_blippy::BlippyReportSortKey;
 use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
 use nexus_reconfigurator_planning::blueprint_editor::ExternalNetworkingAllocator;
-use nexus_reconfigurator_planning::example::{
-    ExampleSystemBuilder, extract_tuf_repo_description, tuf_assemble,
-};
+use nexus_reconfigurator_planning::example::ExampleSystemBuilder;
 use nexus_reconfigurator_planning::planner::Planner;
 use nexus_reconfigurator_planning::system::{
     RotStateOverrides, SledBuilder, SledInventoryVisibility, SystemDescription,
@@ -51,6 +49,7 @@ use nexus_types::deployment::{OmicronZoneNic, TargetReleaseDescription};
 use nexus_types::deployment::{PendingMgsUpdateSpDetails, PlanningInput};
 use nexus_types::external_api::sled::{SledPolicy, SledProvisionPolicy};
 use nexus_types::inventory::CollectionDisplayCliFilter;
+use nexus_types::tuf_repo::TufRepoDescription;
 use omicron_common::address::REPO_DEPOT_PORT;
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::Name;
@@ -67,6 +66,7 @@ use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::VnicUuid;
 use omicron_uuid_kinds::{BlueprintUuid, MupdateOverrideUuid};
 use omicron_uuid_kinds::{CollectionUuid, MupdateUuid};
+use semver::Version;
 use sled_agent_types::inventory::ZoneKind;
 use slog_error_chain::InlineErrorChain;
 use std::borrow::Cow;
@@ -80,10 +80,11 @@ use std::str::FromStr;
 use std::sync::Arc;
 use swrite::{SWrite, swrite, swriteln};
 use tabled::Tabled;
-use tufaceous_artifact::ArtifactHash;
-use tufaceous_artifact::ArtifactVersion;
-use tufaceous_artifact::ArtifactVersionError;
-use tufaceous_lib::assemble::ArtifactManifest;
+use tufaceous_artifact_v2::ArtifactHash;
+use tufaceous_artifact_v2::ArtifactVersion;
+use tufaceous_artifact_v2::ArtifactVersionError;
+use tufaceous_v2::RepositoryLoader;
+use tufaceous_v2::edit::RepositoryEditor;
 
 mod log_capture;
 pub mod test_utils;
@@ -464,7 +465,7 @@ fn process_command(
         Commands::BlueprintLoad(args) => cmd_blueprint_load(sim, args),
         Commands::Show => cmd_show(sim),
         Commands::Set(args) => cmd_set(sim, args),
-        Commands::TufAssemble(args) => cmd_tuf_assemble(sim, args),
+        Commands::GenerateFakeRepo(args) => cmd_generate_fake_repo(args),
         Commands::Load(args) => cmd_load(sim, args),
         Commands::LoadExample(args) => cmd_load_example(sim, args),
         Commands::FileContents(args) => cmd_file_contents(args),
@@ -567,8 +568,8 @@ enum Commands {
     #[command(subcommand)]
     Set(SetArgs),
 
-    /// use tufaceous to generate a repo from a manifest
-    TufAssemble(TufAssembleArgs),
+    /// use tufaceous to generate a fake repository
+    GenerateFakeRepo(GenerateFakeRepoArgs),
 
     /// save state to a file
     Save(SaveArgs),
@@ -1622,19 +1623,15 @@ impl CockroachdbSettingsOpts {
 }
 
 #[derive(Debug, Args)]
-struct TufAssembleArgs {
-    /// The tufaceous manifest path (relative to this crate's root)
-    manifest_path: Utf8PathBuf,
-
-    /// Allow non-semver artifact versions.
-    #[clap(long)]
-    allow_non_semver: bool,
+struct GenerateFakeRepoArgs {
+    /// System version of generated repository
+    version: Version,
 
     #[clap(
         long,
         // Use help here rather than a doc comment because rustdoc doesn't like
         // `<` and `>` in help messages.
-        help = "The path to the output [default: repo-<system-version>.zip]"
+        help = "The path to the output [default: repo-<version>.zip]"
     )]
     output: Option<Utf8PathBuf>,
 }
@@ -3355,17 +3352,16 @@ fn cmd_show(sim: &mut ReconfiguratorSim) -> anyhow::Result<Option<String>> {
                 s,
                 "target release (generation {}): {} ({})",
                 target_release.target_release_generation,
-                tuf_desc.repo.system_version,
-                tuf_desc.repo.file_name
+                tuf_desc.system_version,
+                tuf_desc.file_name
             );
             for artifact in &tuf_desc.artifacts {
                 swriteln!(
                     s,
-                    "    artifact: {} {} ({} version {})",
+                    "    artifact: {} {} version {}",
                     artifact.hash,
-                    artifact.id.kind,
-                    artifact.id.name,
-                    artifact.id.version
+                    artifact.display_tags(),
+                    artifact.version
                 );
             }
         }
@@ -3552,6 +3548,32 @@ fn cmd_set(
     Ok(Some(rv))
 }
 
+fn extract_tuf_repo_description(
+    logger: &slog::Logger,
+    archive_path: &Utf8Path,
+) -> anyhow::Result<TufRepoDescription> {
+    let repo = oxide_tokio_rt::run(
+        RepositoryLoader::new()
+            .unsafe_blindly_trust_repo()
+            .compute_archive_sha256(true)
+            .load_zip_path(archive_path.to_owned(), logger),
+    )?;
+    Ok(TufRepoDescription {
+        artifacts: repo.artifacts().clone(),
+        metadata: repo.metadata().clone(),
+        system_version: repo.system_version().clone(),
+        hash: ArtifactHash(
+            *repo
+                .archive_sha256()
+                .expect("tufaceous should have calculated hash"),
+        ),
+        file_name: archive_path
+            .file_name()
+            .expect("path to opened file must have a file name")
+            .to_owned(),
+    })
+}
+
 /// Converts a mupdate source to a TUF repo description.
 fn mupdate_source_to_description(
     sim: &ReconfiguratorSim,
@@ -3619,48 +3641,27 @@ fn mupdate_source_to_description(
     }
 }
 
-fn cmd_tuf_assemble(
-    sim: &ReconfiguratorSim,
-    args: TufAssembleArgs,
+fn cmd_generate_fake_repo(
+    args: GenerateFakeRepoArgs,
 ) -> anyhow::Result<Option<String>> {
-    let manifest_path = if args.manifest_path.is_absolute() {
-        args.manifest_path.clone()
-    } else {
-        // Use CARGO_MANIFEST_DIR to resolve relative paths.
-        let dir = std::env::var("CARGO_MANIFEST_DIR").context(
-            "CARGO_MANIFEST_DIR not set in environment \
-             (are you running with `cargo run`?)",
-        )?;
-        let mut dir = Utf8PathBuf::from(dir);
-        dir.push(&args.manifest_path);
-        dir
-    };
-
-    // Obtain the system version from the manifest.
-    let manifest =
-        ArtifactManifest::from_path(&manifest_path).with_context(|| {
-            format!("error parsing manifest from `{manifest_path}`")
-        })?;
-
-    let output_path = if let Some(output_path) = &args.output {
-        output_path.clone()
-    } else {
-        // This is relative to the current directory.
-        Utf8PathBuf::from(format!("repo-{}.zip", manifest.system_version))
-    };
-
-    tuf_assemble(
-        &sim.log,
-        &manifest_path,
-        &output_path,
-        args.allow_non_semver,
-    )?;
-
-    let rv = format!(
-        "created {} for system version {}",
-        output_path, manifest.system_version,
-    );
-    Ok(Some(rv))
+    oxide_tokio_rt::run(async {
+        let output_path = args.output.unwrap_or_else(|| {
+            // This is relative to the current directory.
+            format!("repo-{}.zip", args.version).into()
+        });
+        RepositoryEditor::fake(args.version.clone())?
+            .finish()
+            .await?
+            .generate_root()
+            .sign()
+            .await?
+            .write_zip_file(&output_path, chrono::Utc::now())
+            .await?;
+        Ok(Some(format!(
+            "created {} for system version {}",
+            output_path, args.version
+        )))
+    })
 }
 
 fn read_file(

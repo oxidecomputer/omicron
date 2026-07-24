@@ -128,9 +128,9 @@ thiserror.workspace = true
 tokio = { workspace = true, features = ["full"] }
 tokio-postgres = { workspace = true, features = ["with-serde_json-1"] }
 tokio-util = { workspace = true, features = ["codec", "rt"] }
-tough.workspace = true
 trust-quorum-types.workspace = true
-tufaceous-artifact.workspace = true
+tufaceous-artifact-v2.workspace = true
+tufaceous-v2.workspace = true
 usdt.workspace = true
 uuid.workspace = true
 
@@ -160,7 +160,6 @@ rustls = { workspace = true }
 rustls-pemfile = { workspace = true }
 scim2-rs.workspace = true
 support-bundle-collection.workspace = true
-update-common.workspace = true
 oxide-update-engine.workspace = true
 oxide-update-engine-types.workspace = true
 omicron-workspace-hack.workspace = true
@@ -211,9 +210,8 @@ sp-sim.workspace = true
 strum.workspace = true
 subprocess.workspace = true
 term.workspace = true
-tufaceous.workspace = true
-tufaceous-artifact.workspace = true
-tufaceous-lib.workspace = true
+tufaceous-artifact-v2.workspace = true
+tufaceous-v2.workspace = true
 
 [[bench]]
 name = "setup_benchmark"

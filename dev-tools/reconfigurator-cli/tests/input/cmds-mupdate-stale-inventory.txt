@@ -20,7 +20,7 @@ load-example --nsleds 1 --ndisks-per-sled 3
 sled-list
 
 # Create a TUF repository so noop image source conversions are possible.
-tuf-assemble ../../update-common/manifests/fake.toml
+generate-fake-repo 1.0.0
 set target-release repo-1.0.0.zip
 
 # Update the install dataset on serial0 to the target release.

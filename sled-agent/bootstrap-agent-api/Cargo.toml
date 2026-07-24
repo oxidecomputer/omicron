@@ -18,4 +18,4 @@ serde.workspace = true
 sled-agent-types.workspace = true
 sled-agent-types-versions.workspace = true
 sled-hardware-types.workspace = true
-tufaceous-artifact.workspace = true
+tufaceous-artifact-v2.workspace = true

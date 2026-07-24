@@ -15,7 +15,7 @@ use sled_agent_types::resolvable_files::PreparedOmicronZone;
 use sled_agent_types::resolvable_files::RemoveMupdateOverrideResult;
 use sled_agent_types::resolvable_files::ResolverStatus;
 use std::future::Future;
-use tufaceous_artifact::ArtifactHash;
+use tufaceous_artifact_v2::ArtifactHash;
 
 use crate::InternalDisks;
 

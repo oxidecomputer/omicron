@@ -8,7 +8,7 @@ load-example --nsleds 1 --ndisks-per-sled 3
 sled-list
 
 # Create a TUF repository, set as target release, and update the install dataset.
-tuf-assemble ../../update-common/manifests/fake.toml
+generate-fake-repo 1.0.0
 set target-release repo-1.0.0.zip
 sled-update-install-dataset serial0 --to-target-release
 

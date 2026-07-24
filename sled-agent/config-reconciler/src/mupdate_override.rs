@@ -22,7 +22,7 @@ use slog::error;
 use slog::info;
 use slog::warn;
 use slog_error_chain::InlineErrorChain;
-use tufaceous_artifact::ArtifactHash;
+use tufaceous_artifact_v2::ArtifactHash;
 
 /// An extension trait for `ResolverStatus`.
 ///

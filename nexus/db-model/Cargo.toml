@@ -60,7 +60,7 @@ omicron-passwords.workspace = true
 sled-agent-client.workspace = true
 sled-agent-types.workspace = true
 omicron-workspace-hack.workspace = true
-tufaceous-artifact.workspace = true
+tufaceous-artifact-v2.workspace = true
 
 [dev-dependencies]
 camino-tempfile.workspace = true
