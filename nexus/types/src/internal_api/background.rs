@@ -971,7 +971,7 @@ pub mod fm_sitrep_history_pruner {
         Pruned { count: u64 },
         /// A pruning query failed. Any batches that completed before the
         /// error still happened, and are recorded in
-        /// [`SirepsPruned`].
+        /// [`SitrepsPruned`].
         Error(String),
     }
 }
