@@ -37,8 +37,8 @@
     },
     "/clear-update-state": {
       "post": {
-        "summary": "Clear update state for one or more service processors",
-        "description": "Use this to reset update state after a completed or failed update. This fails with a 400 if any of the targeted service processors are currently being updated. Otherwise, the response reports which targets had update state cleared and which had no update data to clear.",
+        "summary": "Clear MUPdate state for one or more sleds, switches, or PSCs",
+        "description": "Use this to reset update state after a completed or failed MUPdate. This fails with a 400 if any of the targets are currently being MUPdated. Otherwise, the response reports which targets had update state cleared and which had no update data to clear.",
         "operationId": "post_clear_update_state",
         "requestBody": {
           "content": {
@@ -388,7 +388,7 @@
       },
       "put": {
         "summary": "Upload a TUF repository to wicketd",
-        "description": "At any given time, wicketd holds at most one TUF repository, extracted to ephemeral storage; any previously-uploaded repository is discarded. This request is rejected with a 400 while any service-processor update is in progress. A successful upload clears all update progress state, so a subsequent `GET /update-progress` returns an empty list.",
+        "description": "At any given time, wicketd holds at most one TUF repository, extracted to ephemeral storage; any previously-uploaded repository is discarded. This request is rejected with a 400 while any MUPdate is in progress. A successful upload clears all update progress state, so a subsequent `GET /update-progress` returns an empty list.",
         "operationId": "put_repository",
         "requestBody": {
           "content": {
@@ -416,8 +416,8 @@
     },
     "/update": {
       "post": {
-        "summary": "Start updating one or more service processors",
-        "description": "A target that already has update state (even from a successful update) is rejected until that state is cleared with `/clear-update-state` or a new repository is uploaded.",
+        "summary": "Start MUPdating one or more sleds, switches, or PSCs",
+        "description": "A target that already has update state (even from a successful MUPdate) is rejected until that state is cleared with `/clear-update-state` or a new repository is uploaded.",
         "operationId": "post_start_update",
         "requestBody": {
           "content": {
@@ -444,7 +444,7 @@
     },
     "/update-progress": {
       "get": {
-        "summary": "Report the update progress of every service processor with update state",
+        "summary": "Report the progress of every MUPdate",
         "operationId": "get_update_progress",
         "responses": {
           "200": {

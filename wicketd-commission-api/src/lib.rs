@@ -122,11 +122,11 @@ pub trait WicketdCommissionApi {
 
     /// Upload a TUF repository to wicketd
     ///
-    /// At any given time, wicketd holds at most one TUF repository, extracted to
-    /// ephemeral storage; any previously-uploaded repository is discarded. This
-    /// request is rejected with a 400 while any service-processor update is in
-    /// progress. A successful upload clears all update progress state, so a
-    /// subsequent `GET /update-progress` returns an empty list.
+    /// At any given time, wicketd holds at most one TUF repository, extracted
+    /// to ephemeral storage; any previously-uploaded repository is discarded.
+    /// This request is rejected with a 400 while any MUPdate is in progress. A
+    /// successful upload clears all update progress state, so a subsequent
+    /// `GET /update-progress` returns an empty list.
     #[endpoint {
         method = PUT,
         path = "/repository",
@@ -137,7 +137,7 @@ pub trait WicketdCommissionApi {
         body: StreamingBody,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
-    /// Report the update progress of every service processor with update state
+    /// Report the progress of every MUPdate
     #[endpoint {
         method = GET,
         path = "/update-progress",
@@ -149,11 +149,11 @@ pub trait WicketdCommissionApi {
         HttpError,
     >;
 
-    /// Start updating one or more service processors
+    /// Start MUPdating one or more sleds, switches, or PSCs
     ///
-    /// A target that already has update state (even from a successful update) is
-    /// rejected until that state is cleared with `/clear-update-state` or a new
-    /// repository is uploaded.
+    /// A target that already has update state (even from a successful MUPdate)
+    /// is rejected until that state is cleared with `/clear-update-state` or a
+    /// new repository is uploaded.
     #[endpoint {
         method = POST,
         path = "/update",
@@ -163,12 +163,12 @@ pub trait WicketdCommissionApi {
         params: TypedBody<latest::update::StartUpdateParams>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
-    /// Clear update state for one or more service processors
+    /// Clear MUPdate state for one or more sleds, switches, or PSCs
     ///
-    /// Use this to reset update state after a completed or failed update. This
-    /// fails with a 400 if any of the targeted service processors are currently
-    /// being updated. Otherwise, the response reports which targets had update
-    /// state cleared and which had no update data to clear.
+    /// Use this to reset update state after a completed or failed MUPdate. This
+    /// fails with a 400 if any of the targets are currently being MUPdated.
+    /// Otherwise, the response reports which targets had update state cleared
+    /// and which had no update data to clear.
     #[endpoint {
         method = POST,
         path = "/clear-update-state",
