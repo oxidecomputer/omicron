@@ -2,395 +2,391 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::collections::BTreeMap;
-use std::collections::HashMap;
-use std::io::ErrorKind;
-
+use crate::tuf_v2::SharedEditor;
 use anyhow::Context as _;
 use anyhow::Result;
+use anyhow::anyhow;
 use anyhow::bail;
 use anyhow::ensure;
 use camino::Utf8PathBuf;
-use fs_err::tokio as fs;
-use futures::future::TryFutureExt;
-use semver::Version;
-use serde::Deserialize;
-use serde::Deserializer;
+use camino_tempfile::NamedUtf8TempFile;
+use camino_tempfile::Utf8TempDir;
+use camino_tempfile::Utf8TempPath;
+use futures::StreamExt;
+use sigstore_verify::GITHUB_DOT_COM;
+use sigstore_verify::SIGSTORE_PUBLIC_GOOD;
+use sigstore_verify::repr::bundle::Bundle;
+use sigstore_verify::repr::bundle::BundleContent;
+use sigstore_verify::repr::in_toto::InTotoPredicate;
+use sigstore_verify::repr::in_toto::InTotoStatement;
+use sigstore_verify::repr::trusted_root::TrustedRoot;
+use sigstore_verify::verify_no_tlog_async;
 use slog::Logger;
+use slog::debug;
 use slog::warn;
+use std::collections::BTreeMap;
+use std::io::SeekFrom;
+use std::time::Duration;
+use tokio::fs::File;
+use tokio::io::AsyncSeekExt as _;
+use tokio::io::AsyncWriteExt as _;
 use tufaceous_artifact::ArtifactVersion;
 use tufaceous_artifact::KnownArtifactKind;
 use tufaceous_artifact_v2::RotSlot;
 use tufaceous_lib::assemble::DeserializedArtifactData;
 use tufaceous_lib::assemble::DeserializedArtifactSource;
 use tufaceous_lib::assemble::DeserializedFileArtifactSource;
-use tufaceous_lib::assemble::DeserializedManifest;
 
-use crate::RETRY_ATTEMPTS;
-
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct Environment {
-    pub(crate) full_name: &'static str,
-    pub(crate) short_name: &'static str,
-    pub(crate) base_url: &'static str,
-}
-
-impl Environment {
-    pub(crate) const ALL: [Environment; 2] = [
-        Environment {
-            full_name: "staging-devel",
-            short_name: "staging",
-            base_url: "https://permslip-staging.corp.oxide.computer",
-        },
-        Environment {
-            full_name: "production-release",
-            short_name: "production",
-            base_url: "https://signer-us-west.corp.oxide.computer",
-        },
-    ];
-}
-
-pub(crate) async fn fetch_hubris_artifacts(
-    logger: Logger,
-    env: Environment,
+pub(crate) async fn fetch_hubris(
+    log: Logger,
     client: reqwest::Client,
+    attestation: Utf8PathBuf,
     output_dir: Utf8PathBuf,
-    editor: crate::tuf_v2::SharedEditor,
+    editor: SharedEditor,
 ) -> Result<()> {
-    let output_dir = output_dir.join(format!("hubris-{}", env.short_name));
-    let ctx = Context { logger, env, client, output_dir };
-    fs::create_dir_all(&ctx.output_dir).await?;
+    tokio::fs::create_dir_all(&output_dir).await?;
 
-    // This could be parallelized with FuturesUnordered but in practice this
-    // takes less time than OS builds.
+    let bundle: Bundle =
+        serde_json::from_slice(&tokio::fs::read(&attestation).await?)?;
+    let fetcher = Fetcher::new(log, client, &bundle, &output_dir).await?;
 
-    // A partial Tufaceous v1 manifest, written to
-    // $output_dir/hubris-$env/manifest.toml.
-    let mut manifest = DeserializedManifest {
-        system_version: Version::new(0, 0, 0),
-        artifacts: BTreeMap::new(),
-    };
+    let mut artifacts: BTreeMap<_, Vec<_>> = BTreeMap::new();
 
-    let manifest_path = crate::WORKSPACE_DIR
-        .join(format!("tools/permslip_{}", ctx.env.short_name));
-    for line in fs::read_to_string(manifest_path).await?.lines() {
-        let Some(hash) = line.split_whitespace().next() else { continue };
-        let data = ctx.fetch_hash(hash.parse()?, "toml").await?.data;
-        let str = String::from_utf8(data).with_context(|| {
-            format!("hubris artifact manifest {} was not UTF-8", hash)
-        })?;
-        let hash_manifest: PermslipManifest = toml::from_str(&str)
-            .with_context(|| {
-                format!(
-                    "failed to deserialize hubris artifact manifest {}",
-                    hash
-                )
-            })?;
-        for (kind, artifacts) in hash_manifest.artifact {
-            for artifact in artifacts {
-                let source = match (kind, artifact.source) {
-                    (
-                        PermslipArtifactKind::GimletRot
-                        | PermslipArtifactKind::SwitchRot
-                        | PermslipArtifactKind::PscRot,
-                        PermslipSource::CompositeRot { archive_a, archive_b },
-                    ) => {
-                        let path_a =
-                            ctx.fetch_hash(archive_a.hash, "zip").await?.path;
-                        editor
-                            .add_rot_archive(RotSlot::A, path_a.clone())
-                            .await?;
+    let metadata = fetcher.get_omicron_metadata().await?;
+    let version = ArtifactVersion::new(&metadata.version)?;
+    for (name, board) in &metadata.boards {
+        let source = match board {
+            OmicronMetadataBoard::Single { archive } => {
+                let output = output_dir.join(archive);
+                fetcher.download_attested(archive).await?.persist(&output)?;
 
-                        let path_b =
-                            ctx.fetch_hash(archive_b.hash, "zip").await?.path;
-                        editor
-                            .add_rot_archive(RotSlot::B, path_b.clone())
-                            .await?;
-
-                        DeserializedArtifactSource::CompositeRot {
-                            archive_a: DeserializedFileArtifactSource::File {
-                                path: path_a,
-                            },
-                            archive_b: DeserializedFileArtifactSource::File {
-                                path: path_b,
-                            },
-                        }
-                    }
-                    (
-                        PermslipArtifactKind::GimletRotBootloader
-                        | PermslipArtifactKind::SwitchRotBootloader
-                        | PermslipArtifactKind::PscRotBootloader,
-                        PermslipSource::File(file),
-                    ) => {
-                        let path = ctx.fetch_hash(file.hash, "zip").await?.path;
-                        editor.add_rot_bootloader_archive(path.clone()).await?;
-                        DeserializedArtifactSource::File { path }
-                    }
-                    (
-                        PermslipArtifactKind::GimletSp
-                        | PermslipArtifactKind::SwitchSp
-                        | PermslipArtifactKind::PscSp,
-                        PermslipSource::File(file),
-                    ) => {
-                        let path = ctx.fetch_hash(file.hash, "zip").await?.path;
-                        editor.add_sp_archive(path.clone()).await?;
-                        DeserializedArtifactSource::File { path }
-                    }
-                    (kind @ _, source @ _) => {
-                        bail!("unexpected source {source:?} for kind {kind:?}");
-                    }
-                };
-                manifest.artifacts.entry(kind.into()).or_default().push(
-                    DeserializedArtifactData {
-                        name: artifact.name,
-                        version: artifact.version,
-                        source,
-                    },
-                );
+                // TODO: need a way to distinguish SP vs Bootleby in the
+                // metadata emitted by Brussels.
+                editor.add_sp_archive(output.clone()).await?;
+                DeserializedArtifactSource::File { path: output }
             }
-        }
-        if let Some(PermslipFileSource { hash }) =
-            hash_manifest.measurement_corpus
-        {
-            let Output { data, path } = ctx.fetch_hash(hash, "corim").await?;
-            editor.add_measurement_corpus(path.clone()).await?;
-            let corim = rats_corim::Corim::from_bytes(&data)?;
-            manifest
-                .artifacts
-                .entry(KnownArtifactKind::MeasurementCorpus)
-                .or_default()
-                .push(DeserializedArtifactData {
-                    name: format!("{}-{}", ctx.env.short_name, corim.id),
-                    version: corim.get_version()?.parse()?,
-                    source: DeserializedArtifactSource::File { path },
-                });
-        }
+            OmicronMetadataBoard::Ab { archive_a, archive_b } => {
+                let a = output_dir.join(archive_a);
+                fetcher.download_attested(archive_a).await?.persist(&a)?;
+
+                let b = output_dir.join(archive_b);
+                fetcher.download_attested(archive_b).await?.persist(&b)?;
+
+                editor.add_rot_archive(RotSlot::A, a.clone()).await?;
+                editor.add_rot_archive(RotSlot::B, b.clone()).await?;
+                DeserializedArtifactSource::CompositeRot {
+                    archive_a: DeserializedFileArtifactSource::File { path: a },
+                    archive_b: DeserializedFileArtifactSource::File { path: b },
+                }
+            }
+        };
+
+        artifacts.entry(kind_from_board_name(name)?).or_default().push(
+            DeserializedArtifactData {
+                name: name.clone(),
+                version: version.clone(),
+                source,
+            },
+        );
     }
 
-    workaround_check(&manifest, ctx.env.full_name)?;
-    fs::write(
-        ctx.output_dir.join("manifest.toml"),
-        toml::to_string_pretty(&manifest)?.into_bytes(),
+    if fetcher.release_contains("corim.cbor") {
+        let path = output_dir.join("corim.cbor");
+        fetcher.download("corim.cbor").await?.persist(&path)?;
+
+        editor.add_measurement_corpus(path.clone()).await?;
+        artifacts.entry(KnownArtifactKind::MeasurementCorpus).or_default().push(
+            DeserializedArtifactData {
+                name: format!("staging-{}", fetcher.tag),
+                version,
+                source: DeserializedArtifactSource::File { path },
+            },
+        )
+    }
+
+    // Pass the list of artifacts to the code generating Tufaceous v1 repos.
+    // This won't be needed from Tufaceous v2 onwards.
+    tokio::fs::write(
+        output_dir.join("artifacts.json"),
+        serde_json::to_string_pretty(&artifacts)?.into_bytes(),
     )
     .await?;
-    Ok(())
-}
-
-// omicron#9437 fixed an issue where an incorrect RoT image could be chosen.
-// Because the RoT is upgraded before any omicron components, the risk is
-// the incorrect RoT gets chosen and blocks the update with the fix in it.
-// For the purposes of working around the bug and making sure we can deploy
-// the fix, ensure our images are in the "correct" order
-fn workaround_check(
-    manifest: &DeserializedManifest,
-    env_name: &'static str,
-) -> Result<()> {
-    // This bug only affects `gimlet_rot` and `gimlet_rot_bootloader`
-    // We search for these by name. This is ugly but temporary.
-    let gimlet_artifacts =
-        manifest.artifacts.get(&KnownArtifactKind::GimletRot).unwrap();
-
-    let gimlet = gimlet_artifacts
-        .iter()
-        .position(|x| x.name == format!("oxide-rot-1-{env_name}-gimlet"))
-        .expect("failed to find gimlet");
-
-    let cosmo = gimlet_artifacts
-        .iter()
-        .position(|x| x.name == format!("oxide-rot-1-{env_name}-cosmo"))
-        .expect("failed to find cosmo");
-
-    // We need the indicies to be relative for each key set
-    if gimlet > cosmo {
-        anyhow::bail!(
-            "The gimlet entry for `GimletRot` comes after cosmo. This may cause problems."
-        );
-    }
-
-    let gimlet_artifacts = manifest
-        .artifacts
-        .get(&KnownArtifactKind::GimletRotBootloader)
-        .unwrap();
-
-    let gimlet = gimlet_artifacts
-        .iter()
-        .position(|x| {
-            x.name == format!("gimlet_rot_bootloader-{env_name}-gimlet")
-        })
-        .expect("failed to find gimlet");
-
-    let cosmo = gimlet_artifacts
-        .iter()
-        .position(|x| {
-            x.name == format!("gimlet_rot_bootloader-{env_name}-cosmo")
-        })
-        .expect("failed to find cosmo");
-
-    // We need the indicies to be relative for each key set
-    if gimlet > cosmo {
-        anyhow::bail!(
-            "The gimlet entry for `GimletRotBootloader` comes after cosmo. This may cause problems."
-        );
-    }
 
     Ok(())
 }
 
-struct Context {
-    logger: Logger,
-    env: Environment,
+fn kind_from_board_name(board: &str) -> Result<KnownArtifactKind> {
+    if board.starts_with("gimlet-")
+        || board.starts_with("cosmo-")
+        || board.starts_with("metro-")
+    {
+        Ok(KnownArtifactKind::GimletSp)
+    } else if board.starts_with("sidecar-") {
+        Ok(KnownArtifactKind::SwitchSp)
+    } else if board.starts_with("psc-") || board.starts_with("observer-") {
+        Ok(KnownArtifactKind::PscSp)
+    } else {
+        bail!("unknown board name: {board}");
+    }
+}
+
+struct Fetcher<'a> {
+    log: Logger,
     client: reqwest::Client,
-    output_dir: Utf8PathBuf,
+    trusted_root: TrustedRoot,
+    output_dir: &'a Utf8PathBuf,
+    release_bundle: &'a Bundle,
+    in_toto: &'a InTotoStatement,
+    tag: &'a str,
+    repo: &'a str,
+    commit: String,
 }
 
-struct Output {
-    data: Vec<u8>,
-    path: Utf8PathBuf,
-}
+impl<'a> Fetcher<'a> {
+    async fn new(
+        log: Logger,
+        client: reqwest::Client,
+        bundle: &'a Bundle,
+        output_dir: &'a Utf8PathBuf,
+    ) -> Result<Self> {
+        let BundleContent::DsseEnvelope(envelope) = &bundle.content else {
+            bail!("not a release attestation (the content is not DSSE)");
+        };
+        let in_toto = &envelope.payload.parsed;
 
-impl Context {
-    async fn fetch_hash(
-        &self,
-        hash: blake3::Hash,
-        extension: &str,
-    ) -> Result<Output> {
-        let path =
-            self.output_dir.join(hash.to_string()).with_extension(extension);
-        match fs::read(&path).await {
-            Ok(data) => {
-                let cached_hash = blake3::hash(&data);
-                if hash == cached_hash {
-                    return Ok(Output { data, path });
-                }
-                warn!(
-                    self.logger,
-                    "cached hash mismatch: {path} has hash {cached_hash}"
-                );
-                fs::remove_file(&path).await?;
-            }
-            Err(err) if err.kind() == ErrorKind::NotFound => {}
-            Err(err) => return Err(err.into()),
+        // GitHub migrated over time from predicate version 0.1 to 0.2. For the
+        // fields we care about, the difference between the two doesn't matter.
+        let (repo, tag) = match &in_toto.predicate {
+            InTotoPredicate::Release01(release) => (
+                release.predicate.repository.as_deref(),
+                release.predicate.tag.as_deref(),
+            ),
+            InTotoPredicate::Release02(release) => (
+                release.predicate.repository.as_deref(),
+                release.predicate.tag.as_deref(),
+            ),
+            _ => bail!("not a release attestation (bad predicate)"),
+        };
+        let repo = repo.ok_or_else(|| anyhow!("missing repo in predicate"))?;
+        let tag = tag.ok_or_else(|| anyhow!("missing tag in predicate"))?;
+
+        // The commit of the published release is not stored as a predicate for
+        // some reason, but rather as a subject???
+        let commit = hex::encode(
+            in_toto
+                .subject
+                .iter()
+                .find(|sub| sub.uri == Some(format!("pkg:github/{repo}@{tag}")))
+                .ok_or_else(|| anyhow!("missing commit in in-toto subject"))?
+                .digest
+                .sha1
+                .as_ref()
+                .ok_or_else(|| {
+                    anyhow!("missing commit sha1 in in-toto subject")
+                })?,
+        );
+
+        Ok(Fetcher {
+            log,
+            client,
+            trusted_root: fetch_trusted_root().await?,
+            output_dir,
+            release_bundle: bundle,
+            in_toto,
+            tag,
+            repo,
+            commit,
+        })
+    }
+
+    async fn get_omicron_metadata(&self) -> Result<OmicronMetadata> {
+        let file = self.download("omicron-metadata.json").await?;
+        let raw = tokio::fs::read(&file).await?;
+
+        // We first deserialize a struct containing only the metadata_version
+        // field to provide better error messages when the version is bumped.
+        let version: MetadataVersion = serde_json::from_slice(&raw)?;
+        if version.metadata_version != EXPECTED_OMICRON_METADATA_VERSION {
+            bail!(
+                "omicron-metadata.json's version is {}, expected {}",
+                version.metadata_version,
+                EXPECTED_OMICRON_METADATA_VERSION,
+            );
         }
 
-        let url = format!("{}/artifact/{}", self.env.base_url, hash);
-        for attempt in 1..=RETRY_ATTEMPTS {
-            let result = self
-                .client
-                .get(&url)
-                .send()
-                .and_then(|response| {
-                    futures::future::ready(response.error_for_status())
-                })
-                .and_then(|response| response.json::<Vec<u8>>())
-                .map_err(anyhow::Error::from)
-                .and_then(async |data| {
-                    let fetched_hash = blake3::hash(&data);
-                    ensure!(
-                        hash == fetched_hash,
-                        "hash mismatch: expected {hash}, fetched {fetched_hash}"
-                    );
-                    Ok(data)
-                })
-                .await
-                .with_context(|| {
-                    format!(
-                        "failed to fetch hubris artifact {} from {}",
-                        hash, self.env.base_url
-                    )
-                });
-            match result {
-                Ok(data) => {
-                    fs::write(&path, &data).await?;
-                    return Ok(Output { data, path });
-                }
+        Ok(serde_json::from_slice(&raw)?)
+    }
+
+    fn release_contains(&self, name: &str) -> bool {
+        self.in_toto
+            .subject
+            .iter()
+            .find(|sub| sub.name.as_deref() == Some(name))
+            .is_some()
+    }
+
+    async fn download_attested(&self, name: &str) -> Result<Utf8TempPath> {
+        let path = self.download(name).await?;
+
+        // Retrieve the attestation for the artifact.
+        let sigstore = self.download(&format!("{name}.sigstore.json")).await?;
+        let bundle = serde_json::from_slice::<Bundle>(
+            &tokio::fs::read(&sigstore).await?,
+        )
+        .with_context(|| format!("failed to parse attestation for {name}"))?;
+
+        // Verify that the attestation for the artifact is valid.
+        let outcome = verify_no_tlog_async(
+            &self.trusted_root,
+            &bundle,
+            &mut File::open(&path).await?,
+        )
+        .await
+        .with_context(|| format!("failed to verify attestation of {name}"))?;
+
+        // Verify that the artifact was built by GitHub Actions in the correct
+        // repository with the correct source commit (preventing a release from
+        // containing artifacts built elsewhere).
+        let check_claim = |claim, expected: &str, found: &Option<String>| {
+            if Some(expected) != found.as_deref() {
+                bail!(
+                    "expected attestation claim {claim} of {name} \
+                     to be {expected}, found {found:?}"
+                );
+            } else {
+                Ok(())
+            }
+        };
+        check_claim(
+            "issuer_v2",
+            "https://token.actions.githubusercontent.com",
+            &outcome.claims.issuer_v2,
+        )?;
+        check_claim(
+            "subject_repository_uri",
+            &format!("https://github.com/{}", self.repo),
+            &outcome.claims.source_repository_uri,
+        )?;
+        check_claim(
+            "source_repository_digest",
+            &self.commit,
+            &outcome.claims.source_repository_digest,
+        )?;
+
+        Ok(path)
+    }
+
+    async fn download(&self, name: &str) -> Result<Utf8TempPath> {
+        let url = format!(
+            "https://github.com/{}/releases/download/{}/{name}",
+            self.repo, self.tag
+        );
+
+        // Handle spurious GitHub failures by retrying.
+        let mut retries = 0;
+        let mut file = loop {
+            match self.fetch_url(&url).await {
+                Ok(file) => break file,
                 Err(err) => {
-                    if attempt == RETRY_ATTEMPTS {
+                    retries += 1;
+                    if retries > 5 {
                         return Err(err);
                     } else {
-                        warn!(
-                            self.logger,
-                            "fetching {} failed, retrying: {}", url, err
-                        );
+                        warn!(self.log, "retrying fetching {url}: {err}");
+                        tokio::time::sleep(Duration::from_secs(retries)).await;
                     }
                 }
             }
+        };
+
+        // Verify that the downloaded file is part of the release.
+        //
+        // This uses GitHub's release attestation, which contains the hashes of
+        // all released files in the in-toto subject.
+        let claims = verify_no_tlog_async(
+            &self.trusted_root,
+            &self.release_bundle,
+            file.as_file_mut(),
+        )
+        .await?;
+        ensure!(
+            &["https://dotcom.releases.github.com"]
+                == &claims.claims.subject_alternative_names_uris[..],
+            "attestation is not for a GitHub release"
+        );
+
+        Ok(file.into_temp_path())
+    }
+
+    async fn fetch_url(&self, url: &str) -> Result<NamedUtf8TempFile<File>> {
+        let (file, path) =
+            NamedUtf8TempFile::new_in(&self.output_dir)?.into_parts();
+        let mut file = File::from_std(file);
+
+        debug!(self.log, "downloading {url}");
+
+        let resp = self
+            .client
+            .get(url)
+            .send()
+            .await
+            .with_context(|| format!("failed to request {url}"))?;
+        if !resp.status().is_success() {
+            bail!("request to {url} failed with {}", resp.status());
         }
-        unreachable!();
+
+        // Files can potentially be arbitrarily large, stream them rather than
+        // buffering the whole thing into memory.
+        let mut stream = resp.bytes_stream();
+        while let Some(chunk) = stream.next().await {
+            file.write_all(&chunk?).await?;
+        }
+        file.seek(SeekFrom::Start(0)).await?;
+
+        Ok(NamedUtf8TempFile::from_parts(file, path))
     }
 }
 
-// These structs are similar to `DeserializeManifest` and friends from
-// tufaceous-lib, except that the source is a hash instead of a file path. This
-// hash is used to download the artifact from Permission Slip.
-#[derive(Deserialize)]
-struct PermslipManifest {
-    artifact: HashMap<PermslipArtifactKind, Vec<PermslipArtifact>>,
-    // Add a default for backwards compatibility
-    measurement_corpus: Option<PermslipFileSource>,
+async fn fetch_trusted_root() -> Result<TrustedRoot> {
+    // releng is designed to run in an ephemeral CI environment, so the TUF
+    // caching is not actually needed. "Store" it in a temporary directory.
+    let cache_dir = Utf8TempDir::new()?;
+
+    let mut trusted_root = TrustedRoot::empty();
+    trusted_root.merge(
+        sigstore_verify::fetch_trusted_root(
+            cache_dir.as_ref(),
+            &SIGSTORE_PUBLIC_GOOD,
+        )
+        .await?,
+    );
+    trusted_root.merge(
+        sigstore_verify::fetch_trusted_root(
+            cache_dir.as_ref(),
+            &GITHUB_DOT_COM,
+        )
+        .await?,
+    );
+
+    Ok(trusted_root)
 }
 
-#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Hash)]
-#[serde(rename_all = "snake_case")]
-enum PermslipArtifactKind {
-    GimletRot,
-    SwitchRot,
-    PscRot,
-    GimletRotBootloader,
-    SwitchRotBootloader,
-    PscRotBootloader,
-    GimletSp,
-    SwitchSp,
-    PscSp,
+const EXPECTED_OMICRON_METADATA_VERSION: u32 = 3;
+
+#[derive(Debug, serde::Deserialize)]
+struct MetadataVersion {
+    metadata_version: u32,
 }
 
-impl From<PermslipArtifactKind> for KnownArtifactKind {
-    fn from(value: PermslipArtifactKind) -> Self {
-        match value {
-            PermslipArtifactKind::GimletRot => KnownArtifactKind::GimletRot,
-            PermslipArtifactKind::SwitchRot => KnownArtifactKind::SwitchRot,
-            PermslipArtifactKind::PscRot => KnownArtifactKind::PscRot,
-            PermslipArtifactKind::GimletRotBootloader => {
-                KnownArtifactKind::GimletRotBootloader
-            }
-            PermslipArtifactKind::SwitchRotBootloader => {
-                KnownArtifactKind::SwitchRotBootloader
-            }
-            PermslipArtifactKind::PscRotBootloader => {
-                KnownArtifactKind::PscRotBootloader
-            }
-            PermslipArtifactKind::GimletSp => KnownArtifactKind::GimletSp,
-            PermslipArtifactKind::SwitchSp => KnownArtifactKind::SwitchSp,
-            PermslipArtifactKind::PscSp => KnownArtifactKind::PscSp,
-        }
-    }
+#[derive(Debug, serde::Deserialize)]
+struct OmicronMetadata {
+    version: String,
+    boards: BTreeMap<String, OmicronMetadataBoard>,
 }
 
-#[derive(Deserialize)]
-struct PermslipArtifact {
-    name: String,
-    version: ArtifactVersion,
-    source: PermslipSource,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(tag = "kind", rename_all = "kebab-case")]
-enum PermslipSource {
-    File(PermslipFileSource),
-    CompositeRot {
-        archive_a: PermslipFileSource,
-        archive_b: PermslipFileSource,
-    },
-}
-
-#[derive(Debug, Deserialize)]
-struct PermslipFileSource {
-    #[serde(deserialize_with = "deserialize_hash")]
-    hash: blake3::Hash,
-}
-
-fn deserialize_hash<'de, D>(de: D) -> Result<blake3::Hash, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    String::deserialize(de)?.parse().map_err(serde::de::Error::custom)
+#[derive(Debug, serde::Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+enum OmicronMetadataBoard {
+    Single { archive: String },
+    Ab { archive_a: String, archive_b: String },
 }
