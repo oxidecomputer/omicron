@@ -21,9 +21,10 @@ use crate::helpers::SpIdentifierDisplay;
 use crate::http_helpers::http_error_with_message;
 use crate::http_helpers::shutdown_to_http;
 
+pub use self::inventory::MgsFetchError;
 use self::inventory::{
-    FetchedIgnitionState, FetchedSpData, FetchedSpMessage, IgnitionPresence,
-    IgnitionStateFetcher, SpStateFetcher,
+    FetchedIgnitionState, FetchedSpData, IgnitionPresence,
+    IgnitionStateFetcher, SpFetchResult, SpStateFetcher,
 };
 
 mod inventory;
@@ -267,13 +268,31 @@ impl MgsManager {
                     );
                 }
 
-                Some((_, sp)) = sp_data_streams.next() => {
-                    last_successful_mgs_response =
-                        last_successful_mgs_response.max(sp.data.mgs_received);
-                    self.update_inventory_with_sp(
-                        sp,
-                        last_successful_mgs_response,
-                    );
+                Some((id, result)) = sp_data_streams.next() => {
+                    match result {
+                        SpFetchResult::Data(data) => {
+                            last_successful_mgs_response =
+                                last_successful_mgs_response
+                                    .max(data.mgs_received);
+                            self.update_inventory_with_sp(
+                                id,
+                                *data,
+                                last_successful_mgs_response,
+                            );
+                        }
+                        SpFetchResult::StateFetchFailed(error) => {
+                            // Do not satisfy any waiters on receiving this
+                            // error. Completing a waiter on an error would hand
+                            // back stale or absent state after what may be a
+                            // transient failure, so we record the error and
+                            // leave the waiter queued. (This retains behavioral
+                            // compatibility with prior versions of this code
+                            // path, in which the fetching task logged errors and
+                            // never forwarded them here; we may choose to be
+                            // smarter about this in the future.)
+                            self.record_sp_state_fetch_error(id, error);
+                        }
+                    }
                 }
 
                 Some(request) = self.rx.recv() => {
@@ -297,7 +316,10 @@ impl MgsManager {
         &self,
         mgs_last_seen: Instant,
     ) -> GetInventoryResponse {
-        if self.records.is_empty() {
+        // Inventory is available only once at least one record is populated
+        // (see `SpRecord::is_populated`): a map holding nothing but error-only
+        // records still reads as unavailable.
+        if !self.records.iter().any(SpRecord::is_populated) {
             GetInventoryResponse::Unavailable
         } else {
             GetInventoryResponse::Response {
@@ -404,6 +426,10 @@ impl MgsManager {
                 }
             }
 
+            // An ignition update populates `ignition` but deliberately leaves
+            // `last_state_fetch_error` untouched: that field is managed by the
+            // state-fetch path, which sets it on a failed state fetch and clears
+            // it on a successful one.
             entry.ignition = Some(ignition);
         }
 
@@ -418,25 +444,42 @@ impl MgsManager {
 
     fn update_inventory_with_sp(
         &mut self,
-        sp: FetchedSpMessage,
+        sp: SpIdentifier,
+        data: FetchedSpData,
         mgs_last_seen: Instant,
     ) {
-        let id = sp.id;
         // Scope the `record` RefMut so it is dropped before we access `&mut
         // self` again below.
         {
             let mut record =
-                self.records.entry(id).or_insert_with(|| SpRecord::new(id));
-            record.data = Some(sp.data);
+                self.records.entry(sp).or_insert_with(|| SpRecord::new(sp));
+            record.data = Some(data);
+
+            // A successful state fetch supersedes any previously recorded
+            // fetch error for this SP.
+            record.last_state_fetch_error = None;
         }
 
         // Scan any pending waiters and remove this SP from their list; if that
         // was the last thing they needed, `check_completed_waiters()` will send
         // them a response.
         for waiting in &mut self.waiting_for_update {
-            waiting.sps_to_refresh.remove(&id);
+            waiting.sps_to_refresh.remove(&sp);
         }
         self.check_completed_waiters(mgs_last_seen);
+    }
+
+    /// Record the latest state-fetch error for an SP.
+    fn record_sp_state_fetch_error(
+        &mut self,
+        sp: SpIdentifier,
+        error: MgsFetchError,
+    ) {
+        let mut record =
+            self.records.entry(sp).or_insert_with(|| SpRecord::new(sp));
+        // We do not reset `data` back to `None` here -- it represents the
+        // last successful fetch.
+        record.last_state_fetch_error = Some(error);
     }
 }
 
@@ -448,11 +491,21 @@ pub struct SpRecord {
 
     /// Data from the most recent successful fetch.
     pub(crate) data: Option<FetchedSpData>,
+
+    /// The most recent state-fetch error for this SP, or `None` if the last
+    /// state fetch succeeded (or fetching hasn't failed yet).
+    pub last_state_fetch_error: Option<MgsFetchError>,
 }
 
 impl SpRecord {
     fn new(id: SpIdentifier) -> Self {
-        Self { id, ignition: None, data: None }
+        Self { id, ignition: None, data: None, last_state_fetch_error: None }
+    }
+
+    /// Returns true if any fetched information (ignition or SP state data) has
+    /// been recorded for this SP.
+    fn is_populated(&self) -> bool {
+        self.ignition.is_some() || self.data.is_some()
     }
 
     /// Project this record into the frozen `SpInventory` wire type.
@@ -501,7 +554,11 @@ impl IdOrdItem for SpRecord {
 pub(crate) fn records_to_mgs_inventory(
     records: &IdOrdMap<SpRecord>,
 ) -> MgsV1Inventory {
-    let sps = records.iter().map(SpRecord::to_sp_inventory).collect();
+    let sps = records
+        .iter()
+        .filter(|record| record.is_populated())
+        .map(SpRecord::to_sp_inventory)
+        .collect();
     MgsV1Inventory { sps }
 }
 
@@ -514,6 +571,8 @@ struct WaitingForRefresh {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gateway_types::component::{PowerState, SpState};
+    use gateway_types::rot::RotState;
     use std::net::Ipv6Addr;
     use wicket_common::inventory::SpType;
 
@@ -525,6 +584,267 @@ mod tests {
 
     fn sled(slot: u16) -> SpIdentifier {
         SpIdentifier { typ: SpType::Sled, slot }
+    }
+
+    fn sp_state(slot: u16) -> SpState {
+        SpState {
+            serial_number: format!("serial-{slot}"),
+            model: "model".to_string(),
+            revision: 0,
+            hubris_archive_id: "archive".to_string(),
+            base_mac_address: [0; 6],
+            power_state: PowerState::A0,
+            rot: RotState::CommunicationFailed {
+                message: "rot is unhappy".to_string(),
+            },
+        }
+    }
+
+    fn fetched_sp_data(id: SpIdentifier) -> FetchedSpData {
+        FetchedSpData {
+            state: sp_state(id.slot),
+            components: None,
+            caboose_active: None,
+            caboose_inactive: None,
+            rot: None,
+            mgs_received: Instant::now(),
+        }
+    }
+
+    fn mgs_fetch_error(message: &str) -> MgsFetchError {
+        MgsFetchError {
+            message: message.to_string(),
+            observed_at: Instant::now(),
+        }
+    }
+
+    /// Fetch the current inventory and unwrap it as available, panicking if the
+    /// manager still reports `Unavailable`.
+    fn expect_inventory(
+        manager: &MgsManager,
+        now: Instant,
+    ) -> IdOrdMap<SpRecord> {
+        let GetInventoryResponse::Response { sps, .. } =
+            manager.current_inventory(now)
+        else {
+            panic!("expected inventory to be available");
+        };
+        sps
+    }
+
+    /// Return the recorded state-fetch error message for `id`, or `None` if the
+    /// record carries no error.
+    ///
+    /// Panics if no record exists for `id` at all (it should always be
+    /// populated).
+    fn sp_fetch_error_message(
+        sps: &IdOrdMap<SpRecord>,
+        id: SpIdentifier,
+    ) -> Option<&str> {
+        sps.get(&id)
+            .expect("record exists for the SP")
+            .last_state_fetch_error
+            .as_ref()
+            .map(|error| error.message.as_str())
+    }
+
+    #[test]
+    fn sp_state_fetch_error_lifecycle() {
+        let mut manager = dummy_manager();
+        let now = Instant::now();
+
+        // (a) A failed fetch is recorded via the same method `run()` dispatches
+        // to. It creates a record for the SP but does not by itself make
+        // inventory available.
+        manager.record_sp_state_fetch_error(
+            sled(0),
+            mgs_fetch_error("first failure"),
+        );
+        let record = manager
+            .records
+            .get(&sled(0))
+            .expect("recording an error creates a record for the SP");
+        assert!(
+            !record.is_populated(),
+            "an error-only record carries no fetched data: {record:?}",
+        );
+        match manager.current_inventory(now) {
+            GetInventoryResponse::Unavailable => {}
+            other => panic!("expected Unavailable, got {other:?}"),
+        }
+
+        // (b) A second error for the same SP overwrites the first; the overwrite
+        // is asserted at step (c), once inventory is available.
+        manager.record_sp_state_fetch_error(
+            sled(0),
+            mgs_fetch_error("second failure"),
+        );
+
+        // (c) Once any SP reports state, inventory becomes available. The
+        // error-only record for sled 0 is excluded from the wire-visible
+        // projection while sled 1's data appears; sled 0's error reflects the
+        // latest failure, and the successfully-read sled 1 has no error.
+        manager.update_inventory_with_sp(
+            sled(1),
+            fetched_sp_data(sled(1)),
+            now,
+        );
+        let sps = expect_inventory(&manager, now);
+        let inventory = records_to_mgs_inventory(&sps);
+        assert!(
+            inventory.sps.get(&sled(0)).is_none(),
+            "the error-only record for sled 0 is excluded from inventory",
+        );
+        assert!(
+            inventory.sps.get(&sled(1)).is_some(),
+            "sled 1 has data, so it appears in inventory",
+        );
+        assert_eq!(
+            sp_fetch_error_message(&sps, sled(0)),
+            Some("second failure"),
+            "the most recent error overwrites the earlier one",
+        );
+        assert_eq!(
+            sp_fetch_error_message(&sps, sled(1)),
+            None,
+            "sled 1 was read successfully, so it has no error",
+        );
+
+        // (d) A later success for sled 0 clears its error.
+        manager.update_inventory_with_sp(
+            sled(0),
+            fetched_sp_data(sled(0)),
+            now,
+        );
+        let sps = expect_inventory(&manager, now);
+        assert_eq!(
+            sp_fetch_error_message(&sps, sled(0)),
+            None,
+            "a successful read clears the recorded error",
+        );
+
+        // (e) A fresh error after that success does not discard the data the
+        // success captured.
+        manager.record_sp_state_fetch_error(
+            sled(0),
+            mgs_fetch_error("third failure"),
+        );
+        let sps = expect_inventory(&manager, now);
+        let sled0_record = sps.get(&sled(0)).expect("sled 0's record exists");
+        assert!(
+            sled0_record.data.is_some(),
+            "the earlier successful data survives the later error: \
+             {sled0_record:?}",
+        );
+        assert_eq!(
+            sp_fetch_error_message(&sps, sled(0)),
+            Some("third failure"),
+            "the fresh error is recorded alongside the retained data",
+        );
+        let inventory = records_to_mgs_inventory(&sps);
+        let sled0 = inventory
+            .sps
+            .get(&sled(0))
+            .expect("sled 0's data is projected into inventory");
+        let state = sled0
+            .state
+            .as_ref()
+            .expect("sled 0's projected inventory carries SP state");
+        assert_eq!(
+            state.serial_number, "serial-0",
+            "the projected state is the one from the successful fetch",
+        );
+    }
+
+    #[test]
+    fn sp_state_fetch_errors_do_not_satisfy_waiters() {
+        let mut manager = dummy_manager();
+        let now = Instant::now();
+
+        // A waiter blocked on refreshes for both sled 0 and sled 1.
+        let (reply_tx, mut reply_rx) = oneshot::channel();
+        manager.waiting_for_update.push(WaitingForRefresh {
+            reply_tx,
+            sps_to_refresh: [sled(0), sled(1)].into_iter().collect(),
+            need_ignition_refresh: false,
+        });
+
+        // An error for sled 0 followed by a success for sled 1 must not satisfy
+        // the waiter.
+        manager.record_sp_state_fetch_error(
+            sled(0),
+            mgs_fetch_error("mgs is unhappy"),
+        );
+        manager.update_inventory_with_sp(
+            sled(1),
+            fetched_sp_data(sled(1)),
+            now,
+        );
+        assert_eq!(
+            manager.waiting_for_update.len(),
+            1,
+            "the waiter stays queued while sled 0 is still outstanding",
+        );
+        match reply_rx.try_recv() {
+            Err(oneshot::error::TryRecvError::Empty) => {}
+            other => {
+                panic!("waiter should have no response yet, got {other:?}")
+            }
+        }
+
+        // A successful fetch for sled 0 satisfies the waiter and reports the
+        // error as cleared.
+        manager.update_inventory_with_sp(
+            sled(0),
+            fetched_sp_data(sled(0)),
+            now,
+        );
+        assert!(
+            manager.waiting_for_update.is_empty(),
+            "the waiter fires once every SP has refreshed",
+        );
+        let GetInventoryResponse::Response { sps, .. } = reply_rx
+            .try_recv()
+            .expect("the waiter received a response")
+            .expect("the response is not an error")
+        else {
+            panic!("expected inventory to be available");
+        };
+        assert_eq!(
+            sp_fetch_error_message(&sps, sled(0)),
+            None,
+            "the successful fetch cleared sled 0's error in the reply",
+        );
+    }
+
+    #[test]
+    fn ignition_update_does_not_clear_errors() {
+        let mut manager = dummy_manager();
+        let now = Instant::now();
+
+        manager.record_sp_state_fetch_error(
+            sled(0),
+            mgs_fetch_error("mgs is unhappy"),
+        );
+
+        // An ignition update populates data for sled 0 (so inventory becomes
+        // available) but must not clear the recorded state-fetch error.
+        let mut sps = BTreeMap::new();
+        sps.insert(sled(0), SpIgnition::Absent);
+        let ignition = FetchedIgnitionState { sps, mgs_received: now };
+        manager.update_inventory_with_ignition(ignition, &BTreeMap::new(), now);
+
+        let sps = expect_inventory(&manager, now);
+        let inventory = records_to_mgs_inventory(&sps);
+        assert!(
+            inventory.sps.get(&sled(0)).is_some(),
+            "the ignition update gave sled 0 data, so it appears in inventory",
+        );
+        assert_eq!(
+            sp_fetch_error_message(&sps, sled(0)),
+            Some("mgs is unhappy"),
+            "sled 0's error survives the ignition update",
+        );
     }
 
     #[test]
