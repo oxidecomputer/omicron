@@ -265,7 +265,7 @@ impl Store {
         );
 
         let db = sled::open(&config.storage_path).with_context(|| {
-            format!("open DNS database {:?}", &config.storage_path)
+            format!("open DNS database {:?}", config.storage_path)
         })?;
 
         Self::new_with_db(log, Arc::new(db), config)
@@ -570,7 +570,7 @@ impl Store {
             let tree = self
                 .db
                 .open_tree(&tree_name)
-                .with_context(|| format!("creating tree {:?}", &tree_name))?;
+                .with_context(|| format!("creating tree {:?}", tree_name))?;
 
             for (name, records) in &zone_config.records {
                 if records.is_empty() {

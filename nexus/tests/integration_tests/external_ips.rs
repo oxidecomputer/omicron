@@ -1957,7 +1957,7 @@ async fn can_list_instance_snat_ip(cptestctx: &ControlPlaneTestContext) {
         ..
     }) = &range.items[0].range
     else {
-        panic!("Expected IPv4 range, found {:?}", &range.items[0]);
+        panic!("Expected IPv4 range, found {:?}", range.items[0]);
     };
     let expected_v4_ip = IpAddr::V4(*first);
 
@@ -1977,7 +1977,7 @@ async fn can_list_instance_snat_ip(cptestctx: &ControlPlaneTestContext) {
         ..
     }) = &range.items[0].range
     else {
-        panic!("Expected IPv6 range, found {:?}", &range.items[0]);
+        panic!("Expected IPv6 range, found {:?}", range.items[0]);
     };
 
     // Create a running instance with only an SNAT IP address, for each IP
@@ -2074,7 +2074,7 @@ async fn can_create_instance_with_ephemeral_ipv6_address(
         ..
     }) = &range.items[0].range
     else {
-        panic!("Expected IPv6 range, found {:?}", &range.items[0]);
+        panic!("Expected IPv6 range, found {:?}", range.items[0]);
     };
 
     // Create a running instance with an Ephemeral IPv6 address.
@@ -2164,7 +2164,7 @@ async fn can_create_instance_with_floating_ipv6_address(
         ..
     }) = &range.items[0].range
     else {
-        panic!("Expected IPv6 range, found {:?}", &range.items[0]);
+        panic!("Expected IPv6 range, found {:?}", range.items[0]);
     };
     let expected_ip = IpAddr::V6(*first);
 
@@ -2238,7 +2238,7 @@ async fn can_create_instance_with_floating_ipv6_address(
         ..
     } = ip
     else {
-        panic!("Expected a Floating external IP, found {:?}", &ips[1]);
+        panic!("Expected a Floating external IP, found {:?}", ips[1]);
     };
     assert_eq!(id, &fip.identity.id);
     assert_eq!(instance_id, &Some(instance.identity.id));

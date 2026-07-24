@@ -709,7 +709,7 @@ impl NexusArgs {
                 format!("http://{}", addr)
             }
         };
-        eprintln!("note: using Nexus URL {}", &nexus_url);
+        eprintln!("note: using Nexus URL {}", nexus_url);
         let client =
             nexus_lockstep_client::Client::new(&nexus_url, log.clone());
 

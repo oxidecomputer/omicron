@@ -115,7 +115,7 @@ impl<'a> ResourceBuilder<'a> {
             let role_name = role.to_database_string();
             let username = format!("{}-{}", resource_name, role_name);
             let user_id = SiloUserUuid::new_v4();
-            println!("creating user: {}", &username);
+            println!("creating user: {}", username);
             self.users.push((username.clone(), user_id));
 
             let authz_silo = authz::Silo::new(

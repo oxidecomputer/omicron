@@ -448,7 +448,7 @@ impl ClickHouseProcess {
             .envs(&env)
             .spawn()
             .with_context(|| {
-                format!("failed to spawn `clickhouse` (with args: {:?})", &args)
+                format!("failed to spawn `clickhouse` (with args: {:?})", args)
             })?;
         for (k, v) in std::env::vars_os() {
             env.insert(
@@ -548,7 +548,7 @@ impl ClickHouseProcess {
             .envs(&env)
             .spawn()
             .with_context(|| {
-                format!("failed to spawn `clickhouse` (with args: {:?})", &args)
+                format!("failed to spawn `clickhouse` (with args: {:?})", args)
             })?;
         for (k, v) in std::env::vars_os() {
             env.insert(
@@ -637,7 +637,7 @@ impl ClickHouseProcess {
             .with_context(|| {
                 format!(
                     "failed to spawn `clickhouse keeper` (with args: {:?})",
-                    &args
+                    args
                 )
             })?;
         for (k, v) in std::env::vars_os() {

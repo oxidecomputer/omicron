@@ -2425,7 +2425,7 @@ mod test {
                          name, description, project ID, and {} ID:\
                          {name:?} {description:?} {project_id:?} {:?}\n{e}",
                         if is_service { "Service" } else { "Instance" },
-                        &ip.parent_id
+                        ip.parent_id
                     )
                 });
 

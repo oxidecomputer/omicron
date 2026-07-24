@@ -30,12 +30,12 @@ pub fn run_repl_from_file<C: Parser>(
     run_one: &mut dyn FnMut(C) -> anyhow::Result<Option<String>>,
 ) -> anyhow::Result<()> {
     let file = File::open(&input_file)
-        .with_context(|| format!("open {:?}", &input_file))?;
+        .with_context(|| format!("open {:?}", input_file))?;
     let bufread = BufReader::new(file);
     let mut lines = bufread.lines().peekable();
     while let Some(line_res) = lines.next() {
         let line =
-            line_res.with_context(|| format!("read {:?}", &input_file))?;
+            line_res.with_context(|| format!("read {:?}", input_file))?;
 
         // Extract and handle multi-line comments.
         if line.starts_with('#') {
@@ -56,7 +56,7 @@ pub fn run_repl_from_file<C: Parser>(
                     break;
                 };
                 let next_line = next_res
-                    .with_context(|| format!("read {:?}", &input_file))?;
+                    .with_context(|| format!("read {:?}", input_file))?;
                 println!("> {}", next_line);
             }
 

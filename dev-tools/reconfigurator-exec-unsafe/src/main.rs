@@ -149,7 +149,7 @@ impl ReconfiguratorExec {
             .with_context(|| format!("open {:?}", input_path))?;
         let bufread = std::io::BufReader::new(file);
         let blueprint: Blueprint = serde_json::from_reader(bufread)
-            .with_context(|| format!("read and parse {:?}", &input_path))?;
+            .with_context(|| format!("read and parse {:?}", input_path))?;
 
         // Check that the blueprint is the current system target.
         // (This is currently redundant with a check done early during blueprint

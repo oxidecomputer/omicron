@@ -362,7 +362,7 @@ impl ArchiveFile<'_> {
                 // gracefully.
                 anyhow!(
                     "file for archival has no filename: {:?}",
-                    &self.input_path
+                    self.input_path
                 )
             })?
             .to_owned()

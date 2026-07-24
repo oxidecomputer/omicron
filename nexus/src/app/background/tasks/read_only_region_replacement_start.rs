@@ -336,7 +336,7 @@ mod test {
         let result: ReadOnlyRegionReplacementStartStatus =
             serde_json::from_value(task.activate(&opctx).await).unwrap();
 
-        eprintln!("{:?}", &result);
+        eprintln!("{:?}", result);
 
         assert_eq!(result.requests_created_ok.len(), 1);
         assert!(result.errors.is_empty());

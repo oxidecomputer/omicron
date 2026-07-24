@@ -212,7 +212,7 @@ async fn test_vpc_subnets(cptestctx: &ControlPlaneTestContext) {
     subnets_eq(&subnet, &same_subnet);
 
     // get subnet by ID, should retrieve the same subnet
-    let subnet_by_id_url = format!("/v1/vpc-subnets/{}", &subnet.identity.id);
+    let subnet_by_id_url = format!("/v1/vpc-subnets/{}", subnet.identity.id);
     let same_subnet_again = NexusRequest::object_get(client, &subnet_by_id_url)
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()

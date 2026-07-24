@@ -65,7 +65,7 @@ impl MgdInstance {
             .kill_on_drop(true)
             .spawn()
             .with_context(|| {
-                format!("failed to spawn `mgd` (with args: {:?})", &args)
+                format!("failed to spawn `mgd` (with args: {:?})", args)
             })?;
 
         let temp_dir = temp_dir.keep();
@@ -190,7 +190,7 @@ impl DdmInstance {
             .kill_on_drop(true)
             .spawn()
             .with_context(|| {
-                format!("failed to spawn `ddmd` (with args: {:?})", &args)
+                format!("failed to spawn `ddmd` (with args: {:?})", args)
             })?;
 
         let temp_dir = temp_dir.keep();
