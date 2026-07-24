@@ -28,8 +28,9 @@ pub enum Gateway {
 impl Route {
     pub async fn ensure_default_route_with_gateway(
         gateway: Gateway,
+        datalink: Option<&str>,
     ) -> Result<(), ExecutionError> {
-        Self::ensure_route_with_gateway("default", gateway, None).await
+        Self::ensure_route_with_gateway("default", gateway, datalink).await
     }
 
     pub async fn ensure_underlay_route_with_gateway(

@@ -798,11 +798,14 @@ async fn opte_interface_set_up(
         log, "Ensuring there is a default route";
         "gateway" => ?gateway,
     );
-    Route::ensure_default_route_with_gateway(Gateway::Ipv4(gateway))
-        .await
-        .with_context(|| {
-            format!("failed to ensure default route via gateway {gateway}")
-        })?;
+    Route::ensure_default_route_with_gateway(
+        Gateway::Ipv4(gateway),
+        Some(interface.as_str()),
+    )
+    .await
+    .with_context(|| {
+        format!("failed to ensure default route via gateway {gateway}")
+    })?;
 
     Ok(())
 }
