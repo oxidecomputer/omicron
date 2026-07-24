@@ -38,7 +38,7 @@ use tufaceous_lib::Key;
 use tufaceous_lib::assemble::{ArtifactManifest, OmicronRepoAssembler};
 use tufaceous_lib::assemble::{DeserializedManifest, ManifestTweak};
 
-use crate::integration_tests::target_release::set_target_release_for_mupdate_recovery;
+use crate::integration_tests::target_release::set_target_release_for_mupdate_recovery_with_expected_status;
 
 const TRUST_ROOTS_URL: &str = "/v1/system/update/trust-roots";
 
@@ -757,7 +757,12 @@ async fn test_update_status() -> Result<()> {
         .execute()
         .await?;
     let v1 = Version::new(1, 0, 0);
-    set_target_release_for_mupdate_recovery(client, &v1).await?;
+    set_target_release_for_mupdate_recovery_with_expected_status(
+        client,
+        &v1,
+        StatusCode::NO_CONTENT,
+    )
+    .await?;
 
     let status: update::UpdateStatus =
         object_get(client, "/v1/system/update/status").await;
@@ -788,7 +793,12 @@ async fn test_update_status() -> Result<()> {
         .to_upload_request(client, StatusCode::OK)
         .execute()
         .await?;
-    set_target_release_for_mupdate_recovery(client, &v2).await?;
+    set_target_release_for_mupdate_recovery_with_expected_status(
+        client,
+        &v2,
+        StatusCode::NO_CONTENT,
+    )
+    .await?;
 
     let status: update::UpdateStatus =
         object_get(client, "/v1/system/update/status").await;
@@ -803,7 +813,7 @@ async fn test_update_status() -> Result<()> {
     assert_eq!(counts.get("install dataset").unwrap(), &7);
     assert_eq!(counts.get("unknown").unwrap(), &11);
 
-    // `set_target_release_for_mupdate_recovery` only updates the target_release
+    // Setting the target release for mupdate recovery only updates the target_release
     // row, but the blueprint stays in its initial
     // `WaitingForMupdateToBeCleared` state. This state is not treated as an
     // update in progress, so `contact_support()` runs the full health checks
