@@ -105,6 +105,11 @@ fm.analysis_period_secs = 120
 # is activated every time the current sitrep changes. Periodic activations are
 # only necessary to ensure that it always happens eventually.
 fm.sitrep_gc_period_secs = 600
+# The sitrep history pruning task is explicitly activated when the current
+# sitrep changes, or when the sitrep capacity in the database is reaching the
+# limit. Periodic activations are necessary only as a backstop, so they need no
+# be frequent.
+fm.sitrep_history_prune_period_secs = 600
 # Updating database state to match the current sitrep is triggered whenever a
 # new sitrep is loaded, so we need not set the periodic activation interval
 # too high.

@@ -50,6 +50,27 @@ pub struct Activators {
     pub inventory_loader: Activator,
     pub sitrep_loader: Activator,
     pub sitrep_gc: Activator,
+    pub sitrep_history_pruner: Activator,
+}
+
+impl Activators {
+    /// Activate the sitrep history pruning and orphan sitrep GC background
+    /// tasks to try and free up some capacity for new sitreps in the database.
+    ///
+    /// The `fm_sitrep_gc` task deletes orphaned sitreps (i.e., those which are
+    /// not in the `fm_sitrep_history`) table. Meanwhile, the
+    /// `fm_sitrep_history_pruner` task deletes old sitrep versions from the end
+    /// of the `fm_sitrep_history` table, leaving those sitreps as orphans that
+    /// can be cleaned up by the garbage collection task. When we wish to
+    /// reclaim capacity for new sitreps, we activate *both* tasks: a GC pass is
+    /// necessary to delete orphaned sitreps that may have been left behind when
+    /// an analysis task lost a race to insert a new sitrep, while the history
+    /// pruning pass is necessary to free up capacity used by sitrep versions
+    /// that *are* part of the history.
+    fn reclaim_capacity(&self) {
+        self.sitrep_history_pruner.activate();
+        self.sitrep_gc.activate();
+    }
 }
 
 impl BackgroundTask for FmAnalysis {
@@ -662,9 +683,7 @@ impl FmAnalysis {
                      will not be written";
                      "limit" => limit,
                 );
-                // Activate the GC task to see if we can clean up any old
-                // sitreps.
-                self.activators.sitrep_gc.activate();
+                self.activators.reclaim_capacity();
                 return Err(status::AnalysisOutcome::LimitReached { limit });
             }
             Ok(db::IsLimitReached::No { count }) => count,
@@ -702,12 +721,10 @@ impl FmAnalysis {
                     "count" => count,
                     "usage_percent" => usage_percent,
                 );
-                // Activate the GC task to see if we can clean up any old
-                // sitreps.
-                self.activators.sitrep_gc.activate();
+                self.activators.reclaim_capacity();
             }
             // At 95% of the limit, this is where I might start to worry that
-            // the GC task isn't running or something!
+            // the GC tasks isn't running or something!
             95.. => {
                 warn!(
                     &opctx.log,
@@ -721,9 +738,7 @@ impl FmAnalysis {
                     "sitrep count ({count}) at {usage_percent}% of limit \
                      ({limit})",
                 ));
-                // Activate the GC task to see if we can clean up any old
-                // sitreps.
-                self.activators.sitrep_gc.activate();
+                self.activators.reclaim_capacity();
             }
         }
 
@@ -765,10 +780,12 @@ mod tests {
             inventory_loader: Activator::new(),
             sitrep_loader: Activator::new(),
             sitrep_gc: Activator::new(),
+            sitrep_history_pruner: Activator::new(),
         };
         a.inventory_loader.mark_wired_up().unwrap();
         a.sitrep_loader.mark_wired_up().unwrap();
         a.sitrep_gc.mark_wired_up().unwrap();
+        a.sitrep_history_pruner.mark_wired_up().unwrap();
         a
     }
 
@@ -1219,6 +1236,9 @@ mod tests {
         acts.sitrep_gc.assert_not_activated(
             "GC should not be activated at 50% of the sitrep limit",
         );
+        acts.sitrep_history_pruner.assert_not_activated(
+            "history pruning should not be activated at 50% of the sitrep limit",
+        );
 
         // 15 sitreps: 75% of the limit, just below the GC-activation tier.
         // Still no warning and no GC activation.
@@ -1236,6 +1256,9 @@ mod tests {
         acts.sitrep_gc.assert_not_activated(
             "GC should not be activated at 75% of the sitrep limit",
         );
+        acts.sitrep_history_pruner.assert_not_activated(
+            "history pruning should not be activated at 75% of the sitrep limit",
+        );
 
         // 16 sitreps: 80% of the limit. The GC task is activated to reclaim
         // capacity. This is roughly the expected steady state of the system, if
@@ -1252,6 +1275,9 @@ mod tests {
         );
         acts.sitrep_gc.assert_activated(
             "GC should be activated at 80% of the sitrep limit",
+        );
+        acts.sitrep_history_pruner.assert_activated(
+            "history pruning should be activated at 80% of the sitrep limit",
         );
 
         // 19 sitreps: 95% of the limit. Now the check records a warning, since
@@ -1275,6 +1301,9 @@ mod tests {
         acts.sitrep_gc.assert_activated(
             "GC should be activated at 95% of the sitrep limit",
         );
+        acts.sitrep_history_pruner.assert_activated(
+            "history pruning should be activated at 95% of the sitrep limit",
+        );
 
         // 20 sitreps: at the limit. The check fails, and the GC task is
         // activated. Note that the last sitrep is an orphan that was never made
@@ -1291,6 +1320,9 @@ mod tests {
         assert_eq!(warnings, Vec::<String>::new());
         acts.sitrep_gc.assert_activated(
             "GC should be activated when the sitrep limit is reached",
+        );
+        acts.sitrep_history_pruner.assert_activated(
+            "history pruning should be activated when the sitrep limit is reached",
         );
 
         db.terminate().await;
@@ -1348,6 +1380,9 @@ mod tests {
         acts.sitrep_gc.assert_not_activated(
             "GC should not be activated below the sitrep limit",
         );
+        acts.sitrep_history_pruner.assert_not_activated(
+            "history pruning should not be activated below the sitrep limit",
+        );
         // Committing a sitrep pokes the loader; consume that activation so
         // the assertion below observes only the second activation's behavior.
         acts.sitrep_loader.assert_activated(
@@ -1376,6 +1411,9 @@ mod tests {
         }
         acts.sitrep_gc.assert_activated(
             "GC should be activated when the sitrep limit is reached",
+        );
+        acts.sitrep_history_pruner.assert_activated(
+            "history pruning should be activated when the sitrep limit is reached",
         );
         acts.sitrep_loader.assert_not_activated(
             "the sitrep loader should not be activated when no sitrep was \

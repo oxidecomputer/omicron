@@ -9,14 +9,20 @@ use crate::db::DataStore;
 use crate::db::IsLimitReached;
 use crate::db::datastore::fm;
 use crate::db::datastore::fm::InsertSitrepError;
+use crate::db::model::SqlU32;
+use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
+use diesel::prelude::*;
+use nexus_db_schema::schema::fm_sitrep::dsl as sitrep_dsl;
+use nexus_db_schema::schema::fm_sitrep_history::dsl as history_dsl;
 use nexus_types::fm::Sitrep;
 use nexus_types::fm::SitrepMetadata;
-use nexus_types::internal_api::background::fm_sitrep_gc::HistoryPruningOutcome;
+use nexus_types::internal_api::background::fm_sitrep_history_pruner;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::Generation;
 use omicron_uuid_kinds::CollectionUuid;
+use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SitrepUuid;
 use std::collections::BTreeSet;
@@ -54,14 +60,23 @@ use std::sync::Arc;
 /// Expected effects on the database that happen *outside* the model's own
 /// insert methods are recorded explicitly.
 ///
-/// - When a GC activation runs, call [`Self::simulate_gc`] with the task's
-///   configured history limit. The model computes what the GC should do
-///   given that limit, applies those effects to itself, and returns them so
-///   that the test can compare the task's reported status against the
-///   model's prediction.
+/// - When a `fm_sitrep_history_pruner` activation runs, call
+///   [`Self::simulate_history_pruning`] with the task's configured history
+///   limit. The model computes what pruning should do given that limit,
+///   applies those effects to itself, and returns them so that the test can
+///   compare the task's reported status against the model's prediction.
+/// - When a `fm_sitrep_gc` activation runs, call
+///   [`Self::simulate_orphan_gc`], which does the same for the orphan sweep.
 /// - When a sitrep is made current by the code under test, rather than the
 ///   model, call [`Self::record_committed`] with the ID of the newly
 ///   committed sitrep.
+///
+/// So that each task can be tested in isolation, without running the other
+/// task, the model can also *apply* either half's simulated effects directly
+/// to the database: see [`Self::prune_history`] and [`Self::gc_orphans`]. These
+/// simulate a history pruning or orphan GC pass, and then update the database
+/// state to reflect the effects. This way, each task can be tested individually
+/// against the model's in-memory simulation of what the other task *should* do.
 pub struct SitrepModel {
     datastore: Arc<DataStore>,
     /// Every sitrep ever made current, in version order: `history[i]` is
@@ -199,32 +214,35 @@ impl SitrepModel {
         eprintln!("model: recorded sitrep {id} at v{}", self.history.len());
     }
 
-    /// Simulate a sitrep GC activation with the given `history_limit`,
-    /// applying its expected effects to the model and returning them as an
-    /// [`ExpectedGc`], so that the test can compare the task's reported
-    /// status against the model's prediction.
+    /// Simulate a sitrep history pruner activation with the given
+    /// `history_limit`, applying its expected effects to the model and
+    /// returning them as an [`ExpectedPruning`], so that the test can
+    /// compare the task's reported status against the model's prediction.
     ///
-    /// This simulates what the GC task *should* do:
+    /// This simulates what the pruner task *should* do:
     ///
     /// - If the history table holds no more than `history_limit` rows,
     ///   nothing is pruned.
     /// - Otherwise, the newest `history_limit` versions are kept, and every
     ///   version at or below `latest_version - history_limit` is pruned,
-    ///   oldest versions first.
+    ///   oldest versions first. The sitreps referenced by the pruned entries
+    ///   become orphans (they are added to [`Self::live_orphans`], to be
+    ///   collected by a future orphan sweep).
     /// - Either way, the pruning loop should end by observing that the
     ///   history table is within the limit, reporting the number of entries
-    ///   that remain: [`HistoryPruningOutcome::Pruned`] if this activation
-    ///   pruned something, and [`HistoryPruningOutcome::NotPruned`] if it
-    ///   didn't.
-    /// - All orphaned sitreps, including those newly orphaned by pruning
-    ///   the history, are deleted by the orphan sweep.
-    pub fn simulate_gc(&mut self, history_limit: NonZeroU32) -> ExpectedGc {
+    ///   that remain: [`fm_sitrep_history_pruner::Outcome::Pruned`] if this
+    ///   activation pruned something, and
+    ///   [`fm_sitrep_history_pruner::Outcome::NotPruned`] if it didn't.
+    pub fn simulate_history_pruning(
+        &mut self,
+        history_limit: NonZeroU32,
+    ) -> ExpectedPruning {
         let history_limit = history_limit.get();
         let latest_version = self.latest_version();
         let history_count = u32::try_from(self.history_count())
             .expect("test current history count exceeds u32");
         eprintln!(
-            "model: simulating GC with history_limit={history_limit}, \
+            "model: simulating pruning with history_limit={history_limit}, \
              latest_version=v{latest_version}, history_count={history_count}"
         );
         let mut versions_pruned = None;
@@ -255,31 +273,118 @@ impl SitrepModel {
         // history table is within the limit. If we pruned anything, exactly
         // `limit` entries remain; otherwise, the count is unchanged.
         let outcome = if history_pruned > 0 {
-            HistoryPruningOutcome::Pruned { count: u64::from(history_limit) }
+            fm_sitrep_history_pruner::Outcome::Pruned {
+                count: u64::from(history_limit),
+            }
         } else {
-            HistoryPruningOutcome::NotPruned { count: history_count.into() }
+            fm_sitrep_history_pruner::Outcome::NotPruned {
+                count: history_count.into(),
+            }
         };
-        let gced = std::mem::take(&mut self.live_orphans);
-        let orphans_deleted = gced.len();
         eprintln!(
-            "model: simulated GC with history limit {history_limit}:\n  \
+            "model: simulated pruning history to limit {history_limit}:\n  \
              sitreps_pruned: {history_pruned}, \
              versions_pruned: {versions_pruned:?}, \
              outcome: {outcome:?}, \
-             earliest live version now v{}, \
-             expecting {orphans_deleted} orphaned sitreps deleted",
+             earliest live version now v{}",
             self.earliest_live_version,
+        );
+        ExpectedPruning {
+            sitreps_pruned: history_pruned as usize,
+            versions_pruned,
+            outcome,
+        }
+    }
+
+    /// Simulate a sitrep GC orphan sweep, applying its expected effects to
+    /// the model and returning the number of orphaned sitreps that should
+    /// have been deleted, so that the test can compare the task's reported
+    /// status against the model's prediction.
+    ///
+    /// All live orphans (both those created when a Nexus loses a commit race and
+    /// those created when committed sitreps are removed from history by the
+    /// sitrep pruner)  are expected to be deleted by the sweep.
+    pub fn simulate_orphan_gc(&mut self) -> usize {
+        let gced = std::mem::take(&mut self.live_orphans);
+        let orphans_deleted = gced.len();
+        eprintln!(
+            "model: simulated orphan GC, expecting {orphans_deleted} \
+             orphaned sitreps deleted"
         );
         for orphan in &gced {
             eprintln!("  - GC'd: {orphan}")
         }
         self.gced_orphans.extend(gced);
-        ExpectedGc {
-            sitreps_pruned: history_pruned as usize,
-            versions_pruned,
-            outcome,
-            orphans_deleted,
+        orphans_deleted
+    }
+
+    /// Prune the sitrep history to (at most) `history_limit` entries,
+    /// simulating what a `fm_sitrep_history_pruner` task activation would
+    /// do, and applying the simulated effects to the database.
+    ///
+    /// Note that this does *not* invoke the datastore's history pruning
+    /// machinery. Instead, the model determines which versions should be pruned
+    /// from its own internal representation, (by calling
+    /// [`Self::simulate_orphan_gc`]) and deletes exactly those rows from the
+    /// history table by primary key. This updates the database to match the
+    /// model, which allows tests for the GC task to construct prune-orphaned
+    /// sitreps without depending on the pruner's correctness.
+    pub async fn prune_history(&mut self, history_limit: NonZeroU32) {
+        let expected = self.simulate_history_pruning(history_limit);
+        let Some(versions) = expected.versions_pruned else {
+            return;
+        };
+        let conn = self.datastore.pool_connection_for_tests().await.unwrap();
+        let pruned: Vec<SqlU32> = versions.clone().map(SqlU32).collect();
+        let n_deleted = diesel::delete(
+            history_dsl::fm_sitrep_history
+                .filter(history_dsl::version.eq_any(pruned)),
+        )
+        .execute_async(&*conn)
+        .await
+        .expect("deleting pruned history rows should succeed");
+        assert_eq!(
+            n_deleted, expected.sitreps_pruned,
+            "the history table should contain exactly the versions \
+             (v{versions:?}) that the model chose to prune"
+        );
+    }
+
+    /// Delete all orphaned sitreps, simulating what a `fm_sitrep_gc` orphan
+    /// sweep would do, and applying the simulated effects to the database.
+    ///
+    /// As with [`Self::prune_history`], this does *not* invoke the
+    /// datastore's orphan GC machinery, which is the code under test in the
+    /// GC task's own tests. Instead, the model deletes the sitreps it knows
+    /// to be orphaned from the `fm_sitrep` table by primary key, so that the
+    /// database matches the model.
+    ///
+    /// The model only ever creates empty sitreps with no child-table records
+    /// (see [`test_sitrep`]), so deleting the metadata row is the sweep's
+    /// entire effect. If the model ever grows sitreps with children, the
+    /// child-table checks in [`Self::assert_matches`] will fail loudly here. If
+    /// that happens, we'll have to update this code to also delete all the
+    /// child table records, which I don't really want to do because it would be
+    /// annoying.
+    pub async fn gc_orphans(&mut self) {
+        let orphans: Vec<_> =
+            self.live_orphans.iter().map(|id| id.into_untyped_uuid()).collect();
+        let expected_deleted = self.simulate_orphan_gc();
+        if orphans.is_empty() {
+            return;
         }
+        let conn = self.datastore.pool_connection_for_tests().await.unwrap();
+        let n_deleted = diesel::delete(
+            sitrep_dsl::fm_sitrep.filter(sitrep_dsl::id.eq_any(orphans)),
+        )
+        .execute_async(&*conn)
+        .await
+        .expect("deleting orphaned sitreps should succeed");
+        assert_eq!(
+            n_deleted, expected_deleted,
+            "the fm_sitrep table should contain exactly the sitreps that \
+             the model believes are live orphans"
+        );
     }
 
     /// Assert that the database contents match this model:
@@ -354,10 +459,20 @@ impl SitrepModel {
             ),
         }
 
-        // Pruned history sitreps are deleted; live ones exist.
+        // Sitreps whose history entries were pruned become orphans: they
+        // are tracked in `live_orphans` until an orphan sweep moves them to
+        // `gced_orphans`, and the loops below check their existence in the
+        // database accordingly. Here, just make sure the model is tracking
+        // every pruned sitrep in one of those two sets.
         for &id in &history[..first_live_idx] {
-            assert_sitrep_deleted(datastore, opctx, id).await;
+            assert!(
+                orphans.contains(&id) || collected_orphans.contains(&id),
+                "pruned history sitrep {id} should be tracked as either a \
+                 live or a collected orphan; this is a bug in the model \
+                 itself"
+            );
         }
+        // Live history sitreps exist.
         for &id in &history[first_live_idx..] {
             assert_sitrep_exists(datastore, opctx, id).await;
         }
@@ -387,20 +502,23 @@ impl SitrepModel {
     }
 }
 
-/// The expected outcome of a sitrep GC activation, as computed by
-/// [`SitrepModel::simulate_gc`].
+/// The expected outcome of a sitrep history pruner activation, as computed
+/// by [`SitrepModel::simulate_history_pruning`].
+///
+/// This contains only the values that the model actually predicts. In
+/// particular, it does *not* predict how the pruned versions are divided
+/// into batches, as that's a property of the pruner task's implementation
+/// rather than a correctness property. Tests that care about batching should
+/// assert on the reported batch counts directly.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ExpectedGc {
+pub struct ExpectedPruning {
     /// The total number of history table entries that should be pruned.
     pub sitreps_pruned: usize,
     /// The range of versions that should be pruned (oldest..=newest), if
     /// any.
     pub versions_pruned: Option<RangeInclusive<u32>>,
     /// The outcome the pruning loop should end with.
-    pub outcome: HistoryPruningOutcome,
-    /// The number of orphaned sitreps the task's orphan sweep should delete,
-    /// including sitreps newly orphaned by pruning the history.
-    pub orphans_deleted: usize,
+    pub outcome: fm_sitrep_history_pruner::Outcome,
 }
 
 /// Returns an empty test [`Sitrep`] with the given ID, parent, and comment.

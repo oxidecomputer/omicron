@@ -1004,6 +1004,10 @@ pub struct FmTasksConfig {
     #[serde_as(as = "DurationSeconds<u64>")]
     pub sitrep_gc_period_secs: Duration,
     /// period (in seconds) for periodic activations of the background task that
+    /// prunes the oldest entries from the fault management sitrep history
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub sitrep_history_prune_period_secs: Duration,
+    /// period (in seconds) for periodic activations of the background task that
     /// updates externally-visible database tables to match the current situation
     /// report.
     #[serde_as(as = "DurationSeconds<u64>")]
@@ -1023,6 +1027,11 @@ impl Default for FmTasksConfig {
             // time the current sitrep changes, and activating it more
             // frequently won't make things more responsive.
             sitrep_gc_period_secs: Duration::from_secs(600),
+            // This need not be activated very frequently, as it's triggered
+            // whenever a new sitrep is committed and by the analysis task when
+            // nearing capacity limits, so periodic activation is only a
+            // backstop.
+            sitrep_history_prune_period_secs: Duration::from_secs(600),
             // This, too, is activated whenever a new sitrep is loaded, so we
             // need not set the periodic activation interval too high.
             rendezvous_period_secs: Duration::from_secs(300),
@@ -1337,6 +1346,7 @@ mod test {
             sp_ereport_ingester.period_secs = 47
             fm.sitrep_load_period_secs = 48
             fm.sitrep_gc_period_secs = 49
+            fm.sitrep_history_prune_period_secs = 53
             probe_distributor.period_secs = 50
             multicast_reconciler.period_secs = 60
             fm.rendezvous_period_secs = 51
@@ -1601,6 +1611,8 @@ mod test {
                             analysis_period_secs: Duration::from_secs(52),
                             sitrep_load_period_secs: Duration::from_secs(48),
                             sitrep_gc_period_secs: Duration::from_secs(49),
+                            sitrep_history_prune_period_secs:
+                                Duration::from_secs(53),
                             rendezvous_period_secs: Duration::from_secs(51),
                         },
                         probe_distributor: ProbeDistributorConfig {
@@ -1736,6 +1748,7 @@ mod test {
             sp_ereport_ingester.period_secs = 44
             fm.sitrep_load_period_secs = 45
             fm.sitrep_gc_period_secs = 46
+            fm.sitrep_history_prune_period_secs = 50
             probe_distributor.period_secs = 47
             fm.rendezvous_period_secs = 48
             fm.analysis_period_secs = 49

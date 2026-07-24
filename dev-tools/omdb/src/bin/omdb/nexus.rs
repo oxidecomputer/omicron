@@ -1385,6 +1385,9 @@ fn print_task_details(
         "fm_sitrep_gc" => {
             print_task_fm_sitrep_gc(details);
         }
+        "fm_sitrep_history_pruner" => {
+            print_task_fm_sitrep_history_pruner(details);
+        }
         "fm_rendezvous" => {
             print_task_fm_rendezvous(details);
         }
@@ -3700,19 +3703,76 @@ fn print_task_fm_sitrep_loader(details: &serde_json::Value) {
     };
 }
 
-fn print_task_fm_sitrep_gc(details: &serde_json::Value) {
-    use nexus_types::internal_api::background::fm_sitrep_gc::HistoryPruningOutcome;
-    use nexus_types::internal_api::background::fm_sitrep_gc::HistoryPruningStatus;
+fn print_task_fm_sitrep_history_pruner(details: &serde_json::Value) {
+    use nexus_types::internal_api::background::SitrepHistoryPrunerStatus;
+    use nexus_types::internal_api::background::fm_sitrep_history_pruner::{
+        Outcome, SitrepsPruned,
+    };
 
-    let SitrepGcStatus {
+    let SitrepHistoryPrunerStatus {
         history_limit,
-        history_pruning_status:
-            HistoryPruningStatus {
-                batches: pruning_batches,
-                sitreps_pruned,
-                versions_pruned,
-            },
-        history_pruning_outcome,
+        batch_size,
+        pruned: SitrepsPruned { batches, total, versions },
+        outcome,
+    } = match serde_json::from_value::<SitrepHistoryPrunerStatus>(
+        details.clone(),
+    ) {
+        Err(error) => {
+            eprintln!(
+                "warning: failed to interpret task details: {:?}: {:?}",
+                error, details
+            );
+            return;
+        }
+        Ok(status) => status,
+    };
+
+    const HISTORY_LIMIT: &str = "max sitreps to keep:";
+    const STATUS: &str = "status:";
+    const SITREP_COUNT: &str = "  current count:";
+    const PRUNED_COUNT: &str = "  sitreps pruned:";
+    const PRUNED_VERSIONS: &str = "  versions pruned:";
+    const BATCHES: &str = "  batches:";
+    const BATCH_SIZE: &str = "deletion batch size:";
+    const P_WIDTH: usize = const_max_len(&[
+        HISTORY_LIMIT,
+        SITREP_COUNT,
+        PRUNED_COUNT,
+        PRUNED_VERSIONS,
+        BATCHES,
+        BATCH_SIZE,
+    ]) + 1;
+    const NUM_WIDTH: usize = 4;
+    println!("    {HISTORY_LIMIT:<P_WIDTH$}{history_limit:>NUM_WIDTH$}");
+    println!("    {BATCH_SIZE:<P_WIDTH$}{batch_size:>NUM_WIDTH$}");
+    match outcome {
+        Outcome::Error(error) => {
+            println!("{ERRICON} {STATUS} failed!");
+            println!("      > {error}")
+        }
+        Outcome::NotPruned { count } => {
+            println!("    {STATUS} within limit (nothing was deleted)");
+            println!("    {SITREP_COUNT:<P_WIDTH$}{count:>NUM_WIDTH$}");
+        }
+        Outcome::Pruned { count } => {
+            println!("    {STATUS} limit reached (old sitreps were deleted)");
+            println!("    {SITREP_COUNT:<P_WIDTH$}{count:>NUM_WIDTH$}");
+        }
+    }
+
+    // If anything was deleted, including partial progress made before a
+    // query failed, display the details of what was pruned.
+    if total > 0 {
+        println!("    {PRUNED_COUNT:<P_WIDTH$}{total:>NUM_WIDTH$}");
+        if let Some(versions) = versions {
+            println!("    {PRUNED_VERSIONS:<P_WIDTH$}v{versions:?}");
+        }
+        println!("    {BATCHES:<P_WIDTH$}{batches:>NUM_WIDTH$}");
+    }
+}
+
+fn print_task_fm_sitrep_gc(details: &serde_json::Value) {
+    let SitrepGcStatus {
         orphaned_sitreps_deleted,
         sitrep_metadata_batches,
         batch_size,
@@ -3729,52 +3789,6 @@ fn print_task_fm_sitrep_gc(details: &serde_json::Value) {
         Ok(status) => status,
     };
 
-    println!("    pruning sitrep history table:");
-    const HISTORY_LIMIT: &str = "max sitreps to keep:";
-    const STATUS: &str = "status:";
-    const SITREP_COUNT: &str = "current count:";
-    const PRUNED: &str = "sitreps pruned:";
-    const VERSIONS_PRUNED: &str = "versions pruned:";
-    const PRUNE_BATCHES: &str = "batches:";
-    const BATCH_SIZE: &str = "batch size:";
-    const P_WIDTH: usize = const_max_len(&[
-        HISTORY_LIMIT,
-        SITREP_COUNT,
-        PRUNED,
-        VERSIONS_PRUNED,
-        PRUNE_BATCHES,
-        BATCH_SIZE,
-    ]) + 1;
-    println!("      {HISTORY_LIMIT:<P_WIDTH$}{history_limit:>NUM_WIDTH$}");
-    match history_pruning_outcome {
-        HistoryPruningOutcome::Error(error) => {
-            println!("{ERRICON}   {STATUS} failed!");
-            println!("        > {error}")
-        }
-        HistoryPruningOutcome::NotPruned { count } => {
-            println!("      {STATUS} within limit (nothing was deleted)");
-            println!("      {SITREP_COUNT:<P_WIDTH$}{count:>NUM_WIDTH$}");
-        }
-        HistoryPruningOutcome::Pruned { count } => {
-            println!("      {STATUS} limit reached (old sitreps were deleted)");
-            println!("      {SITREP_COUNT:<P_WIDTH$}{count:>NUM_WIDTH$}");
-        }
-    }
-
-    // If anything was deleted, including partial progress made before a
-    // query failed, display the details of what was pruned.
-    if sitreps_pruned > 0 {
-        println!("      {PRUNED:<P_WIDTH$}{sitreps_pruned:>NUM_WIDTH$}");
-        if let Some(versions) = versions_pruned {
-            println!("      {VERSIONS_PRUNED:<P_WIDTH$}v{versions:?}");
-        }
-        println!(
-            "      {PRUNE_BATCHES:<P_WIDTH$}{pruning_batches:>NUM_WIDTH$}"
-        );
-        println!("      {BATCH_SIZE:<P_WIDTH$}{batch_size:>NUM_WIDTH$}");
-    }
-
-    println!("    garbage collecting orphaned sitreps:");
     const BASE_WIDTH: usize = 40;
     const NUM_WIDTH: usize = 4;
 
@@ -3788,37 +3802,33 @@ fn print_task_fm_sitrep_gc(details: &serde_json::Value) {
         .fold(BASE_WIDTH, |w, l| w.max(l));
 
     if !errors.is_empty() {
-        println!(
-            "{ERRICON}   {:<width$}{:>NUM_WIDTH$}",
-            "errors:",
-            errors.len()
-        );
+        println!("{ERRICON} {:<width$}{:>NUM_WIDTH$}", "errors:", errors.len());
         for error in errors {
-            println!("      > {error}")
+            println!("    > {error}")
         }
     }
 
-    println!("      {BATCH_SIZE:<width$}{batch_size:>NUM_WIDTH$}");
+    println!("    {:<width$}{batch_size:>NUM_WIDTH$}", "batch size:");
     println!(
-        "      {:<width$}{orphaned_sitreps_deleted:>NUM_WIDTH$}",
+        "    {:<width$}{orphaned_sitreps_deleted:>NUM_WIDTH$}",
         "orphaned sitreps deleted:"
     );
     println!(
-        "      {:<width$}{sitrep_metadata_batches:>NUM_WIDTH$}",
+        "    {:<width$}{sitrep_metadata_batches:>NUM_WIDTH$}",
         "  batches:"
     );
 
     if child_tables.is_empty() {
-        eprintln!("(!)     warning: no child tables reported (likely a bug)");
+        eprintln!("(!)   warning: no child tables reported (likely a bug)");
     }
 
     for (table_name, stats) in &child_tables {
         println!(
-            "      {:<width$}{:>NUM_WIDTH$}",
+            "    {:<width$}{:>NUM_WIDTH$}",
             format!("orphaned {table_name} rows deleted:"),
             stats.rows_deleted,
         );
-        println!("      {:<width$}{:>NUM_WIDTH$}", "  batches:", stats.batches);
+        println!("    {:<width$}{:>NUM_WIDTH$}", "  batches:", stats.batches);
     }
 }
 
