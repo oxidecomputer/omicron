@@ -85,6 +85,7 @@ use sled_agent_types::disk::DatasetConfig;
 use sled_agent_types::disk::DiskIdentity;
 use sled_agent_types::disk::M2Slot;
 use sled_agent_types::disk::OmicronPhysicalDiskConfig;
+use sled_agent_types::disk::SharedDatasetConfig;
 use sled_agent_types::inventory::BootImageHeader;
 use sled_agent_types::inventory::BootPartitionDetails;
 use sled_agent_types::inventory::ConfigReconcilerInventoryStatus;
@@ -2986,7 +2987,7 @@ impl TryFrom<InvOmicronSledConfigDataset> for DatasetConfig {
         Ok(Self {
             id: dataset.id.into(),
             name: DatasetName::new(pool, kind),
-            inner: omicron_common::disk::SharedDatasetConfig {
+            inner: SharedDatasetConfig {
                 quota: dataset.quota.map(|b| b.into()),
                 reservation: dataset.reservation.map(|b| b.into()),
                 compression: dataset.compression.parse()?,

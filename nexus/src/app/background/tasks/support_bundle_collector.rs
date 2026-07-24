@@ -728,7 +728,6 @@ mod test {
     use omicron_common::api::external::ByteCount;
     use omicron_common::api::internal::shared::DatasetKind;
     use omicron_common::disk::DatasetName;
-    use omicron_common::disk::SharedDatasetConfig;
     use omicron_common::zpool_name::ZpoolName;
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::{
@@ -736,6 +735,7 @@ mod test {
         PhysicalDiskUuid, RackUuid, SledUuid,
     };
     use sled_agent_types::disk::DatasetConfig;
+    use sled_agent_types::disk::SharedDatasetConfig;
     use sled_agent_types::inventory::ZpoolHealth;
     use std::num::NonZeroU64;
     use support_bundle_collection::perfetto;

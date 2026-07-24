@@ -13,7 +13,7 @@ use std::fmt;
 use std::str::FromStr;
 
 use crate::api::internal::shared::DatasetKindParseError;
-use crate::{api::external::ByteCount, zpool_name::ZpoolName};
+use crate::zpool_name::ZpoolName;
 
 pub use crate::api::internal::shared::DatasetKind;
 
@@ -284,31 +284,6 @@ impl FromStr for CompressionAlgorithm {
         };
         Ok(c)
     }
-}
-
-/// Shared configuration information to request a dataset.
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    Deserialize,
-    Serialize,
-    JsonSchema,
-    PartialEq,
-    Eq,
-    Hash,
-    PartialOrd,
-    Ord,
-)]
-pub struct SharedDatasetConfig {
-    /// The compression mode to be used by the dataset
-    pub compression: CompressionAlgorithm,
-
-    /// The upper bound on the amount of storage used by this dataset
-    pub quota: Option<ByteCount>,
-
-    /// The lower bound on the amount of storage usable by this dataset
-    pub reservation: Option<ByteCount>,
 }
 
 #[cfg(test)]

@@ -43,9 +43,7 @@ use omicron_common::api::internal::shared::{
 use omicron_common::backoff::{
     BackoffError, retry_notify_ext, retry_policy_internal_service_aggressive,
 };
-use omicron_common::disk::{
-    CompressionAlgorithm, DatasetKind, DatasetName, SharedDatasetConfig,
-};
+use omicron_common::disk::{CompressionAlgorithm, DatasetKind, DatasetName};
 use omicron_common::policy::{
     BOUNDARY_NTP_REDUNDANCY, COCKROACHDB_REDUNDANCY,
     CRUCIBLE_PANTRY_REDUNDANCY, INTERNAL_DNS_REDUNDANCY, NEXUS_REDUNDANCY,
@@ -64,6 +62,7 @@ use sled_agent_client::{
 };
 use sled_agent_types::disk::DatasetConfig;
 use sled_agent_types::disk::DiskVariant;
+use sled_agent_types::disk::SharedDatasetConfig;
 use sled_agent_types::inventory::NetworkInterface;
 use sled_agent_types::inventory::NetworkInterfaceKind;
 use sled_agent_types::inventory::SourceNatConfigError;

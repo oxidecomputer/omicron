@@ -6,9 +6,10 @@
 
 use iddqd::IdOrdItem;
 use iddqd::id_upcast;
+use omicron_common::api::external::ByteCount;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
+use omicron_common::disk::CompressionAlgorithm;
 use omicron_common::disk::DatasetName;
-use omicron_common::disk::SharedDatasetConfig;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::ZpoolUuid;
@@ -171,4 +172,29 @@ impl IdOrdItem for DatasetConfig {
     }
 
     id_upcast!();
+}
+
+/// Shared configuration information to request a dataset.
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+    PartialEq,
+    Eq,
+    Hash,
+    PartialOrd,
+    Ord,
+)]
+pub struct SharedDatasetConfig {
+    /// The compression mode to be used by the dataset
+    pub compression: CompressionAlgorithm,
+
+    /// The upper bound on the amount of storage used by this dataset
+    pub quota: Option<ByteCount>,
+
+    /// The lower bound on the amount of storage usable by this dataset
+    pub reservation: Option<ByteCount>,
 }
