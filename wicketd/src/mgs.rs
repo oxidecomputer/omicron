@@ -22,9 +22,7 @@ use crate::http_helpers::http_error_with_message;
 use crate::http_helpers::shutdown_to_http;
 
 pub(crate) use self::inventory::{FetchedSpData, MgsFetchError};
-// Will be used by the commissioning API.
-#[cfg_attr(not(test), expect(unused_imports))]
-pub(crate) use self::inventory::{Fetched, RotData, RotFetch, Stage0Fetch};
+
 use self::inventory::{
     FetchedIgnitionState, IgnitionPresence, IgnitionStateFetcher,
     SpFetchResult, SpStateFetcher,
@@ -531,7 +529,7 @@ pub(crate) struct SpRecord {
 
     /// The most recent state-fetch error for this SP, or `None` if the last
     /// state fetch succeeded (or fetching hasn't failed yet).
-    last_state_fetch_error: Option<MgsFetchError>,
+    pub(crate) last_state_fetch_error: Option<MgsFetchError>,
 }
 
 impl SpRecord {
@@ -608,6 +606,8 @@ struct WaitingForRefresh {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use crate::mgs::inventory::{Fetched, RotData, RotFetch, Stage0Fetch};
     use gateway_types::component::{PowerState, SpState};
     use gateway_types::rot::RotState;
     use std::net::Ipv6Addr;
@@ -977,6 +977,7 @@ mod tests {
                 caboose_b: Fetched::NotRead,
                 stage0: stage0.clone(),
                 stage0next: Stage0Fetch::Unsupported,
+                image_errors: None,
             }));
             let record = record_with_data(sled(0), Fetched::NotRead, rot);
             let rot_inventory = record
