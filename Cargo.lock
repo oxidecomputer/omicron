@@ -8066,6 +8066,7 @@ dependencies = [
  "pq-sys",
  "proptest",
  "serde",
+ "sled-agent-types",
  "slog",
  "test-strategy",
  "tokio",

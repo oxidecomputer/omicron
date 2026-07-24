@@ -8,7 +8,6 @@ use iddqd::IdOrdItem;
 use iddqd::id_upcast;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
-use omicron_common::disk::CompressionAlgorithm;
 use omicron_common::disk::DatasetName;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
@@ -197,4 +196,59 @@ pub struct SharedDatasetConfig {
 
     /// The lower bound on the amount of storage usable by this dataset
     pub reservation: Option<ByteCount>,
+}
+
+#[derive(
+    Copy,
+    Clone,
+    Debug,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+    PartialEq,
+    Eq,
+    Hash,
+    PartialOrd,
+    Ord,
+    daft::Diffable,
+)]
+pub struct GzipLevel(pub(crate) u8);
+
+#[derive(
+    Copy,
+    Clone,
+    Debug,
+    Default,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+    PartialEq,
+    Eq,
+    Hash,
+    PartialOrd,
+    Ord,
+    daft::Diffable,
+)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum CompressionAlgorithm {
+    // Selects a default compression algorithm. This is dependent on both the
+    // zpool and OS version.
+    On,
+
+    // Disables compression.
+    #[default]
+    Off,
+
+    // Selects the default Gzip compression level.
+    //
+    // According to the ZFS docs, this is "gzip-6", but that's a default value,
+    // which may change with OS updates.
+    Gzip,
+
+    GzipN {
+        level: GzipLevel,
+    },
+    Lz4,
+    Lzjb,
+    Zle,
 }

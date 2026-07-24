@@ -15,9 +15,9 @@ use camino::{Utf8Path, Utf8PathBuf};
 use camino_tempfile::Utf8TempDir;
 use itertools::Itertools;
 use omicron_common::api::external::ByteCount;
-use omicron_common::disk::CompressionAlgorithm;
 use omicron_uuid_kinds::DatasetUuid;
 use rustix::fd::AsRawFd;
+use sled_agent_types::disk::CompressionAlgorithm;
 use sled_agent_types::disk::DiskIdentity;
 use sled_agent_types::disk::SharedDatasetConfig;
 use sled_agent_types::inventory::InventoryDataset;
@@ -2543,6 +2543,7 @@ pub async fn get_all_omicron_datasets_for_delete() -> anyhow::Result<Vec<String>
 #[cfg(test)]
 mod test {
     use super::*;
+    use sled_agent_types::disk::GzipLevel;
 
     #[cfg(target_os = "illumos")]
     #[tokio::test]
@@ -2869,7 +2870,7 @@ mod test {
             quota: Some(hundred_gib),
             reservation: None,
             compression: CompressionAlgorithm::GzipN {
-                level: omicron_common::disk::GzipLevel::new::<9>(),
+                level: GzipLevel::new::<9>(),
             },
         });
 

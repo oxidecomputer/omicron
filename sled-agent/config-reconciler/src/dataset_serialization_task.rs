@@ -1501,13 +1501,13 @@ mod tests {
     use assert_matches::assert_matches;
     use illumos_utils::zfs::DestroyDatasetErrorVariant;
     use omicron_common::api::external::ByteCount;
-    use omicron_common::disk::CompressionAlgorithm;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::OmicronZoneUuid;
     use omicron_uuid_kinds::ZpoolUuid;
     use proptest::collection::btree_map;
     use proptest::prelude::*;
     use proptest::sample::size_range;
+    use sled_agent_types::disk::CompressionAlgorithm;
     use std::sync::Mutex;
     use test_strategy::Arbitrary;
     use test_strategy::proptest;
@@ -2567,10 +2567,10 @@ mod illumos_tests {
     use key_manager::SecretRetriever;
     use key_manager::SecretRetrieverError;
     use key_manager::StorageKeyRequester;
-    use omicron_common::disk::CompressionAlgorithm;
     use omicron_common::zpool_name::ZpoolKind;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::ZpoolUuid;
+    use sled_agent_types::disk::CompressionAlgorithm;
     use sled_storage::disk::Disk;
     use sled_storage::disk::RawSyntheticDisk;
     use tokio::sync::watch;

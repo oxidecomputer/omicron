@@ -45,12 +45,14 @@ pub mod diagnostics {
 }
 
 pub mod disk {
+    pub use crate::v1::disk::CompressionAlgorithm;
     pub use crate::v1::disk::DatasetConfig;
     pub use crate::v1::disk::DiskEnsureBody;
     pub use crate::v1::disk::DiskIdentity;
     pub use crate::v1::disk::DiskPathParam;
     pub use crate::v1::disk::DiskStateRequested;
     pub use crate::v1::disk::DiskVariant;
+    pub use crate::v1::disk::GzipLevel;
     pub use crate::v1::disk::M2Slot;
     pub use crate::v1::disk::OmicronPhysicalDiskConfig;
     pub use crate::v1::disk::SharedDatasetConfig;
