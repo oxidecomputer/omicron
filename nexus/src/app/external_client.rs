@@ -207,7 +207,7 @@ pub enum ExternalUrlError {
 }
 
 impl ExternalIpError {
-    /// Traverses `error`'s cause chain to extract an [`ExternalIplError`], if
+    /// Traverses `error`'s cause chain to extract an [`ExternalIpError`], if
     /// the provided error was caused by one.
     pub fn downcast_from<'err>(
         error: &'err (dyn std::error::Error + 'static),
