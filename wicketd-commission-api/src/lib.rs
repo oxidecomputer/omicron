@@ -15,7 +15,7 @@ use wicketd_commission_types_versions::latest;
 
 // NOTE: The commission API is server-side versioned, but changing it requires
 // coordinating with rkdeploy (it must stay on the oldest version supported
-// across all Omicron versions it supports.) So it's worth not revising this API
+// across all Omicron versions it targets.) So it's worth not revising this API
 // too frequently.
 api_versions!([
     // WHEN CHANGING THE API (part 1 of 2):

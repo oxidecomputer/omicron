@@ -760,7 +760,7 @@ pub enum RackOperationState {
         message: String,
         /// Information about the step that failed, if known.
         ///
-        /// This is currently always absent, but is reserved for future use.
+        /// This is reserved for future use.
         failed_step: Option<RssStepInfo>,
     },
     /// The operation panicked.

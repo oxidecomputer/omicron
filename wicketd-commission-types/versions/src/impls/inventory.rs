@@ -183,7 +183,8 @@ impl TransceiverDatapath {
             TransceiverDatapath::Error { message } => {
                 return Err(message.as_str());
             }
-            // TODO-RAINCLAUDE: SFF-8636 has no lane ids, so the array index is the lane number; zipping a u8 range keeps that a conversion-free fact
+            // For SFF-8636, the array index is the lane number. (The
+            // .zip(0u8..) is similar to enumerate() except it fits in a u8.)
             TransceiverDatapath::Sff8636 { lanes } => lanes
                 .iter()
                 .zip(0u8..)

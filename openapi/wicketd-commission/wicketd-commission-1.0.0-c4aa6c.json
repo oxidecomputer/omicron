@@ -1233,7 +1233,7 @@
         ]
       },
       "Inventory": {
-        "description": "Inventory across all service processors and switch transceivers.\n\nThis type cannot derive `Eq` because transceiver optical-power readings are floating-point.",
+        "description": "Inventory across all service processors and switch transceivers.",
         "type": "object",
         "properties": {
           "ignition_fetch_error": {
@@ -1932,7 +1932,7 @@
             "properties": {
               "failed_step": {
                 "nullable": true,
-                "description": "Information about the step that failed, if known.\n\nThis is currently always absent, but is reserved for future use.",
+                "description": "Information about the step that failed, if known.\n\nThis is reserved for future use.",
                 "allOf": [
                   {
                     "$ref": "#/components/schemas/RssStepInfo"

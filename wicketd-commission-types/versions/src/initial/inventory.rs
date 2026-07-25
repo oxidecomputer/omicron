@@ -375,9 +375,6 @@ impl IdOrdItem for SpInfo {
 }
 
 /// Inventory across all service processors and switch transceivers.
-///
-/// This type cannot derive `Eq` because transceiver optical-power readings are
-/// floating-point.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Inventory {
     /// How long it has been since wicketd last received a successful response

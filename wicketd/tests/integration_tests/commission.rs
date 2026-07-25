@@ -628,8 +628,10 @@ async fn test_commission_rss_config() {
     ctx.teardown().await;
 }
 
-// TODO-RAINCLAUDE: read back through the unstable API because the commission API has no config read-back endpoint
 async fn recovery_password_set(ctx: &WicketdTestContext) -> bool {
+    // The recovery password is read through the unstable API, because the
+    // stable commission API currently doesn't have a way to read the config
+    // back.
     ctx.wicketd_client
         .get_rss_config()
         .await
