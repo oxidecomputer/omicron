@@ -21,16 +21,16 @@ use uuid::Uuid;
 /// A query for filtering out candidate IP ranges that overlap with any
 /// existing ranges.
 ///
-/// This query is used when inserting a new IP range into an existing IP Pool.
-/// Those ranges must currently be unique globally, across all pools. This query
-/// selects the candidate range, _if_ it does not overlap with any existing
-/// range. I.e., it filters out the candidate if it overlaps.
+/// This query runs when inserting a new IP range into an existing IP Pool.
+/// Ranges must be unique across all pools. This query selects the
+/// candidate range only if it does not overlap any existing range. It
+/// filters out the candidate if it overlaps an existing `ip_pool_range`
+/// row or an existing `subnet_pool_member` row.
 ///
-/// The query uses multiple separate `NOT EXISTS` subqueries rather than a
-/// single subquery with `OR` clauses. That's a lot of duplication, but it's
-/// to help with the scalability of the query. An `OR` means the database
-/// cannot use the indexes we've supplied on the `first_address` and
-/// `last_address` columns, and must resort to a full table scan.
+/// Two closed intervals `[a, b]` and `[c, d]` overlap exactly when
+/// `a <= d AND c <= b`. Both tables have a `check_address_order` CHECK
+/// constraint guaranteeing `a <= b` and `c <= d`, so this simple form
+/// always works. That one inequality is checked once per table below.
 ///
 /// See `tests/output/filter_overlapping_ip_ranges.sql` for the full generated SQL.
 #[derive(Debug, Clone)]
@@ -43,103 +43,61 @@ impl QueryId for FilterOverlappingIpRanges {
     const HAS_STATIC_QUERY_ID: bool = false;
 }
 
-// Push the subquery finding any existing record that contains a candidate's
-// address (first or last):
+// Push a single `NOT EXISTS` subquery that checks whether any row in
+// `table_name` overlaps the candidate range `[first_address, last_address]`.
+//
+// Two closed intervals overlap when each one starts before or at the
+// other one's end. See the module doc comment above for the general
+// form. Here, `first_address` and `last_address` name the existing
+// row's columns, and the two function parameters name the candidate's
+// bounds:
 //
 // ```sql
-// SELECT
-//      id
-// FROM
-//      ip_pool_range
-// WHERE
-//      <address> >= first_address AND
-//      <address> <= last_address AND
-//      time_deleted IS NULL
-//  LIMIT 1
+// SELECT 1 FROM <table_name>
+// WHERE first_address <= <last_address>   -- existing.start <= candidate.end
+//   AND last_address >= <first_address>   -- existing.end >= candidate.start
+//   AND time_deleted IS NULL
+// LIMIT 1
 // ```
-fn push_ip_pool_range_record_contains_candidate_subquery<'a>(
-    out: AstPass<'_, 'a, Pg>,
-    address: &'a IpNetwork,
-) -> QueryResult<()> {
-    push_record_contains_candidate_subquery(out, address, "ip_pool_range")
-}
-
-fn push_subnet_pool_member_record_contains_candidate_subquery<'a>(
-    out: AstPass<'_, 'a, Pg>,
-    address: &'a IpNetwork,
-) -> QueryResult<()> {
-    push_record_contains_candidate_subquery(out, address, "subnet_pool_member")
-}
-
-fn push_record_contains_candidate_subquery<'a>(
+fn push_overlap_subquery<'a>(
     mut out: AstPass<'_, 'a, Pg>,
-    address: &'a IpNetwork,
+    first_address: &'a IpNetwork,
+    last_address: &'a IpNetwork,
     table_name: &'static str,
 ) -> QueryResult<()> {
     out.push_sql("SELECT 1 FROM ");
     out.push_identifier(table_name)?;
-    out.push_sql(" WHERE ");
-    out.push_bind_param::<sql_types::Inet, _>(address)?;
-    out.push_sql(" >= first_address AND ");
-    out.push_bind_param::<sql_types::Inet, _>(address)?;
-    out.push_sql(" <= last_address AND time_deleted IS NULL LIMIT 1");
+    out.push_sql(" WHERE first_address <= ");
+    out.push_bind_param::<sql_types::Inet, _>(last_address)?;
+    out.push_sql(" AND last_address >= ");
+    out.push_bind_param::<sql_types::Inet, _>(first_address)?;
+    out.push_sql(" AND time_deleted IS NULL LIMIT 1");
     Ok(())
 }
 
-// Push the subquery that finds any records with an address contained within the
-// provided candidate range.
-//
-// ```sql
-// SELECT
-//      id
-// FROM
-//      ip_pool_range
-// WHERE
-//      <column> >= <first_address> AND
-//      <column> <= <last_address> AND
-//      time_deleted IS NULL
-// LIMIT 1
-// ```
-fn push_candidate_contains_ip_pool_range_record_subquery<'a>(
+// Thin, named wrappers around `push_overlap_subquery`, one per table. These
+// only exist so the call sites in `walk_ast` below read as
+// "check ip_pool_range" / "check subnet_pool_member" rather than a bare
+// function call with a string literal buried in the argument list.
+fn push_ip_pool_range_overlap_subquery<'a>(
     out: AstPass<'_, 'a, Pg>,
     first_address: &'a IpNetwork,
     last_address: &'a IpNetwork,
 ) -> QueryResult<()> {
-    push_candidate_contains_record_subquery(
-        out,
-        first_address,
-        last_address,
-        "ip_pool_range",
-    )
+    push_overlap_subquery(out, first_address, last_address, "ip_pool_range")
 }
 
-fn push_candidate_contains_subnet_pool_member_record_subquery<'a>(
+fn push_subnet_pool_member_overlap_subquery<'a>(
     out: AstPass<'_, 'a, Pg>,
     first_address: &'a IpNetwork,
     last_address: &'a IpNetwork,
 ) -> QueryResult<()> {
-    push_candidate_contains_record_subquery(
+    push_overlap_subquery(
         out,
         first_address,
         last_address,
         "subnet_pool_member",
     )
-}
-
-fn push_candidate_contains_record_subquery<'a>(
-    mut out: AstPass<'_, 'a, Pg>,
-    first_address: &'a IpNetwork,
-    last_address: &'a IpNetwork,
-    table_name: &'static str,
-) -> QueryResult<()> {
-    out.push_sql("SELECT 1 FROM ");
-    out.push_identifier(table_name)?;
-    out.push_sql(" WHERE first_address >= ");
-    out.push_bind_param::<sql_types::Inet, _>(first_address)?;
-    out.push_sql(" AND last_address <= ");
-    out.push_bind_param::<sql_types::Inet, _>(last_address)?;
-    out.push_sql(" AND time_deleted IS NULL LIMIT 1");
-    Ok(())
 }
 
 impl QueryFragment<Pg> for FilterOverlappingIpRanges {
@@ -170,54 +128,20 @@ impl QueryFragment<Pg> for FilterOverlappingIpRanges {
         out.push_sql(", ");
         out.push_bind_param::<sql_types::BigInt, i64>(&self.range.rcgen)?;
 
-        // Filter out ranges that overlap with existing ranges.
+        // Filter out ranges that overlap with an existing IP Pool range, or
+        // with an existing Subnet Pool member.
         out.push_sql(" WHERE NOT EXISTS(");
-        push_candidate_contains_ip_pool_range_record_subquery(
+        push_ip_pool_range_overlap_subquery(
             out.reborrow(),
             &self.range.first_address,
             &self.range.last_address,
         )?;
         out.push_sql(") AND NOT EXISTS(");
-        push_candidate_contains_ip_pool_range_record_subquery(
+        push_subnet_pool_member_overlap_subquery(
             out.reborrow(),
             &self.range.first_address,
             &self.range.last_address,
         )?;
-        out.push_sql(") AND NOT EXISTS(");
-        push_ip_pool_range_record_contains_candidate_subquery(
-            out.reborrow(),
-            &self.range.first_address,
-        )?;
-        out.push_sql(") AND NOT EXISTS(");
-        push_ip_pool_range_record_contains_candidate_subquery(
-            out.reborrow(),
-            &self.range.last_address,
-        )?;
-
-        // Or overlap with existing Subnet Pool Members.
-        out.push_sql(" ) AND NOT EXISTS(");
-        push_candidate_contains_subnet_pool_member_record_subquery(
-            out.reborrow(),
-            &self.range.first_address,
-            &self.range.last_address,
-        )?;
-        out.push_sql(") AND NOT EXISTS(");
-        push_candidate_contains_subnet_pool_member_record_subquery(
-            out.reborrow(),
-            &self.range.first_address,
-            &self.range.last_address,
-        )?;
-        out.push_sql(") AND NOT EXISTS(");
-        push_subnet_pool_member_record_contains_candidate_subquery(
-            out.reborrow(),
-            &self.range.first_address,
-        )?;
-        out.push_sql(") AND NOT EXISTS(");
-        push_subnet_pool_member_record_contains_candidate_subquery(
-            out.reborrow(),
-            &self.range.last_address,
-        )?;
-
         out.push_sql(")");
         Ok(())
     }
