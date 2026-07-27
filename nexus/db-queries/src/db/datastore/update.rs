@@ -668,11 +668,8 @@ async fn insert_impl(
     // later.
     let old_generation = get_generation(&conn).await?;
     let new_generation = old_generation.next();
-    let desc =
-        TufRepoDescription::from_external(logical_desc.clone(), new_generation)
-            .map_err(|error| {
-                err.bail(InsertError::ByteCountRangeError(error))
-            })?;
+    let desc = TufRepoDescription::new(logical_desc.clone(), new_generation)
+        .map_err(|error| err.bail(InsertError::ByteCountRangeError(error)))?;
 
     let repo = {
         use nexus_db_schema::schema::tuf_repo::dsl;

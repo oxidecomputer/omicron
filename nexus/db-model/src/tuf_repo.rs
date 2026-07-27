@@ -25,7 +25,7 @@ use parse_display::Display;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use tufaceous_artifact_v2::{
-    Artifact, ArtifactHash as ExternalArtifactHash, ArtifactVersion,
+    ArtifactHash as ExternalArtifactHash, ArtifactVersion,
 };
 
 /// A description of a TUF update: a repo, along with the artifacts it
@@ -45,7 +45,7 @@ pub struct TufRepoDescription {
 impl TufRepoDescription {
     /// Creates a new `TufRepoDescription` from an
     /// [`nexus_types::tuf_repo::TufRepoDescription`].
-    pub fn from_external(
+    pub fn new(
         description: nexus_types::tuf_repo::TufRepoDescription,
         generation_added: external::Generation,
     ) -> Result<Self, external::ByteCountRangeError> {
@@ -63,10 +63,7 @@ impl TufRepoDescription {
                 .artifacts
                 .into_iter()
                 .map(|artifact| {
-                    TufArtifactDescription::from_artifact(
-                        artifact,
-                        generation_added,
-                    )
+                    TufArtifactDescription::new(artifact, generation_added)
                 })
                 .collect::<Result<_, _>>()?,
             metadata: description
@@ -110,8 +107,10 @@ pub struct TufArtifactDescription {
 }
 
 impl TufArtifactDescription {
-    pub fn from_artifact(
-        artifact: Artifact,
+    /// Creates a new `TufArtifactDescription` from an
+    /// [`tufaceous_artifact_v2::Artifact`].
+    pub fn new(
+        artifact: tufaceous_artifact_v2::Artifact,
         generation_added: external::Generation,
     ) -> Result<Self, external::ByteCountRangeError> {
         let id = TypedUuid::new_v4().into();
@@ -140,9 +139,9 @@ impl TufArtifactDescription {
     }
 }
 
-impl From<TufArtifactDescription> for Artifact {
+impl From<TufArtifactDescription> for tufaceous_artifact_v2::Artifact {
     fn from(description: TufArtifactDescription) -> Self {
-        Artifact {
+        tufaceous_artifact_v2::Artifact {
             version: description.file.version.into(),
             tags: description
                 .tags
