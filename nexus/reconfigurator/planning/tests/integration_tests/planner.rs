@@ -12,7 +12,7 @@ use clickhouse_admin_types::keeper::KeeperId;
 use expectorate::assert_contents;
 use iddqd::IdOrdMap;
 use nexus_reconfigurator_planning::blueprint_editor::ExternalNetworkingAllocator;
-use nexus_reconfigurator_planning::system::FAKE_SIGN;
+use nexus_reconfigurator_planning::system::FAKE_ROT_RKTH;
 use nexus_reconfigurator_simulation::BlueprintId;
 use nexus_reconfigurator_simulation::CollectionId;
 use nexus_types::deployment::Blueprint;
@@ -3341,7 +3341,7 @@ fn create_artifacts_for_version(which: WhichVersion) -> ArtifactSet {
             version: ArtifactVersion::new("0.0.1").unwrap(),
             tags: KnownArtifactTags::Rot(RotTags {
                 rot_board: sp_sim::SIM_ROT_BOARD.to_string(),
-                rot_rkth: Some(RotKeyTableHash(FAKE_SIGN.into())),
+                rot_rkth: Some(RotKeyTableHash(FAKE_ROT_RKTH.into())),
                 rot_slot: RotSlot::B,
             })
             .to_tags()
@@ -3357,7 +3357,7 @@ fn create_artifacts_for_version(which: WhichVersion) -> ArtifactSet {
             version: ArtifactVersion::new("0.0.1").unwrap(),
             tags: KnownArtifactTags::RotBootloader(RotBootloaderTags {
                 rot_board: sp_sim::SIM_ROT_BOARD.to_string(),
-                rot_rkth: Some(RotKeyTableHash(FAKE_SIGN.into())),
+                rot_rkth: Some(RotKeyTableHash(FAKE_ROT_RKTH.into())),
             })
             .to_tags()
             .unwrap(),
