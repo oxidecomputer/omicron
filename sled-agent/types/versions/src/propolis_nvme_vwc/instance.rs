@@ -2,23 +2,33 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+//! Instance types for Sled Agent API versions 43.
+
 use std::net::SocketAddr;
 
 use omicron_uuid_kinds::InstanceUuid;
-use propolis_api_types_versions::v3::instance_spec::InstanceSpec;
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
 use crate::v1::instance::InstanceMetadata;
 use crate::v1::instance::VmmRuntimeState;
-use crate::v18;
-use crate::v18::instance::InstanceSledLocalConfig;
+use crate::v29;
+use crate::v41;
+use crate::v41::instance::InstanceSledLocalConfig;
+use propolis_api_types_versions::v6::instance_spec::InstanceSpec;
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 /// Specifies the virtual hardware configuration of a new Propolis VMM in the
 /// form of a Propolis instance specification.
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct VmmSpec(pub InstanceSpec);
+
+impl From<v29::instance::VmmSpec> for VmmSpec {
+    fn from(other: v29::instance::VmmSpec) -> VmmSpec {
+        let v6_spec: InstanceSpec = other.0.into();
+        VmmSpec(v6_spec)
+    }
+}
 
 /// The body of a request to ensure that a instance and VMM are known to a sled
 /// agent.
@@ -50,21 +60,16 @@ pub struct InstanceEnsureBody {
     pub metadata: InstanceMetadata,
 }
 
-impl From<v18::instance::InstanceEnsureBody> for InstanceEnsureBody {
-    fn from(old: v18::instance::InstanceEnsureBody) -> InstanceEnsureBody {
-        // Conversion goes v1 -> v2 -> v3 (latest) through propolis's
-        // versioned From impls.
-        let v2_spec: propolis_api_types_versions::v2::instance_spec::InstanceSpec =
-            old.vmm_spec.0.into();
-        let v3_spec: InstanceSpec = v2_spec.into();
+impl From<v41::instance::InstanceEnsureBody> for InstanceEnsureBody {
+    fn from(v41: v41::instance::InstanceEnsureBody) -> InstanceEnsureBody {
         InstanceEnsureBody {
-            vmm_spec: VmmSpec(v3_spec),
-            local_config: old.local_config,
-            vmm_runtime: old.vmm_runtime,
-            instance_id: old.instance_id,
-            migration_id: old.migration_id,
-            propolis_addr: old.propolis_addr,
-            metadata: old.metadata,
+            vmm_spec: v41.vmm_spec.into(),
+            local_config: v41.local_config,
+            vmm_runtime: v41.vmm_runtime,
+            instance_id: v41.instance_id,
+            migration_id: v41.migration_id,
+            propolis_addr: v41.propolis_addr,
+            metadata: v41.metadata,
         }
     }
 }
