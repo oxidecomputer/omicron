@@ -645,7 +645,9 @@ impl super::Nexus {
         // for Oxide-internal services, to the structured per-pool config the
         // datastore now expects. We partition the ranges by IP version and
         // produce one pool config per non-empty version, using the historical
-        // built-in pool names and descriptions so nothing observable changes.
+        // built-in pool names and descriptions. Note that we can still have
+        // slightly different behavior here than before, since we filter out
+        // empty ranges before constructing a pool.
         //
         // TODO(#8946): have RSS provide the structured `ServiceIpPoolConfig`s
         // directly, rather than reconstructing them from a flat list here.

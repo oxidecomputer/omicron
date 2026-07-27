@@ -6,13 +6,11 @@
 
 use super::DataStore;
 use super::dns::DnsVersionUpdateBuilder;
-use super::ip_pool::ServiceIpPools;
 use crate::authz;
 use crate::context::OpContext;
 use crate::db;
 use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
-use crate::db::datastore::ServiceIpPool;
 use crate::db::identity::Asset;
 use crate::db::model::CrucibleDataset;
 use crate::db::model::IncompleteExternalIp;
@@ -581,9 +579,9 @@ impl DataStore {
 
     async fn rack_populate_service_networking_records(
         &self,
+        opctx: &OpContext,
         conn: &async_bb8_diesel::Connection<DbConnection>,
         log: &slog::Logger,
-        service_pools: &ServiceIpPools,
         zone_config: &BlueprintZoneConfig,
     ) -> Result<(), RackInitError> {
         // For services with external connectivity, we record their
@@ -703,16 +701,22 @@ impl DataStore {
             );
             return Ok(());
         };
-        let service_pool = service_pools
-            .pools_for_version(external_ip.ip_version().into())
-            .first()
-            .ok_or_else(|| {
-                RackInitError::AddingIp(Error::internal_error(
-                    "no system services pool for this IP version",
-                ))
+        let (_authz_pool, db_pool) = self
+            .ip_pool_fetch_containing_address_for_services_on_connection(
+                opctx,
+                conn,
+                external_ip.ip(),
+            )
+            .await
+            .map_err(|e| {
+                RackInitError::AddingIp(Error::internal_error(&format!(
+                    "no system services pool for external IP '{}': {}",
+                    external_ip.ip(),
+                    e,
+                )))
             })?;
         let db_ip = IncompleteExternalIp::for_omicron_zone(
-            service_pool.db_pool.id(),
+            db_pool.id(),
             external_ip,
             zone_config.id,
             zone_config.zone_type.kind(),
@@ -720,7 +724,7 @@ impl DataStore {
         Self::allocate_external_ip_on_connection(
             conn,
             db_ip,
-            LookupType::ById(service_pool.db_pool.id()),
+            LookupType::ById(db_pool.id()),
         )
         .await
         .map_err(|err| {
@@ -833,10 +837,6 @@ impl DataStore {
                     // Which RSS has already allocated during bootstrapping.
 
                     // Add the service IP Pools and ranges for each.
-                    let mut service_ip_pools = ServiceIpPools {
-                        ipv4: Vec::new(),
-                        ipv6: Vec::new(),
-                    };
                     for pool_config in rack_init.service_ip_pools {
                         let pool = db::model::IpPool::new(
                             &IdentityMetadataCreateParams {
@@ -846,9 +846,6 @@ impl DataStore {
                             pool_config.ip_version(),
                             nexus_db_model::IpPoolAssignment::SystemServices,
                         );
-                        // TODO-correctness TODO-multirack: Pools are shared
-                        // across racks, so getting an error that these already
-                        // exist might be fine.
                         let db_pool = Self::ip_pool_create_on_connection(&conn, opctx, pool)
                             .await
                             .map_err(|e| {
@@ -884,14 +881,6 @@ impl DataStore {
                                 err.set(RackInitError::AddingIp(e)).unwrap();
                                 DieselError::RollbackTransaction
                             })?;
-                        }
-                        match db_pool.ip_version {
-                            IpVersion::V4 => service_ip_pools
-                                .ipv4
-                                .push(ServiceIpPool { authz_pool, db_pool } ),
-                            IpVersion::V6 => service_ip_pools
-                                .ipv6
-                                .push(ServiceIpPool { authz_pool, db_pool } ),
                         }
                     }
 
@@ -951,9 +940,9 @@ impl DataStore {
                     // Allocate networking records for all services.
                     for (_, zone_config) in blueprint.in_service_zones() {
                         self.rack_populate_service_networking_records(
+                            opctx,
                             &conn,
                             &log,
-                            &service_ip_pools,
                             zone_config,
                         )
                         .await
@@ -1160,6 +1149,8 @@ mod test {
     use nexus_types::external_api::silo::SiloIdentityMode;
     use nexus_types::identity::Asset;
     use nexus_types::internal_api::params::DnsRecord;
+    use omicron_common::address::Ipv4Range;
+    use omicron_common::address::Ipv6Range;
     use omicron_common::address::NEXUS_OPTE_IPV4_SUBNET;
     use omicron_common::api::external::http_pagination::PaginatedBy;
     use omicron_common::api::external::{
@@ -2212,7 +2203,8 @@ mod test {
         blueprint.parent_blueprint_id = None;
 
         // Provide a v4 service IP pool whose range does not contain the address
-        // the Nexus zone requested above. The pool exists, so pool selection
+        // the Nexus zone requested above. The pool exists, but doesn't contain
+        // the requested address and so the rack-setup request fails.
         // succeeds, but allocating the out-of-range IP fails.
         let service_ip_pool_range =
             IpRange::from(IpAddr::V4(Ipv4Addr::new(9, 9, 9, 9)));
@@ -2230,10 +2222,9 @@ mod test {
             )
             .await;
         assert!(result.is_err());
-        assert_eq!(
-            result.unwrap_err().to_string(),
-            "Invalid Request: Requested external IP address not available"
-        );
+        assert!(result.unwrap_err().to_string().starts_with(
+            "Internal Error: no system services pool for external IP '1.2.3.4'"
+        ));
 
         assert!(get_all_crucible_datasets(&datastore).await.is_empty());
         assert!(get_all_external_ips(&datastore).await.is_empty());
@@ -2597,5 +2588,30 @@ mod test {
 
         db.terminate().await;
         logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn service_ip_pool_config_fails_with_empty_ranges() {
+        ServiceIpPoolConfig::new("foo".parse().unwrap(), String::new(), vec![])
+            .expect_err("should fail with empty IP ranges");
+    }
+
+    #[test]
+    fn service_ip_pool_config_fails_with_mixed_versions() {
+        ServiceIpPoolConfig::new(
+            "foo".parse().unwrap(),
+            String::new(),
+            vec![
+                IpRange::V4(Ipv4Range {
+                    first: "10.0.0.1".parse().unwrap(),
+                    last: "10.0.0.2".parse().unwrap(),
+                }),
+                IpRange::V6(Ipv6Range {
+                    first: "fd00::1".parse().unwrap(),
+                    last: "fd00::2".parse().unwrap(),
+                }),
+            ],
+        )
+        .expect_err("should fail with mixed v4 / v6 ranges");
     }
 }

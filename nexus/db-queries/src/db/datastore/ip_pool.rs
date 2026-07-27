@@ -87,19 +87,6 @@ pub struct ServiceIpPools {
 }
 
 impl ServiceIpPools {
-    /// Return all pools whose IP version matches `range`.
-    pub fn pools_for_range(&self, range: &IpRange) -> &[ServiceIpPool] {
-        if range.first_address().is_ipv4() { &self.ipv4 } else { &self.ipv6 }
-    }
-
-    /// Return all pools matching `version`.
-    pub fn pools_for_version(&self, version: IpVersion) -> &[ServiceIpPool] {
-        match version {
-            IpVersion::V4 => &self.ipv4,
-            IpVersion::V6 => &self.ipv6,
-        }
-    }
-
     /// Return any one system-service pool, regardless of IP version.
     pub fn any_pool(&self) -> Option<&ServiceIpPool> {
         self.ipv4.first().or_else(|| self.ipv6.first())
