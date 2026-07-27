@@ -51,9 +51,11 @@ async fn artifacts_for_repo(
     use nexus_db_schema::schema::tuf_artifact_tag::dsl as tuf_artifact_tag_dsl;
     use nexus_db_schema::schema::tuf_repo_artifact::dsl as tuf_repo_artifact_dsl;
 
-    // We don't bother paginating in this method because each repo has a
-    // limited number of artifacts (currently <100 as of February 2026) and tags
-    // (currently <250).
+    // We don't bother paginating in this method because all callers need to
+    // fully read the list of artifacts in a single repository, and the number
+    // of artifacts in a repository is controlled by the release engineering
+    // tooling, not users. As of July 2026 the artifact count is <100 and tag
+    // count is <250, and these numbers are expected to grow very slowly.
 
     // First collect all the artifacts belonging to this repo ID.
     let join_on_dsl_1 =
@@ -109,8 +111,11 @@ async fn metadata_for_repo(
 ) -> Result<Vec<TufMetadataEntry>, DieselError> {
     use nexus_db_schema::schema::tuf_repo_metadata::dsl;
 
-    // We don't bother paginating metadata because each repo has a limited
-    // amount of metadata (currently 0).
+    // We don't bother paginating in this method because all callers need to
+    // fully read the list of metadata, and the amount of metadata keys in a
+    // repository is controlled by the release engineering tooling, not users.
+    // As of July 2026 the number of metadata keys per repository is 0, and when
+    // we start adding metadata it is expected to grow very slowly.
     dsl::tuf_repo_metadata
         .filter(dsl::tuf_repo_id.eq(nexus_db_model::to_db_typed_uuid(repo_id)))
         .select(TufMetadataEntry::as_select())
@@ -531,8 +536,11 @@ impl DataStore {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         let conn = self.pool_connection_authorized(opctx).await?;
 
-        // We don't bother paginating in this method because each repo has a
-        // limited number of artifacts (currently <100 as of February 2026).
+        // We don't bother paginating in this method because all callers need
+        // to fully read the list of artifacts in a single repository, and the
+        // number of artifacts in a repository is controlled by the release
+        // engineering tooling, not users. As of July 2026 the artifact count is
+        // <100, and these numbers are expected to grow very slowly.
 
         let join_on_dsl =
             tuf_artifact_dsl::id.eq(tuf_repo_artifact_dsl::tuf_artifact_id);
