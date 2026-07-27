@@ -264,12 +264,13 @@ async fn mupdate_recovery_after_noop_conversion() -> Result<()> {
     // Recovery to a version that doesn't match the blueprint's sources must be
     // rejected, and the error should name both versions.
     let version_2_0_0 = Version::new(2, 0, 0);
-    let response = set_target_release_for_mupdate_recovery_with_expected_status(
-        client,
-        &version_2_0_0,
-        StatusCode::BAD_REQUEST,
-    )
-    .await?;
+    let response =
+        set_target_release_for_mupdate_recovery_with_expected_status(
+            client,
+            &version_2_0_0,
+            StatusCode::BAD_REQUEST,
+        )
+        .await?;
     let err = response.parsed_body::<HttpErrorResponseBody>().unwrap();
     for needle in [
         "mupdate recovery required",
@@ -300,12 +301,13 @@ async fn mupdate_recovery_after_noop_conversion() -> Result<()> {
     assert_eq!(status.target_release.0.unwrap().version, version_1_0_0);
 
     // ...and further recovery attempts must be rejected.
-    let response = set_target_release_for_mupdate_recovery_with_expected_status(
-        client,
-        &version_1_0_0,
-        StatusCode::BAD_REQUEST,
-    )
-    .await?;
+    let response =
+        set_target_release_for_mupdate_recovery_with_expected_status(
+            client,
+            &version_1_0_0,
+            StatusCode::BAD_REQUEST,
+        )
+        .await?;
     let err = response.parsed_body::<HttpErrorResponseBody>().unwrap();
     assert!(
         err.message.contains("no evidence a mupdate has occurred"),
