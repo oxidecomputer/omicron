@@ -231,6 +231,9 @@ impl InstallOpts {
                 "Downloading installinator document",
                 async move |cx| {
                     let installinator_doc_id = ArtifactLookupId {
+                        // v2-aware Wicket doesn't read this field, but this is
+                        // necessary to get the Installinator document from an
+                        // older Wicket.
                         kind: "installinator_document",
                         hash: lookup_id.document,
                     };
@@ -512,12 +515,19 @@ async fn download_all_artifacts(
     cx.with_nested_engine(|engine| {
         for artifact in artifacts {
             let kind = match &artifact.kind {
+                // v2-aware Wicket doesn't read `kind` on ArtifactLookupId, but
+                // using the correct value is necessary to get the artifact from
+                // an older Wicket.
                 InstallinatorArtifactKind::HostPhase2 => "host_phase_2",
                 InstallinatorArtifactKind::MeasurementCorpus => {
                     "measurement_corpus"
                 }
-                InstallinatorArtifactKind::Zone { .. } => "zone",
                 InstallinatorArtifactKind::ControlPlane => "control_plane",
+
+                // This kind doesn't exist on an older Wicket, and it won't be
+                // present in an Installinator document if we fetched it from an
+                // older Wicket, so this value is arbitrary.
+                InstallinatorArtifactKind::Zone { .. } => "zone",
             };
             let id = ArtifactLookupId { kind, hash: artifact.hash };
 
