@@ -999,7 +999,7 @@ pub async fn create_affinity_group(
 ) -> AffinityGroup {
     object_create(
         &client,
-        format!("/v1/affinity-groups?project={}", &project_name).as_str(),
+        format!("/v1/affinity-groups?project={}", project_name).as_str(),
         &affinity::AffinityGroupCreate {
             identity: IdentityMetadataCreateParams {
                 name: group_name.parse().unwrap(),
@@ -1019,7 +1019,7 @@ pub async fn create_anti_affinity_group(
 ) -> AntiAffinityGroup {
     object_create(
         &client,
-        format!("/v1/anti-affinity-groups?project={}", &project_name).as_str(),
+        format!("/v1/anti-affinity-groups?project={}", project_name).as_str(),
         &affinity::AntiAffinityGroupCreate {
             identity: IdentityMetadataCreateParams {
                 name: group_name.parse().unwrap(),
@@ -1039,7 +1039,7 @@ pub async fn create_vpc(
 ) -> Vpc {
     object_create(
         &client,
-        format!("/v1/vpcs?project={}", &project_name).as_str(),
+        format!("/v1/vpcs?project={}", project_name).as_str(),
         &vpc::VpcCreate {
             identity: IdentityMetadataCreateParams {
                 name: vpc_name.parse().unwrap(),
@@ -1064,7 +1064,7 @@ pub async fn create_vpc_with_error(
         RequestBuilder::new(
             client,
             Method::POST,
-            format!("/v1/vpcs?project={}", &project_name).as_str(),
+            format!("/v1/vpcs?project={}", project_name).as_str(),
         )
         .body(Some(&vpc::VpcCreate {
             identity: IdentityMetadataCreateParams {
@@ -1118,7 +1118,7 @@ pub async fn create_router(
 ) -> VpcRouter {
     NexusRequest::objects_post(
         &client,
-        format!("/v1/vpc-routers?project={}&vpc={}", &project_name, &vpc_name)
+        format!("/v1/vpc-routers?project={}&vpc={}", project_name, vpc_name)
             .as_str(),
         &vpc::VpcRouterCreate {
             identity: IdentityMetadataCreateParams {
@@ -1148,7 +1148,7 @@ pub async fn create_route(
         &client,
         format!(
             "/v1/vpc-router-routes?project={}&vpc={}&router={}",
-            &project_name, &vpc_name, &router_name
+            project_name, vpc_name, router_name
         )
         .as_str(),
         &vpc::RouterRouteCreate {
@@ -1185,7 +1185,7 @@ pub async fn create_route_with_error(
             Method::POST,
             format!(
                 "/v1/vpc-router-routes?project={}&vpc={}&router={}",
-                &project_name, &vpc_name, &router_name
+                project_name, vpc_name, router_name
             )
             .as_str(),
         )
@@ -1217,7 +1217,7 @@ pub async fn create_internet_gateway(
         &client,
         format!(
             "/v1/internet-gateways?project={}&vpc={}",
-            &project_name, &vpc_name
+            project_name, vpc_name
         )
         .as_str(),
         &vpc::VpcRouterCreate {
@@ -1246,7 +1246,7 @@ pub async fn delete_internet_gateway(
         &client,
         format!(
             "/v1/internet-gateways/{}?project={}&vpc={}&cascade={}",
-            &internet_gateway_name, &project_name, &vpc_name, cascade
+            internet_gateway_name, project_name, vpc_name, cascade
         )
         .as_str(),
     )
