@@ -289,7 +289,7 @@ impl From<SwitchPortSettings>
 }
 
 /// Downgrade to v2026_04_16_00 (STRONGER_BGP_UNNUMBERED_TYPES) —
-/// drop `src_addr` and re-add the `vlan_interfaces` field.
+/// drop `src_addr` field.
 impl From<SwitchPortSettings>
     for crate::v2026_04_16_00::networking::SwitchPortSettings
 {
