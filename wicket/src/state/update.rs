@@ -26,7 +26,6 @@ use tufaceous_artifact_v2::{ArtifactVersion, KnownArtifactTags};
 pub struct RackUpdateState {
     pub items: BTreeMap<ComponentId, UpdateItem>,
     pub system_version: Option<Version>,
-    pub artifacts: Vec<ArtifactId>,
     pub artifact_versions: BTreeMap<KnownArtifactTags, Vec<ArtifactVersion>>,
     // The update item currently selected is recorded in
     // state.rack_state.selected.
@@ -76,14 +75,13 @@ impl RackUpdateState {
                     ),
                 })
                 .collect(),
-            artifacts: vec![],
             artifact_versions: BTreeMap::default(),
             status_view_displayed: false,
         }
     }
 
     pub fn item_state(&self, component: ComponentId) -> UpdateItemState<'_> {
-        if self.artifacts.is_empty() {
+        if self.artifact_versions.is_empty() {
             UpdateItemState::AwaitingRepository
         } else {
             match &self.items[&component].state {
@@ -107,9 +105,8 @@ impl RackUpdateState {
         reports: EventReportMap,
     ) {
         self.system_version = system_version;
-        self.artifacts = artifacts;
         self.artifact_versions.clear();
-        for a in &self.artifacts {
+        for a in artifacts {
             if let Ok(known) = KnownArtifactTags::from_tags(a.tags.clone()) {
                 self.artifact_versions
                     .entry(known)
