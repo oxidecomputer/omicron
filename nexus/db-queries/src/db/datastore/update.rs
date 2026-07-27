@@ -780,12 +780,27 @@ async fn insert_impl(
         // if we find an existing artifact. However, we should avoid adding new
         // rows to the artifact table if we've already recorded them.
         //
+        // The only rule we enforce is that if two artifacts have the same
+        // SHA-256 checksum, they must also have the same length and the same
+        // version (because artifacts should contain their own version string,
+        // or otherwise be unique due to the version). This is enforced at the
+        // database schema via the `tuf_artifact_file` table.
+        //
         // We don't enforce that two artifacts with the same SHA-256 checksum
-        // have the same tags; they are entered as separate artifacts. The
-        // only rule we enforce is that if two artifacts have the same SHA-256
-        // checksum, they must also have the same length and the same version
-        // (because artifacts should contain their own version string, or
-        // otherwise be unique due to the version).
+        // have the same tags; they are entered as separate artifacts. Two
+        // artifacts with the same contents may have different tags to allow
+        // them to be selected in a way that is clear to Nexus (for example, if
+        // we have two kinds of compute sleds that use the same CPU generation,
+        // we might want to select the same OS phase 1 image with either board
+        // name.)
+        //
+        // Because it is not possible for the database to ensure a one-to-one
+        // mapping of artifact UUID to a set of tags and SHA-256 checksum, it
+        // is possible to end up with multiple artifact entries in the database
+        // with the same set of tags. This is okay; we don't make decisions
+        // around the uniqueness of an artifact in the database. This function
+        // makes a best-effort attempt to avoid inserting duplicate artifacts to
+        // avoid unnecessary database bloat.
 
         // First, build a list of artifacts matching any artifact hash present
         // in the uploaded repository.
