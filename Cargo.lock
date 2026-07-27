@@ -1640,7 +1640,7 @@ dependencies = [
 [[package]]
 name = "client-common"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=65cc70aa5507f779551a1d33c0089bb0a9b7ac72#65cc70aa5507f779551a1d33c0089bb0a9b7ac72"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=ce015cde17a1ebc839ae482026d522cf0e369a3b#ce015cde17a1ebc839ae482026d522cf0e369a3b"
 
 [[package]]
 name = "clipboard-win"
@@ -2696,7 +2696,7 @@ dependencies = [
 [[package]]
 name = "ddm-admin-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=65cc70aa5507f779551a1d33c0089bb0a9b7ac72#65cc70aa5507f779551a1d33c0089bb0a9b7ac72"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=ce015cde17a1ebc839ae482026d522cf0e369a3b#ce015cde17a1ebc839ae482026d522cf0e369a3b"
 dependencies = [
  "ddm-api-types-versions",
  "oxnet",
@@ -2710,7 +2710,7 @@ dependencies = [
 [[package]]
 name = "ddm-api-types-versions"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=65cc70aa5507f779551a1d33c0089bb0a9b7ac72#65cc70aa5507f779551a1d33c0089bb0a9b7ac72"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=ce015cde17a1ebc839ae482026d522cf0e369a3b#ce015cde17a1ebc839ae482026d522cf0e369a3b"
 dependencies = [
  "ddm-protocol",
  "oxnet",
@@ -2723,7 +2723,7 @@ dependencies = [
 [[package]]
 name = "ddm-protocol"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=65cc70aa5507f779551a1d33c0089bb0a9b7ac72#65cc70aa5507f779551a1d33c0089bb0a9b7ac72"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=ce015cde17a1ebc839ae482026d522cf0e369a3b#ce015cde17a1ebc839ae482026d522cf0e369a3b"
 dependencies = [
  "oxnet",
  "schemars 0.8.22",
@@ -6922,7 +6922,7 @@ dependencies = [
 [[package]]
 name = "mg-admin-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=65cc70aa5507f779551a1d33c0089bb0a9b7ac72#65cc70aa5507f779551a1d33c0089bb0a9b7ac72"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=ce015cde17a1ebc839ae482026d522cf0e369a3b#ce015cde17a1ebc839ae482026d522cf0e369a3b"
 dependencies = [
  "chrono",
  "client-common",
@@ -6942,7 +6942,7 @@ dependencies = [
 [[package]]
 name = "mg-api-types"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=65cc70aa5507f779551a1d33c0089bb0a9b7ac72#65cc70aa5507f779551a1d33c0089bb0a9b7ac72"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=ce015cde17a1ebc839ae482026d522cf0e369a3b#ce015cde17a1ebc839ae482026d522cf0e369a3b"
 dependencies = [
  "mg-api-types-versions",
 ]
@@ -6950,7 +6950,7 @@ dependencies = [
 [[package]]
 name = "mg-api-types-versions"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=65cc70aa5507f779551a1d33c0089bb0a9b7ac72#65cc70aa5507f779551a1d33c0089bb0a9b7ac72"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=ce015cde17a1ebc839ae482026d522cf0e369a3b#ce015cde17a1ebc839ae482026d522cf0e369a3b"
 dependencies = [
  "chrono",
  "nom 8.0.0",
@@ -13591,9 +13591,9 @@ dependencies = [
 
 [[package]]
 name = "serde_json"
-version = "1.0.150"
+version = "1.0.151"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e8014e44b4736ed0538adeecded0fce2a272f22dc9578a7eb6b2d9993c74cfb9"
+checksum = "c841b55ecdae098c80dcae9cf767f6f8a0c2cdb3416bbef72181df4d0fe73f14"
 dependencies = [
  "itoa",
  "memchr",
