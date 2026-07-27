@@ -60,11 +60,11 @@ impl TryFrom<IdentityType> for policy::IdentityType {
 #[derive(Clone, Queryable, Insertable, Debug, Selectable)]
 #[diesel(table_name = role_assignment)]
 pub struct RoleAssignment {
-    pub identity_type: IdentityType,
-    pub identity_id: Uuid,
     pub resource_type: String,
-    pub resource_id: Uuid,
     pub role_name: String,
+    pub resource_id: Uuid,
+    pub identity_id: Uuid,
+    pub identity_type: IdentityType,
 }
 
 impl RoleAssignment {

@@ -31,9 +31,9 @@ const CLIENT_AUTHENTICATION_TIMEOUT: i64 = 300;
 #[derive(Clone, Debug, Insertable, Queryable, Selectable)]
 #[diesel(table_name = device_auth_request)]
 pub struct DeviceAuthRequest {
+    pub user_code: String,
     pub client_id: Uuid,
     pub device_code: String,
-    pub user_code: String,
     pub time_created: DateTime<Utc>,
     pub time_expires: DateTime<Utc>,
 

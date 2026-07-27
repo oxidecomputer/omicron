@@ -22,8 +22,8 @@ use clickhouse_admin_types::keeper::{
     ClickhouseKeeperClusterMembership, KeeperId,
 };
 use diesel::backend::Backend;
-use diesel::deserialize::{self, FromSql};
-use diesel::expression::AsExpression;
+use diesel::deserialize::{self, FromSql, Queryable};
+use diesel::expression::{AsExpression, Selectable};
 use diesel::pg::Pg;
 use diesel::serialize::ToSql;
 use diesel::{serialize, sql_types};
@@ -917,7 +917,7 @@ impl From<SledRole> for sled_agent_types::inventory::SledRole {
 }
 
 /// See [`nexus_types::inventory::SledAgent`].
-#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[derive(Clone, Debug, Insertable)]
 #[diesel(table_name = inv_sled_agent)]
 pub struct InvSledAgent {
     pub inv_collection_id: DbTypedUuid<CollectionKind>,
@@ -940,6 +940,107 @@ pub struct InvSledAgent {
 
     #[diesel(embed)]
     pub file_source_resolver: InvOmicronFileSourceResolver,
+}
+
+// In the database schema, `cpu_family` appears in the middle of the
+// file-source-resolver columns even though it is not part of that embedded
+// type. Avoiding this adapter would require reordering the table columns by
+// moving `cpu_family` to the end of `inv_sled_agent` and ordering
+// `InvOmicronFileSourceResolver`'s fields as zone manifest, mupdate override,
+// then measurement manifest.
+#[derive(Queryable, Selectable)]
+#[diesel(table_name = inv_sled_agent)]
+#[doc(hidden)]
+pub struct InvSledAgentRow {
+    inv_collection_id: DbTypedUuid<CollectionKind>,
+    time_collected: DateTime<Utc>,
+    source: String,
+    sled_id: DbTypedUuid<SledKind>,
+    hw_baseboard_id: Option<Uuid>,
+    sled_agent_ip: ipv6::Ipv6Addr,
+    sled_agent_port: SqlU16,
+    sled_role: SledRole,
+    usable_hardware_threads: SqlU32,
+    usable_physical_ram: ByteCount,
+    reservoir_size: ByteCount,
+    ledgered_sled_config: Option<DbTypedUuid<OmicronSledConfigKind>>,
+
+    #[diesel(embed)]
+    reconciler_status: InvConfigReconcilerStatus,
+
+    zone_manifest_boot_disk_path: String,
+    zone_manifest_source: Option<InvZoneManifestSourceEnum>,
+    zone_manifest_mupdate_id: Option<DbTypedUuid<MupdateKind>>,
+    zone_manifest_boot_disk_error: Option<String>,
+
+    mupdate_override_boot_disk_path: String,
+    mupdate_override_id: Option<DbTypedUuid<MupdateOverrideKind>>,
+    mupdate_override_boot_disk_error: Option<String>,
+
+    cpu_family: SledCpuFamily,
+
+    measurement_manifest_boot_disk_path: String,
+    measurement_manifest_source: Option<InvZoneManifestSourceEnum>,
+    measurement_manifest_mupdate_id: Option<DbTypedUuid<MupdateKind>>,
+    measurement_manifest_boot_disk_error: Option<String>,
+}
+
+type InvSledAgentSqlType =
+    <<InvSledAgentRow as Selectable<Pg>>::SelectExpression as diesel::Expression>::SqlType;
+
+impl Selectable<Pg> for InvSledAgent {
+    type SelectExpression =
+        <InvSledAgentRow as Selectable<Pg>>::SelectExpression;
+
+    fn construct_selection() -> Self::SelectExpression {
+        <InvSledAgentRow as Selectable<Pg>>::construct_selection()
+    }
+}
+
+impl Queryable<InvSledAgentSqlType, Pg> for InvSledAgent {
+    type Row = <InvSledAgentRow as Queryable<InvSledAgentSqlType, Pg>>::Row;
+
+    fn build(row: Self::Row) -> deserialize::Result<Self> {
+        let row =
+            <InvSledAgentRow as Queryable<InvSledAgentSqlType, Pg>>::build(
+                row,
+            )?;
+        Ok(Self {
+            inv_collection_id: row.inv_collection_id,
+            time_collected: row.time_collected,
+            source: row.source,
+            sled_id: row.sled_id,
+            hw_baseboard_id: row.hw_baseboard_id,
+            sled_agent_ip: row.sled_agent_ip,
+            sled_agent_port: row.sled_agent_port,
+            sled_role: row.sled_role,
+            usable_hardware_threads: row.usable_hardware_threads,
+            usable_physical_ram: row.usable_physical_ram,
+            cpu_family: row.cpu_family,
+            reservoir_size: row.reservoir_size,
+            ledgered_sled_config: row.ledgered_sled_config,
+            reconciler_status: row.reconciler_status,
+            file_source_resolver: InvOmicronFileSourceResolver {
+                zone_manifest_boot_disk_path: row.zone_manifest_boot_disk_path,
+                zone_manifest_source: row.zone_manifest_source,
+                zone_manifest_mupdate_id: row.zone_manifest_mupdate_id,
+                zone_manifest_boot_disk_error: row
+                    .zone_manifest_boot_disk_error,
+                measurement_manifest_boot_disk_path: row
+                    .measurement_manifest_boot_disk_path,
+                measurement_manifest_source: row.measurement_manifest_source,
+                measurement_manifest_mupdate_id: row
+                    .measurement_manifest_mupdate_id,
+                measurement_manifest_boot_disk_error: row
+                    .measurement_manifest_boot_disk_error,
+                mupdate_override_boot_disk_path: row
+                    .mupdate_override_boot_disk_path,
+                mupdate_override_id: row.mupdate_override_id,
+                mupdate_override_boot_disk_error: row
+                    .mupdate_override_boot_disk_error,
+            },
+        })
+    }
 }
 
 /// See [`sled_agent_types::inventory::ConfigReconcilerInventoryStatus`].
@@ -2395,9 +2496,9 @@ pub struct InvNvmeDiskFirmware {
     inv_collection_id: DbTypedUuid<CollectionKind>,
     sled_id: DbTypedUuid<SledKind>,
     slot: i64,
+    number_of_slots: SqlU8,
     active_slot: SqlU8,
     next_active_slot: Option<SqlU8>,
-    number_of_slots: SqlU8,
     slot1_is_read_only: bool,
     slot_firmware_versions: Vec<Option<String>>,
 }

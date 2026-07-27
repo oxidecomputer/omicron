@@ -80,8 +80,8 @@ pub struct RouterRoute {
     #[diesel(embed)]
     identity: RouterRouteIdentity,
 
-    pub kind: RouterRouteKind,
     pub vpc_router_id: Uuid,
+    pub kind: RouterRouteKind,
     pub target: RouteTarget,
     pub destination: RouteDestination,
     pub vpc_subnet_id: Option<Uuid>,

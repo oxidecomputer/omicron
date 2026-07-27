@@ -34,18 +34,18 @@ pub struct Alert {
     #[diesel(embed)]
     pub identity: AlertIdentity,
 
-    /// The time at which this alert was dispatched by creating entries in the
-    /// `webhook_delivery` table.
-    ///
-    /// If this is `None`, this alert has yet to be dispatched.
-    pub time_dispatched: Option<DateTime<Utc>>,
-
     /// The class of this alert.
     #[diesel(column_name = alert_class)]
     pub class: AlertClass,
 
     /// The alert's data payload.
     pub payload: serde_json::Value,
+
+    /// The time at which this alert was dispatched by creating entries in the
+    /// `webhook_delivery` table.
+    ///
+    /// If this is `None`, this alert has yet to be dispatched.
+    pub time_dispatched: Option<DateTime<Utc>>,
 
     pub num_dispatched: i64,
 

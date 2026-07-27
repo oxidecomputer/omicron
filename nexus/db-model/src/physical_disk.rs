@@ -118,8 +118,8 @@ impl From<PhysicalDisk> for physical_disk_types::PhysicalDisk {
 pub struct PhysicalDiskAdoptionRequest {
     pub id: DbTypedUuid<PhysicalDiskAdoptionRequestKind>,
     pub vendor: String,
-    pub serial: String,
     pub model: String,
+    pub serial: String,
     pub time_created: DateTime<Utc>,
     pub time_deleted: Option<DateTime<Utc>>,
 }
