@@ -31,11 +31,11 @@ impl MupdateOverrideInfo {
     pub const FILE_NAME: &'static str = "mupdate-override.json";
 }
 
+/// An artifact hash written to the install dataset. This is used only for
+/// debugging.
 #[derive(
     Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Deserialize, Serialize,
 )]
-/// An artifact hash written to the install dataset. This is used only for
-/// debugging.
 pub struct MupdateOverrideHashId {
     /// The kind of artifact this is. This is not intended to be mapped to an
     /// artifact in a repository.
