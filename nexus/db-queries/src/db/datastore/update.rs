@@ -804,17 +804,15 @@ async fn insert_impl(
 
         // First, build a list of artifacts matching any artifact hash present
         // in the uploaded repository.
-        let mut filter_dsl = tuf_artifact_dsl::tuf_artifact.into_boxed();
-        for artifact in &desc.artifacts {
-            filter_dsl = filter_dsl.or_filter(
-                tuf_artifact_dsl::sha256.eq(artifact.artifact.sha256),
-            );
-        }
-        let join_on_dsl =
-            tuf_artifact_file_dsl::sha256.eq(tuf_artifact_dsl::sha256);
-        let mut results = filter_dsl
+        let mut results = tuf_artifact_dsl::tuf_artifact
+            .filter(
+                tuf_artifact_dsl::sha256
+                    .eq_any(desc.artifacts.iter().map(|a| a.artifact.sha256)),
+            )
             .inner_join(
-                tuf_artifact_file_dsl::tuf_artifact_file.on(join_on_dsl),
+                tuf_artifact_file_dsl::tuf_artifact_file
+                    .on(tuf_artifact_file_dsl::sha256
+                        .eq(tuf_artifact_dsl::sha256)),
             )
             .select((TufArtifact::as_select(), TufArtifactFile::as_select()))
             .load_async(&conn)
@@ -828,15 +826,10 @@ async fn insert_impl(
             .collect::<IdHashMap<_>>();
         // Now fetch their tags and add them.
         if !results.is_empty() {
-            let mut filter_dsl =
-                tuf_artifact_tag_dsl::tuf_artifact_tag.into_boxed();
-            for artifact in &results {
-                filter_dsl = filter_dsl.or_filter(
-                    tuf_artifact_tag_dsl::tuf_artifact_id
-                        .eq(artifact.artifact.id),
-                );
-            }
-            for tag in filter_dsl
+            for tag in tuf_artifact_tag_dsl::tuf_artifact_tag
+                .filter(tuf_artifact_tag_dsl::tuf_artifact_id.eq_any(
+                    results.iter().map(|artifact| artifact.artifact.id),
+                ))
                 .select(TufArtifactTag::as_select())
                 .load_async(&conn)
                 .await?
