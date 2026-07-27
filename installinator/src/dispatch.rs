@@ -712,6 +712,10 @@ async fn read_legacy_control_plane_tarball(
                 data,
             });
         }
+        ensure!(
+            !zones.is_empty(),
+            "no zones were extracted from control plane tarball"
+        );
         Ok(zones)
     })
     .await?
