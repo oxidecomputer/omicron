@@ -1150,14 +1150,18 @@ impl ServicePortBuilder {
             .collect::<BTreeSet<IpAddr>>();
         let internal_services_ip_pool = Box::new(
             config
-                .internal_services_ip_pool_ranges
-                .clone()
+                .service_ip_pools
+                .iter()
+                .flat_map(|config| config.ranges().iter().copied())
+                // Collect here is unavoidable, otherwise the iterator borrows
+                // the source data from &config. But at least we're collecting
+                // the _ranges_, not individual addresses.
+                .collect::<Vec<_>>()
                 .into_iter()
                 .flat_map(|range| range.iter())
-                // External DNS IPs are required to be present in
-                // `internal_services_ip_pool_ranges`, but we want to skip them
-                // when choosing IPs for non-DNS services, so filter them out
-                // here.
+                // External DNS IPs are required to be present in the ranges of
+                // all the `service_ip_pools`, but we want to skip them when
+                // choosing IPs for non-DNS services, so filter them out here.
                 .filter(move |ip| !external_dns_ips_set.contains(ip)),
         );
         let external_dns_ips = config.external_dns_ips.clone().into_iter();
@@ -1357,6 +1361,7 @@ mod tests {
     use super::*;
     use bootstrap_agent_lockstep_types::BootstrapAddressDiscovery;
     use bootstrap_agent_lockstep_types::RecoverySiloConfig;
+    use bootstrap_agent_lockstep_types::ServiceIpPoolConfig;
     use omicron_common::address::IpRange;
     use omicron_common::address::SLED_RESERVED_ADDRESSES;
     use omicron_common::api::external::ByteCount;
@@ -1443,11 +1448,6 @@ mod tests {
         let ip = |string: &str| -> IpAddr { string.parse().unwrap() };
 
         // We still need these values to provision external services
-        let ip_pools = [
-            (ip("192.168.1.10"), ip("192.168.1.14")),
-            (ip("fd00::20"), ip("fd00::23")),
-            (ip("fd01::100"), ip("fd01::103")),
-        ];
         let dns_ips = [
             ip("192.168.1.10"),
             ip("192.168.1.13"),
@@ -1455,16 +1455,45 @@ mod tests {
             ip("fd01::100"),
             ip("fd01::103"),
         ];
+        let mut service_ip_pools = IdOrdMap::new();
+        service_ip_pools
+            .insert_unique(
+                ServiceIpPoolConfig::new(
+                    "ipv4-service-pool".parse().unwrap(),
+                    String::new(),
+                    vec![
+                        IpRange::try_from((
+                            ip("192.168.1.10"),
+                            ip("192.168.1.14"),
+                        ))
+                        .unwrap(),
+                    ],
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        service_ip_pools
+            .insert_unique(
+                ServiceIpPoolConfig::new(
+                    "ipv6-service-pool".parse().unwrap(),
+                    String::new(),
+                    vec![
+                        IpRange::try_from((ip("fd00::20"), ip("fd00::23")))
+                            .unwrap(),
+                        IpRange::try_from((ip("fd01::100"), ip("fd01::103")))
+                            .unwrap(),
+                    ],
+                )
+                .unwrap(),
+            )
+            .unwrap();
 
         let config = Config {
             trust_quorum_peers: None,
             bootstrap_discovery: BootstrapAddressDiscovery::OnlyOurs,
             ntp_servers: Vec::new(),
             dns_servers: Vec::new(),
-            internal_services_ip_pool_ranges: ip_pools
-                .iter()
-                .map(|(a, b)| IpRange::try_from((*a, *b)).unwrap())
-                .collect(),
+            service_ip_pools,
             external_dns_ips: dns_ips.to_vec(),
             external_dns_zone_name: "".to_string(),
             external_certificates: Vec::new(),

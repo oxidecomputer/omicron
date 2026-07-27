@@ -20,6 +20,7 @@ progenitor::generate_api!(
     }),
     derives = [schemars::JsonSchema],
     crates = {
+        "iddqd" = "*",
         "omicron-uuid-kinds" = "*",
         "oxnet" = "0.1.0",
     },
@@ -37,6 +38,7 @@ progenitor::generate_api!(
         RouteConfig = sled_agent_types::early_networking::RouteConfig,
         RouterLifetimeConfig = sled_agent_types::early_networking::RouterLifetimeConfig,
         RssStep = bootstrap_agent_lockstep_types::RssStep,
+        ServiceIpPoolConfig = bootstrap_agent_lockstep_types::ServiceIpPoolConfig,
         SwitchSlot = sled_agent_types::early_networking::SwitchSlot,
         TxEqConfig = sled_agent_types::early_networking::TxEqConfig,
         UplinkAddressConfig = sled_agent_types::early_networking::UplinkAddressConfig,

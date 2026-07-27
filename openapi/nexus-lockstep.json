@@ -8318,13 +8318,6 @@
               }
             ]
           },
-          "internal_services_ip_pool_ranges": {
-            "description": "Ranges of the service IP pool which may be used for internal services, such as Nexus.",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/IpRange"
-            }
-          },
           "physical_disks": {
             "description": "\"Managed\" physical disks owned by the control plane",
             "type": "array",
@@ -8348,6 +8341,25 @@
               }
             ]
           },
+          "service_ip_pools": {
+            "title": "IdOrdMap",
+            "description": "Configuration for IP Pools used for system services.",
+            "x-rust-type": {
+              "crate": "iddqd",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/ServiceIpPoolConfig"
+                }
+              ],
+              "path": "iddqd::IdOrdMap",
+              "version": "*"
+            },
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ServiceIpPoolConfig"
+            },
+            "uniqueItems": true
+          },
           "zpools": {
             "description": "Zpools created within the physical disks created by the control plane.",
             "type": "array",
@@ -8363,10 +8375,10 @@
           "crucible_datasets",
           "external_dns_zone_name",
           "internal_dns_zone_config",
-          "internal_services_ip_pool_ranges",
           "physical_disks",
           "rack_network_config",
           "recovery_silo",
+          "service_ip_pools",
           "zpools"
         ]
       },
@@ -9045,6 +9057,35 @@
         "type": "integer",
         "format": "uint64",
         "minimum": 0
+      },
+      "ServiceIpPoolConfig": {
+        "description": "Full details of a system-service IP pool, provided at rack setup (RSS).",
+        "type": "object",
+        "properties": {
+          "description": {
+            "description": "Description of the IP Pool",
+            "type": "string"
+          },
+          "name": {
+            "description": "Name of the IP Pool",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          },
+          "ranges": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/IpRange"
+            }
+          }
+        },
+        "required": [
+          "description",
+          "name",
+          "ranges"
+        ]
       },
       "SledAgentUpdateStatus": {
         "type": "object",

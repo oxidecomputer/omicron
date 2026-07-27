@@ -9,13 +9,17 @@
 //! out of this crate and into the relevant `*-types-versions` / `*-types` crate
 //! pairs.
 
+use anyhow::Context as _;
+use iddqd::IdOrdMap;
 use omicron_common::address::AZ_PREFIX_LENGTH;
 use omicron_common::address::IpRange;
+use omicron_common::address::IpVersion;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::RACK_PREFIX_LENGTH;
 use omicron_common::address::SLED_PREFIX_LENGTH;
 use omicron_common::address::get_64_subnet;
 use omicron_common::api::external::AllowedSourceIps;
+use omicron_common::api::external::Error;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::UserId;
 use omicron_common::api::internal::nexus::Certificate;
@@ -54,10 +58,8 @@ pub struct RackInitializeRequest {
     /// The external DNS server addresses.
     pub dns_servers: Vec<IpAddr>,
 
-    /// Ranges of the service IP pool which may be used for internal services.
-    // TODO(https://github.com/oxidecomputer/omicron/issues/1530): Eventually,
-    // we want to configure multiple pools.
-    pub internal_services_ip_pool_ranges: Vec<IpRange>,
+    /// Configuration for service IP Pools.
+    pub service_ip_pools: IdOrdMap<ServiceIpPoolConfig>,
 
     /// Service IP addresses on which we run external DNS servers.
     ///
@@ -97,7 +99,7 @@ impl std::fmt::Debug for RackInitializeRequest {
             bootstrap_discovery,
             ntp_servers,
             dns_servers,
-            internal_services_ip_pool_ranges,
+            service_ip_pools,
             external_dns_ips,
             external_dns_zone_name,
             external_certificates: _,
@@ -112,10 +114,7 @@ impl std::fmt::Debug for RackInitializeRequest {
             .field("bootstrap_discovery", bootstrap_discovery)
             .field("ntp_servers", ntp_servers)
             .field("dns_servers", dns_servers)
-            .field(
-                "internal_services_ip_pool_ranges",
-                internal_services_ip_pool_ranges,
-            )
+            .field("service_ip_pools", service_ip_pools)
             .field("external_dns_ips", external_dns_ips)
             .field("external_dns_zone_name", external_dns_zone_name)
             .field("external_certificates", &"<redacted>")
@@ -158,7 +157,7 @@ struct UnvalidatedRackInitializeRequest {
     bootstrap_discovery: BootstrapAddressDiscovery,
     ntp_servers: Vec<String>,
     dns_servers: Vec<IpAddr>,
-    internal_services_ip_pool_ranges: Vec<IpRange>,
+    service_ip_pools: Vec<ServiceIpPoolConfig>,
     external_dns_ips: Vec<IpAddr>,
     external_dns_zone_name: String,
     external_certificates: Vec<Certificate>,
@@ -178,18 +177,20 @@ impl TryFrom<UnvalidatedRackInitializeRequest> for RackInitializeRequest {
     fn try_from(
         value: UnvalidatedRackInitializeRequest,
     ) -> anyhow::Result<Self> {
-        validate_external_dns(
-            &value.external_dns_ips,
-            &value.internal_services_ip_pool_ranges,
-        )?;
+        let service_ip_pools =
+            IdOrdMap::from_iter_unique(value.service_ip_pools)
+                .context("duplicate names in service IP Pool configuration")?;
+        if service_ip_pools.is_empty() {
+            anyhow::bail!("at least one service IP pool is required");
+        }
+        validate_external_dns(&value.external_dns_ips, &service_ip_pools)?;
 
         Ok(Self {
             trust_quorum_peers: value.trust_quorum_peers,
             bootstrap_discovery: value.bootstrap_discovery,
             ntp_servers: value.ntp_servers,
             dns_servers: value.dns_servers,
-            internal_services_ip_pool_ranges: value
-                .internal_services_ip_pool_ranges,
+            service_ip_pools,
             external_dns_ips: value.external_dns_ips,
             external_dns_zone_name: value.external_dns_zone_name,
             external_certificates: value.external_certificates,
@@ -211,11 +212,13 @@ const fn default_allowed_source_ips() -> AllowedSourceIps {
 
 fn validate_external_dns(
     dns_ips: &Vec<IpAddr>,
-    internal_ranges: &Vec<IpRange>,
+    service_ip_pools: &IdOrdMap<ServiceIpPoolConfig>,
 ) -> anyhow::Result<()> {
     if dns_ips.is_empty() {
         anyhow::bail!("At least one external DNS IP is required");
     }
+    let internal_ranges =
+        service_ip_pools.iter().flat_map(|p| p.ranges()).collect::<Vec<_>>();
 
     // Every external DNS IP should also be present in one of the internal
     // services IP pool ranges. This check is O(N*M), but we expect both N
@@ -224,7 +227,7 @@ fn validate_external_dns(
         if !internal_ranges.iter().any(|range| range.contains(dns_ip)) {
             anyhow::bail!(
                 "External DNS IP {dns_ip} is not contained in \
-                 `internal_services_ip_pool_ranges`"
+                any service IP pool range"
             );
         }
     }
@@ -381,4 +384,89 @@ pub struct ReplicatedNetworkConfigContents {
     /// serialization/deserialization of the contents is performed outside the
     /// replication engine, which just deals with a binary blob.
     pub base64_blob: String,
+}
+
+/// Full details of a system-service IP pool, provided at rack setup (RSS).
+#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
+#[serde(try_from = "UnvalidatedServiceIpPoolConfig")]
+pub struct ServiceIpPoolConfig {
+    /// Name of the IP Pool
+    pub name: Name,
+    /// Description of the IP Pool
+    pub description: String,
+    /// List of IP address ranges in the pool.
+    ///
+    /// There is guaranteed to be at least one range, and all ranges are of the
+    /// same IP version.
+    // NOTE: Private to ensure the above invariants. `new()` checks them, and we
+    // deserialize through `UnvalidatedServiceIpPoolConfig` to check them.
+    ranges: Vec<IpRange>,
+}
+
+impl ServiceIpPoolConfig {
+    /// Construct a new service IP pool configuration.
+    ///
+    /// Errors if `ranges` is empty, or if the ranges are a mix of IPv4 and
+    /// IPv6 addresses.
+    pub fn new(
+        name: Name,
+        description: String,
+        ranges: Vec<IpRange>,
+    ) -> Result<Self, Error> {
+        let mut versions = ranges.iter().map(|r| r.version());
+        let Some(first) = versions.next() else {
+            return Err(Error::internal_error(
+                "service IP pool config has no ranges",
+            ));
+        };
+        if versions.any(|v| v != first) {
+            return Err(Error::internal_error(
+                "service IP pool config has ranges of mixed IP versions",
+            ));
+        }
+        Ok(Self { name, description, ranges })
+    }
+
+    /// The ranges belonging to this pool.
+    ///
+    /// Guaranteed to be non-empty and all of the same IP version.
+    pub fn ranges(&self) -> &[IpRange] {
+        &self.ranges
+    }
+
+    /// The IP version of this pool, derived from its ranges.
+    pub fn ip_version(&self) -> IpVersion {
+        // Safety: the constructor guarantees at least one range, and that all
+        // ranges share an IP version.
+        self.ranges[0].version()
+    }
+}
+
+impl iddqd::IdOrdItem for ServiceIpPoolConfig {
+    type Key<'a> = &'a Name;
+
+    fn key(&self) -> Self::Key<'_> {
+        &self.name
+    }
+
+    iddqd::id_upcast!();
+}
+
+#[derive(Deserialize)]
+struct UnvalidatedServiceIpPoolConfig {
+    name: Name,
+    description: String,
+    ranges: Vec<IpRange>,
+}
+
+impl TryFrom<UnvalidatedServiceIpPoolConfig> for ServiceIpPoolConfig {
+    type Error = Error;
+
+    fn try_from(
+        value: UnvalidatedServiceIpPoolConfig,
+    ) -> Result<Self, Self::Error> {
+        let UnvalidatedServiceIpPoolConfig { name, description, ranges } =
+            value;
+        ServiceIpPoolConfig::new(name, description, ranges)
+    }
 }

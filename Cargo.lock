@@ -969,6 +969,7 @@ name = "bootstrap-agent-lockstep-client"
 version = "0.1.0"
 dependencies = [
  "bootstrap-agent-lockstep-types",
+ "iddqd",
  "omicron-common",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
@@ -989,6 +990,7 @@ name = "bootstrap-agent-lockstep-types"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "iddqd",
  "omicron-common",
  "omicron-passwords",
  "omicron-uuid-kinds",

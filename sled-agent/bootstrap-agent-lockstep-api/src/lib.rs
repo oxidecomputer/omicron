@@ -6,7 +6,7 @@
 //!
 //! This API handles rack initialization and reset operations. It is a lockstep
 //! API as we do not expect rack initialization functions to be called during
-//! and upgrade. Furthermore when rack initialization functions are called
+//! an upgrade. Furthermore when rack initialization functions are called
 //! it's expected that software components are on the same version.
 
 use bootstrap_agent_lockstep_types::RackInitializeRequest;

@@ -1005,13 +1005,6 @@
             "default": false,
             "type": "boolean"
           },
-          "internal_services_ip_pool_ranges": {
-            "description": "Ranges of the service IP pool which may be used for internal services.",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/IpRange"
-            }
-          },
           "ntp_servers": {
             "description": "The external NTP server addresses.",
             "type": "array",
@@ -1035,6 +1028,25 @@
               }
             ]
           },
+          "service_ip_pools": {
+            "title": "IdOrdMap",
+            "description": "Configuration for service IP Pools.",
+            "x-rust-type": {
+              "crate": "iddqd",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/ServiceIpPoolConfig"
+                }
+              ],
+              "path": "iddqd::IdOrdMap",
+              "version": "*"
+            },
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ServiceIpPoolConfig"
+            },
+            "uniqueItems": true
+          },
           "trust_quorum_peers": {
             "nullable": true,
             "description": "The set of peer_ids required to initialize trust quorum\n\nThe value is `None` if we are not using trust quorum",
@@ -1051,10 +1063,10 @@
           "external_certificates",
           "external_dns_ips",
           "external_dns_zone_name",
-          "internal_services_ip_pool_ranges",
           "ntp_servers",
           "rack_network_config",
-          "recovery_silo"
+          "recovery_silo",
+          "service_ip_pools"
         ]
       },
       "RackNetworkConfig": {
@@ -1658,6 +1670,35 @@
               "status"
             ]
           }
+        ]
+      },
+      "ServiceIpPoolConfig": {
+        "description": "Full details of a system-service IP pool, provided at rack setup (RSS).",
+        "type": "object",
+        "properties": {
+          "description": {
+            "description": "Description of the IP Pool",
+            "type": "string"
+          },
+          "name": {
+            "description": "Name of the IP Pool",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          },
+          "ranges": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/IpRange"
+            }
+          }
+        },
+        "required": [
+          "description",
+          "name",
+          "ranges"
         ]
       },
       "SwitchSlot": {
