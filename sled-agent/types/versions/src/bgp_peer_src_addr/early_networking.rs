@@ -37,7 +37,6 @@ pub enum RouterPeerType {
         /// Optional local IP address to bind when establishing outbound TCP
         /// connections to this peer. If `None`, the OS selects the source
         /// address.
-        #[serde(default)]
         src_addr: Option<v30::RouterPeerIpAddr>,
     },
 }
