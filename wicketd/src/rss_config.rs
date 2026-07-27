@@ -38,11 +38,11 @@ use std::collections::BTreeMap;
 use std::net::IpAddr;
 use std::net::Ipv6Addr;
 use wicket_common::inventory::MgsV1Inventory;
-use wicket_common::rack_setup::BgpAuthKey;
 use wicket_common::rack_setup::CurrentRssUserConfigInsensitive;
 use wicket_common::rack_setup::GetBgpAuthKeyInfoResponse;
 use wicketd_api::CurrentRssUserConfig;
 use wicketd_api::CurrentRssUserConfigSensitive;
+use wicketd_commission_types::rack_setup::BgpAuthKey;
 use wicketd_commission_types::rack_setup::CertificateUploadResponse;
 use wicketd_commission_types::rack_setup::ManualPortConfig;
 use wicketd_commission_types::rack_setup::PutRssUserConfigInsensitive;
@@ -699,9 +699,10 @@ mod tests {
     use omicron_test_utils::certificates::CertificateChain;
     use omicron_test_utils::dev;
     use wicket_common::example::ExampleRackSetupData;
+    use wicket_common::rack_setup::BgpAuthKeyInfo;
     use wicket_common::rack_setup::BgpAuthKeyStatus;
-    use wicketd_api::SetBgpAuthKeyStatus;
     use wicketd_commission_types::rack_setup::BgpAuthKeyId;
+    use wicketd_commission_types::rack_setup::SetBgpAuthKeyStatus;
 
     use super::*;
 
@@ -931,7 +932,9 @@ mod tests {
             let key_data = current_config.common.get_bgp_auth_key_data();
             assert_eq!(
                 key_data.get(&key1),
-                Some(&BgpAuthKeyStatus::Set { info: shared_key.info() })
+                Some(&BgpAuthKeyStatus::Set {
+                    info: BgpAuthKeyInfo::for_key(&shared_key)
+                })
             );
         }
 
@@ -945,7 +948,9 @@ mod tests {
             let key_data = current_config.common.get_bgp_auth_key_data();
             assert_eq!(
                 key_data.get(&key1),
-                Some(&BgpAuthKeyStatus::Set { info: shared_key.info() })
+                Some(&BgpAuthKeyStatus::Set {
+                    info: BgpAuthKeyInfo::for_key(&shared_key)
+                })
             );
         }
 
@@ -959,7 +964,9 @@ mod tests {
             let key_data = current_config.common.get_bgp_auth_key_data();
             assert_eq!(
                 key_data.get(&key1),
-                Some(&BgpAuthKeyStatus::Set { info: new_key.info() })
+                Some(&BgpAuthKeyStatus::Set {
+                    info: BgpAuthKeyInfo::for_key(&new_key)
+                })
             );
         }
 
@@ -999,7 +1006,9 @@ mod tests {
 
             assert_eq!(
                 key_data.get(&key2),
-                Some(&BgpAuthKeyStatus::Set { info: shared_key.info() })
+                Some(&BgpAuthKeyStatus::Set {
+                    info: BgpAuthKeyInfo::for_key(&shared_key)
+                })
             );
         }
 
@@ -1020,7 +1029,9 @@ mod tests {
         assert_eq!(key_data.len(), 1);
         assert_eq!(
             key_data.get(&key1),
-            Some(&BgpAuthKeyStatus::Set { info: new_key.info() })
+            Some(&BgpAuthKeyStatus::Set {
+                info: BgpAuthKeyInfo::for_key(&new_key)
+            })
         );
         assert_eq!(key_data.get(&key2), None, "key2 should have been dropped",);
 
@@ -1040,7 +1051,9 @@ mod tests {
         assert_eq!(key_data.len(), 2);
         assert_eq!(
             key_data.get(&key1),
-            Some(&BgpAuthKeyStatus::Set { info: new_key.info() })
+            Some(&BgpAuthKeyStatus::Set {
+                info: BgpAuthKeyInfo::for_key(&new_key)
+            })
         );
         assert_eq!(key_data.get(&key2), Some(&BgpAuthKeyStatus::Unset));
 

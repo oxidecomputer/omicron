@@ -7,12 +7,13 @@
 use crate::SmfConfigValues;
 use crate::context::CommonConfigContainer;
 use crate::context::RssOrMultirackJoinConfig;
+use crate::helpers::baseboard_matches_sp_state;
 use crate::http_helpers::ba_lockstep_client;
 use crate::http_helpers::ba_lockstep_error_to_http;
-use crate::http_helpers::inventory_err_to_http;
 use crate::http_helpers::mgs_inventory_or_unavail;
 use crate::http_helpers::start_update;
 use crate::mgs::GetInventoryResponse as GetMgsInventoryResponse;
+use crate::mgs::records_to_mgs_inventory;
 use crate::multirack_config::CurrentMultirackJoinConfig;
 use crate::transceivers::GetTransceiversResponse;
 use bootstrap_agent_lockstep_client::ClientInfo as _;
@@ -41,11 +42,11 @@ use wicket_common::multirack_setup::CurrentMultirackJoinUserConfig;
 use wicket_common::multirack_setup::MultirackJoinConfigBaseUserInput;
 use wicket_common::rack_setup::GetBgpAuthKeyInfoResponse;
 use wicket_common::rack_update::AbortUpdateOptions;
-use wicket_common::rack_update::ClearUpdateStateResponse;
 use wicket_common::update_events::EventReport;
 use wicketd_api::*;
 use wicketd_commission_types::rack_setup::CertificateUploadResponse;
 use wicketd_commission_types::rack_setup::PutRssUserConfigInsensitive;
+use wicketd_commission_types::update::ClearUpdateStateResponse;
 
 use crate::ServerContext;
 
@@ -383,23 +384,51 @@ impl WicketdApi for WicketdApiImpl {
             .get_inventory_refreshing_sps(force_refresh)
             .await
         {
-            Ok(GetMgsInventoryResponse::Response {
-                inventory,
+            Ok(GetMgsInventoryResponse {
+                sps,
                 mgs_last_seen,
-            }) => Some((inventory, mgs_last_seen)),
-            Ok(GetMgsInventoryResponse::Unavailable) => None,
+                // The (currently frozen) wicketd API surfaces only the lossy
+                // `MgsV1Inventory` projection of the per-SP records.
+                //
+                // TODO: surface the richer per-SP records and fetch errors once
+                // rkdeploy is on the stable commissioning API.
+                last_ignition_fetch_error: _,
+            }) => records_to_mgs_inventory(&sps)
+                .map(|inventory| (inventory, mgs_last_seen)),
             Err(err) => {
-                return Err(inventory_err_to_http(err));
+                return Err(err.to_http_error());
             }
         };
 
         // Fetch the transceiver information from the SP.
         let maybe_transceiver_inventory =
             match rqctx.context().transceiver_handle.get_transceivers() {
-                GetTransceiversResponse::Response {
-                    transceivers,
-                    transceivers_last_seen,
-                } => Some((transceivers, transceivers_last_seen)),
+                GetTransceiversResponse::Response { transceivers } => {
+                    // transceivers tracks the last_seen for each switch
+                    // independently. But the (currently frozen) wicketd API
+                    // wire shape only has a single last_seen field. So we must
+                    // pick: min or max? We choose max here, so that if one of
+                    // the fetch tasks is wedged, the timestamp indicates that.
+                    //
+                    // TODO: clean this up (report per-switch last_seen) once
+                    // rkdeploy is on the stable commissioning API.
+                    let last_seen = transceivers
+                        .iter()
+                        .map(|switch| switch.updated_at.elapsed())
+                        .max();
+                    last_seen.map(|last_seen| {
+                        // The (currently frozen) wicketd API is a HashMap, so
+                        // collect into that.
+                        //
+                        // TODO: switch to IdOrdMap once rkdeploy is on the
+                        // stable commissioning API.
+                        let inventory = transceivers
+                            .into_iter()
+                            .map(|switch| (switch.switch, switch.transceivers))
+                            .collect();
+                        (inventory, last_seen)
+                    })
+                }
                 GetTransceiversResponse::Unavailable => None,
             };
 
@@ -459,7 +488,10 @@ impl WicketdApi for WicketdApiImpl {
         let rqctx = rqctx.context();
         let inventory = mgs_inventory_or_unavail(&rqctx.mgs_handle).await?;
 
-        let switch_id = rqctx.local_switch_id().await;
+        // We don't error out in get_location on the local switch ID not being
+        // available, so discard the error here (it's already logged in
+        // local_switch_id).
+        let switch_id = rqctx.local_switch_id().await.ok();
         let sled_baseboard = rqctx.baseboard.clone();
 
         let mut switch_baseboard = None;
@@ -481,10 +513,7 @@ impl WicketdApi for WicketdApiImpl {
             } else if let (Some(sled_baseboard), Some(state)) =
                 (sled_baseboard.as_ref(), sp.state.as_ref())
             {
-                if sled_baseboard.identifier() == state.serial_number
-                    && sled_baseboard.model() == state.model
-                    && sled_baseboard.revision() == state.revision
-                {
+                if baseboard_matches_sp_state(sled_baseboard, state) {
                     sled_id = Some(sp.id);
                 }
             }
@@ -592,7 +621,7 @@ impl WicketdApi for WicketdApiImpl {
         let options = body.into_inner();
 
         let our_switch_slot = match rqctx.local_switch_id().await {
-            Some(SpIdentifier { slot, typ: SpType::Switch }) => match slot {
+            Ok(SpIdentifier { slot, typ: SpType::Switch }) => match slot {
                 0 => SwitchSlot::Switch0,
                 1 => SwitchSlot::Switch1,
                 _ => {
@@ -601,16 +630,13 @@ impl WicketdApi for WicketdApiImpl {
                     )));
                 }
             },
-            Some(other) => {
+            Ok(other) => {
                 return Err(HttpError::for_internal_error(format!(
                     "unexpected switch SP identifier {other:?}"
                 )));
             }
-            None => {
-                return Err(HttpError::for_unavail(
-                    Some("UnknownSwitchSlot".to_string()),
-                    "local switch slot not yet determined".to_string(),
-                ));
+            Err(err) => {
+                return Err(err.to_http_error());
             }
         };
 
@@ -695,6 +721,13 @@ impl WicketdApi for WicketdApiImpl {
             return Err(HttpError::for_bad_request(
                 None,
                 "listening address cannot be reconfigured".to_string(),
+            ));
+        }
+        if rqctx.commission_bind_address != smf_values.commission_address {
+            return Err(HttpError::for_bad_request(
+                None,
+                "commission listening address cannot be reconfigured"
+                    .to_string(),
             ));
         }
 

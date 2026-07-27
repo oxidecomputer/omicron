@@ -46,6 +46,18 @@ impl WicketdArtifactStore {
         self.replace(Inner { by_hash, repo });
     }
 
+    /// Returns the system version.
+    ///
+    /// Avoids cloning the entire artifact list the way
+    /// `system_version_and_artifact_ids` does.
+    pub(crate) fn system_version(&self) -> Option<Version> {
+        self.inner
+            .lock()
+            .unwrap()
+            .as_ref()
+            .map(|inner| inner.repo.system_version().clone())
+    }
+
     pub(crate) fn system_version_and_artifact_ids(
         &self,
     ) -> Option<(Version, Vec<ArtifactId>)> {
