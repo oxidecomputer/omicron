@@ -688,69 +688,56 @@ impl super::Nexus {
             UpdateActivityState::Idle | UpdateActivityState::Stuck => {}
         };
 
+        // TODO-K: Extract all of this propolis-specific code into separate
+        // methods
+
         // Propolis zones whose VMMs are expected to be offline (e.g. an
         // instance that is being stopped) shouldn't count as unexpected
-        // enabled-not-online SMF services. They don't affect the update process
+        // enabled not online SMF services. They don't affect the update process
         // and can confuse users thinking something may be wrong.
         //
-        // Look up the state of each propolis zone that currently appears in
-        // the enabled-not-online lists and collect the ones we expect to be
-        // offline.
-        let mut expected_offline_propolis = BTreeSet::new();
-        for svcs_result in
-            inventory.enabled_smf_services_not_online().into_values()
-        {
-            let svcs = match svcs_result {
-                SvcsEnabledNotOnlineResult::SvcsEnabledNotOnline(svcs) => svcs,
+        // Gather the propolis zones that currently appear in the
+        // enabled-not-online lists, then look up each VMM's state concurrently
+        // and collect the ones we expect to be offline.
+        // TODO-K: Clean up. This is impossible to read
+        let candidate_propolis: Vec<PropolisUuid> = inventory
+            .enabled_smf_services_not_online()
+            .into_values()
+            .filter_map(|svcs_result| match svcs_result {
+                SvcsEnabledNotOnlineResult::SvcsEnabledNotOnline(svcs) => {
+                    Some(svcs)
+                }
                 // We're only retrieving information if there are any enabled
                 // services not online, we continue on to the next sled if there
                 // aren't any
                 SvcsEnabledNotOnlineResult::DataUnavailable
-                | SvcsEnabledNotOnlineResult::SvcsCmdError(_) => continue,
-            };
+                | SvcsEnabledNotOnlineResult::SvcsCmdError(_) => None,
+            })
+            .flat_map(|svcs| {
+                svcs.services
+                    .iter()
+                    .filter_map(|svc| propolis_id_from_zone(&svc.zone))
+            })
+            .collect();
 
-            for svc in &svcs.services {
-                let Some(propolis_id) = propolis_id_from_zone(&svc.zone) else {
-                    // This isn't a propolis zone; move on.
-                    continue;
-                };
-
-                // TODO-K: Clean this up
-                let expected_offline_zone =
-                    // TODO-K: Probably don't use this endpoint? An option is to
-                    // write a new one that bulk fetches all the VMMs from a
-                    // given list of ids, so we don't have to do multiple API
-                    // calls. The downside of doing that would be knowing what
-                    // to do for an ObjectNotFound. Just omit it?
-                    match self.datastore().vmm_fetch(opctx, &propolis_id).await
-                    {
-                        Ok(vmm) => match vmm.state {
-                            VmmState::Stopping
-                            | VmmState::Stopped
-                            | VmmState::Destroyed
-                            | VmmState::SagaUnwound => true,
-                            VmmState::Creating
-                            | VmmState::Failed
-                            | VmmState::Migrating
-                            | VmmState::Rebooting
-                            | VmmState::Running
-                            | VmmState::Starting => false,
-                        },
-                        // This shouldn't happen, but the VMM record could already
-                        // have been reaped but its zone is still lingering for some
-                        // reason. Treat its offline propolis service as expected to
-                        // be offline.
-                        Err(Error::ObjectNotFound { .. }) => true,
-                        Err(e) => return Err(e),
-                    };
-
-                if expected_offline_zone {
-                    // This zone should be offline, include in list of propolis
-                    // zones to exclude from problems.
-                    expected_offline_propolis.insert(propolis_id);
-                }
-            }
-        }
+        // TODO-K: Probably don't use this endpoint? An option is to
+        // write a new one that bulk fetches all the VMMs from a
+        // given list of ids, so we don't have to do multiple API
+        // calls. The downside of doing that would be knowing what
+        // to do for an ObjectNotFound. Just omit it?
+        //
+        // TODO-K: Clean this up
+        let expected_offline_propolis = futures::future::try_join_all(
+            candidate_propolis.into_iter().map(|propolis_id| async move {
+                self.is_propolis_expected_offline(opctx, propolis_id)
+                    .await
+                    .map(|expected| expected.then_some(propolis_id))
+            }),
+        )
+        .await?
+        .into_iter()
+        .flatten()
+        .collect();
 
         let checks = UpdateContactSupportChecksInput {
             inventory,
@@ -780,6 +767,34 @@ impl super::Nexus {
         }
 
         Ok(contact_support)
+    }
+
+    /// Determine whether the given VMM is expected to be offline.
+    async fn is_propolis_expected_offline(
+        &self,
+        opctx: &OpContext,
+        propolis_id: PropolisUuid,
+    ) -> Result<bool, Error> {
+        match self.datastore().vmm_fetch(opctx, &propolis_id).await {
+            // TODO-K: Ask ixi if this logic makes sense
+            Ok(vmm) => Ok(match vmm.state {
+                VmmState::Stopping
+                | VmmState::Stopped
+                | VmmState::Destroyed
+                | VmmState::SagaUnwound => true,
+                VmmState::Creating
+                | VmmState::Failed
+                | VmmState::Migrating
+                | VmmState::Rebooting
+                | VmmState::Running
+                | VmmState::Starting => false,
+            }),
+            // This shouldn't happen, but the VMM record could already have been
+            // reaped while its zone is still lingering for some reason. Treat
+            // its offline propolis service as expected to be offline.
+            Err(Error::ObjectNotFound { .. }) => Ok(true),
+            Err(e) => Err(e),
+        }
     }
 
     async fn get_internal_update_status(
@@ -1045,18 +1060,27 @@ mod test {
         })
     }
 
-    // A single enabled not online SMF service living in the propolis zone for
-    // the given propolis id.
-    fn offline_propolis_svc(
-        propolis_id: PropolisUuid,
+    // Enabled not online SMF services living in different propolis zones for
+    // the given propolis ids.
+    fn enabled_not_online_propolis_svcs(
+        propolis_id_1: PropolisUuid,
+        propolis_id_2: PropolisUuid,
     ) -> SvcsEnabledNotOnlineResult {
         SvcsEnabledNotOnlineResult::SvcsEnabledNotOnline(SvcsEnabledNotOnline {
-            services: vec![SvcEnabledNotOnline {
-                fmri: "svc:/system/illumos/propolis-server:default"
-                    .to_string(),
-                zone: format!("{PROPOLIS_ZONE_PREFIX}{propolis_id}"),
-                state: SvcEnabledNotOnlineState::Offline,
-            }],
+            services: vec![
+                SvcEnabledNotOnline {
+                    fmri: "svc:/system/illumos/propolis-server:default"
+                        .to_string(),
+                    zone: format!("{PROPOLIS_ZONE_PREFIX}{propolis_id_1}"),
+                    state: SvcEnabledNotOnlineState::Offline,
+                },
+                SvcEnabledNotOnline {
+                    fmri: "svc:/system/illumos/propolis-server:default"
+                        .to_string(),
+                    zone: format!("{PROPOLIS_ZONE_PREFIX}{propolis_id_2}"),
+                    state: SvcEnabledNotOnlineState::Maintenance,
+                },
+            ],
             errors: vec![],
             time_of_status: Utc::now(),
         })
@@ -1753,15 +1777,19 @@ mod test {
         let nexus = &cptestctx.server.server_context().nexus;
         let opctx = fake_opctx(cptestctx);
 
-        let propolis_id = PropolisUuid::new_v4();
+        let propolis_id_1 = PropolisUuid::new_v4();
+        let propolis_id_2 = PropolisUuid::new_v4();
         insert_fake_collection(
             cptestctx,
             &opctx,
             healthy_zpools(),
-            offline_propolis_svc(propolis_id),
+            enabled_not_online_propolis_svcs(propolis_id_1, propolis_id_2),
         )
         .await;
-        insert_vmm_in_db(cptestctx, &opctx, propolis_id, VmmState::Stopping)
+
+        insert_vmm_in_db(cptestctx, &opctx, propolis_id_1, VmmState::Stopping)
+            .await;
+        insert_vmm_in_db(cptestctx, &opctx, propolis_id_1, VmmState::Destroyed)
             .await;
 
         let inventory = Arc::new(
@@ -1775,10 +1803,11 @@ mod test {
         let version = fake_target_version();
         let blueprint =
             fake_blueprint(&cptestctx.logctx.log, &version, Utc::now(), false);
-        
-        // A propolis zone reports an enabled not online SMF service, but its
-        // VMM is in the `Stopping` state, so we expect it to be offline. It
-        // should be filtered out, and contact_support shoudl be false.
+
+        // Two propolis zones report an enabled not online SMF service, the
+        // VMM of one is in the `Stopping` state and the other `Destroyed`, so
+        // we expect them to be offline. They should both be filtered out, and
+        // contact_support should be false.
         assert!(
             !nexus
                 .contact_support(
@@ -1800,15 +1829,19 @@ mod test {
         let nexus = &cptestctx.server.server_context().nexus;
         let opctx = fake_opctx(cptestctx);
 
-        let propolis_id = PropolisUuid::new_v4();
+        let propolis_id_1 = PropolisUuid::new_v4();
+        let propolis_id_2 = PropolisUuid::new_v4();
         insert_fake_collection(
             cptestctx,
             &opctx,
             healthy_zpools(),
-            offline_propolis_svc(propolis_id),
+            enabled_not_online_propolis_svcs(propolis_id_1, propolis_id_2),
         )
         .await;
-        insert_vmm_in_db(cptestctx, &opctx, propolis_id, VmmState::Running)
+
+        insert_vmm_in_db(cptestctx, &opctx, propolis_id_1, VmmState::Running)
+            .await;
+        insert_vmm_in_db(cptestctx, &opctx, propolis_id_2, VmmState::Stopping)
             .await;
 
         let inventory = Arc::new(
@@ -1823,9 +1856,11 @@ mod test {
         let blueprint =
             fake_blueprint(&cptestctx.logctx.log, &version, Utc::now(), false);
 
-        // A propolis zone reports a enabled not-online SMF service while its
-        // VMM is in the `Running` state, so its being offline is unexpected.
-        // contact_support should be true.
+        // A propolis zone reports a enabled not online SMF service while its
+        // VMM is in the `Stopping` state, it is expected to be in this state,
+        // so it is filtered out. Another propolis zone also reports an enabled
+        // not online SMF service, but it's VMM is in the `Running` state, so
+        // its being offline is unexpected. contact_support should be true.
         assert!(
             nexus
                 .contact_support(
