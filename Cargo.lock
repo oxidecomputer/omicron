@@ -13986,6 +13986,7 @@ dependencies = [
  "sled-diagnostics",
  "sled-hardware-types",
  "slog-error-chain",
+ "static_assertions",
  "trust-quorum-types",
  "tufaceous-artifact 0.1.0",
  "uuid",
