@@ -7,6 +7,7 @@
 use crate::SmfConfigValues;
 use crate::context::CommonConfigContainer;
 use crate::context::RssOrMultirackJoinConfig;
+use crate::helpers::baseboard_matches_sp_state;
 use crate::http_helpers::ba_lockstep_client;
 use crate::http_helpers::ba_lockstep_error_to_http;
 use crate::http_helpers::mgs_inventory_or_unavail;
@@ -383,7 +384,7 @@ impl WicketdApi for WicketdApiImpl {
             .get_inventory_refreshing_sps(force_refresh)
             .await
         {
-            Ok(GetMgsInventoryResponse::Response {
+            Ok(GetMgsInventoryResponse {
                 sps,
                 mgs_last_seen,
                 // The (currently frozen) wicketd API surfaces only the lossy
@@ -392,8 +393,8 @@ impl WicketdApi for WicketdApiImpl {
                 // TODO: surface the richer per-SP records and fetch errors once
                 // rkdeploy is on the stable commissioning API.
                 last_ignition_fetch_error: _,
-            }) => Some((records_to_mgs_inventory(&sps), mgs_last_seen)),
-            Ok(GetMgsInventoryResponse::Unavailable) => None,
+            }) => records_to_mgs_inventory(&sps)
+                .map(|inventory| (inventory, mgs_last_seen)),
             Err(err) => {
                 return Err(err.to_http_error());
             }
@@ -512,10 +513,7 @@ impl WicketdApi for WicketdApiImpl {
             } else if let (Some(sled_baseboard), Some(state)) =
                 (sled_baseboard.as_ref(), sp.state.as_ref())
             {
-                if sled_baseboard.identifier() == state.serial_number
-                    && sled_baseboard.model() == state.model
-                    && sled_baseboard.revision() == state.revision
-                {
+                if baseboard_matches_sp_state(sled_baseboard, state) {
                     sled_id = Some(sp.id);
                 }
             }
