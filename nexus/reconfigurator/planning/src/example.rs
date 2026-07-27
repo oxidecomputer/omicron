@@ -61,6 +61,8 @@ use tufaceous_artifact_v2::OsBoard;
 use tufaceous_artifact_v2::OsPhase1Tags;
 use tufaceous_artifact_v2::OsPhase2Tags;
 use tufaceous_artifact_v2::OsVariant;
+use tufaceous_artifact_v2::RotSlot;
+use tufaceous_artifact_v2::RotTags;
 use tufaceous_v2::edit::ArtifactSetExt;
 use typed_rng::TypedUuidRng;
 
@@ -1059,9 +1061,7 @@ impl ExampleSystemBuilder {
             // system is returned.
             let sp_version = repo
                 .artifacts
-                .filter_tags(|tags| {
-                    matches!(tags, KnownArtifactTags::Sp { .. })
-                })
+                .filter_tags(|tags| matches!(tags, KnownArtifactTags::Sp(_)))
                 .next()
                 .unwrap()
                 .version
@@ -1069,13 +1069,33 @@ impl ExampleSystemBuilder {
             let rot_a_version = repo
                 .artifacts
                 .filter_tags(|tags| {
-                    matches!(tags, KnownArtifactTags::Rot { .. })
+                    matches!(
+                        tags,
+                        KnownArtifactTags::Rot(RotTags {
+                            rot_slot: RotSlot::A,
+                            ..
+                        })
+                    )
                 })
                 .next()
                 .unwrap()
                 .version
                 .clone();
-            let rot_b_version = rot_a_version.clone();
+            let rot_b_version = repo
+                .artifacts
+                .filter_tags(|tags| {
+                    matches!(
+                        tags,
+                        KnownArtifactTags::Rot(RotTags {
+                            rot_slot: RotSlot::B,
+                            ..
+                        })
+                    )
+                })
+                .next()
+                .unwrap()
+                .version
+                .clone();
             let host_phase_1_hash = repo
                 .artifacts
                 .get_only(
