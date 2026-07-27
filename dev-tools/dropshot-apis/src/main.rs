@@ -30,6 +30,7 @@ use repo_depot_api::*;
 use serde::{Deserialize, Serialize};
 use sled_agent_api::*;
 use wicketd_api::*;
+use wicketd_commission_api::*;
 
 fn environment() -> anyhow::Result<Environment> {
     // The workspace root is two levels up from this crate's directory.
@@ -338,6 +339,22 @@ fn all_apis() -> anyhow::Result<ManagedApis> {
             },
             api_description: wicketd_api_mod::stub_api_description,
             ident: "wicketd",
+        }),
+        ManagedApi::from(ManagedApiConfig {
+            title: "Wicketd Commission API",
+            versions: Versions::new_versioned(
+                wicketd_commission_api::supported_versions(),
+            ),
+            metadata: ManagedApiMetadata {
+                description: Some(
+                    "Stable API for rack commissioning (RFD 710)",
+                ),
+                contact_url: Some("https://oxide.computer"),
+                contact_email: Some("api@oxide.computer"),
+                extra: to_value(ApiBoundary::Internal),
+            },
+            api_description: wicketd_commission_api_mod::stub_api_description,
+            ident: "wicketd-commission",
         }),
     ];
 

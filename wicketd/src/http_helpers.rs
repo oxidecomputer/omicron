@@ -4,9 +4,9 @@
 
 //! Helper and utility code for the wicketd HTTP APIs.
 //!
-//! Currently this is only used for the main wicketd API implementation defined
-//! in `http_entrypoints.rs`. In the future, the same code will be used for the
-//! commission API (RFD 710).
+//! These helpers are shared by both the unstable wicketd API (defined in
+//! `http_entrypoints.rs`) and the stable commission API (defined in the
+//! `commission` module).
 
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
@@ -23,22 +23,21 @@ use wicketd_commission_types::update::UpdateTargets;
 
 use crate::ServerContext;
 use crate::helpers::SpIdentifierDisplay;
+use crate::helpers::baseboard_matches_sp_state;
 use crate::helpers::sps_to_string;
-use crate::mgs::GetInventoryError;
 use crate::mgs::GetInventoryResponse;
 use crate::mgs::MgsHandle;
 use crate::mgs::ShutdownInProgress;
+use crate::mgs::records_to_mgs_inventory;
 
 // Get the current inventory or return a 503 Unavailable.
-//
-// Note that 503 is returned if we can't get the MGS-based inventory. If we fail
-// to get the transceivers, that's not considered a fatal 503.
 pub(crate) async fn mgs_inventory_or_unavail(
     mgs_handle: &MgsHandle,
 ) -> Result<MgsV1Inventory, HttpError> {
     match mgs_handle.get_cached_inventory().await {
-        Ok(GetInventoryResponse::Response { inventory, .. }) => Ok(inventory),
-        Ok(GetInventoryResponse::Unavailable) => Err(inventory_unavailable()),
+        Ok(GetInventoryResponse { sps, .. }) => {
+            records_to_mgs_inventory(&sps).ok_or_else(inventory_unavailable)
+        }
         Err(err @ ShutdownInProgress) => Err(shutdown_to_http(err)),
     }
 }
@@ -57,19 +56,6 @@ pub(crate) fn shutdown_to_http(_err: ShutdownInProgress) -> HttpError {
         None,
         "Server is shutting down".to_owned(),
     )
-}
-
-pub(crate) fn inventory_err_to_http(err: GetInventoryError) -> HttpError {
-    match err {
-        GetInventoryError::ShutdownInProgress => {
-            shutdown_to_http(ShutdownInProgress)
-        }
-        GetInventoryError::InvalidSpIdentifier => http_error_with_message(
-            ErrorStatusCode::SERVICE_UNAVAILABLE,
-            None,
-            "Invalid SP identifier in request".to_owned(),
-        ),
-    }
 }
 
 pub(crate) fn ba_lockstep_client(
@@ -163,7 +149,7 @@ pub(crate) fn ba_lockstep_error_to_http(
 ///
 /// This avoids using methods on `HttpError`, many of which don't expose the
 /// full message to clients for security reasons.
-fn http_error_with_message(
+pub(crate) fn http_error_with_message(
     status_code: dropshot::ErrorStatusCode,
     error_code: Option<String>,
     message: String,
@@ -223,25 +209,15 @@ pub(crate) async fn start_update(
     let mut self_update = None;
     let mut maybe_self_update = BTreeSet::new();
 
-    // Next, do we have the states of the target SP?
-    let sp_states: BTreeMap<_, _> = match inventory {
-        GetInventoryResponse::Response { inventory, .. } => inventory
-            .sps
-            .into_iter()
-            .filter_map(|sp| {
-                if targets.contains(&sp.id) {
-                    if let Some(sp_state) = sp.state {
-                        Some((sp.id, sp_state))
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                }
-            })
-            .collect(),
-        GetInventoryResponse::Unavailable => BTreeMap::new(),
-    };
+    // Next, do we have the states of the target SPs?
+    let GetInventoryResponse { sps, .. } = &inventory;
+    let sp_states: BTreeMap<_, _> = targets
+        .iter()
+        .filter_map(|target| {
+            let state = sps.get(target)?.data.as_ref()?.state.clone();
+            Some((*target, state))
+        })
+        .collect();
 
     for target in &targets {
         let sp_state = match sp_states.get(target) {
@@ -257,10 +233,7 @@ pub(crate) async fn start_update(
         // refuse to try to update our own sled.
         match &ctx.baseboard {
             Some(baseboard) => {
-                if baseboard.identifier() == sp_state.serial_number
-                    && baseboard.model() == sp_state.model
-                    && baseboard.revision() == sp_state.revision
-                {
+                if baseboard_matches_sp_state(baseboard, sp_state) {
                     self_update = Some(*target);
                     continue;
                 }

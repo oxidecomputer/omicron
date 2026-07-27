@@ -547,9 +547,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                                     .datastore
                                     .bgp_config_get(
                                         opctx,
-                                        &bgp_config_id
-                                            .into_untyped_uuid()
-                                            .into(),
+                                        bgp_config_id
                                     )
                                     .await
                                 {

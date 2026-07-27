@@ -729,7 +729,6 @@ mod test {
     use omicron_common::api::internal::shared::DatasetKind;
     use omicron_common::disk::DatasetConfig;
     use omicron_common::disk::DatasetName;
-    use omicron_common::disk::DatasetsConfig;
     use omicron_common::disk::SharedDatasetConfig;
     use omicron_common::zpool_name::ZpoolName;
     use omicron_uuid_kinds::GenericUuid;
@@ -1041,41 +1040,27 @@ mod test {
                 disks.push(Self { zpool_id, dataset_id })
             }
 
-            // Create a configuration for the sled agent consisting of all these
+            // Update the configuration of the sled agent to include all these
             // debug datasets.
-            let datasets = disks
-                .iter()
-                .map(|TestDataset { zpool_id, dataset_id }| {
-                    (
-                        *dataset_id,
-                        DatasetConfig {
-                            id: *dataset_id,
-                            name: DatasetName::new(
-                                ZpoolName::new_external(*zpool_id),
-                                DatasetKind::Debug,
-                            ),
-                            inner: SharedDatasetConfig::default(),
-                        },
-                    )
-                })
-                .collect();
-
-            // Read current sled config generation from zones (this will change
-            // slightly once the simulator knows how to keep the unified config
-            // and be a little less weird)
-            let current_generation =
-                cptestctx.first_sled_agent().omicron_zones_list().generation;
-
-            let dataset_config = DatasetsConfig {
-                generation: current_generation.next(),
-                datasets,
-            };
-
-            let res = cptestctx
+            let mut config = cptestctx
                 .first_sled_agent()
-                .datasets_ensure(dataset_config)
-                .unwrap();
-            assert!(!res.has_error());
+                .omicron_sled_config()
+                .unwrap_or_default();
+            for TestDataset { zpool_id, dataset_id } in &disks {
+                config.datasets.insert_overwrite(DatasetConfig {
+                    id: *dataset_id,
+                    name: DatasetName::new(
+                        ZpoolName::new_external(*zpool_id),
+                        DatasetKind::Debug,
+                    ),
+                    inner: SharedDatasetConfig::default(),
+                });
+            }
+            config.generation = config.generation.next();
+            cptestctx
+                .first_sled_agent()
+                .set_omicron_config(config)
+                .expect("updated sled config");
 
             disks
         }

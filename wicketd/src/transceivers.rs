@@ -5,11 +5,11 @@
 //! Fetching transceiver state from the SP.
 
 use gateway_types::component::SpIdentifier;
+use iddqd::{IdOrdItem, IdOrdMap, id_ord_map, id_upcast};
 use sled_agent_types::early_networking::SwitchSlot;
 use slog::{Logger, debug, error};
 use slog_error_chain::InlineErrorChain;
 use std::{
-    collections::HashMap,
     sync::{Arc, Mutex},
     time::Duration,
 };
@@ -24,7 +24,30 @@ use transceiver_controller::{SpRequest, message::ExtendedStatus};
 use wicket_common::inventory::{SpType, Transceiver};
 
 /// Type alias for a map of all transceivers on each switch.
-pub type TransceiverMap = HashMap<SwitchSlot, Vec<Transceiver>>;
+pub type TransceiverMap = IdOrdMap<SwitchTransceivers>;
+
+/// Item in a [`TransceiverMap`].
+///
+/// This tracks the state of all transceivers on a single switch.
+#[derive(Clone, Debug)]
+pub struct SwitchTransceivers {
+    /// The switch slot.
+    pub switch: SwitchSlot,
+    /// The list of transceivers on this switch.
+    pub transceivers: Vec<Transceiver>,
+    /// The last time we fetched transceivers from this switch.
+    pub updated_at: Instant,
+}
+
+impl IdOrdItem for SwitchTransceivers {
+    type Key<'a> = SwitchSlot;
+
+    fn key(&self) -> Self::Key<'_> {
+        self.switch
+    }
+
+    id_upcast!();
+}
 
 // Queue size for passing messages between transceiver fetch task.
 const CHANNEL_CAPACITY: usize = 4;
@@ -50,7 +73,7 @@ const OTHER_SWITCH_SP_INTERFACE: &str = "sidecar1";
 
 #[derive(Clone, Debug)]
 pub enum GetTransceiversResponse {
-    Response { transceivers: TransceiverMap, transceivers_last_seen: Duration },
+    Response { transceivers: TransceiverMap },
     Unavailable,
 }
 
@@ -171,22 +194,21 @@ impl Manager {
                 error!(self.log, "all transceiver fetch tasks have exited");
                 return;
             };
+            let update = SwitchTransceivers {
+                switch: switch_slot,
+                transceivers: these_transceivers,
+                updated_at,
+            };
             let mut transceivers_by_switch = self.transceivers.lock().unwrap();
             match &mut *transceivers_by_switch {
-                GetTransceiversResponse::Response {
-                    transceivers,
-                    transceivers_last_seen,
-                } => {
-                    transceivers.insert(switch_slot, these_transceivers);
-                    *transceivers_last_seen = updated_at.elapsed();
+                GetTransceiversResponse::Response { transceivers } => {
+                    transceivers.insert_overwrite(update);
                 }
                 GetTransceiversResponse::Unavailable => {
-                    let mut all_transceivers = TransceiverMap::new();
-                    all_transceivers.insert(switch_slot, these_transceivers);
+                    let all_transceivers = id_ord_map! { update };
                     *transceivers_by_switch =
                         GetTransceiversResponse::Response {
                             transceivers: all_transceivers,
-                            transceivers_last_seen: updated_at.elapsed(),
                         };
                 }
             }

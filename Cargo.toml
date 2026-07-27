@@ -25,6 +25,7 @@ members = [
     "clients/repo-depot-client",
     "clients/sled-agent-client",
     "clients/wicketd-client",
+    "clients/wicketd-commission-client",
     "cockroach-admin",
     "cockroach-admin/api",
     "cockroach-admin/types",
@@ -47,6 +48,7 @@ members = [
     "dev-tools/omicron-dev",
     "dev-tools/omicron-dev-lib",
     "dev-tools/omicron-deployment-graph",
+    "dev-tools/oximeter-load-test",
     "dev-tools/oxlog",
     "dev-tools/pins",
     "dev-tools/reconfigurator-cli",
@@ -183,6 +185,7 @@ members = [
     "wicket",
     "wicketd",
     "wicketd-api",
+    "wicketd-commission-api",
     "wicketd-commission-types",
     "wicketd-commission-types/versions",
     "workspace-hack",
@@ -216,6 +219,7 @@ default-members = [
     "clients/repo-depot-client",
     "clients/sled-agent-client",
     "clients/wicketd-client",
+    "clients/wicketd-commission-client",
     "cockroach-admin",
     "cockroach-admin/api",
     "cockroach-admin/types",
@@ -238,6 +242,7 @@ default-members = [
     "dev-tools/omicron-dev",
     "dev-tools/omicron-dev-lib",
     "dev-tools/omicron-deployment-graph",
+    "dev-tools/oximeter-load-test",
     "dev-tools/oxlog",
     "dev-tools/pins",
     "dev-tools/reconfigurator-cli",
@@ -376,6 +381,7 @@ default-members = [
     "wicket",
     "wicketd",
     "wicketd-api",
+    "wicketd-commission-api",
     "wicketd-commission-types",
     "wicketd-commission-types/versions",
     "workspace-hack",
@@ -512,7 +518,7 @@ digest = "0.10.7"
 dns-server = { path = "dns-server" }
 dns-server-api = { path = "dns-server-api" }
 dns-service-client = { path = "clients/dns-service-client" }
-dpd-client = { git = "https://github.com/oxidecomputer/dendrite", rev = "cc0c307c617f2988aafdca4e3bd35ea178b64801" }
+dpd-client = { git = "https://github.com/oxidecomputer/dendrite", rev = "04a52a3240a26c58f03e1cf40353d67ff69d76b6" }
 dropshot = { version = "0.17.1", features = [ "usdt-probes" ] }
 dropshot-api-manager = "0.7.2"
 dropshot-api-manager-types = "0.7.2"
@@ -897,6 +903,8 @@ wicket = { path = "wicket" }
 wicket-common = { path = "wicket-common" }
 wicketd-api = { path = "wicketd-api" }
 wicketd-client = { path = "clients/wicketd-client" }
+wicketd-commission-api = { path = "wicketd-commission-api" }
+wicketd-commission-client = { path = "clients/wicketd-commission-client" }
 wicketd-commission-types = { path = "wicketd-commission-types" }
 wicketd-commission-types-versions = { path = "wicketd-commission-types/versions" }
 x509-cert = { version = "0.2.5", default-features = false }

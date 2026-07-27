@@ -29,17 +29,18 @@ use wicket_common::inventory::SpType;
 use wicket_common::multirack_setup::CurrentMultirackJoinUserConfig;
 use wicket_common::multirack_setup::MultirackJoinConfigBaseUserInput;
 use wicket_common::preflight_check;
-use wicket_common::rack_setup::BgpAuthKey;
 use wicket_common::rack_setup::CurrentRssUserConfigInsensitive;
 use wicket_common::rack_setup::GetBgpAuthKeyInfoResponse;
 use wicket_common::rack_update::AbortUpdateOptions;
 use wicket_common::rack_update::ClearUpdateStateOptions;
-use wicket_common::rack_update::ClearUpdateStateResponse;
 use wicket_common::rack_update::StartUpdateOptions;
 use wicket_common::update_events::EventReport;
+use wicketd_commission_types::rack_setup::BgpAuthKey;
 use wicketd_commission_types::rack_setup::BgpAuthKeyId;
 use wicketd_commission_types::rack_setup::CertificateUploadResponse;
 use wicketd_commission_types::rack_setup::PutRssUserConfigInsensitive;
+use wicketd_commission_types::rack_setup::SetBgpAuthKeyStatus;
+use wicketd_commission_types::update::ClearUpdateStateResponse;
 use wicketd_commission_types::update::UpdateTargets;
 
 /// Full release repositories are currently (Dec 2024) 1.8 GiB and are likely to
@@ -434,19 +435,6 @@ pub struct PutBgpAuthKeyBody {
 #[derive(Clone, Debug, Serialize, JsonSchema, PartialEq)]
 pub struct PutBgpAuthKeyResponse {
     pub status: SetBgpAuthKeyStatus,
-}
-
-#[derive(Clone, Debug, Serialize, JsonSchema, PartialEq)]
-#[serde(rename_all = "snake_case")]
-pub enum SetBgpAuthKeyStatus {
-    /// The key was accepted and replaced an old key.
-    Replaced,
-
-    /// The key was accepted, and is the same as the existing key.
-    Unchanged,
-
-    /// The key was accepted and is new.
-    Added,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
