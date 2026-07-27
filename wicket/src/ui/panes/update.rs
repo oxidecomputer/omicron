@@ -33,8 +33,8 @@ use ratatui::widgets::{
 };
 use slog::{Logger, info, o};
 use tufaceous_artifact_v2::{
-    ArtifactVersion, KnownArtifactTags, RotBootloaderTags, RotKeyTableHash,
-    RotTags,
+    ArtifactVersion, KnownArtifactTags, OsPhase2Tags, OsVariant,
+    RotBootloaderTags, RotKeyTableHash, RotTags,
 };
 use tui_tree_widget::{Tree, TreeItem, TreeState};
 use wicket_common::inventory::RotSlot;
@@ -2465,7 +2465,14 @@ fn artifact_version(
             .unwrap_or("NO MATCH")
             .to_string(),
         UpdateComponent::Host => match id {
-            ComponentId::Sled(_) => "UNKNOWN".to_string(),
+            ComponentId::Sled(_) => versions
+                .get(&KnownArtifactTags::OsPhase2(OsPhase2Tags {
+                    os_variant: OsVariant::Host,
+                }))
+                .and_then(|versions| versions.first())
+                .map(ArtifactVersion::as_str)
+                .unwrap_or("NO MATCH")
+                .to_string(),
             // Switches and PSCs do not have a host.
             ComponentId::Switch(_) | ComponentId::Psc(_) => "N/A".to_string(),
         },
