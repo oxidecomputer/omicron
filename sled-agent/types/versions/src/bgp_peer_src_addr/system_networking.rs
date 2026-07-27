@@ -29,7 +29,6 @@ impl SystemNetworkingConfig {
     pub const SCHEMA_VERSION: u32 = 8;
 }
 
-// See ../early_networking.rs for why it is okay for this to be fallible.
 impl TryFrom<v42::system_networking::SystemNetworkingConfig>
     for SystemNetworkingConfig
 {
