@@ -279,6 +279,11 @@ impl DisksByIdBuilder {
                 // `/dsk/`, the block device, which can buffer writes when not
                 // opened O_DIRECT - see spec_write(), vpm_data_copy(), and
                 // vpm_sync_pages()).
+                //
+                // XXX: In development and non-product environments where
+                // storage may be commodity M.2s or worse, this can claim "no
+                // VWC semantics" when the underlying storage actually does.
+                // This could be improved. See Omicron#10933.
                 let vwc_semantics = !path.starts_with("/dev/zvol/rdsk/");
 
                 vwc_semantics
