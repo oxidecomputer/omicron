@@ -433,6 +433,17 @@ wicketd-client is only used by wicket, which is deployed in a unit with wicketd.
 """
 
 [[apis]]
+client_package_name = "wicketd-commission-client"
+label = "Wicketd Commission"
+server_package_name = "wicketd-commission-api"
+versioned_how = "server"
+notes = """
+Stable rack commissioning API (RFD 710), served by wicketd on its own port. The
+production consumer is rkdeploy, which lives outside this workspace and is
+not currently modeled by ls-apis.
+"""
+
+[[apis]]
 client_package_name = "crucible-control-client"
 label = "Crucible Control (for testing only)"
 server_package_name = "crucible"

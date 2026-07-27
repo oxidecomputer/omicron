@@ -21,12 +21,17 @@ use crate::helpers::SpIdentifierDisplay;
 use crate::http_helpers::http_error_with_message;
 use crate::http_helpers::shutdown_to_http;
 
-pub(crate) use self::inventory::{FetchedSpData, MgsFetchError};
-
+pub(crate) use self::inventory::{
+    Fetched, FetchedSpData, MgsFetchError, RotFetch, Stage0Fetch,
+};
 use self::inventory::{
     FetchedIgnitionState, IgnitionPresence, IgnitionStateFetcher,
     SpFetchResult, SpStateFetcher,
 };
+// RotData and RotImageErrors are only needed by tests in conversions.rs, hence
+// this somewhat awkward separate `#[cfg(test)]` re-export.
+#[cfg(test)]
+pub(crate) use self::inventory::{RotData, RotImageErrors};
 
 mod inventory;
 
@@ -52,7 +57,6 @@ pub(crate) struct GetInventoryResponse {
 
     /// The most recent ignition-list fetch error, or `None` if the last
     /// ignition fetch succeeded (or none has failed yet).
-    #[cfg_attr(not(test), expect(dead_code))]
     pub(crate) last_ignition_fetch_error: Option<MgsFetchError>,
 
     pub(crate) mgs_last_seen: Duration,
@@ -598,7 +602,6 @@ struct WaitingForRefresh {
 mod tests {
     use super::*;
 
-    use crate::mgs::inventory::{Fetched, RotData, RotFetch, Stage0Fetch};
     use gateway_types::component::{PowerState, SpState};
     use gateway_types::rot::RotState;
     use std::net::Ipv6Addr;

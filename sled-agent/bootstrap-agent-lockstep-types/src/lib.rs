@@ -339,6 +339,27 @@ impl RssStep {
         }
         return 0;
     }
+
+    pub fn description(&self) -> &'static str {
+        match self {
+            Self::Requested => "Requested",
+            Self::Starting => "Starting",
+            Self::LoadExistingPlan => "Loading existing plan",
+            Self::CreateSledPlan => "Creating sled plan",
+            Self::InitTrustQuorum => "Initializing trust quorum",
+            Self::InitialNetworkConfigUpdate => "Initial network config update",
+            Self::SledInit => "Initializing sleds",
+            Self::FinalNetworkConfigUpdate => "Final network config update",
+            Self::InitDns => "Initializing DNS",
+            Self::ConfigureDns => "Configuring DNS",
+            Self::InitNtp => "Initializing NTP",
+            Self::WaitForTimeSync => "Waiting for time sync",
+            Self::WaitForDatabase => "Waiting for database",
+            Self::ClusterInit => "Initializing cluster",
+            Self::ZonesInit => "Initializing zones",
+            Self::NexusHandoff => "Handing off to Nexus",
+        }
+    }
 }
 
 /// Wrapper for optional contents of the replicated network config.

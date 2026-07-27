@@ -17,7 +17,7 @@
   </dependency>
 
   <exec_method type='method' name='start'
-      exec='ctrun -l child -o noorphan,regent /opt/oxide/wicketd/bin/wicketd run /var/svc/manifest/site/wicketd/config.toml --address %{config/address} --artifact-address %{config/artifact-address} --mgs-address %{config/mgs-address} --nexus-proxy-address %{config/nexus-proxy-address} --baseboard-file %{config/baseboard-file} --read-smf-config &amp;'
+      exec='ctrun -l child -o noorphan,regent /opt/oxide/wicketd/bin/wicketd run /var/svc/manifest/site/wicketd/config.toml --address %{config/address} --artifact-address %{config/artifact-address} --commission-address %{config/commission-address} --mgs-address %{config/mgs-address} --nexus-proxy-address %{config/nexus-proxy-address} --baseboard-file %{config/baseboard-file} --read-smf-config &amp;'
     timeout_seconds='0' />
   <exec_method type='method' name='stop' exec=':kill' timeout_seconds='0' />
 
@@ -47,6 +47,7 @@
   <property_group name='config' type='application'>
     <propval name='address' type='astring' value='unknown' />
     <propval name='artifact-address' type='astring' value='unknown' />
+    <propval name='commission-address' type='astring' value='unknown' />
     <propval name='mgs-address' type='astring' value='unknown' />
     <propval name='nexus-proxy-address' type='astring' value='unknown' />
     <propval name='baseboard-file' type='astring' value='unknown' />
