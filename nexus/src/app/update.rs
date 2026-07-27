@@ -928,6 +928,8 @@ async fn component_version_counts(
 mod test {
     use super::*;
     use chrono::Utc;
+    use nexus_db_model::Vmm;
+    use nexus_db_model::VmmCpuPlatform;
     use nexus_db_model::saga_types::Saga;
     use nexus_db_model::saga_types::SecId;
     use nexus_inventory::CollectionBuilder;
@@ -1043,6 +1045,23 @@ mod test {
         })
     }
 
+    // A single enabled not online SMF service living in the propolis zone for
+    // the given propolis id.
+    fn offline_propolis_svc(
+        propolis_id: PropolisUuid,
+    ) -> SvcsEnabledNotOnlineResult {
+        SvcsEnabledNotOnlineResult::SvcsEnabledNotOnline(SvcsEnabledNotOnline {
+            services: vec![SvcEnabledNotOnline {
+                fmri: "svc:/system/illumos/propolis-server:default"
+                    .to_string(),
+                zone: format!("{PROPOLIS_ZONE_PREFIX}{propolis_id}"),
+                state: SvcEnabledNotOnlineState::Offline,
+            }],
+            errors: vec![],
+            time_of_status: Utc::now(),
+        })
+    }
+
     fn fake_opctx(cptestctx: &ControlPlaneTestContext) -> OpContext {
         OpContext::for_tests(
             cptestctx.logctx.log.new(o!()),
@@ -1069,6 +1088,35 @@ mod test {
             .inventory_insert_collection(opctx, &collection)
             .await
             .expect("inserted inventory collection");
+    }
+
+    async fn insert_vmm_in_db(
+        cptestctx: &ControlPlaneTestContext,
+        opctx: &OpContext,
+        propolis_id: PropolisUuid,
+        state: VmmState,
+    ) {
+        let datastore = cptestctx.server.server_context().nexus.datastore();
+        datastore
+            .vmm_insert(
+                opctx,
+                Vmm {
+                    id: propolis_id.into_untyped_uuid(),
+                    time_created: Utc::now(),
+                    time_deleted: None,
+                    instance_id: Uuid::new_v4(),
+                    time_state_updated: Utc::now(),
+                    generation: Generation::new(),
+                    sled_id: sled_id().into(),
+                    propolis_ip: "10.1.9.42".parse().unwrap(),
+                    propolis_port: 12400.into(),
+                    state,
+                    cpu_platform: VmmCpuPlatform::SledDefault,
+                    failure_reason: None,
+                },
+            )
+            .await
+            .expect("inserted vmm");
     }
 
     // Insert a running saga whose `time_created` is older than
@@ -1691,6 +1739,100 @@ mod test {
                     inventory,
                     blueprint,
                     Some(&target_release),
+                    empty_internal_update_status(),
+                )
+                .await
+                .unwrap()
+        );
+    }
+
+    #[nexus_test(server = crate::Server)]
+    async fn test_contact_support_expected_offline_propolis(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        let nexus = &cptestctx.server.server_context().nexus;
+        let opctx = fake_opctx(cptestctx);
+
+        let propolis_id = PropolisUuid::new_v4();
+        insert_fake_collection(
+            cptestctx,
+            &opctx,
+            healthy_zpools(),
+            offline_propolis_svc(propolis_id),
+        )
+        .await;
+        insert_vmm_in_db(cptestctx, &opctx, propolis_id, VmmState::Stopping)
+            .await;
+
+        let inventory = Arc::new(
+            nexus
+                .datastore()
+                .inventory_get_latest_collection(&opctx)
+                .await
+                .unwrap()
+                .unwrap(),
+        );
+        let version = fake_target_version();
+        let blueprint =
+            fake_blueprint(&cptestctx.logctx.log, &version, Utc::now(), false);
+        
+        // A propolis zone reports an enabled not online SMF service, but its
+        // VMM is in the `Stopping` state, so we expect it to be offline. It
+        // should be filtered out, and contact_support shoudl be false.
+        assert!(
+            !nexus
+                .contact_support(
+                    &opctx,
+                    inventory,
+                    blueprint,
+                    Some(&version),
+                    empty_internal_update_status(),
+                )
+                .await
+                .unwrap()
+        );
+    }
+
+    #[nexus_test(server = crate::Server)]
+    async fn test_contact_support_unexpected_offline_propolis(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        let nexus = &cptestctx.server.server_context().nexus;
+        let opctx = fake_opctx(cptestctx);
+
+        let propolis_id = PropolisUuid::new_v4();
+        insert_fake_collection(
+            cptestctx,
+            &opctx,
+            healthy_zpools(),
+            offline_propolis_svc(propolis_id),
+        )
+        .await;
+        insert_vmm_in_db(cptestctx, &opctx, propolis_id, VmmState::Running)
+            .await;
+
+        let inventory = Arc::new(
+            nexus
+                .datastore()
+                .inventory_get_latest_collection(&opctx)
+                .await
+                .unwrap()
+                .unwrap(),
+        );
+        let version = fake_target_version();
+        let blueprint =
+            fake_blueprint(&cptestctx.logctx.log, &version, Utc::now(), false);
+
+        // A propolis zone reports a enabled not-online SMF service while its
+        // VMM is in the `Running` state, so its being offline is unexpected.
+        // contact_support should be true.
+        assert!(
+            nexus
+                .contact_support(
+                    &opctx,
+                    inventory,
+                    blueprint,
+                    Some(&version),
                     empty_internal_update_status(),
                 )
                 .await
