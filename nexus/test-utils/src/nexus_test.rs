@@ -295,9 +295,10 @@ impl<N: NexusServer> ControlPlaneTestContext<N> {
             || async {
                 match dpd_client.switch_identifiers().await {
                     Ok(_) => Ok(()),
-                    Err(_) => Err(dev::poll::CondCheckError::<()>::NotYet {
-                        status: None,
-                    }),
+                    Err(error) if error.is_retryable() => {
+                        Err(dev::poll::CondCheckError::NotYet { status: None })
+                    }
+                    Err(error) => Err(dev::poll::CondCheckError::Failed(error)),
                 }
             },
             &Duration::from_millis(50),
