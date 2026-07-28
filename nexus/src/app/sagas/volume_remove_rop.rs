@@ -3,10 +3,10 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::{ActionRegistry, NexusActionContext, NexusSaga, SagaInitError};
-use crate::app::sagas;
 use crate::app::sagas::declare_saga_actions;
 use nexus_db_queries::authn;
 use nexus_types::saga::saga_action_failed;
+use omicron_common::api::external::Error;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::VolumeUuid;
 use serde::Deserialize;
@@ -48,9 +48,12 @@ declare_saga_actions! {
         + svr_create_temp_volume
         - svr_create_temp_volume_undo
     }
-    // remove the read_only_parent,  attach it to the temp volume.
+    // remove the read_only_parent, attach it to the temp volume.
     REMOVE_READ_ONLY_PARENT -> "no_result_1" {
         + svr_remove_read_only_parent
+    }
+    SOFT_DELETE_VOLUME -> "soft_delete_volume" {
+        + svr_soft_delete_volume
     }
 }
 
@@ -67,25 +70,11 @@ impl NexusSaga for SagaVolumeRemoveROP {
     }
 
     fn make_saga_dag(
-        params: &Self::Params,
+        _params: &Self::Params,
         mut builder: steno::DagBuilder,
     ) -> Result<steno::Dag, SagaInitError> {
         // Generate the temp volume ID this saga will use.
         let temp_volume_id = VolumeUuid::new_v4();
-        // Generate the params for the subsaga called at the end.
-        let subsaga_params = sagas::volume_delete::Params {
-            serialized_authn: params.serialized_authn.clone(),
-            volume_id: temp_volume_id,
-        };
-        let subsaga_dag = {
-            let subsaga_builder = steno::DagBuilder::new(steno::SagaName::new(
-                sagas::volume_delete::SagaVolumeDelete::NAME,
-            ));
-            sagas::volume_delete::SagaVolumeDelete::make_saga_dag(
-                &subsaga_params,
-                subsaga_builder,
-            )?
-        };
 
         // Add the temp_volume_id to the saga.
         builder.append(Node::constant(
@@ -97,26 +86,12 @@ impl NexusSaga for SagaVolumeRemoveROP {
 
         // Create the temporary volume
         builder.append(create_temp_volume_action());
+
         // Remove the read only parent, attach to temp volume
         builder.append(remove_read_only_parent_action());
 
-        // Build the params for the subsaga to delete the temp volume
-        builder.append(Node::constant(
-            "params_for_delete_subsaga",
-            serde_json::to_value(&subsaga_params).map_err(|e| {
-                SagaInitError::SerializeError(
-                    String::from("params_for_delete_subsaga"),
-                    e,
-                )
-            })?,
-        ));
-
-        // Call the subsaga to delete the temp volume
-        builder.append(Node::subsaga(
-            "final_no_result",
-            subsaga_dag,
-            "params_for_delete_subsaga",
-        ));
+        // Soft-delete the temp volume
+        builder.append(soft_delete_volume_action());
 
         Ok(builder.build()?)
     }
@@ -177,5 +152,24 @@ async fn svr_remove_read_only_parent(
         .volume_remove_rop(params.volume_id, temp_volume_id)
         .await
         .map_err(saga_action_failed)?;
+    Ok(())
+}
+
+async fn svr_soft_delete_volume(
+    sagactx: NexusActionContext,
+) -> Result<(), ActionError> {
+    let osagactx = sagactx.user_data();
+
+    let temp_volume_id = sagactx.lookup::<VolumeUuid>("temp_volume_id")?;
+
+    osagactx.datastore().soft_delete_volume(temp_volume_id).await.map_err(
+        |e| {
+            saga_action_failed(Error::internal_error(&format!(
+                "failed to soft_delete_volume: {:?}",
+                e,
+            )))
+        },
+    )?;
+
     Ok(())
 }

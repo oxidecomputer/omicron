@@ -237,6 +237,8 @@ audit_log_cleanup.period_secs = 600
 audit_log_cleanup.retention_days = 90
 audit_log_cleanup.max_deleted_per_activation = 10000
 populate_switch_ports.period_secs = 30
+volume_delete.period_secs = 10000
+local_storage_delete.period_secs = 10000
 
 [multicast]
 # Enable multicast functionality for tests (disabled by default in production)

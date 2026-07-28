@@ -3,15 +3,14 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::{ActionRegistry, NexusActionContext, NexusSaga};
-use crate::app::sagas;
 use crate::app::sagas::declare_saga_actions;
 use nexus_db_queries::{authn, authz, db};
 use nexus_types::saga::saga_action_failed;
+use omicron_common::api::external::Error;
 use omicron_uuid_kinds::VolumeUuid;
 use serde::Deserialize;
 use serde::Serialize;
 use steno::ActionError;
-use steno::Node;
 
 #[derive(Debug, Deserialize, Serialize)]
 pub(crate) enum ImageParam {
@@ -38,6 +37,9 @@ pub(crate) struct Params {
 
 declare_saga_actions! {
     image_delete;
+    SOFT_DELETE_VOLUME -> "soft_delete_volume" {
+        + sid_soft_delete_volume
+    }
     DELETE_IMAGE_RECORD -> "no_result1" {
         + sid_delete_image_record
     }
@@ -54,38 +56,11 @@ impl NexusSaga for SagaImageDelete {
     }
 
     fn make_saga_dag(
-        params: &Self::Params,
+        _params: &Self::Params,
         mut builder: steno::DagBuilder,
     ) -> Result<steno::Dag, super::SagaInitError> {
         builder.append(delete_image_record_action());
-
-        const DELETE_VOLUME_PARAMS: &'static str = "delete_volume_params";
-
-        let volume_delete_params = sagas::volume_delete::Params {
-            serialized_authn: params.serialized_authn.clone(),
-            volume_id: params.image_param.volume_id(),
-        };
-        builder.append(Node::constant(
-            DELETE_VOLUME_PARAMS,
-            serde_json::to_value(&volume_delete_params).map_err(|e| {
-                super::SagaInitError::SerializeError(
-                    String::from("volume_id"),
-                    e,
-                )
-            })?,
-        ));
-
-        let make_volume_delete_dag = || {
-            let subsaga_builder = steno::DagBuilder::new(steno::SagaName::new(
-                sagas::volume_delete::SagaVolumeDelete::NAME,
-            ));
-            sagas::volume_delete::create_dag(subsaga_builder)
-        };
-        builder.append(steno::Node::subsaga(
-            "delete_volume",
-            make_volume_delete_dag()?,
-            DELETE_VOLUME_PARAMS,
-        ));
+        builder.append(soft_delete_volume_action());
 
         Ok(builder.build()?)
     }
@@ -120,6 +95,26 @@ async fn sid_delete_image_record(
                 .map_err(saga_action_failed)?;
         }
     }
+
+    Ok(())
+}
+
+async fn sid_soft_delete_volume(
+    sagactx: NexusActionContext,
+) -> Result<(), ActionError> {
+    let params = sagactx.saga_params::<Params>()?;
+    let osagactx = sagactx.user_data();
+
+    osagactx
+        .datastore()
+        .soft_delete_volume(params.image_param.volume_id())
+        .await
+        .map_err(|e| {
+            saga_action_failed(Error::internal_error(&format!(
+                "failed to soft_delete_volume: {:?}",
+                e,
+            )))
+        })?;
 
     Ok(())
 }

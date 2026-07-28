@@ -371,12 +371,22 @@ impl super::Nexus {
         let saga_params = sagas::disk_delete::Params {
             serialized_authn: authn::saga::Serialized::for_opctx(opctx),
             project_id: project.id(),
-            disk,
+            disk: disk.clone(),
         };
 
         self.sagas
             .saga_execute::<sagas::disk_delete::SagaDiskDelete>(saga_params)
             .await?;
+
+        match disk {
+            datastore::Disk::Crucible(_) => {
+                self.background_tasks.task_volume_delete.activate();
+            }
+
+            datastore::Disk::LocalStorage(_) => {
+                self.background_tasks.task_local_storage_delete.activate();
+            }
+        }
 
         Ok(())
     }
@@ -400,6 +410,8 @@ impl super::Nexus {
             datastore::Disk::Crucible(disk) => {
                 self.volume_remove_read_only_parent(&opctx, disk.volume_id())
                     .await?;
+
+                self.background_tasks.task_volume_delete.activate();
             }
 
             datastore::Disk::LocalStorage(_) => {

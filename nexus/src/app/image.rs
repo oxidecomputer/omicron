@@ -192,6 +192,8 @@ impl super::Nexus {
             .saga_execute::<sagas::image_delete::SagaImageDelete>(saga_params)
             .await?;
 
+        self.background_tasks.task_volume_delete.activate();
+
         Ok(())
     }
 

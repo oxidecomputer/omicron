@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Clean up the volume that stashes the target replaced during the region
+//! Soft-delete up the volume that stashes the target replaced during the region
 //! snapshot replacement start saga. After that's done, change the region
 //! snapshot replacement state to Running. This saga handles the following
 //! region snapshot replacement request state transitions:
@@ -29,9 +29,9 @@ use super::{
     SagaInitError,
 };
 use crate::app::sagas::declare_saga_actions;
-use crate::app::sagas::volume_delete;
 use crate::app::{authn, db};
 use nexus_types::saga::saga_action_failed;
+use omicron_common::api::external::Error;
 use omicron_uuid_kinds::VolumeUuid;
 use serde::Deserialize;
 use serde::Serialize;
@@ -59,6 +59,9 @@ declare_saga_actions! {
         + rsrgs_set_saga_id
         - rsrgs_set_saga_id_undo
     }
+    SOFT_DELETE_VOLUME -> "soft_delete_volume" {
+        + rsrgs_soft_delete_volume
+    }
     UPDATE_REQUEST_RECORD -> "unused_2" {
         + rsrgs_update_request_record
     }
@@ -77,7 +80,7 @@ impl NexusSaga for SagaRegionSnapshotReplacementGarbageCollect {
     }
 
     fn make_saga_dag(
-        params: &Self::Params,
+        _params: &Self::Params,
         mut builder: steno::DagBuilder,
     ) -> Result<steno::Dag, SagaInitError> {
         builder.append(Node::action(
@@ -87,38 +90,7 @@ impl NexusSaga for SagaRegionSnapshotReplacementGarbageCollect {
         ));
 
         builder.append(set_saga_id_action());
-
-        let subsaga_params = volume_delete::Params {
-            serialized_authn: params.serialized_authn.clone(),
-            volume_id: params.old_snapshot_volume_id,
-        };
-
-        let subsaga_dag = {
-            let subsaga_builder = steno::DagBuilder::new(steno::SagaName::new(
-                volume_delete::SagaVolumeDelete::NAME,
-            ));
-            volume_delete::SagaVolumeDelete::make_saga_dag(
-                &subsaga_params,
-                subsaga_builder,
-            )?
-        };
-
-        builder.append(Node::constant(
-            "params_for_volume_delete_subsaga",
-            serde_json::to_value(&subsaga_params).map_err(|e| {
-                SagaInitError::SerializeError(
-                    "params_for_volume_delete_subsaga".to_string(),
-                    e,
-                )
-            })?,
-        ));
-
-        builder.append(Node::subsaga(
-            "volume_delete_subsaga_no_result",
-            subsaga_dag,
-            "params_for_volume_delete_subsaga",
-        ));
-
+        builder.append(soft_delete_volume_action());
         builder.append(update_request_record_action());
 
         Ok(builder.build()?)
@@ -180,6 +152,26 @@ async fn rsrgs_set_saga_id_undo(
     Ok(())
 }
 
+async fn rsrgs_soft_delete_volume(
+    sagactx: NexusActionContext,
+) -> Result<(), ActionError> {
+    let params = sagactx.saga_params::<Params>()?;
+    let osagactx = sagactx.user_data();
+
+    osagactx
+        .datastore()
+        .soft_delete_volume(params.old_snapshot_volume_id)
+        .await
+        .map_err(|e| {
+            saga_action_failed(Error::internal_error(&format!(
+                "failed to soft_delete_volume: {:?}",
+                e,
+            )))
+        })?;
+
+    Ok(())
+}
+
 async fn rsrgs_update_request_record(
     sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
@@ -218,6 +210,7 @@ pub(crate) mod test {
     use nexus_db_model::RegionSnapshotReplacementState;
     use nexus_db_queries::authn::saga::Serialized;
     use nexus_db_queries::context::OpContext;
+    use nexus_test_utils::background::wait_for_all_volume_deletes;
     use nexus_test_utils_macros::nexus_test;
     use omicron_uuid_kinds::DatasetUuid;
     use omicron_uuid_kinds::GenericUuid;
@@ -319,7 +312,11 @@ pub(crate) mod test {
             RegionSnapshotReplacementState::Running
         );
 
-        // Validate the Volume was deleted
+        // Run the volume delete background task and validate the Volume was
+        // deleted.
+        wait_for_all_volume_deletes(datastore, &cptestctx.lockstep_client)
+            .await;
+
         assert!(
             datastore
                 .volume_get(old_snapshot_volume_id)

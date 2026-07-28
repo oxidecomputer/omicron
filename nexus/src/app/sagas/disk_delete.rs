@@ -5,27 +5,16 @@
 use super::ActionRegistry;
 use super::NexusActionContext;
 use super::NexusSaga;
-use crate::app::InlineErrorChain;
-use crate::app::sagas::SagaInitError;
 use crate::app::sagas::declare_saga_actions;
-use crate::app::sagas::sled_out_of_service_gone_check;
-use crate::app::sagas::volume_delete;
-use crate::app::sagas::zpool_out_of_service_gone_check;
 use nexus_db_queries::authn;
 use nexus_db_queries::db;
 use nexus_db_queries::db::datastore;
 use nexus_types::saga::saga_action_failed;
 use omicron_common::api::external::DiskState;
 use omicron_common::api::external::Error;
-use omicron_common::backoff::backon_retry_policy_internal_service;
-use progenitor_extras::retry::{
-    GoneCheckResult, retry_operation_while_indefinitely,
-};
 use serde::Deserialize;
 use serde::Serialize;
-use sled_agent_client::types::LocalStorageDatasetDeleteRequest;
 use steno::ActionError;
-use steno::Node;
 use uuid::Uuid;
 
 // disk delete saga: input parameters
@@ -49,11 +38,8 @@ declare_saga_actions! {
         + sdd_account_space
         - sdd_account_space_undo
     }
-    DELETE_LOCAL_STORAGE -> "delete_local_storage" {
-        + sdd_delete_local_storage
-    }
-    DEALLOCATE_LOCAL_STORAGE -> "deallocate_local_storage" {
-        + sdd_deallocate_local_storage
+    SOFT_DELETE_CRUCIBLE_VOLUME -> "soft_delete_volume" {
+        + sdd_soft_delete_volume
     }
 }
 
@@ -77,47 +63,13 @@ impl NexusSaga for SagaDiskDelete {
         builder.append(space_account_action());
 
         match &params.disk {
-            datastore::Disk::Crucible(disk) => {
-                let subsaga_params = volume_delete::Params {
-                    serialized_authn: params.serialized_authn.clone(),
-                    volume_id: disk.volume_id(),
-                };
-
-                let subsaga_dag = {
-                    let subsaga_builder =
-                        steno::DagBuilder::new(steno::SagaName::new(
-                            volume_delete::SagaVolumeDelete::NAME,
-                        ));
-                    volume_delete::SagaVolumeDelete::make_saga_dag(
-                        &subsaga_params,
-                        subsaga_builder,
-                    )?
-                };
-
-                builder.append(Node::constant(
-                    "params_for_volume_delete_subsaga",
-                    serde_json::to_value(&subsaga_params).map_err(|e| {
-                        SagaInitError::SerializeError(
-                            "params_for_volume_delete_subsaga".to_string(),
-                            e,
-                        )
-                    })?,
-                ));
-
-                builder.append(Node::subsaga(
-                    "volume_delete_subsaga_no_result",
-                    subsaga_dag,
-                    "params_for_volume_delete_subsaga",
-                ));
+            datastore::Disk::Crucible(_) => {
+                builder.append(soft_delete_crucible_volume_action());
             }
 
             datastore::Disk::LocalStorage(_) => {
-                // Attempt deleting the local storage before removing the
-                // database record. If the delete does not succeed, at least the
-                // user can re-request the deletion.
-
-                builder.append(delete_local_storage_action());
-                builder.append(deallocate_local_storage_action());
+                // Local storage clean up is done entirely in the
+                // local_storage_delete background task
             }
         }
 
@@ -208,127 +160,27 @@ async fn sdd_account_space_undo(
     Ok(())
 }
 
-async fn sdd_delete_local_storage(
+async fn sdd_soft_delete_volume(
     sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
-    let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
-    let opctx = crate::context::op_context_for_saga_action(
-        &sagactx,
-        &params.serialized_authn,
-    );
+    let osagactx = sagactx.user_data();
 
-    let datastore::Disk::LocalStorage(disk) = params.disk else {
+    let datastore::Disk::Crucible(disk) = params.disk else {
         unreachable!(
             "check during `make_saga_dag` should have ensured disk type is \
-            local storage"
+            crucible"
         );
     };
 
-    let Some(allocation) = disk.local_storage_dataset_allocation else {
-        // Nothing to do!
-        return Ok(());
-    };
-
-    let sled_id = allocation.sled_id();
-    let zpool_id = allocation.pool_id().upcast();
-
-    let request = LocalStorageDatasetDeleteRequest {
-        zpool_id: allocation.pool_id(),
-        dataset_id: allocation.id(),
-        encrypted_at_rest: allocation.encrypted_at_rest(),
-    };
-
-    // Get a sled agent client
-
-    let sled_agent_client = osagactx
-        .nexus()
-        .sled_client(&sled_id)
-        .await
-        .map_err(saga_action_failed)?;
-
-    // Ensure that the local storage is deleted
-
-    let delete_operation = || async {
-        sled_agent_client.local_storage_dataset_delete(&request).await
-    };
-
-    // Bail out of the retry loop if either the disk or sled is no longer
-    // in-service.
-    let gone_check = || async {
-        match sled_out_of_service_gone_check(
-            osagactx.datastore(),
-            &opctx,
-            sled_id,
-        )
-        .await?
-        {
-            GoneCheckResult::StillAvailable => {
-                // proceed to zpool check
-            }
-
-            GoneCheckResult::Gone => {
-                return Ok(GoneCheckResult::Gone);
-            }
-        }
-
-        zpool_out_of_service_gone_check(osagactx.datastore(), &opctx, zpool_id)
-            .await
-    };
-
-    let log = osagactx.log().clone();
-    let result = retry_operation_while_indefinitely(
-        backon_retry_policy_internal_service(),
-        delete_operation,
-        gone_check,
-        |notification| {
-            slog::warn!(
-                log,
-                "failed to delete local storage dataset, retrying in {:?}",
-                notification.delay;
-                InlineErrorChain::new(&notification.error),
-            );
+    osagactx.datastore().soft_delete_volume(disk.volume_id()).await.map_err(
+        |e| {
+            saga_action_failed(Error::internal_error(&format!(
+                "failed to soft_delete_volume: {:?}",
+                e,
+            )))
         },
-    )
-    .await;
-
-    match result {
-        Ok(_) => Ok(()),
-
-        // In this case, if the particular disk hosting this local storage was
-        // expunged, or if the sled was expunged, then proceed with the rest of
-        // the saga.
-        Err(e) if e.is_gone() => Ok(()),
-
-        Err(e) => Err(saga_action_failed(Error::internal_error(&format!(
-            "failed to delete local storage: {}",
-            InlineErrorChain::new(&e)
-        )))),
-    }
-}
-
-async fn sdd_deallocate_local_storage(
-    sagactx: NexusActionContext,
-) -> Result<(), ActionError> {
-    let osagactx = sagactx.user_data();
-    let params = sagactx.saga_params::<Params>()?;
-    let opctx = crate::context::op_context_for_saga_action(
-        &sagactx,
-        &params.serialized_authn,
-    );
-
-    let datastore::Disk::LocalStorage(disk) = params.disk else {
-        unreachable!(
-            "check during `make_saga_dag` should have ensured disk type is \
-            local storage"
-        );
-    };
-
-    osagactx
-        .datastore()
-        .delete_local_storage_dataset_allocations(&opctx, &disk)
-        .await
-        .map_err(saga_action_failed)?;
+    )?;
 
     Ok(())
 }
@@ -353,6 +205,8 @@ pub(crate) mod test {
     use nexus_db_queries::authz;
     use nexus_db_queries::context::OpContext;
     use nexus_db_queries::db::datastore::Disk;
+    use nexus_test_utils::background::wait_for_all_local_storage_deletes;
+    use nexus_test_utils::background::wait_for_all_volume_deletes;
     use nexus_test_utils::resource_helpers::DiskTest;
     use nexus_test_utils::resource_helpers::create_project;
     use nexus_test_utils_macros::nexus_test;
@@ -474,6 +328,12 @@ pub(crate) mod test {
         let dag = create_saga_dag::<SagaDiskDelete>(params).unwrap();
         crate::app::sagas::test_helpers::actions_succeed_idempotently(
             nexus, dag,
+        )
+        .await;
+
+        wait_for_all_volume_deletes(
+            nexus.datastore(),
+            &cptestctx.lockstep_client,
         )
         .await;
 
@@ -640,6 +500,16 @@ pub(crate) mod test {
         pub async fn validate_allocation_deleted(&self) {
             let nexus = &self.cptestctx.server.server_context().nexus;
             let datastore = nexus.datastore();
+
+            // Run the local storage delete background task to completion
+
+            wait_for_all_local_storage_deletes(
+                &datastore,
+                &self.cptestctx.lockstep_client,
+            )
+            .await;
+
+            // Then check all allocations were deleted
 
             let conn = datastore.pool_connection_for_tests().await.unwrap();
 

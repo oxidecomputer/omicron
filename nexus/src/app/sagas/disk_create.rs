@@ -1073,6 +1073,7 @@ pub(crate) mod test {
     use nexus_db_queries::context::OpContext;
     use nexus_db_queries::db;
     use nexus_db_queries::db::datastore::DataStore;
+    use nexus_test_utils::background::wait_for_all_volume_deletes;
     use nexus_test_utils::resource_helpers;
     use nexus_test_utils::resource_helpers::create_project;
     use nexus_test_utils_macros::nexus_test;
@@ -1608,6 +1609,11 @@ pub(crate) mod test {
         .await;
 
         destroy_disk(&cptestctx).await;
+        wait_for_all_volume_deletes(
+            nexus.datastore(),
+            &cptestctx.lockstep_client,
+        )
+        .await;
         verify_clean_slate(&cptestctx, &test).await;
     }
 

@@ -1765,6 +1765,40 @@ impl DataStore {
             })
     }
 
+    pub async fn get_soft_deleted_volumes(
+        &self,
+        opctx: &OpContext,
+    ) -> ListResultVec<Volume> {
+        opctx.check_complex_operations_allowed()?;
+
+        let mut volumes = Vec::new();
+        let mut paginator = Paginator::new(
+            SQL_BATCH_SIZE,
+            dropshot::PaginationOrder::Ascending,
+        );
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        while let Some(p) = paginator.next() {
+            use nexus_db_schema::schema::volume::dsl;
+
+            let mut page =
+                paginated(dsl::volume, dsl::id, &p.current_pagparams())
+                    .filter(dsl::time_deleted.is_not_null())
+                    .select(Volume::as_select())
+                    .get_results_async::<Volume>(&*conn)
+                    .await
+                    .map_err(|e| {
+                        public_error_from_diesel(e, ErrorHandler::Server)
+                    })?;
+
+            paginator = p.found_batch(&page, &|r| *r.id().as_untyped_uuid());
+
+            volumes.append(&mut page);
+        }
+
+        Ok(volumes)
+    }
+
     async fn volume_remove_rop_in_txn(
         conn: &async_bb8_diesel::Connection<DbConnection>,
         err: OptionalError<RemoveRopError>,

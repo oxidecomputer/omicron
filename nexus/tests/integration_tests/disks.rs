@@ -5,6 +5,7 @@
 //! Tests basic disk support in the API
 
 use super::instances::instance_wait_for_state;
+use crate::integration_tests::common::assert_all_crucible_resources_deleted;
 use dropshot::HttpErrorResponseBody;
 use dropshot::test_util::ClientTestContext;
 use http::StatusCode;
@@ -19,6 +20,8 @@ use nexus_db_queries::db::datastore::RegionAllocationFor;
 use nexus_db_queries::db::datastore::RegionAllocationParameters;
 use nexus_db_queries::db::fixed_data::FLEET_ID;
 use nexus_test_utils::SLED_AGENT_UUID;
+use nexus_test_utils::background::run_volume_delete_return_status;
+use nexus_test_utils::background::wait_for_all_volume_deletes;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
@@ -59,7 +62,6 @@ use sled_agent_client::VolumeConstructionRequest;
 use std::collections::HashSet;
 use std::collections::VecDeque;
 use std::sync::Arc;
-use tokio::sync::oneshot;
 use uuid::Uuid;
 
 type ControlPlaneTestContext =
@@ -1321,11 +1323,10 @@ async fn test_disk_virtual_provisioning_collection(
     );
 }
 
+/// Confirm that region deletes can happen async to the higher user-level
+/// resources
 #[nexus_test]
-async fn test_disk_virtual_provisioning_collection_failed_delete(
-    cptestctx: &ControlPlaneTestContext,
-) {
-    // Confirm that there's no panic deleting a project if a disk deletion fails
+async fn test_async_region_delete(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
     let nexus = &cptestctx.server.server_context().nexus;
     let datastore = nexus.datastore();
@@ -1387,42 +1388,8 @@ async fn test_disk_virtual_provisioning_collection_failed_delete(
         .get_crucible_dataset(zpool.id, dataset.id)
         .set_region_deletion_error(true);
 
-    // Delete the disk - expect this to fail
-    NexusRequest::new(
-        RequestBuilder::new(client, Method::DELETE, &disk_url)
-            .expect_status(Some(StatusCode::INTERNAL_SERVER_ERROR)),
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .expect("unexpected success deleting 1 GiB disk");
-
-    // The virtual provisioning collection numbers haven't changed
-    let virtual_provisioning_collection = datastore
-        .virtual_provisioning_collection_get(&opctx, project_id1)
-        .await
-        .unwrap();
-    assert_eq!(
-        virtual_provisioning_collection.virtual_disk_bytes_provisioned.0,
-        disk_size
-    );
-
-    // And the disk is now faulted. The name will have changed due to the
-    // "undelete and fault" function.
-    let disk_url = format!(
-        "/v1/disks/deleted-{}?project={}",
-        disk.identity.id, PROJECT_NAME
-    );
-    let disk = disk_get(&client, &disk_url).await;
-    assert_eq!(disk.state, DiskState::Faulted);
-
-    // Set the third agent to respond normally
-    cptestctx
-        .first_sled_agent()
-        .get_crucible_dataset(zpool.id, dataset.id)
-        .set_region_deletion_error(false);
-
-    // Request disk delete again
+    // Delete the disk - this will succeed but the third region won't be
+    // properly deleted yet
     NexusRequest::new(
         RequestBuilder::new(client, Method::DELETE, &disk_url)
             .expect_status(Some(StatusCode::NO_CONTENT)),
@@ -1430,7 +1397,15 @@ async fn test_disk_virtual_provisioning_collection_failed_delete(
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
     .await
-    .expect("unexpected failure deleting 1 GiB disk");
+    .expect("unexpected error deleting 1 GiB disk");
+
+    // Assert running the volume delete task deletes the two other regions but
+    // errors when trying to delete the third.
+    let status =
+        run_volume_delete_return_status(&cptestctx.lockstep_client).await;
+
+    assert!(!status.errors.is_empty());
+    assert_eq!(status.region_results.len(), 2);
 
     // Delete the project's default VPC subnet and VPC
     let subnet_url =
@@ -1448,7 +1423,7 @@ async fn test_disk_virtual_provisioning_collection_failed_delete(
         .await
         .expect("failed to make request");
 
-    // The project can be deleted now
+    // Assert the project can be deleted even if the region isn't yet.
     let url = format!("/v1/projects/{}", PROJECT_NAME);
     NexusRequest::new(
         RequestBuilder::new(client, Method::DELETE, &url)
@@ -1458,6 +1433,16 @@ async fn test_disk_virtual_provisioning_collection_failed_delete(
     .execute()
     .await
     .expect("unexpected failure deleting project");
+
+    // Set the third agent to respond normally
+    cptestctx
+        .first_sled_agent()
+        .get_crucible_dataset(zpool.id, dataset.id)
+        .set_region_deletion_error(false);
+
+    // Wait for all crucible resources to be cleaned up
+
+    assert_all_crucible_resources_deleted(&cptestctx, &disk_test).await;
 }
 
 #[nexus_test]
@@ -1591,6 +1576,7 @@ async fn test_disk_size_accounting(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
     let nexus = &cptestctx.server.server_context().nexus;
     let datastore = nexus.datastore();
+    let lockstep_client = &cptestctx.lockstep_client;
 
     // Create three zpools, each with one dataset.
     let test = DiskTest::new(&cptestctx).await;
@@ -1697,6 +1683,8 @@ async fn test_disk_size_accounting(cptestctx: &ControlPlaneTestContext) {
     .execute()
     .await
     .expect("unexpected failure deleting 7 GiB disk");
+
+    wait_for_all_volume_deletes(&datastore, &lockstep_client).await;
 
     // Total occupied size should be 0
     for zpool in test.zpools() {
@@ -2326,29 +2314,27 @@ async fn test_no_halt_disk_delete_one_region_on_expunged_agent(
 
     cptestctx.first_sled_agent().drop_dataset(zpool.id, dataset.id);
 
-    // Spawn a task that tries to delete the disk
+    // Ensure the disk delete does not hang even when a Crucible agent isn't
+    // responding
+
     let disk_url = get_disk_url(DISK_NAME);
-    let client = client.clone();
 
-    let (task_started_tx, task_started_rx) = oneshot::channel();
+    NexusRequest::object_delete(&client, &disk_url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("failed to delete disk");
 
-    let jh = tokio::spawn(async move {
-        task_started_tx.send(()).unwrap();
+    // Run the volume delete task, and assert two regions are deleted.
 
-        NexusRequest::object_delete(&client, &disk_url)
-            .authn_as(AuthnMode::PrivilegedUser)
-            .execute()
-            .await
-            .expect("failed to delete disk");
-    });
+    let status =
+        run_volume_delete_return_status(&cptestctx.lockstep_client).await;
 
-    // Wait until the task starts
-    task_started_rx.await.unwrap();
-
-    // It won't finish until the dataset is expunged.
-    assert!(!jh.is_finished());
+    assert!(!status.errors.is_empty());
+    assert_eq!(status.region_results.len(), 2);
 
     // Expunge the physical disk
+
     let (_, db_zpool) = LookupPath::new(&opctx, datastore)
         .zpool_id(zpool.id)
         .fetch()
@@ -2364,11 +2350,19 @@ async fn test_no_halt_disk_delete_one_region_on_expunged_agent(
         .await
         .unwrap();
 
-    // Now, the delete call will finish Ok
-    jh.await.unwrap();
+    // Rerun the volume delete task and assert the last region was deleted. This
+    // test asserts against 3 regions being deleted because the volume record
+    // won't be hard-deleted, and the background task will re-attempt each
+    // delete.
 
-    // Ensure that the disk was properly deleted and all the regions are gone -
-    // Nexus should hard delete the region records in this case.
+    let status =
+        run_volume_delete_return_status(&cptestctx.lockstep_client).await;
+
+    assert!(status.errors.is_empty());
+    assert_eq!(status.region_results.len(), 3);
+
+    // Assert that all the regions are gone - Nexus should hard delete the
+    // region records in this case.
 
     let datasets_and_regions =
         datastore.get_allocated_regions(db_disk.volume_id()).await.unwrap();
@@ -2615,6 +2609,12 @@ async fn test_zpool_control_plane_storage_buffer(
         .execute()
         .await
         .expect("failed to delete disk");
+
+    // This test is testing the control plane storage buffer, not the background
+    // volume deletion. Wait for all those to complete, otherwise later on the
+    // test will see unrelated INSUFFICIENT_STORAGE errors.
+
+    wait_for_all_volume_deletes(&datastore, &cptestctx.lockstep_client).await;
 
     // For any of the zpools, set the control plane storage buffer to 2G. This
     // should prevent the disk's region allocation from succeeding (as the

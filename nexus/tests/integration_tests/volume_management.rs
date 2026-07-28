@@ -5,6 +5,7 @@
 //! Tests that Nexus properly manages and cleans up Crucible resources
 //! associated with Volumes
 
+use crate::integration_tests::common::assert_all_crucible_resources_deleted;
 use crate::integration_tests::crucible_replacements::wait_for_all_replacements;
 use crate::integration_tests::sleds::sleds_list;
 use async_bb8_diesel::AsyncRunQueryDsl;
@@ -37,6 +38,7 @@ use nexus_db_queries::db::datastore::SourceVolume;
 use nexus_db_queries::db::datastore::VolumeReplaceResult;
 use nexus_db_queries::db::datastore::VolumeToDelete;
 use nexus_db_queries::db::datastore::VolumeWithTarget;
+use nexus_test_utils::background::wait_for_all_volume_deletes;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
@@ -210,7 +212,7 @@ async fn test_snapshot_then_delete_disk(cptestctx: &ControlPlaneTestContext) {
         .expect("failed to delete snapshot");
 
     // Assert everything was cleaned up
-    assert!(disk_test.crucible_resources_deleted().await);
+    assert_all_crucible_resources_deleted(cptestctx, &disk_test).await;
 }
 
 #[nexus_test]
@@ -274,7 +276,7 @@ async fn test_delete_snapshot_then_disk(cptestctx: &ControlPlaneTestContext) {
         .expect("failed to delete disk");
 
     // Assert everything was cleaned up
-    assert!(disk_test.crucible_resources_deleted().await);
+    assert_all_crucible_resources_deleted(cptestctx, &disk_test).await;
 }
 
 #[nexus_test]
@@ -342,7 +344,7 @@ async fn test_multiple_snapshots(cptestctx: &ControlPlaneTestContext) {
     }
 
     // Assert everything was cleaned up
-    assert!(disk_test.crucible_resources_deleted().await);
+    assert_all_crucible_resources_deleted(cptestctx, &disk_test).await;
 }
 
 #[nexus_test]
@@ -353,6 +355,11 @@ async fn test_snapshot_prevents_other_disk(
     // allocation.
 
     let client = &cptestctx.external_client;
+    let lockstep_client = &cptestctx.lockstep_client;
+    let apictx = &cptestctx.server.server_context();
+    let nexus = &apictx.nexus;
+    let datastore = nexus.datastore();
+
     let disk_test = DiskTest::new(&cptestctx).await;
     let disks_url = get_disks_url();
     let base_disk_name: Name = "base-disk".parse().unwrap();
@@ -427,6 +434,11 @@ async fn test_snapshot_prevents_other_disk(
         .await
         .expect("failed to delete snapshot");
 
+    // Wait for the volume delete background task, else the next disk creation
+    // may fail with INSUFFICIENT_STORAGE
+
+    wait_for_all_volume_deletes(&datastore, &lockstep_client).await;
+
     // Disk allocation will work now
     let _next_disk: external::Disk = NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &disks_url)
@@ -451,7 +463,7 @@ async fn test_snapshot_prevents_other_disk(
     delete_image(client, PROJECT_NAME, "not-alpine").await;
 
     // Assert everything was cleaned up
-    assert!(disk_test.crucible_resources_deleted().await);
+    assert_all_crucible_resources_deleted(cptestctx, &disk_test).await;
 }
 
 #[nexus_test]
@@ -590,7 +602,7 @@ async fn test_multiple_disks_multiple_snapshots_order_1(
         .expect("failed to delete snapshot");
 
     // Assert everything was cleaned up
-    assert!(disk_test.crucible_resources_deleted().await);
+    assert_all_crucible_resources_deleted(cptestctx, &disk_test).await;
 }
 
 #[nexus_test]
@@ -729,7 +741,7 @@ async fn test_multiple_disks_multiple_snapshots_order_2(
         .expect("failed to delete snapshot");
 
     // Assert everything was cleaned up
-    assert!(disk_test.crucible_resources_deleted().await);
+    assert_all_crucible_resources_deleted(cptestctx, &disk_test).await;
 }
 
 async fn prepare_for_test_multiple_layers_of_snapshots(
@@ -908,7 +920,7 @@ async fn test_multiple_layers_of_snapshots_delete_all_disks_first(
     }
 
     // Assert everything was cleaned up
-    assert!(disk_test.crucible_resources_deleted().await);
+    assert_all_crucible_resources_deleted(cptestctx, &disk_test).await;
 }
 
 #[nexus_test]
@@ -946,7 +958,7 @@ async fn test_multiple_layers_of_snapshots_delete_all_snapshots_first(
     }
 
     // Assert everything was cleaned up
-    assert!(disk_test.crucible_resources_deleted().await);
+    assert_all_crucible_resources_deleted(cptestctx, &disk_test).await;
 }
 
 #[nexus_test]
@@ -1010,7 +1022,7 @@ async fn test_multiple_layers_of_snapshots_random_delete_order(
     }
 
     // Assert everything was cleaned up
-    assert!(disk_test.crucible_resources_deleted().await);
+    assert_all_crucible_resources_deleted(cptestctx, &disk_test).await;
 }
 
 #[nexus_test]
@@ -1160,7 +1172,7 @@ async fn test_create_image_from_snapshot_delete(
         .expect("failed to delete image");
 
     // Assert everything was cleaned up
-    assert!(disk_test.crucible_resources_deleted().await);
+    assert_all_crucible_resources_deleted(cptestctx, &disk_test).await;
 }
 
 enum DeleteImageTestParam {
@@ -1287,7 +1299,7 @@ async fn delete_image_test(
     }
 
     // Assert everything was cleaned up
-    assert!(disk_test.crucible_resources_deleted().await);
+    assert_all_crucible_resources_deleted(cptestctx, &disk_test).await;
 }
 
 // Make sure that whatever order disks, images, and snapshots are deleted, the
@@ -2512,7 +2524,7 @@ async fn test_disk_create_saga_unwinds_correctly(
     .unwrap();
 
     // Assert everything was cleaned up
-    assert!(disk_test.crucible_resources_deleted().await);
+    assert_all_crucible_resources_deleted(cptestctx, &disk_test).await;
 }
 
 #[nexus_test]
@@ -2586,7 +2598,7 @@ async fn test_snapshot_create_saga_unwinds_correctly(
         .expect("failed to delete disk");
 
     // Assert everything was cleaned up
-    assert!(disk_test.crucible_resources_deleted().await);
+    assert_all_crucible_resources_deleted(cptestctx, &disk_test).await;
 }
 
 // Test function that creates a VolumeConstructionRequest::Region With gen,
@@ -4144,6 +4156,8 @@ async fn test_read_only_region_reference_counting(
         .await
         .expect("failed to delete disk");
 
+    wait_for_all_volume_deletes(&datastore, &lockstep_client).await;
+
     let usage = datastore
         .volume_usage_records_for_resource(
             VolumeResourceUsage::ReadOnlyRegion {
@@ -4185,7 +4199,7 @@ async fn test_read_only_region_reference_counting(
     assert!(region_destroyed);
 
     // Assert everything was cleaned up
-    assert!(disk_test.crucible_resources_deleted().await);
+    assert_all_crucible_resources_deleted(cptestctx, &disk_test).await;
 }
 
 /// Assert that a snapshot of a volume with a read-only region is properly
@@ -4440,7 +4454,7 @@ async fn test_read_only_region_reference_counting_layers(
         .expect("failed to delete disk");
 
     // Assert everything was cleaned up
-    assert!(disk_test.crucible_resources_deleted().await);
+    assert_all_crucible_resources_deleted(cptestctx, &disk_test).await;
 }
 
 #[nexus_test]
@@ -5137,7 +5151,8 @@ async fn test_double_layer_with_read_only_region_delete(
     .await
     .expect("failed to delete another-disk-from-snapshot");
 
-    assert!(disk_test.crucible_resources_deleted().await);
+    // Assert everything was cleaned up
+    assert_all_crucible_resources_deleted(cptestctx, &disk_test).await;
 }
 
 #[nexus_test(extra_sled_agents = 3)]
@@ -5316,8 +5331,7 @@ async fn test_double_layer_snapshot_with_read_only_region_delete_2(
         .expect("failed to delete disk-from-snapshot");
 
     // Assert everything was cleaned up
-
-    assert!(disk_test.crucible_resources_deleted().await);
+    assert_all_crucible_resources_deleted(cptestctx, &disk_test).await;
 }
 
 #[nexus_test(extra_sled_agents = 3)]
