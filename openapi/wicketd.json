@@ -921,16 +921,23 @@
         ]
       },
       "ArtifactId": {
+        "description": "The identifying components of an [`Artifact`], sent over the wire from wicketd to the wicket client to show versions of artifacts we will be updating to.",
         "type": "object",
         "properties": {
           "tags": {
+            "description": "The Tufaceous tags used to select the artifact.",
             "type": "object",
             "additionalProperties": {
               "type": "string"
             }
           },
           "version": {
-            "$ref": "#/components/schemas/ArtifactVersion"
+            "description": "The artifact's version string.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ArtifactVersion"
+              }
+            ]
           }
         },
         "required": [
@@ -2000,7 +2007,7 @@
         "type": "object",
         "properties": {
           "artifacts": {
-            "description": "Map of artifacts we ingested from the most-recently-uploaded TUF repository to a list of artifacts we're serving over the bootstrap network. In some cases the list of artifacts being served will have length 1 (when we're serving the artifact directly); in other cases the artifact in the TUF repo contains multiple nested artifacts inside it (e.g., RoT artifacts contain both A and B images), and we serve the list of extracted artifacts but not the original combination.\n\nConceptually, this is a `BTreeMap<ArtifactId, Vec<ArtifactHashId>>`, but JSON requires string keys for maps, so we give back a vec of pairs instead.",
+            "description": "List of artifacts we ingested from the most-recently-uploaded TUF repository.",
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/ArtifactId"
