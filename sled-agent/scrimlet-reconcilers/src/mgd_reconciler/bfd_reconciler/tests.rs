@@ -72,7 +72,8 @@ fn mgd_bfd_peer(
     MgdBfdPeerConfig {
         peer: peer.parse().unwrap(),
         listen: listen.parse().unwrap(),
-        detection_threshold,
+        detection_threshold: NonZeroU8::new(detection_threshold)
+            .expect("tests don't use detection_threshold of 0"),
         required_rx,
         mode,
     }
@@ -250,7 +251,7 @@ fn plan_mix() {
         BTreeSet::from([DiffableBfdPeer {
             peer: "10.0.0.4".parse().unwrap(),
             listen: "10.0.0.1".parse().unwrap(),
-            detection_threshold: 3,
+            detection_threshold: NonZeroU8::new(3).unwrap(),
             required_rx: 300000,
             mode: DiffableSessionMode::SingleHop,
         }])
@@ -344,7 +345,7 @@ fn plan_parameter_change_is_remove_plus_add() {
         BTreeSet::from([DiffableBfdPeer {
             peer: "10.0.0.2".parse().unwrap(),
             listen: "10.0.0.1".parse().unwrap(),
-            detection_threshold: 5,
+            detection_threshold: NonZeroU8::new(5).unwrap(),
             required_rx: 300000,
             mode: DiffableSessionMode::SingleHop,
         }])
@@ -455,7 +456,7 @@ fn plan_mode_change_is_remove_plus_add() {
         BTreeSet::from([DiffableBfdPeer {
             peer: "10.0.0.2".parse().unwrap(),
             listen: "10.0.0.1".parse().unwrap(),
-            detection_threshold: 3,
+            detection_threshold: NonZeroU8::new(3).unwrap(),
             required_rx: 300000,
             mode: DiffableSessionMode::MultiHop,
         }])

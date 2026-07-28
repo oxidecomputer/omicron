@@ -21,6 +21,7 @@ use std::collections::BTreeSet;
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
+use std::num::NonZeroU8;
 
 type MgdClientError = mg_admin_client::Error<mg_admin_client::types::Error>;
 
@@ -283,7 +284,7 @@ impl ReconciliationPlan {
 struct DiffableBfdPeer {
     peer: IpAddr,
     listen: IpAddr,
-    detection_threshold: u8,
+    detection_threshold: NonZeroU8,
     required_rx: u64,
     mode: DiffableSessionMode,
 }
@@ -326,7 +327,10 @@ impl From<&'_ sled_agent_types::early_networking::BfdPeerConfig>
                 IpAddr::V4(_) => Ipv4Addr::UNSPECIFIED.into(),
                 IpAddr::V6(_) => Ipv6Addr::UNSPECIFIED.into(),
             }),
-            detection_threshold: config.detection_threshold,
+            // TODO-cleanup We should extend NonZeroU8 up the stack.
+            // <https://github.com/oxidecomputer/omicron/issues/10657>
+            detection_threshold: NonZeroU8::new(config.detection_threshold)
+                .unwrap_or_else(|| NonZeroU8::new(1).expect("1 is not 0")),
             required_rx: config.required_rx,
             mode: match config.mode {
                 BfdMode::SingleHop => DiffableSessionMode::SingleHop,
