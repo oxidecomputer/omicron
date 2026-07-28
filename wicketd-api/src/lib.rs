@@ -464,17 +464,8 @@ pub enum GetInventoryResponse {
 pub struct GetArtifactsAndEventReportsResponse {
     pub system_version: Option<Version>,
 
-    /// Map of artifacts we ingested from the most-recently-uploaded TUF
-    /// repository to a list of artifacts we're serving over the bootstrap
-    /// network. In some cases the list of artifacts being served will have
-    /// length 1 (when we're serving the artifact directly); in other cases the
-    /// artifact in the TUF repo contains multiple nested artifacts inside it
-    /// (e.g., RoT artifacts contain both A and B images), and we serve the list
-    /// of extracted artifacts but not the original combination.
-    ///
-    /// Conceptually, this is a `BTreeMap<ArtifactId, Vec<ArtifactHashId>>`, but
-    /// JSON requires string keys for maps, so we give back a vec of pairs
-    /// instead.
+    /// List of artifacts we ingested from the most-recently-uploaded TUF
+    /// repository.
     pub artifacts: Vec<ArtifactId>,
 
     pub event_reports: BTreeMap<SpType, BTreeMap<u16, EventReport>>,

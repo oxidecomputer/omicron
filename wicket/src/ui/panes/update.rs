@@ -2411,7 +2411,8 @@ fn artifact_version(
 ) -> String {
     // NOTE: This function currently assumes that all artifacts in the repo of
     // the same general kind (SP, ROT, bootloader) are of the same version; we
-    // don't filter on board or slot.
+    // don't filter on board or slot. (Wicketd does not verify this assumption,
+    // either.)
     match update_component {
         UpdateComponent::RotBootloader => {
             let Some(sign) = inventory

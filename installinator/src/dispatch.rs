@@ -661,9 +661,9 @@ pub(crate) fn stderr_env_drain(
     builder.build()
 }
 
-/// If the Wicket on the other end is older and using Tufaceous v1, control
-/// plane zones won't be split into their own files. We have to read the
-/// individual zone artifacts out of the tarball we've downloaded.
+/// If the Wicket on the other end has a v1 repo, it will serve the original v1
+/// Installinator document, which lists the control plane tarball. We have to
+/// read the individual zone artifacts out of the tarball we've downloaded.
 ///
 /// This function can be removed at the same time the
 /// `InstallinatorArtifactKind::ControlPlane` variant is removed at the end of

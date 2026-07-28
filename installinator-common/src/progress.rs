@@ -61,8 +61,9 @@ pub enum InstallinatorComponent {
     /// The measurement corpus component.
     MeasurementCorpus,
 
-    /// A component that means "all components", used for downloads and writes
-    /// for now. It is possible that this component will go away in the future.
+    /// A component that means "all components", used for downloads, writes, and
+    /// hardware scans for now. It is possible that this component will go away
+    /// in the future.
     All,
 
     /// Future variants that might be unknown.
@@ -85,7 +86,7 @@ pub enum InstallinatorStepId {
 #[serde(rename_all = "snake_case", tag = "reason")]
 pub enum InstallinatorStepMetadata {
     Write {
-        /// The destination being formatted or written to.
+        /// The destination being written to.
         ///
         /// Available with format and destination events.
         #[schemars(schema_with = "path_schema_opt")]

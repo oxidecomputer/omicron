@@ -10,6 +10,9 @@ use serde::Serialize;
 use tufaceous_artifact_v2::Artifact;
 use tufaceous_artifact_v2::ArtifactVersion;
 
+/// The identifying components of an [`Artifact`], sent over the wire from
+/// wicketd to the wicket client to show versions of artifacts we will be
+/// updating to.
 #[derive(
     Debug,
     Clone,
@@ -22,7 +25,10 @@ use tufaceous_artifact_v2::ArtifactVersion;
     JsonSchema,
 )]
 pub struct ArtifactId {
+    /// The Tufaceous tags used to select the artifact.
     pub tags: BTreeMap<String, String>,
+
+    /// The artifact's version string.
     pub version: ArtifactVersion,
 }
 

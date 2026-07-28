@@ -188,7 +188,7 @@ impl ArtifactClient {
     }
 }
 
-/// Wicket prior to Tufaceous v1 looks up artifacts by both kind and hash. The
+/// Wicket prior to Tufaceous v2 looks up artifacts by both kind and hash. The
 /// kind must be correct in order for an artifact to be retrieved. When the
 /// Tufaceous v2 transition is complete, only the hash will be used to look up
 /// artifacts, and the `kind` value at the API layer can be replaced with any

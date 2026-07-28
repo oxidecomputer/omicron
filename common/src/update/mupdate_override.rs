@@ -19,10 +19,11 @@ pub struct MupdateOverrideInfo {
     /// A UUID that identifies a MUPdate that occurred.
     pub mupdate_uuid: MupdateOverrideUuid,
 
-    /// Artifact hashes written out to the install dataset.
+    /// Artifact hashes written out to the install dataset. Not used by the
+    /// control plane itself.
     ///
-    /// Currently includes the host phase 2 and composite control plane
-    /// artifacts.
+    /// Currently includes the host phase 2 image, each zone, and each
+    /// measurement corpus.
     pub hash_ids: BTreeSet<MupdateOverrideHashId>,
 }
 

@@ -378,6 +378,14 @@ impl UpdateTracker {
     }
 
     /// Updates the repository stored inside the update tracker.
+    ///
+    /// This verifies that the uploaded repository is consistent (all TUF
+    /// metadata has valid signatures and all targets have a correct hash) but
+    /// does not verify the TUF signatures against a valid trust root or verify
+    /// the expiration timestamps; see RFD 721.
+    ///
+    /// It also does not verify that the artifacts used by Wicket and
+    /// Installinator are present.
     pub(crate) async fn put_repository(
         &self,
         stream: impl Stream<Item = Result<Bytes, HttpError>> + Send + 'static,
@@ -831,7 +839,7 @@ impl UpdateTrackerData {
             ));
         }
 
-        // Set the new artifacts_with_plan.
+        // Set the new repo.
         self.artifact_store.set_repository(repository);
 
         // Reset all running data: a new repository means starting afresh.
@@ -1487,11 +1495,31 @@ impl UpdateDriver {
                                 })?
                                 .hash
                         };
+
+                    // In the beginning, Installinator only had a host phase
+                    // 2 image and a control plane zones tarball to fetch
+                    // from Wicket. Wicket communicates these artifact hashes
+                    // to Installinator by sending a JSON-encoded request
+                    // to MGS, which encodes the image ID as CBOR and sets
+                    // it as a key to be retrieved from IPCC. Because Wicket
+                    // and Installinator are always updated before MGS, it is
+                    // difficult to change the wire format of this chain.
+                    //
+                    // When we introduced the Installinator document artifact we
+                    // overloaded the definition of the image ID to communicate
+                    // that Installinator should instead fetch the document.
                     let installinator_image_id = InstallinatorImageId {
-                        host_phase_2: hash.to_string(),
-                        control_plane: ArtifactHash([0; 32]).to_string(),
                         update_id: update_cx.update_id,
+
+                        // A zeroed control plane image hash indicates that
+                        // Installinator should fetch an Installinator document,
+                        // with the hash stored as `host_phase_2`.
+                        control_plane: ArtifactHash([0; 32]).to_string(),
+                        // The Installinator document hash, since
+                        // `control_plane` is a zero hash.
+                        host_phase_2: hash.to_string(),
                     };
+
                     update_cx
                         .mgs_client
                         .sp_installinator_image_id_set(

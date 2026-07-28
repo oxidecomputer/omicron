@@ -53,7 +53,7 @@ use wicketd_commission_types_versions::latest::update::{
     UpdateStepStatus, UpdateTargets,
 };
 
-/// The list of zone file names defined in fake-non-semver.toml.
+/// The list of zone file names defined in Tufaceous's `FAKE_ZONES`.
 static FAKE_NON_SEMVER_ZONE_FILE_NAMES: &[&str] = &[
     "clickhouse.tar.gz",
     "clickhouse_keeper.tar.gz",
@@ -526,8 +526,8 @@ async fn installinator_fetch_impl(
     // Check that the host and control plane artifacts were downloaded
     // correctly.
     //
-    // The control plane zone names here are defined in `fake-non-semver.toml`
-    // which we load above.
+    // The control plane zone names here are defined in Tufaceous's `FAKE_ZONES`
+    // which we have a copy of above.
     for file_name in [HOST_PHASE_2_FILE_NAME.to_owned()].into_iter().chain(
         FAKE_NON_SEMVER_ZONE_FILE_NAMES.iter().map(|z| format!("install/{z}")),
     ) {
