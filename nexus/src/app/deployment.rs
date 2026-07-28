@@ -1323,12 +1323,13 @@ mod tests {
             (initial_gen, bp)
         };
 
-        // The version we'll propose for mupdate recovery. In this test, this
-        // doesn't really matter: because the blueprints all have sleds showing
-        // evidence of a mupdate, we have to assume the operator is uploading
-        // the correct version. If they don't, the sleds won't be no-op
-        // converted, which will leave the rack still needing mupdate recovery,
-        // and they can try again (hopefully with the correct version).
+        // The version we'll propose for mupdate recovery. This test exercises
+        // the "whole system" mupdate paths, not the special case where we're
+        // trying to recover to the same version that's already deployed (that's
+        // covered by
+        // test_target_release_for_mupdate_recovery_after_noop_conversion
+        // below), so any version that's different from `current_version` is
+        // fine.
         let proposed_recovery_version: semver::Version =
             "17.0.0-0.ci+git0123456789a".parse().unwrap();
 
