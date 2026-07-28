@@ -686,10 +686,10 @@ impl FmAnalysis {
         opctx: &OpContext,
         warnings: &mut Vec<String>,
     ) -> Result<status::SitrepCapacity, status::AnalysisOutcome> {
-        let limit = self.sitrep_limit.get();
+        let limit = self.sitrep_limit;
         let count = match self
             .datastore
-            .fm_sitrep_check_limit_reached(&opctx, limit)
+            .fm_sitrep_check_limit_reached(&opctx, limit.get())
             .await
         {
             Ok(db::IsLimitReached::Yes) => {
@@ -697,7 +697,7 @@ impl FmAnalysis {
                     &opctx.log,
                     "sitrep capacity is at or above the limit, a new sitrep \
                      will not be written";
-                     "limit" => limit,
+                     "limit" => limit.get(),
                 );
                 self.activators.reclaim_capacity();
                 return Err(status::AnalysisOutcome::LimitReached { limit });
@@ -720,7 +720,7 @@ impl FmAnalysis {
                 debug!(
                     &opctx.log,
                     "sitrep count under limit, proceeding with analysis";
-                    "limit" => limit,
+                    "limit" => limit.get(),
                     "count" => count,
                     "usage_percent" => usage_percent,
                 );
@@ -733,7 +733,7 @@ impl FmAnalysis {
                     &opctx.log,
                     "sitrep count above 80% of limit, proceeding with analysis \
                      and activating GC (will stop analysis if limit is reached)";
-                    "limit" => limit,
+                    "limit" => limit.get(),
                     "count" => count,
                     "usage_percent" => usage_percent,
                 );
@@ -746,7 +746,7 @@ impl FmAnalysis {
                     &opctx.log,
                     "sitrep count above 95% of limit, proceeding with analysis \
                      and activating GC (will stop analysis if limit is reached)";
-                    "limit" => limit,
+                    "limit" => limit.get(),
                     "count" => count,
                     "usage_percent" => usage_percent,
                 );
@@ -1221,7 +1221,7 @@ mod tests {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
-        const LIMIT: u64 = 20;
+        const LIMIT: NonZeroU64 = NonZeroU64::new(20).unwrap();
         let (_sitrep_tx, sitrep_rx) = watch::channel(None);
         let (_inv_tx, inv_rx) = watch::channel(None);
         let acts = activators();
@@ -1233,7 +1233,7 @@ mod tests {
             OmicronZoneUuid::new_v4(),
             ANALYSIS_ENABLED,
         );
-        task.sitrep_limit = NonZeroU64::new(LIMIT).unwrap();
+        task.sitrep_limit = LIMIT;
 
         let mut model = SitrepModel::new(datastore.clone());
 
@@ -1326,7 +1326,7 @@ mod tests {
         // current. Orphans also count against the total number of sitreps in
         // the database, until GC sweeps them up.
         model.insert_orphan(opctx, None).await;
-        assert_eq!(model.sitrep_count(), LIMIT);
+        assert_eq!(model.sitrep_count(), LIMIT.get());
         let mut warnings = Vec::new();
         let result = task.check_sitrep_limit(opctx, &mut warnings).await;
         assert_eq!(
@@ -1356,7 +1356,7 @@ mod tests {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
-        const LIMIT: u64 = 4;
+        const LIMIT: NonZeroU64 = NonZeroU64::new(4).unwrap();
         let inv = Arc::new(CollectionBuilder::new("test").build());
         let (_sitrep_tx, sitrep_rx) = watch::channel(None);
         let (_inv_tx, inv_rx) = watch::channel(Some(inv.clone()));
@@ -1369,7 +1369,7 @@ mod tests {
             OmicronZoneUuid::new_v4(),
             ANALYSIS_ENABLED,
         );
-        task.sitrep_limit = NonZeroU64::new(LIMIT).unwrap();
+        task.sitrep_limit = LIMIT;
 
         let mut model = SitrepModel::new(datastore.clone());
 
@@ -1411,7 +1411,7 @@ mod tests {
         // never made current.
         model.insert_history(opctx, 2).await;
         model.insert_orphan(opctx, None).await;
-        assert_eq!(model.sitrep_count(), LIMIT);
+        assert_eq!(model.sitrep_count(), LIMIT.get());
 
         // Now analysis should run, but refuse to write its sitrep.
         let result = task.actually_activate(opctx).await;

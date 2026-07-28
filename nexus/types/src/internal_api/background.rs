@@ -997,6 +997,7 @@ pub struct FmAnalysisStatus {
 pub mod fm_analysis {
     use super::*;
     use crate::fm::analysis_reports;
+    use std::num::NonZeroU64;
 
     #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
     pub struct PreparationStatus {
@@ -1047,7 +1048,7 @@ pub mod fm_analysis {
     #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
     pub struct SitrepCapacity {
         pub count: u64,
-        pub limit: u64,
+        pub limit: NonZeroU64,
     }
 
     impl SitrepCapacity {
@@ -1070,7 +1071,7 @@ pub mod fm_analysis {
 
         /// Analysis produced a new sitrep, but the sitrep limit has been
         /// reached, so it was not written to the database.
-        LimitReached { limit: u64 },
+        LimitReached { limit: NonZeroU64 },
 
         /// Analysis produced a new sitrep, but we failed to make it
         /// the current sitrep.
