@@ -1,7 +1,6 @@
 [package]
 name = "db-macros"
 version = "0.1.0"
-authors = ["Sean Klein <sean@oxide.computer>"]
 edition.workspace = true
 license = "MPL-2.0"
 

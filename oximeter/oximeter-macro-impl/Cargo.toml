@@ -1,7 +1,6 @@
 [package]
 name = "oximeter-macro-impl"
 version = "0.1.0"
-authors = ["Benjamin Naecker <ben@oxide.computer>"]
 edition.workspace = true
 license = "MPL-2.0"
 
