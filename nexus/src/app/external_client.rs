@@ -14,7 +14,7 @@
 //! prevent the risk of server-side request forgery (SSRF) attacks, in which
 //! Nexus is used to smuggle an external request onto an underlay network
 //! service which should otherwise not be exposed externally. In addition, a
-//! non-malicious operator could inadvertantly misconfigure things so that the
+//! non-malicious operator could inadvertently misconfigure things so that the
 //! IPv6 ULA address assigned to an external service collides with an underlay
 //! network address, with confusing results. In such cases, it is better to fail
 //! loudly than to accidentally send the request to an underlay service which is
