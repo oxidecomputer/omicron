@@ -7,22 +7,17 @@
 use std::fmt;
 
 use itertools::Itertools;
-use sled_hardware_types::Baseboard;
+use sled_hardware_types::BaseboardId;
 use wicket_common::inventory::{SpIdentifier, SpState, SpType};
 
-/// Return true if the provided baseboard matches the provided `SpState`.
+/// Return true if the provided baseboard_id matches the provided `SpState`.
 ///
-/// This currently checks for equality on all of part number (model), serial
-/// number, and revision. In the future, following the definition of
-/// `BaseboardId`, we may change this to only match on the part number and
-/// serial number.
-pub(crate) fn baseboard_matches_sp_state(
-    baseboard: &Baseboard,
+pub(crate) fn baseboard_id_matches_sp_state(
+    baseboard_id: &BaseboardId,
     state: &SpState,
 ) -> bool {
-    baseboard.model() == state.model
-        && baseboard.identifier() == state.serial_number
-        && baseboard.revision() == state.revision
+    baseboard_id.part_number == state.model
+        && baseboard_id.serial_number == state.serial_number
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Ord, Hash)]
@@ -81,50 +76,35 @@ mod tests {
     const SERIAL: &str = "BRM123";
     const REVISION: u32 = 4;
 
-    fn baseboard() -> Baseboard {
-        // Note that Baseboard::new_gimlet takes the serial number first, which
-        // is the opposite of BaseboardId's order (model/part number first).
-        Baseboard::new_gimlet(SERIAL.to_string(), MODEL.to_string(), REVISION)
+    fn baseboard_id() -> BaseboardId {
+        BaseboardId {
+            serial_number: SERIAL.to_string(),
+            part_number: MODEL.to_string(),
+        }
     }
 
     #[test]
-    fn baseboard_matches_only_when_all_three_fields_agree() {
+    fn baseboard_id_matches_when_part_and_serial_agree() {
         assert!(
-            baseboard_matches_sp_state(
-                &baseboard(),
+            baseboard_id_matches_sp_state(
+                &baseboard_id(),
                 &sp_state(MODEL, SERIAL, REVISION)
             ),
-            "the same model, serial number, and revision is a match",
+            "the same model and serial number is a match"
         );
 
         // Any of the three fields being different is a reason to say no.
         for (model, serial, revision, what) in [
             ("cosmo", SERIAL, REVISION, "a different model"),
             (MODEL, "BRM999", REVISION, "a different serial number"),
-            (MODEL, SERIAL, 5, "a different revision"),
         ] {
             assert!(
-                !baseboard_matches_sp_state(
-                    &baseboard(),
+                !baseboard_id_matches_sp_state(
+                    &baseboard_id(),
                     &sp_state(model, serial, revision)
                 ),
                 "{what} is not a match",
             );
         }
-    }
-
-    #[test]
-    fn unknown_baseboard_matches_its_own_placeholder_identity() {
-        // This shows that `Baseboard::Unknown` reports "unknown"/"unknown"/0
-        // rather than nothing. This is probably wrong and should be replaced
-        // with BaseboardId in the future.
-        assert!(baseboard_matches_sp_state(
-            &Baseboard::unknown(),
-            &sp_state("unknown", "unknown", 0)
-        ));
-        assert!(!baseboard_matches_sp_state(
-            &Baseboard::unknown(),
-            &sp_state(MODEL, SERIAL, REVISION)
-        ));
     }
 }

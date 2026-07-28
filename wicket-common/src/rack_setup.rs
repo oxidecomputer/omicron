@@ -10,7 +10,7 @@ use serde::Deserialize;
 use serde::Serialize;
 use sha2::Digest;
 use sha2::Sha256;
-use sled_hardware_types::Baseboard;
+use sled_hardware_types::BaseboardId;
 use std::collections::BTreeMap;
 use std::fmt;
 use std::net::IpAddr;
@@ -45,7 +45,7 @@ pub struct CurrentRssUserConfigInsensitive {
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 pub struct BootstrapSledDescription {
     pub id: SpIdentifier,
-    pub baseboard: Baseboard,
+    pub baseboard_id: BaseboardId,
     /// The sled's bootstrap address, if the host is on and we've discovered it
     /// on the bootstrap network.
     pub bootstrap_ip: Option<Ipv6Addr>,
