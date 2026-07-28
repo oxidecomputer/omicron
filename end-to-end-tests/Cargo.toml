@@ -42,14 +42,13 @@ oxide-tokio-rt.workspace = true
 rand.workspace = true
 rand_010 = { package = "rand", version = "0.10.1" }
 reqwest = { workspace = true, features = ["cookies"] }
-russh = "0.61.2"
+russh = "0.62.4"
 serde.workspace = true
 serde_json.workspace = true
 sled-agent-types.workspace = true
 slog.workspace = true
 slog-error-chain.workspace = true
 socket2.workspace = true
-ssh-key = { version = "0.7.0-rc.10", features = ["ed25519"] } # matches russh
 thiserror.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 toml.workspace = true
