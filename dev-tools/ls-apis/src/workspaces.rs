@@ -542,7 +542,7 @@ fn load_dependent_repo(
             format!(
                 "locating workspace for {:?} (from {:?}) with \
                  `cargo locate-project`",
-                pkgname, &pkg.manifest_path
+                pkgname, pkg.manifest_path
             )
         })?;
     let workspace_manifest = Utf8Path::new(output.trim_end());

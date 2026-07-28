@@ -7,6 +7,7 @@
 use crate::SmfConfigValues;
 use crate::context::CommonConfigContainer;
 use crate::context::RssOrMultirackJoinConfig;
+use crate::helpers::baseboard_id_matches_sp_state;
 use crate::http_helpers::ba_lockstep_client;
 use crate::http_helpers::ba_lockstep_error_to_http;
 use crate::http_helpers::mgs_inventory_or_unavail;
@@ -27,7 +28,6 @@ use dropshot::StreamingBody;
 use dropshot::TypedBody;
 use internal_dns_resolver::Resolver;
 use omicron_uuid_kinds::RackInitUuid;
-use omicron_uuid_kinds::RackResetUuid;
 use sled_agent_types::early_networking::SwitchSlot;
 use sled_hardware_types::Baseboard;
 use slog::o;
@@ -142,7 +142,7 @@ impl WicketdApi for WicketdApiImpl {
         rss_config
             .update(
                 body.into_inner(),
-                ctx.baseboard.as_ref(),
+                &ctx.baseboard_id,
                 &inventory,
                 &ddm_discovered_sleds,
                 &ctx.log,
@@ -171,7 +171,7 @@ impl WicketdApi for WicketdApiImpl {
             join_config
                 .update(
                     body.into_inner(),
-                    ctx.baseboard.as_ref(),
+                    &ctx.baseboard_id,
                     &inventory,
                     &ddm_discovered_sleds,
                     &ctx.log,
@@ -181,7 +181,7 @@ impl WicketdApi for WicketdApiImpl {
             // Overwrite any non-multirack-join config
             *config = RssOrMultirackJoinConfig::MultirackJoin(
                 CurrentMultirackJoinConfig::new_with_inventory_and_peers(
-                    ctx.baseboard.as_ref(),
+                    &ctx.baseboard_id,
                     body.into_inner(),
                     &inventory,
                     &ddm_discovered_sleds,
@@ -302,8 +302,7 @@ impl WicketdApi for WicketdApiImpl {
     ) -> Result<HttpResponseOk<RackOperationStatus>, HttpError> {
         let ctx = rqctx.context();
 
-        let client = ba_lockstep_client(ctx)?;
-
+        let client = ba_lockstep_client(ctx);
         let op_status = client
             .rack_initialization_status()
             .await
@@ -319,8 +318,7 @@ impl WicketdApi for WicketdApiImpl {
         let ctx = rqctx.context();
         let log = &rqctx.log;
 
-        let client = ba_lockstep_client(ctx)?;
-
+        let client = ba_lockstep_client(ctx);
         let request = {
             let mut config = ctx.rss_or_multirack_join_config.lock().unwrap();
 
@@ -348,28 +346,6 @@ impl WicketdApi for WicketdApiImpl {
         Ok(HttpResponseOk(init_id))
     }
 
-    async fn post_run_rack_reset(
-        rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<RackResetUuid>, HttpError> {
-        let ctx = rqctx.context();
-
-        let client = ba_lockstep_client(ctx)?;
-
-        slog::info!(
-            ctx.log,
-            "Sending RSS reset request to {}",
-            client.baseurl()
-        );
-
-        let reset_id = client
-            .rack_reset()
-            .await
-            .map_err(|err| ba_lockstep_error_to_http(err, "rack reset"))?
-            .into_inner();
-
-        Ok(HttpResponseOk(reset_id))
-    }
-
     async fn get_inventory(
         rqctx: RequestContext<Self::Context>,
         body_params: TypedBody<GetInventoryParams>,
@@ -383,15 +359,17 @@ impl WicketdApi for WicketdApiImpl {
             .get_inventory_refreshing_sps(force_refresh)
             .await
         {
-            Ok(GetMgsInventoryResponse::Response { sps, mgs_last_seen }) => {
+            Ok(GetMgsInventoryResponse {
+                sps,
+                mgs_last_seen,
                 // The (currently frozen) wicketd API surfaces only the lossy
                 // `MgsV1Inventory` projection of the per-SP records.
                 //
-                // TODO: surface the richer per-SP records once rkdeploy is on
-                // the stable commissioning API.
-                Some((records_to_mgs_inventory(&sps), mgs_last_seen))
-            }
-            Ok(GetMgsInventoryResponse::Unavailable) => None,
+                // TODO: surface the richer per-SP records and fetch errors once
+                // rkdeploy is on the stable commissioning API.
+                last_ignition_fetch_error: _,
+            }) => records_to_mgs_inventory(&sps)
+                .map(|inventory| (inventory, mgs_last_seen)),
             Err(err) => {
                 return Err(err.to_http_error());
             }
@@ -475,7 +453,7 @@ impl WicketdApi for WicketdApiImpl {
     ) -> Result<HttpResponseOk<GetBaseboardResponse>, HttpError> {
         let rqctx = rqctx.context();
         Ok(HttpResponseOk(GetBaseboardResponse {
-            baseboard: rqctx.baseboard.clone(),
+            baseboard: rqctx.baseboard_id.clone(),
         }))
     }
 
@@ -489,7 +467,7 @@ impl WicketdApi for WicketdApiImpl {
         // available, so discard the error here (it's already logged in
         // local_switch_id).
         let switch_id = rqctx.local_switch_id().await.ok();
-        let sled_baseboard = rqctx.baseboard.clone();
+        let sled_baseboard_id = rqctx.baseboard_id.clone();
 
         let mut switch_baseboard = None;
         let mut sled_id = None;
@@ -507,13 +485,8 @@ impl WicketdApi for WicketdApiImpl {
                         state.revision,
                     )
                 });
-            } else if let (Some(sled_baseboard), Some(state)) =
-                (sled_baseboard.as_ref(), sp.state.as_ref())
-            {
-                if sled_baseboard.identifier() == state.serial_number
-                    && sled_baseboard.model() == state.model
-                    && sled_baseboard.revision() == state.revision
-                {
+            } else if let Some(state) = sp.state.as_ref() {
+                if baseboard_id_matches_sp_state(&sled_baseboard_id, state) {
                     sled_id = Some(sp.id);
                 }
             }
@@ -521,7 +494,7 @@ impl WicketdApi for WicketdApiImpl {
 
         Ok(HttpResponseOk(GetLocationResponse {
             sled_id,
-            sled_baseboard,
+            sled_baseboard_id,
             switch_baseboard,
             switch_id,
         }))
@@ -721,6 +694,13 @@ impl WicketdApi for WicketdApiImpl {
             return Err(HttpError::for_bad_request(
                 None,
                 "listening address cannot be reconfigured".to_string(),
+            ));
+        }
+        if rqctx.commission_bind_address != smf_values.commission_address {
+            return Err(HttpError::for_bad_request(
+                None,
+                "commission listening address cannot be reconfigured"
+                    .to_string(),
             ));
         }
 

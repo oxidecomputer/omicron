@@ -367,28 +367,6 @@
             "$ref": "#/components/responses/Error"
           }
         }
-      },
-      "delete": {
-        "summary": "Run rack reset.",
-        "operationId": "post_run_rack_reset",
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RackResetUuid"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
       }
     },
     "/rack-setup/config": {
@@ -1146,20 +1124,6 @@
           {
             "type": "object",
             "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "unknown"
-                ]
-              }
-            },
-            "required": [
-              "type"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
               "identifier": {
                 "type": "string"
               },
@@ -1179,6 +1143,24 @@
               "type"
             ]
           }
+        ]
+      },
+      "BaseboardId": {
+        "description": "A representation of a Baseboard ID as used in the inventory subsystem.\n\nThis type is essentially the same as a `Baseboard` except it doesn't have a revision or HW type (Gimlet, PC, Unknown).",
+        "type": "object",
+        "properties": {
+          "part_number": {
+            "description": "Oxide Part Number",
+            "type": "string"
+          },
+          "serial_number": {
+            "description": "Serial number (unique for a given part number)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "part_number",
+          "serial_number"
         ]
       },
       "BgpAuthKey": {
@@ -1330,8 +1312,8 @@
       "BootstrapSledDescription": {
         "type": "object",
         "properties": {
-          "baseboard": {
-            "$ref": "#/components/schemas/Baseboard"
+          "baseboard_id": {
+            "$ref": "#/components/schemas/BaseboardId"
           },
           "bootstrap_ip": {
             "nullable": true,
@@ -1344,7 +1326,7 @@
           }
         },
         "required": [
-          "baseboard",
+          "baseboard_id",
           "id"
         ]
       },
@@ -1352,7 +1334,7 @@
         "type": "object",
         "properties": {
           "baseboard": {
-            "$ref": "#/components/schemas/Baseboard"
+            "$ref": "#/components/schemas/BaseboardId"
           },
           "ip": {
             "type": "string",
@@ -2042,14 +2024,12 @@
         "type": "object",
         "properties": {
           "baseboard": {
-            "nullable": true,
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Baseboard"
-              }
-            ]
+            "$ref": "#/components/schemas/BaseboardId"
           }
-        }
+        },
+        "required": [
+          "baseboard"
+        ]
       },
       "GetBgpAuthKeyInfoResponse": {
         "description": "Returns information about BGP keys for rack network setup.\n\nThis is part of a wicketd response, but is returned here because our tooling turns BTreeMaps into HashMaps. So we use a `replace` directive instead.",
@@ -2147,12 +2127,11 @@
         "description": "All the fields of this response are optional, because it's possible we don't know any of them (yet) if MGS has not yet finished discovering its location or (ever) if we're running in a dev environment that doesn't support MGS-location / baseboard mapping.",
         "type": "object",
         "properties": {
-          "sled_baseboard": {
-            "nullable": true,
+          "sled_baseboard_id": {
             "description": "The baseboard of our sled (where wicketd is running).",
             "allOf": [
               {
-                "$ref": "#/components/schemas/Baseboard"
+                "$ref": "#/components/schemas/BaseboardId"
               }
             ]
           },
@@ -2183,7 +2162,10 @@
               }
             ]
           }
-        }
+        },
+        "required": [
+          "sled_baseboard_id"
+        ]
       },
       "InstallableArtifacts": {
         "type": "object",
@@ -3656,7 +3638,7 @@
         ]
       },
       "PutRssUserConfigInsensitive": {
-        "description": "The portion of the RSS configuration that can be posted in one shot.\n\nIt is provided by the operator uploading a TOML file. Sensitive values (certificates and the recovery password hash) are set separately.",
+        "description": "The portion of the RSS configuration that can be posted in one shot.\n\nIt is provided by the operator uploading a TOML file. Sensitive values (certificates, the recovery password hash, and BGP authentication keys) are set separately.",
         "type": "object",
         "properties": {
           "allowed_source_ips": {
@@ -3837,33 +3819,6 @@
           {
             "type": "object",
             "properties": {
-              "id": {
-                "$ref": "#/components/schemas/RackResetUuid"
-              },
-              "status": {
-                "type": "string",
-                "enum": [
-                  "resetting"
-                ]
-              }
-            },
-            "required": [
-              "id",
-              "status"
-            ]
-          },
-          {
-            "description": "`reset_id` will be None if the rack is in an uninitialized-on-startup, or Some if it is in an uninitialized state due to a reset operation completing.",
-            "type": "object",
-            "properties": {
-              "reset_id": {
-                "nullable": true,
-                "allOf": [
-                  {
-                    "$ref": "#/components/schemas/RackResetUuid"
-                  }
-                ]
-              },
               "status": {
                 "type": "string",
                 "enum": [
@@ -3874,57 +3829,8 @@
             "required": [
               "status"
             ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "id": {
-                "$ref": "#/components/schemas/RackResetUuid"
-              },
-              "message": {
-                "type": "string"
-              },
-              "status": {
-                "type": "string",
-                "enum": [
-                  "reset_failed"
-                ]
-              }
-            },
-            "required": [
-              "id",
-              "message",
-              "status"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "id": {
-                "$ref": "#/components/schemas/RackResetUuid"
-              },
-              "status": {
-                "type": "string",
-                "enum": [
-                  "reset_panicked"
-                ]
-              }
-            },
-            "required": [
-              "id",
-              "status"
-            ]
           }
         ]
-      },
-      "RackResetUuid": {
-        "x-rust-type": {
-          "crate": "omicron-uuid-kinds",
-          "path": "omicron_uuid_kinds::RackResetUuid",
-          "version": "*"
-        },
-        "type": "string",
-        "format": "uuid"
       },
       "RackV1Inventory": {
         "description": "The current state of the v1 Rack as known to wicketd",

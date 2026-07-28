@@ -230,7 +230,7 @@ pub fn blueprint_external_dns_config<'a>(
             let name = format!("ns{}", idx + 1);
             zone_records.push(DnsRecord::Ns(format!(
                 "{}.{}",
-                &name, external_dns_zone_name
+                name, external_dns_zone_name
             )));
             (name, vec![record])
         })
