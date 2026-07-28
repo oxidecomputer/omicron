@@ -387,6 +387,7 @@ impl super::Nexus {
                             &current_blueprint,
                             *current_target_release.generation,
                             &new_system_version,
+                            &self.log,
                         )
                     }
                 };
@@ -483,6 +484,7 @@ fn validate_can_set_target_release_for_mupdate_recovery(
     current_blueprint: &Blueprint,
     current_target_release_gen: Generation,
     proposed_new_version: &semver::Version,
+    log: &Logger,
 ) -> Result<(), TargetReleaseChangeError> {
     let min_target_release_gen_is_ahead_of_actual_target_release_gen =
         current_blueprint.target_release_minimum_generation
@@ -501,6 +503,17 @@ fn validate_can_set_target_release_for_mupdate_recovery(
                 // All components are on the proposed new version, but we need
                 // to allow recovery to catch up to the min target release
                 // generation specified in the blueprint.
+                info!(
+                    log,
+                    "allowing target release to be set for mupdate recovery: \
+                     all components are on the proposed new version, but the \
+                     blueprint minimum target release generation is ahead of \
+                     the current target release generation";
+                    "proposed_version" => %proposed_new_version,
+                    "blueprint_min_target_release_gen" =>
+                        %current_blueprint.target_release_minimum_generation,
+                    "current_target_release_gen" => %current_target_release_gen,
+                );
                 Ok(())
             } else {
                 // All components are on the proposed new version and there is
@@ -510,10 +523,18 @@ fn validate_can_set_target_release_for_mupdate_recovery(
             }
         }
         BlueprintTargetReleaseStatus::WaitingForMupdateToBeCleared {
-            ..
+            how,
+            sled_id,
         } => {
             // At least one sled is waiting for a mupdate to be cleared;
             // recovery is allowed.
+            info!(
+                log,
+                "allowing target release to be set for mupdate recovery: \
+                 found a sled that is waiting for a mupdate to be cleared";
+                "mupdate_detected_how" => ?how,
+                "sled_id" => %sled_id,
+            );
             Ok(())
         }
         BlueprintTargetReleaseStatus::PreviousUpdateInProgress {
@@ -1320,6 +1341,7 @@ mod tests {
                 &blueprint,
                 blueprint.target_release_minimum_generation,
                 &proposed_recovery_version,
+                log,
             ),
             Err(TargetReleaseChangeError::NoMupdateRecoveryNeeded)
         );
@@ -1371,6 +1393,7 @@ mod tests {
                     &blueprint,
                     current_target_release_gen,
                     &proposed_recovery_version,
+                    log,
                 ),
                 Ok(()),
                 "should find evidence of mupdate in blueprint: {description}"
@@ -1411,6 +1434,7 @@ mod tests {
                 &blueprint,
                 initial_target_release_generation,
                 &current_version,
+                log,
             ),
             Err(TargetReleaseChangeError::NoMupdateRecoveryNeeded)
         );
@@ -1419,6 +1443,7 @@ mod tests {
                 &blueprint,
                 initial_target_release_generation,
                 &different_version,
+                log,
             ),
             Err(TargetReleaseChangeError::NoMupdateRecoveryNeeded)
         );
@@ -1451,6 +1476,7 @@ mod tests {
                 &blueprint,
                 initial_target_release_generation,
                 &different_version,
+                log,
             ),
             Err(expected_err),
         );
@@ -1459,6 +1485,7 @@ mod tests {
                 &blueprint,
                 blueprint.target_release_minimum_generation,
                 &different_version,
+                log,
             ),
             Err(TargetReleaseChangeError::NoMupdateRecoveryNeeded)
         );
@@ -1470,6 +1497,7 @@ mod tests {
                 &blueprint,
                 initial_target_release_generation,
                 &current_version,
+                log,
             ),
             Ok(())
         );
@@ -1482,6 +1510,7 @@ mod tests {
                 &blueprint,
                 blueprint.target_release_minimum_generation,
                 &current_version,
+                log,
             ),
             Err(TargetReleaseChangeError::NoMupdateRecoveryNeeded)
         );
