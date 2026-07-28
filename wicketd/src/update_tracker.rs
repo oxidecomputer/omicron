@@ -1049,20 +1049,9 @@ impl UpdateDriver {
                     }
 
                     let rot_bootloader_interrogation =
-                        match rot_bootloader_interrogation
+                        rot_bootloader_interrogation
                             .into_value(cx.token())
-                            .await
-                        {
-                            Some(v) => v,
-                            None => {
-                                return StepSkipped::new(
-                                    (),
-                                    "Skipping bootloader update, \
-                                    check interrogation step",
-                                )
-                                .into();
-                            }
-                        };
+                            .await;
 
                     let bootloader_has_this_version =
                         rot_bootloader_interrogation
@@ -1994,7 +1983,7 @@ impl UpdateContext {
     async fn interrogate_rot_bootloader(
         &self,
         repo: &Arc<Repository>,
-    ) -> Result<StepResult<Option<RotInterrogation>>, UpdateTerminalError> {
+    ) -> Result<StepResult<RotInterrogation>, UpdateTerminalError> {
         // Read the caboose of the currently running version (always 0)
         let caboose = self
             .mgs_client
@@ -2020,13 +2009,13 @@ impl UpdateContext {
         })?;
 
         let make_result = |active_version| {
-            Some(RotInterrogation {
+            RotInterrogation {
                 // We always update slot 1
                 slot_to_update: 1,
                 artifact_to_apply: artifact_to_apply.clone(),
                 sp: self.sp,
                 active_version,
-            })
+            }
         };
 
         let message = format!(
