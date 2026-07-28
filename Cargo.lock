@@ -5643,7 +5643,7 @@ checksum = "a4b8219c9c8c2c844dfd5772ec0bda5cd2a81d78c4579aba97f699721d46ab24"
 [[package]]
 name = "illumos-sys-hdrs"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=ab2941cdf2ab067429a4a68ab2389d2960620b57#ab2941cdf2ab067429a4a68ab2389d2960620b57"
+source = "git+https://github.com/oxidecomputer/opte?rev=7f20f04c289961b92d18906846c28ff2b28ba681#7f20f04c289961b92d18906846c28ff2b28ba681"
 dependencies = [
  "bitflags 2.11.0",
 ]
@@ -5772,9 +5772,9 @@ dependencies = [
 
 [[package]]
 name = "ingot"
-version = "0.1.1"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3a17a93829808685f3b6882763901d7489efc1155ad4ae568499d1b303067ca6"
+checksum = "20eae0b62f8c5e0215c7b3a00fe75566615ed7f2c96752ef8cd9e335a8922299"
 dependencies = [
  "bitflags 2.11.0",
  "ingot-macros",
@@ -5786,12 +5786,12 @@ dependencies = [
 
 [[package]]
 name = "ingot-macros"
-version = "0.1.1"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c4c94e8b5b5e08b71943d585acdb6062daaeb6b19de82ebb377c7c9cbeff44bb"
+checksum = "0d8c6b68cf2c0e9c6c385c8655cd390d861d6fba0e30493ad7e0ab6013a46f61"
 dependencies = [
- "darling 0.21.3",
- "itertools 0.14.0",
+ "darling 0.23.0",
+ "itertools 0.15.0",
  "proc-macro2",
  "quote",
  "regex",
@@ -5800,9 +5800,9 @@ dependencies = [
 
 [[package]]
 name = "ingot-types"
-version = "0.1.2"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2d0d55db2f1de52564cc3781ffd5a7ebb7f2c6e1888841c2fa54231a9498db5f"
+checksum = "0c38331af4cff022b2ea46b220467d5962973853a47bd6851c54c111b71baa42"
 dependencies = [
  "ingot-macros",
  "macaddr",
@@ -6197,6 +6197,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "itertools"
+version = "0.15.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8b4baf93f58d4425749ca49a51c50ebab072c5df6994d08fed93541c331481dc"
+dependencies = [
+ "either",
+]
+
+[[package]]
 name = "itoa"
 version = "1.0.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6369,7 +6378,7 @@ dependencies = [
 [[package]]
 name = "kstat-macro"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=ab2941cdf2ab067429a4a68ab2389d2960620b57#ab2941cdf2ab067429a4a68ab2389d2960620b57"
+source = "git+https://github.com/oxidecomputer/opte?rev=7f20f04c289961b92d18906846c28ff2b28ba681#7f20f04c289961b92d18906846c28ff2b28ba681"
 dependencies = [
  "quote",
  "syn 2.0.117",
@@ -10149,7 +10158,7 @@ dependencies = [
 [[package]]
 name = "opte"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=ab2941cdf2ab067429a4a68ab2389d2960620b57#ab2941cdf2ab067429a4a68ab2389d2960620b57"
+source = "git+https://github.com/oxidecomputer/opte?rev=7f20f04c289961b92d18906846c28ff2b28ba681#7f20f04c289961b92d18906846c28ff2b28ba681"
 dependencies = [
  "bitflags 2.11.0",
  "dyn-clone",
@@ -10168,7 +10177,7 @@ dependencies = [
 [[package]]
 name = "opte-api"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=ab2941cdf2ab067429a4a68ab2389d2960620b57#ab2941cdf2ab067429a4a68ab2389d2960620b57"
+source = "git+https://github.com/oxidecomputer/opte?rev=7f20f04c289961b92d18906846c28ff2b28ba681#7f20f04c289961b92d18906846c28ff2b28ba681"
 dependencies = [
  "illumos-sys-hdrs",
  "ingot",
@@ -10181,7 +10190,7 @@ dependencies = [
 [[package]]
 name = "opte-ioctl"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=ab2941cdf2ab067429a4a68ab2389d2960620b57#ab2941cdf2ab067429a4a68ab2389d2960620b57"
+source = "git+https://github.com/oxidecomputer/opte?rev=7f20f04c289961b92d18906846c28ff2b28ba681#7f20f04c289961b92d18906846c28ff2b28ba681"
 dependencies = [
  "libc",
  "libnet",
@@ -10320,7 +10329,7 @@ dependencies = [
 [[package]]
 name = "oxide-vpc"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=ab2941cdf2ab067429a4a68ab2389d2960620b57#ab2941cdf2ab067429a4a68ab2389d2960620b57"
+source = "git+https://github.com/oxidecomputer/opte?rev=7f20f04c289961b92d18906846c28ff2b28ba681#7f20f04c289961b92d18906846c28ff2b28ba681"
 dependencies = [
  "cfg-if",
  "illumos-sys-hdrs",
