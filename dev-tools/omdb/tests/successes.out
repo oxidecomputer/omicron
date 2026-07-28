@@ -714,9 +714,6 @@ task: "fm_analysis"
     =================================
     no changes from the current situation report (Some(..........<REDACTED_UUID>........... (sitrep)))
 
-    sitrep storage capacity: 0% used
-      limit:   2500
-      count:      1
     preparation report:
       parent sitrep:        ..........<REDACTED_UUID>...........
       inventory collection: ..........<REDACTED_UUID>...........
@@ -1439,9 +1436,6 @@ task: "fm_analysis"
     =================================
     no changes from the current situation report (Some(..........<REDACTED_UUID>........... (sitrep)))
 
-    sitrep storage capacity: 0% used
-      limit:   2500
-      count:      1
     preparation report:
       parent sitrep:        ..........<REDACTED_UUID>...........
       inventory collection: ..........<REDACTED_UUID>...........
