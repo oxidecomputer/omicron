@@ -28,6 +28,7 @@ progenitor::generate_api!(
         AllowedSourceIps = omicron_common::api::external::AllowedSourceIps,
         Baseboard = sled_hardware_types::Baseboard,
         BaseboardId = sled_hardware_types::BaseboardId,
+        BaseboardIds = bootstrap_agent_lockstep_types::BaseboardIds,
         BgpPeerConfig = sled_agent_types::early_networking::BgpPeerConfig,
         ImportExportPolicy = sled_agent_types::early_networking::ImportExportPolicy,
         LinkFec = sled_agent_types::early_networking::LinkFec,
