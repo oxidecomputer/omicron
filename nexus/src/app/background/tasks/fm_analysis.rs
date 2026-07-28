@@ -547,8 +547,41 @@ impl FmAnalysis {
             };
         }
 
+        // Is the new sitrep identical to the parent sitrep? If so, we're done.
+        if let Some(parent) = inputs.parent_sitrep() {
+            if parent.compare_state() == sitrep {
+                slog::info!(
+                    &opctx.log,
+                    "fault management analysis produced no changes from the \
+                     current sitrep"
+                );
+                return status::AnalysisStatus {
+                    start_time,
+                    end_time,
+                    report,
+                    capacity: None,
+                    outcome: status::AnalysisOutcome::Unchanged,
+                };
+            }
+        }
+
         // Before writing the new sitrep to the database, check whether there is
         // capacity to write a new sitrep.
+        //
+        // Readers who have read the similar-looking code in the
+        // `blueprint_planner` background task may note that we are doing the
+        // check for whether the sitrep has changed and the check for whether
+        // the limit is reached in the opposite order as the Reconfigurator.
+        // That is by design. In the Reconfigurator case, there isn't an
+        // automated process that's automatically deleting old blueprints, so
+        // hitting the limit is a condition that requires manual human
+        // intervention. Therefore, it's important for them to be able to warn
+        // about it as soon as it's hit. For us, it's much less important to
+        // surface, and if we've hit the limit, we will probably go back down
+        // below it soon when history pruning frees up capacity. Therefore,
+        // there's no sense doing the fairly expensive scan to check if the
+        // limit has been hit when we're not actually planning on committing the
+        // new sitrep anyway.
         let capacity = match self.check_sitrep_limit(&opctx, warnings).await {
             Ok(capacity) => Some(capacity),
             Err(outcome) => {
@@ -561,23 +594,6 @@ impl FmAnalysis {
                 };
             }
         };
-
-        if let Some(parent) = inputs.parent_sitrep() {
-            if parent.compare_state() == sitrep {
-                slog::info!(
-                    &opctx.log,
-                    "fault management analysis produced no changes from the \
-                     current sitrep"
-                );
-                return status::AnalysisStatus {
-                    start_time,
-                    end_time,
-                    report,
-                    capacity,
-                    outcome: status::AnalysisOutcome::Unchanged,
-                };
-            }
-        }
 
         let sitrep_id = sitrep.id();
 
