@@ -86,6 +86,7 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyy_mm_dd_nn, IDENT),
+    (2026_06_28_00, SET_TARGET_RELEASE_UPDATE_RECOVERY_DOCS),
     (2026_06_11_00, ADD_SYSTEM_IP_POOL_APIS),
     (2026_06_10_00, BGP_CONFIGURATION_UPDATE),
     (2026_06_08_00, INSTANCE_CPU_TYPE_TURIN_V2),
