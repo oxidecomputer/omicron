@@ -9286,6 +9286,7 @@ dependencies = [
  "tufaceous-artifact 0.1.0",
  "tufaceous-lib",
  "update-common",
+ "url",
  "usdt 0.5.0",
  "uuid",
  "zip 4.6.1",

@@ -5,8 +5,6 @@
 use std::error::Error;
 use std::net::IpAddr;
 use std::net::SocketAddr;
-use std::sync::Arc;
-use std::sync::OnceLock;
 
 use hickory_resolver::TokioResolver;
 use hickory_resolver::config::NameServerConfig;
@@ -16,20 +14,22 @@ use hickory_resolver::config::ResolverOpts;
 use hickory_resolver::name_server::TokioConnectionProvider;
 use hickory_resolver::proto::xfer::Protocol;
 use omicron_common::address::DNS_PORT;
-use omicron_common::address::UnderlaySubnets;
 use reqwest::dns::Name;
+
+use super::external_client::ExternalIpPolicy;
 
 /// Wrapper around hickory-resolver to provide name resolution
 /// using a given set of DNS servers for use with reqwest.
+#[derive(Clone, Debug)]
 pub struct Resolver {
     resolver: TokioResolver,
-    underlay_subnets: Arc<OnceLock<UnderlaySubnets>>,
+    ip_policy: ExternalIpPolicy,
 }
 
 impl Resolver {
     pub fn new(
         dns_servers: &[IpAddr],
-        underlay_subnets: Arc<OnceLock<UnderlaySubnets>>,
+        ip_policy: ExternalIpPolicy,
     ) -> Resolver {
         assert!(!dns_servers.is_empty());
         let mut rc = ResolverConfig::new();
@@ -75,32 +75,39 @@ impl Resolver {
             )
             .with_options(opts)
             .build(),
-            underlay_subnets,
+            ip_policy,
         }
+    }
+}
+
+impl Resolver {
+    /// Returns the [`ExternalIpPolicy`] this resolver enforces on resolved
+    /// addresses.
+    pub fn ip_policy(&self) -> &ExternalIpPolicy {
+        &self.ip_policy
     }
 }
 
 impl reqwest::dns::Resolve for Resolver {
     fn resolve(&self, name: Name) -> reqwest::dns::Resolving {
         let resolver = self.resolver.clone();
-        let underlay_subnets = self.underlay_subnets.clone();
+        let ip_policy = self.ip_policy.clone();
         Box::pin(async move {
             let ips = resolver.lookup_ip(name.as_str()).await?;
 
-            // NOTE(eliza): this certainly *could* be a `tokio::sync::watch`,
-            // and we _could_ wait for it to be set here, instead of failing
-            // fast if we don't know the rack subnet yet. Maybe this is actually
-            // the wrong thing and we should wait for it instead, I dunno...
-            let underlay = underlay_subnets.get().ok_or_else(|| {
-                anyhow::anyhow!("cannot resolve external DNS names before RSS!")
-            })?;
+            // NOTE(eliza): the policy's underlay subnets live in a `OnceLock`
+            // that isn't populated until RSS handoff, so this fails fast if
+            // we don't know the rack subnet yet. It certainly *could* be a
+            // `tokio::sync::watch`, and we _could_ wait for it to be set here
+            // instead. Maybe failing fast is actually the wrong thing and we
+            // should wait for it instead, I dunno...
             let addrs = ips
                 .into_iter()
                 .map(|ip| {
                     // We expect this domain to resolve to an external IP
                     // address, *not* one within the underlay network. Reject
                     // any unexpected underlay addresses here.
-                    let ip = underlay.check_external_ip(ip)?;
+                    let ip = ip_policy.ensure_external_ip(ip)?;
                     // hickory-resolver returns `IpAddr`s but reqwest wants
                     // `SocketAddr`s (useful if you have a custom resolver that
                     // returns a scoped IPv6 address). The port provided here

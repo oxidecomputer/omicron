@@ -49,6 +49,13 @@ techport_external_server_port = 0
 # These are the DNS servers it should use.
 external_dns_servers = ["1.1.1.1", "9.9.9.9"]
 
+# Simulated/development deployments run "external" servers (e.g. webhook
+# receivers) on localhost, so external HTTP clients must be permitted to
+# connect to loopback addresses. This must never be enabled in production
+# configs.
+[deployment.external_http_clients]
+treat_loopback_as_external = "yes_for_test_purposes_only"
+
 [deployment.dropshot_external]
 # IP Address and TCP port on which to listen for the external API
 # This config file uses 12222 to avoid colliding with the usual 12220 that's
