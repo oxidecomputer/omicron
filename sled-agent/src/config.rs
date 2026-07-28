@@ -89,7 +89,7 @@ pub struct Config {
     /// Optional VLAN ID to be used for tagging guest VNICs.
     pub vlan: Option<VlanID>,
     /// The source of external disks to use.
-    pub external_disks: ExternalDisks,
+    pub external_disks: Vec<ExternalDisks>,
     /// Optionally skip waiting for time synchronization
     pub skip_timesync: Option<bool>,
 

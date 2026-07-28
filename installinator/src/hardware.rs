@@ -29,7 +29,7 @@ impl Hardware {
         let hardware = HardwareManager::new(
             log,
             SledMode::Auto,
-            ExternalDisks::DetectPhysical,
+            vec![ExternalDisks::DetectPhysical],
         )
         .map_err(|err| anyhow!("failed to create HardwareManager: {err}"))?;
 

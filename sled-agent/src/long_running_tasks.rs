@@ -229,7 +229,7 @@ fn spawn_key_manager(
 async fn spawn_hardware_manager(
     log: &Logger,
     sled_mode: SledMode,
-    external_disks: ExternalDisks,
+    external_disks: Vec<ExternalDisks>,
 ) -> HardwareManager {
     // The `HardwareManager` does not use the the "task/handle" pattern
     // and spawns its worker task inside `HardwareManager::new`. Instead of returning
@@ -361,17 +361,19 @@ async fn upsert_synthetic_disks_if_needed(
     raw_disks_tx: &RawDisksSender,
     config: &Config,
 ) {
-    if let ExternalDisks::Virtual { vdevs } = &config.external_disks {
-        for (i, vdev) in vdevs.iter().enumerate() {
-            info!(
-                log,
-                "Upserting synthetic device to Storage Manager";
-                "vdev" => vdev.to_string(),
-            );
-            let disk = RawSyntheticDisk::load(vdev, i.try_into().unwrap())
-                .expect("Failed to parse synthetic disk")
-                .into();
-            raw_disks_tx.add_or_update_raw_disk(disk, log);
+    for external_disk in &config.external_disks {
+        if let ExternalDisks::Virtual { vdevs } = external_disk {
+            for (i, vdev) in vdevs.iter().enumerate() {
+                info!(
+                    log,
+                    "Upserting synthetic device to Storage Manager";
+                    "vdev" => vdev.to_string(),
+                );
+                let disk = RawSyntheticDisk::load(vdev, i.try_into().unwrap())
+                    .expect("Failed to parse synthetic disk")
+                    .into();
+                raw_disks_tx.add_or_update_raw_disk(disk, log);
+            }
         }
     }
 }

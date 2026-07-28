@@ -127,7 +127,7 @@ impl HardwareSnapshot {
     // Walk the device tree to capture a view of the current hardware.
     fn new(
         log: &Logger,
-        external_disks: &ExternalDisks,
+        external_disks: &[ExternalDisks],
     ) -> Result<Self, Error> {
         let mut device_info =
             DevInfo::new_force_load().map_err(Error::DevInfo)?;
@@ -172,27 +172,30 @@ impl HardwareSnapshot {
 
         // Monitor for block devices.
         let mut disks = HashMap::new();
-        match external_disks {
-            ExternalDisks::DetectPhysical => {
-                let mut node_walker = device_info.walk_driver("blkdev");
-                while let Some(node) =
-                    node_walker.next().transpose().map_err(Error::DevInfo)?
-                {
-                    poll_blkdev_node(
-                        &log,
-                        sled_type,
-                        &mut disks,
-                        node,
-                        boot_storage_unit,
-                    )?;
+
+        for external_disk in external_disks {
+            match external_disk {
+                ExternalDisks::DetectPhysical => {
+                    let mut node_walker = device_info.walk_driver("blkdev");
+                    while let Some(node) =
+                        node_walker.next().transpose().map_err(Error::DevInfo)?
+                    {
+                        poll_blkdev_node(
+                            &log,
+                            sled_type,
+                            &mut disks,
+                            node,
+                            boot_storage_unit,
+                        )?;
+                    }
                 }
-            }
-            ExternalDisks::HardcodedPhysical { disks: hardcoded_disks } => {
-                for disk in hardcoded_disks {
-                    disks.insert(disk.identity().clone(), disk.clone());
+                ExternalDisks::HardcodedPhysical { disks: hardcoded_disks } => {
+                    for disk in hardcoded_disks {
+                        disks.insert(disk.identity().clone(), disk.clone());
+                    }
                 }
+                ExternalDisks::Virtual { .. } => {}
             }
-            ExternalDisks::Virtual { .. } => {}
         }
 
         Ok(Self { tofino, disks, baseboard })
@@ -518,7 +521,7 @@ fn poll_blkdev_node(
 fn poll_device_tree(
     log: &Logger,
     hardware_view_tx: &watch::Sender<HardwareView>,
-    external_disks: &ExternalDisks,
+    external_disks: &[ExternalDisks],
 ) -> Result<(), Error> {
     // Construct a view of hardware by walking the device tree.
     let polled_hw = match HardwareSnapshot::new(log, external_disks) {
@@ -545,16 +548,18 @@ fn poll_device_tree(
                     // functionality, sled-agent can be supplied a fixed list of
                     // UnparsedDisks. Add those to the HardwareSnapshot here if
                     // they are missing (which they will be for non-sleds).
-                    if let ExternalDisks::HardcodedPhysical { disks } =
-                        external_disks
-                    {
-                        for disk in disks {
-                            let identity = disk.identity();
-                            if !inner.disks.contains_key(identity) {
-                                inner
-                                    .disks
-                                    .insert(identity.clone(), disk.clone());
-                                did_modify = true;
+                    for external_disk in external_disks {
+                        if let ExternalDisks::HardcodedPhysical { disks } =
+                            external_disk
+                        {
+                            for disk in disks {
+                                let identity = disk.identity();
+                                if !inner.disks.contains_key(identity) {
+                                    inner
+                                        .disks
+                                        .insert(identity.clone(), disk.clone());
+                                    did_modify = true;
+                                }
                             }
                         }
                     }
@@ -764,7 +769,7 @@ fn parse_smbios_output(log: &Logger, output: String) -> Option<Baseboard> {
 fn hardware_tracking_task(
     log: Logger,
     hardware_view_tx: watch::Sender<HardwareView>,
-    external_disks: ExternalDisks,
+    external_disks: Vec<ExternalDisks>,
 ) {
     loop {
         match poll_device_tree(&log, &hardware_view_tx, &external_disks) {
@@ -801,7 +806,7 @@ impl HardwareManager {
     pub fn new(
         log: &Logger,
         sled_mode: SledMode,
-        external_disks: ExternalDisks,
+        external_disks: Vec<ExternalDisks>,
     ) -> Result<Self, String> {
         let log = log.new(o!("component" => "HardwareManager"));
         info!(log, "Creating HardwareManager");
