@@ -10,6 +10,30 @@
     "version": "0.0.1"
   },
   "paths": {
+    "/baseboard-ids": {
+      "get": {
+        "summary": "Return all known `BaseboardId`s and their bootstrap addresses.",
+        "operationId": "baseboard_ids",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BaseboardIds"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/debug/network-config-contents": {
       "get": {
         "summary": "Get the current contents of the network config kept in the replicated",
@@ -89,28 +113,6 @@
             "$ref": "#/components/responses/Error"
           }
         }
-      },
-      "delete": {
-        "summary": "Reset the rack to an unconfigured state.",
-        "operationId": "rack_reset",
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RackResetUuid"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
       }
     }
   },
@@ -158,73 +160,49 @@
           }
         ]
       },
-      "Baseboard": {
-        "description": "Describes properties that should uniquely identify a Gimlet.",
-        "oneOf": [
-          {
-            "type": "object",
-            "properties": {
-              "identifier": {
-                "type": "string"
-              },
-              "model": {
-                "type": "string"
-              },
-              "revision": {
-                "type": "integer",
-                "format": "uint32",
-                "minimum": 0
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "gimlet"
-                ]
-              }
-            },
-            "required": [
-              "identifier",
-              "model",
-              "revision",
-              "type"
-            ]
+      "BaseboardId": {
+        "description": "A representation of a Baseboard ID as used in the inventory subsystem.\n\nThis type is essentially the same as a `Baseboard` except it doesn't have a revision or HW type (Gimlet, PC, Unknown).",
+        "type": "object",
+        "properties": {
+          "part_number": {
+            "description": "Oxide Part Number",
+            "type": "string"
           },
-          {
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "unknown"
-                ]
-              }
-            },
-            "required": [
-              "type"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "identifier": {
-                "type": "string"
-              },
-              "model": {
-                "type": "string"
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "pc"
-                ]
-              }
-            },
-            "required": [
-              "identifier",
-              "model",
-              "type"
-            ]
+          "serial_number": {
+            "description": "Serial number (unique for a given part number)",
+            "type": "string"
           }
+        },
+        "required": [
+          "part_number",
+          "serial_number"
+        ]
+      },
+      "BaseboardIds": {
+        "description": "All `BaseboardId`s that can be found by sprockets connections on the bootstrap network.",
+        "type": "object",
+        "properties": {
+          "data": {
+            "title": "IdOrdMap",
+            "x-rust-type": {
+              "crate": "iddqd",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/BootstrapIpOfBaseboardId"
+                }
+              ],
+              "path": "iddqd::IdOrdMap",
+              "version": "*"
+            },
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BootstrapIpOfBaseboardId"
+            },
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "data"
         ]
       },
       "BfdMode": {
@@ -502,6 +480,22 @@
               "type"
             ]
           }
+        ]
+      },
+      "BootstrapIpOfBaseboardId": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/BaseboardId"
+          },
+          "ip": {
+            "type": "string",
+            "format": "ipv6"
+          }
+        },
+        "required": [
+          "id",
+          "ip"
         ]
       },
       "Certificate": {
@@ -1040,7 +1034,7 @@
             "description": "The set of peer_ids required to initialize trust quorum\n\nThe value is `None` if we are not using trust quorum",
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/Baseboard"
+              "$ref": "#/components/schemas/BaseboardId"
             }
           }
         },
@@ -1197,33 +1191,6 @@
           {
             "type": "object",
             "properties": {
-              "id": {
-                "$ref": "#/components/schemas/RackResetUuid"
-              },
-              "status": {
-                "type": "string",
-                "enum": [
-                  "resetting"
-                ]
-              }
-            },
-            "required": [
-              "id",
-              "status"
-            ]
-          },
-          {
-            "description": "`reset_id` will be None if the rack is in an uninitialized-on-startup, or Some if it is in an uninitialized state due to a reset operation completing.",
-            "type": "object",
-            "properties": {
-              "reset_id": {
-                "nullable": true,
-                "allOf": [
-                  {
-                    "$ref": "#/components/schemas/RackResetUuid"
-                  }
-                ]
-              },
               "status": {
                 "type": "string",
                 "enum": [
@@ -1234,57 +1201,8 @@
             "required": [
               "status"
             ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "id": {
-                "$ref": "#/components/schemas/RackResetUuid"
-              },
-              "message": {
-                "type": "string"
-              },
-              "status": {
-                "type": "string",
-                "enum": [
-                  "reset_failed"
-                ]
-              }
-            },
-            "required": [
-              "id",
-              "message",
-              "status"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "id": {
-                "$ref": "#/components/schemas/RackResetUuid"
-              },
-              "status": {
-                "type": "string",
-                "enum": [
-                  "reset_panicked"
-                ]
-              }
-            },
-            "required": [
-              "id",
-              "status"
-            ]
           }
         ]
-      },
-      "RackResetUuid": {
-        "x-rust-type": {
-          "crate": "omicron-uuid-kinds",
-          "path": "omicron_uuid_kinds::RackResetUuid",
-          "version": "*"
-        },
-        "type": "string",
-        "format": "uuid"
       },
       "RecoverySiloConfig": {
         "description": "Configuration for the recovery silo created during rack setup.",

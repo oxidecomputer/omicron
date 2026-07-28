@@ -972,13 +972,13 @@ impl RunQueryDsl<DbConnection> for NextExternalIp {}
 mod tests {
     use crate::authz;
     use crate::db::datastore::DataStore;
-    use crate::db::datastore::SERVICE_IPV4_POOL_NAME;
     use crate::db::explain::ExplainableAsync as _;
     use crate::db::identity::Resource;
     use crate::db::model::IpKind;
     use crate::db::model::IpPool;
     use crate::db::model::IpPoolRange;
     use crate::db::pub_test_utils::TestDatabase;
+    use crate::db::pub_test_utils::helpers::create_service_ip_pool;
     use crate::db::queries::external_ip::NextExternalIp;
     use crate::db::raw_query_builder::expectorate_query_contents;
     use async_bb8_diesel::AsyncRunQueryDsl;
@@ -1008,6 +1008,7 @@ mod tests {
     use omicron_common::address::NUM_SOURCE_NAT_PORTS;
     use omicron_common::api::external::Error;
     use omicron_common::api::external::IdentityMetadataCreateParams;
+    use omicron_common::api::external::IpVersion;
     use omicron_common::api::external::LookupType;
     use omicron_common::api::external::ResourceType;
     use omicron_test_utils::dev;
@@ -1524,7 +1525,15 @@ mod tests {
             Ipv4Addr::new(10, 0, 0, 4),
         ))
         .unwrap();
-        context.initialize_ip_pool(SERVICE_IPV4_POOL_NAME, ip_range).await;
+        let service_pool = create_service_ip_pool(
+            context.db.opctx(),
+            context.db.datastore(),
+            IpVersion::V4,
+        )
+        .await;
+        context
+            .initialize_ip_pool(service_pool.db_pool.name().as_str(), ip_range)
+            .await;
 
         let ip_10_0_0_2 =
             OmicronZoneExternalIp::Floating(OmicronZoneExternalFloatingIp {
@@ -1733,7 +1742,15 @@ mod tests {
             Ipv4Addr::new(10, 0, 0, 4),
         ))
         .unwrap();
-        context.initialize_ip_pool(SERVICE_IPV4_POOL_NAME, ip_range).await;
+        let service_pool = create_service_ip_pool(
+            context.db.opctx(),
+            context.db.datastore(),
+            IpVersion::V4,
+        )
+        .await;
+        context
+            .initialize_ip_pool(service_pool.db_pool.name().as_str(), ip_range)
+            .await;
 
         let ip_10_0_0_5 =
             OmicronZoneExternalIp::Floating(OmicronZoneExternalFloatingIp {
@@ -1755,7 +1772,8 @@ mod tests {
             .expect_err("Should have failed to allocate out-of-bounds IP");
         assert_eq!(
             err.to_string(),
-            "Invalid Request: Requested external IP address not available"
+            "Invalid Request: External IP address 10.0.0.5 is not \
+            available in any pool assigned to system services"
         );
 
         context.success().await;
@@ -2423,23 +2441,20 @@ mod tests {
             "fd01::ffff".parse::<Ipv6Addr>().unwrap(),
         ))
         .unwrap();
-        let (authz_pool, db_pool) = context
-            .db
-            .datastore()
-            .ip_pools_service_lookup(
-                context.db.opctx(),
-                nexus_db_model::IpVersion::V6,
-            )
-            .await
-            .expect("should be able to lookup service IP Pool");
+        let service_pool = create_service_ip_pool(
+            context.db.opctx(),
+            context.db.datastore(),
+            IpVersion::V6,
+        )
+        .await;
         for range in [range1, range2] {
             let _ = context
                 .db
                 .datastore()
                 .ip_pool_add_range(
                     context.db.opctx(),
-                    &authz_pool,
-                    &db_pool,
+                    &service_pool.authz_pool,
+                    &service_pool.db_pool,
                     &range,
                 )
                 .await

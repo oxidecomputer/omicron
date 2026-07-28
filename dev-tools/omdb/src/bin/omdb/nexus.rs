@@ -100,6 +100,17 @@ use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::SupportBundleUuid;
+use oxide_update_engine_display::LineDisplay;
+use oxide_update_engine_display::LineDisplayStyles;
+use oxide_update_engine_display::ProgressRatioDisplay;
+use oxide_update_engine_types::buffer::EventBuffer;
+use oxide_update_engine_types::buffer::ExecutionStatus;
+use oxide_update_engine_types::buffer::ExecutionTerminalInfo;
+use oxide_update_engine_types::buffer::TerminalKind;
+use oxide_update_engine_types::events::EventReport;
+use oxide_update_engine_types::events::StepOutcome;
+use oxide_update_engine_types::spec::GenericSpec;
+use oxide_update_engine_types::spec::SerializableError;
 use quiesce::QuiesceArgs;
 use quiesce::cmd_nexus_quiesce;
 use reconfigurator_config::ReconfiguratorConfigArgs;
@@ -123,17 +134,6 @@ use tabled::settings::object::Columns;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::OnceCell;
 use trust_quorum_types::types::Epoch;
-use update_engine::EventBuffer;
-use update_engine::ExecutionStatus;
-use update_engine::ExecutionTerminalInfo;
-use update_engine::NestedError;
-use update_engine::NestedSpec;
-use update_engine::TerminalKind;
-use update_engine::display::LineDisplay;
-use update_engine::display::LineDisplayStyles;
-use update_engine::display::ProgressRatioDisplay;
-use update_engine::events::EventReport;
-use update_engine::events::StepOutcome;
 use update_status::cmd_nexus_update_status;
 use uuid::Uuid;
 
@@ -709,7 +709,7 @@ impl NexusArgs {
                 format!("http://{}", addr)
             }
         };
-        eprintln!("note: using Nexus URL {}", &nexus_url);
+        eprintln!("note: using Nexus URL {}", nexus_url);
         let client =
             nexus_lockstep_client::Client::new(&nexus_url, log.clone());
 
@@ -1385,6 +1385,9 @@ fn print_task_details(
         "fm_sitrep_gc" => {
             print_task_fm_sitrep_gc(details);
         }
+        "fm_sitrep_history_pruner" => {
+            print_task_fm_sitrep_history_pruner(details);
+        }
         "fm_rendezvous" => {
             print_task_fm_rendezvous(details);
         }
@@ -1558,7 +1561,7 @@ fn print_task_blueprint_executor(details: &serde_json::Value) {
     struct BlueprintExecutorStatus {
         target_id: Uuid,
         enabled: bool,
-        execution_error: Option<NestedError>,
+        execution_error: Option<SerializableError>,
     }
 
     match serde_json::from_value::<BlueprintExecutorStatus>(value) {
@@ -3599,6 +3602,7 @@ fn print_task_fm_analysis(details: &serde_json::Value, colored: bool) {
         end_time,
         report: analysis_report,
         outcome,
+        capacity,
     } = analysis_status;
     match outcome {
         AnalysisOutcome::Error(error) => {
@@ -3609,6 +3613,13 @@ fn print_task_fm_analysis(details: &serde_json::Value, colored: bool) {
                 "    no changes from the current situation report ({:?})",
                 parent_sitrep_id
             );
+        }
+        AnalysisOutcome::LimitReached { limit } => {
+            println!(
+                "{ERRICON}   analysis succeeded, but the database sitrep \
+                 limit ({limit} sitreps) has been reached!"
+            );
+            println!("    no new sitrep was written.");
         }
         AnalysisOutcome::NotCommitted { sitrep_id } => {
             println!(
@@ -3640,6 +3651,13 @@ fn print_task_fm_analysis(details: &serde_json::Value, colored: bool) {
         for error in warnings {
             println!("      > {error}")
         }
+    }
+
+    if let Some(capacity) = capacity {
+        let usage_percent = capacity.usage_percent();
+        println!("    sitrep storage capacity: {usage_percent}% used");
+        println!("      limit: {:>6}", capacity.limit);
+        println!("      count: {:>6}", capacity.count);
     }
 
     let PreparationStatus { warnings, report: prep_report } = prep_status;
@@ -3685,6 +3703,74 @@ fn print_task_fm_sitrep_loader(details: &serde_json::Value) {
     };
 }
 
+fn print_task_fm_sitrep_history_pruner(details: &serde_json::Value) {
+    use nexus_types::internal_api::background::SitrepHistoryPrunerStatus;
+    use nexus_types::internal_api::background::fm_sitrep_history_pruner::{
+        Outcome, SitrepsPruned,
+    };
+
+    let SitrepHistoryPrunerStatus {
+        history_limit,
+        batch_size,
+        pruned: SitrepsPruned { batches, total, versions },
+        outcome,
+    } = match serde_json::from_value::<SitrepHistoryPrunerStatus>(
+        details.clone(),
+    ) {
+        Err(error) => {
+            eprintln!(
+                "warning: failed to interpret task details: {:?}: {:?}",
+                error, details
+            );
+            return;
+        }
+        Ok(status) => status,
+    };
+
+    const HISTORY_LIMIT: &str = "max sitreps to keep:";
+    const STATUS: &str = "status:";
+    const SITREP_COUNT: &str = "  current count:";
+    const PRUNED_COUNT: &str = "  sitreps pruned:";
+    const PRUNED_VERSIONS: &str = "  versions pruned:";
+    const BATCHES: &str = "  batches:";
+    const BATCH_SIZE: &str = "deletion batch size:";
+    const P_WIDTH: usize = const_max_len(&[
+        HISTORY_LIMIT,
+        SITREP_COUNT,
+        PRUNED_COUNT,
+        PRUNED_VERSIONS,
+        BATCHES,
+        BATCH_SIZE,
+    ]) + 1;
+    const NUM_WIDTH: usize = 4;
+    println!("    {HISTORY_LIMIT:<P_WIDTH$}{history_limit:>NUM_WIDTH$}");
+    println!("    {BATCH_SIZE:<P_WIDTH$}{batch_size:>NUM_WIDTH$}");
+    match outcome {
+        Outcome::Error(error) => {
+            println!("{ERRICON} {STATUS} failed!");
+            println!("      > {error}")
+        }
+        Outcome::NotPruned { count } => {
+            println!("    {STATUS} within limit (nothing was deleted)");
+            println!("    {SITREP_COUNT:<P_WIDTH$}{count:>NUM_WIDTH$}");
+        }
+        Outcome::Pruned { count } => {
+            println!("    {STATUS} limit reached (old sitreps were deleted)");
+            println!("    {SITREP_COUNT:<P_WIDTH$}{count:>NUM_WIDTH$}");
+        }
+    }
+
+    // If anything was deleted, including partial progress made before a
+    // query failed, display the details of what was pruned.
+    if total > 0 {
+        println!("    {PRUNED_COUNT:<P_WIDTH$}{total:>NUM_WIDTH$}");
+        if let Some(versions) = versions {
+            println!("    {PRUNED_VERSIONS:<P_WIDTH$}v{versions:?}");
+        }
+        println!("    {BATCHES:<P_WIDTH$}{batches:>NUM_WIDTH$}");
+    }
+}
+
 fn print_task_fm_sitrep_gc(details: &serde_json::Value) {
     let SitrepGcStatus {
         orphaned_sitreps_deleted,
@@ -3716,13 +3802,9 @@ fn print_task_fm_sitrep_gc(details: &serde_json::Value) {
         .fold(BASE_WIDTH, |w, l| w.max(l));
 
     if !errors.is_empty() {
-        println!(
-            "{ERRICON}   {:<width$}{:>NUM_WIDTH$}",
-            "errors:",
-            errors.len()
-        );
+        println!("{ERRICON} {:<width$}{:>NUM_WIDTH$}", "errors:", errors.len());
         for error in errors {
-            println!("      > {error}")
+            println!("    > {error}")
         }
     }
 
@@ -3746,7 +3828,7 @@ fn print_task_fm_sitrep_gc(details: &serde_json::Value) {
             format!("orphaned {table_name} rows deleted:"),
             stats.rows_deleted,
         );
-        println!("    {:<width$}{:>NUM_WIDTH$}", "  batches:", stats.batches,);
+        println!("    {:<width$}{:>NUM_WIDTH$}", "  batches:", stats.batches);
     }
 }
 
@@ -4145,7 +4227,7 @@ fn bgtask_apply_kv_style(table: &mut tabled::Table) {
 /// output can be quite large.)
 fn extract_event_buffer(
     value: &mut serde_json::Value,
-) -> anyhow::Result<Option<EventBuffer<NestedSpec>>> {
+) -> anyhow::Result<Option<EventBuffer<GenericSpec>>> {
     let Some(obj) = value.as_object_mut() else {
         bail!("expected value to be an object")
     };
@@ -4156,7 +4238,7 @@ fn extract_event_buffer(
     // Try deserializing the event report generically. We could deserialize to
     // a more explicit spec, e.g. `ReconfiguratorExecutionSpec`, but that's
     // unnecessary for omdb's purposes.
-    let value: Result<EventReport<NestedSpec>, NestedError> =
+    let value: Result<EventReport<GenericSpec>, SerializableError> =
         serde_json::from_value(event_report)
             .context("failed to deserialize event report")?;
     let event_report = value.context(
@@ -4171,7 +4253,7 @@ fn extract_event_buffer(
 // Make a short summary of the current state of an execution based on an event
 // buffer, and add it to the table.
 fn push_event_buffer_summary(
-    event_buffer: anyhow::Result<Option<EventBuffer<NestedSpec>>>,
+    event_buffer: anyhow::Result<Option<EventBuffer<GenericSpec>>>,
     builder: &mut tabled::builder::Builder,
 ) {
     match event_buffer {
@@ -4197,7 +4279,7 @@ fn push_event_buffer_summary(
 }
 
 fn event_buffer_summary_impl(
-    buffer: EventBuffer<NestedSpec>,
+    buffer: EventBuffer<GenericSpec>,
     builder: &mut tabled::builder::Builder,
 ) {
     let Some(summary) = buffer.root_execution_summary() else {
@@ -4257,7 +4339,7 @@ fn event_buffer_summary_impl(
 fn push_event_buffer_terminal_info(
     info: &ExecutionTerminalInfo,
     total_steps: usize,
-    buffer: &EventBuffer<NestedSpec>,
+    buffer: &EventBuffer<GenericSpec>,
     builder: &mut tabled::builder::Builder,
 ) {
     let step_data = buffer.get(&info.step_key).expect("step exists");

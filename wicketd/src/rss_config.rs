@@ -32,17 +32,17 @@ use sled_agent_types::early_networking::RouterPeerType;
 use sled_agent_types::early_networking::SwitchSlot;
 use sled_agent_types::early_networking::UplinkAddress;
 use sled_agent_types::early_networking::UplinkPorts;
-use sled_hardware_types::Baseboard;
+use sled_hardware_types::BaseboardId;
 use slog::warn;
 use std::collections::BTreeMap;
 use std::net::IpAddr;
 use std::net::Ipv6Addr;
 use wicket_common::inventory::MgsV1Inventory;
-use wicket_common::rack_setup::BgpAuthKey;
 use wicket_common::rack_setup::CurrentRssUserConfigInsensitive;
 use wicket_common::rack_setup::GetBgpAuthKeyInfoResponse;
 use wicketd_api::CurrentRssUserConfig;
 use wicketd_api::CurrentRssUserConfigSensitive;
+use wicketd_commission_types::rack_setup::BgpAuthKey;
 use wicketd_commission_types::rack_setup::CertificateUploadResponse;
 use wicketd_commission_types::rack_setup::ManualPortConfig;
 use wicketd_commission_types::rack_setup::PutRssUserConfigInsensitive;
@@ -165,12 +165,13 @@ impl CurrentRssConfig {
         let known_bootstrap_sleds = bootstrap_peers.sleds();
         let mut bootstrap_ips = Vec::new();
         for sled in &self.common.bootstrap_sleds {
-            let Some(ip) = known_bootstrap_sleds.get(&sled.baseboard).copied()
+            let Some(ip) =
+                known_bootstrap_sleds.get(&sled.baseboard_id).copied()
             else {
                 bail!(
                     "IP address not (yet?) known for sled {} ({:?})",
                     sled.id.slot,
-                    sled.baseboard,
+                    sled.baseboard_id,
                 );
             };
             bootstrap_ips.push(ip);
@@ -182,13 +183,13 @@ impl CurrentRssConfig {
         // a small rack cluster that does not support trust quorum.
         // https://github.com/oxidecomputer/omicron/issues/3690
         const TRUST_QUORUM_MIN_SIZE: usize = 3;
-        let trust_quorum_peers: Option<Vec<Baseboard>> =
+        let trust_quorum_peers: Option<Vec<BaseboardId>> =
             if self.common.bootstrap_sleds.len() >= TRUST_QUORUM_MIN_SIZE {
                 Some(
                     self.common
                         .bootstrap_sleds
                         .iter()
-                        .map(|sled| sled.baseboard.clone())
+                        .map(|sled| sled.baseboard_id.clone())
                         .collect(),
                 )
             } else {
@@ -340,9 +341,9 @@ impl CurrentRssConfig {
     pub(crate) fn update(
         &mut self,
         config: PutRssUserConfigInsensitive,
-        our_baseboard: Option<&Baseboard>,
+        our_baseboard: &BaseboardId,
         inventory: &MgsV1Inventory,
-        ddm_discovered_sleds: &BTreeMap<Baseboard, Ipv6Addr>,
+        ddm_discovered_sleds: &BTreeMap<BaseboardId, Ipv6Addr>,
         log: &slog::Logger,
     ) -> Result<(), String> {
         self.common.update(
@@ -699,9 +700,10 @@ mod tests {
     use omicron_test_utils::certificates::CertificateChain;
     use omicron_test_utils::dev;
     use wicket_common::example::ExampleRackSetupData;
+    use wicket_common::rack_setup::BgpAuthKeyInfo;
     use wicket_common::rack_setup::BgpAuthKeyStatus;
-    use wicketd_api::SetBgpAuthKeyStatus;
     use wicketd_commission_types::rack_setup::BgpAuthKeyId;
+    use wicketd_commission_types::rack_setup::SetBgpAuthKeyStatus;
 
     use super::*;
 
@@ -812,7 +814,7 @@ mod tests {
         config
             .update(
                 example.put_insensitive.clone(),
-                example.our_baseboard.as_ref(),
+                &example.our_baseboard_id,
                 &example.inventory,
                 &example.ddm_discovered_sleds,
                 &logctx.log,
@@ -853,7 +855,7 @@ mod tests {
         let err = config
             .update(
                 config_b,
-                example.our_baseboard.as_ref(),
+                &example.our_baseboard_id,
                 &example.inventory,
                 &example.ddm_discovered_sleds,
                 &logctx.log,
@@ -898,7 +900,7 @@ mod tests {
         current_config
             .update(
                 example.put_insensitive.clone(),
-                example.our_baseboard.as_ref(),
+                &example.our_baseboard_id,
                 &example.inventory,
                 &example.ddm_discovered_sleds,
                 &logctx.log,
@@ -931,7 +933,9 @@ mod tests {
             let key_data = current_config.common.get_bgp_auth_key_data();
             assert_eq!(
                 key_data.get(&key1),
-                Some(&BgpAuthKeyStatus::Set { info: shared_key.info() })
+                Some(&BgpAuthKeyStatus::Set {
+                    info: BgpAuthKeyInfo::for_key(&shared_key)
+                })
             );
         }
 
@@ -945,7 +949,9 @@ mod tests {
             let key_data = current_config.common.get_bgp_auth_key_data();
             assert_eq!(
                 key_data.get(&key1),
-                Some(&BgpAuthKeyStatus::Set { info: shared_key.info() })
+                Some(&BgpAuthKeyStatus::Set {
+                    info: BgpAuthKeyInfo::for_key(&shared_key)
+                })
             );
         }
 
@@ -959,7 +965,9 @@ mod tests {
             let key_data = current_config.common.get_bgp_auth_key_data();
             assert_eq!(
                 key_data.get(&key1),
-                Some(&BgpAuthKeyStatus::Set { info: new_key.info() })
+                Some(&BgpAuthKeyStatus::Set {
+                    info: BgpAuthKeyInfo::for_key(&new_key)
+                })
             );
         }
 
@@ -999,7 +1007,9 @@ mod tests {
 
             assert_eq!(
                 key_data.get(&key2),
-                Some(&BgpAuthKeyStatus::Set { info: shared_key.info() })
+                Some(&BgpAuthKeyStatus::Set {
+                    info: BgpAuthKeyInfo::for_key(&shared_key)
+                })
             );
         }
 
@@ -1008,7 +1018,7 @@ mod tests {
         current_config
             .update(
                 example_data_2.put_insensitive,
-                example_data_2.our_baseboard.as_ref(),
+                &example_data_2.our_baseboard_id,
                 &example_data_2.inventory,
                 &example_data_2.ddm_discovered_sleds,
                 &logctx.log,
@@ -1020,7 +1030,9 @@ mod tests {
         assert_eq!(key_data.len(), 1);
         assert_eq!(
             key_data.get(&key1),
-            Some(&BgpAuthKeyStatus::Set { info: new_key.info() })
+            Some(&BgpAuthKeyStatus::Set {
+                info: BgpAuthKeyInfo::for_key(&new_key)
+            })
         );
         assert_eq!(key_data.get(&key2), None, "key2 should have been dropped",);
 
@@ -1028,7 +1040,7 @@ mod tests {
         current_config
             .update(
                 example.put_insensitive,
-                example.our_baseboard.as_ref(),
+                &example.our_baseboard_id,
                 &example.inventory,
                 &example.ddm_discovered_sleds,
                 &logctx.log,
@@ -1040,7 +1052,9 @@ mod tests {
         assert_eq!(key_data.len(), 2);
         assert_eq!(
             key_data.get(&key1),
-            Some(&BgpAuthKeyStatus::Set { info: new_key.info() })
+            Some(&BgpAuthKeyStatus::Set {
+                info: BgpAuthKeyInfo::for_key(&new_key)
+            })
         );
         assert_eq!(key_data.get(&key2), Some(&BgpAuthKeyStatus::Unset));
 

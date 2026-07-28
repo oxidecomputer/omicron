@@ -26,24 +26,28 @@ use anyhow::{Context, Result, anyhow, bail};
 use camino::Utf8PathBuf;
 use clap::{Args, Subcommand, ValueEnum};
 use omicron_common::update::ArtifactId;
+use oxide_update_engine_display::{GroupDisplay, LineDisplayStyles};
+use oxide_update_engine_types::buffer::{
+    AbortReason, EventBuffer, ExecutionStatus, FailureReason, StepKey,
+    TerminalKind,
+};
+use oxide_update_engine_types::spec::{EngineSpec, SerializableError};
 use slog::Logger;
 use tokio::{sync::watch, task::JoinHandle};
-use update_engine::{
-    AbortReason, EventBuffer, ExecutionStatus, FailureReason, NestedError,
-    StepKey, StepSpec, TerminalKind,
-    display::{GroupDisplay, LineDisplayStyles},
-};
 use wicket_common::{
     WICKETD_TIMEOUT,
     rack_update::{
-        ClearUpdateStateResponse, ComponentUpdateStatus, ExitMessage,
-        RackUpdateStatus, UpdateState, UpdateStateCounts, rollup_update_state,
+        ComponentUpdateStatus, ExitMessage, RackUpdateStatus, UpdateState,
+        UpdateStateCounts, rollup_update_state,
     },
     update_events::{EventReport, WicketdEngineSpec},
 };
 use wicketd_client::types::{
     ClearUpdateStateParams, GetArtifactsAndEventReportsResponse,
     StartUpdateParams,
+};
+use wicketd_commission_types::update::{
+    ClearUpdateStateResponse, UpdateTargets,
 };
 
 use super::command::CommandOutput;
@@ -153,10 +157,11 @@ impl StartRackUpdateArgs {
 
         let num_update_ids = update_ids.len();
 
-        let params = StartUpdateParams {
-            targets: update_ids.iter().copied().map(Into::into).collect(),
-            options,
-        };
+        let targets = UpdateTargets::new(
+            update_ids.iter().copied().map(Into::into).collect(),
+        )
+        .context("error starting update")?;
+        let params = StartUpdateParams { targets, options };
 
         slog::debug!(log, "Sending post_start_update"; "num_update_ids" => num_update_ids);
         match client.post_start_update(&params).await {
@@ -390,7 +395,7 @@ impl StatusArgs {
     }
 }
 
-fn get_exit_message<S: StepSpec>(
+fn get_exit_message<S: EngineSpec>(
     buffer: &EventBuffer<S>,
     key: &StepKey,
 ) -> Option<ExitMessage> {
@@ -702,8 +707,8 @@ impl ClearArgs {
                 }
             }
             MessageFormat::Json => {
-                let response =
-                    response.map_err(|error| NestedError::new(error.as_ref()));
+                let response = response
+                    .map_err(|error| SerializableError::new(error.as_ref()));
                 // Return the response as a JSON object.
                 serde_json::to_writer_pretty(output.stdout, &response)
                     .context("error writing to output")?;
@@ -724,10 +729,11 @@ async fn do_clear_update_state(
 ) -> Result<ClearUpdateStateResponse> {
     let options =
         CreateClearUpdateStateOptions {}.to_clear_update_state_options()?;
-    let params = ClearUpdateStateParams {
-        targets: update_ids.iter().copied().map(Into::into).collect(),
-        options,
-    };
+    let targets = UpdateTargets::new(
+        update_ids.iter().copied().map(Into::into).collect(),
+    )
+    .context("error clearing update state")?;
+    let params = ClearUpdateStateParams { targets, options };
 
     let result = client
         .post_clear_update_state(&params)

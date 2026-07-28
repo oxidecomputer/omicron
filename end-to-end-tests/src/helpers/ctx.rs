@@ -168,11 +168,11 @@ impl ClientParams {
             Err(_) => ("http", None),
             Ok(path) => {
                 let cert_bytes = std::fs::read(&path).with_context(|| {
-                    format!("reading certificate from {:?}", &path)
+                    format!("reading certificate from {:?}", path)
                 })?;
                 let cert = reqwest::tls::Certificate::from_pem(&cert_bytes)
                     .with_context(|| {
-                        format!("parsing certificate from {:?}", &path)
+                        format!("parsing certificate from {:?}", path)
                     })?;
                 ("https", Some(cert))
             }
