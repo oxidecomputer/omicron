@@ -12,7 +12,6 @@ use nexus_config::PostgresConfigWithUrl;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_types::deployment::SledFilter;
-use omicron_common::address::Ipv6Subnet;
 use slog::info;
 use slog::o;
 use std::ffi::OsStr;
@@ -69,6 +68,23 @@ impl LiveTestContext {
         &self.datastore
     }
 
+    /// Establish a new `DataStore` connection pointed at this deployed system's
+    /// database
+    ///
+    /// Most consumers should prefer `datastore()`, which returns a reference to
+    /// a `DataStore` constructed when this context was created. This method is
+    /// useful if a caller needs to reevaluate what Cockroach instances are
+    /// available in DNS (e.g., due to zone expungement) or needs a `DataStore`
+    /// instance that is not shared.
+    pub async fn new_datastore_connection(
+        &self,
+    ) -> anyhow::Result<(OpContext, Arc<DataStore>)> {
+        let log = &self.logctx.log;
+        let datastore = create_datastore(log, &self.resolver).await?;
+        let opctx = OpContext::for_tests(log.clone(), datastore.clone());
+        Ok((opctx, datastore))
+    }
+
     /// Returns a client for a Nexus internal API at the given socket address
     pub fn specific_internal_nexus_client(
         &self,
@@ -96,20 +112,14 @@ impl LiveTestContext {
 }
 
 fn create_resolver(log: &slog::Logger) -> Result<Resolver, anyhow::Error> {
-    // In principle, we should look at /etc/resolv.conf to find the DNS servers.
-    // In practice, this usually isn't populated today.  See
-    // oxidecomputer/omicron#2122.
-    //
-    // However, the address selected below should work for most existing Omicron
-    // deployments today.  That's because while the base subnet is in principle
-    // configurable in config-rss.toml, it's very uncommon to change it from the
-    // default value used here.
-    let subnet = Ipv6Subnet::new("fd00:1122:3344:0100::".parse().unwrap());
-    eprintln!("note: using DNS server for subnet {}", subnet.net());
-    internal_dns_resolver::Resolver::new_from_subnet(log.clone(), subnet)
-        .with_context(|| {
-            format!("creating DNS resolver for subnet {}", subnet.net())
-        })
+    // The internal DNS servers are populated in /etc/resolv.conf in the switch
+    // zone, which is where we expect live tests to run. Notify the user that
+    // we're going to attempt DNS resolution via the default system path.
+    eprintln!(
+        "note: using DNS from system config (typically /etc/resolv.conf)",
+    );
+    internal_dns_resolver::Resolver::new_from_system_conf(log.clone())
+        .context("creating DNS resolver from system config")
 }
 
 /// Creates a DataStore pointing at the CockroachDB cluster that's in DNS
@@ -213,7 +223,7 @@ async fn check_hardware_environment(
 ) -> Result<(), anyhow::Error> {
     const ALLOWED_GIMLET_SERIALS: &[&str] = &[
         // Serial number lists can be generated with:
-        // inventron env system list -Hpo serial -F type=gimlet <ENVIRONMENT>
+        // inventron env system list -Hpo serial -F type=cosmo -F type=gimlet <ENVIRONMENT>
 
         // test rig: "madrid"
         "BRM42220081",
@@ -222,11 +232,11 @@ async fn check_hardware_environment(
         "BRM42220004",
         // test rig: "london"
         "BRM42220036",
-        "BRM42220062",
+        "2CN2M459",
         "BRM42220030",
-        "BRM44220007",
+        "2RGCFG10",
         // test rig: "dublin"
-        "BRM42220026",
+        "2F8JEXDK",
         "BRM27230037",
         "BRM23230018",
         "BRM23230010",
@@ -234,7 +244,7 @@ async fn check_hardware_environment(
         "BRM42220011",
         "BRM44220007",
         "BRM42220082",
-        "BRM06240029",
+        "271FVPY0",
     ];
 
     // Refuse to operate in an environment that might contain real Oxide
