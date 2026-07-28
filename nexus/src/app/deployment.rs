@@ -336,6 +336,39 @@ impl super::Nexus {
                 //    bumping the minimum target release generation, and does a
                 //    no-op conversion to artifacts from the current target
                 //    release.
+                //
+                // An alternative implementation to handle the case of 2 would
+                // be to check: is the blueprint minimum target release
+                // generation ahead of the current target release generation AND
+                // is the operator attempting to recover to the same version
+                // that's already the target release. In a "correctly mupdated"
+                // system (i.e., one or more sleds have been mupdated to the
+                // same version as the rest of the rack, not during a live
+                // update), this should be equivalent to the check we do. It
+                // would behave differently in "incorrectly mupdated" cases,
+                // though. For example:
+                //
+                // 1. System is in the middle of a live update from release A to
+                //    release B.
+                // 2. A sled is mupdated to release B. (This is incorrect and
+                //    potentially wildly dangerous! But mupdates are an escape
+                //    hatch and we have no way of preventing it other than
+                //    documentation and processes.)
+                // 3. Reconfigurator notices the mupdate and bumps the minimum
+                //    target release generation, and pauses the update as a
+                //    result.
+                //
+                // If the operator attempts to use this endpoint to set the
+                // target release to B, what should we do? In the current
+                // implementation, we'll check all artifact versions in the
+                // blueprint, find some on A and some on B, and therefore reject
+                // the request. In the alternative implementation proposed
+                // above, we would allow the request, which would unpause the
+                // update. It seems safer to _reject_ the request, even though
+                // that leaves the update wedged without support intervention,
+                // because the system is in an illegal state that required
+                // support intervention in the first place (mupdating a single
+                // sled in the middle of a live update).
                 let current_version = self
                     .datastore()
                     .tuf_repo_get_version(&opctx, &tuf_repo_id)
