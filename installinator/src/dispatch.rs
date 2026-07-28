@@ -27,7 +27,7 @@ use tufaceous_artifact_v2::{
 };
 
 use crate::{
-    ArtifactWriter, MeasurementToWrite, WriteDestination, ZoneToWrite,
+    ArtifactToWrite, ArtifactWriter, WriteDestination,
     artifact::{ArtifactIdOpts, ArtifactLookupId},
     fetch::{FetchArtifactBackend, FetchedArtifact, HttpFetchBackend},
     peers::{DiscoveryMechanism, LastKnownPeer},
@@ -274,6 +274,31 @@ impl InstallOpts {
                         image but found {host_phase_2_count}"
                     );
 
+                    // We expect that measurement corpus and zone file names
+                    // are unique.
+                    let mut measurements = BTreeSet::new();
+                    let mut zones = BTreeSet::new();
+                    for artifact in &json.artifacts {
+                        match artifact.kind {
+                            InstallinatorArtifactKind::MeasurementCorpus => {
+                                ensure!(
+                                    measurements.insert(&artifact.file_name),
+                                    "measurement with file name {} seen twice",
+                                    artifact.file_name
+                                );
+                            }
+                            InstallinatorArtifactKind::Zone { .. } => {
+                                ensure!(
+                                    zones.insert(&artifact.file_name),
+                                    "zone with file name {} seen twice",
+                                    artifact.file_name
+                                );
+                            }
+                            InstallinatorArtifactKind::HostPhase2
+                            | InstallinatorArtifactKind::ControlPlane => {}
+                        }
+                    }
+
                     StepSuccess::new(json.artifacts).into()
                 },
             )
@@ -327,6 +352,7 @@ impl InstallOpts {
 
                     let mut host_phase_2 = None;
                     let mut zones = Vec::new();
+                    let mut zone_file_names = BTreeSet::new();
                     let mut measurement_corpus = Vec::new();
                     for (artifact, step) in
                         downloads.into_value(cx.token()).await
@@ -338,10 +364,10 @@ impl InstallOpts {
                                     kind: "measurement_corpus".into(),
                                     hash: artifact.hash,
                                 };
-                                measurement_corpus.push(MeasurementToWrite {
+                                measurement_corpus.push(ArtifactToWrite {
                                     id,
-                                    name: artifact.file_name,
-                                    artifact: data,
+                                    file_name: artifact.file_name,
+                                    data,
                                 });
                             }
                             InstallinatorArtifactKind::HostPhase2 => {
@@ -352,25 +378,46 @@ impl InstallOpts {
                                 host_phase_2 = Some((id, data));
                             }
                             InstallinatorArtifactKind::Zone { zone_name } => {
+                                // We already checked this against other zones
+                                // in the same Installinator document, but we
+                                // might have extracted a legacy control plane
+                                // tarball. (We can remove this check once that
+                                // branch is removed.)
+                                ensure!(
+                                    zone_file_names
+                                        .insert(artifact.file_name.clone()),
+                                    "zone with file name {} seen twice",
+                                    artifact.file_name
+                                );
                                 let id = MupdateOverrideHashId {
                                     kind: format!("zone-{zone_name}"),
                                     hash: artifact.hash,
                                 };
-                                zones.push(ZoneToWrite {
+                                zones.push(ArtifactToWrite {
                                     id,
                                     file_name: artifact.file_name,
                                     data,
                                 });
                             }
+                            // When this branch is removed, remove the duplicate
+                            // zone file name check in the `Zone` branch.
                             InstallinatorArtifactKind::ControlPlane => {
-                                zones.extend(
+                                for zone in
                                     read_legacy_control_plane_tarball(data)
                                         .await
                                         .context(
                                             "failed to read control \
                                             plane tarball",
-                                        )?,
-                                );
+                                        )?
+                                {
+                                    ensure!(
+                                        zone_file_names
+                                            .insert(zone.file_name.clone()),
+                                        "zone with file name {} seen twice",
+                                        artifact.file_name
+                                    );
+                                    zones.push(zone);
+                                }
                             }
                         }
                     }
@@ -670,7 +717,7 @@ pub(crate) fn stderr_env_drain(
 /// the transition.
 async fn read_legacy_control_plane_tarball(
     data: BufList,
-) -> Result<Vec<ZoneToWrite>> {
+) -> Result<Vec<ArtifactToWrite>> {
     // None of this is blocking I/O since it's copying and hashing memory, but
     // the tarball is large enough that we should probably do this on its own
     // worker thread.
@@ -700,7 +747,7 @@ async fn read_legacy_control_plane_tarball(
                 hasher.update(&buf[..n]);
             }
 
-            zones.push(ZoneToWrite {
+            zones.push(ArtifactToWrite {
                 id: MupdateOverrideHashId {
                     // We normally write the zone name as found in oxide.json
                     // but this string is for debugging and reading the inner

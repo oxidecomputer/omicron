@@ -14,7 +14,6 @@ use async_trait::async_trait;
 use buf_list::BufList;
 use bytes::Buf;
 use camino::{Utf8Path, Utf8PathBuf};
-use iddqd::IdOrdMap;
 use illumos_utils::zpool::{Zpool, ZpoolName};
 use installinator_common::{
     ControlPlaneZonesSpec, ControlPlaneZonesStepId, RawDiskWriter, StepContext,
@@ -39,7 +38,6 @@ use tokio::{
     fs,
     fs::File,
     io::{AsyncWrite, AsyncWriteExt},
-    task::JoinSet,
 };
 use tufaceous_artifact_v2::ArtifactHash;
 
@@ -229,8 +227,8 @@ impl<'a> ArtifactWriter<'a> {
         mupdate_id: MupdateUuid,
         host_phase_2_id: &'a MupdateOverrideHashId,
         host_phase_2_data: &'a BufList,
-        control_plane_zones: &'a [ZoneToWrite],
-        measurement_corpus: &'a [MeasurementToWrite],
+        control_plane_zones: &'a [ArtifactToWrite],
+        measurement_corpus: &'a [ArtifactToWrite],
         destination: WriteDestination,
     ) -> Self {
         let drives = destination
@@ -564,10 +562,10 @@ impl SlotWriteContext<'_> {
 struct ArtifactsToWrite<'a> {
     host_phase_2_id: &'a MupdateOverrideHashId,
     host_phase_2_data: &'a BufList,
-    control_plane_zones: &'a [ZoneToWrite],
+    control_plane_zones: &'a [ArtifactToWrite],
     mupdate_id: MupdateUuid,
     mupdate_override_uuid: MupdateOverrideUuid,
-    measurement_corpus: &'a [MeasurementToWrite],
+    measurement_corpus: &'a [ArtifactToWrite],
 }
 
 impl ArtifactsToWrite<'_> {
@@ -646,16 +644,21 @@ impl ArtifactsToWrite<'_> {
     }
 }
 
-pub(crate) struct ZoneToWrite {
+pub(crate) struct ArtifactToWrite {
     pub(crate) id: MupdateOverrideHashId,
     pub(crate) file_name: String,
     pub(crate) data: BufList,
 }
 
-pub(crate) struct MeasurementToWrite {
-    pub(crate) id: MupdateOverrideHashId,
-    pub(crate) name: String,
-    pub(crate) artifact: BufList,
+impl ArtifactToWrite {
+    fn to_install_metadata(&self) -> OmicronInstallMetadata {
+        let file_size: usize = self.data.num_bytes();
+        OmicronInstallMetadata::new_v2(
+            self.file_name.clone(),
+            u64::try_from(file_size).expect("usize fits in u64"),
+            self.id.hash,
+        )
+    }
 }
 
 struct ControlPlaneZoneWriteContext<'a> {
@@ -663,9 +666,9 @@ struct ControlPlaneZoneWriteContext<'a> {
     clean_output_directory: bool,
     output_directory: &'a Utf8Path,
     measurement_directory: &'a Utf8Path,
-    zones: &'a [ZoneToWrite],
+    zones: &'a [ArtifactToWrite],
     host_phase_2_id: &'a MupdateOverrideHashId,
-    measurement_corpus: &'a [MeasurementToWrite],
+    measurement_corpus: &'a [ArtifactToWrite],
     mupdate_id: MupdateUuid,
     mupdate_override_uuid: MupdateOverrideUuid,
 }
@@ -788,7 +791,7 @@ impl ControlPlaneZoneWriteContext<'_> {
             )
             .register();
 
-        for ZoneToWrite { file_name, data, .. } in self.zones {
+        for ArtifactToWrite { file_name, data, .. } in self.zones {
             let out_path = self.output_directory.join(file_name);
             transport = engine
                 .new_step(
@@ -866,7 +869,7 @@ impl ControlPlaneZoneWriteContext<'_> {
             .register();
 
         for data in self.measurement_corpus {
-            let name = data.name.clone();
+            let name = data.file_name.clone();
             let out_path = self.measurement_directory.join(&name);
             transport = engine
                 .new_step(
@@ -878,7 +881,7 @@ impl ControlPlaneZoneWriteContext<'_> {
                         write_artifact_impl(
                             WriteComponent::MeasurementCorpus,
                             slot,
-                            data.artifact.clone(),
+                            data.data.clone(),
                             &out_path,
                             transport,
                             &cx,
@@ -941,13 +944,18 @@ impl ControlPlaneZoneWriteContext<'_> {
     }
 
     async fn omicron_measurement_manifest_artifact(&self) -> BufList {
-        let files = compute_measurement_hashes(self.measurement_corpus).await;
-
         let omicron_zone_manifest = OmicronInstallManifest {
             source: OmicronInstallManifestSource::Installinator {
                 mupdate_id: self.mupdate_id,
             },
-            files,
+            // This is an `IdOrdMap` keyed on the file name. We already
+            // confirmed that all measurement artifacts have a unique file name
+            // when we read the Installinator document.
+            files: self
+                .measurement_corpus
+                .iter()
+                .map(ArtifactToWrite::to_install_metadata)
+                .collect(),
         };
         let json_bytes = serde_json::to_vec(&omicron_zone_manifest)
             .expect("this serialization is infallible");
@@ -955,101 +963,24 @@ impl ControlPlaneZoneWriteContext<'_> {
     }
 
     async fn omicron_zone_manifest_artifact(&self) -> BufList {
-        let files = compute_zone_hashes(&self.zones).await;
-
         let omicron_zone_manifest = OmicronInstallManifest {
             source: OmicronInstallManifestSource::Installinator {
                 mupdate_id: self.mupdate_id,
             },
-            files,
+            // This is an `IdOrdMap` keyed on the file name. We already
+            // confirmed that all zones have a unique file name when we read the
+            // Installinator document (or when we extracted the legacy control
+            // plane tarball).
+            files: self
+                .zones
+                .iter()
+                .map(ArtifactToWrite::to_install_metadata)
+                .collect(),
         };
         let json_bytes = serde_json::to_vec(&omicron_zone_manifest)
             .expect("this serialization is infallible");
         BufList::from(json_bytes)
     }
-}
-
-/// Computes the measurement hash IDs.
-///
-/// Hash computation is done in parallel on blocking tasks.
-///
-/// # Panics
-///
-/// Panics if the runtime shuts down causing a task abort, or a task panics.
-async fn compute_measurement_hashes(
-    images: &[MeasurementToWrite],
-) -> IdOrdMap<OmicronInstallMetadata> {
-    let mut tasks = JoinSet::new();
-    for m in images {
-        let file_name = m.name.clone();
-        let data: BufList = m.artifact.clone();
-        // Compute hashes in parallel.
-        tasks.spawn_blocking(move || {
-            let mut hasher = Sha256::new();
-            for d in &data {
-                hasher.update(&d);
-            }
-            let hash = hasher.finalize();
-            OmicronInstallMetadata::new_v2(
-                file_name,
-                u64::try_from(data.num_bytes()).unwrap(),
-                ArtifactHash(hash.into()),
-            )
-        });
-    }
-
-    let mut output = IdOrdMap::new();
-    while let Some(res) = tasks.join_next().await {
-        // Propagate panics across tasks—this is the standard pattern we follow
-        // in installinator.
-        output
-            .insert_unique(res.expect("task panicked"))
-            .expect("filenames are unique");
-    }
-    output
-}
-
-/// Computes the zone hash IDs.
-///
-/// Hash computation is done in parallel on blocking tasks.
-///
-/// # Panics
-///
-/// Panics if the runtime shuts down causing a task abort, or a task panics.
-async fn compute_zone_hashes(
-    images: &[ZoneToWrite],
-) -> IdOrdMap<OmicronInstallMetadata> {
-    let mut tasks = JoinSet::new();
-    for ZoneToWrite { file_name, data, .. } in images {
-        let file_name = file_name.clone();
-        // data is a BufList so is relatively cheap to clone.
-        let data: BufList = data.clone();
-        // Compute hashes in parallel.
-        tasks.spawn_blocking(move || {
-            let mut len = 0;
-            let mut hasher = Sha256::new();
-            for buf in data {
-                len += buf.len();
-                hasher.update(&buf);
-            }
-            let hash = hasher.finalize();
-            OmicronInstallMetadata::new_v2(
-                file_name,
-                u64::try_from(len).unwrap(),
-                ArtifactHash(hash.into()),
-            )
-        });
-    }
-
-    let mut output = IdOrdMap::new();
-    while let Some(res) = tasks.join_next().await {
-        // Propagate panics across tasks—this is the standard pattern we follow
-        // in installinator.
-        output
-            .insert_unique(res.expect("task panicked"))
-            .expect("filenames are unique");
-    }
-    output
 }
 
 fn remove_contents_of(path: &Utf8Path) -> io::Result<()> {
@@ -1461,7 +1392,7 @@ mod tests {
 
         // Assemble our one control plane artifact into a 1-long list of zone
         // images.
-        let control_plane_zone_images = vec![ZoneToWrite {
+        let control_plane_zone_images = vec![ArtifactToWrite {
             id: MupdateOverrideHashId {
                 kind: "zone".into(),
                 hash: ArtifactHash([0; 32]),
@@ -1473,13 +1404,13 @@ mod tests {
             data: artifact_control_plane.clone(),
         }];
 
-        let all_corpus = vec![MeasurementToWrite {
+        let all_corpus = vec![ArtifactToWrite {
             id: MupdateOverrideHashId {
                 kind: "measurement_corpus".into(),
                 hash: ArtifactHash([0; 32]),
             },
-            artifact: artifact_measurement_corpus,
-            name: "blah".to_string(),
+            file_name: "blah".to_string(),
+            data: artifact_measurement_corpus,
         }];
         let mut writer = ArtifactWriter::new(
             MupdateUuid::new_v4(),
