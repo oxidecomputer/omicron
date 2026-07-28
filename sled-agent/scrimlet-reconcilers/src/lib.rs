@@ -60,6 +60,8 @@ pub use handle::ScrimletReconcilers;
 pub use handle::ScrimletReconcilersMode;
 pub use handle::SledAgentNetworkingInfo;
 pub use lldpd_reconciler::LldpdReconcilerStatus;
+pub use mgd_reconciler::MgdBfdOperationFailure;
+pub use mgd_reconciler::MgdBfdReconcilerStatus;
 pub use mgd_reconciler::MgdBgpReconcilerStatus;
 pub use mgd_reconciler::MgdBgpReconcilerStatusOpCount;
 pub use mgd_reconciler::MgdReconcilerStatus;
