@@ -111,10 +111,11 @@ struct UpdateContactSupportChecksInput {
     // None when no target release has ever been set on the system.
     current_target_version: Option<Version>,
     internal_update_status: internal_views::UpdateStatus,
-    // Propolis IDs whose VMMs we expect to be offline (e.g. an instance that is
-    // being stopped). Enabled-but-not-online SMF services in these zones are
-    // filtered out.
-    expected_offline_propolis: BTreeSet<PropolisUuid>,
+    // Propolis IDs whose VMMs are NOT expected to be offline — i.e. their
+    // enabled-but-not-online SMF service is a genuine problem worth reporting.
+    // Any propolis zone not in this set is filtered out of the results (its VMM
+    // is expected to be offline, e.g. an instance that is being stopped).
+    unexpected_offline_propolis: BTreeSet<PropolisUuid>,
 }
 
 impl UpdateContactSupportChecksInput {
@@ -178,49 +179,19 @@ impl UpdateContactSupportChecksInput {
 
         // Drop propolis zones whose VMMs are expected to be offline from the
         // per-sled lists.
-        let unexpected_enabled_smf_services_not_online_by_sled =
-            self.inventory
-                .enabled_smf_services_not_online()
-                .into_iter()
-                // TODO-K: Clean up. This is impossible to read
-                .filter_map(|(sled, svcs)| {
-                    let svcs = match svcs {
-                        SvcsEnabledNotOnlineResult::SvcsEnabledNotOnline(
-                            not_online,
-                        ) => {
-                            let services: Vec<_> = not_online
-                                .services
-                                .iter()
-                                .filter(|svc| {
-                                    !propolis_id_from_zone(&svc.zone)
-                                        .is_some_and(|id| {
-                                            self.expected_offline_propolis
-                                                .contains(&id)
-                                        })
-                                })
-                                .cloned()
-                                .collect();
-
-                            if services.is_empty() {
-                                return None;
-                            }
-
-                            SvcsEnabledNotOnlineResult::SvcsEnabledNotOnline(
-                                SvcsEnabledNotOnline {
-                                    services,
-                                    errors: not_online.errors.clone(),
-                                    time_of_status: not_online.time_of_status,
-                                },
-                            )
-                        }
-                        // Command errors and unavailable data aren't
-                        // propolis-specific, so they're always retained.
-                        other => other.clone(),
-                    };
-
-                    Some((sled, svcs))
-                })
-                .collect();
+        let mut unexpected_enabled_smf_services_not_online_by_sled =
+            BTreeMap::new();
+        // TODO-K: This could be nicer
+        for (sled, svcs_result) in
+            self.inventory.enabled_smf_services_not_online()
+        {
+            if let Some(retained) =
+                self.retain_unexpected_enabled_not_online_svcs(svcs_result)
+            {
+                unexpected_enabled_smf_services_not_online_by_sled
+                    .insert(sled, retained);
+            }
+        }
 
         UpdateStatusProblems {
             stuck_sagas,
@@ -230,6 +201,60 @@ impl UpdateContactSupportChecksInput {
             unhealthy_zpools_by_sled,
             unexpected_enabled_smf_services_not_online_by_sled,
             missing_sleds,
+        }
+    }
+
+    /// Drop expected-offline propolis services from one sled's result,
+    /// returning `None` if nothing unexpected remains on that sled.
+    fn retain_unexpected_enabled_not_online_svcs(
+        &self,
+        // TODO-K: Can I avoid taking the result?
+        svcs_result: &SvcsEnabledNotOnlineResult,
+        // TODO-K: I think I can avoid this Option
+    ) -> Option<SvcsEnabledNotOnlineResult> {
+        let enabled_not_online = match svcs_result {
+            SvcsEnabledNotOnlineResult::SvcsEnabledNotOnline(svcs) => svcs,
+            // Command errors and unavailable data aren't propolis-specific, so
+            // they're always retained.
+            SvcsEnabledNotOnlineResult::DataUnavailable
+            | SvcsEnabledNotOnlineResult::SvcsCmdError(_) => {
+                return Some(svcs_result.clone());
+            }
+        };
+
+        let SvcsEnabledNotOnline { services, errors, time_of_status } =
+            enabled_not_online;
+
+        let services: Vec<_> = services
+            .iter()
+            .filter(|svc| {
+                // Whether the service in `zone` is an unexpected enabled not
+                // online service. It either doesn't live in a propolis zone,
+                // or lives in a propolis zone whose VMM we did not expect to be
+                // offline.
+                propolis_id_from_zone(&svc.zone).is_none_or(|id| {
+                    self.unexpected_offline_propolis.contains(&id)
+                })
+            })
+            .cloned()
+            .collect();
+
+        // TODO-K: Leave this for now to keep the test passing. Double check
+        // behaviour below based on notes on enabled_smf_services_not_online
+        // regarding how we report services
+        if services.is_empty() {
+            None
+        } else {
+            // We always return some because even if there are no services left,
+            // there may be errors, and we want to know the time the sample was
+            // taken.
+            Some(SvcsEnabledNotOnlineResult::SvcsEnabledNotOnline(
+                SvcsEnabledNotOnline {
+                    services,
+                    errors: errors.to_vec(),
+                    time_of_status: *time_of_status,
+                },
+            ))
         }
     }
 }
@@ -698,7 +723,7 @@ impl super::Nexus {
         //
         // Gather the propolis zones that currently appear in the
         // enabled-not-online lists, then look up each VMM's state concurrently
-        // and collect the ones we expect to be offline.
+        // and collect the ones we did not expect to be offline.
         // TODO-K: Clean up. This is impossible to read
         let candidate_propolis: Vec<PropolisUuid> = inventory
             .enabled_smf_services_not_online()
@@ -727,11 +752,15 @@ impl super::Nexus {
         // to do for an ObjectNotFound. Just omit it?
         //
         // TODO-K: Clean this up
-        let expected_offline_propolis = futures::future::try_join_all(
+        let unexpected_offline_propolis = futures::future::try_join_all(
             candidate_propolis.into_iter().map(|propolis_id| async move {
-                self.is_propolis_expected_offline(opctx, propolis_id)
+                self.is_propolis_unexpected_offline(opctx, propolis_id)
                     .await
-                    .map(|expected| expected.then_some(propolis_id))
+                    .map(
+                        |unexpected| {
+                            if unexpected { Some(propolis_id) } else { None }
+                        },
+                    )
             }),
         )
         .await?
@@ -752,7 +781,7 @@ impl super::Nexus {
             blueprint,
             current_target_version: current_target_version.cloned(),
             internal_update_status,
-            expected_offline_propolis,
+            unexpected_offline_propolis,
         };
 
         let problems = checks.problems();
@@ -770,7 +799,7 @@ impl super::Nexus {
     }
 
     /// Determine whether the given VMM is expected to be offline.
-    async fn is_propolis_expected_offline(
+    async fn is_propolis_unexpected_offline(
         &self,
         opctx: &OpContext,
         propolis_id: PropolisUuid,
@@ -781,18 +810,18 @@ impl super::Nexus {
                 VmmState::Stopping
                 | VmmState::Stopped
                 | VmmState::Destroyed
-                | VmmState::SagaUnwound => true,
+                | VmmState::SagaUnwound => false,
                 VmmState::Creating
                 | VmmState::Failed
                 | VmmState::Migrating
                 | VmmState::Rebooting
                 | VmmState::Running
-                | VmmState::Starting => false,
+                | VmmState::Starting => true,
             }),
             // This shouldn't happen, but the VMM record could already have been
             // reaped while its zone is still lingering for some reason. Treat
             // its offline propolis service as expected to be offline.
-            Err(Error::ObjectNotFound { .. }) => Ok(true),
+            Err(Error::ObjectNotFound { .. }) => Ok(false),
             Err(e) => Err(e),
         }
     }
@@ -1895,7 +1924,7 @@ mod test {
             blueprint,
             current_target_version: Some(fake_target_version()),
             internal_update_status: empty_internal_update_status(),
-            expected_offline_propolis: BTreeSet::new(),
+            unexpected_offline_propolis: BTreeSet::new(),
         };
         assert_eq!(checks.problems(), UpdateStatusProblems::default());
 
@@ -1925,7 +1954,7 @@ mod test {
             blueprint,
             current_target_version: Some(fake_target_version()),
             internal_update_status: empty_internal_update_status(),
-            expected_offline_propolis: BTreeSet::new(),
+            unexpected_offline_propolis: BTreeSet::new(),
         };
 
         let expected = UpdateStatusProblems {
@@ -1959,7 +1988,7 @@ mod test {
             blueprint,
             current_target_version: Some(fake_target_version()),
             internal_update_status: empty_internal_update_status(),
-            expected_offline_propolis: BTreeSet::new(),
+            unexpected_offline_propolis: BTreeSet::new(),
         };
 
         let expected = UpdateStatusProblems {
@@ -1993,7 +2022,7 @@ mod test {
             blueprint,
             current_target_version: Some(fake_target_version()),
             internal_update_status: empty_internal_update_status(),
-            expected_offline_propolis: BTreeSet::new(),
+            unexpected_offline_propolis: BTreeSet::new(),
         };
 
         let expected = UpdateStatusProblems {
@@ -2029,7 +2058,7 @@ mod test {
             blueprint,
             current_target_version: Some(fake_target_version()),
             internal_update_status: empty_internal_update_status(),
-            expected_offline_propolis: BTreeSet::new(),
+            unexpected_offline_propolis: BTreeSet::new(),
         };
         assert_eq!(checks.problems(), UpdateStatusProblems::default());
 
@@ -2060,7 +2089,7 @@ mod test {
             blueprint,
             current_target_version: Some(fake_target_version()),
             internal_update_status: empty_internal_update_status(),
-            expected_offline_propolis: BTreeSet::new(),
+            unexpected_offline_propolis: BTreeSet::new(),
         };
 
         let expected = UpdateStatusProblems {
@@ -2098,7 +2127,7 @@ mod test {
             blueprint,
             current_target_version: Some(fake_target_version()),
             internal_update_status: empty_internal_update_status(),
-            expected_offline_propolis: BTreeSet::new(),
+            unexpected_offline_propolis: BTreeSet::new(),
         };
 
         let expected_zpool = Zpool {
@@ -2142,7 +2171,7 @@ mod test {
             blueprint,
             current_target_version: Some(fake_target_version()),
             internal_update_status: empty_internal_update_status(),
-            expected_offline_propolis: BTreeSet::new(),
+            unexpected_offline_propolis: BTreeSet::new(),
         };
 
         let expected = UpdateStatusProblems {
@@ -2157,54 +2186,9 @@ mod test {
     }
 
     #[test]
-    fn test_problems_expected_offline_propolis_omits_sled() {
-        let logctx = test_setup_log(
-            "test_problems_expected_offline_propolis_omits_sled",
-        );
-        let blueprint = fake_blueprint(
-            &logctx.log,
-            &fake_target_version(),
-            Utc::now(),
-            false,
-        );
-        let sled_id = sled_id();
-
-        let propolis_id =
-            PropolisUuid::from_untyped_uuid(Uuid::from_u128(0xDDDD));
-        let services = SvcsEnabledNotOnlineResult::SvcsEnabledNotOnline(
-            SvcsEnabledNotOnline {
-                services: vec![SvcEnabledNotOnline {
-                    fmri: "svc:/system/illumos/propolis-server:default"
-                        .to_string(),
-                    zone: format!("{PROPOLIS_ZONE_PREFIX}{propolis_id}"),
-                    state: SvcEnabledNotOnlineState::Offline,
-                }],
-                errors: vec![],
-                time_of_status: Utc::now(),
-            },
-        );
-        let collection =
-            fake_collection_with_ids(sled_id, healthy_zpools(), services);
-
-        let checks = UpdateContactSupportChecksInput {
-            inventory: Arc::new(collection),
-            stuck_sagas: Ok(vec![]),
-            blueprint,
-            current_target_version: Some(fake_target_version()),
-            internal_update_status: empty_internal_update_status(),
-            expected_offline_propolis: BTreeSet::from([propolis_id]),
-        };
-
-        assert_eq!(checks.problems(), UpdateStatusProblems::default());
-
-        logctx.cleanup_successful();
-    }
-
-    #[test]
-    fn test_problems_expected_offline_propolis_retains_others() {
-        let logctx = test_setup_log(
-            "test_problems_expected_offline_propolis_retains_others",
-        );
+    fn test_problems_unexpected_propolis_is_reported() {
+        let logctx =
+            test_setup_log("test_problems_unexpected_propolis_is_reported");
         let blueprint = fake_blueprint(
             &logctx.log,
             &fake_target_version(),
@@ -2216,11 +2200,6 @@ mod test {
         let propolis_id =
             PropolisUuid::from_untyped_uuid(Uuid::from_u128(0xDDDD));
         let time_of_status = Utc::now();
-        let non_propolis_service = SvcEnabledNotOnline {
-            fmri: "svc:/system/test:default".to_string(),
-            zone: "global".to_string(),
-            state: SvcEnabledNotOnlineState::Maintenance,
-        };
         let services = SvcsEnabledNotOnlineResult::SvcsEnabledNotOnline(
             SvcsEnabledNotOnline {
                 services: vec![
@@ -2230,7 +2209,89 @@ mod test {
                         zone: format!("{PROPOLIS_ZONE_PREFIX}{propolis_id}"),
                         state: SvcEnabledNotOnlineState::Offline,
                     },
-                    non_propolis_service.clone(),
+                    // A non-propolis service, which is always reported.
+                    SvcEnabledNotOnline {
+                        fmri: "svc:/system/test:default".to_string(),
+                        zone: "global".to_string(),
+                        state: SvcEnabledNotOnlineState::Maintenance,
+                    },
+                ],
+                errors: vec![],
+                time_of_status,
+            },
+        );
+        let collection = fake_collection_with_ids(
+            sled_id,
+            healthy_zpools(),
+            services.clone(),
+        );
+
+        let checks = UpdateContactSupportChecksInput {
+            inventory: Arc::new(collection),
+            stuck_sagas: Ok(vec![]),
+            blueprint,
+            current_target_version: Some(fake_target_version()),
+            internal_update_status: empty_internal_update_status(),
+            // The propolis VMM was not expected to be offline, so its service
+            // is a genuine problem worth reporting.
+            unexpected_offline_propolis: BTreeSet::from([propolis_id]),
+        };
+
+        // Both services are kept, unchanged.
+        let expected = UpdateStatusProblems {
+            unexpected_enabled_smf_services_not_online_by_sled: BTreeMap::from(
+                [(sled_id, services)],
+            ),
+            ..Default::default()
+        };
+        assert_eq!(checks.problems(), expected);
+
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn test_problems_only_unexpected_propolis_retained() {
+        let logctx =
+            test_setup_log("test_problems_only_unexpected_propolis_retained");
+        let blueprint = fake_blueprint(
+            &logctx.log,
+            &fake_target_version(),
+            Utc::now(),
+            false,
+        );
+        let sled_id = sled_id();
+
+        let unexpected_propolis_id =
+            PropolisUuid::from_untyped_uuid(Uuid::from_u128(0xDDDD));
+        let expected_propolis_id =
+            PropolisUuid::from_untyped_uuid(Uuid::from_u128(0xEEEE));
+        let time_of_status = Utc::now();
+
+        let unexpected_propolis_svc = SvcEnabledNotOnline {
+            fmri: "svc:/system/illumos/propolis-server:default".to_string(),
+            zone: format!("{PROPOLIS_ZONE_PREFIX}{unexpected_propolis_id}"),
+            state: SvcEnabledNotOnlineState::Offline,
+        };
+        let non_propolis_svc = SvcEnabledNotOnline {
+            fmri: "svc:/system/test:default".to_string(),
+            zone: "global".to_string(),
+            state: SvcEnabledNotOnlineState::Maintenance,
+        };
+        let services = SvcsEnabledNotOnlineResult::SvcsEnabledNotOnline(
+            SvcsEnabledNotOnline {
+                services: vec![
+                    unexpected_propolis_svc.clone(),
+                    // Expected to be offline, so this service will not count as a
+                    // problem
+                    SvcEnabledNotOnline {
+                        fmri: "svc:/system/illumos/propolis-server:default"
+                            .to_string(),
+                        zone: format!(
+                            "{PROPOLIS_ZONE_PREFIX}{expected_propolis_id}"
+                        ),
+                        state: SvcEnabledNotOnlineState::Offline,
+                    },
+                    non_propolis_svc.clone(),
                 ],
                 errors: vec![],
                 time_of_status,
@@ -2245,7 +2306,11 @@ mod test {
             blueprint,
             current_target_version: Some(fake_target_version()),
             internal_update_status: empty_internal_update_status(),
-            expected_offline_propolis: BTreeSet::from([propolis_id]),
+            // Only the first propolis VMM was unexpected; the second is
+            // expected to be offline and should be dropped.
+            unexpected_offline_propolis: BTreeSet::from([
+                unexpected_propolis_id,
+            ]),
         };
 
         let expected = UpdateStatusProblems {
@@ -2254,7 +2319,12 @@ mod test {
                     sled_id,
                     SvcsEnabledNotOnlineResult::SvcsEnabledNotOnline(
                         SvcsEnabledNotOnline {
-                            services: vec![non_propolis_service],
+                            // Only the unexpected enabled-not-online propolis
+                            // service and the non-propolis service are kept
+                            services: vec![
+                                unexpected_propolis_svc,
+                                non_propolis_svc,
+                            ],
                             errors: vec![],
                             time_of_status,
                         },
@@ -2297,7 +2367,7 @@ mod test {
             blueprint,
             current_target_version: Some(fake_target_version()),
             internal_update_status: empty_internal_update_status(),
-            expected_offline_propolis: BTreeSet::new(),
+            unexpected_offline_propolis: BTreeSet::new(),
         };
 
         let expected_zpool = Zpool {
@@ -2359,7 +2429,7 @@ mod test {
                 [missing_sled_id],
                 [sled_id],
             ),
-            expected_offline_propolis: BTreeSet::new(),
+            unexpected_offline_propolis: BTreeSet::new(),
         };
 
         let expected_zpool = Zpool {
@@ -2418,7 +2488,7 @@ mod test {
                 [missing_sled_id],
                 [healthy_sled_id],
             ),
-            expected_offline_propolis: BTreeSet::new(),
+            unexpected_offline_propolis: BTreeSet::new(),
         };
 
         let expected = UpdateStatusProblems {

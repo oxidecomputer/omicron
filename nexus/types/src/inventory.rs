@@ -324,6 +324,9 @@ impl Collection {
             .filter_map(|sled_agent| {
                 match &sled_agent.smf_services_enabled_not_online {
                     SvcsEnabledNotOnlineResult::SvcsEnabledNotOnline(svcs)
+                    // TODO-K: Double check if this is the behaviour we want.
+                    // Looks like we're not including sleds that return with errors
+                    // in the result (These would be parsing errors)
                         if svcs.services.is_empty() =>
                     {
                         None
