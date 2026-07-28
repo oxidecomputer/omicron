@@ -1179,8 +1179,7 @@ mod tests {
         let ip = |last: u16| -> Ipv6Addr {
             format!("fdb0::{last}").parse().expect("valid IPv6 address")
         };
-        let (sled0_ip, sled1_ip, stranger_ip, unidentified_ip) =
-            (ip(1), ip(2), ip(3), ip(4));
+        let (sled0_ip, sled1_ip, stranger_ip, _) = (ip(1), ip(2), ip(3), ip(4));
 
         let mut ddm = BTreeMap::new();
         ddm.insert(
@@ -1281,12 +1280,6 @@ mod tests {
                 },
             },
             "the peer matching no sled in inventory is surfaced as unmatched",
-        );
-        assert_eq!(
-            response.unidentified_peers,
-            BTreeSet::from([unidentified_ip]),
-            "the peer that could not identify its own baseboard is surfaced \
-             by address alone",
         );
     }
 

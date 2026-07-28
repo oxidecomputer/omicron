@@ -57,8 +57,8 @@ impl WicketdTestContext {
             mgs_address,
             nexus_proxy_address: LOCALHOST_PORT_0,
             baseboard_id: BaseboardId {
-                serial_number: "test".to_string(),
-                part_number: "test".to_string(),
+                serial_number: "SimGimlet01".to_string(),
+                part_number: "i86pc".to_string(),
             },
             rack_subnet: None,
         };

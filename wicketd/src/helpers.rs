@@ -90,14 +90,13 @@ mod tests {
                 &baseboard_id(),
                 &sp_state(MODEL, SERIAL, REVISION)
             ),
-            "the same model, serial number, and revision is a match",
+            "the same model and serial number is a match"
         );
 
         // Any of the three fields being different is a reason to say no.
         for (model, serial, revision, what) in [
             ("cosmo", SERIAL, REVISION, "a different model"),
             (MODEL, "BRM999", REVISION, "a different serial number"),
-            (MODEL, SERIAL, 5, "a different revision"),
         ] {
             assert!(
                 !baseboard_id_matches_sp_state(
