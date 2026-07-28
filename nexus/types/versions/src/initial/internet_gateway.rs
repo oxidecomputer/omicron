@@ -91,7 +91,9 @@ pub struct DeleteInternetGatewayElementSelector {
     pub vpc: Option<NameOrId>,
     /// Name or ID of the internet gateway
     pub gateway: Option<NameOrId>,
-    /// Also delete routes targeting this gateway element.
+    /// Detach attached IP pools/addresses and delete any routes targeting
+    /// this gateway. Without `cascade`, delete fails if the gateway has any IP
+    /// pools or IP addresses attached.
     #[serde(default)]
     pub cascade: bool,
 }
