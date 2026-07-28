@@ -1209,7 +1209,7 @@ impl BackgroundTasksInitializer {
                 ),
             ),
             opctx: opctx.child(BTreeMap::new()),
-            watchers: vec![Box::new(sitrep_watcher.clone())],
+            watchers: vec![],
             activator: task_fm_sitrep_history_pruner,
         });
 
