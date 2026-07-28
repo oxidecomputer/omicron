@@ -498,7 +498,6 @@ impl Nexus {
             ))
         };
 
-<<<<<<< HEAD
         // The webhook delivery HTTP client will send requests to endpoints
         // external to the rack, so apply the configuration for external
         // HTTP clients.
@@ -512,23 +511,6 @@ impl Nexus {
                 InlineErrorChain::new(&e)
             )
         })?;
-=======
-        let webhook_delivery_client = {
-            // The webhook delivery HTTP client will send requests to endpoints
-            // external to the rack, so apply the configuration for external
-            // HTTP clients.
-            let builder = external_client::external_http_client_builder(
-                &config.deployment.external_http_clients,
-                &external_resolver,
-            );
-            webhook::delivery_client(builder).map_err(|e| {
-                format!(
-                    "failed to build webhook delivery client: {}",
-                    InlineErrorChain::new(&e)
-                )
-            })?
-        };
->>>>>>> 942542e28 (so it actually turns out this is complicated (WIP))
 
         let mut mgs_resolver =
             qorb_resolver.for_service(ServiceName::ManagementGatewayService);
