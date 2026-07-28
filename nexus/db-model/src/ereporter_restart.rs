@@ -18,11 +18,27 @@ use omicron_uuid_kinds::RackUuid;
 #[diesel(table_name = ereporter_restart)]
 pub struct EreporterRestart {
     pub id: DbTypedUuid<EreporterRestartKind>,
+    /// The timestamp at which the first ereport received from this restart ID
+    /// was collected.
+    ///
+    /// This is set when inserting a tranche of ereports with a restart ID that
+    /// does not already exist in the database. If ereports with an *earlier*
+    /// time_collected timestamp are inserted, this timestamp may be adjusted
+    /// backwards in time to reflect that the restart ID was encountered earlier
+    /// than we believe it to have been.
     pub time_first_seen: DateTime<Utc>,
     pub reporter: EreporterType,
     pub slot_type: SpType,
     pub slot: Option<SpMgsSlot>,
     pub rack_id: DbTypedUuid<RackKind>,
+    /// The time at which the most recently received ereport from this restart
+    /// ID was collected.
+    ///
+    /// As new ereports are inserted into the database, this field is updated to
+    /// the collection time of those ereports, if their collection time is more
+    /// recent than the current value. This value will only ever move forwards
+    /// in time as new ereports are collected.
+    pub time_latest_ereport_received: DateTime<Utc>,
 }
 
 impl EreporterRestart {

@@ -15,10 +15,10 @@ nexus-switch-config.workspace = true
 nexus-db-model.workspace = true
 nexus-db-queries.workspace = true
 omicron-common.workspace = true
+omicron-uuid-kinds.workspace = true
 omicron-workspace-hack.workspace = true
 oxnet.workspace = true
 # See omicron-rpaths for more about the "pq-sys" dependency.
 pq-sys = "*"
 sled-agent-types.workspace = true
 slog.workspace = true
-uuid.workspace = true

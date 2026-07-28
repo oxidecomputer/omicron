@@ -39,7 +39,7 @@ use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::blueprint_zone_type;
 use nexus_types::external_api::sled::SledState;
 use omicron_common::address::Ipv6Subnet;
-use omicron_common::address::SLED_PREFIX;
+use omicron_common::address::SLED_PREFIX_LENGTH;
 use omicron_common::api::external::Generation;
 use omicron_common::disk::DatasetKind;
 use omicron_common::disk::M2Slot;
@@ -225,7 +225,7 @@ impl SledEditor {
         })
     }
 
-    pub fn for_new_active(subnet: Ipv6Subnet<SLED_PREFIX>) -> Self {
+    pub fn for_new_active(subnet: Ipv6Subnet<SLED_PREFIX_LENGTH>) -> Self {
         Self {
             underlay_ip_allocator: SledUnderlayIpAllocator::new(
                 subnet,
@@ -332,7 +332,7 @@ impl SledEditor {
         }
     }
 
-    pub fn subnet(&self) -> Ipv6Subnet<SLED_PREFIX> {
+    pub fn subnet(&self) -> Ipv6Subnet<SLED_PREFIX_LENGTH> {
         self.underlay_ip_allocator.subnet()
     }
 

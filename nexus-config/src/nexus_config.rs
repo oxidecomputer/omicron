@@ -11,12 +11,13 @@ use dropshot::ConfigDropshot;
 use dropshot::ConfigLogging;
 use nexus_types::deployment::ReconfiguratorConfig;
 use omicron_common::address::Ipv6Subnet;
-pub use omicron_common::address::MAX_VPC_IPV4_SUBNET_PREFIX;
-pub use omicron_common::address::MIN_VPC_IPV4_SUBNET_PREFIX;
+pub use omicron_common::address::MAX_VPC_IPV4_SUBNET_PREFIX_LENGTH;
+pub use omicron_common::address::MIN_VPC_IPV4_SUBNET_PREFIX_LENGTH;
 use omicron_common::address::NEXUS_TECHPORT_EXTERNAL_PORT;
 pub use omicron_common::address::NUM_INITIAL_RESERVED_IP_ADDRESSES;
-use omicron_common::address::RACK_PREFIX;
+use omicron_common::address::RACK_PREFIX_LENGTH;
 use omicron_uuid_kinds::OmicronZoneUuid;
+use omicron_uuid_kinds::RackUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_with::DisplayFromStr;
@@ -29,7 +30,6 @@ use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::num::NonZeroU32;
 use std::time::Duration;
-use uuid::Uuid;
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct NexusConfig {
@@ -142,7 +142,7 @@ pub enum InternalDns {
     /// Nexus should infer the DNS server addresses from this subnet.
     ///
     /// This is a more common usage for production.
-    FromSubnet { subnet: Ipv6Subnet<RACK_PREFIX> },
+    FromSubnet { subnet: Ipv6Subnet<RACK_PREFIX_LENGTH> },
     /// Nexus should use precisely the following address.
     ///
     /// This is less desirable in production, but can give value
@@ -155,7 +155,7 @@ pub struct DeploymentConfig {
     /// Uuid of the Nexus instance
     pub id: OmicronZoneUuid,
     /// Uuid of the Rack where Nexus is executing.
-    pub rack_id: Uuid,
+    pub rack_id: RackUuid,
     /// Port on which the "techport external" dropshot server should listen.
     /// This dropshot server copies _most_ of its config from
     /// `dropshot_external` (so that it matches TLS, etc.), but builds its
@@ -329,7 +329,8 @@ impl Tunables {
                 as u8,
             )
             .expect("Invalid absolute maximum IPv4 subnet prefix");
-        if prefix >= MIN_VPC_IPV4_SUBNET_PREFIX && prefix <= absolute_max {
+        if prefix >= MIN_VPC_IPV4_SUBNET_PREFIX_LENGTH && prefix <= absolute_max
+        {
             Ok(())
         } else {
             Err(InvalidTunable {
@@ -346,7 +347,7 @@ impl Tunables {
 impl Default for Tunables {
     fn default() -> Self {
         Tunables {
-            max_vpc_ipv4_subnet_prefix: MAX_VPC_IPV4_SUBNET_PREFIX,
+            max_vpc_ipv4_subnet_prefix: MAX_VPC_IPV4_SUBNET_PREFIX_LENGTH,
             load_timeout: None,
         }
     }
@@ -1138,7 +1139,7 @@ mod test {
     use nexus_types::deployment::PlannerConfig;
     use nexus_types::deployment::ReconfiguratorDisruptionPolicy;
     use omicron_common::address::{
-        CLICKHOUSE_TCP_PORT, Ipv6Subnet, RACK_PREFIX,
+        CLICKHOUSE_TCP_PORT, Ipv6Subnet, RACK_PREFIX_LENGTH,
     };
 
     use camino::{Utf8Path, Utf8PathBuf};
@@ -1392,7 +1393,7 @@ mod test {
                         ..Default::default()
                     },
                     internal_dns: InternalDns::FromSubnet {
-                        subnet: Ipv6Subnet::<RACK_PREFIX>::new(
+                        subnet: Ipv6Subnet::<RACK_PREFIX_LENGTH>::new(
                             Ipv6Addr::LOCALHOST
                         )
                     },

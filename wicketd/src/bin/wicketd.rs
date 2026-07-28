@@ -31,6 +31,11 @@ enum Args {
         #[clap(long, action)]
         artifact_address: SocketAddrV6,
 
+        /// The address (expected to be on localhost) for the stable
+        /// commissioning API server
+        #[clap(long, action)]
+        commission_address: SocketAddrV6,
+
         /// The address (expected to be on localhost) for MGS
         #[clap(long, action)]
         mgs_address: SocketAddrV6,
@@ -91,6 +96,7 @@ async fn do_run() -> Result<(), CmdError> {
             config_file_path,
             address,
             artifact_address,
+            commission_address,
             mgs_address,
             nexus_proxy_address,
             baseboard_part,
@@ -121,6 +127,7 @@ async fn do_run() -> Result<(), CmdError> {
             let args = wicketd::Args {
                 address,
                 artifact_address,
+                commission_address,
                 mgs_address,
                 nexus_proxy_address,
                 baseboard_id,

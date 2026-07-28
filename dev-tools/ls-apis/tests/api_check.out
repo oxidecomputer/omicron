@@ -20,6 +20,7 @@ Server-managed APIs:
     Propolis (propolis-client, exposed by propolis-server)
     Sled Agent (sled-agent-client, exposed by omicron-sled-agent)
     Wicketd (wicketd-client, exposed by wicketd)
+    Wicketd Commission (wicketd-commission-client, exposed by wicketd)
 
 
 Client-managed API:
@@ -33,9 +34,6 @@ Client-managed API:
     Nexus Internal Lockstep API (nexus-lockstep-client, exposed by omicron-nexus)
         reason: Circular dependencies between Nexus and other services
     NTP Admin (ntp-admin-client, exposed by omicron-ntp-admin)
-        reason: Sled Agent (within the Host OS deployment unit) calls into NTP, and is updated before NTP. This requires that the NTP Admin API be client-side versioned.
-
-    NTP Admin version 1 (ntp-admin-v1-client, exposed by omicron-ntp-admin)
         reason: Sled Agent (within the Host OS deployment unit) calls into NTP, and is updated before NTP. This requires that the NTP Admin API be client-side versioned.
 
     Crucible Repair (repair-client, exposed by crucible-downstairs)

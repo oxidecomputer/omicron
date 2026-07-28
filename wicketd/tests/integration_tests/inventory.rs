@@ -122,7 +122,7 @@ async fn test_inventory() {
             response,
             vec![
                 BootstrapSledDescription {
-                    id: SpIdentifier { type_: SpType::Sled, slot: 0 },
+                    id: SpIdentifier { typ: SpType::Sled, slot: 0 },
                     baseboard_id: BaseboardId {
                         serial_number: "SimGimlet00".to_string(),
                         part_number: "i86pc".to_string(),
@@ -130,7 +130,7 @@ async fn test_inventory() {
                     bootstrap_ip: None
                 },
                 BootstrapSledDescription {
-                    id: SpIdentifier { type_: SpType::Sled, slot: 1 },
+                    id: SpIdentifier { typ: SpType::Sled, slot: 1 },
                     baseboard_id: BaseboardId {
                         serial_number: "SimGimlet01".to_string(),
                         part_number: "i86pc".to_string(),

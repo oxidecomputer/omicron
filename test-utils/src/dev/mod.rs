@@ -13,6 +13,7 @@ pub mod maghemite;
 pub mod poll;
 #[cfg(feature = "seed-gen")]
 pub mod seed;
+pub mod tcp_proxy;
 pub mod test_cmds;
 
 use anyhow::{Context, Result};

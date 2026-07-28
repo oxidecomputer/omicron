@@ -4,8 +4,6 @@
 
 //! Client methods for running OxQL queries against the timeseries database.
 
-// Copyright 2024 Oxide Computer Company
-
 use super::Handle;
 use crate::Error;
 use crate::Metric;

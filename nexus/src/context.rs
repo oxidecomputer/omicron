@@ -21,9 +21,10 @@ use nexus_db_queries::authn::ConsoleSessionWithSiloId;
 use nexus_db_queries::authn::external::session_cookie::SessionStore;
 use nexus_db_queries::context::{OpContext, OpKind};
 use nexus_db_queries::{authn, authz, db};
-use omicron_common::address::{AZ_PREFIX, Ipv6Subnet};
+use omicron_common::address::{AZ_PREFIX_LENGTH, Ipv6Subnet};
 use omicron_uuid_kinds::ConsoleSessionUuid;
 use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::SiloUserUuid;
 use oximeter::types::ProducerRegistry;
 use oximeter_instruments::http::{HttpService, LatencyTracker};
@@ -65,7 +66,7 @@ impl ApiContext {
     /// Create a new context with a rack ID and logger. This creates the
     /// underlying `Nexus` as well.
     pub async fn for_internal(
-        rack_id: Uuid,
+        rack_id: RackUuid,
         log: Logger,
         config: &NexusConfig,
     ) -> Result<Self, String> {
@@ -131,7 +132,7 @@ impl ServerContext {
     /// Create a new context with the given rack id and log.  This creates the
     /// underlying nexus as well.
     pub async fn new(
-        rack_id: Uuid,
+        rack_id: RackUuid,
         log: Logger,
         config: &NexusConfig,
     ) -> Result<Arc<ServerContext>, String> {
@@ -230,7 +231,7 @@ impl ServerContext {
         let (resolver, qorb_resolver) = match config.deployment.internal_dns {
             nexus_config::InternalDns::FromSubnet { subnet } => {
                 let az_subnet =
-                    Ipv6Subnet::<AZ_PREFIX>::new(subnet.net().addr());
+                    Ipv6Subnet::<AZ_PREFIX_LENGTH>::new(subnet.net().addr());
                 info!(
                     log,
                     "Setting up resolver using DNS servers for subnet: {:?}",

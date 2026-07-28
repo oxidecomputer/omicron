@@ -47,7 +47,9 @@ use illumos_utils::zpool::ZpoolOrRamdisk;
 use internal_dns_resolver::Resolver;
 use itertools::Itertools as _;
 use omicron_common::address::BOOTSTRAP_AGENT_RACK_INIT_PORT;
-use omicron_common::address::{Ipv6Subnet, SLED_PREFIX, get_sled_address};
+use omicron_common::address::{
+    Ipv6Subnet, SLED_PREFIX_LENGTH, get_sled_address,
+};
 use omicron_common::api::external::{ByteCount, ByteCountRangeError, Vni};
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::shared::DelegatedZvol;
@@ -381,7 +383,7 @@ struct SledAgentInner {
     // Subnet of the Sled's underlay.
     //
     // The Sled Agent's address can be derived from this value.
-    subnet: Ipv6Subnet<SLED_PREFIX>,
+    subnet: Ipv6Subnet<SLED_PREFIX_LENGTH>,
 
     // The request that was used to start the sled-agent
     // This is used for idempotence checks during RSS/Add-Sled internal APIs
@@ -718,7 +720,7 @@ impl SledAgent {
                     ThisSledSwitchZoneUnderlayIpAddr::from_sled_agent_request(
                         &request,
                     ),
-                rack_id: request.body.rack_id.into_untyped_uuid(),
+                rack_id: request.body.rack_id,
                 network_config_rx,
                 metrics_queue: metrics_manager.request_queue(),
             })
@@ -1906,7 +1908,10 @@ impl SledAgentFacilities for ReconcilerFacilities {
         }
     }
 
-    fn ddm_remove_internal_dns_prefix(&self, prefix: Ipv6Subnet<SLED_PREFIX>) {
+    fn ddm_remove_internal_dns_prefix(
+        &self,
+        prefix: Ipv6Subnet<SLED_PREFIX_LENGTH>,
+    ) {
         self.service_manager
             .ddm_reconciler()
             .remove_internal_dns_subnet(prefix);

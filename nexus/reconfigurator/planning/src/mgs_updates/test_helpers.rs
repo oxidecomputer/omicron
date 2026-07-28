@@ -6,8 +6,8 @@
 
 use chrono::Utc;
 use gateway_client::types::SpComponentCaboose;
-use gateway_client::types::SpIdentifier;
 use gateway_types::component::PowerState;
+use gateway_types::component::SpIdentifier;
 use gateway_types::component::SpState;
 use gateway_types::rot::RotSlot;
 use gateway_types::rot::RotState;
@@ -252,7 +252,7 @@ impl TestBoards {
                 let slot = slot as u16;
                 boards
                     .insert_unique(TestBoard {
-                        id: SpIdentifier { type_, slot },
+                        id: SpIdentifier { typ: type_, slot },
                         sled_id: SledUuid::new_v4(),
                         serial,
                         sp_board,
@@ -268,7 +268,7 @@ impl TestBoards {
     /// Get the sled ID of a particular sled by SP slot number.
     pub fn sled_id(&self, sp_slot: u16) -> Option<SledUuid> {
         self.boards.iter().find_map(|b| {
-            (b.id.type_ == SpType::Sled && b.id.slot == sp_slot)
+            (b.id.typ == SpType::Sled && b.id.slot == sp_slot)
                 .then_some(b.sled_id)
         })
     }
@@ -565,7 +565,7 @@ impl TestBoards {
             let sled_type = board_to_sled(&board.sp_board);
             updates
                 .insert_unique(ExpectedUpdate {
-                    sp_type: board.id.type_,
+                    sp_type: board.id.typ,
                     sp_slot: board.id.slot,
                     component: MgsUpdateComponent::Sp,
                     expected_serial: board.serial,
@@ -574,12 +574,12 @@ impl TestBoards {
                 .expect("boards are unique");
             updates
                 .insert_unique(ExpectedUpdate {
-                    sp_type: board.id.type_,
+                    sp_type: board.id.typ,
                     sp_slot: board.id.slot,
                     component: MgsUpdateComponent::Rot,
                     expected_serial: board.serial,
                     expected_artifact: test_artifact_for_artifact_kind(
-                        match board.id.type_ {
+                        match board.id.typ {
                             SpType::Sled => ArtifactKind::GIMLET_ROT_IMAGE_B,
                             SpType::Power => ArtifactKind::PSC_ROT_IMAGE_B,
                             SpType::Switch => ArtifactKind::SWITCH_ROT_IMAGE_B,
@@ -590,12 +590,12 @@ impl TestBoards {
                 .expect("boards are unique");
             updates
                 .insert_unique(ExpectedUpdate {
-                    sp_type: board.id.type_,
+                    sp_type: board.id.typ,
                     sp_slot: board.id.slot,
                     component: MgsUpdateComponent::RotBootloader,
                     expected_serial: board.serial,
                     expected_artifact: test_artifact_for_artifact_kind(
-                        match board.id.type_ {
+                        match board.id.typ {
                             SpType::Sled => ArtifactKind::GIMLET_ROT_STAGE0,
                             SpType::Power => ArtifactKind::PSC_ROT_STAGE0,
                             SpType::Switch => ArtifactKind::SWITCH_ROT_STAGE0,
@@ -605,10 +605,10 @@ impl TestBoards {
                 })
                 .expect("boards are unique");
 
-            if board.id.type_ == SpType::Sled {
+            if board.id.typ == SpType::Sled {
                 updates
                     .insert_unique(ExpectedUpdate {
-                        sp_type: board.id.type_,
+                        sp_type: board.id.typ,
                         sp_slot: board.id.slot,
                         component: MgsUpdateComponent::HostOs,
                         expected_serial: board.serial,
@@ -910,7 +910,7 @@ impl<'a> TestBoardCollectionBuilder<'a> {
         v: ArtifactVersion,
     ) -> Self {
         self.sp_active_version_exceptions
-            .insert(SpIdentifier { type_, slot }, v);
+            .insert(SpIdentifier { typ: type_, slot }, v);
         self
     }
 
@@ -920,7 +920,7 @@ impl<'a> TestBoardCollectionBuilder<'a> {
         slot: u16,
     ) -> bool {
         self.sp_active_version_exceptions
-            .contains_key(&SpIdentifier { type_, slot })
+            .contains_key(&SpIdentifier { typ: type_, slot })
     }
 
     pub fn rot_versions(
@@ -940,7 +940,7 @@ impl<'a> TestBoardCollectionBuilder<'a> {
         v: ArtifactVersion,
     ) -> Self {
         self.rot_active_version_exceptions
-            .insert(SpIdentifier { type_, slot }, v);
+            .insert(SpIdentifier { typ: type_, slot }, v);
         self
     }
 
@@ -951,7 +951,7 @@ impl<'a> TestBoardCollectionBuilder<'a> {
         s: RotSlot,
     ) -> Self {
         self.rot_active_slot_exceptions
-            .insert(SpIdentifier { type_, slot: sp_slot }, s);
+            .insert(SpIdentifier { typ: type_, slot: sp_slot }, s);
         self
     }
 
@@ -962,7 +962,7 @@ impl<'a> TestBoardCollectionBuilder<'a> {
         s: RotSlot,
     ) -> Self {
         self.rot_persistent_boot_preference_exceptions
-            .insert(SpIdentifier { type_, slot: sp_slot }, s);
+            .insert(SpIdentifier { typ: type_, slot: sp_slot }, s);
         self
     }
 
@@ -972,7 +972,7 @@ impl<'a> TestBoardCollectionBuilder<'a> {
         slot: u16,
     ) -> bool {
         self.rot_active_version_exceptions
-            .contains_key(&SpIdentifier { type_, slot })
+            .contains_key(&SpIdentifier { typ: type_, slot })
     }
 
     pub fn stage0_versions(
@@ -991,7 +991,8 @@ impl<'a> TestBoardCollectionBuilder<'a> {
         slot: u16,
         v: ArtifactVersion,
     ) -> Self {
-        self.stage0_version_exceptions.insert(SpIdentifier { type_, slot }, v);
+        self.stage0_version_exceptions
+            .insert(SpIdentifier { typ: type_, slot }, v);
         self
     }
 
@@ -1001,7 +1002,7 @@ impl<'a> TestBoardCollectionBuilder<'a> {
         slot: u16,
     ) -> bool {
         self.stage0_version_exceptions
-            .contains_key(&SpIdentifier { type_, slot })
+            .contains_key(&SpIdentifier { typ: type_, slot })
     }
 
     pub fn gimlet_host_phase_1_artifacts(
@@ -1099,7 +1100,7 @@ impl<'a> TestBoardCollectionBuilder<'a> {
 
             let sp_state = SpState {
                 // We assume a valid model ID for sleds
-                model: match sp_id.type_ {
+                model: match sp_id.typ {
                     SpType::Sled => {
                         // The RKTH is expected to be different between
                         // Cosmo and Gimlet so we can use that here.
@@ -1109,7 +1110,7 @@ impl<'a> TestBoardCollectionBuilder<'a> {
                             GIMLET_SLED_MODEL.to_string()
                         }
                     }
-                    _ => format!("dummy_{}", sp_id.type_),
+                    _ => format!("dummy_{}", sp_id.typ),
                 },
                 serial_number: serial.to_string(),
                 ..dummy_sp_state.clone()
@@ -1118,12 +1119,7 @@ impl<'a> TestBoardCollectionBuilder<'a> {
             let sled_model = OxideSled::try_from_model(&sp_state.model);
 
             let baseboard_id = builder
-                .found_sp_state(
-                    "test",
-                    sp_id.type_,
-                    sp_id.slot,
-                    sp_state.clone(),
-                )
+                .found_sp_state("test", sp_id.typ, sp_id.slot, sp_state.clone())
                 .unwrap();
             let sp_active_version = self
                 .sp_active_version_exceptions
@@ -1246,7 +1242,7 @@ impl<'a> TestBoardCollectionBuilder<'a> {
                     .unwrap();
             }
 
-            if board.id.type_ == SpType::Sled {
+            if board.id.typ == SpType::Sled {
                 let phase_1_active_artifact = self
                     .host_exceptions
                     .get(&board.id.slot)

@@ -4,8 +4,6 @@
 
 //! Query plans for the Oximeter Query Language.
 
-// Copyright 2024 Oxide Computer Company
-
 mod align;
 mod delta;
 mod filter;

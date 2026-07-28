@@ -58,7 +58,7 @@ use internal_dns_resolver::Resolver;
 use internal_dns_types::names::BOUNDARY_NTP_DNS_NAME;
 use internal_dns_types::names::DNS_ZONE;
 use nexus_config::{ConfigDropshotWithTls, DeploymentConfig};
-use omicron_common::address::AZ_PREFIX;
+use omicron_common::address::AZ_PREFIX_LENGTH;
 use omicron_common::address::BOOTSTRAP_AGENT_LOCKSTEP_PORT;
 use omicron_common::address::ConcreteIp;
 use omicron_common::address::DENDRITE_PORT;
@@ -66,9 +66,10 @@ use omicron_common::address::LLDP_PORT;
 use omicron_common::address::MAX_PORT;
 use omicron_common::address::MGS_PORT;
 use omicron_common::address::NTP_ADMIN_PORT;
-use omicron_common::address::RACK_PREFIX;
-use omicron_common::address::SLED_PREFIX;
+use omicron_common::address::RACK_PREFIX_LENGTH;
+use omicron_common::address::SLED_PREFIX_LENGTH;
 use omicron_common::address::TFPORTD_PORT;
+use omicron_common::address::WICKETD_COMMISSION_PORT;
 use omicron_common::address::WICKETD_NEXUS_PROXY_PORT;
 use omicron_common::address::WICKETD_PORT;
 use omicron_common::address::{BOOTSTRAP_ARTIFACT_PORT, COCKROACH_ADMIN_PORT};
@@ -85,6 +86,7 @@ use omicron_common::backoff::{
 use omicron_common::disk::{DatasetKind, DatasetName};
 use omicron_ddm_admin_client::DdmError;
 use omicron_uuid_kinds::OmicronZoneUuid;
+use omicron_uuid_kinds::RackUuid;
 use sled_agent_early_networking::{EarlyNetworkSetup, EarlyNetworkSetupError};
 use sled_agent_resolvable_files::{
     ZoneImageSourceResolver, ramdisk_file_source,
@@ -633,7 +635,7 @@ pub(crate) struct SledAgentInfo {
     pub(crate) resolver: Resolver,
     pub(crate) underlay_address: Ipv6Addr,
     pub(crate) local_switch_zone_ip: ThisSledSwitchZoneUnderlayIpAddr,
-    pub(crate) rack_id: Uuid,
+    pub(crate) rack_id: RackUuid,
     pub(crate) network_config_rx: watch::Receiver<SystemNetworkingConfig>,
     pub(crate) metrics_queue: MetricsRequestQueue,
 }
@@ -960,7 +962,7 @@ impl ServiceManager {
     // Derive two unique techport /64 prefixes from the bootstrap address.
     fn bootstrap_addr_to_techport_prefixes(
         addr: &Ipv6Addr,
-    ) -> [Ipv6Subnet<SLED_PREFIX>; 2] {
+    ) -> [Ipv6Subnet<SLED_PREFIX_LENGTH>; 2] {
         // Generate two unique prefixes from the bootstrap address, by
         // incrementing the second octet. This assumes that the bootstrap
         // address starts with `fdb0`, and so we end up with `fdb1` and `fdb2`.
@@ -2105,10 +2107,11 @@ impl ServiceManager {
                     &[*address.ip()],
                 )?;
 
-                let rack_net =
-                    Ipv6Subnet::<RACK_PREFIX>::new(info.underlay_address)
-                        .net()
-                        .to_string();
+                let rack_net = Ipv6Subnet::<RACK_PREFIX_LENGTH>::new(
+                    info.underlay_address,
+                )
+                .net()
+                .to_string();
 
                 let dns_install_service = Self::dns_install(
                     info,
@@ -2201,10 +2204,11 @@ impl ServiceManager {
                     &[*address.ip()],
                 )?;
 
-                let rack_net =
-                    Ipv6Subnet::<RACK_PREFIX>::new(info.underlay_address)
-                        .net()
-                        .to_string();
+                let rack_net = Ipv6Subnet::<RACK_PREFIX_LENGTH>::new(
+                    info.underlay_address,
+                )
+                .net()
+                .to_string();
 
                 let dns_install_service = Self::dns_install(info, None, None)?;
 
@@ -2445,7 +2449,7 @@ impl ServiceManager {
                         compression: dropshot::CompressionConfig::None,
                     },
                     internal_dns: nexus_config::InternalDns::FromSubnet {
-                        subnet: Ipv6Subnet::<RACK_PREFIX>::new(
+                        subnet: Ipv6Subnet::<RACK_PREFIX_LENGTH>::new(
                             info.underlay_address,
                         ),
                     },
@@ -2686,6 +2690,11 @@ impl ServiceManager {
                         &format!("[::1]:{WICKETD_PORT}"),
                     )
                     .add_property(
+                        "commission-address",
+                        "astring",
+                        &format!("[::1]:{WICKETD_COMMISSION_PORT}"),
+                    )
+                    .add_property(
                         "artifact-address",
                         "astring",
                         &format!(
@@ -2728,8 +2737,9 @@ impl ServiceManager {
                     );
 
                     if let Some(i) = info {
-                        let rack_subnet =
-                            Ipv6Subnet::<AZ_PREFIX>::new(i.underlay_address);
+                        let rack_subnet = Ipv6Subnet::<AZ_PREFIX_LENGTH>::new(
+                            i.underlay_address,
+                        );
 
                         wicketd_config = wicketd_config.add_property(
                             "rack-subnet",
@@ -2761,7 +2771,7 @@ impl ServiceManager {
                         );
                         if *address != Ipv6Addr::LOCALHOST {
                             let az_prefix =
-                                Ipv6Subnet::<AZ_PREFIX>::new(*address);
+                                Ipv6Subnet::<AZ_PREFIX_LENGTH>::new(*address);
                             for addr in Resolver::servers_from_subnet(az_prefix)
                             {
                                 dendrite_config = dendrite_config.add_property(
@@ -3033,7 +3043,7 @@ impl ServiceManager {
                     for address in addresses {
                         if *address != Ipv6Addr::LOCALHOST {
                             let az_prefix =
-                                Ipv6Subnet::<AZ_PREFIX>::new(*address);
+                                Ipv6Subnet::<AZ_PREFIX_LENGTH>::new(*address);
                             for addr in Resolver::servers_from_subnet(az_prefix)
                             {
                                 mgd_config = mgd_config.add_property(
@@ -3075,7 +3085,7 @@ impl ServiceManager {
                     for address in addresses {
                         if *address != Ipv6Addr::LOCALHOST {
                             let az_prefix =
-                                Ipv6Subnet::<AZ_PREFIX>::new(*address);
+                                Ipv6Subnet::<AZ_PREFIX_LENGTH>::new(*address);
                             for addr in Resolver::servers_from_subnet(az_prefix)
                             {
                                 mg_ddm_config = mg_ddm_config.add_property(
@@ -3807,7 +3817,9 @@ impl ServiceManager {
                                 )?;
                                 if *address != Ipv6Addr::LOCALHOST {
                                     let az_prefix =
-                                        Ipv6Subnet::<AZ_PREFIX>::new(*address);
+                                        Ipv6Subnet::<AZ_PREFIX_LENGTH>::new(
+                                            *address,
+                                        );
                                     for addr in
                                         Resolver::servers_from_subnet(az_prefix)
                                     {
@@ -3828,7 +3840,9 @@ impl ServiceManager {
                         SwitchService::Wicketd { .. } => {
                             if let Some(&address) = first_address {
                                 let rack_subnet =
-                                    Ipv6Subnet::<AZ_PREFIX>::new(address);
+                                    Ipv6Subnet::<AZ_PREFIX_LENGTH>::new(
+                                        address,
+                                    );
 
                                 info!(
                                     self.inner.log, "configuring wicketd";
@@ -3941,7 +3955,9 @@ impl ServiceManager {
                             for address in &request.addresses {
                                 if *address != Ipv6Addr::LOCALHOST {
                                     let az_prefix =
-                                        Ipv6Subnet::<AZ_PREFIX>::new(*address);
+                                        Ipv6Subnet::<AZ_PREFIX_LENGTH>::new(
+                                            *address,
+                                        );
                                     for addr in
                                         Resolver::servers_from_subnet(az_prefix)
                                     {
@@ -3988,7 +4004,9 @@ impl ServiceManager {
                             for address in &request.addresses {
                                 if *address != Ipv6Addr::LOCALHOST {
                                     let az_prefix =
-                                        Ipv6Subnet::<AZ_PREFIX>::new(*address);
+                                        Ipv6Subnet::<AZ_PREFIX_LENGTH>::new(
+                                            *address,
+                                        );
                                     for addr in
                                         Resolver::servers_from_subnet(az_prefix)
                                     {

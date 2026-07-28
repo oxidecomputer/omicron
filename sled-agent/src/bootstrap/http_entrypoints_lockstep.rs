@@ -97,9 +97,7 @@ impl BootstrapAgentLockstepApi for BootstrapAgentLockstepImpl {
         let ctx = rqctx.context();
         let request = body.into_inner();
         let params = RackInitializeRequestParams::new(request, SKIP_TIMESYNC);
-        let id = ctx
-            .start_rack_initialize(params)
-            .map_err(|err| HttpError::for_bad_request(None, err.to_string()))?;
+        let id = ctx.start_rack_initialize(params).map_err(HttpError::from)?;
         Ok(HttpResponseOk(id))
     }
 

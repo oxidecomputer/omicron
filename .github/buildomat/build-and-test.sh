@@ -9,6 +9,14 @@ set -o pipefail
 set -o xtrace
 
 #
+# Set up a custom temporary directory within whatever one we were given so that
+# we can check later whether we left detritus around.
+#
+TEST_TMPDIR='/var/tmp/omicron_tmp'
+echo "tests will store ephemeral output in $TEST_TMPDIR" >&2
+mkdir "$TEST_TMPDIR"
+
+#
 # Set up our PATH for the test suite.
 #
 
@@ -28,13 +36,6 @@ cargo --version
 rustc --version
 curl -sSfL --retry 10 https://get.nexte.st/"$NEXTEST_VERSION"/"$1" | gunzip | tar -xvf - -C ~/.cargo/bin
 
-#
-# Set up a custom temporary directory within whatever one we were given so that
-# we can check later whether we left detritus around.
-#
-TEST_TMPDIR='/var/tmp/omicron_tmp'
-echo "tests will store ephemeral output in $TEST_TMPDIR" >&2
-mkdir "$TEST_TMPDIR"
 
 OUTPUT_DIR='/work'
 echo "tests will store non-ephemeral output in $OUTPUT_DIR" >&2

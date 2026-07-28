@@ -1723,8 +1723,8 @@ mod test {
     use nexus_reconfigurator_blippy::{Blippy, BlippyReportSortKey};
     use omicron_common::{
         address::{
-            AZ_PREFIX, IpRange, Ipv6Subnet, RACK_PREFIX, SLED_PREFIX,
-            get_sled_address,
+            AZ_PREFIX_LENGTH, IpRange, Ipv6Subnet, RACK_PREFIX_LENGTH,
+            SLED_PREFIX_LENGTH, get_sled_address,
         },
         api::external::{AllowedSourceIps, ByteCount, Generation},
         disk::{DiskIdentity, DiskVariant},
@@ -1749,12 +1749,12 @@ mod test {
             .join("../../smf/sled-agent/non-gimlet/config-rss.toml");
         let contents = std::fs::read_to_string(&path).unwrap();
         toml::from_str(&contents)
-            .unwrap_or_else(|e| panic!("failed to parse {:?}: {}", &path, e))
+            .unwrap_or_else(|e| panic!("failed to parse {:?}: {}", path, e))
     }
 
     fn make_sled_info(
         sled_id: SledUuid,
-        subnet: Ipv6Subnet<SLED_PREFIX>,
+        subnet: Ipv6Subnet<SLED_PREFIX_LENGTH>,
         u2_count: usize,
     ) -> SledInfo {
         let sled_agent_address = get_sled_address(subnet);
@@ -1810,21 +1810,21 @@ mod test {
         vec![
             make_sled_info(
                 SledUuid::new_v4(),
-                Ipv6Subnet::<SLED_PREFIX>::new(
+                Ipv6Subnet::<SLED_PREFIX_LENGTH>::new(
                     "fd00:1122:3344:101::1".parse().unwrap(),
                 ),
                 5,
             ),
             make_sled_info(
                 SledUuid::new_v4(),
-                Ipv6Subnet::<SLED_PREFIX>::new(
+                Ipv6Subnet::<SLED_PREFIX_LENGTH>::new(
                     "fd00:1122:3344:102::1".parse().unwrap(),
                 ),
                 5,
             ),
             make_sled_info(
                 SledUuid::new_v4(),
-                Ipv6Subnet::<SLED_PREFIX>::new(
+                Ipv6Subnet::<SLED_PREFIX_LENGTH>::new(
                     "fd00:1122:3344:103::1".parse().unwrap(),
                 ),
                 5,
@@ -1993,13 +1993,13 @@ mod test {
             manifest.join("../../smf/sled-agent/non-gimlet/config-rss.toml");
         let contents = std::fs::read_to_string(&path).unwrap();
         let _: RackInitializeRequest = toml::from_str(&contents)
-            .unwrap_or_else(|e| panic!("failed to parse {:?}: {}", &path, e));
+            .unwrap_or_else(|e| panic!("failed to parse {:?}: {}", path, e));
 
         let path = manifest
             .join("../../smf/sled-agent/gimlet-standalone/config-rss.toml");
         let contents = std::fs::read_to_string(&path).unwrap();
         let _: RackInitializeRequest = toml::from_str(&contents)
-            .unwrap_or_else(|e| panic!("failed to parse {:?}: {}", &path, e));
+            .unwrap_or_else(|e| panic!("failed to parse {:?}: {}", path, e));
     }
 
     #[test]
@@ -2055,7 +2055,7 @@ mod test {
             rack_network_config: RackNetworkConfig {
                 rack_subnet: Ipv6Net::new(
                     "fd00:1122:3344:0100::".parse().unwrap(),
-                    RACK_PREFIX,
+                    RACK_PREFIX_LENGTH,
                 )
                 .unwrap(),
                 infra_ip_first: IpAddr::V4(Ipv4Addr::LOCALHOST),
@@ -2074,7 +2074,7 @@ mod test {
         };
 
         assert_eq!(
-            omicron_common::address::Ipv6Subnet::<AZ_PREFIX>::new(
+            omicron_common::address::Ipv6Subnet::<AZ_PREFIX_LENGTH>::new(
                 //              Masked out in AZ Subnet
                 //              vv
                 "fd00:1122:3344:0000::".parse::<Ipv6Addr>().unwrap(),
@@ -2082,7 +2082,7 @@ mod test {
             cfg.az_subnet()
         );
         assert_eq!(
-            omicron_common::address::Ipv6Subnet::<RACK_PREFIX>::new(
+            omicron_common::address::Ipv6Subnet::<RACK_PREFIX_LENGTH>::new(
                 //              Shows up from Rack Subnet
                 //              vv
                 "fd00:1122:3344:0100::".parse::<Ipv6Addr>().unwrap(),
@@ -2090,7 +2090,7 @@ mod test {
             cfg.rack_subnet()
         );
         assert_eq!(
-            omicron_common::address::Ipv6Subnet::<SLED_PREFIX>::new(
+            omicron_common::address::Ipv6Subnet::<SLED_PREFIX_LENGTH>::new(
                 //                0th Sled Subnet
                 //                vv
                 "fd00:1122:3344:0100::".parse::<Ipv6Addr>().unwrap(),
@@ -2098,7 +2098,7 @@ mod test {
             cfg.sled_subnet(0)
         );
         assert_eq!(
-            omicron_common::address::Ipv6Subnet::<SLED_PREFIX>::new(
+            omicron_common::address::Ipv6Subnet::<SLED_PREFIX_LENGTH>::new(
                 //                1st Sled Subnet
                 //                vv
                 "fd00:1122:3344:0101::".parse::<Ipv6Addr>().unwrap(),
@@ -2106,7 +2106,7 @@ mod test {
             cfg.sled_subnet(1)
         );
         assert_eq!(
-            omicron_common::address::Ipv6Subnet::<SLED_PREFIX>::new(
+            omicron_common::address::Ipv6Subnet::<SLED_PREFIX_LENGTH>::new(
                 //                Last Sled Subnet
                 //                vv
                 "fd00:1122:3344:01ff::".parse::<Ipv6Addr>().unwrap(),
@@ -2124,7 +2124,7 @@ mod test {
             rack_initialize_request_from_file(&path).unwrap_or_else(|e| {
                 panic!(
                     "failed to parse {:?}: {}",
-                    &path,
+                    path,
                     InlineErrorChain::new(&e)
                 )
             });
@@ -2154,7 +2154,7 @@ mod test {
         let cfg_path = tempdir.path().join("config-rss.toml");
         let _ = std::fs::copy(&path, &cfg_path)
             .with_context(|| {
-                format!("failed to copy file {:?} to {:?}", &path, &cfg_path)
+                format!("failed to copy file {:?} to {:?}", path, cfg_path)
             })
             .unwrap();
 
@@ -2165,14 +2165,14 @@ mod test {
             .into_bytes();
         let cert_path = tempdir.path().join("initial-tls-cert.pem");
         std::fs::write(&cert_path, &cert_bytes)
-            .with_context(|| format!("failed to write to {:?}", &cert_path))
+            .with_context(|| format!("failed to write to {:?}", cert_path))
             .unwrap();
 
         // Write the private key.
         let key_path = tempdir.path().join("initial-tls-key.pem");
         let key_bytes = cert.serialize_private_key_pem().into_bytes();
         std::fs::write(&key_path, &key_bytes)
-            .with_context(|| format!("failed to write to {:?}", &key_path))
+            .with_context(|| format!("failed to write to {:?}", key_path))
             .unwrap();
 
         // Now try to load it all.

@@ -949,7 +949,25 @@ pub trait SledAgentApi {
     // (i.e., faithfully serialize the _old_ format into the bootstore). The
     // latest version does _not_ use the `latest::*` type alias to be a gentle
     // stumbling block toward this comment.
+    //
+    // This pattern opens the door for the opposite problem, too: what if we
+    // forget to add a new `write_network_bootstore_config_v*` endpoint when
+    // adding a new `WriteNetworkConfigRequest` type? `sled-agent-client` uses a
+    // `replace` directive pointed to `latest`, which will silently do the wrong
+    // thing: it will allow calling the most recent
+    // `write_network_bootstore_config_v*` endpoint defined here even though
+    // these types explicitly do not use the `latest` alias. To guard against
+    // this, the `static_assert_latest_write_network_config_type()` function
+    // below contains a compile-time check that the `latest` alias matches a
+    // specific version: when adding a new `write_network_bootstore_config_v*`
+    // endpoint, also update this assertion.
     // -------------------------------------------------------------------------
+    fn static_assert_latest_write_network_config_type() {
+        static_assertions::assert_type_eq_all!(
+            v42::system_networking::WriteNetworkConfigRequest,
+            latest::system_networking::WriteNetworkConfigRequest
+        );
+    }
 
     // As described above, this must not forward to newer versions; sled-agent
     // must implement this by faithfully serializing the requested version.

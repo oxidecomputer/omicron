@@ -23,6 +23,7 @@ nexus-config.workspace = true
 omicron-common.workspace = true
 oxide-tokio-rt.workspace = true
 pem.workspace = true
+port-file.workspace = true
 regex.workspace = true
 rustls.workspace = true
 slog.workspace = true

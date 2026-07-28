@@ -4,8 +4,6 @@
 
 //! Shared helpers for OxQL benchmarks.
 
-// Copyright 2026 Oxide Computer Company
-
 use criterion::measurement::WallTime;
 use criterion::{BenchmarkGroup, BenchmarkId};
 use oximeter_db::Client;

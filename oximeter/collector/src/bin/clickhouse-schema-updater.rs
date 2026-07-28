@@ -4,8 +4,6 @@
 
 //! CLI tool to apply offline updates to ClickHouse schema.
 
-// Copyright 2023 Oxide Computer Company
-
 use anyhow::Context;
 use anyhow::anyhow;
 use camino::Utf8PathBuf;

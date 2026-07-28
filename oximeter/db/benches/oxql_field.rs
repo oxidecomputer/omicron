@@ -6,8 +6,6 @@
 //!
 //! Tests multiple timeseries with varying numbers of field types.
 
-// Copyright 2026 Oxide Computer Company
-
 mod common;
 
 use common::{bench_metric, bench_oxql_query, get_client, get_socket_addr};

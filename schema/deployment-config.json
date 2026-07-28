@@ -53,8 +53,11 @@
     },
     "rack_id": {
       "description": "Uuid of the Rack where Nexus is executing.",
-      "type": "string",
-      "format": "uuid"
+      "allOf": [
+        {
+          "$ref": "#/definitions/RackUuid"
+        }
+      ]
     }
   },
   "definitions": {
@@ -182,6 +185,15 @@
       "x-rust-type": {
         "crate": "omicron-uuid-kinds",
         "path": "omicron_uuid_kinds::OmicronZoneUuid",
+        "version": "*"
+      }
+    },
+    "RackUuid": {
+      "type": "string",
+      "format": "uuid",
+      "x-rust-type": {
+        "crate": "omicron-uuid-kinds",
+        "path": "omicron_uuid_kinds::RackUuid",
         "version": "*"
       }
     }

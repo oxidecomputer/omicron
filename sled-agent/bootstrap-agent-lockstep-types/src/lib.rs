@@ -12,11 +12,11 @@
 use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
 use iddqd::id_upcast;
-use omicron_common::address::AZ_PREFIX;
+use omicron_common::address::AZ_PREFIX_LENGTH;
 use omicron_common::address::IpRange;
 use omicron_common::address::Ipv6Subnet;
-use omicron_common::address::RACK_PREFIX;
-use omicron_common::address::SLED_PREFIX;
+use omicron_common::address::RACK_PREFIX_LENGTH;
+use omicron_common::address::SLED_PREFIX_LENGTH;
 use omicron_common::address::get_64_subnet;
 use omicron_common::api::external::AllowedSourceIps;
 use omicron_common::api::external::Name;
@@ -134,21 +134,21 @@ impl std::fmt::Debug for RackInitializeRequest {
 }
 
 impl RackInitializeRequest {
-    pub fn az_subnet(&self) -> Ipv6Subnet<AZ_PREFIX> {
-        Ipv6Subnet::<AZ_PREFIX>::new(
+    pub fn az_subnet(&self) -> Ipv6Subnet<AZ_PREFIX_LENGTH> {
+        Ipv6Subnet::<AZ_PREFIX_LENGTH>::new(
             self.rack_network_config.rack_subnet.addr(),
         )
     }
 
     /// Returns the subnet for our rack.
-    pub fn rack_subnet(&self) -> Ipv6Subnet<RACK_PREFIX> {
-        Ipv6Subnet::<RACK_PREFIX>::new(
+    pub fn rack_subnet(&self) -> Ipv6Subnet<RACK_PREFIX_LENGTH> {
+        Ipv6Subnet::<RACK_PREFIX_LENGTH>::new(
             self.rack_network_config.rack_subnet.addr(),
         )
     }
 
     /// Returns the subnet for the `index`-th sled in the rack.
-    pub fn sled_subnet(&self, index: u8) -> Ipv6Subnet<SLED_PREFIX> {
+    pub fn sled_subnet(&self, index: u8) -> Ipv6Subnet<SLED_PREFIX_LENGTH> {
         get_64_subnet(self.rack_subnet(), index)
     }
 }
@@ -254,7 +254,9 @@ pub struct RecoverySiloConfig {
 
 /// Current status of any rack-level operation being performed by this bootstrap
 /// agent.
-#[derive(Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema,
+)]
 #[serde(tag = "status", rename_all = "snake_case")]
 pub enum RackOperationStatus {
     Initializing {
@@ -324,6 +326,27 @@ impl RssStep {
             }
         }
         return 0;
+    }
+
+    pub fn description(&self) -> &'static str {
+        match self {
+            Self::Requested => "Requested",
+            Self::Starting => "Starting",
+            Self::LoadExistingPlan => "Loading existing plan",
+            Self::CreateSledPlan => "Creating sled plan",
+            Self::InitTrustQuorum => "Initializing trust quorum",
+            Self::InitialNetworkConfigUpdate => "Initial network config update",
+            Self::SledInit => "Initializing sleds",
+            Self::FinalNetworkConfigUpdate => "Final network config update",
+            Self::InitDns => "Initializing DNS",
+            Self::ConfigureDns => "Configuring DNS",
+            Self::InitNtp => "Initializing NTP",
+            Self::WaitForTimeSync => "Waiting for time sync",
+            Self::WaitForDatabase => "Waiting for database",
+            Self::ClusterInit => "Initializing cluster",
+            Self::ZonesInit => "Initializing zones",
+            Self::NexusHandoff => "Handing off to Nexus",
+        }
     }
 }
 

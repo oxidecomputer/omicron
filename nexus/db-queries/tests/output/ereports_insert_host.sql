@@ -34,13 +34,21 @@ WITH
     AS (
       INSERT
       INTO
-        ereporter_restart (id, time_first_seen, reporter, slot_type, slot, rack_id)
+        ereporter_restart
+          (id, time_first_seen, reporter, slot_type, slot, rack_id, time_latest_ereport_received)
       VALUES
-        ($25, $26, $27, $28, $29, $30)
+        ($25, $26, $27, $28, $29, $30, $31)
       ON CONFLICT
         (id)
       DO
-        UPDATE SET slot = $31
+        UPDATE SET
+          time_latest_ereport_received
+            = greatest(
+              ereporter_restart.time_latest_ereport_received,
+              excluded.time_latest_ereport_received
+            ),
+          time_first_seen = least(ereporter_restart.time_first_seen, excluded.time_first_seen),
+          slot = COALESCE(ereporter_restart.slot, excluded.slot)
       RETURNING
         id
     )

@@ -2,8 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-// Copyright 2023 Oxide Computer Company
-
 use crate::artifacts::WicketdArtifactStore;
 use crate::helpers::sps_to_string;
 use crate::installinator_progress::IprStartReceiver;
@@ -37,6 +35,9 @@ use installinator_common::InstallinatorCompletionMetadata;
 use installinator_common::WriteOutput;
 use omicron_common::disk::M2Slot;
 use omicron_uuid_kinds::MupdateUuid;
+use oxide_update_engine::AbortHandle;
+use oxide_update_engine_types::events::ProgressUnits;
+use oxide_update_engine_types::spec::{EngineSpec, GenericSpec};
 use semver::Version;
 use sled_hardware_types::OxideSled;
 use slog::Logger;
@@ -67,15 +68,10 @@ use update_common::artifacts::ArtifactsWithPlan;
 use update_common::artifacts::ControlPlaneZonesMode;
 use update_common::artifacts::UpdatePlan;
 use update_common::artifacts::VerificationMode;
-use update_engine::AbortHandle;
-use update_engine::NestedSpec;
-use update_engine::StepSpec;
-use update_engine::events::ProgressUnits;
 use uuid::Uuid;
 use wicket_common::inventory::SpComponentCaboose;
 use wicket_common::inventory::SpIdentifier;
 use wicket_common::inventory::SpType;
-use wicket_common::rack_update::ClearUpdateStateResponse;
 use wicket_common::rack_update::StartUpdateOptions;
 use wicket_common::rack_update::UpdateSimulatedResult;
 use wicket_common::update_events::ComponentRegistrar;
@@ -101,6 +97,8 @@ use wicket_common::update_events::UpdateEngine;
 use wicket_common::update_events::UpdateStepId;
 use wicket_common::update_events::UpdateTerminalError;
 use wicketd_api::GetArtifactsAndEventReportsResponse;
+use wicketd_commission_types::update::ClearUpdateStateResponse;
+use wicketd_commission_types::update::UpdateTargets;
 
 #[derive(Debug)]
 struct SpUpdateData {
@@ -199,7 +197,7 @@ impl UpdateTracker {
 
     pub(crate) async fn start(
         &self,
-        sps: BTreeSet<SpIdentifier>,
+        sps: UpdateTargets,
         opts: StartUpdateOptions,
     ) -> Result<(), Vec<StartUpdateError>> {
         let imp = RealSpawnUpdateDriver { update_tracker: self, opts };
@@ -213,7 +211,7 @@ impl UpdateTracker {
     #[doc(hidden)]
     pub async fn start_fake_update(
         &self,
-        sps: BTreeSet<SpIdentifier>,
+        sps: UpdateTargets,
         fake_step_receiver: oneshot::Receiver<oneshot::Sender<()>>,
     ) -> Result<(), Vec<StartUpdateError>> {
         let imp = FakeUpdateDriver {
@@ -225,10 +223,10 @@ impl UpdateTracker {
 
     pub(crate) async fn clear_update_state(
         &self,
-        sps: BTreeSet<SpIdentifier>,
+        targets: UpdateTargets,
     ) -> Result<ClearUpdateStateResponse, ClearUpdateStateError> {
         let mut update_data = self.sp_update_data.lock().await;
-        update_data.clear_update_state(&sps)
+        update_data.clear_update_state(&targets)
     }
 
     pub(crate) async fn abort_update(
@@ -250,14 +248,14 @@ impl UpdateTracker {
     /// performs the same checks.
     pub(crate) async fn update_pre_checks(
         &self,
-        sps: BTreeSet<SpIdentifier>,
+        sps: UpdateTargets,
     ) -> Result<(), Vec<StartUpdateError>> {
         self.start_impl::<NeverUpdateDriver>(sps, None).await
     }
 
     async fn start_impl<Spawn>(
         &self,
-        sps: BTreeSet<SpIdentifier>,
+        sps: UpdateTargets,
         spawn_update_driver: Option<Spawn>,
     ) -> Result<(), Vec<StartUpdateError>>
     where
@@ -388,20 +386,21 @@ impl UpdateTracker {
             None => (None, Vec::new()),
         };
 
-        let mut event_reports = BTreeMap::new();
-        for (sp, update_data) in &update_data.sp_update_data {
-            let event_report =
-                update_data.event_buffer.lock().unwrap().generate_report();
-            let inner: &mut BTreeMap<_, _> =
-                event_reports.entry(sp.type_).or_default();
-            inner.insert(sp.slot, event_report);
-        }
-
         GetArtifactsAndEventReportsResponse {
             system_version,
             artifacts,
-            event_reports,
+            event_reports: update_data.event_reports(),
         }
+    }
+
+    pub(crate) async fn system_version(&self) -> Option<Version> {
+        self.sp_update_data.lock().await.artifact_store.system_version()
+    }
+
+    pub(crate) async fn event_reports(
+        &self,
+    ) -> BTreeMap<SpType, BTreeMap<u16, EventReport>> {
+        self.sp_update_data.lock().await.event_reports()
     }
 
     pub(crate) async fn event_report(&self, sp: SpIdentifier) -> EventReport {
@@ -567,7 +566,7 @@ impl SpawnUpdateDriver for FakeUpdateDriver {
         _plan: UpdatePlan,
         _setup_data: &Self::Setup,
     ) -> SpUpdateData {
-        let (sender, mut receiver) = update_engine::channel();
+        let (sender, mut receiver) = oxide_update_engine::channel();
         let event_buffer = Arc::new(StdMutex::new(EventBuffer::new(16)));
         let event_buffer_2 = event_buffer.clone();
         let log = self.log.clone();
@@ -679,9 +678,24 @@ impl UpdateTrackerData {
         Self { artifact_store, sp_update_data: BTreeMap::new() }
     }
 
+    // TODO: once rkdeploy is on the published API, change the return type here
+    // and elsewhere to be an `IdOrdMap<SpEventReport>` where `SpEventReport`'s
+    // key is an `SpIdentifier`.
+    fn event_reports(&self) -> BTreeMap<SpType, BTreeMap<u16, EventReport>> {
+        let mut event_reports = BTreeMap::new();
+        for (sp, update_data) in &self.sp_update_data {
+            let event_report =
+                update_data.event_buffer.lock().unwrap().generate_report();
+            let inner: &mut BTreeMap<_, _> =
+                event_reports.entry(sp.typ).or_default();
+            inner.insert(sp.slot, event_report);
+        }
+        event_reports
+    }
+
     fn clear_update_state(
         &mut self,
-        sps: &BTreeSet<SpIdentifier>,
+        sps: &UpdateTargets,
     ) -> Result<ClearUpdateStateResponse, ClearUpdateStateError> {
         // Are any updates currently running? If so, then reject the request.
         let in_progress_updates = sps
@@ -864,7 +878,7 @@ impl UpdateDriver {
         //    the newest components for the SP and RoT, and one without.
 
         // Build the update executor.
-        let (sender, mut receiver) = update_engine::channel();
+        let (sender, mut receiver) = oxide_update_engine::channel();
         let mut engine = UpdateEngine::new(&update_cx.log, sender);
         let abort_handle = engine.abort_handle();
         _ = abort_handle_sender.send(abort_handle);
@@ -874,7 +888,7 @@ impl UpdateDriver {
         }
 
         let (rot_a, rot_b, sp_artifacts, rot_bootloader) =
-            match update_cx.sp.type_ {
+            match update_cx.sp.typ {
                 SpType::Sled => (
                     &plan.gimlet_rot_a,
                     &plan.gimlet_rot_b,
@@ -939,7 +953,7 @@ impl UpdateDriver {
                     let caboose = update_cx
                         .mgs_client
                         .sp_component_caboose_get(
-                            &update_cx.sp.type_,
+                            &update_cx.sp.typ,
                             update_cx.sp.slot,
                             SpComponent::SP_ITSELF.const_as_str(),
                             sp_firmware_slot,
@@ -1183,7 +1197,7 @@ impl UpdateDriver {
             )
             .register();
 
-        if update_cx.sp.type_ == SpType::Sled {
+        if update_cx.sp.typ == SpType::Sled {
             self.register_sled_steps(
                 update_cx,
                 &mut engine,
@@ -1229,7 +1243,7 @@ impl UpdateDriver {
                 async |_cx| {
                     let state = update_cx
                         .mgs_client
-                        .sp_get(&update_cx.sp.type_, update_cx.sp.slot)
+                        .sp_get(&update_cx.sp.typ, update_cx.sp.slot)
                         .await
                         .map(|response| response.into_inner())
                         .map_err(|error| UpdateTerminalError::SpGetFailed {
@@ -1435,7 +1449,7 @@ impl UpdateDriver {
                     update_cx
                         .mgs_client
                         .sp_installinator_image_id_set(
-                            &update_cx.sp.type_,
+                            &update_cx.sp.typ,
                             update_cx.sp.slot,
                             &installinator_image_id,
                         )
@@ -1473,7 +1487,7 @@ impl UpdateDriver {
                     update_cx
                         .mgs_client
                         .sp_startup_options_set(
-                            &update_cx.sp.type_,
+                            &update_cx.sp.typ,
                             update_cx.sp.slot,
                             &HostStartupOptions {
                                 boot_net: false,
@@ -1547,7 +1561,7 @@ impl UpdateDriver {
                 if let Err(err) = update_cx
                     .mgs_client
                         .sp_installinator_image_id_delete(
-                            &update_cx.sp.type_,
+                            &update_cx.sp.typ,
                             update_cx.sp.slot,
                         )
                         .await
@@ -1597,7 +1611,7 @@ impl UpdateDriver {
                     update_cx
                         .mgs_client
                         .sp_startup_options_set(
-                            &update_cx.sp.type_,
+                            &update_cx.sp.typ,
                             update_cx.sp.slot,
                             &HostStartupOptions {
                                 boot_net: false,
@@ -1766,7 +1780,7 @@ impl RotInterrogation {
     ) -> bool {
         let sp_caboose = client
             .sp_component_caboose_get(
-                &self.sp.type_,
+                &self.sp.typ,
                 self.sp.slot,
                 SpComponent::SP_ITSELF.const_as_str(),
                 0,
@@ -1787,7 +1801,7 @@ impl RotInterrogation {
             // trying an update
             None => false,
             Some(caboose) => match caboose.version.parse::<Version>() {
-                Ok(vers) => match self.sp.type_ {
+                Ok(vers) => match self.sp.typ {
                     SpType::Sled => vers >= MIN_GIMLET_VERSION,
                     SpType::Switch => vers >= MIN_SWITCH_VERSION,
                     SpType::Power => vers >= MIN_PSC_VERSION,
@@ -1834,7 +1848,7 @@ impl UpdateContext {
     async fn process_installinator_reports(
         &self,
         cx: &StepContext,
-        mut ipr_receiver: watch::Receiver<EventReport<NestedSpec>>,
+        mut ipr_receiver: watch::Receiver<EventReport<GenericSpec>>,
     ) -> anyhow::Result<WriteOutput> {
         let mut write_output = None;
 
@@ -1924,7 +1938,7 @@ impl UpdateContext {
         let stage0_fwid = match self
             .mgs_client
             .sp_rot_boot_info(
-                &self.sp.type_,
+                &self.sp.typ,
                 self.sp.slot,
                 SpComponent::ROT.const_as_str(),
                 &GetRotBootInfoParams {
@@ -1966,7 +1980,7 @@ impl UpdateContext {
         let caboose = self
             .mgs_client
             .sp_component_caboose_get(
-                &self.sp.type_,
+                &self.sp.typ,
                 self.sp.slot,
                 SpComponent::STAGE0.const_as_str(),
                 0,
@@ -2065,7 +2079,7 @@ impl UpdateContext {
         let caboose = self
             .mgs_client
             .sp_component_caboose_get(
-                &self.sp.type_,
+                &self.sp.typ,
                 self.sp.slot,
                 SpComponent::ROT.const_as_str(),
                 rot_active_slot,
@@ -2123,7 +2137,7 @@ impl UpdateContext {
         let cmpa = match self
             .mgs_client
             .sp_rot_cmpa_get(
-                &self.sp.type_,
+                &self.sp.typ,
                 self.sp.slot,
                 SpComponent::ROT.const_as_str(),
             )
@@ -2176,7 +2190,7 @@ impl UpdateContext {
         let cfpa = self
             .mgs_client
             .sp_rot_cfpa_get(
-                &self.sp.type_,
+                &self.sp.typ,
                 self.sp.slot,
                 SpComponent::ROT.const_as_str(),
                 &gateway_client::types::GetCfpaParams {
@@ -2402,7 +2416,7 @@ impl UpdateContext {
         cx: &StepContext,
         mut ipr_start_receiver: IprStartReceiver,
         image_id: HostPhase2RecoveryImageId,
-    ) -> anyhow::Result<watch::Receiver<EventReport<NestedSpec>>> {
+    ) -> anyhow::Result<watch::Receiver<EventReport<GenericSpec>>> {
         const MGS_PROGRESS_POLL_INTERVAL: Duration = Duration::from_secs(3);
 
         // Waiting for the installinator to start is a little strange. It can't
@@ -2433,7 +2447,7 @@ impl UpdateContext {
         // installinator tells us it has failed.
         if let Err(err) = self
             .mgs_client
-            .sp_host_phase2_progress_delete(&self.sp.type_, self.sp.slot)
+            .sp_host_phase2_progress_delete(&self.sp.typ, self.sp.slot)
             .await
         {
             warn!(
@@ -2472,7 +2486,7 @@ impl UpdateContext {
     ) {
         match self
             .mgs_client
-            .sp_host_phase2_progress_get(&self.sp.type_, self.sp.slot)
+            .sp_host_phase2_progress_get(&self.sp.typ, self.sp.slot)
             .await
             .map(|response| response.into_inner())
         {
@@ -2515,7 +2529,7 @@ impl UpdateContext {
     ) -> Result<StepResult<()>, UpdateTerminalError> {
         info!(self.log, "moving host to {power_state:?}");
         self.mgs_client
-            .sp_power_state_set(&self.sp.type_, self.sp.slot, power_state)
+            .sp_power_state_set(&self.sp.typ, self.sp.slot, power_state)
             .await
             .map(|response| response.into_inner())
             .map_err(|error| UpdateTerminalError::UpdatePowerStateFailed {
@@ -2527,7 +2541,7 @@ impl UpdateContext {
     async fn get_rot_boot_info(&self) -> anyhow::Result<RotState> {
         self.mgs_client
             .sp_rot_boot_info(
-                &self.sp.type_,
+                &self.sp.typ,
                 self.sp.slot,
                 SpComponent::ROT.const_as_str(),
                 &GetRotBootInfoParams {
@@ -2545,11 +2559,7 @@ impl UpdateContext {
         component: &str,
     ) -> anyhow::Result<u16> {
         self.mgs_client
-            .sp_component_active_slot_get(
-                &self.sp.type_,
-                self.sp.slot,
-                component,
-            )
+            .sp_component_active_slot_get(&self.sp.typ, self.sp.slot, component)
             .await
             .context("failed to get component active slot")
             .map(|res| res.into_inner().slot)
@@ -2563,7 +2573,7 @@ impl UpdateContext {
     ) -> anyhow::Result<()> {
         self.mgs_client
             .sp_component_active_slot_set(
-                &self.sp.type_,
+                &self.sp.typ,
                 self.sp.slot,
                 component,
                 persist,
@@ -2576,13 +2586,13 @@ impl UpdateContext {
 
     async fn reset_sp_component(&self, component: &str) -> anyhow::Result<()> {
         self.mgs_client
-            .sp_component_reset(&self.sp.type_, self.sp.slot, component)
+            .sp_component_reset(&self.sp.typ, self.sp.slot, component)
             .await
             .context("failed to reset SP")
             .map(|res| res.into_inner())
     }
 
-    async fn poll_component_update<S: StepSpec>(
+    async fn poll_component_update<S: EngineSpec>(
         &self,
         cx: StepContext<S>,
         stage: ComponentUpdateStage,
@@ -2599,7 +2609,7 @@ impl UpdateContext {
             let status = self
                 .mgs_client
                 .sp_component_update_status(
-                    &self.sp.type_,
+                    &self.sp.typ,
                     self.sp.slot,
                     component,
                 )
@@ -2816,7 +2826,7 @@ impl<'a> SpComponentUpdateContext<'a> {
                     update_cx
                         .mgs_client
                         .sp_component_update(
-                            &update_cx.sp.type_,
+                            &update_cx.sp.typ,
                             update_cx.sp.slot,
                             component_name,
                             firmware_slot,

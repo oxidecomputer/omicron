@@ -79,6 +79,14 @@ async fn test_omdb_usage_errors() {
         // Command help output
         &["db"],
         &["db", "--help"],
+        &["db", "alert"],
+        &["db", "alert", "list", "--help"],
+        // Nonexistent alert class
+        &["db", "alert", "list", "--classes", "test.foo.bar", "test.foo.box"],
+        &["db", "alert", "webhook", "delivery", "list", "--help"],
+        // Nonexistent webhook delivery state and trigger
+        &["db", "alert", "webhook", "delivery", "list", "--state", "bogus"],
+        &["db", "alert", "webhook", "delivery", "list", "--trigger", "bogus"],
         &["db", "disks"],
         &["db", "dns"],
         &["db", "dns", "diff"],
@@ -95,6 +103,12 @@ async fn test_omdb_usage_errors() {
         &["db", "ereport", "info", "--help"],
         &["db", "sleds", "--help"],
         &["db", "sitrep", "--help"],
+        &["db", "sitrep", "show", "--help"],
+        &["db", "sitrep", "analysis-report", "--help"],
+        // Invalid sitrep selectors: not a UUID, a version number, or "current"
+        &["db", "sitrep", "show", "not-a-sitrep"],
+        // Invalid sitrep selector: begins with 'v' but is not an integer.
+        &["db", "sitrep", "show", "v1.2.3"],
         &["db", "saga"],
         &["db", "snapshots"],
         &["db", "network"],
@@ -333,6 +347,18 @@ async fn test_omdb_success_cases() {
             "001de000-5110-4000-8000-000000000000",
             "001de000-05e4-4000-8000-000000004007",
         ],
+        // The alert list command should accept multiple case IDs and multiple
+        // alert classes. Note that this command shouldn't actually print any
+        // alerts, which is fine; this is a test for the argument parsing.
+        &[
+            "db",
+            "alert",
+            "list",
+            "--cases",
+            "001de000-05e4-4000-8000-000000004007",
+            "98b11fa2-3437-4704-83f5-e4aa5163e672",
+        ],
+        &["db", "alert", "list", "--classes", "test.foo.bar", "test.foo.baz"],
         // This operation will set the "db_metadata_nexus" state to quiesced.
         //
         // This would normally only be set by a Nexus as it shuts itself down;
