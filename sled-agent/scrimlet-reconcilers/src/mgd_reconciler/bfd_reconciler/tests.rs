@@ -7,7 +7,6 @@ use crate::switch_zone_slot::ThisSledSwitchSlot;
 use gateway_messages::SpPort;
 use mg_admin_client::types::BfdPeerConfig as MgdBfdPeerConfig;
 use mg_admin_client::types::SessionMode as MgdSessionMode;
-use proptest::prelude::ProptestConfig;
 use proptest::prelude::proptest;
 use sled_agent_types::early_networking::BfdMode;
 use sled_agent_types::early_networking::BfdPeerConfig;
