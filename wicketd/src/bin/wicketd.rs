@@ -16,6 +16,7 @@ use std::net::{Ipv6Addr, SocketAddrV6};
 use wicketd::{Config, Server, SmfConfigValues};
 
 #[derive(Debug, Parser)]
+#[allow(clippy::large_enum_variant)]
 #[clap(name = "wicketd", about = "See README.adoc for more information")]
 enum Args {
     /// Start a wicketd server
