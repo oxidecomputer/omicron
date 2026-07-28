@@ -329,10 +329,7 @@ fn is_update_in_progress(
     // their updates, so if we were to get stuck while still updating Hubris
     // components, the check below will sitll be sufficient.
     let blueprint_in_progress = match current_target_version {
-        Some(v) => match BlueprintTargetReleaseStatus::new(
-            blueprint,
-            &v.to_string(),
-        ) {
+        Some(v) => match BlueprintTargetReleaseStatus::new(blueprint, v) {
             BlueprintTargetReleaseStatus::PreviousUpdateInProgress { .. }
                 => true,
             // We don't consider a Mupdate as an "update in-progress" because
