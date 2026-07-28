@@ -261,16 +261,6 @@ pub trait WicketdApi {
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<GetBaseboardResponse>, HttpError>;
 
-    /// Report the identity of the sled and switch we're currently running on /
-    /// connected to.
-    #[endpoint {
-        method = GET,
-        path = "/location",
-    }]
-    async fn get_location(
-        rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<GetLocationResponse>, HttpError>;
-
     /// An endpoint to start updating one or more sleds, switches and PSCs.
     #[endpoint {
         method = POST,
@@ -511,23 +501,6 @@ pub struct ClearUpdateStateParams {
 #[serde(rename_all = "snake_case")]
 pub struct GetBaseboardResponse {
     pub baseboard: Option<Baseboard>,
-}
-
-/// All the fields of this response are optional, because it's possible we don't
-/// know any of them (yet) if MGS has not yet finished discovering its location
-/// or (ever) if we're running in a dev environment that doesn't support
-/// MGS-location / baseboard mapping.
-#[derive(Clone, Debug, JsonSchema, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub struct GetLocationResponse {
-    /// The identity of our sled (where wicketd is running).
-    pub sled_id: Option<SpIdentifier>,
-    /// The baseboard of our sled (where wicketd is running).
-    pub sled_baseboard: Option<Baseboard>,
-    /// The baseboard of the switch our sled is physically connected to.
-    pub switch_baseboard: Option<Baseboard>,
-    /// The identity of the switch our sled is physically connected to.
-    pub switch_id: Option<SpIdentifier>,
 }
 
 #[derive(Serialize, Deserialize, JsonSchema)]

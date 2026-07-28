@@ -7,7 +7,6 @@
 use crate::SmfConfigValues;
 use crate::context::CommonConfigContainer;
 use crate::context::RssOrMultirackJoinConfig;
-use crate::helpers::baseboard_matches_sp_state;
 use crate::http_helpers::ba_lockstep_client;
 use crate::http_helpers::ba_lockstep_error_to_http;
 use crate::http_helpers::mgs_inventory_or_unavail;
@@ -30,7 +29,6 @@ use internal_dns_resolver::Resolver;
 use omicron_uuid_kinds::RackInitUuid;
 use omicron_uuid_kinds::RackResetUuid;
 use sled_agent_types::early_networking::SwitchSlot;
-use sled_hardware_types::Baseboard;
 use slog::o;
 use std::sync::Arc;
 use wicket_common::inventory::MgsV1InventorySnapshot;
@@ -479,51 +477,6 @@ impl WicketdApi for WicketdApiImpl {
         let rqctx = rqctx.context();
         Ok(HttpResponseOk(GetBaseboardResponse {
             baseboard: rqctx.baseboard.clone(),
-        }))
-    }
-
-    async fn get_location(
-        rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<GetLocationResponse>, HttpError> {
-        let rqctx = rqctx.context();
-        let inventory = mgs_inventory_or_unavail(&rqctx.mgs_handle).await?;
-
-        // We don't error out in get_location on the local switch ID not being
-        // available, so discard the error here (it's already logged in
-        // local_switch_id).
-        let switch_id = rqctx.local_switch_id().await.ok();
-        let sled_baseboard = rqctx.baseboard.clone();
-
-        let mut switch_baseboard = None;
-        let mut sled_id = None;
-
-        // Safety: `inventory_or_unavail` returns an error if there is no
-        // MGS-derived inventory, so option is always `Some(_)`.
-        for sp in &inventory.sps {
-            if Some(sp.id) == switch_id {
-                switch_baseboard = sp.state.as_ref().map(|state| {
-                    // TODO-correctness `new_gimlet` isn't the right name: this is a
-                    // sidecar baseboard.
-                    Baseboard::new_gimlet(
-                        state.serial_number.clone(),
-                        state.model.clone(),
-                        state.revision,
-                    )
-                });
-            } else if let (Some(sled_baseboard), Some(state)) =
-                (sled_baseboard.as_ref(), sp.state.as_ref())
-            {
-                if baseboard_matches_sp_state(sled_baseboard, state) {
-                    sled_id = Some(sp.id);
-                }
-            }
-        }
-
-        Ok(HttpResponseOk(GetLocationResponse {
-            sled_id,
-            sled_baseboard,
-            switch_baseboard,
-            switch_id,
         }))
     }
 

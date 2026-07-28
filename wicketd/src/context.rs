@@ -391,7 +391,11 @@ impl LocalSwitchIdError {
         http_error_with_message(
             dropshot::ErrorStatusCode::SERVICE_UNAVAILABLE,
             Some("UnknownSwitchSlot".to_string()),
-            format!("{} (is MGS running?)", InlineErrorChain::new(self)),
+            format!(
+                "{}; MGS may be down, or wicketd may not yet have \
+                 established contact with it (see wicketd logs for details)",
+                InlineErrorChain::new(self),
+            ),
         )
     }
 }
