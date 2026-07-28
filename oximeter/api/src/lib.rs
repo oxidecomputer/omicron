@@ -8,7 +8,7 @@ use dropshot::{
 };
 use dropshot_api_manager_types::api_versions;
 use omicron_common::api::internal::nexus::ProducerEndpoint;
-use oximeter_types_versions::latest;
+use oximeter_types_versions::{latest, v1};
 
 api_versions!([
     // WHEN CHANGING THE API (part 1 of 2):
@@ -22,6 +22,7 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
+    (2, ADD_PRODUCER_KIND),
     (1, INITIAL),
 ]);
 
@@ -57,11 +58,28 @@ pub trait OximeterApi {
     #[endpoint {
         method = GET,
         path = "/producers/{producer_id}",
+        versions = VERSION_ADD_PRODUCER_KIND..,
     }]
     async fn producer_details(
         request_context: RequestContext<Self::Context>,
         path: dropshot::Path<latest::producer::ProducerIdPathParams>,
     ) -> Result<HttpResponseOk<latest::producer::ProducerDetails>, HttpError>;
+
+    /// Get details about a producer by ID.
+    #[endpoint {
+        operation_id = "producer_details",
+        method = GET,
+        path = "/producers/{producer_id}",
+        versions = ..VERSION_ADD_PRODUCER_KIND,
+    }]
+    async fn producer_details_v1(
+        request_context: RequestContext<Self::Context>,
+        path: dropshot::Path<v1::producer::ProducerIdPathParams>,
+    ) -> Result<HttpResponseOk<v1::producer::ProducerDetails>, HttpError> {
+        Ok(Self::producer_details(request_context, path)
+            .await?
+            .map(v1::producer::ProducerDetails::from))
+    }
 
     /// Delete a producer by ID.
     #[endpoint {

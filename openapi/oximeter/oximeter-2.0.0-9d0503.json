@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "1.0.0"
+    "version": "2.0.0"
   },
   "paths": {
     "/info": {
@@ -261,6 +261,14 @@
               }
             ]
           },
+          "kind": {
+            "description": "The kind of producer.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ProducerKind"
+              }
+            ]
+          },
           "last_failure": {
             "nullable": true,
             "description": "Details about the last failed collection.\n\nThis is None if we've never failed to collect from the producer.",
@@ -306,6 +314,7 @@
           "address",
           "id",
           "interval",
+          "kind",
           "n_collections",
           "n_failures",
           "registered",
