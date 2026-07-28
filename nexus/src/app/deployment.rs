@@ -1309,8 +1309,7 @@ mod tests {
 
         // Construct a blueprint with a bumped
         // `target_release_minimum_generation`, returning that and the previous
-        // generation (which we'll pass as the current target release
-        // generation, mimicking real world behavior).
+        // generation.
         let (current_target_release_gen, blueprint) = {
             let mut bp = make_blueprint_matching_system_version(
                 log,
@@ -1389,16 +1388,31 @@ mod tests {
             ("sled with OS mupdate", bp_os_mupdate),
             ("zone set to install dataset", bp_zone_mupdate),
         ] {
-            assert_eq!(
-                validate_can_set_target_release_for_mupdate_recovery(
-                    &blueprint,
+            // We should detect these sleds that need mupdate recovery whether
+            // or not the blueprint min target release generation is behind the
+            // current target release generation; try both.
+            for (gen_description, generation) in [
+                (
+                    "generation behind blueprint minimum",
                     current_target_release_gen,
-                    &proposed_recovery_version,
-                    log,
                 ),
-                Ok(()),
-                "should find evidence of mupdate in blueprint: {description}"
-            );
+                (
+                    "generation caught up to blueprint minimum",
+                    blueprint.target_release_minimum_generation,
+                ),
+            ] {
+                assert_eq!(
+                    validate_can_set_target_release_for_mupdate_recovery(
+                        &blueprint,
+                        generation,
+                        &proposed_recovery_version,
+                        log,
+                    ),
+                    Ok(()),
+                    "should find evidence of mupdate in blueprint: \
+                     {description} ({gen_description})"
+                );
+            }
         }
 
         logctx.cleanup_successful();
