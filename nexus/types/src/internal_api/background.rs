@@ -893,6 +893,23 @@ pub struct EreporterStatus {
     pub errors: Vec<String>,
 }
 
+/// The status of a `fm_config_loader` background task activation.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub enum FmConfigLoadStatus {
+    /// An error occurred.
+    Error(String),
+
+    /// A fault management configuration was loaded (as of `time_loaded`).
+    Loaded {
+        /// The current configuration.
+        config: crate::fm::FmConfigView,
+        /// The time at which the current config was loaded.
+        time_updated: DateTime<Utc>,
+        /// Whether the config was updated in this activation.
+        updated: bool,
+    },
+}
+
 /// The status of a `fm_sitrep_loader` background task activation.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub enum SitrepLoadStatus {

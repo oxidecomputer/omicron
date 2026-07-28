@@ -1032,6 +1032,10 @@ pub struct FmTasksConfig {
     #[serde_as(as = "DurationSeconds<u64>")]
     pub analysis_period_secs: Duration,
     /// period (in seconds) for periodic activations of the background task that
+    /// reads the current fault management configuration from the database.
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub config_load_period_secs: Duration,
+    /// period (in seconds) for periodic activations of the background task that
     /// reads the latest fault management sitrep from the database.
     #[serde_as(as = "DurationSeconds<u64>")]
     pub sitrep_load_period_secs: Duration,
@@ -1058,6 +1062,9 @@ impl Default for FmTasksConfig {
             // inventory, or by the ereport ingester(s), so it need not be
             // periodically activated all that frequently.
             analysis_period_secs: Duration::from_secs(60),
+            // Loading the config is cheap, and operators expect config
+            // changes to take effect promptly.
+            config_load_period_secs: Duration::from_secs(15),
             sitrep_load_period_secs: Duration::from_secs(15),
             // This need not be activated very frequently, as it's triggered any
             // time the current sitrep changes, and activating it more
@@ -1388,6 +1395,7 @@ mod test {
             multicast_reconciler.period_secs = 60
             fm.rendezvous_period_secs = 51
             fm.analysis_period_secs = 52
+            fm.config_load_period_secs = 53
             trust_quorum.period_secs = 60
             attached_subnet_manager.period_secs = 60
             session_cleanup.period_secs = 300
@@ -1647,6 +1655,7 @@ mod test {
                         fm: FmTasksConfig {
                             analysis_enabled: default_fm_analysis_enabled(),
                             analysis_period_secs: Duration::from_secs(52),
+                            config_load_period_secs: Duration::from_secs(53),
                             sitrep_load_period_secs: Duration::from_secs(48),
                             sitrep_gc_period_secs: Duration::from_secs(49),
                             sitrep_history_prune_period_secs:
@@ -1790,6 +1799,7 @@ mod test {
             probe_distributor.period_secs = 47
             fm.rendezvous_period_secs = 48
             fm.analysis_period_secs = 49
+            fm.config_load_period_secs = 50
             multicast_reconciler.period_secs = 60
             trust_quorum.period_secs = 60
             attached_subnet_manager.period_secs = 60
