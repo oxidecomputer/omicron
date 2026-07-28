@@ -32,7 +32,7 @@ use super::conversions;
 use super::progress;
 use crate::ServerContext;
 use crate::helpers::SpIdentifierDisplay;
-use crate::helpers::baseboard_matches_sp_state;
+use crate::helpers::baseboard_id_matches_sp_state;
 use crate::http_helpers::{
     ba_lockstep_client, ba_lockstep_error_to_http, http_error_with_message,
     mgs_inventory_or_unavail, shutdown_to_http, start_update,
@@ -169,25 +169,19 @@ impl WicketdCommissionApi for WicketdCommissionApiImpl {
                 serial_number: data.state.serial_number.clone(),
             });
 
-        // sled_baseboard will be None if either the baseboard isn't known at
-        // all, or it is stored as `Unknown` (in which case
-        // BaseboardId::try_from returns an error).
-        let sled_baseboard = ctx
-            .baseboard
-            .as_ref()
-            .and_then(|b| BaseboardId::try_from(b.clone()).ok());
+        // TODO: We always know our baseboard id now, so we should change the
+        // API to always report it.
+        let sled_baseboard = Some(ctx.baseboard_id.clone());
 
-        let sled_id = ctx.baseboard.as_ref().and_then(|baseboard| {
-            response
-                .sps
-                .iter()
-                .filter(|record| record.id.typ == SpType::Sled)
-                .find_map(|record| {
-                    let data = record.data.as_ref()?;
-                    baseboard_matches_sp_state(baseboard, &data.state)
-                        .then_some(record.id)
-                })
-        });
+        let sled_id = response
+            .sps
+            .iter()
+            .filter(|record| record.id.typ == SpType::Sled)
+            .find_map(|record| {
+                let data = record.data.as_ref()?;
+                baseboard_id_matches_sp_state(&ctx.baseboard_id, &data.state)
+                    .then_some(record.id)
+            });
 
         let switch_slot = match switch_id.slot {
             0 => SwitchSlot::Switch0,
@@ -309,7 +303,7 @@ impl WicketdCommissionApi for WicketdCommissionApiImpl {
     ) -> Result<HttpResponseOk<RackSetupStatus>, HttpError> {
         let ctx = rqctx.context();
 
-        let client = ba_lockstep_client(ctx)?;
+        let client = ba_lockstep_client(ctx);
 
         let op_status = client
             .rack_initialization_status()
@@ -337,7 +331,7 @@ impl WicketdCommissionApi for WicketdCommissionApiImpl {
         rss_config
             .update(
                 config,
-                ctx.baseboard.as_ref(),
+                &ctx.baseboard_id,
                 &inventory,
                 &ddm_discovered_sleds,
                 &ctx.log,
@@ -440,7 +434,7 @@ impl WicketdCommissionApi for WicketdCommissionApiImpl {
         let ctx = rqctx.context();
         let log = &rqctx.log;
 
-        let client = ba_lockstep_client(ctx)?;
+        let client = ba_lockstep_client(ctx);
 
         let request = {
             let mut guard = ctx.rss_or_multirack_join_config.lock().unwrap();
