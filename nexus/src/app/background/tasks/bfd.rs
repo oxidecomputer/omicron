@@ -22,6 +22,7 @@ use std::{
     collections::HashSet,
     hash::Hash,
     net::{IpAddr, Ipv4Addr},
+    num::NonZeroU8,
     sync::Arc,
 };
 
@@ -40,7 +41,7 @@ struct BfdSessionKey {
     switch: SwitchSlot,
     local: Option<IpAddr>,
     remote: IpAddr,
-    detection_threshold: u8,
+    detection_threshold: NonZeroU8,
     required_rx: u64,
     mode: BfdMode,
 }
@@ -78,6 +79,8 @@ impl From<BfdSession> for BfdSessionKey {
                 .detection_threshold
                 .0
                 .try_into()
+                .ok()
+                .and_then(NonZeroU8::new)
                 .unwrap(), //TODO unwrap
             required_rx: value.required_rx.0.into(),
             mode: value.mode,
