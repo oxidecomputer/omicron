@@ -70,10 +70,6 @@ const SERVICE_POOL_IPV6_NAME: &str = "oxide-service-pool-v6";
 fn service_ip_pools_from_ranges(
     ranges: &[address::IpRange],
 ) -> Result<IdOrdMap<ServiceIpPoolConfig>> {
-    anyhow::ensure!(
-        !ranges.is_empty(),
-        "at least one internal services IP pool range is required",
-    );
     let (service_ipv4_ranges, service_ipv6_ranges): (Vec<_>, Vec<_>) =
         ranges.iter().partition(|range| range.is_ipv4());
     let mut service_ip_pools = IdOrdMap::new();

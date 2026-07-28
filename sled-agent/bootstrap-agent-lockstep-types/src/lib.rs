@@ -63,7 +63,8 @@ pub struct RackInitializeRequest {
 
     /// Service IP addresses on which we run external DNS servers.
     ///
-    /// Each address must be present in `internal_services_ip_pool_ranges`.
+    /// Each address must be present in the ranges of the pools in
+    /// `service_ip_pools`.
     pub external_dns_ips: Vec<IpAddr>,
 
     /// DNS name for the DNS zone delegated to the rack for external DNS

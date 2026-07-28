@@ -9075,6 +9075,7 @@
             ]
           },
           "ranges": {
+            "description": "List of IP address ranges in the pool.\n\nThere is guaranteed to be at least one range, and all ranges are of the same IP version.",
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/IpRange"

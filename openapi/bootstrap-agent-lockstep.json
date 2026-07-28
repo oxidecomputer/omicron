@@ -989,7 +989,7 @@
             }
           },
           "external_dns_ips": {
-            "description": "Service IP addresses on which we run external DNS servers.\n\nEach address must be present in `internal_services_ip_pool_ranges`.",
+            "description": "Service IP addresses on which we run external DNS servers.\n\nEach address must be present in the ranges of the pools in `service_ip_pools`.",
             "type": "array",
             "items": {
               "type": "string",
@@ -1689,6 +1689,7 @@
             ]
           },
           "ranges": {
+            "description": "List of IP address ranges in the pool.\n\nThere is guaranteed to be at least one range, and all ranges are of the same IP version.",
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/IpRange"
