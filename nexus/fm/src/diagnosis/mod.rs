@@ -10,9 +10,11 @@
 use crate::SitrepBuilder;
 
 mod physical_disk;
+mod power_shelf;
 
 pub fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
     physical_disk::analyze(builder)?;
+    power_shelf::analyze(builder)?;
     Ok(())
 }
 
@@ -33,5 +35,5 @@ pub fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
 /// (`class LIKE 'ereport.cpu.amd.%'`) or a `known_ereport_class` lookup
 /// table joined into the query. Revisit this if the list grows that large.
 pub fn known_ereport_classes() -> &'static [&'static str] {
-    &[]
+    &[power_shelf::PSU_INSERT_EREPORT, power_shelf::PSU_REMOVE_EREPORT]
 }

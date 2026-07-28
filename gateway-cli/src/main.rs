@@ -14,9 +14,9 @@ use gateway_client::types::IgnitionCommand;
 use gateway_client::types::InstallinatorImageId;
 use gateway_client::types::PowerState;
 use gateway_client::types::SpComponentFirmwareSlot;
-use gateway_client::types::SpIdentifier;
 use gateway_client::types::SpUpdateStatus;
 use gateway_client::types::UpdateAbortBody;
+use gateway_types::component::SpIdentifier;
 use omicron_uuid_kinds::MupdateUuid;
 use serde::Serialize;
 use slog::Drain;
@@ -322,11 +322,11 @@ fn sp_identifier_from_str(s: &str) -> Result<SpIdentifier> {
         bail!(BAD_FORMAT);
     }
     Ok(SpIdentifier {
-        type_: type_.parse().map_err(|s| {
+        typ: type_.parse().map_err(|s| {
             anyhow!("failed to parse {type_} as an SpType: {s}")
         })?,
         slot: slot.parse().map_err(|err| {
-            anyhow!("failed to parse slot {slot} as a u32: {err}")
+            anyhow!("failed to parse slot {slot} as a u16: {err}")
         })?,
     })
 }
@@ -396,13 +396,13 @@ async fn main_impl() -> Result<()> {
 
     match args.command {
         Command::State { sp } => {
-            let info = client.sp_get(&sp.type_, sp.slot).await?.into_inner();
+            let info = client.sp_get(&sp.typ, sp.slot).await?.into_inner();
             dumper.dump(&info)?;
         }
         Command::Ignition { sp } => {
             if let Some(sp) = sp {
                 let info =
-                    client.ignition_get(&sp.type_, sp.slot).await?.into_inner();
+                    client.ignition_get(&sp.typ, sp.slot).await?.into_inner();
                 dumper.dump(&info)?;
             } else {
                 let info = client.ignition_list().await?.into_inner();
@@ -410,13 +410,13 @@ async fn main_impl() -> Result<()> {
             }
         }
         Command::IgnitionCommand { sp, command } => {
-            client.ignition_command(&sp.type_, sp.slot, command).await?;
+            client.ignition_command(&sp.typ, sp.slot, command).await?;
         }
         Command::ComponentActiveSlot { sp, component, set_slot, persist } => {
             if let Some(slot) = set_slot {
                 client
                     .sp_component_active_slot_set(
-                        &sp.type_,
+                        &sp.typ,
                         sp.slot,
                         &component,
                         persist,
@@ -425,9 +425,7 @@ async fn main_impl() -> Result<()> {
                     .await?;
             } else {
                 let info = client
-                    .sp_component_active_slot_get(
-                        &sp.type_, sp.slot, &component,
-                    )
+                    .sp_component_active_slot_get(&sp.typ, sp.slot, &component)
                     .await?
                     .into_inner();
                 dumper.dump(&info)?;
@@ -459,11 +457,11 @@ async fn main_impl() -> Result<()> {
                     verbose: startup_verbose,
                 };
                 client
-                    .sp_startup_options_set(&sp.type_, sp.slot, &options)
+                    .sp_startup_options_set(&sp.typ, sp.slot, &options)
                     .await?;
             } else {
                 let info = client
-                    .sp_startup_options_get(&sp.type_, sp.slot)
+                    .sp_startup_options_get(&sp.typ, sp.slot)
                     .await?
                     .into_inner();
                 dumper.dump(&info)?;
@@ -478,7 +476,7 @@ async fn main_impl() -> Result<()> {
         } => {
             if clear {
                 client
-                    .sp_installinator_image_id_delete(&sp.type_, sp.slot)
+                    .sp_installinator_image_id_delete(&sp.typ, sp.slot)
                     .await?;
             } else {
                 // clap guarantees these are not `None` when `clear` is false.
@@ -487,7 +485,7 @@ async fn main_impl() -> Result<()> {
                 let control_plane = control_plane.unwrap().to_string();
                 client
                     .sp_installinator_image_id_set(
-                        &sp.type_,
+                        &sp.typ,
                         sp.slot,
                         &InstallinatorImageId {
                             update_id,
@@ -499,22 +497,20 @@ async fn main_impl() -> Result<()> {
             }
         }
         Command::Inventory { sp } => {
-            let info = client
-                .sp_component_list(&sp.type_, sp.slot)
-                .await?
-                .into_inner();
+            let info =
+                client.sp_component_list(&sp.typ, sp.slot).await?.into_inner();
             dumper.dump(&info)?;
         }
         Command::ComponentDetails { sp, component } => {
             let info = client
-                .sp_component_get(&sp.type_, sp.slot, &component)
+                .sp_component_get(&sp.typ, sp.slot, &component)
                 .await?
                 .into_inner();
             dumper.dump(&info)?;
         }
         Command::ComponentClearStatus { sp, component } => {
             client
-                .sp_component_clear_status(&sp.type_, sp.slot, &component)
+                .sp_component_clear_status(&sp.typ, sp.slot, &component)
                 .await?;
         }
         Command::UsartAttach {
@@ -527,7 +523,7 @@ async fn main_impl() -> Result<()> {
         } => {
             let upgraded = client
                 .sp_component_serial_console_attach(
-                    &sp.type_,
+                    &sp.typ,
                     sp.slot,
                     SERIAL_CONSOLE_COMPONENT,
                 )
@@ -558,7 +554,7 @@ async fn main_impl() -> Result<()> {
         Command::UsartDetach { sp } => {
             client
                 .sp_component_serial_console_detach(
-                    &sp.type_,
+                    &sp.typ,
                     sp.slot,
                     SERIAL_CONSOLE_COMPONENT,
                 )
@@ -583,7 +579,7 @@ async fn main_impl() -> Result<()> {
         }
         Command::UpdateStatus { sp, component } => {
             let info = client
-                .sp_component_update_status(&sp.type_, sp.slot, &component)
+                .sp_component_update_status(&sp.typ, sp.slot, &component)
                 .await?
                 .into_inner();
             dumper.dump(&info)?;
@@ -591,19 +587,17 @@ async fn main_impl() -> Result<()> {
         Command::UpdateAbort { sp, component, update_id } => {
             let body = UpdateAbortBody { id: update_id };
             client
-                .sp_component_update_abort(
-                    &sp.type_, sp.slot, &component, &body,
-                )
+                .sp_component_update_abort(&sp.typ, sp.slot, &component, &body)
                 .await?;
         }
         Command::PowerState { sp, new_power_state } => {
             if let Some(power_state) = new_power_state {
                 client
-                    .sp_power_state_set(&sp.type_, sp.slot, power_state)
+                    .sp_power_state_set(&sp.typ, sp.slot, power_state)
                     .await?;
             } else {
                 let info = client
-                    .sp_power_state_get(&sp.type_, sp.slot)
+                    .sp_power_state_get(&sp.typ, sp.slot)
                     .await?
                     .into_inner();
                 dumper.dump(&info)?;
@@ -612,10 +606,10 @@ async fn main_impl() -> Result<()> {
         Command::Reset { sp } => {
             let component =
                 gateway_messages::SpComponent::SP_ITSELF.const_as_str();
-            client.sp_component_reset(&sp.type_, sp.slot, component).await?;
+            client.sp_component_reset(&sp.typ, sp.slot, component).await?;
         }
         Command::ResetComponent { sp, component } => {
-            client.sp_component_reset(&sp.type_, sp.slot, &component).await?;
+            client.sp_component_reset(&sp.typ, sp.slot, &component).await?;
         }
     }
 
@@ -635,14 +629,14 @@ async fn update(
 
     client
         .sp_component_update(
-            &sp.type_, sp.slot, component, slot, &update_id, image,
+            &sp.typ, sp.slot, component, slot, &update_id, image,
         )
         .await
         .context("failed to start update")?;
 
     loop {
         let status = client
-            .sp_component_update_status(&sp.type_, sp.slot, component)
+            .sp_component_update_status(&sp.typ, sp.slot, component)
             .await
             .context("failed to get update status")?
             .into_inner();

@@ -825,6 +825,7 @@ impl CollectionTask {
                         _ => 0,
                     })
                     .sum();
+                self.stats.samples_collected.datum += n_samples;
                 let success = SuccessfulCollection {
                     started_at,
                     time_queued,

@@ -1381,19 +1381,15 @@ mod test {
             .ip_pools_service_lookup_both_versions(&opctx)
             .await
             .expect("success looking up both versions of the service IP Pools");
-        let mut ranges = datastore
-            .ip_pool_list_ranges_batched(&opctx, &service_pools.ipv4.authz_pool)
-            .await
-            .expect("success listing IPv4 pool ranges");
-        ranges.append(
-            &mut datastore
-                .ip_pool_list_ranges_batched(
-                    &opctx,
-                    &service_pools.ipv6.authz_pool,
-                )
-                .await
-                .expect("success listing IPv6 pool ranges"),
-        );
+        let mut ranges = Vec::new();
+        for pool in service_pools.ipv4.iter().chain(service_pools.ipv6.iter()) {
+            ranges.append(
+                &mut datastore
+                    .ip_pool_list_ranges_batched(&opctx, &pool.authz_pool)
+                    .await
+                    .expect("success listing service pool ranges"),
+            );
+        }
         ranges
     }
 

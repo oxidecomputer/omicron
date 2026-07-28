@@ -8,6 +8,7 @@ use crate::bootstrap::rss_handle::RssHandle;
 use bootstore::schemes::v0 as bootstore;
 use bootstrap_agent_lockstep_types::RackOperationStatus;
 use bootstrap_agent_lockstep_types::RssStep;
+use dropshot::HttpError;
 use omicron_uuid_kinds::RackInitUuid;
 use omicron_uuid_kinds::RackResetUuid;
 use sled_agent_config_reconciler::InternalDisksReceiver;
@@ -27,7 +28,7 @@ use tokio::sync::watch;
 
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum RssAccessError {
-    #[error("RSS is still initializating and cannot run concurrently")]
+    #[error("RSS is still initializing and cannot run concurrently")]
     StillInitializing,
     #[error("RSS failed to initialize: {message}")]
     InitializationFailed { message: String },
@@ -43,6 +44,49 @@ pub enum RssAccessError {
     ResetPanicked,
     #[error("RSS is already reset")]
     AlreadyReset,
+}
+
+impl RssAccessError {
+    /// Return a stable error code for this error.
+    pub fn error_code(&self) -> &'static str {
+        // Don't change these even if enum variants change.
+        match self {
+            RssAccessError::StillInitializing => "StillInitializing",
+            RssAccessError::InitializationFailed { .. } => {
+                "InitializationFailed"
+            }
+            RssAccessError::InitializationPanicked => "InitializationPanicked",
+            RssAccessError::AlreadyInitialized => "AlreadyInitialized",
+            RssAccessError::StillResetting => "StillResetting",
+            RssAccessError::ResetFailed { .. } => "ResetFailed",
+            RssAccessError::ResetPanicked => "ResetPanicked",
+            RssAccessError::AlreadyReset => "AlreadyReset",
+        }
+    }
+}
+
+impl From<RssAccessError> for HttpError {
+    fn from(err: RssAccessError) -> Self {
+        // All variants of RssAccessError report states that conflict with the
+        // requested rack operation in some fashion:
+        //
+        // * `StillInitializing`/`StillResetting` mean that an operation is in
+        //   progress.
+        // * `AlreadyInitialized`/`AlreadyReset` mean that we're already at the
+        //   requested end state. (Note that we don't try and be idempotent here
+        //   -- to do so we'd have to ensure the actual RSS config is the same,
+        //   which is tricky. Instead, clients should look at the error code to
+        //   determine what to do.)
+        // * The other states are terminal states that need operator intervention.
+        //
+        // We map all of these states to 409 Conflict errors, and (since this is
+        // an internal API) expose the error text to the client.
+        HttpError::for_client_error(
+            Some(err.error_code().to_string()),
+            dropshot::ClientErrorStatusCode::CONFLICT,
+            err.to_string(),
+        )
+    }
 }
 
 #[derive(Clone)]
@@ -309,7 +353,7 @@ enum RssStatus {
         id: Option<RackInitUuid>,
     },
 
-    // Tranistory states (which we may be in for a long time, even on human time
+    // Transitory states (which we may be in for a long time, even on human time
     // scales, but should eventually leave).
     Initializing {
         id: RackInitUuid,
@@ -379,4 +423,50 @@ async fn rack_reset(
         measurements,
     )
     .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rss_access_error_to_http_error() {
+        let cases = [
+            RssAccessError::StillInitializing,
+            RssAccessError::InitializationFailed {
+                message: "boom".to_string(),
+            },
+            RssAccessError::InitializationPanicked,
+            RssAccessError::AlreadyInitialized,
+            RssAccessError::StillResetting,
+            RssAccessError::ResetFailed { message: "boom".to_string() },
+            RssAccessError::ResetPanicked,
+            RssAccessError::AlreadyReset,
+        ];
+        for err in cases {
+            let error_code = err.error_code();
+            let display = err.to_string();
+            let http_error = HttpError::from(err);
+            assert_eq!(
+                http_error.status_code.as_u16(),
+                409,
+                "{error_code}: expected 409 Conflict"
+            );
+            assert_eq!(
+                http_error.error_code.as_deref(),
+                Some(error_code),
+                "{error_code}: error_code should be the variant name"
+            );
+            assert_eq!(
+                http_error.external_message, display,
+                "{error_code}: full error text should be exposed to the \
+                 client"
+            );
+            assert_eq!(
+                http_error.internal_message, display,
+                "{error_code}: internal message should match the error \
+                 text"
+            );
+        }
+    }
 }

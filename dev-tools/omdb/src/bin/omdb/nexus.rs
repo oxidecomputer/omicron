@@ -722,7 +722,14 @@ impl NexusArgs {
             }) => cmd_nexus_background_tasks_list(&client).await,
             NexusCommands::BackgroundTasks(BackgroundTasksArgs {
                 command: BackgroundTasksCommands::Show(args),
-            }) => cmd_nexus_background_tasks_show(&client, args).await,
+            }) => {
+                cmd_nexus_background_tasks_show(
+                    &client,
+                    args,
+                    omdb.output.color,
+                )
+                .await
+            }
             NexusCommands::BackgroundTasks(BackgroundTasksArgs {
                 command: BackgroundTasksCommands::PrintReport(args),
             }) => {
@@ -990,6 +997,7 @@ async fn cmd_nexus_background_tasks_list(
 async fn cmd_nexus_background_tasks_show(
     client: &nexus_lockstep_client::Client,
     args: &BackgroundTasksShowArgs,
+    color: ColorChoice,
 ) -> Result<(), anyhow::Error> {
     let response =
         client.bgtask_list().await.context("listing background tasks")?;
@@ -1039,6 +1047,7 @@ async fn cmd_nexus_background_tasks_show(
 
     let opts = BackgroundTasksPrintOpts {
         show_executing_info: !args.no_executing_info,
+        colored: should_colorize(color, supports_color::Stream::Stdout),
     };
 
     // Some tasks should be grouped and printed together in a certain order,
@@ -1137,6 +1146,8 @@ async fn cmd_nexus_background_tasks_activate(
 #[derive(Clone, Debug)]
 struct BackgroundTasksPrintOpts {
     show_executing_info: bool,
+    /// Whether to style output with ANSI terminal colors.
+    colored: bool,
 }
 
 fn print_task(bgtask: &BackgroundTask, opts: &BackgroundTasksPrintOpts) {
@@ -1185,7 +1196,7 @@ fn print_task(bgtask: &BackgroundTask, opts: &BackgroundTasksPrintOpts) {
     // unstable -- it gets exposed by background tasks as unstructured
     // (schemaless) data.  We make a best effort to interpret it.
     if let LastResult::Completed(completed) = &bgtask.last {
-        print_task_details(&bgtask, &completed.details);
+        print_task_details(&bgtask, &completed.details, opts.colored);
     }
 }
 
@@ -1229,7 +1240,11 @@ fn print_start_end_time(
 /// undocumented and unstable (subject to change).  That does make this code
 /// both ugly and brittle.  It's not a fatal error to fail to parse these, but
 /// we do warn the user if that happens.
-fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
+fn print_task_details(
+    bgtask: &BackgroundTask,
+    details: &serde_json::Value,
+    colored: bool,
+) {
     // All tasks might produce an "error" property.  If we find one, print that
     // out and stop.
     #[derive(Deserialize)]
@@ -1362,7 +1377,7 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
             print_task_webhook_deliverator(details);
         }
         "fm_analysis" => {
-            print_task_fm_analysis(details);
+            print_task_fm_analysis(details, colored);
         }
         "fm_sitrep_loader" => {
             print_task_fm_sitrep_loader(details);
@@ -3490,7 +3505,7 @@ mod ereporter_status_fields {
     pub const NUM_WIDTH: usize = 4;
 }
 
-fn print_task_fm_analysis(details: &serde_json::Value) {
+fn print_task_fm_analysis(details: &serde_json::Value, colored: bool) {
     use nexus_types::internal_api::background::fm_analysis::{
         AnalysisOutcome, AnalysisStatus, Outcome, PreparationStatus,
     };
@@ -3629,7 +3644,7 @@ fn print_task_fm_analysis(details: &serde_json::Value) {
 
     let PreparationStatus { warnings, report: prep_report } = prep_status;
     println!("    preparation report:");
-    print!("{}", prep_report.display_multiline(6));
+    print!("{}", prep_report.display_multiline(6).colored(colored));
     if !warnings.is_empty() {
         println!("{ERRICON}   non-fatal errors preparing analysis inputs:");
         for error in warnings {
@@ -3639,7 +3654,7 @@ fn print_task_fm_analysis(details: &serde_json::Value) {
 
     println!();
     println!("    analysis report:");
-    print!("{}", analysis_report.display_multiline(6));
+    print!("{}", analysis_report.display_multiline(6).colored(colored));
     print_start_end_time(start_time, end_time, 4);
 }
 
@@ -3759,6 +3774,8 @@ fn print_task_fm_rendezvous(details: &serde_json::Value) {
         alerts,
         support_bundles,
         ereport_marking: marking,
+        alert_marker_gc,
+        support_bundle_marker_gc,
     } = match serde_json::from_value::<FmRendezvousStatus>(details.clone()) {
         Err(error) => {
             eprintln!(
@@ -3936,6 +3953,36 @@ fn print_task_fm_rendezvous(details: &serde_json::Value) {
             }
         },
     );
+    print_op(
+        "garbage collecting alert creation markers",
+        &alert_marker_gc,
+        print_marker_gc_details,
+    );
+    print_op(
+        "garbage collecting support bundle creation markers",
+        &support_bundle_marker_gc,
+        print_marker_gc_details,
+    );
+}
+
+fn print_marker_gc_details(status: &fm_rendezvous::MarkerGcStatus) {
+    let fm_rendezvous::MarkerGcStatus { rows_deleted, batches, errors } =
+        status;
+    const ROWS_DELETED: &str = "rows deleted:";
+    const BATCHES: &str = "batches:";
+    const ERRORS: &str = "errors:";
+    const WIDTH: usize = const_max_len(&[ROWS_DELETED, BATCHES, ERRORS]) + 1;
+    const NUM_WIDTH: usize = 4;
+    println!("      {ROWS_DELETED:<WIDTH$}{rows_deleted:>NUM_WIDTH$}");
+    println!("      {BATCHES:<WIDTH$}{batches:>NUM_WIDTH$}");
+    println!(
+        "{}   {ERRORS:<WIDTH$}{:>NUM_WIDTH$}",
+        warn_if_nonzero(errors.len()),
+        errors.len()
+    );
+    for error in errors {
+        println!("        > {error}");
+    }
 }
 
 fn print_task_trust_quorum_manager(details: &serde_json::Value) {

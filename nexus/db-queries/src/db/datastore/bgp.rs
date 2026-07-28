@@ -110,25 +110,37 @@ impl DataStore {
                         BgpAnnounceSetUuid::from_untyped_uuid(announce_set_id),
                     );
 
+                    let BgpConfig {
+                        identity,
+                        asn,
+                        bgp_announce_set_id,
+                        vrf,
+                        shaper,
+                        checker,
+                        max_paths,
+                    } = config.clone();
+
                     // Idempotency:
                     // Check to see if an exact match for the config already exists
                     let query = dsl::bgp_config
-                        .filter(dsl::name.eq(config.name().to_string()))
-                        .filter(dsl::asn.eq(config.asn))
-                        .filter(dsl::bgp_announce_set_id.eq(config.bgp_announce_set_id))
+                        .filter(dsl::name.eq(identity.name.to_string()))
+                        .filter(dsl::description.eq(identity.description.to_string()))
+                        .filter(dsl::asn.eq(asn))
+                        .filter(dsl::bgp_announce_set_id.eq(bgp_announce_set_id))
+                        .filter(dsl::max_paths.eq(max_paths))
                         .into_boxed();
 
-                    let query = match config.vrf.clone() {
+                    let query = match vrf {
                         Some(v) => query.filter(dsl::vrf.eq(v)),
                         None => query.filter(dsl::vrf.is_null()),
                     };
 
-                    let query = match config.shaper.clone() {
+                    let query = match shaper {
                         Some(v) => query.filter(dsl::shaper.eq(v)),
                         None => query.filter(dsl::shaper.is_null()),
                     };
 
-                    let query = match config.checker.clone() {
+                    let query = match checker {
                         Some(v) => query.filter(dsl::checker.eq(v)),
                         None => query.filter(dsl::checker.is_null()),
                     };
@@ -1070,6 +1082,7 @@ mod tests {
     use crate::db::pub_test_utils::TestDatabase;
     use nexus_db_lookup::LookupPath;
     use nexus_db_model::SwitchPortBgpPeerConfig;
+    use nexus_types::external_api::networking::BgpConfigCreate;
     use nexus_types::external_api::networking::BgpConfigSelector;
     use nexus_types::external_api::networking::BgpPeer;
     use omicron_common::api::external::IdentityMetadataCreateParams;
@@ -1082,6 +1095,26 @@ mod tests {
     use sled_agent_types::early_networking::MaxPathConfig;
     use sled_agent_types::early_networking::RouterLifetimeConfig;
     use std::net::IpAddr;
+
+    /// A `BgpConfigCreate` for a test config named `name` that references
+    /// `bgp_announce_set_id`.
+    fn make_bgp_config(
+        name: &Name,
+        bgp_announce_set_id: NameOrId,
+    ) -> networking::BgpConfigCreate {
+        networking::BgpConfigCreate {
+            identity: IdentityMetadataCreateParams {
+                name: name.clone(),
+                description: "a test config".into(),
+            },
+            asn: 47,
+            bgp_announce_set_id,
+            vrf: None,
+            shaper: None,
+            checker: None,
+            max_paths: Default::default(),
+        }
+    }
 
     #[tokio::test]
     async fn test_update_bgp_config() {
@@ -1233,18 +1266,10 @@ mod tests {
         datastore
             .bgp_config_create(
                 &opctx,
-                &networking::BgpConfigCreate {
-                    identity: IdentityMetadataCreateParams {
-                        name: config_name.clone(),
-                        description: String::from("a test config"),
-                    },
-                    asn: 47,
-                    bgp_announce_set_id: NameOrId::Name(announce_name.clone()),
-                    vrf: None,
-                    shaper: None,
-                    checker: None,
-                    max_paths: Default::default(),
-                },
+                &make_bgp_config(
+                    &config_name,
+                    NameOrId::Name(announce_name.clone()),
+                ),
             )
             .await
             .expect("create bgp config");
@@ -1268,6 +1293,81 @@ mod tests {
             )
             .await
             .expect("delete announce set by name");
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    /// After a config name is reused, a by-name `bgp_config_get` must return
+    /// the live config.
+    #[tokio::test]
+    async fn bgp_config_get_by_name_after_reuse_returns_live() {
+        let logctx = dev::test_setup_log(
+            "bgp_config_get_by_name_after_reuse_returns_live",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let announce_name: Name = "test-announce-set".parse().unwrap();
+        let config_name: Name = "test-bgp-config".parse().unwrap();
+
+        datastore
+            .bgp_create_announce_set(
+                &opctx,
+                &networking::BgpAnnounceSetCreate {
+                    identity: IdentityMetadataCreateParams {
+                        name: announce_name.clone(),
+                        description: "a test announce set".into(),
+                    },
+                    announcement: vec![],
+                },
+            )
+            .await
+            .expect("created announce set");
+
+        let config = make_bgp_config(
+            &config_name,
+            NameOrId::Name(announce_name.clone()),
+        );
+
+        // Create the config, delete it, then create it again under the same
+        // name.
+        let first = datastore.bgp_config_create(&opctx, &config).await.unwrap();
+        let first_id = first.id().into_untyped_uuid();
+        datastore
+            .bgp_config_delete(
+                &opctx,
+                &networking::BgpConfigSelector {
+                    name_or_id: NameOrId::Name(config_name.clone()),
+                },
+            )
+            .await
+            .expect("the unreferenced config can be deleted");
+        let second =
+            datastore.bgp_config_create(&opctx, &config).await.unwrap();
+        let second_id = second.id().into_untyped_uuid();
+        assert_ne!(first_id, second_id, "the recreation is a distinct row");
+
+        // A by-name lookup returns the live (second) config, not the dead one.
+        let got = datastore
+            .bgp_config_get(&opctx, &NameOrId::Name(config_name.clone()))
+            .await
+            .expect("the reused name resolves to the live config");
+        assert_eq!(got.id().into_untyped_uuid(), second_id);
+        assert!(got.identity.time_deleted.is_none());
+
+        datastore
+            .bgp_config_get(&opctx, &NameOrId::Id(second_id))
+            .await
+            .expect("the live config is readable by id");
+        let dead = datastore
+            .bgp_config_get(&opctx, &NameOrId::Id(first_id))
+            .await
+            .expect_err("the soft-deleted row must not be found by id");
+        let Error::ObjectNotFound { type_name, .. } = &dead else {
+            panic!("expected ObjectNotFound, got {dead:#?}");
+        };
+        assert_eq!(*type_name, ResourceType::BgpConfig);
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -1728,8 +1828,6 @@ mod tests {
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
         let config_name: Name = "config-name".parse().unwrap();
-        let description = String::from("a test config");
-        let asn = 47;
 
         let announce_id = datastore
             .bgp_create_announce_set(
@@ -1748,26 +1846,18 @@ mod tests {
             .identity
             .id;
 
-        datastore
+        let config_id = datastore
             .bgp_config_create(
                 &opctx,
-                &networking::BgpConfigCreate {
-                    identity: IdentityMetadataCreateParams {
-                        name: config_name.clone(),
-                        description: description.clone(),
-                    },
-                    asn,
-                    bgp_announce_set_id: NameOrId::Id(
-                        announce_id.into_untyped_uuid(),
-                    ),
-                    vrf: None,
-                    shaper: None,
-                    checker: None,
-                    max_paths: Default::default(),
-                },
+                &make_bgp_config(
+                    &config_name,
+                    NameOrId::Id(announce_id.into_untyped_uuid()),
+                ),
             )
             .await
-            .expect("create bgp config");
+            .expect("create bgp config")
+            .id()
+            .into_untyped_uuid();
 
         let bgp_config = datastore
             .bgp_config_get(&opctx, &NameOrId::Name(config_name.clone()))
@@ -1775,9 +1865,15 @@ mod tests {
             .expect("get bgp config by name");
 
         assert_eq!(bgp_config.identity.name.0, config_name);
-        assert_eq!(bgp_config.identity.description, description);
-        assert_eq!(bgp_config.asn.0, asn);
+        assert_eq!(bgp_config.identity.description, "a test config");
+        assert_eq!(bgp_config.asn.0, 47);
         assert_eq!(bgp_config.bgp_announce_set_id, announce_id);
+
+        // The same live config is also readable by id.
+        datastore
+            .bgp_config_get(&opctx, &NameOrId::Id(config_id))
+            .await
+            .expect("get bgp config by id");
 
         datastore
             .bgp_config_delete(
@@ -1789,12 +1885,138 @@ mod tests {
             .await
             .expect("delete bgp config by name");
 
-        assert!(
-            datastore
-                .bgp_config_get(&opctx, &NameOrId::Name(config_name))
+        // Once soft-deleted, the config is gone by both name and id (rather
+        // than resolving to the dead row or full-scanning).
+        let by_name = datastore
+            .bgp_config_get(&opctx, &NameOrId::Name(config_name))
+            .await
+            .expect_err("a soft-deleted config must not be found by name");
+        let Error::ObjectNotFound { type_name, .. } = &by_name else {
+            panic!("expected ObjectNotFound by name, got {by_name:#?}");
+        };
+        assert_eq!(*type_name, ResourceType::BgpConfig);
+
+        let by_id = datastore
+            .bgp_config_get(&opctx, &NameOrId::Id(config_id))
+            .await
+            .expect_err("a soft-deleted config must not be found by id");
+        let Error::ObjectNotFound { type_name, .. } = &by_id else {
+            panic!("expected ObjectNotFound by id, got {by_id:#?}");
+        };
+        assert_eq!(*type_name, ResourceType::BgpConfig);
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_bgp_config_create_idempotency() {
+        let logctx = dev::test_setup_log("test_bgp_config_create_idempotency");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let bgp_announce_set_id = datastore
+            .bgp_create_announce_set(
+                &opctx,
+                &networking::BgpAnnounceSetCreate {
+                    identity: IdentityMetadataCreateParams {
+                        name: "announce-set".parse().unwrap(),
+                        description: String::from("the first announce set"),
+                    },
+                    announcement: Vec::default(),
+                },
+            )
+            .await
+            .expect("create bgp announce set")
+            .0
+            .identity
+            .id;
+
+        datastore
+            .bgp_create_announce_set(
+                &opctx,
+                &networking::BgpAnnounceSetCreate {
+                    identity: IdentityMetadataCreateParams {
+                        name: "other-announce-set".parse().unwrap(),
+                        description: String::from("another announce set"),
+                    },
+                    announcement: Vec::default(),
+                },
+            )
+            .await
+            .expect("create other bgp announce set");
+
+        let bgp_config = networking::BgpConfigCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "config-name".parse().unwrap(),
+                description: String::from("a test config"),
+            },
+            asn: 47,
+            bgp_announce_set_id: NameOrId::Id(
+                bgp_announce_set_id.into_untyped_uuid(),
+            ),
+            vrf: None,
+            shaper: None,
+            checker: None,
+            max_paths: MaxPathConfig::new(1).unwrap(),
+        };
+
+        let created = datastore
+            .bgp_config_create(&opctx, &bgp_config)
+            .await
+            .expect("create bgp config");
+
+        // Subsequent creates should succeed if all fields match
+        let replayed = datastore
+            .bgp_config_create(&opctx, &bgp_config)
+            .await
+            .expect("replay identical bgp config create");
+        assert_eq!(created.identity.id, replayed.identity.id);
+
+        // Subsequent creates should fail if any field is different
+        type Mutation = (&'static str, fn(&mut BgpConfigCreate));
+        let mutations: &[Mutation] = &[
+            ("identity.name", |config| {
+                config.identity.name = "other-config-name".parse().unwrap();
+            }),
+            ("identity.description", |config| {
+                config.identity.description =
+                    String::from("another description");
+            }),
+            ("asn", |config| {
+                config.asn = 48;
+            }),
+            ("bgp_announce_set_id", |config| {
+                config.bgp_announce_set_id =
+                    NameOrId::Name("other-announce-set".parse().unwrap());
+            }),
+            ("vrf", |config| {
+                config.vrf = Some("other-vrf".parse().unwrap());
+            }),
+            ("shaper", |config| {
+                config.shaper = Some(String::from("other shaper"));
+            }),
+            ("checker", |config| {
+                config.checker = Some(String::from("other checker"));
+            }),
+            ("max_paths", |config| {
+                config.max_paths = MaxPathConfig::new(2).unwrap();
+            }),
+        ];
+
+        for &(field, mutate) in mutations {
+            let mut conflicting_config = bgp_config.clone();
+            mutate(&mut conflicting_config);
+
+            let error = datastore
+                .bgp_config_create(&opctx, &conflicting_config)
                 .await
-                .is_err()
-        );
+                .expect_err(&format!("{field} should affect idempotency"));
+            assert!(
+                matches!(error, Error::Conflict { .. }),
+                "changing {field} returned an unexpected error: {error:?}"
+            );
+        }
 
         db.terminate().await;
         logctx.cleanup_successful();

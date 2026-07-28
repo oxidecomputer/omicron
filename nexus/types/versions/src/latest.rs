@@ -210,20 +210,25 @@ pub mod internet_gateway {
 }
 
 pub mod ip_pool {
-    pub use crate::v2025_11_20_00::ip_pool::IpPool;
-    pub use crate::v2025_11_20_00::ip_pool::IpPoolCreate;
     pub use crate::v2025_11_20_00::ip_pool::IpPoolRange;
     pub use crate::v2025_11_20_00::ip_pool::IpPoolSiloLink;
     pub use crate::v2025_11_20_00::ip_pool::IpPoolSiloPath;
     pub use crate::v2025_11_20_00::ip_pool::IpPoolType;
     pub use crate::v2025_11_20_00::ip_pool::IpPoolUpdate;
     pub use crate::v2025_11_20_00::ip_pool::IpPoolUtilization;
+    pub use crate::v2026_06_11_00::ip_pool::IpPool;
 
     pub use crate::v2026_01_01_00::ip_pool::SiloIpPool;
 
     pub use crate::v2026_01_05_00::ip_pool::IpPoolLinkSilo;
     pub use crate::v2026_01_05_00::ip_pool::IpPoolSiloUpdate;
     pub use crate::v2026_01_05_00::ip_pool::PoolSelector;
+
+    pub use crate::v2026_06_11_00::ip_pool::IpPoolAssignParam;
+    pub use crate::v2026_06_11_00::ip_pool::IpPoolAssignment;
+    pub use crate::v2026_06_11_00::ip_pool::IpPoolCreate;
+    pub use crate::v2026_06_11_00::ip_pool::IpPoolFilter;
+    pub use crate::v2026_06_11_00::ip_pool::SystemIpPoolFilter;
 }
 
 pub mod metrics {
@@ -331,15 +336,15 @@ pub mod networking {
 
     pub use crate::v2026_06_10_00::networking::BgpConfigUpdate;
 
-    pub use crate::v2026_06_25_00::networking::DiscoveredRouter;
-    pub use crate::v2026_06_25_00::networking::PendingUnnumberedInterface;
-    pub use crate::v2026_06_25_00::networking::RouterDiscoveryRuntimeState;
-    pub use crate::v2026_06_25_00::networking::SwitchUnnumberedInterface;
-    pub use crate::v2026_06_25_00::networking::SwitchUnnumberedManagerState;
-    pub use crate::v2026_06_25_00::networking::UnnumberedInterface;
-    pub use crate::v2026_06_25_00::networking::UnnumberedInterfacePath;
-    pub use crate::v2026_06_25_00::networking::UnnumberedInterfaceStatus;
-    pub use crate::v2026_06_25_00::networking::UnnumberedManagerState;
+    pub use crate::v2026_07_28_00::networking::DiscoveredRouter;
+    pub use crate::v2026_07_28_00::networking::PendingUnnumberedInterface;
+    pub use crate::v2026_07_28_00::networking::RouterDiscoveryRuntimeState;
+    pub use crate::v2026_07_28_00::networking::SwitchUnnumberedInterface;
+    pub use crate::v2026_07_28_00::networking::SwitchUnnumberedManagerState;
+    pub use crate::v2026_07_28_00::networking::UnnumberedInterface;
+    pub use crate::v2026_07_28_00::networking::UnnumberedInterfacePath;
+    pub use crate::v2026_07_28_00::networking::UnnumberedInterfaceStatus;
+    pub use crate::v2026_07_28_00::networking::UnnumberedManagerState;
 }
 
 pub mod oxql {

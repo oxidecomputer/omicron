@@ -15,7 +15,7 @@ use illumos_utils::dladm::PhysicalLink;
 use omicron_common::vlan::VlanID;
 use serde::Deserialize;
 use sled_hardware::DataLinks;
-use sled_hardware::UnparsedDisk;
+use sled_hardware::ExternalDisks;
 use sprockets_tls::keys::SprocketsConfig;
 
 #[derive(Clone, Debug, Deserialize)]
@@ -88,12 +88,8 @@ pub struct Config {
     pub swap_device_size_gb: Option<u32>,
     /// Optional VLAN ID to be used for tagging guest VNICs.
     pub vlan: Option<VlanID>,
-    /// Optional list of virtual devices to be used as "discovered disks".
-    pub vdevs: Option<Vec<Utf8PathBuf>>,
-    /// Optional list of real devices to be injected as observed disks during
-    /// device polling.
-    #[serde(default)]
-    pub nongimlet_observed_disks: Option<Vec<UnparsedDisk>>,
+    /// The source of external disks to use.
+    pub external_disks: ExternalDisks,
     /// Optionally skip waiting for time synchronization
     pub skip_timesync: Option<bool>,
 

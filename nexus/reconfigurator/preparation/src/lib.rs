@@ -491,15 +491,14 @@ async fn fetch_all_service_ip_pool_ranges(
         .ip_pools_service_lookup_both_versions(opctx)
         .await
         .internal_context("fetching IP services pools")?;
-    let mut ranges = datastore
-        .ip_pool_list_ranges_batched(opctx, &service_pools.ipv4.authz_pool)
-        .await
-        .internal_context("listing services IPv4 pool ranges")?;
-    let mut v6_ranges = datastore
-        .ip_pool_list_ranges_batched(opctx, &service_pools.ipv6.authz_pool)
-        .await
-        .internal_context("listing services IPv6 pool ranges")?;
-    ranges.append(&mut v6_ranges);
+    let mut ranges = Vec::new();
+    for pool in service_pools.ipv4.iter().chain(service_pools.ipv6.iter()) {
+        let mut pool_ranges = datastore
+            .ip_pool_list_ranges_batched(opctx, &pool.authz_pool)
+            .await
+            .internal_context("listing services pool ranges")?;
+        ranges.append(&mut pool_ranges);
+    }
     Ok(ranges)
 }
 

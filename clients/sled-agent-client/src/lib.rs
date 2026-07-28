@@ -37,6 +37,7 @@ progenitor::generate_api!(
         "oxnet" = "0.1.0",
     },
     replace = {
+        ArtifactConfig = sled_agent_types::artifact::ArtifactConfig,
         Attestation = sled_agent_types_versions::latest::rot::Attestation,
         Baseboard = sled_agent_types_versions::latest::inventory::Baseboard,
         BaseboardId = sled_hardware_types::BaseboardId,

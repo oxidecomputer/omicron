@@ -61,7 +61,7 @@ impl Inventory {
 
         for sp in mgs_inventory.sps {
             let i = sp.id.slot;
-            let type_ = sp.id.type_;
+            let type_ = sp.id.typ;
             let sp = Sp {
                 ignition: sp.ignition,
                 state: sp.state,

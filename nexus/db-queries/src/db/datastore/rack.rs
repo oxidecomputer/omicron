@@ -653,26 +653,36 @@ impl DataStore {
             );
             return Ok(());
         };
-        let service_pool =
-            service_pools.pool_for_version(external_ip.ip_version().into());
+        let service_pool = service_pools
+            .pools_for_version(external_ip.ip_version().into())
+            .first()
+            .ok_or_else(|| {
+                RackInitError::AddingIp(Error::internal_error(
+                    "no system services pool for this IP version",
+                ))
+            })?;
         let db_ip = IncompleteExternalIp::for_omicron_zone(
-            service_pool.id(),
+            service_pool.db_pool.id(),
             external_ip,
             zone_config.id,
             zone_config.zone_type.kind(),
         );
-        Self::allocate_external_ip_on_connection(conn, db_ip).await.map_err(
-            |err| {
-                error!(
-                    log,
-                    "Initializing Rack: Failed to allocate \
-                     IP address for {}",
-                     zone_report_str;
-                    "err" => %err,
-                );
-                RackInitError::AddingIp(err.into_public_ignore_retries())
-            },
-        )?;
+        Self::allocate_external_ip_on_connection(
+            conn,
+            db_ip,
+            LookupType::ById(service_pool.db_pool.id()),
+        )
+        .await
+        .map_err(|err| {
+            error!(
+                log,
+                "Initializing Rack: Failed to allocate \
+                 IP address for {}",
+                 zone_report_str;
+                "err" => %err,
+            );
+            RackInitError::AddingIp(err.into_public_ignore_retries())
+        })?;
 
         self.create_network_interface_raw_conn(conn, db_nic)
             .await
@@ -784,7 +794,16 @@ impl DataStore {
 
                     // Set up the IP pool for internal services.
                     for range in service_ip_pool_ranges {
-                        let service_pool = service_ip_pools.pool_for_range(&range);
+                        let service_pool = service_ip_pools
+                            .pools_for_range(&range)
+                            .first()
+                            .ok_or_else(|| {
+                                let e = Error::internal_error(
+                                    "no system services pool for this IP version",
+                                );
+                                err.set(RackInitError::AddingIp(e)).unwrap();
+                                DieselError::RollbackTransaction
+                            })?;
                         Self::ip_pool_add_range_on_connection(
                             &conn,
                             opctx,

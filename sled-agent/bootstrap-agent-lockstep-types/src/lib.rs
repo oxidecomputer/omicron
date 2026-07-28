@@ -251,7 +251,9 @@ pub struct RecoverySiloConfig {
 
 /// Current status of any rack-level operation being performed by this bootstrap
 /// agent.
-#[derive(Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema,
+)]
 #[serde(tag = "status", rename_all = "snake_case")]
 pub enum RackOperationStatus {
     Initializing {
