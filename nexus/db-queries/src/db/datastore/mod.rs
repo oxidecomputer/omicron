@@ -160,7 +160,6 @@ pub use alert::AlertFilters;
 pub use alert::FmRendezvousAlertCreateError;
 pub use db_metadata::DatastoreSetupAction;
 pub use db_metadata::ValidatedDatastoreSetupAction;
-pub use deployment::BlueprintLimitReachedOutput;
 pub use deployment::ExternalServiceNetworkingConfig;
 pub use disk::CrucibleDisk;
 pub use disk::Disk;
@@ -174,15 +173,20 @@ pub use external_subnet::ExternalSubnetCompleteOpResult;
 pub use fm_rendezvous_gc::MarkerGcResult;
 pub use instance::{InstanceAndActiveVmm, InstanceGestalt};
 pub use inventory::DataStoreInventoryTest;
+pub use ip_pool::ServiceIpPool;
+pub use ip_pool::ServiceIpPools;
 use nexus_db_model::AllSchemaVersions;
 use nexus_types::internal_api::views::HeldDbClaimInfo;
 pub use oximeter::CollectorReassignment;
 pub use rack::RackInit;
+pub use rack::ServiceIpPoolConfig;
 pub use rack::SledUnderlayAllocationResult;
 pub use region::RegionAllocationFor;
 pub use region::RegionAllocationParameters;
 pub use region_snapshot_replacement::NewRegionVolumeId;
 pub use region_snapshot_replacement::OldSnapshotVolumeId;
+pub use saga::NewSagaState;
+pub use saga::SagaStateDbFields;
 pub use scim_provider_store::CrdbScimProviderStore;
 pub use silo::Discoverability;
 pub use silo_group::SiloGroup;
@@ -2424,7 +2428,7 @@ mod test {
                          name, description, project ID, and {} ID:\
                          {name:?} {description:?} {project_id:?} {:?}\n{e}",
                         if is_service { "Service" } else { "Instance" },
-                        &ip.parent_id
+                        ip.parent_id
                     )
                 });
 

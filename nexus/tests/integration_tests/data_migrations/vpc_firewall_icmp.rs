@@ -20,7 +20,7 @@ fn before<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
     Box::pin(async {
         use nexus_db_queries::db::fixed_data::project::*;
         use nexus_db_queries::db::fixed_data::vpc::*;
-        use omicron_common::address::SERVICE_VPC_IPV6_PREFIX;
+        use omicron_common::address::SERVICE_VPC_IPV6_SUBNET;
 
         // First, create the oxide-services vpc. The migration will only add
         // a new rule if it detects the presence of *this* VPC entry (i.e.,
@@ -41,7 +41,7 @@ fn before<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
                     '{svc_proj}', '{svc_router}', '{svc_vpc_name}',
                     100, '{}', 0, 0
                 );",
-                *SERVICE_VPC_IPV6_PREFIX
+                *SERVICE_VPC_IPV6_SUBNET
             ))
             .await
             .expect("failed to create services vpc record");

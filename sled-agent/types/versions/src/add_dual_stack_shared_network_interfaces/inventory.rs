@@ -6,6 +6,7 @@ use std::collections::BTreeMap;
 use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6};
 use std::time::Duration;
 
+use crate::v1::inventory::Baseboard;
 use chrono::{DateTime, Utc};
 use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
@@ -25,7 +26,7 @@ use omicron_uuid_kinds::{MupdateOverrideUuid, PhysicalDiskUuid};
 use oxnet::IpNet;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use sled_hardware_types::{Baseboard, SledCpuFamily};
+use sled_hardware_types::SledCpuFamily;
 use uuid::Uuid;
 
 use crate::v1::inventory::{

@@ -69,6 +69,7 @@ use omicron_common::api::external::http_pagination::PaginatedBy;
 use ref_cast::RefCast;
 use std::collections::HashSet;
 use std::net::IpAddr;
+use std::num::NonZeroU32;
 use uuid::Uuid;
 
 /// Helper type with both an authz IP Pool and the actual DB record.
@@ -78,25 +79,17 @@ pub struct ServiceIpPool {
     pub db_pool: IpPool,
 }
 
-/// Helper type with service IP Pool information for both IP versions.
+/// Helper type with all system services IP Pools, split by IP version.
 #[derive(Debug, Clone)]
 pub struct ServiceIpPools {
-    pub ipv4: ServiceIpPool,
-    pub ipv6: ServiceIpPool,
+    pub ipv4: Vec<ServiceIpPool>,
+    pub ipv6: Vec<ServiceIpPool>,
 }
 
 impl ServiceIpPools {
-    /// Return the IP Pool appropriate for a range, based on its version.
-    pub fn pool_for_range(&self, range: &IpRange) -> &ServiceIpPool {
-        if range.first_address().is_ipv4() { &self.ipv4 } else { &self.ipv6 }
-    }
-
-    /// Return the IP Pool appropriate for an IP version.
-    pub fn pool_for_version(&self, version: IpVersion) -> &IpPool {
-        match version {
-            IpVersion::V4 => &self.ipv4.db_pool,
-            IpVersion::V6 => &self.ipv6.db_pool,
-        }
+    /// Return any one system-service pool, regardless of IP version.
+    pub fn any_pool(&self) -> Option<&ServiceIpPool> {
+        self.ipv4.first().or_else(|| self.ipv6.first())
     }
 }
 
@@ -157,7 +150,7 @@ impl DataStore {
     pub async fn ip_pools_list_paginated(
         &self,
         opctx: &OpContext,
-        assignment: IpPoolAssignment,
+        assignment: Option<IpPoolAssignment>,
         version: Option<IpVersion>,
         pool_type: Option<IpPoolType>,
         pagparams: &PaginatedBy<'_>,
@@ -176,6 +169,10 @@ impl DataStore {
                 &by_name.map_name(|n| Name::ref_cast(n)),
             ),
         };
+        query = match assignment {
+            Some(a) => query.filter(ip_pool::assignment.eq(a)),
+            None => query,
+        };
         query = match version {
             Some(ver) => query.filter(ip_pool::ip_version.eq(ver)),
             None => query,
@@ -186,7 +183,6 @@ impl DataStore {
         };
         query
             .filter(ip_pool::time_deleted.is_null())
-            .filter(ip_pool::assignment.eq(assignment))
             .select(IpPool::as_select())
             .get_results_async(&*self.pool_connection_authorized(opctx).await?)
             .await
@@ -203,7 +199,7 @@ impl DataStore {
     ) -> ListResultVec<IpPool> {
         self.ip_pools_list_paginated(
             opctx,
-            IpPoolAssignment::Silos,
+            Some(IpPoolAssignment::Silos),
             None,
             None,
             pagparams,
@@ -219,7 +215,7 @@ impl DataStore {
     ) -> ListResultVec<IpPool> {
         self.ip_pools_list_paginated(
             opctx,
-            IpPoolAssignment::Silos,
+            Some(IpPoolAssignment::Silos),
             None,
             Some(IpPoolType::Multicast),
             pagparams,
@@ -235,7 +231,7 @@ impl DataStore {
     ) -> ListResultVec<IpPool> {
         self.ip_pools_list_paginated(
             opctx,
-            IpPoolAssignment::Silos,
+            Some(IpPoolAssignment::Silos),
             None,
             Some(IpPoolType::Unicast),
             pagparams,
@@ -447,24 +443,74 @@ impl DataStore {
         }
     }
 
-    /// Look up system services IP Pools for both IP versions.
-    ///
-    /// This is useful when you need to handle resources like external IPs where
-    /// the actual address might be from either IP version.
-    //
-    // TODO-remove: Use list_ip_pools_for_internal instead.
-    //
-    // See https://github.com/oxidecomputer/omicron/issues/8947.
+    /// Look up all system services IP Pools, split by IP version.
     pub async fn ip_pools_service_lookup_both_versions(
         &self,
         opctx: &OpContext,
     ) -> LookupResult<ServiceIpPools> {
-        let ipv4 = self.ip_pools_service_lookup(opctx, IpVersion::V4).await?;
-        let ipv6 = self.ip_pools_service_lookup(opctx, IpVersion::V6).await?;
-        Ok(ServiceIpPools {
-            ipv4: ServiceIpPool { authz_pool: ipv4.0, db_pool: ipv4.1 },
-            ipv6: ServiceIpPool { authz_pool: ipv6.0, db_pool: ipv6.1 },
-        })
+        use nexus_db_schema::schema::ip_pool;
+
+        opctx
+            .authorize(authz::Action::ListChildren, &authz::IP_POOL_LIST)
+            .await?;
+
+        let pools: Vec<IpPool> = ip_pool::table
+            .filter(ip_pool::time_deleted.is_null())
+            .filter(ip_pool::assignment.eq(IpPoolAssignment::SystemServices))
+            .select(IpPool::as_select())
+            .load_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        let mut ipv4 = Vec::new();
+        let mut ipv6 = Vec::new();
+        for db_pool in pools {
+            let id = db_pool.id();
+            let authz_pool =
+                authz::IpPool::new(authz::FLEET, id, LookupType::ById(id));
+            let service_pool = ServiceIpPool { authz_pool, db_pool };
+            if service_pool.db_pool.ip_version == IpVersion::V4 {
+                ipv4.push(service_pool);
+            } else {
+                ipv6.push(service_pool);
+            }
+        }
+        Ok(ServiceIpPools { ipv4, ipv6 })
+    }
+
+    /// Look up the system-service IP pools of a single IP version.
+    ///
+    /// Returns every pool assigned to system services with the given IP
+    /// version, up to `limit`.
+    pub async fn ip_pools_service_lookup_by_version(
+        &self,
+        opctx: &OpContext,
+        ip_version: IpVersion,
+        limit: NonZeroU32,
+    ) -> LookupResult<Vec<ServiceIpPool>> {
+        let pagparams = PaginatedBy::Id(DataPageParams {
+            marker: None,
+            direction: dropshot::PaginationOrder::Ascending,
+            limit,
+        });
+        let pools = self
+            .ip_pools_list_paginated(
+                opctx,
+                Some(IpPoolAssignment::SystemServices),
+                Some(ip_version),
+                None,
+                &pagparams,
+            )
+            .await?;
+        Ok(pools
+            .into_iter()
+            .map(|db_pool| {
+                let id = db_pool.id();
+                let authz_pool =
+                    authz::IpPool::new(authz::FLEET, id, LookupType::ById(id));
+                ServiceIpPool { authz_pool, db_pool }
+            })
+            .collect())
     }
 
     /// Fetch all default unicast IP pools for the current silo, one per IP
@@ -564,10 +610,10 @@ impl DataStore {
 
         let (authz_pool, pool_version) = match pool {
             Some(authz_pool) => {
-                self.ip_pool_fetch_link(opctx, authz_pool.id())
-                    .await
-                    .map_err(|_| authz_pool.not_found())?;
-
+                // We intentionally skip checking the silo / pool link here.
+                // That's now done in the `NextExternalIp` allocation query
+                // itself, which has a CTE arm that ensures the link exists. We
+                // do still fetch the pool to validate its type and IP version.
                 let pool_record = {
                     ip_pool::table
                         .filter(ip_pool::id.eq(authz_pool.id()))
@@ -624,42 +670,112 @@ impl DataStore {
     /// This searches all pools linked to the current silo for a range
     /// containing the given IP address. Since IP pool ranges cannot overlap,
     /// at most one pool can contain any given address.
-    pub async fn ip_pool_fetch_containing_address(
+    ///
+    /// NOTE: This also authorizes the CreateChild action on the pool.
+    pub async fn ip_pool_fetch_containing_address_in_current_silo(
         &self,
         opctx: &OpContext,
         ip: IpAddr,
         pool_type: IpPoolType,
     ) -> LookupResult<authz::IpPool> {
+        let silo_id = opctx.authn.silo_required()?.id();
+        self.lookup_ip_pool_containing_address_on_connection(
+            opctx,
+            &*self.pool_connection_authorized(opctx).await?,
+            ip,
+            pool_type,
+            Some(silo_id),
+        )
+        .await
+        .map(|(authz, _db)| authz)
+    }
+
+    /// Fetch the IP Pool assigned to services containing the provided address.
+    pub async fn ip_pool_fetch_containing_address_for_services(
+        &self,
+        opctx: &OpContext,
+        ip: IpAddr,
+    ) -> LookupResult<(authz::IpPool, IpPool)> {
+        self.ip_pool_fetch_containing_address_for_services_on_connection(
+            opctx,
+            &*self.pool_connection_authorized(opctx).await?,
+            ip,
+        )
+        .await
+    }
+
+    pub(crate) async fn ip_pool_fetch_containing_address_for_services_on_connection(
+        &self,
+        opctx: &OpContext,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        ip: IpAddr,
+    ) -> LookupResult<(authz::IpPool, IpPool)> {
+        self.lookup_ip_pool_containing_address_on_connection(
+            opctx,
+            conn,
+            ip,
+            // System services always use unicast addresses today.
+            IpPoolType::Unicast,
+            // And have no linked silo.
+            None,
+        )
+        .await
+    }
+
+    async fn lookup_ip_pool_containing_address_on_connection(
+        &self,
+        opctx: &OpContext,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        ip: IpAddr,
+        pool_type: IpPoolType,
+        silo_id: Option<Uuid>,
+    ) -> LookupResult<(authz::IpPool, IpPool)> {
         use nexus_db_schema::schema::ip_pool;
         use nexus_db_schema::schema::ip_pool_range;
         use nexus_db_schema::schema::ip_pool_resource;
-
         let ip_network: IpNetwork = ip.into();
-        let silo_id = opctx.authn.silo_required()?.id();
-
-        let pool = ip_pool_range::table
+        let ip_version =
+            if ip.is_ipv4() { IpVersion::V4 } else { IpVersion::V6 };
+        let mut query = ip_pool_range::table
             .inner_join(
                 ip_pool::table.on(ip_pool::id
                     .eq(ip_pool_range::ip_pool_id)
                     .and(ip_pool::time_deleted.is_null())),
             )
-            .inner_join(
-                ip_pool_resource::table.on(ip_pool_resource::ip_pool_id
-                    .eq(ip_pool::id)
-                    .and(
-                        ip_pool_resource::resource_type
-                            .eq(IpPoolResourceType::Silo),
-                    )
-                    .and(ip_pool_resource::resource_id.eq(silo_id))),
-            )
+            .into_boxed();
+
+        // We need to ensure the pool is linked to the provided silo, if it's
+        // Some(_). We can do that with an inner join, but that's difficult to
+        // express in Diesel. Instead, use a subquery that returns FALSE if
+        // there's no such link.
+        //
+        // NOTE: We don't do this at all for system services, and instead check
+        // that the pool itself is assigned for services.
+        if let Some(silo_id) = silo_id {
+            query = query.filter(diesel::dsl::exists(
+                ip_pool_resource::table.filter(
+                    ip_pool_resource::ip_pool_id
+                        .eq(ip_pool::id)
+                        .and(
+                            ip_pool_resource::resource_type
+                                .eq(IpPoolResourceType::Silo),
+                        )
+                        .and(ip_pool_resource::resource_id.eq(silo_id)),
+                ),
+            ));
+        } else {
+            query = query.filter(
+                ip_pool::assignment.eq(IpPoolAssignment::SystemServices),
+            );
+        }
+        let pool = query
             .filter(ip_pool_range::time_deleted.is_null())
             .filter(ip_pool_range::first_address.le(ip_network))
             .filter(ip_pool_range::last_address.ge(ip_network))
             .filter(ip_pool::pool_type.eq(pool_type))
+            .filter(ip_pool::ip_version.eq(ip_version))
             .select(IpPool::as_select())
-            .first_async::<IpPool>(
-                &*self.pool_connection_authorized(opctx).await?,
-            )
+            .first_async::<IpPool>(conn)
             .await
             .map_err(|e| {
                 public_error_from_diesel_lookup(
@@ -675,17 +791,18 @@ impl DataStore {
         let authz_pool =
             authz::IpPool::new(authz::FLEET, pool.id(), lookup_type);
         opctx.authorize(authz::Action::CreateChild, &authz_pool).await?;
-        Ok(authz_pool)
+        Ok((authz_pool, pool))
     }
 
     /// Look up system services IP pool by its well-known name.
     ///
     /// This method may require an index by Availability Zone in the future.
     //
-    // TODO-remove: Use ip_pools_list_paginated with the right enum type
-    // instead.
-    //
-    // See https://github.com/oxidecomputer/omicron/issues/8947.
+    // The only remaining callers are the deprecated `ip-pools-service` API
+    // handlers. Everything else resolves system-service pools by assignment via
+    // `ip_pools_service_lookup_by_version` / `_both_versions`. This method and
+    // the well-known name constants are removed once those handlers move off
+    // the builtin names. See https://github.com/oxidecomputer/omicron/issues/8950.
     pub async fn ip_pools_service_lookup(
         &self,
         opctx: &OpContext,
@@ -706,16 +823,24 @@ impl DataStore {
         opctx: &OpContext,
         pool: IpPool,
     ) -> CreateResult<IpPool> {
-        use nexus_db_schema::schema::ip_pool::dsl;
+        let conn = self.pool_connection_authorized(opctx).await?;
+        Self::ip_pool_create_on_connection(&conn, opctx, pool).await
+    }
+
+    pub(crate) async fn ip_pool_create_on_connection(
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        opctx: &OpContext,
+        pool: IpPool,
+    ) -> CreateResult<IpPool> {
         opctx
             .authorize(authz::Action::CreateChild, &authz::IP_POOL_LIST)
             .await?;
+        use nexus_db_schema::schema::ip_pool::dsl;
         let pool_name = pool.name().as_str().to_string();
-
         diesel::insert_into(dsl::ip_pool)
             .values(pool)
             .returning(IpPool::as_returning())
-            .get_result_async(&*self.pool_connection_authorized(opctx).await?)
+            .get_result_async(conn)
             .await
             .map_err(|e| {
                 public_error_from_diesel(
@@ -872,17 +997,20 @@ impl DataStore {
         authz_pool: &authz::IpPool,
         db_pool: &IpPool,
         assignment: IpPoolAssignment,
-    ) -> UpdateResult<()> {
+    ) -> UpdateResult<IpPool> {
         if db_pool.assignment == assignment {
             return Err(Error::invalid_request(format!(
                 "IP Pool already has assignment '{}'",
                 assignment,
             )));
         }
-        let n_rows = assign_ip_pool_query(db_pool, assignment)
-            .execute_async(&*self.pool_connection_authorized(opctx).await?)
+        assign_ip_pool_query(db_pool, assignment)
+            .get_result_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| match e {
+                DieselError::NotFound => Error::invalid_request(
+                    "update failed due to concurrent modification",
+                ),
                 DieselError::DatabaseError(
                     DatabaseErrorKind::Unknown,
                     ref info,
@@ -904,14 +1032,7 @@ impl DataStore {
                     e,
                     ErrorHandler::NotFoundByResource(authz_pool),
                 ),
-            })?;
-        if n_rows == 0 {
-            Err(Error::invalid_request(
-                "update failed due to concurrent modification",
-            ))
-        } else {
-            Ok(())
-        }
+            })
     }
 
     /// Return the number of IPs allocated from and the capacity of the provided
@@ -1076,12 +1197,14 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         authz_silo: &authz::Silo,
+        ip_version: Option<IpVersion>,
+        pool_type: Option<IpPoolType>,
         pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<(IpPool, IpPoolResource)> {
         use nexus_db_schema::schema::ip_pool;
         use nexus_db_schema::schema::ip_pool_resource;
 
-        match pagparams {
+        let mut query = match pagparams {
             PaginatedBy::Id(pagparams) => {
                 paginated(ip_pool::table, ip_pool::id, pagparams)
             }
@@ -1090,15 +1213,27 @@ impl DataStore {
                 ip_pool::name,
                 &pagparams.map_name(|n| Name::ref_cast(n)),
             ),
-        }
-        .inner_join(ip_pool_resource::table)
-        .filter(ip_pool_resource::resource_id.eq(authz_silo.id()))
-        .filter(ip_pool_resource::resource_type.eq(IpPoolResourceType::Silo))
-        .filter(ip_pool::time_deleted.is_null())
-        .select(<(IpPool, IpPoolResource)>::as_select())
-        .load_async(&*self.pool_connection_authorized(opctx).await?)
-        .await
-        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+        };
+        query = match ip_version {
+            Some(v) => query.filter(ip_pool::ip_version.eq(v)),
+            None => query,
+        };
+        query = match pool_type {
+            Some(pt) => query.filter(ip_pool::pool_type.eq(pt)),
+            None => query,
+        };
+        query
+            .inner_join(ip_pool_resource::table)
+            .filter(ip_pool_resource::resource_id.eq(authz_silo.id()))
+            .filter(
+                ip_pool_resource::resource_type.eq(IpPoolResourceType::Silo),
+            )
+            .filter(ip_pool::assignment.eq(IpPoolAssignment::Silos))
+            .filter(ip_pool::time_deleted.is_null())
+            .select(<(IpPool, IpPoolResource)>::as_select())
+            .load_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     /// Insert a link between an IP Pool and a Silo.
@@ -2386,14 +2521,14 @@ fn count_system_services_pools_subquery(
 fn assign_ip_pool_query(
     pool: &IpPool,
     assignment: IpPoolAssignment,
-) -> TypedSqlQuery<()> {
+) -> TypedSqlQuery<SelectableSql<IpPool>> {
     assert_ne!(pool.assignment, assignment);
     match pool.assignment {
         IpPoolAssignment::Silos => {
-            assign_ip_pool_to_silos_query(pool, assignment)
+            reassign_silo_ip_pool_query(pool, assignment)
         }
         IpPoolAssignment::SystemServices => {
-            assign_ip_pool_to_system_services_query(pool, assignment)
+            reassign_system_services_ip_pool_query(pool, assignment)
         }
     }
 }
@@ -2403,10 +2538,10 @@ fn assign_ip_pool_query(
 //
 // Checks that the pool is not currently linked to any silos first. Note that
 // this means there cannot be any silo-specific resources using the pool.
-fn assign_ip_pool_to_silos_query(
+fn reassign_silo_ip_pool_query(
     ip_pool: &IpPool,
     new_assignment: IpPoolAssignment,
-) -> TypedSqlQuery<()> {
+) -> TypedSqlQuery<SelectableSql<IpPool>> {
     let mut builder = QueryBuilder::new();
     builder
         .sql("UPDATE ip_pool SET assignment = ")
@@ -2428,7 +2563,27 @@ fn assign_ip_pool_to_silos_query(
         .bind::<sql_types::Uuid, _>(ip_pool.id())
         .sql(" LIMIT 1), '")
         .sql(BAD_SILO_LINK_SENTINEL)
-        .sql("', 'TRUE') AS BOOL)");
+        // NOTE: We do need to list all the columns here, _in the struct field
+        // order_.
+        //
+        // This is an unfortunate side-effect of the `QueryBuilder` interface.
+        // That uses diesel's `Queryable` trait, which selects columns in the
+        // database schema order. That's intentional. The usual
+        // `QueryableByName` trait is not used, because there can be duplicate
+        // column names in the complex queries we use the builder for.
+        //
+        // But deserializing by tuple assumes the Rust type's fields match the
+        // order of the columns, which may not be true and introduces a brittle
+        // coupling in any case. There are other, type-safe, ways around this,
+        // but they require a lot of boilerplate. We already have tests that
+        // will catch any change to the column ordering or types, since the
+        // query here will fail with deserialization errors. This is a
+        // reasonable tradeoff at this point.
+        .sql(
+            "', 'TRUE') AS BOOL) RETURNING \
+            id, name, description, time_created, time_modified, \
+            time_deleted, ip_version, rcgen, assignment, pool_type",
+        );
     builder.query()
 }
 
@@ -2439,10 +2594,10 @@ fn assign_ip_pool_to_silos_query(
 //
 // - There are no external IPs in use by Oxide resources.
 // - There is at least one other system-services pool of the same assignment.
-fn assign_ip_pool_to_system_services_query(
+fn reassign_system_services_ip_pool_query(
     ip_pool: &IpPool,
     new_assignment: IpPoolAssignment,
-) -> TypedSqlQuery<()> {
+) -> TypedSqlQuery<SelectableSql<IpPool>> {
     let mut builder = QueryBuilder::new();
     builder
         .sql("UPDATE ip_pool SET assignment = ")
@@ -2489,7 +2644,12 @@ fn assign_ip_pool_to_system_services_query(
         )
         .param()
         .bind::<sql_types::Text, _>(LAST_POOL_SENTINEL)
-        .sql(") AS INT) = 1");
+        // NOTE: See comment above about explicit column ordering.
+        .sql(
+            ") AS INT) = 1 RETURNING \
+            id, name, description, time_created, time_modified, \
+            time_deleted, ip_version, rcgen, assignment, pool_type",
+        );
     builder.query()
 }
 
@@ -2513,6 +2673,7 @@ mod test {
     };
     use crate::db::pagination::Paginator;
     use crate::db::pub_test_utils::TestDatabase;
+    use crate::db::pub_test_utils::helpers::create_service_ip_pool;
     use crate::db::raw_query_builder::expectorate_query_contents;
     use assert_matches::assert_matches;
     use async_bb8_diesel::AsyncRunQueryDsl as _;
@@ -2573,7 +2734,7 @@ mod test {
         let authz_silo = opctx.authn.silo_required().unwrap();
 
         let silo_pools = datastore
-            .silo_ip_pool_list(&opctx, &authz_silo, &pagbyid)
+            .silo_ip_pool_list(&opctx, &authz_silo, None, None, &pagbyid)
             .await
             .expect("Should list silo IP pools");
         assert_eq!(silo_pools.len(), 0);
@@ -2601,7 +2762,7 @@ mod test {
             .expect("Should list IP pools");
         assert_eq!(all_pools.len(), 1);
         let silo_pools = datastore
-            .silo_ip_pool_list(&opctx, &authz_silo, &pagbyid)
+            .silo_ip_pool_list(&opctx, &authz_silo, None, None, &pagbyid)
             .await
             .expect("Should list silo IP pools");
         assert_eq!(silo_pools.len(), 0);
@@ -2639,7 +2800,7 @@ mod test {
 
         // now it shows up in the silo list
         let silo_pools = datastore
-            .silo_ip_pool_list(&opctx, &authz_silo, &pagbyid)
+            .silo_ip_pool_list(&opctx, &authz_silo, None, None, &pagbyid)
             .await
             .expect("Should list silo IP pools");
         assert_eq!(silo_pools.len(), 1);
@@ -2751,7 +2912,7 @@ mod test {
 
         // and silo pools list is empty again
         let silo_pools = datastore
-            .silo_ip_pool_list(&opctx, &authz_silo, &pagbyid)
+            .silo_ip_pool_list(&opctx, &authz_silo, None, None, &pagbyid)
             .await
             .expect("Should list silo IP pools");
         assert_eq!(silo_pools.len(), 0);
@@ -2767,16 +2928,28 @@ mod test {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
+        // Create the v4 and v6 system-service pools the loop expects to find.
+        create_service_ip_pool(opctx, datastore, IpVersion::V4.into()).await;
+        create_service_ip_pool(opctx, datastore, IpVersion::V6.into()).await;
+
         for version in [IpVersion::V4, IpVersion::V6] {
             // confirm system services pools are identified correctly
-            let (authz_pool, pool) = datastore
-                .ip_pools_service_lookup(&opctx, version)
+            let service_pools = datastore
+                .ip_pools_service_lookup_by_version(
+                    &opctx,
+                    version,
+                    NonZeroU32::new(1).unwrap(),
+                )
                 .await
                 .unwrap();
-            assert_eq!(pool.ip_version, version);
+            let service_pool = service_pools.first().unwrap();
+            assert_eq!(service_pool.db_pool.ip_version, version);
 
             let is_internal = datastore
-                .ip_pool_is_assigned_to_system_services(&opctx, &authz_pool)
+                .ip_pool_is_assigned_to_system_services(
+                    &opctx,
+                    &service_pool.authz_pool,
+                )
                 .await;
             assert_eq!(is_internal, Ok(true));
 
@@ -4074,9 +4247,8 @@ mod test {
     }
 
     #[tokio::test]
-    async fn paginate_ip_pools_by_delegation_type() {
-        let logctx =
-            dev::test_setup_log("paginate_ip_pools_by_delegation_type");
+    async fn paginate_ip_pools_by_assignment() {
+        let logctx = dev::test_setup_log("paginate_ip_pools_by_assignment");
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
@@ -4126,6 +4298,7 @@ mod test {
                 .expect("Failed to create IP pool");
             oxide_pools.push(pool);
         }
+        oxide_pools.sort_by_key(|pool| pool.id());
         assert_eq!(oxide_pools.len(), N_POOLS);
 
         let fetch_paginated = |assignment| async move {
@@ -4138,7 +4311,7 @@ mod test {
                 let batch = datastore
                     .ip_pools_list_paginated(
                         opctx,
-                        assignment,
+                        Some(assignment),
                         None,
                         None,
                         &PaginatedBy::Id(page.current_pagparams()),
@@ -4157,21 +4330,11 @@ mod test {
         assert_eq!(customer_pools.len(), customer_pools_found.len());
         assert_eq!(customer_pools, customer_pools_found);
 
-        // Paginate all those assigned for system services use.
-        //
-        // Note that we have 2 extra pools today, which are the builtin service
-        // pools. These will go away in the future, so we'll unfortunately need
-        // to update this test at that time. Until then, fetch those service
-        // pools explicitly and add them.
+        // Paginate all those assigned for system services use. These are
+        // exactly the pools we created above; the test datastore has no other
+        // system-service pools.
         let oxide_reserved_found =
             fetch_paginated(IpPoolAssignment::SystemServices).await;
-        let pools = datastore
-            .ip_pools_service_lookup_both_versions(opctx)
-            .await
-            .unwrap();
-        oxide_pools.push(pools.ipv4.db_pool);
-        oxide_pools.push(pools.ipv6.db_pool);
-        oxide_pools.sort_by_key(|pool| pool.id());
         assert_eq!(oxide_pools.len(), oxide_reserved_found.len());
         assert_eq!(oxide_pools, oxide_reserved_found);
 
@@ -5555,15 +5718,17 @@ mod test {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
-        // Fetch the pools.
-        let pools = datastore
-            .ip_pools_service_lookup_both_versions(opctx)
-            .await
-            .unwrap();
+        // Create the v4 and v6 system-service pools we exercise below.
+        let ipv4 =
+            create_service_ip_pool(opctx, datastore, IpVersion::V4.into())
+                .await;
+        let ipv6 =
+            create_service_ip_pool(opctx, datastore, IpVersion::V6.into())
+                .await;
 
         // We should be able to delete one of these.
         let _ = datastore
-            .ip_pool_delete(opctx, &pools.ipv4.authz_pool, &pools.ipv4.db_pool)
+            .ip_pool_delete(opctx, &ipv4.authz_pool, &ipv4.db_pool)
             .await
             .expect(
                 "Should be able to delete assigned for system services \
@@ -5579,7 +5744,7 @@ mod test {
         let l = datastore
             .ip_pools_list_paginated(
                 opctx,
-                IpPoolAssignment::SystemServices,
+                Some(IpPoolAssignment::SystemServices),
                 None,
                 None,
                 &pagparams,
@@ -5591,7 +5756,7 @@ mod test {
         // We should _not_ be able to delete the other now, because there's only
         // one left.
         let res = datastore
-            .ip_pool_delete(opctx, &pools.ipv6.authz_pool, &pools.ipv6.db_pool)
+            .ip_pool_delete(opctx, &ipv6.authz_pool, &ipv6.db_pool)
             .await;
 
         let Err(Error::InvalidRequest { message }) = &res else {
@@ -5605,7 +5770,7 @@ mod test {
         let l = datastore
             .ip_pools_list_paginated(
                 opctx,
-                IpPoolAssignment::SystemServices,
+                Some(IpPoolAssignment::SystemServices),
                 None,
                 None,
                 &pagparams,
@@ -5626,18 +5791,20 @@ mod test {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
-        // Fetch the pools.
-        let pools = datastore
-            .ip_pools_service_lookup_both_versions(opctx)
-            .await
-            .unwrap();
+        // Create the v4 and v6 system-service pools we exercise below.
+        let ipv4 =
+            create_service_ip_pool(opctx, datastore, IpVersion::V4.into())
+                .await;
+        let ipv6 =
+            create_service_ip_pool(opctx, datastore, IpVersion::V6.into())
+                .await;
 
         // We should be able to assign one of these for silo use.
         let _ = datastore
             .ip_pool_assign(
                 opctx,
-                &pools.ipv4.authz_pool,
-                &pools.ipv4.db_pool,
+                &ipv4.authz_pool,
+                &ipv4.db_pool,
                 IpPoolAssignment::Silos,
             )
             .await
@@ -5655,7 +5822,7 @@ mod test {
         let l = datastore
             .ip_pools_list_paginated(
                 opctx,
-                IpPoolAssignment::SystemServices,
+                Some(IpPoolAssignment::SystemServices),
                 None,
                 None,
                 &pagparams,
@@ -5669,8 +5836,8 @@ mod test {
         let res = datastore
             .ip_pool_assign(
                 opctx,
-                &pools.ipv6.authz_pool,
-                &pools.ipv6.db_pool,
+                &ipv6.authz_pool,
+                &ipv6.db_pool,
                 IpPoolAssignment::Silos,
             )
             .await;
@@ -5686,7 +5853,7 @@ mod test {
         let l = datastore
             .ip_pools_list_paginated(
                 opctx,
-                IpPoolAssignment::SystemServices,
+                Some(IpPoolAssignment::SystemServices),
                 None,
                 None,
                 &pagparams,
@@ -5707,11 +5874,13 @@ mod test {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
-        // Get pool, add a range, allocate an external IP.
-        let pools = datastore
-            .ip_pools_service_lookup_both_versions(opctx)
-            .await
-            .unwrap();
+        // Create the v4 system-service pool, add a range, allocate an external
+        // IP. Also create a v6 pool so that reassigning the v4 pool for silo
+        // use is allowed at the end (more than one system-service pool remains).
+        let ipv4 =
+            create_service_ip_pool(opctx, datastore, IpVersion::V4.into())
+                .await;
+        create_service_ip_pool(opctx, datastore, IpVersion::V6.into()).await;
         let ip_range = IpRange::V4(Ipv4Range {
             first: Ipv4Addr::new(1, 1, 1, 1),
             last: Ipv4Addr::new(1, 1, 1, 10),
@@ -5719,8 +5888,8 @@ mod test {
         datastore
             .ip_pool_add_range(
                 opctx,
-                &pools.ipv4.authz_pool,
-                &pools.ipv4.db_pool,
+                &ipv4.authz_pool,
+                &ipv4.db_pool,
                 &ip_range,
             )
             .await
@@ -5751,8 +5920,8 @@ mod test {
         let res = datastore
             .ip_pool_assign(
                 opctx,
-                &pools.ipv4.authz_pool,
-                &pools.ipv4.db_pool,
+                &ipv4.authz_pool,
+                &ipv4.db_pool,
                 IpPoolAssignment::Silos,
             )
             .await;
@@ -5771,8 +5940,8 @@ mod test {
             .expect("Should be able to delete external IP");
         let _ = datastore.ip_pool_assign(
             opctx,
-            &pools.ipv4.authz_pool,
-            &pools.ipv4.db_pool,
+            &ipv4.authz_pool,
+            &ipv4.db_pool,
             IpPoolAssignment::Silos,
         ).await
             .expect(
@@ -5951,7 +6120,7 @@ mod test {
         // Case: IP within range should find the pool
         let ip_in_range = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 100));
         let result = datastore
-            .ip_pool_fetch_containing_address(
+            .ip_pool_fetch_containing_address_in_current_silo(
                 &opctx,
                 ip_in_range,
                 IpPoolType::Unicast,
@@ -5963,7 +6132,7 @@ mod test {
         // Case: IP at range boundaries should find the pool
         let ip_start = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 0));
         let result = datastore
-            .ip_pool_fetch_containing_address(
+            .ip_pool_fetch_containing_address_in_current_silo(
                 &opctx,
                 ip_start,
                 IpPoolType::Unicast,
@@ -5974,7 +6143,7 @@ mod test {
 
         let ip_end = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 255));
         let result = datastore
-            .ip_pool_fetch_containing_address(
+            .ip_pool_fetch_containing_address_in_current_silo(
                 &opctx,
                 ip_end,
                 IpPoolType::Unicast,
@@ -5986,7 +6155,7 @@ mod test {
         // Case: IP outside range should return NotFound error
         let ip_outside = IpAddr::V4(Ipv4Addr::new(10, 1, 0, 1));
         let result = datastore
-            .ip_pool_fetch_containing_address(
+            .ip_pool_fetch_containing_address_in_current_silo(
                 &opctx,
                 ip_outside,
                 IpPoolType::Unicast,
@@ -5999,7 +6168,7 @@ mod test {
 
         // Case: Wrong pool type should return NotFound error
         let result = datastore
-            .ip_pool_fetch_containing_address(
+            .ip_pool_fetch_containing_address_in_current_silo(
                 &opctx,
                 ip_in_range,
                 IpPoolType::Multicast,
@@ -6066,7 +6235,7 @@ mod test {
         // Case: Multicast IP should find the multicast pool
         let mcast_ip = IpAddr::V4(Ipv4Addr::new(239, 0, 0, 50));
         let result = datastore
-            .ip_pool_fetch_containing_address(
+            .ip_pool_fetch_containing_address_in_current_silo(
                 &opctx,
                 mcast_ip,
                 IpPoolType::Multicast,
@@ -6077,7 +6246,7 @@ mod test {
 
         // Case: Multicast IP should not be found when asking for unicast
         let result = datastore
-            .ip_pool_fetch_containing_address(
+            .ip_pool_fetch_containing_address_in_current_silo(
                 &opctx,
                 mcast_ip,
                 IpPoolType::Unicast,
@@ -6086,6 +6255,76 @@ mod test {
         assert!(
             result.is_err(),
             "Should not find multicast pool when asking for unicast"
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_ip_pool_fetch_containing_address_for_services() {
+        let logctx = dev::test_setup_log(
+            "test_ip_pool_fetch_containing_address_for_services",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // Create a pool assigned to system services. Note that we deliberately
+        // do not link it to a silo: system-services pools have no silo link,
+        // which is exactly the branch this method exercises.
+        let identity = IdentityMetadataCreateParams {
+            name: "service-pool".parse().unwrap(),
+            description: "Test system-services IP pool".to_string(),
+        };
+        let pool = datastore
+            .ip_pool_create(
+                &opctx,
+                IpPool::new(
+                    &identity,
+                    IpVersion::V4,
+                    IpPoolAssignment::SystemServices,
+                ),
+            )
+            .await
+            .expect("Should create system-services IP pool");
+
+        let authz_pool = authz::IpPool::new(
+            authz::FLEET,
+            pool.id(),
+            LookupType::ById(pool.id()),
+        );
+
+        // Add a range to the pool.
+        let range = IpRange::V4(
+            Ipv4Range::new(
+                Ipv4Addr::new(10, 0, 0, 0),
+                Ipv4Addr::new(10, 0, 0, 255),
+            )
+            .unwrap(),
+        );
+        datastore
+            .ip_pool_add_range(&opctx, &authz_pool, &pool, &range)
+            .await
+            .expect("Should add range to pool");
+
+        // Pick an address from that range and confirm the lookup finds our
+        // pool.
+        let ip = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 100));
+        let (found_authz, found_pool) = datastore
+            .ip_pool_fetch_containing_address_for_services(&opctx, ip)
+            .await
+            .expect("Should find system-services pool containing 10.0.0.100");
+        assert_eq!(found_authz.id(), pool.id());
+        assert_eq!(found_pool.id(), pool.id());
+
+        // An address outside the range should not be found.
+        let ip_outside = IpAddr::V4(Ipv4Addr::new(10, 1, 0, 1));
+        let result = datastore
+            .ip_pool_fetch_containing_address_for_services(&opctx, ip_outside)
+            .await;
+        assert!(
+            result.is_err(),
+            "Should not find a pool for an address outside all ranges"
         );
 
         db.terminate().await;

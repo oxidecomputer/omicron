@@ -6,7 +6,7 @@ use std::net::{IpAddr, SocketAddrV6};
 
 use iddqd::{IdOrdItem, id_upcast};
 use omicron_common::{
-    address::{Ipv6Subnet, SLED_PREFIX},
+    address::{Ipv6Subnet, SLED_PREFIX_LENGTH},
     api::external::Generation,
 };
 use omicron_uuid_kinds::SledUuid;
@@ -60,8 +60,8 @@ impl Sled {
         )
     }
 
-    pub fn subnet(&self) -> Ipv6Subnet<SLED_PREFIX> {
-        Ipv6Subnet::<SLED_PREFIX>::new(*self.sled_agent_address.ip())
+    pub fn subnet(&self) -> Ipv6Subnet<SLED_PREFIX_LENGTH> {
+        Ipv6Subnet::<SLED_PREFIX_LENGTH>::new(*self.sled_agent_address.ip())
     }
 
     pub fn role(&self) -> SledRole {

@@ -16,11 +16,11 @@ use futures::TryStreamExt;
 use installinator_api::InstallinatorApi;
 use installinator_api::body_to_artifact_response;
 use installinator_common::report::ReportQuery;
+use oxide_update_engine_types::events::EventReport;
+use oxide_update_engine_types::spec::GenericSpec;
 use slog::Logger;
 use slog::error;
 use tufaceous_artifact::ArtifactHashId;
-use update_engine::NestedSpec;
-use update_engine::events::EventReport;
 
 use super::WicketdArtifactStore;
 
@@ -90,7 +90,7 @@ impl InstallinatorApi for WicketdInstallinatorApiImpl {
     async fn report_progress(
         rqctx: RequestContext<Self::Context>,
         path: Path<ReportQuery>,
-        report: TypedBody<EventReport<NestedSpec>>,
+        report: TypedBody<EventReport<GenericSpec>>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let context = rqctx.context();
         let update_id = path.into_inner().update_id;

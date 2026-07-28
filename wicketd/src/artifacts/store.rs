@@ -38,6 +38,18 @@ impl WicketdArtifactStore {
         self.replace(artifacts_with_plan);
     }
 
+    /// Returns the system version.
+    ///
+    /// Avoids cloning the entire artifact list the way
+    /// `system_version_and_artifact_ids` does.
+    pub(crate) fn system_version(&self) -> Option<Version> {
+        self.artifacts_with_plan
+            .lock()
+            .unwrap()
+            .as_ref()
+            .map(|artifacts| artifacts.plan().system_version.clone())
+    }
+
     pub(crate) fn system_version_and_artifact_ids(
         &self,
     ) -> Option<(Version, Vec<InstallableArtifacts>)> {

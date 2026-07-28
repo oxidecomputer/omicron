@@ -18,6 +18,7 @@ use wicketd_client::types::{
     ClearUpdateStateParams, GetInventoryParams, GetInventoryResponse,
     GetLocationResponse, IgnitionCommand, StartUpdateParams,
 };
+use wicketd_commission_types::update::UpdateTargets;
 
 use crate::events::{ArtifactData, EventReportMap};
 use crate::keymap::ShowPopupCmd;
@@ -28,13 +29,13 @@ impl From<ComponentId> for SpIdentifier {
     fn from(id: ComponentId) -> Self {
         match id {
             ComponentId::Sled(i) => {
-                SpIdentifier { type_: SpType::Sled, slot: u16::from(i) }
+                SpIdentifier { typ: SpType::Sled, slot: u16::from(i) }
             }
             ComponentId::Psc(i) => {
-                SpIdentifier { type_: SpType::Power, slot: u16::from(i) }
+                SpIdentifier { typ: SpType::Power, slot: u16::from(i) }
             }
             ComponentId::Switch(i) => {
-                SpIdentifier { type_: SpType::Switch, slot: u16::from(i) }
+                SpIdentifier { typ: SpType::Switch, slot: u16::from(i) }
             }
         }
     }
@@ -65,7 +66,6 @@ pub enum Request {
     },
     IgnitionCommand(ComponentId, IgnitionCommand),
     StartRackSetup,
-    StartRackReset,
 }
 
 pub struct WicketdHandle {
@@ -140,9 +140,6 @@ impl WicketdManager {
                         Request::StartRackSetup => {
                             self.start_rack_initialization();
                         }
-                        Request::StartRackReset => {
-                            self.start_rack_reset();
-                        }
                     }
                 }
                 else => {
@@ -165,7 +162,7 @@ impl WicketdManager {
             let update_client =
                 create_wicketd_client(&log, addr, WICKETD_TIMEOUT);
             let params = StartUpdateParams {
-                targets: vec![component_id.into()],
+                targets: UpdateTargets::single(component_id.into()),
                 options,
             };
             let response = match update_client.post_start_update(&params).await
@@ -199,7 +196,7 @@ impl WicketdManager {
                 create_wicketd_client(&log, addr, WICKETD_TIMEOUT);
             let sp: SpIdentifier = component_id.into();
             let response = match update_client
-                .post_abort_update(&sp.type_, sp.slot, &options)
+                .post_abort_update(&sp.typ, sp.slot, &options)
                 .await
             {
                 Ok(_) => Ok(()),
@@ -230,7 +227,7 @@ impl WicketdManager {
             let update_client =
                 create_wicketd_client(&log, addr, WICKETD_TIMEOUT);
             let params = ClearUpdateStateParams {
-                targets: vec![component_id.into()],
+                targets: UpdateTargets::single(component_id.into()),
                 options,
             };
             let response =
@@ -266,7 +263,7 @@ impl WicketdManager {
             let client = create_wicketd_client(&log, addr, WICKETD_TIMEOUT);
             let sp: SpIdentifier = component_id.into();
             let res =
-                client.post_ignition_command(&sp.type_, sp.slot, command).await;
+                client.post_ignition_command(&sp.typ, sp.slot, command).await;
             // We don't return errors or success values, as there's nobody to
             // return them to. How do we relay this result to the user?
             slog::info!(
@@ -297,24 +294,6 @@ impl WicketdManager {
             slog::info!(log, "Start rack setup response: {:?}", response);
             _ = events_tx.send(Event::Term(Cmd::ShowPopup(
                 ShowPopupCmd::StartRackSetupResponse(response),
-            )));
-        });
-    }
-
-    fn start_rack_reset(&self) {
-        let log = self.log.clone();
-        let addr = self.wicketd_addr;
-        let events_tx = self.events_tx.clone();
-        tokio::spawn(async move {
-            let client = create_wicketd_client(&log, addr, WICKETD_TIMEOUT);
-            let response = match client.post_run_rack_reset().await {
-                Ok(_) => Ok(()),
-                Err(error) => Err(error.to_string()),
-            };
-
-            slog::info!(log, "Start rack setup response: {:?}", response);
-            _ = events_tx.send(Event::Term(Cmd::ShowPopup(
-                ShowPopupCmd::StartRackResetResponse(response),
             )));
         });
     }
@@ -380,14 +359,13 @@ impl WicketdManager {
                 // Check this prior to sending the event to avoid an extra
                 // clone.
                 let GetLocationResponse {
-                    sled_baseboard,
+                    sled_baseboard_id: _,
                     sled_id,
                     switch_baseboard,
                     switch_id,
                 } = &location;
 
-                let location_fully_provided = sled_baseboard.is_some()
-                    && sled_id.is_some()
+                let location_fully_provided = sled_id.is_some()
                     && switch_baseboard.is_some()
                     && switch_id.is_some();
 

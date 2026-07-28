@@ -8,6 +8,7 @@ use std::io::ErrorKind;
 
 use anyhow::Context as _;
 use anyhow::Result;
+use anyhow::bail;
 use anyhow::ensure;
 use camino::Utf8PathBuf;
 use fs_err::tokio as fs;
@@ -19,6 +20,7 @@ use slog::Logger;
 use slog::warn;
 use tufaceous_artifact::ArtifactVersion;
 use tufaceous_artifact::KnownArtifactKind;
+use tufaceous_artifact_v2::RotSlot;
 use tufaceous_lib::assemble::DeserializedArtifactData;
 use tufaceous_lib::assemble::DeserializedArtifactSource;
 use tufaceous_lib::assemble::DeserializedFileArtifactSource;
@@ -53,6 +55,7 @@ pub(crate) async fn fetch_hubris_artifacts(
     env: Environment,
     client: reqwest::Client,
     output_dir: Utf8PathBuf,
+    editor: crate::tuf_v2::SharedEditor,
 ) -> Result<()> {
     let output_dir = output_dir.join(format!("hubris-{}", env.short_name));
     let ctx = Context { logger, env, client, output_dir };
@@ -61,6 +64,8 @@ pub(crate) async fn fetch_hubris_artifacts(
     // This could be parallelized with FuturesUnordered but in practice this
     // takes less time than OS builds.
 
+    // A partial Tufaceous v1 manifest, written to
+    // $output_dir/hubris-$env/manifest.toml.
     let mut manifest = DeserializedManifest {
         system_version: Version::new(0, 0, 0),
         artifacts: BTreeMap::new(),
@@ -74,8 +79,8 @@ pub(crate) async fn fetch_hubris_artifacts(
         let str = String::from_utf8(data).with_context(|| {
             format!("hubris artifact manifest {} was not UTF-8", hash)
         })?;
-        let hash_manifest: Manifest =
-            toml::from_str(&str).with_context(|| {
+        let hash_manifest: PermslipManifest = toml::from_str(&str)
+            .with_context(|| {
                 format!(
                     "failed to deserialize hubris artifact manifest {}",
                     hash
@@ -83,16 +88,25 @@ pub(crate) async fn fetch_hubris_artifacts(
             })?;
         for (kind, artifacts) in hash_manifest.artifact {
             for artifact in artifacts {
-                let source = match artifact.source {
-                    Source::File(file) => {
-                        let path = ctx.fetch_hash(file.hash, "zip").await?.path;
-                        DeserializedArtifactSource::File { path }
-                    }
-                    Source::CompositeRot { archive_a, archive_b } => {
+                let source = match (kind, artifact.source) {
+                    (
+                        PermslipArtifactKind::GimletRot
+                        | PermslipArtifactKind::SwitchRot
+                        | PermslipArtifactKind::PscRot,
+                        PermslipSource::CompositeRot { archive_a, archive_b },
+                    ) => {
                         let path_a =
                             ctx.fetch_hash(archive_a.hash, "zip").await?.path;
+                        editor
+                            .add_rot_archive(RotSlot::A, path_a.clone())
+                            .await?;
+
                         let path_b =
                             ctx.fetch_hash(archive_b.hash, "zip").await?.path;
+                        editor
+                            .add_rot_archive(RotSlot::B, path_b.clone())
+                            .await?;
+
                         DeserializedArtifactSource::CompositeRot {
                             archive_a: DeserializedFileArtifactSource::File {
                                 path: path_a,
@@ -102,8 +116,31 @@ pub(crate) async fn fetch_hubris_artifacts(
                             },
                         }
                     }
+                    (
+                        PermslipArtifactKind::GimletRotBootloader
+                        | PermslipArtifactKind::SwitchRotBootloader
+                        | PermslipArtifactKind::PscRotBootloader,
+                        PermslipSource::File(file),
+                    ) => {
+                        let path = ctx.fetch_hash(file.hash, "zip").await?.path;
+                        editor.add_rot_bootloader_archive(path.clone()).await?;
+                        DeserializedArtifactSource::File { path }
+                    }
+                    (
+                        PermslipArtifactKind::GimletSp
+                        | PermslipArtifactKind::SwitchSp
+                        | PermslipArtifactKind::PscSp,
+                        PermslipSource::File(file),
+                    ) => {
+                        let path = ctx.fetch_hash(file.hash, "zip").await?.path;
+                        editor.add_sp_archive(path.clone()).await?;
+                        DeserializedArtifactSource::File { path }
+                    }
+                    (kind @ _, source @ _) => {
+                        bail!("unexpected source {source:?} for kind {kind:?}");
+                    }
                 };
-                manifest.artifacts.entry(kind).or_default().push(
+                manifest.artifacts.entry(kind.into()).or_default().push(
                     DeserializedArtifactData {
                         name: artifact.name,
                         version: artifact.version,
@@ -112,8 +149,11 @@ pub(crate) async fn fetch_hubris_artifacts(
                 );
             }
         }
-        if let Some(FileSource { hash }) = hash_manifest.measurement_corpus {
+        if let Some(PermslipFileSource { hash }) =
+            hash_manifest.measurement_corpus
+        {
             let Output { data, path } = ctx.fetch_hash(hash, "corim").await?;
+            editor.add_measurement_corpus(path.clone()).await?;
             let corim = rats_corim::Corim::from_bytes(&data)?;
             manifest
                 .artifacts
@@ -283,28 +323,67 @@ impl Context {
 // tufaceous-lib, except that the source is a hash instead of a file path. This
 // hash is used to download the artifact from Permission Slip.
 #[derive(Deserialize)]
-struct Manifest {
-    artifact: HashMap<KnownArtifactKind, Vec<Artifact>>,
+struct PermslipManifest {
+    artifact: HashMap<PermslipArtifactKind, Vec<PermslipArtifact>>,
     // Add a default for backwards compatibility
-    measurement_corpus: Option<FileSource>,
+    measurement_corpus: Option<PermslipFileSource>,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "snake_case")]
+enum PermslipArtifactKind {
+    GimletRot,
+    SwitchRot,
+    PscRot,
+    GimletRotBootloader,
+    SwitchRotBootloader,
+    PscRotBootloader,
+    GimletSp,
+    SwitchSp,
+    PscSp,
+}
+
+impl From<PermslipArtifactKind> for KnownArtifactKind {
+    fn from(value: PermslipArtifactKind) -> Self {
+        match value {
+            PermslipArtifactKind::GimletRot => KnownArtifactKind::GimletRot,
+            PermslipArtifactKind::SwitchRot => KnownArtifactKind::SwitchRot,
+            PermslipArtifactKind::PscRot => KnownArtifactKind::PscRot,
+            PermslipArtifactKind::GimletRotBootloader => {
+                KnownArtifactKind::GimletRotBootloader
+            }
+            PermslipArtifactKind::SwitchRotBootloader => {
+                KnownArtifactKind::SwitchRotBootloader
+            }
+            PermslipArtifactKind::PscRotBootloader => {
+                KnownArtifactKind::PscRotBootloader
+            }
+            PermslipArtifactKind::GimletSp => KnownArtifactKind::GimletSp,
+            PermslipArtifactKind::SwitchSp => KnownArtifactKind::SwitchSp,
+            PermslipArtifactKind::PscSp => KnownArtifactKind::PscSp,
+        }
+    }
 }
 
 #[derive(Deserialize)]
-struct Artifact {
+struct PermslipArtifact {
     name: String,
     version: ArtifactVersion,
-    source: Source,
+    source: PermslipSource,
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 #[serde(tag = "kind", rename_all = "kebab-case")]
-enum Source {
-    File(FileSource),
-    CompositeRot { archive_a: FileSource, archive_b: FileSource },
+enum PermslipSource {
+    File(PermslipFileSource),
+    CompositeRot {
+        archive_a: PermslipFileSource,
+        archive_b: PermslipFileSource,
+    },
 }
 
-#[derive(Deserialize)]
-struct FileSource {
+#[derive(Debug, Deserialize)]
+struct PermslipFileSource {
     #[serde(deserialize_with = "deserialize_hash")]
     hash: blake3::Hash,
 }

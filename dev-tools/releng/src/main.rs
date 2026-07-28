@@ -7,8 +7,10 @@ mod helios;
 mod hubris;
 mod job;
 mod tuf;
+mod tuf_v2;
 
 use std::collections::BTreeMap;
+use std::fmt::Write;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::LazyLock;
@@ -39,6 +41,7 @@ use slog::warn;
 use slog_term::FullFormat;
 use slog_term::TermDecorator;
 use tokio::sync::Semaphore;
+use tufaceous_artifact_v2::OsVariant;
 
 use crate::cmd::Command;
 use crate::job::Jobs;
@@ -248,11 +251,10 @@ async fn main() -> Result<()> {
     // Read pins.toml.
     let pins = omicron_pins::Pins::read_from_dir(&metadata.workspace_root)?;
 
-    let permits = Arc::new(Semaphore::new(
-        std::thread::available_parallelism()
-            .context("couldn't get available parallelism")?
-            .into(),
-    ));
+    let threads = std::thread::available_parallelism()
+        .context("couldn't get available parallelism")?
+        .into();
+    let permits = Arc::new(Semaphore::new(threads));
 
     let commit = Command::new(&args.git_bin)
         .args(["rev-parse", "HEAD"])
@@ -261,19 +263,8 @@ async fn main() -> Result<()> {
         .trim()
         .to_owned();
 
-    let mut version = BASE_VERSION.clone();
-    // Differentiate between CI and local builds. We use `0.word` as the
-    // prerelease field because it comes before `alpha`.
-    version.pre =
-        if std::env::var_os("CI").is_some() { "0.ci" } else { "0.local" }
-            .parse()?;
-    // Set the build metadata to the current commit hash.
-    let mut build = String::with_capacity(14);
-    build.push_str("git");
-    build.extend(commit.chars().take(11));
-    version.build = build.parse()?;
-    let version_str = version.to_string();
-    info!(logger, "version: {}", version_str);
+    let version = generate_version(&commit)?;
+    info!(logger, "version: {}", version);
 
     let xtask_config: Arc<XtaskConfig> = Arc::new(
         toml::from_str(
@@ -467,6 +458,7 @@ async fn main() -> Result<()> {
     fs::create_dir_all(&args.output_dir).await?;
 
     // DEFINE JOBS ============================================================
+    let editor_v2 = tuf_v2::SharedEditor::new(version.clone())?;
     let tempdir = camino_tempfile::tempdir()
         .context("failed to create temporary directory")?;
     let mut jobs = Jobs::new(&logger, permits.clone(), &args.output_dir);
@@ -563,7 +555,7 @@ async fn main() -> Result<()> {
                             $target.artifacts_path(&args).as_str(),
                             "stamp",
                             package.as_str(),
-                            &version_str,
+                            &version.to_string(),
                         ])
                         .env_remove("CARGO_MANIFEST_DIR"),
                 );
@@ -669,13 +661,13 @@ async fn main() -> Result<()> {
             commit.chars().take(7).collect::<String>(),
             Utc::now().format("%Y-%m-%d %H:%M")
         );
-
+        let output_dir = args.output_dir.join(format!("os-{}", target));
         let mut image_cmd = Command::new("ptime")
             .arg("-m")
             .arg(args.helios_dir.join("helios-build"))
             .arg("experiment-image")
             .arg("-o") // output directory for image
-            .arg(args.output_dir.join(format!("os-{}", target)))
+            .arg(&output_dir)
             .arg("-F") // pass extra image builder features
             .arg(format!("optever={opte_version}"))
             .arg("-P") // include all files from extra proto area
@@ -744,13 +736,16 @@ async fn main() -> Result<()> {
                 download_opte_p5p(&logger, &client, &ov.commit, &p5p_path),
             );
 
-            image_cmd = image_cmd
-                .arg("-p")
-                .arg(format!("helios-dev=file://{p5p_path}"));
+            // The OPTE CI p5p publishes under the "helios" publisher, so
+            // this adds it as an extra origin alongside the incorporation
+            // and the helios pkg repo.
+            image_cmd =
+                image_cmd.arg("-p").arg(format!("helios=file://{p5p_path}"));
         }
 
+        let image_job_name = format!("{target}-image");
         let image_job = jobs
-            .push_command(format!("{target}-image"), image_cmd)
+            .push_command(&image_job_name, image_cmd)
             .after("helios-setup")
             .after("helios-incorp")
             .after(format!("{target}-proto"));
@@ -758,6 +753,16 @@ async fn main() -> Result<()> {
         if opte_override.is_some() {
             image_job.after(format!("{target}-opte-p5p"));
         }
+
+        let editor = editor_v2.clone();
+        jobs.push(format!("tuf-v2-{target}"), async move {
+            let os_variant = match target {
+                Target::Host => OsVariant::Host,
+                Target::Recovery => OsVariant::Recovery,
+            };
+            editor.add_os_image_dir(os_variant, output_dir).await
+        })
+        .after(image_job_name);
     }
     // Build the recovery target after we build the host target (and have
     // finished verifying its binaries). Only one of these will build at a time
@@ -781,6 +786,31 @@ async fn main() -> Result<()> {
     stamp_packages!("tuf-stamp", Target::Host, TUF_PACKAGES)
         .after("host-stamp")
         .after("recovery-stamp");
+    {
+        let editor = editor_v2.clone();
+        let manifest = manifest.clone();
+        jobs.push("tuf-v2-zones", async move {
+            let stamped_dir = crate::WORKSPACE_DIR.join("out/versioned");
+            for package_name in TUF_PACKAGES {
+                let path = stamped_dir.join(format!("{}.tar.gz", package_name));
+                // Rename to the file name we actually want in the repo; this
+                // is load-bearing for getting the right file name into the
+                // Installinator document.
+                let package = manifest
+                    .packages
+                    .get(package_name)
+                    .expect("checked in preflight");
+                let correct_path = stamped_dir
+                    .join(format!("{}.tar.gz", package.service_name));
+                if path != correct_path {
+                    fs::copy(&path, &correct_path).await?;
+                }
+                editor.add_zone_image(correct_path).await?;
+            }
+            Ok(())
+        })
+        .after("tuf-stamp");
+    }
 
     if args.verify_debug_libraries {
         // Run `cargo xtask verify-libraries`. This builds *all* binaries in
@@ -810,6 +840,7 @@ async fn main() -> Result<()> {
                 env,
                 client.clone(),
                 args.output_dir.clone(),
+                editor_v2.clone(),
             ),
         );
     }
@@ -822,11 +853,27 @@ async fn main() -> Result<()> {
             version,
             manifest,
             args.extra_manifest,
+            threads,
         ),
     )
     .after("tuf-stamp")
     .after("host-image")
     .after("recovery-image")
+    .after("hubris-staging")
+    .after("hubris-production");
+
+    jobs.push(
+        "tuf-v2-repo",
+        tuf_v2::build_tuf_repo(
+            logger.clone(),
+            args.output_dir.clone(),
+            editor_v2,
+            threads,
+        ),
+    )
+    .after("tuf-v2-host")
+    .after("tuf-v2-recovery")
+    .after("tuf-v2-zones")
     .after("hubris-staging")
     .after("hubris-production");
 
@@ -1111,6 +1158,48 @@ async fn host_add_root_profile(host_proto_root: Utf8PathBuf) -> Result<()> {
         export PATH=$PATH:/opt/oxide/opte/bin:/opt/oxide/mg-ddm:/opt/oxide/oxlog\n",
     ).await?;
     Ok(())
+}
+
+fn generate_version(commit: &str) -> Result<Version> {
+    const PADDED_WIDTH: usize = 8;
+
+    let mut version = BASE_VERSION.clone();
+    // Differentiate between CI and local builds. We use `0.word` as the
+    // prerelease field because it comes before `alpha`.
+    version.pre =
+        if std::env::var_os("CI").is_some() { "0.ci" } else { "0.local" }
+            .parse()?;
+    // Set the build metadata to the current commit hash.
+    let mut build = String::with_capacity(14);
+    build.push_str("git");
+    build.extend(commit.chars().take(11));
+    version.build = build.parse()?;
+
+    // Verify that this version can fit in the database. Nexus converts SemVer
+    // to a zero-padded version in order to use lexicographic sorting in the
+    // database, and the database column is limited to 64 Unicode code points.
+    ensure!(
+        version.major.to_string().len() <= PADDED_WIDTH
+            && version.major.to_string().len() <= PADDED_WIDTH
+            && version.major.to_string().len() <= PADDED_WIDTH,
+        "major, minor, and patch versions may not be longer than {PADDED_WIDTH} digits"
+    );
+    let mut version_str = format!(
+        "{:0>0PADDED_WIDTH$}.{:0>0PADDED_WIDTH$}.{:0>0PADDED_WIDTH$}",
+        version.major, version.minor, version.patch,
+    );
+    if !version.pre.is_empty() {
+        write!(version_str, "-{}", version.pre).unwrap();
+    }
+    if !version.build.is_empty() {
+        write!(version_str, "+{}", version.build).unwrap();
+    }
+    // Avoid bothering with "what does Cockroach mean by Unicode code points"
+    // and just assume the version is entirely ASCII.
+    ensure!(version_str.is_ascii(), "{version_str} is not ASCII");
+    ensure!(version_str.len() <= 64, "{version_str} is longer than 64 bytes");
+
+    Ok(version)
 }
 
 /// Check that the local console assets match the pinned console version and

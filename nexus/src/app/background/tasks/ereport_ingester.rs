@@ -78,7 +78,8 @@ impl SpEreportIngester {
         &mut self,
         opctx: &OpContext,
     ) -> SpEreportIngesterStatus {
-        use gateway_client::types::{SpIdentifier, SpIgnitionInfo};
+        use gateway_client::types::SpIgnitionInfo;
+        use gateway_types::component::SpIdentifier;
         use gateway_types::ignition::SpIgnition;
 
         let mut status = SpEreportIngesterStatus::default();
@@ -161,7 +162,7 @@ impl SpEreportIngester {
 
             status.sps_found += 1;
 
-            let SpIdentifier { type_, slot } = id;
+            let SpIdentifier { typ: type_, slot } = id;
             let sp_result = tasks
                 .spawn({
                     let opctx = opctx.child(BTreeMap::from([

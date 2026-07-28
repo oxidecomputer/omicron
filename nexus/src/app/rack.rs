@@ -17,6 +17,9 @@ use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use nexus_db_queries::db::datastore::DnsVersionUpdateBuilder;
 use nexus_db_queries::db::datastore::RackInit;
+use nexus_db_queries::db::datastore::SERVICE_IPV4_POOL_NAME;
+use nexus_db_queries::db::datastore::SERVICE_IPV6_POOL_NAME;
+use nexus_db_queries::db::datastore::ServiceIpPoolConfig;
 use nexus_db_queries::db::datastore::SledUnderlayAllocationResult;
 use nexus_types::deployment::CockroachDbClusterVersion;
 use nexus_types::deployment::SledFilter;
@@ -28,7 +31,7 @@ use nexus_types::external_api::silo;
 use nexus_types::external_api::sled as sled_types;
 use nexus_types::inventory::SpType;
 use nexus_types::silo::silo_dns_name;
-use omicron_common::address::{Ipv6Subnet, RACK_PREFIX, get_64_subnet};
+use omicron_common::address::{Ipv6Subnet, RACK_PREFIX_LENGTH, get_64_subnet};
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::IdentityMetadataCreateParams;
@@ -423,25 +426,42 @@ impl super::Nexus {
                 },
             }?;
 
+            let (.., authz_bgp_announce_set) = self
+                .bgp_announce_set_lookup(
+                    opctx,
+                    announce_set_name.clone().into(),
+                )?
+                .lookup_for(authz::Action::Read)
+                .await
+                .map_err(|e| {
+                    Error::internal_error(&format!(
+                        "unable to lookup announce set for as {}: {e}",
+                        bgp_config.asn
+                    ))
+                })?;
+
             match self
                 .db_datastore
                 .bgp_config_create(
                     &opctx,
-                    &networking::BgpConfigCreate {
-                        identity: IdentityMetadataCreateParams {
-                            name: bgp_config_name,
-                            description: format!(
-                                "BGP config for AS {}",
-                                bgp_config.asn
-                            ),
+                    db::model::BgpConfig::from_config_create(
+                        &networking::BgpConfigCreate {
+                            identity: IdentityMetadataCreateParams {
+                                name: bgp_config_name,
+                                description: format!(
+                                    "BGP config for AS {}",
+                                    bgp_config.asn
+                                ),
+                            },
+                            asn: bgp_config.asn,
+                            bgp_announce_set_id: announce_set_name.into(),
+                            vrf: None,
+                            shaper: bgp_config.shaper.clone(),
+                            checker: bgp_config.checker.clone(),
+                            max_paths: bgp_config.max_paths,
                         },
-                        asn: bgp_config.asn,
-                        bgp_announce_set_id: announce_set_name.into(),
-                        vrf: None,
-                        shaper: bgp_config.shaper.clone(),
-                        checker: bgp_config.checker.clone(),
-                        max_paths: bgp_config.max_paths,
-                    },
+                        authz_bgp_announce_set.id(),
+                    ),
                 )
                 .await
             {
@@ -621,7 +641,48 @@ impl super::Nexus {
         } // TODO - https://github.com/oxidecomputer/omicron/issues/3277
         // record port speed
 
-        let service_ip_pool_ranges = request.internal_services_ip_pool_ranges;
+        // Shim from the current wire format, which is a flat list of IP ranges
+        // for Oxide-internal services, to the structured per-pool config the
+        // datastore now expects. We partition the ranges by IP version and
+        // produce one pool config per non-empty version, using the historical
+        // built-in pool names and descriptions. Note that we can still have
+        // slightly different behavior here than before, since we filter out
+        // empty ranges before constructing a pool.
+        //
+        // TODO(#8946): have RSS provide the structured `ServiceIpPoolConfig`s
+        // directly, rather than reconstructing them from a flat list here.
+        let mut v4_ranges = Vec::new();
+        let mut v6_ranges = Vec::new();
+        for range in request.internal_services_ip_pool_ranges {
+            match range {
+                omicron_common::address::IpRange::V4(_) => {
+                    v4_ranges.push(range)
+                }
+                omicron_common::address::IpRange::V6(_) => {
+                    v6_ranges.push(range)
+                }
+            }
+        }
+        let mut service_ip_pools = Vec::new();
+        for (name, version, ranges) in [
+            (SERVICE_IPV4_POOL_NAME, "v4", v4_ranges),
+            (SERVICE_IPV6_POOL_NAME, "v6", v6_ranges),
+        ] {
+            if ranges.is_empty() {
+                continue;
+            }
+            let name = name.parse::<Name>().map_err(|e| {
+                Error::internal_error(&format!(
+                    "invalid built-in service IP pool name {name:?}: {e}"
+                ))
+            })?;
+            let description = format!("IP{version} IP Pool for Oxide Services");
+            service_ip_pools.push(ServiceIpPoolConfig::new(
+                name,
+                description,
+                ranges,
+            )?);
+        }
         self.db_datastore
             .rack_set_initialized(
                 opctx,
@@ -634,7 +695,7 @@ impl super::Nexus {
                     physical_disks,
                     zpools,
                     datasets,
-                    service_ip_pool_ranges,
+                    service_ip_pools,
                     internal_dns,
                     external_dns,
                     recovery_silo,
@@ -793,7 +854,7 @@ impl super::Nexus {
 
         let subnet = self.db_datastore.rack_subnet(opctx, self.rack_id).await?;
         let rack_subnet =
-            Ipv6Subnet::<RACK_PREFIX>::from(rack_subnet(Some(subnet))?);
+            Ipv6Subnet::<RACK_PREFIX_LENGTH>::from(rack_subnet(Some(subnet))?);
 
         let allocation = match self
             .db_datastore

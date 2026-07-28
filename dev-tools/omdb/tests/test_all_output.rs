@@ -103,6 +103,12 @@ async fn test_omdb_usage_errors() {
         &["db", "ereport", "info", "--help"],
         &["db", "sleds", "--help"],
         &["db", "sitrep", "--help"],
+        &["db", "sitrep", "show", "--help"],
+        &["db", "sitrep", "analysis-report", "--help"],
+        // Invalid sitrep selectors: not a UUID, a version number, or "current"
+        &["db", "sitrep", "show", "not-a-sitrep"],
+        // Invalid sitrep selector: begins with 'v' but is not an integer.
+        &["db", "sitrep", "show", "v1.2.3"],
         &["db", "saga"],
         &["db", "snapshots"],
         &["db", "network"],

@@ -1731,11 +1731,11 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         authz_instance: &authz::Instance,
-        parent_lock: UpdaterLock,
+        parent_lock: &UpdaterLock,
         child_lock_id: Uuid,
     ) -> Result<UpdaterLock, UpdaterLockError> {
         use nexus_db_schema::schema::instance::dsl;
-        let UpdaterLock { updater_id: parent_id, locked_gen } = parent_lock;
+        let &UpdaterLock { updater_id: parent_id, locked_gen } = parent_lock;
         let instance_id = authz_instance.id();
         let new_gen = Generation(locked_gen.0.next());
 
@@ -1763,8 +1763,8 @@ impl DataStore {
 
         match result {
             // If we updated the record, the lock has been successfully
-            // inherited! Return `Ok(true)` to indicate that we have acquired
-            // the lock successfully.
+            // inherited! Return the new lock to indicate that we have acquired
+            // it successfully.
             UpdateAndQueryResult { status: UpdateStatus::Updated, .. } => {
                 slog::debug!(
                     &opctx.log,
@@ -1791,7 +1791,7 @@ impl DataStore {
             }
             // The generation has advanced past the generation at which the
             // lock was held. This means that we have already inherited the
-            // lock. Return `Ok(false)` here for idempotency.
+            // lock. Return `Ok` here for idempotency.
             UpdateAndQueryResult {
                 status: UpdateStatus::NotUpdatedButExists,
                 ref found,
@@ -2764,7 +2764,7 @@ mod tests {
             .instance_updater_inherit_lock(
                 &opctx,
                 &authz_instance,
-                parent_lock,
+                &parent_lock,
                 Uuid::new_v4(),
             )
             .await

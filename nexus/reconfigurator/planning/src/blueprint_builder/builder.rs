@@ -62,7 +62,7 @@ use omicron_common::address::DnsSubnet;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::NTP_PORT;
 use omicron_common::address::ReservedRackSubnet;
-use omicron_common::address::SLED_PREFIX;
+use omicron_common::address::SLED_PREFIX_LENGTH;
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::Vni;
 use omicron_common::disk::M2Slot;
@@ -675,7 +675,7 @@ impl<'a> BlueprintBuilder<'a> {
     pub fn ensure_sled_exists(
         &mut self,
         sled_id: SledUuid,
-        sled_subnet: Ipv6Subnet<SLED_PREFIX>,
+        sled_subnet: Ipv6Subnet<SLED_PREFIX_LENGTH>,
     ) {
         if let Entry::Vacant(slot) = self.sled_editors.entry(sled_id) {
             slot.insert(SledEditor::for_new_active(sled_subnet));
