@@ -4994,8 +4994,20 @@ impl DataStore {
                 .map_err(|e| {
                     public_error_from_diesel(e, ErrorHandler::Server)
                 })?;
-            bail_unless!(collections.len() == 1);
-            let collection = collections.into_iter().next().unwrap();
+            let collection = match collections.len() {
+                0 => {
+                    return Err(Error::ObjectNotFound {
+                        type_name: ResourceType::InventoryCollection,
+                        lookup_type: LookupType::ById(id.into_untyped_uuid()),
+                    });
+                },
+                1 => collections.into_iter().next().unwrap(),
+                n => {
+                    return Err(Error::internal_error(&format!(
+                        "expected 1 collection row, got {n}"
+                    )));
+                },
+            };
             (
                 collection.time_started,
                 collection.time_done,
@@ -5490,6 +5502,28 @@ mod test {
             .await
             .unwrap_err();
         assert!(matches!(err, Error::ObjectNotFound { .. }));
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_inventory_collection_read_missing_returns_not_found() {
+        let logctx = dev::test_setup_log("inventory_collection_read_missing");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let missing_id = CollectionUuid::new_v4();
+
+        let err = datastore
+            .inventory_collection_read(&opctx, missing_id)
+            .await
+            .expect_err("expected error for missing collection");
+
+        assert!(
+            matches!(err, Error::ObjectNotFound { .. }),
+            "expected ObjectNotFound error, got: {err:?}"
+        );
+
         db.terminate().await;
         logctx.cleanup_successful();
     }
