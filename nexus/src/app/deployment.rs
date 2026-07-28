@@ -882,7 +882,8 @@ impl SledUpdateStatus {
         // that are not yet updated.
         let mut num_slots_with_current_contents = 0;
         let mut found_version_to_check_in_either_slot = false;
-        let mut found_non_current_version = BlueprintArtifactVersion::Unknown; for slot in
+        let mut found_non_current_version = BlueprintArtifactVersion::Unknown;
+        for slot in
             [&sled_config.host_phase_2.slot_a, &sled_config.host_phase_2.slot_b]
         {
             match slot {

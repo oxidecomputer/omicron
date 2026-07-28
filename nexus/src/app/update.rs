@@ -330,13 +330,15 @@ fn is_update_in_progress(
     // components, the check below will sitll be sufficient.
     let blueprint_in_progress = match current_target_version {
         Some(v) => match BlueprintTargetReleaseStatus::new(blueprint, v) {
-            BlueprintTargetReleaseStatus::FoundDifferentVersion { .. }
-                => true,
+            BlueprintTargetReleaseStatus::FoundDifferentVersion { .. } => true,
             // We don't consider a Mupdate as an "update in-progress" because
             // recofigurator is not driving this update.
-            BlueprintTargetReleaseStatus::WaitingForMupdateToBeCleared { .. }
-            | BlueprintTargetReleaseStatus::AllComponentsMatchTargetRelease
-                => false,
+            BlueprintTargetReleaseStatus::WaitingForMupdateToBeCleared {
+                ..
+            }
+            | BlueprintTargetReleaseStatus::AllComponentsMatchTargetRelease => {
+                false
+            }
         },
         // When `current_target_version` is `None` no target release has ever
         // been set. We can safely assume no update is in progress.
