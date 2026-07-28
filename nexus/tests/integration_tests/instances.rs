@@ -375,7 +375,7 @@ async fn test_instances_create_reboot_halt(
                     name: instance.identity.name.clone(),
                     description: format!(
                         "instance {:?}",
-                        &instance.identity.name
+                        instance.identity.name
                     ),
                 },
                 ncpus: instance.ncpus,
@@ -721,7 +721,7 @@ async fn test_instance_start_creates_networking_state(
 
     assert_eq!(guest_nics.len(), 1);
     for agent in &sled_agents {
-        println!(">>> {:#?}", &nics[0]);
+        println!(">>> {:#?}", nics[0]);
         assert_sled_v2p_mappings(agent, &nics[0], guest_nics[0].vni).await;
     }
 
@@ -855,8 +855,7 @@ async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
         default_sled_id
     };
 
-    let migrate_url =
-        format!("/instances/{}/migrate", &instance_id.to_string());
+    let migrate_url = format!("/instances/{}/migrate", instance_id);
     let instance = NexusRequest::new(
         RequestBuilder::new(lockstep_client, Method::POST, &migrate_url)
             .body(Some(&InstanceMigrateRequest { dst_sled_id }))
@@ -1173,8 +1172,7 @@ async fn test_instance_migrate_target_finishes_first(
         default_sled_id
     };
 
-    let migrate_url =
-        format!("/instances/{}/migrate", &instance_id.to_string());
+    let migrate_url = format!("/instances/{}/migrate", instance_id);
     let instance = NexusRequest::new(
         RequestBuilder::new(lockstep_client, Method::POST, &migrate_url)
             .body(Some(&InstanceMigrateRequest { dst_sled_id }))
@@ -1531,8 +1529,7 @@ async fn test_instance_migrate_v2p_and_routes(
     };
 
     // Kick off migration and simulate its completion on the target.
-    let migrate_url =
-        format!("/instances/{}/migrate", &instance_id.to_string());
+    let migrate_url = format!("/instances/{}/migrate", instance_id);
     let _ = NexusRequest::new(
         RequestBuilder::new(lockstep_client, Method::POST, &migrate_url)
             .body(Some(&InstanceMigrateRequest { dst_sled_id }))
@@ -1716,8 +1713,7 @@ async fn test_instance_migration_compatible_cpu_platforms(
         first_sled_id
     };
 
-    let migrate_url =
-        format!("/instances/{}/migrate", &instance_id.to_string());
+    let migrate_url = format!("/instances/{}/migrate", instance_id);
     let instance = NexusRequest::new(
         RequestBuilder::new(lockstep_client, Method::POST, &migrate_url)
             .body(Some(&InstanceMigrateRequest { dst_sled_id }))
@@ -1902,8 +1898,7 @@ async fn test_instance_migration_incompatible_cpu_platforms(
     // wrong.
     assert_eq!(sled_info.sled_id, turin_sled_id);
 
-    let migrate_url =
-        format!("/instances/{}/migrate", &instance_id.to_string());
+    let migrate_url = format!("/instances/{}/migrate", instance_id);
     NexusRequest::new(
         RequestBuilder::new(lockstep_client, Method::POST, &migrate_url)
             .body(Some(&InstanceMigrateRequest { dst_sled_id: milan_sled_id }))
@@ -1990,8 +1985,7 @@ async fn test_instance_migration_unknown_sled_type(
         (first_sled_id, http::StatusCode::BAD_REQUEST)
     };
 
-    let migrate_url =
-        format!("/instances/{}/migrate", &instance_id.to_string());
+    let migrate_url = format!("/instances/{}/migrate", instance_id);
     NexusRequest::new(
         RequestBuilder::new(lockstep_client, Method::POST, &migrate_url)
             .body(Some(&InstanceMigrateRequest { dst_sled_id }))
@@ -2848,8 +2842,7 @@ async fn test_instance_metrics_with_migration(
     };
 
     // instance is already running on destination sled
-    let migrate_url =
-        format!("/instances/{}/migrate", &instance_id.to_string());
+    let migrate_url = format!("/instances/{}/migrate", instance_id);
     let _ = NexusRequest::new(
         RequestBuilder::new(lockstep_client, Method::POST, &migrate_url)
             .body(Some(&InstanceMigrateRequest { dst_sled_id }))
@@ -5213,17 +5206,44 @@ async fn test_disk_attach_limit(cptestctx: &ControlPlaneTestContext) {
 
     let project_name = "bit-barrel";
 
-    // Each 1 GB Crucible disk requires 1.25 GB overhead. With the default size
-    // for DiskTest of 16 GB disks, this means 12 regions can be allocated on
-    // each zpool. This means 4 disks per pool.
+    // Each 1 GiB Crucible disk reserves 1.25 GiB (a 25% overhead). With the
+    // default DiskTest zpool size of 16 GiB, 12 regions fit on each zpool.
+    // This test creates 13 1 GiB disks, or 39 regions. Allocation needs 3
+    // distinct zpools per disk, so it fails once fewer than 3 zpools have room
+    // -- no matter how much space is left on the ones that aren't full. The
+    // allocator picks those 3 zpools uniformly at random, with no capacity
+    // weighting, so it does not pack evenly.
     //
-    // This test creates 13 1 GB disks, so we need 4 pools.
+    // So why create 6 zpools here? We do that to avoid test flakes with a
+    // smaller number of zpools. It's illustrative to walk through what happens
+    // when we choose to create a smaller number of zpools.
+    //
+    // Let's say we create 4 zpools. Then, each disk is a uniform "4 choose 3"
+    // selection, or equivalently "4 choose 1" to skip. A zpool gains at most
+    // one region per disk, so it cannot reach 12 before the 12th disk: for the
+    // first 12 disks, all 4 zpools always have room. But consider what happens
+    // with the 13th disk.
+    //
+    // Disk 13 will fail to allocate when at least two zpools are full, i.e.
+    // regions allocated per zpool is of the form {12, 12, m, n}, where the
+    // order of zpools is arbitrary and m + n = 12 (the first 12 disks having
+    // placed 36 regions). A zpool is full exactly when it was never skipped,
+    // so a given pair is both-full exactly when all 12 skips landed on the
+    // other two: a probability of (2/4)^12, or 1/4096. There are C(4,2) = 6
+    // such pairs, which leads to a 6/4096 - ε flake rate, where ε is a small
+    // error factor due to inclusion-exclusion (selections of the form
+    // {12, 12, 12, 0}). That's approximately 0.15%, or 1 run in 700.
+    //
+    // What about 5 zpools? It is possible to end up in the state
+    // {12, 12, 12, 0, 0}, but that requires all 12 disks to have picked the
+    // same 3 zpools out of C(5,3) = 10, i.e. (1/10)^11. The flake is much
+    // rarer, but still possible.
+    //
+    // With 6 zpools, 36 regions can saturate at most 3 of them, so the worst
+    // case is {12, 12, 12, 0, 0, 0} -- the 13th disk will bring this up to
+    // {12, 12, 12, 1, 1, 1}. As a result, the flake becomes impossible.
 
-    DiskTestBuilder::new(&cptestctx)
-        .on_all_sleds()
-        .with_zpool_count(4)
-        .build()
-        .await;
+    DiskTestBuilder::new(&cptestctx).with_zpool_count(6).build().await;
 
     create_project(client, project_name).await;
 
@@ -6770,7 +6790,7 @@ async fn test_instances_memory_rejected_less_than_min_memory_size(
     let instance = instance::InstanceCreate {
         identity: IdentityMetadataCreateParams {
             name: instance_name.parse().unwrap(),
-            description: format!("instance {:?}", &instance_name),
+            description: format!("instance {:?}", instance_name),
         },
         ncpus: InstanceCpuCount(1),
         memory: ByteCount::from(MIN_MEMORY_BYTES_PER_INSTANCE / 2),
@@ -6827,7 +6847,7 @@ async fn test_instances_memory_not_divisible_by_min_memory_size(
     let instance = instance::InstanceCreate {
         identity: IdentityMetadataCreateParams {
             name: instance_name.parse().unwrap(),
-            description: format!("instance {:?}", &instance_name),
+            description: format!("instance {:?}", instance_name),
         },
         ncpus: InstanceCpuCount(1),
         memory: ByteCount::from(1024 * 1024 * 1024 + 300),
@@ -6883,7 +6903,7 @@ async fn test_instances_memory_greater_than_max_size(
     let instance = instance::InstanceCreate {
         identity: IdentityMetadataCreateParams {
             name: instance_name.parse().unwrap(),
-            description: format!("instance {:?}", &instance_name),
+            description: format!("instance {:?}", instance_name),
         },
         ncpus: InstanceCpuCount(1),
         memory: ByteCount::try_from(MAX_MEMORY_BYTES_PER_INSTANCE + (1 << 30))

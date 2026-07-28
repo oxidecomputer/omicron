@@ -386,20 +386,21 @@ impl UpdateTracker {
             None => (None, Vec::new()),
         };
 
-        let mut event_reports = BTreeMap::new();
-        for (sp, update_data) in &update_data.sp_update_data {
-            let event_report =
-                update_data.event_buffer.lock().unwrap().generate_report();
-            let inner: &mut BTreeMap<_, _> =
-                event_reports.entry(sp.typ).or_default();
-            inner.insert(sp.slot, event_report);
-        }
-
         GetArtifactsAndEventReportsResponse {
             system_version,
             artifacts,
-            event_reports,
+            event_reports: update_data.event_reports(),
         }
+    }
+
+    pub(crate) async fn system_version(&self) -> Option<Version> {
+        self.sp_update_data.lock().await.artifact_store.system_version()
+    }
+
+    pub(crate) async fn event_reports(
+        &self,
+    ) -> BTreeMap<SpType, BTreeMap<u16, EventReport>> {
+        self.sp_update_data.lock().await.event_reports()
     }
 
     pub(crate) async fn event_report(&self, sp: SpIdentifier) -> EventReport {
@@ -675,6 +676,21 @@ struct UpdateTrackerData {
 impl UpdateTrackerData {
     fn new(artifact_store: WicketdArtifactStore) -> Self {
         Self { artifact_store, sp_update_data: BTreeMap::new() }
+    }
+
+    // TODO: once rkdeploy is on the published API, change the return type here
+    // and elsewhere to be an `IdOrdMap<SpEventReport>` where `SpEventReport`'s
+    // key is an `SpIdentifier`.
+    fn event_reports(&self) -> BTreeMap<SpType, BTreeMap<u16, EventReport>> {
+        let mut event_reports = BTreeMap::new();
+        for (sp, update_data) in &self.sp_update_data {
+            let event_report =
+                update_data.event_buffer.lock().unwrap().generate_report();
+            let inner: &mut BTreeMap<_, _> =
+                event_reports.entry(sp.typ).or_default();
+            inner.insert(sp.slot, event_report);
+        }
+        event_reports
     }
 
     fn clear_update_state(

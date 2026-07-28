@@ -269,8 +269,8 @@ mod tests {
                 eprintln!(
                     "Failed to delete etherstub '{}'.\n\
                     Delete manually with `dladm delete-etherstub {}`:\n{}",
-                    &self.name,
-                    &self.name,
+                    self.name,
+                    self.name,
                     String::from_utf8_lossy(&output.stderr),
                 );
             }

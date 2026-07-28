@@ -141,10 +141,10 @@ async fn do_run() -> Result<(), CmdError> {
         (None, None) => None,
         (Some(cert_path), Some(key_path)) => {
             let cert_bytes = std::fs::read_to_string(&cert_path)
-                .with_context(|| format!("read {:?}", &cert_path))
+                .with_context(|| format!("read {:?}", cert_path))
                 .map_err(CmdError::Failure)?;
             let key_bytes = std::fs::read_to_string(&key_path)
-                .with_context(|| format!("read {:?}", &key_path))
+                .with_context(|| format!("read {:?}", key_path))
                 .map_err(CmdError::Failure)?;
             Some(Certificate { cert: cert_bytes, key: key_bytes })
         }

@@ -161,7 +161,7 @@ impl super::Nexus {
 
         let out = saga_outputs
             .lookup_node_output::<VpcSubnet>("output")
-            .map_err(|e| Error::internal_error(&format!("{:#}", &e)))
+            .map_err(|e| Error::internal_error(&format!("{:#}", e)))
             .internal_context("looking up output from vpc create saga")?;
 
         self.vpc_needed_notify_sleds();
@@ -213,7 +213,7 @@ impl super::Nexus {
 
         let out = saga_outputs
             .lookup_node_output::<VpcSubnet>("output")
-            .map_err(|e| Error::internal_error(&format!("{:#}", &e)))
+            .map_err(|e| Error::internal_error(&format!("{:#}", e)))
             .internal_context("looking up output from vpc update saga")?;
 
         self.vpc_needed_notify_sleds();
