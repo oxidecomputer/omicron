@@ -295,10 +295,29 @@ async fn mupdate_recovery_after_noop_conversion() -> Result<()> {
 
     // The target release generation has now caught up to the blueprint's
     // minimum, so the system is no longer suspended...
-    let status: update::UpdateStatus =
-        object_get(client, "/v1/system/update/status").await;
-    assert!(!status.suspended, "should not be suspended after recovery");
-    assert_eq!(status.target_release.0.unwrap().version, version_1_0_0);
+    {
+        let update::UpdateStatus {
+            // fields we can meaningfully check
+            target_release,
+            suspended,
+
+            // `contact_support` will be true for reasons not related to what
+            // we're testing (e.g., it won't be able to get SMF service
+            // information from sled-agent, so will be true)
+            contact_support: _,
+
+            // we installed a custom blueprint, then performed recovery, but
+            // didn't wait for reconfigurator to go through planning / no-op
+            // recovery etc., nor could we without greater sled-agent testing
+            // fidelity, so ignore this map
+            components_by_release_version: _,
+
+            // not relevant to the test
+            time_last_step_planned: _,
+        } = object_get(client, "/v1/system/update/status").await;
+        assert_eq!(target_release.0.unwrap().version, version_1_0_0);
+        assert!(!suspended, "should not be suspended after recovery");
+    }
 
     // ...and further recovery attempts must be rejected.
     let response =
