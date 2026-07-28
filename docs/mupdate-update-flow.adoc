@@ -169,6 +169,29 @@ When all zone and host phase 2 images across all sleds have their image sources 
 Zone adds (but not updates) are also allowed when no target release has ever been set for the rack (i.e. the current target release generation is the initial generation, 1).
 ====
 
+== Recovering from a single-sled MUPdate
+
+MUPdating a single sled is only supported in a very restricted set of conditions. One of these must be true:
+
+1. The sled is not yet part of the control plane (e.g., it's being mupdated to match the current release prior to being added during a sled replacement).
+2. The control plane is not performing a live update (i.e., all components are on the same release), and a sled is mupdated to that same release.
+
+In particular, mupdating single sleds (a) during a live update or (b) to a version that doesn't match the rest of the control plane is *extremely dangerous* and may lead to arbitrary control plane corruption.
+
+When recovering from a supported single-sled mupdate, the flow differs from the description in <<Fully Recovering>> in that the operator does not need to upload the TUF repo again, and Nexus will perform no-op conversion on its own once it detects the mupdate. This will typically look like two blueprints separated by a small window of time, where the first detects the MUPdate and bumps the blueprint's minimum target release generation and the second performs no-op conversion of the sled(s); e.g.,
+
+[source,console]
+----
+root@oxz_switch0:~# omdb reconfigurator history --limit 2
+
+VERSN TIME                     BLUEPRINT
+... (earlier history omitted)
+   11 2026-07-27T17:40:34.286Z 98265cf7-69ac-4963-9e71-527c7795790b  enabled: updated target release minimum generation from 2 to 3
+   12 2026-07-27T17:40:58.984Z cddae393-7e2f-4ae3-bb27-676ee6d4e5fd  enabled: sled f8bd4a7b-ce72-4439-87a9-abdccacbbf8d: performed all noop measurements updates, sled f8bd4a7b-ce72-4439-87a9-abdccacbbf8d: performed 16 noop zone image source updates, sled f8bd4a7b-ce72-4439-87a9-abdccacbbf8d: noop updated host phase 2 to Artifact: both slot A and slot B
+----
+
+The operator still needs to set the target release to recover, but in this case the version they specify will be the same version already running. With additional work, Nexus could detect this case and fully recover on its own with no operator intervention; this is link:https://github.com/oxidecomputer/omicron/issues/10918[omicron#10918].
+
 == Appendix: Implementation rationale
 
 This section contains detailed reasoning for implementation decisions, as an alternative to excessively long code comments.
