@@ -10,6 +10,7 @@ use chrono::{DateTime, Utc};
 use nexus_db_schema::schema::fm_config;
 use nexus_types::fm;
 use omicron_common::api::external::Error;
+use std::num::NonZeroU32;
 
 #[derive(Queryable, Clone, Debug, Selectable, Insertable)]
 #[diesel(table_name = fm_config)]
@@ -29,10 +30,10 @@ impl TryFrom<fm::FmConfigParam> for FmConfig {
         // exhaustively so that if any fields are added to the `nexus_types`
         // version, they must be handled here and included in the `db::model`
         // type.
-        let fm::FmConfig { version, sitrep_limit, sitrep_deletion_threshold } =
+        let fm::FmConfig { sitrep_limit, sitrep_deletion_threshold } =
             fm::FmConfig::try_from(&param)?;
         Ok(Self {
-            version: version.get().into(),
+            version: param.version.get().into(),
             sitrep_limit: sitrep_limit.get().into(),
             sitrep_deletion_threshold: sitrep_deletion_threshold.get().into(),
             time_modified: Utc::now(),
@@ -51,17 +52,26 @@ impl TryFrom<FmConfig> for fm::FmConfigView {
             time_modified,
         } = value;
 
-        // Construct the validated the domain type by first constructing an
+        let version = NonZeroU32::new(version.into()).ok_or_else(|| {
+            Error::invalid_value(
+                "version",
+                "the fm_config row has version 0, violating the \
+                 `versions_are_positive` CHECK constraint",
+            )
+        })?;
+
+        // Construct the validated domain type by first constructing an
         // (unvalidated) `FmConfigParam` and then converting it into a
         // `nexus_types::fm::FmConfig`. This validates the values we read from
         // the database.
         let param = fm::FmConfigParam {
-            version: version.into(),
+            version,
             sitrep_limit: sitrep_limit.into(),
             sitrep_deletion_threshold: sitrep_deletion_threshold.into(),
         };
         let config = fm::FmConfig::try_from(&param)?;
+        let source = fm::FmConfigSource::Override { version, time_modified };
 
-        Ok(Self { config, time_modified })
+        Ok(Self { config, source })
     }
 }

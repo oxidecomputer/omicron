@@ -13,7 +13,8 @@ pub use ereport::{Ereport, EreportId};
 pub mod case;
 pub use case::Case;
 pub mod config;
-pub use config::{FmConfig, FmConfigParam, FmConfigView};
+pub use config::{FmConfig, FmConfigParam, FmConfigSource, FmConfigView};
+
 pub mod fact;
 pub use fact::{DiskFact, FactPayload, ZpoolUnhealthyFactPayload};
 pub mod display;

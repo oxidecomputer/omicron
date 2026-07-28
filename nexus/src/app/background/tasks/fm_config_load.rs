@@ -20,10 +20,10 @@ use tokio::sync::watch;
 
 /// Background task that tracks the current FM config from the DB.
 ///
-/// The watch channel contains `None` until the first successful load; because
-/// the `fm_config` table is initialized with a default configuration
-/// when the database is populated, every successful load thereafter yields
-/// `Some`.
+/// The watch channel contains `None` until the first successful load. Every
+/// successful load yields `Some`: either an override read from the
+/// `fm_config` table, or the default configuration if no override
+/// exists in the database.
 pub struct FmConfigLoader {
     datastore: Arc<DataStore>,
     tx: watch::Sender<Option<FmConfigView>>,
@@ -43,7 +43,7 @@ impl FmConfigLoader {
 
     async fn load(&mut self, opctx: &OpContext) -> Status {
         let config = match self.datastore.fm_config_get_latest(opctx).await {
-            Ok(config) => config,
+            Ok(config) => config.unwrap_or_default(),
             Err(err) => {
                 let error = InlineErrorChain::new(&err);
                 slog::error!(opctx.log, "failed to load FM config"; &error);
@@ -63,15 +63,14 @@ impl FmConfigLoader {
             self.time_updated = time_loaded;
             info!(
                 opctx.log,
-                "loaded new FM config version";
-                "version" => %config.config.version,
-                "time_modified" => %config.time_modified,
+                "loaded new FM config";
+                "source" => %config.source,
             );
         } else {
             debug!(
                 opctx.log,
                 "FM config has not changed";
-                "version" => %config.config.version,
+                "source" => %config.source,
             );
         }
         Status::Loaded { config, updated, time_updated: self.time_updated }
@@ -104,8 +103,9 @@ mod test {
     use super::*;
     use crate::app::background::BackgroundTask;
     use nexus_db_queries::db::pub_test_utils::TestDatabase;
-    use nexus_types::fm::FmConfigParam;
+    use nexus_types::fm::{FmConfigParam, FmConfigSource};
     use omicron_test_utils::dev;
+    use std::num::NonZeroU32;
 
     #[tokio::test]
     async fn test_load_fm_config() {
@@ -119,13 +119,10 @@ mod test {
         // Initial state should be `None`: nothing loaded yet.
         assert_eq!(*rx.borrow_and_update(), None);
 
-        // The first activation should load initial config created by
-        // `dbinit.sql`.
-        let initial = datastore
-            .fm_config_get_latest(opctx)
-            .await
-            .expect("initial config must exist");
-        assert_eq!(initial.config.version.get(), 1);
+        // No overrides exist in the database, so the first activation should
+        // load the built-in default config.
+        let initial = FmConfigView::default();
+        assert_eq!(initial.source, FmConfigSource::Default);
 
         let status = task.activate(&opctx).await;
         let status = serde_json::from_value::<Status>(status).unwrap();
@@ -146,16 +143,16 @@ mod test {
         );
         assert!(!rx.has_changed().unwrap());
 
-        // Insert a new config version; the next activation should load it.
+        // Insert a config override; the next activation should load it.
         let param = FmConfigParam {
-            version: 2,
+            version: NonZeroU32::new(1).unwrap(),
             sitrep_limit: 500,
             sitrep_deletion_threshold: 400,
         };
         datastore
             .fm_config_insert_latest_version(opctx, param)
             .await
-            .expect("inserting version 2 should succeed");
+            .expect("inserting override version 1 should succeed");
 
         let status = task.activate(&opctx).await;
         let status = serde_json::from_value::<Status>(status).unwrap();
@@ -163,7 +160,10 @@ mod test {
         else {
             panic!("expected updated Status::Loaded, got {status:?}");
         };
-        assert_eq!(loaded.config.version.get(), 2);
+        let FmConfigSource::Override { version, .. } = loaded.source else {
+            panic!("expected an override source, got {:?}", loaded.source);
+        };
+        assert_eq!(version.get(), 1);
         assert_eq!(loaded.config.sitrep_limit.get(), 500);
         assert_eq!(loaded.config.sitrep_deletion_threshold.get(), 400);
         assert!(rx.has_changed().unwrap());
