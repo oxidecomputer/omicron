@@ -1818,7 +1818,7 @@ async fn create_jit_user(
         .await
         .expect("failed to create user in SamlJit Silo")
         .1
-        .into()
+        .into_view(Vec::new())
 }
 
 /// Create a user in a SamlScim Silo for testing
@@ -1844,7 +1844,7 @@ async fn create_scim_user(
         .await
         .expect("failed to create user in SamlScim Silo")
         .1
-        .into()
+        .into_view(Vec::new())
 }
 
 /// Tests that LocalOnly-specific endpoints are not available in SamlJit Silos
