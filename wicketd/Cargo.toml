@@ -28,7 +28,6 @@ hex.workspace = true
 hickory-resolver.workspace = true
 http.workspace = true
 http-body-util.workspace = true
-hubtools.workspace = true
 hyper.workspace = true
 iddqd.workspace = true
 illumos-utils.workspace = true

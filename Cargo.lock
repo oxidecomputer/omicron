@@ -5897,7 +5897,6 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tokio-stream",
- "tufaceous 0.2.0",
  "tufaceous-artifact 0.2.0",
 ]
 
@@ -17597,7 +17596,6 @@ dependencies = [
  "hickory-resolver 0.25.2",
  "http",
  "http-body-util",
- "hubtools 0.4.7 (git+https://github.com/oxidecomputer/hubtools.git?rev=2b1ef9b38d75563ea800baa3b17327eec17b1b7a)",
  "hyper",
  "iddqd",
  "illumos-utils",

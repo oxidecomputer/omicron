@@ -49,7 +49,6 @@ tar.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["full"] }
 tufaceous-artifact-v2.workspace = true
-tufaceous-v2.workspace = true
 oxide-update-engine.workspace = true
 oxide-update-engine-types.workspace = true
 omicron-workspace-hack.workspace = true
