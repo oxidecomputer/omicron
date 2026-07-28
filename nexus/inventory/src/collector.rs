@@ -970,7 +970,6 @@ mod test {
             sled_id,
             sim::SimMode::Auto,
             None,
-            None,
             sim::ZpoolConfig::None,
             SledCpuFamily::AmdMilan,
         );

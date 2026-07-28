@@ -10,7 +10,9 @@
 //! pairs.
 
 use anyhow::Context as _;
+use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
+use iddqd::id_upcast;
 use omicron_common::address::AZ_PREFIX_LENGTH;
 use omicron_common::address::IpRange;
 use omicron_common::address::IpVersion;
@@ -23,11 +25,11 @@ use omicron_common::api::external::Error;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::UserId;
 use omicron_common::api::internal::nexus::Certificate;
-use omicron_uuid_kinds::{RackInitUuid, RackResetUuid};
+use omicron_uuid_kinds::RackInitUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sled_agent_types::early_networking::RackNetworkConfig;
-use sled_hardware_types::Baseboard;
+use sled_hardware_types::BaseboardId;
 use std::collections::BTreeSet;
 use std::net::IpAddr;
 use std::net::Ipv6Addr;
@@ -47,7 +49,7 @@ pub struct RackInitializeRequest {
     /// The set of peer_ids required to initialize trust quorum
     ///
     /// The value is `None` if we are not using trust quorum
-    pub trust_quorum_peers: Option<Vec<Baseboard>>,
+    pub trust_quorum_peers: Option<Vec<BaseboardId>>,
 
     /// Describes how bootstrap addresses should be collected during RSS.
     pub bootstrap_discovery: BootstrapAddressDiscovery,
@@ -154,7 +156,7 @@ impl RackInitializeRequest {
 // fields.
 #[derive(Clone, Deserialize)]
 struct UnvalidatedRackInitializeRequest {
-    trust_quorum_peers: Option<Vec<Baseboard>>,
+    trust_quorum_peers: Option<Vec<BaseboardId>>,
     bootstrap_discovery: BootstrapAddressDiscovery,
     ntp_servers: Vec<String>,
     dns_servers: Vec<IpAddr>,
@@ -275,22 +277,7 @@ pub enum RackOperationStatus {
     InitializationPanicked {
         id: RackInitUuid,
     },
-    Resetting {
-        id: RackResetUuid,
-    },
-    /// `reset_id` will be None if the rack is in an uninitialized-on-startup,
-    /// or Some if it is in an uninitialized state due to a reset operation
-    /// completing.
-    Uninitialized {
-        reset_id: Option<RackResetUuid>,
-    },
-    ResetFailed {
-        id: RackResetUuid,
-        message: String,
-    },
-    ResetPanicked {
-        id: RackResetUuid,
-    },
+    Uninitialized,
 }
 
 /// Steps we go through during initial rack setup.
@@ -450,7 +437,7 @@ impl iddqd::IdOrdItem for ServiceIpPoolConfig {
         &self.name
     }
 
-    iddqd::id_upcast!();
+    id_upcast!();
 }
 
 #[derive(Deserialize)]
@@ -470,4 +457,37 @@ impl TryFrom<UnvalidatedServiceIpPoolConfig> for ServiceIpPoolConfig {
             value;
         ServiceIpPoolConfig::new(name, description, ranges)
     }
+}
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+)]
+pub struct BootstrapIpOfBaseboardId {
+    pub id: BaseboardId,
+    pub ip: Ipv6Addr,
+}
+
+impl IdOrdItem for BootstrapIpOfBaseboardId {
+    type Key<'a> = &'a BaseboardId;
+
+    fn key(&self) -> Self::Key<'_> {
+        &self.id
+    }
+
+    id_upcast!();
+}
+
+/// All `BaseboardId`s that can be found by sprockets connections on the
+/// bootstrap network.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct BaseboardIds {
+    pub data: IdOrdMap<BootstrapIpOfBaseboardId>,
 }
