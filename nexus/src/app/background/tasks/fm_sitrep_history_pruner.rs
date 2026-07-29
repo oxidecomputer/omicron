@@ -27,22 +27,24 @@ use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::datastore;
 use nexus_db_queries::db::datastore::fm::HistoryPruningParams;
 use nexus_db_queries::db::datastore::fm::HistoryPruningResult;
+use nexus_types::fm::FmConfigView;
 use nexus_types::internal_api::background::SitrepHistoryPrunerStatus as Status;
 use nexus_types::internal_api::background::fm_sitrep_history_pruner as status;
 use serde_json::json;
 use slog_error_chain::InlineErrorChain;
 use std::num::NonZeroU32;
 use std::sync::Arc;
+use tokio::sync::watch;
 
 pub struct SitrepHistoryPruner {
     datastore: Arc<DataStore>,
     /// Activator for the `fm_sitrep_gc` background task, which we poke
     /// whenever pruning has orphaned some sitreps for it to delete.
     sitrep_gc: Activator,
-    // History limit and batch size. These are currently hard-coded but may be
-    // made configurable in the future. However, they are fields on this struct
-    // so that we can use smaller limits when running tests.
-    history_limit: NonZeroU32,
+    cfg: watch::Receiver<Option<FmConfigView>>,
+    /// Maximum batch size for deletion queries. This is currently hard-coded to
+    /// [`SQL_BATCH_SIZE`] but is a field so that it can be overriden to a
+    /// smaller value in tests.
     batch_size: NonZeroU32,
 }
 
@@ -68,28 +70,28 @@ impl BackgroundTask for SitrepHistoryPruner {
 }
 
 impl SitrepHistoryPruner {
-    /// The maximum number of entries to retain in the sitrep history table.
-    ///
-    /// This value was chosen totally arbitrarily. In future changes, this
-    /// will become configurable at runtime, in case I've gotten it wrong.
-    pub const DEFAULT_HISTORY_LIMIT: NonZeroU32 =
-        NonZeroU32::new(2000).unwrap();
-
-    pub fn new(datastore: Arc<DataStore>, sitrep_gc: Activator) -> Self {
+    pub fn new(
+        datastore: Arc<DataStore>,
+        sitrep_gc: Activator,
+        cfg: watch::Receiver<Option<FmConfigView>>,
+    ) -> Self {
         Self {
             datastore,
             sitrep_gc,
-            history_limit: Self::DEFAULT_HISTORY_LIMIT,
+            cfg,
             batch_size: datastore::SQL_BATCH_SIZE,
         }
     }
 
     async fn actually_activate(&mut self, opctx: &OpContext) -> Status {
-        let mut pruned = status::SitrepsPruned::default();
-        let params = HistoryPruningParams {
-            limit: self.history_limit,
-            batch_size: self.batch_size,
+        let Some(cfg_view) = *self.cfg.borrow() else {
+            return Status::WaitingForConfig;
         };
+        let thresh = cfg_view.config.history_pruning_threshold;
+        let mut pruned = status::SitrepsPruned::default();
+        let params =
+            HistoryPruningParams { limit: thresh, batch_size: self.batch_size };
+
         // Each call to `fm_sitrep_history_prune` deletes at most BATCH_SIZE of
         // the oldest history table entries, so we must keep calling it until it
         // tells us that there's nothing left to prune (or until it fails).
@@ -106,7 +108,7 @@ impl SitrepHistoryPruner {
                         "sitrep history depth is within the limit, no records \
                          will be pruned";
                         "sitrep_history_count" => count,
-                        "sitrep_history_limit" => self.history_limit.get(),
+                        "history_pruning_threshold" => thresh.get(),
                     );
                     break status::Outcome::NotPruned { count };
                 }
@@ -117,7 +119,7 @@ impl SitrepHistoryPruner {
                         &opctx.log,
                         "finished pruning the sitrep history table";
                         "sitrep_history_count" => count,
-                        "sitrep_history_limit" => self.history_limit.get(),
+                        "history_pruning_threshold" => thresh.get(),
                         "total_sitreps_pruned" => pruned.total,
                         "versions_pruned" => ?pruned
                             .versions.as_ref(),
@@ -139,7 +141,7 @@ impl SitrepHistoryPruner {
                         &opctx.log,
                         "pruned a batch of old sitreps from the end of the \
                          history table";
-                        "sitrep_history_limit" => self.history_limit.get(),
+                         "history_pruning_threshold" => thresh.get(),
                         "sitreps_pruned" => n_pruned,
                         "versions_pruned" => ?oldest_pruned..=newest_pruned,
                     );
@@ -164,7 +166,7 @@ impl SitrepHistoryPruner {
                     slog::error!(
                         &opctx.log,
                         "pruning the sitrep history table failed";
-                        "sitrep_history_limit" => self.history_limit.get(),
+                        "history_pruning_threshold" => thresh.get(),
                         "total_sitreps_pruned" => pruned.total,
                         "versions_pruned" => ?pruned
                             .versions.as_ref(),
@@ -177,8 +179,8 @@ impl SitrepHistoryPruner {
             }
         };
 
-        Status {
-            history_limit: self.history_limit.get(),
+        Status::Activated {
+            cfg: cfg_view,
             batch_size: self.batch_size.get(),
             outcome,
             pruned,
@@ -193,6 +195,31 @@ mod tests {
     use nexus_db_queries::db::pub_test_utils::fm::SitrepModel;
     use omicron_test_utils::dev;
 
+    /// Returns a config watch receiver carrying an FM config with the given
+    /// history pruning threshold, as though the config loader task had
+    /// published it.
+    ///
+    /// The config is constructed directly rather than validated through
+    /// `FmConfigParam`, so tests may use small thresholds. The sitrep limit
+    /// is not used by this task; it is set to one greater than the
+    /// threshold, as the real config validation would require.
+    fn config_rx(
+        history_pruning_threshold: u32,
+    ) -> watch::Receiver<Option<FmConfigView>> {
+        let config = nexus_types::fm::FmConfig {
+            history_pruning_threshold: NonZeroU32::new(
+                history_pruning_threshold,
+            )
+            .expect("test pruning thresholds must be nonzero"),
+            sitrep_limit: NonZeroU32::new(history_pruning_threshold + 1)
+                .unwrap(),
+        };
+        let view = FmConfigView { config, source: Default::default() };
+        // The sender is dropped here; watch receivers continue to yield the
+        // last-sent value after the channel closes.
+        watch::channel(Some(view)).1
+    }
+
     /// Tests that the task prunes the sitrep history table down to (at most)
     /// `history_limit` entries, deleting oldest versions first, and activates
     /// the GC task if (and only if) it actually deleted something from the
@@ -206,52 +233,54 @@ mod tests {
         const LIMIT: u32 = 5;
         let gc = Activator::new();
         gc.mark_wired_up().unwrap();
-        let mut task = SitrepHistoryPruner::new(datastore.clone(), gc.clone());
-        task.history_limit = NonZeroU32::new(LIMIT).unwrap();
+        let mut task = SitrepHistoryPruner::new(
+            datastore.clone(),
+            gc.clone(),
+            config_rx(LIMIT),
+        );
 
         let mut model = SitrepModel::new(datastore.clone());
 
         // Below the limit: nothing should be pruned.
         model.insert_history(opctx, 3).await; // v1..=v3
-        let status =
+        let (_pruned, outcome) =
             run_prune_and_check(&mut task, &gc, &mut model, opctx).await;
-        assert_eq!(status.history_limit, LIMIT);
-        assert_eq!(status.outcome, status::Outcome::NotPruned { count: 3 });
+        assert_eq!(outcome, status::Outcome::NotPruned { count: 3 });
 
         // Exactly at the limit: the limit check fires, but the newest `LIMIT`
         // versions are the entire history, so nothing is actually deleted.
         model.insert_history(opctx, 2).await; // v4, v5
-        let status =
+        let (_pruned, outcome) =
             run_prune_and_check(&mut task, &gc, &mut model, opctx).await;
-        assert_eq!(status.outcome, status::Outcome::NotPruned { count: 5 });
+        assert_eq!(outcome, status::Outcome::NotPruned { count: 5 });
 
         // Over the limit: versions 1..=3 should be pruned from the history,
         // orphaning the sitreps they referenced, and the GC task should be
         // activated to clean them up.
         model.insert_history(opctx, 3).await; // v6..=v8
-        let status =
+        let (pruned, outcome) =
             run_prune_and_check(&mut task, &gc, &mut model, opctx).await;
-        assert_eq!(status.pruned.total, 3);
-        assert_eq!(status.pruned.versions, Some(1..=3));
-        assert_eq!(status.outcome, status::Outcome::Pruned { count: 5 });
+        assert_eq!(pruned.total, 3);
+        assert_eq!(pruned.versions, Some(1..=3));
+        assert_eq!(outcome, status::Outcome::Pruned { count: 5 });
 
         // Exactly at the limit again, but this time the earliest history
         // version is v4, not v1, since we pruned v1 previously. This is the
         // expected steady state of the system, since we try to keep exactly
         // `LIMIT` rows in the history table.
-        let status =
+        let (_pruned, outcome) =
             run_prune_and_check(&mut task, &gc, &mut model, opctx).await;
-        assert_eq!(status.outcome, status::Outcome::NotPruned { count: 5 });
+        assert_eq!(outcome, status::Outcome::NotPruned { count: 5 });
 
         // Prune again, now that the minimum history version is no longer 1.
         // This checks that the pruning arithmetic is anchored on the latest
         // version rather than on the row count: history is v4..=v10 (7 rows),
         // so v4 and v5 should go.
         model.insert_history(opctx, 2).await; // v9, v10
-        let status =
+        let (pruned, _outcome) =
             run_prune_and_check(&mut task, &gc, &mut model, opctx).await;
-        assert_eq!(status.pruned.total, 2);
-        assert_eq!(status.pruned.versions, Some(4..=5));
+        assert_eq!(pruned.total, 2);
+        assert_eq!(pruned.versions, Some(4..=5));
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -272,8 +301,11 @@ mod tests {
         const EXCESS_HISTORY: u32 = 7;
         let gc = Activator::new();
         gc.mark_wired_up().unwrap();
-        let mut task = SitrepHistoryPruner::new(datastore.clone(), gc.clone());
-        task.history_limit = NonZeroU32::new(LIMIT).unwrap();
+        let mut task = SitrepHistoryPruner::new(
+            datastore.clone(),
+            gc.clone(),
+            config_rx(LIMIT),
+        );
 
         let mut model = SitrepModel::new(datastore.clone());
 
@@ -295,15 +327,15 @@ mod tests {
             let needed = (LIMIT + EXCESS_HISTORY) - count;
             model.insert_history(opctx, needed as usize).await;
 
-            let status =
+            let (pruned, outcome) =
                 run_prune_and_check(&mut task, &gc, &mut model, opctx).await;
-            assert_eq!(status.pruned.total, EXCESS_HISTORY as usize);
+            assert_eq!(pruned.total, EXCESS_HISTORY as usize);
             assert_eq!(
-                status.outcome,
+                outcome,
                 status::Outcome::Pruned { count: LIMIT.into() }
             );
             // ...and did we actually report that we did that many batches?
-            assert_eq!(status.pruned.batches, expected_batches);
+            assert_eq!(pruned.batches, expected_batches);
         }
 
         db.terminate().await;
@@ -313,7 +345,7 @@ mod tests {
     /// Activate the sitrep history pruner task and check the task's reported
     /// status, the database contents, and the GC task's activation against the
     /// model's simulation of what pruning should do with the task's configured
-    /// `history_limit`.
+    /// pruning threshold.
     ///
     /// If pruning orphaned any sitreps, this asserts that the pruner activated
     /// the GC task, and then performs the orphan sweep the GC task *would* do
@@ -327,20 +359,36 @@ mod tests {
         gc: &Activator,
         model: &mut SitrepModel,
         opctx: &OpContext,
-    ) -> Status {
-        let status = dbg!(task.actually_activate(opctx).await);
-        let expected = model.simulate_history_pruning(task.history_limit);
+    ) -> (status::SitrepsPruned, status::Outcome) {
+        let (cfg, pruned, outcome) =
+            match dbg!(task.actually_activate(opctx).await) {
+                Status::Activated { cfg, pruned, outcome, .. } => {
+                    (cfg, pruned, outcome)
+                }
+                status => panic!(
+                    "the pruner should have activated with a loaded config, \
+                     got: {status:?}"
+                ),
+            };
+        // The status must echo the config the task was actually given.
         assert_eq!(
-            status.pruned.total, expected.sitreps_pruned,
+            Some(&cfg),
+            task.cfg.borrow().as_ref(),
+            "the status should report the config used for pruning",
+        );
+        let expected = model
+            .simulate_history_pruning(cfg.config.history_pruning_threshold);
+        assert_eq!(
+            pruned.total, expected.sitreps_pruned,
             "the number of history entries pruned should match the model's \
              simulation"
         );
         assert_eq!(
-            status.pruned.versions, expected.versions_pruned,
+            pruned.versions, expected.versions_pruned,
             "the range of versions pruned should match the model's simulation"
         );
         assert_eq!(
-            status.outcome, expected.outcome,
+            outcome, expected.outcome,
             "the task's reported pruning outcome should match the model's \
              simulation"
         );
@@ -349,7 +397,7 @@ mod tests {
         // task hasn't actually run.
         model.assert_matches(opctx).await;
 
-        if status.pruned.total > 0 {
+        if pruned.total > 0 {
             gc.assert_activated(
                 "the GC task should be activated when sitreps were pruned",
             );
@@ -362,6 +410,6 @@ mod tests {
                 "the GC task should not be activated when nothing was pruned",
             );
         }
-        status
+        (pruned, outcome)
     }
 }

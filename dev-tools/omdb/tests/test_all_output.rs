@@ -211,12 +211,19 @@ async fn test_omdb_success_cases() {
     //    already has). This run reports "committed new sitrep".
     // 3. `fm_sitrep_loader` loads that sitrep and publishes it on the sitrep
     //    watch channel.
-    // 4. `fm_analysis` re-runs with the loaded sitrep as its parent and
+    // 4. `fm_sitrep_history_pruner` runs with the loaded config and exactly
+    //    one sitrep in the history, so its status deterministically reports
+    //    the config it used and a count of 1, rather than "waiting for
+    //    config". If we didn't run it explicitly after the config was loaded,
+    //    its initial activation may race with the config loader and sometimes
+    //    display that it's waiting for config, and sometimes display that it 
+    //    did nothing.
+    // 5. `fm_analysis` re-runs with the loaded sitrep as its parent and
     //    reports "no changes" -- the steady-state output asserted below.
     //    (No later activation ever commits another sitrep here: this
     //    environment has no in-service control plane disks and no
     //    consumable ereports, so every post-load analysis is a no-op.)
-    // 5. `fm_rendezvous` runs against the loaded sitrep, so its status shows
+    // 6. `fm_rendezvous` runs against the loaded sitrep, so its status shows
     //    the executed operations rather than "no FM situation report loaded".
     // 5. `fm_sitrep_history_pruner` runs, determines we have not reached the
     //    sitrep history limit, and does nothing. However, this task's status
@@ -229,6 +236,7 @@ async fn test_omdb_success_cases() {
     activate_background_task(lockstep_client, "fm_config_loader").await;
     activate_background_task(lockstep_client, "fm_analysis").await;
     activate_background_task(lockstep_client, "fm_sitrep_loader").await;
+    activate_background_task(lockstep_client, "fm_sitrep_history_pruner").await;
     activate_background_task(lockstep_client, "fm_analysis").await;
     activate_background_task(lockstep_client, "fm_rendezvous").await;
     activate_background_task(lockstep_client, "fm_sitrep_history_pruner").await;

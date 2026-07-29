@@ -741,9 +741,9 @@ task: "fm_config_loader"
     config last updated at:       <REDACTED_TIMESTAMP>
       updated by this activation: false
     current config:
-      source:                    default
-      sitrep history limit:      1000
-      sitrep deletion threshold: 900
+      source:                           default
+      sitrep limit:                     2500
+      sitrep history pruning threshold: 2000
 
 task: "fm_rendezvous"
   configured period: every <REDACTED_DURATION>m
@@ -814,7 +814,10 @@ task: "fm_sitrep_history_pruner"
   configured period: every <REDACTED_DURATION>m
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    max sitreps to keep: 2000
+    configuration:
+      source:                           default
+      sitrep limit:                     2500
+      sitrep history pruning threshold: 2000
     deletion batch size: 1000
     status: within limit (nothing was deleted)
       current count:        1
@@ -1474,9 +1477,9 @@ task: "fm_config_loader"
     config last updated at:       <REDACTED_TIMESTAMP>
       updated by this activation: false
     current config:
-      source:                    default
-      sitrep history limit:      1000
-      sitrep deletion threshold: 900
+      source:                           default
+      sitrep limit:                     2500
+      sitrep history pruning threshold: 2000
 
 task: "fm_rendezvous"
   configured period: every <REDACTED_DURATION>m
@@ -1547,7 +1550,10 @@ task: "fm_sitrep_history_pruner"
   configured period: every <REDACTED_DURATION>m
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    max sitreps to keep: 2000
+    configuration:
+      source:                           default
+      sitrep limit:                     2500
+      sitrep history pruning threshold: 2000
     deletion batch size: 1000
     status: within limit (nothing was deleted)
       current count:        1

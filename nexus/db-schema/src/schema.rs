@@ -3208,7 +3208,7 @@ table! {
     fm_config (version) {
         version -> Int8,
         sitrep_limit -> Int8,
-        sitrep_deletion_threshold -> Int8,
+        history_pruning_threshold -> Int8,
         time_modified -> Timestamptz,
     }
 }

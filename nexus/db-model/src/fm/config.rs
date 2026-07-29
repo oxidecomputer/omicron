@@ -17,7 +17,7 @@ use std::num::NonZeroU32;
 pub struct FmConfig {
     pub version: SqlU32,
     pub sitrep_limit: SqlU32,
-    pub sitrep_deletion_threshold: SqlU32,
+    pub history_pruning_threshold: SqlU32,
     pub time_modified: DateTime<Utc>,
 }
 
@@ -30,12 +30,12 @@ impl TryFrom<fm::FmConfigParam> for FmConfig {
         // exhaustively so that if any fields are added to the `nexus_types`
         // version, they must be handled here and included in the `db::model`
         // type.
-        let fm::FmConfig { sitrep_limit, sitrep_deletion_threshold } =
+        let fm::FmConfig { history_pruning_threshold, sitrep_limit } =
             fm::FmConfig::try_from(&param)?;
         Ok(Self {
             version: param.version.get().into(),
             sitrep_limit: sitrep_limit.get().into(),
-            sitrep_deletion_threshold: sitrep_deletion_threshold.get().into(),
+            history_pruning_threshold: history_pruning_threshold.get().into(),
             time_modified: Utc::now(),
         })
     }
@@ -48,7 +48,7 @@ impl TryFrom<FmConfig> for fm::FmConfigView {
         let FmConfig {
             version,
             sitrep_limit,
-            sitrep_deletion_threshold,
+            history_pruning_threshold,
             time_modified,
         } = value;
 
@@ -67,7 +67,7 @@ impl TryFrom<FmConfig> for fm::FmConfigView {
         let param = fm::FmConfigParam {
             version,
             sitrep_limit: sitrep_limit.into(),
-            sitrep_deletion_threshold: sitrep_deletion_threshold.into(),
+            history_pruning_threshold: history_pruning_threshold.into(),
         };
         let config = fm::FmConfig::try_from(&param)?;
         let source = fm::FmConfigSource::Override { version, time_modified };

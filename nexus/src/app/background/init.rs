@@ -1138,6 +1138,7 @@ impl BackgroundTasksInitializer {
         // Background task: fault management config loader
         let fm_config_loader =
             fm_config_load::FmConfigLoader::new(datastore.clone());
+        let fm_config_watcher = fm_config_loader.watcher();
         driver.register(TaskDefinition {
             name: "fm_config_loader",
             description: "loads the current fault management configuration \
@@ -1170,6 +1171,7 @@ impl BackgroundTasksInitializer {
             datastore.clone(),
             sitrep_watcher.clone(),
             inventory_load_watcher.clone(),
+            fm_config_watcher.clone(),
             fm_analysis::Activators {
                 inventory_loader: task_inventory_loader.clone(),
                 sitrep_loader: task_fm_sitrep_loader.clone(),
@@ -1189,6 +1191,7 @@ impl BackgroundTasksInitializer {
             watchers: vec![
                 Box::new(sitrep_watcher.clone()),
                 Box::new(inventory_load_watcher.clone()),
+                Box::new(fm_config_watcher.clone()),
             ],
             activator: task_fm_analysis,
         });
@@ -1224,10 +1227,13 @@ impl BackgroundTasksInitializer {
                     // The pruner pokes the GC task whenever it orphans some
                     // sitreps for it to delete.
                     task_fm_sitrep_gc.clone(),
+                    fm_config_watcher.clone(),
                 ),
             ),
             opctx: opctx.child(BTreeMap::new()),
-            watchers: vec![],
+            watchers: vec![
+                Box::new(fm_config_watcher),
+            ],
             activator: task_fm_sitrep_history_pruner,
         });
 

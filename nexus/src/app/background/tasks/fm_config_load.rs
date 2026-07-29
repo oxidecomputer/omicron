@@ -36,7 +36,6 @@ impl FmConfigLoader {
         Self { datastore, tx, time_updated: Utc::now() }
     }
 
-    #[allow(dead_code)] // subsequent PRs will consume this
     pub fn watcher(&self) -> watch::Receiver<Option<FmConfigView>> {
         self.tx.subscribe()
     }
@@ -147,7 +146,7 @@ mod test {
         let param = FmConfigParam {
             version: NonZeroU32::new(1).unwrap(),
             sitrep_limit: 500,
-            sitrep_deletion_threshold: 400,
+            history_pruning_threshold: 400,
         };
         datastore
             .fm_config_insert_latest_version(opctx, param)
@@ -165,7 +164,7 @@ mod test {
         };
         assert_eq!(version.get(), 1);
         assert_eq!(loaded.config.sitrep_limit.get(), 500);
-        assert_eq!(loaded.config.sitrep_deletion_threshold.get(), 400);
+        assert_eq!(loaded.config.history_pruning_threshold.get(), 400);
         assert!(rx.has_changed().unwrap());
         assert_eq!(*rx.borrow_and_update(), Some(loaded));
 

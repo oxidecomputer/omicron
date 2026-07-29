@@ -3558,6 +3558,14 @@ fn print_task_fm_analysis(details: &serde_json::Value, colored: bool) {
             );
             return;
         }
+        Outcome::WaitingForConfig => {
+            println!(
+                "    analysis was not performed, as the fault management\n    \
+                     configuration has not yet been loaded.\n\
+                 (i) note: this should only happen if Nexus has just started.",
+            );
+            return;
+        }
         Outcome::WaitingForInventory => {
             println!(
                 "    analysis was not performed, as the inventory has\n    \
@@ -3738,25 +3746,34 @@ fn print_task_fm_sitrep_history_pruner(details: &serde_json::Value) {
         Outcome, SitrepsPruned,
     };
 
-    let SitrepHistoryPrunerStatus {
-        history_limit,
-        batch_size,
-        pruned: SitrepsPruned { batches, total, versions },
-        outcome,
-    } = match serde_json::from_value::<SitrepHistoryPrunerStatus>(
-        details.clone(),
-    ) {
-        Err(error) => {
-            eprintln!(
-                "warning: failed to interpret task details: {:?}: {:?}",
-                error, details
-            );
-            return;
-        }
-        Ok(status) => status,
-    };
+    let (cfg, batch_size, SitrepsPruned { batches, total, versions }, outcome) =
+        match serde_json::from_value::<SitrepHistoryPrunerStatus>(
+            details.clone(),
+        ) {
+            Err(error) => {
+                eprintln!(
+                    "warning: failed to interpret task details: {:?}: {:?}",
+                    error, details
+                );
+                return;
+            }
+            Ok(SitrepHistoryPrunerStatus::WaitingForConfig) => {
+                println!(
+                    "    nothing was pruned, as the fault management\n    \
+                         configuration has not yet been loaded.\n\
+                     (i) note: this should only happen if Nexus has just \
+                     started.",
+                );
+                return;
+            }
+            Ok(SitrepHistoryPrunerStatus::Activated {
+                cfg,
+                batch_size,
+                pruned,
+                outcome,
+            }) => (cfg, batch_size, pruned, outcome),
+        };
 
-    const HISTORY_LIMIT: &str = "max sitreps to keep:";
     const STATUS: &str = "status:";
     const SITREP_COUNT: &str = "  current count:";
     const PRUNED_COUNT: &str = "  sitreps pruned:";
@@ -3764,7 +3781,6 @@ fn print_task_fm_sitrep_history_pruner(details: &serde_json::Value) {
     const BATCHES: &str = "  batches:";
     const BATCH_SIZE: &str = "deletion batch size:";
     const P_WIDTH: usize = const_max_len(&[
-        HISTORY_LIMIT,
         SITREP_COUNT,
         PRUNED_COUNT,
         PRUNED_VERSIONS,
@@ -3772,7 +3788,8 @@ fn print_task_fm_sitrep_history_pruner(details: &serde_json::Value) {
         BATCH_SIZE,
     ]) + 1;
     const NUM_WIDTH: usize = 4;
-    println!("    {HISTORY_LIMIT:<P_WIDTH$}{history_limit:>NUM_WIDTH$}");
+    println!("    configuration:");
+    print!("{}", cfg.display_multiline(6));
     println!("    {BATCH_SIZE:<P_WIDTH$}{batch_size:>NUM_WIDTH$}");
     match outcome {
         Outcome::Error(error) => {

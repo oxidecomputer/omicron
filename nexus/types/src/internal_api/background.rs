@@ -949,16 +949,22 @@ pub mod fm_sitrep_gc {
 
 /// The status of a `fm_sitrep_history_pruner` background task activation.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
-pub struct SitrepHistoryPrunerStatus {
-    /// The maximum number of entries to retain in the history table.
-    pub history_limit: u32,
-    /// The maximum number of history table entries deleted per query.
-    pub batch_size: u32,
-    /// Tracks how many sitreps were deleted during this activation.
-    pub pruned: fm_sitrep_history_pruner::SitrepsPruned,
-    /// The outcome of this activation (i.e. why it ended, and the last observed
-    /// history table count).
-    pub outcome: fm_sitrep_history_pruner::Outcome,
+pub enum SitrepHistoryPrunerStatus {
+    /// The FM config has not yet been loaded from the database, so the pruning
+    /// task is waiting for the config to be available.
+    WaitingForConfig,
+    /// The pruning task has activated normally.
+    Activated {
+        /// The maximum number of entries to retain in the history table.
+        cfg: crate::fm::FmConfigView,
+        /// The maximum number of history table entries deleted per query.
+        batch_size: u32,
+        /// Tracks how many sitreps were deleted during this activation.
+        pruned: fm_sitrep_history_pruner::SitrepsPruned,
+        /// The outcome of this activation (i.e. why it ended, and the last
+        /// observed history table count).
+        outcome: fm_sitrep_history_pruner::Outcome,
+    },
 }
 
 pub mod fm_sitrep_history_pruner {
@@ -1014,7 +1020,7 @@ pub struct FmAnalysisStatus {
 pub mod fm_analysis {
     use super::*;
     use crate::fm::analysis_reports;
-    use std::num::NonZeroU64;
+    use std::num::{NonZeroU32, NonZeroU64};
 
     #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
     pub struct PreparationStatus {
@@ -1029,6 +1035,11 @@ pub mod fm_analysis {
     pub enum Outcome {
         /// The task is disabled by config.
         Disabled,
+
+        /// Fault management analysis was not performed, as the fault
+        /// management configuration has not yet been loaded from the
+        /// database.
+        WaitingForConfig,
 
         /// Fault management analysis was not performed, as no inventory
         /// collection has been loaded.
@@ -1065,7 +1076,7 @@ pub mod fm_analysis {
     #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
     pub struct SitrepCapacity {
         pub count: u64,
-        pub limit: NonZeroU64,
+        pub limit: NonZeroU32,
     }
 
     impl SitrepCapacity {
@@ -1073,7 +1084,7 @@ pub mod fm_analysis {
         // decimal places, but I don't really think we need to be that precise,
         // and matching on ranges nicely is cute...
         pub fn usage_percent(&self) -> u64 {
-            self.count.saturating_mul(100) / self.limit
+            self.count.saturating_mul(100) / NonZeroU64::from(self.limit)
         }
     }
 
@@ -1088,7 +1099,7 @@ pub mod fm_analysis {
 
         /// Analysis produced a new sitrep, but the sitrep limit has been
         /// reached, so it was not written to the database.
-        LimitReached { limit: NonZeroU64 },
+        LimitReached { limit: NonZeroU32 },
 
         /// Analysis produced a new sitrep, but we failed to make it
         /// the current sitrep.

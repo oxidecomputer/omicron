@@ -9082,26 +9082,28 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_config (
     -- Configuration changes are made by inserting a new row with a higher
     -- version number.
     version INT8 PRIMARY KEY,
-    -- The maximum number of historical sitreps to keep in the database.
+    -- The maximum number of sitreps to keep in the database.
     --
-    -- If the number of records in the `omicron.public.fm_sitrep_history` table
-    -- exceeds this limit, the FM analysis background task will not produce a
-    -- new sitrep until old ones are deleted.
+    -- If the number of records in the `omicron.public.fm_sitrep` table
+    -- (including both sitreps in the history and orphaned sitreps that have
+    -- yet to be garbage-collected) exceeds this limit, the FM analysis
+    -- background task will not produce a new sitrep until old ones are
+    -- deleted.
     sitrep_limit INT8 NOT NULL,
-    -- The number of entries in the `omicron.public.fm_sitrep_history` at which
-    -- the `fm_sitrep_gc` background task will begin deleting the oldest sitreps
-    -- from the history.
+    -- The number of entries in the `omicron.public.fm_sitrep_history` table at
+    -- which the `fm_sitrep_history_pruner` background task will begin deleting
+    -- the oldest sitreps from the history.
     --
     -- This must be less than `sitrep_limit`, and must be at least 2.
-    sitrep_deletion_threshold INT8 NOT NULL,
+    history_pruning_threshold INT8 NOT NULL,
     -- The time at which this config version was created.
     time_modified TIMESTAMPTZ NOT NULL,
 
     CONSTRAINT versions_are_positive CHECK (version > 0),
-    CONSTRAINT sitrep_min_limit CHECK (sitrep_limit >= 3),
-    CONSTRAINT sitrep_deletion_threshold_validity CHECK (
-        sitrep_deletion_threshold >= 2 AND
-        sitrep_deletion_threshold < sitrep_limit
+    CONSTRAINT sitrep_min_limit CHECK (sitrep_limit >= 5),
+    CONSTRAINT history_pruning_threshold_validity CHECK (
+        history_pruning_threshold >= 2 AND
+        history_pruning_threshold < sitrep_limit
     )
 );
 

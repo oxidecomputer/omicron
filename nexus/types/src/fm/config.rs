@@ -33,10 +33,11 @@ use serde::{Deserialize, Serialize};
 /// configuration values pass validation. The configuration values in this
 /// type are unvalidated, and their invariants may not hold:
 ///
-/// - `sitrep_limit` must be at least [`FmConfig::MIN_SITREP_LIMIT`],
-/// - `sitrep_deletion_threshold` must be at least
-///   [`FmConfig::MIN_SITREP_DELETION_THRESHOLD`],
-/// - `sitrep_deletion_threshold` must be strictly less than `sitrep_limit`.
+/// - [`Self::sitrep_limit`] must be at least [`FmConfig::MIN_SITREP_LIMIT`],
+/// - [`Self::history_pruning_threshold`] must be at least
+///   [`FmConfig::MIN_HISTORY_PRUNING_THRESHOLD`],
+/// - [`Self::history_pruning_threshold`] must be strictly less than
+///   [`Self::sitrep_limit`].
 ///
 /// The configuration values are validated by converting this type into a
 /// [`FmConfig`] via `TryFrom`. Whether `version` is actually the next version
@@ -49,16 +50,21 @@ pub struct FmConfigParam {
     /// The version of the configuration.
     pub version: NonZeroU32,
 
-    /// The maximum number of historical sitreps to keep in the database.
+    /// The maximum number of sitreps to keep in the database.
     ///
-    /// If the number of sitreps in the history exceeds this limit, the FM
-    /// analysis background task will not produce a new sitrep until old ones
-    /// are deleted.
+    /// If the number of sitreps exceeds this limit, the FM analysis background
+    /// task will not produce a new sitrep until old ones are deleted.
+    ///
+    /// This limit applies to both committed sitreps in the history *and*
+    /// orphaned sitreps left behind when multiple Nexuses race to commit a
+    /// sitrep.
     pub sitrep_limit: u32,
 
-    /// The number of sitreps in the history at which the sitrep GC background
-    /// task will begin deleting the oldest sitreps.
-    pub sitrep_deletion_threshold: u32,
+    /// The maximum number of sitreps committed to the `fm_sitrep_history`
+    /// table. If the number of sitreps exceeds this threshold, the
+    /// `fm_sitrep_history_pruner` background task will remove the oldest
+    /// entries from the history.
+    pub history_pruning_threshold: u32,
 }
 
 /// A view of the current fault management configuration.
@@ -202,31 +208,46 @@ impl fmt::Display for FmConfigSource {
     Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema,
 )]
 pub struct FmConfig {
-    /// The maximum number of historical sitreps to keep in the database.
+    /// The maximum number of sitreps to keep in the database.
     ///
-    /// If the number of sitreps in the history exceeds this limit, the FM
-    /// analysis background task will not produce a new sitrep until old ones
-    /// are deleted.
+    /// If the number of sitreps exceeds this limit, the FM analysis background
+    /// task will not produce a new sitrep until old ones are deleted.
+    ///
+    /// This limit applies to both committed sitreps in the history *and*
+    /// orphaned sitreps left behind when multiple Nexuses race to commit a
+    /// sitrep.
     pub sitrep_limit: NonZeroU32,
 
-    /// The number of sitreps in the history at which the sitrep GC background
-    /// task will begin deleting the oldest sitreps.
-    pub sitrep_deletion_threshold: NonZeroU32,
+    /// The maximum number of sitreps committed to the `fm_sitrep_history`
+    /// table. If the number of sitreps exceeds this threshold, the
+    /// `fm_sitrep_history_pruner` background task will remove the oldest
+    /// entries from the history.
+    pub history_pruning_threshold: NonZeroU32,
 }
 
 impl FmConfig {
-    /// The minimum permitted value of `sitrep_limit`.
+    /// The minimum permitted value of [`Self::sitrep_limit`].
     ///
-    /// This is one greater than [`Self::MIN_SITREP_DELETION_THRESHOLD`], as
-    /// the deletion threshold must be less than the limit.
-    pub const MIN_SITREP_LIMIT: NonZeroU32 = NonZeroU32::new(3).unwrap();
+    /// This must be greater than [`Self::MIN_HISTORY_PRUNING_THRESHOLD`], to
+    /// allow for new sitreps to be committed when the history has yet to be
+    /// pruned to the limit.
+    pub const MIN_SITREP_LIMIT: NonZeroU32 = NonZeroU32::new(5).unwrap();
 
-    /// The minimum permitted value of `sitrep_deletion_threshold`.
+    /// The default value of [`Self::sitrep_limit`], used when there is no
+    /// config override set.
+    pub const DEFAULT_SITREP_LIMIT: NonZeroU32 = NonZeroU32::new(2500).unwrap();
+
+    /// The minimum permitted value of [`Self::history_pruning_threshold`].
     ///
     /// The current sitrep must always be retained, so at least two sitreps
     /// must exist before any may be deleted.
-    pub const MIN_SITREP_DELETION_THRESHOLD: NonZeroU32 =
+    pub const MIN_HISTORY_PRUNING_THRESHOLD: NonZeroU32 =
         NonZeroU32::new(2).unwrap();
+
+    /// The default value of [`Self::history_pruning_threshold`], used when there is no
+    /// config override set.
+    pub const DEFAULT_HISTORY_PRUNING_THRESHOLD: NonZeroU32 =
+        NonZeroU32::new(2000).unwrap();
 
     /// Returns a multi-line displayer for this config, with each line
     /// indented by `indent` spaces.
@@ -239,7 +260,7 @@ impl FmConfig {
         impl fmt::Display for DisplayConfig<'_> {
             fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
                 let DisplayConfig {
-                    config: FmConfig { sitrep_limit, sitrep_deletion_threshold },
+                    config: FmConfig { sitrep_limit, history_pruning_threshold },
                     indent,
                 } = self;
 
@@ -250,8 +271,8 @@ impl FmConfig {
                 )?;
                 writeln!(
                     f,
-                    "{:>indent$}{SITREP_DELETION_THRESHOLD:<WIDTH$} \
-                     {sitrep_deletion_threshold}",
+                    "{:>indent$}{HISTORY_PRUNING_THRESHOLD:<WIDTH$} \
+                     {history_pruning_threshold}",
                     ""
                 )
             }
@@ -264,8 +285,8 @@ impl FmConfig {
 impl Default for FmConfig {
     fn default() -> Self {
         Self {
-            sitrep_limit: NonZeroU32::new(1000).unwrap(),
-            sitrep_deletion_threshold: NonZeroU32::new(900).unwrap(),
+            sitrep_limit: Self::DEFAULT_SITREP_LIMIT,
+            history_pruning_threshold: Self::DEFAULT_HISTORY_PRUNING_THRESHOLD,
         }
     }
 }
@@ -285,7 +306,7 @@ impl TryFrom<&'_ FmConfigParam> for FmConfig {
         let &FmConfigParam {
             version: _,
             sitrep_limit,
-            sitrep_deletion_threshold,
+            history_pruning_threshold,
         } = value;
 
         fn check_minimum(
@@ -310,36 +331,37 @@ impl TryFrom<&'_ FmConfigParam> for FmConfig {
             "sitrep_limit",
             Self::MIN_SITREP_LIMIT,
         )?;
-        let sitrep_deletion_threshold = check_minimum(
-            sitrep_deletion_threshold,
-            "sitrep_deletion_threshold",
-            Self::MIN_SITREP_DELETION_THRESHOLD,
+        let history_pruning_threshold = check_minimum(
+            history_pruning_threshold,
+            "history_pruning_threshold",
+            Self::MIN_HISTORY_PRUNING_THRESHOLD,
         )?;
 
-        if sitrep_deletion_threshold >= sitrep_limit {
+        if history_pruning_threshold >= sitrep_limit {
             return Err(Error::invalid_value(
-                "sitrep_deletion_threshold",
+                "history_pruning_threshold",
                 format!(
-                    "sitrep deletion threshold ({sitrep_deletion_threshold}) \
-                     must be less than the sitrep limit ({sitrep_limit})",
+                    "sitrep history pruning threshold ({history_pruning_threshold}) \
+                     must be less than the total sitrep limit \
+                    ({sitrep_limit})",
                 ),
             ));
         }
-        Ok(Self { sitrep_limit, sitrep_deletion_threshold })
+        Ok(Self { sitrep_limit, history_pruning_threshold })
     }
 }
 
 const SOURCE: &str = "source:";
 const VERSION: &str = "  version:";
 const TIME_MODIFIED: &str = "  modified at:";
-const SITREP_LIMIT: &str = "sitrep history limit:";
-const SITREP_DELETION_THRESHOLD: &str = "sitrep deletion threshold:";
+const SITREP_LIMIT: &str = "sitrep limit:";
+const HISTORY_PRUNING_THRESHOLD: &str = "sitrep history pruning threshold:";
 const WIDTH: usize = const_max_len(&[
     SOURCE,
     VERSION,
     TIME_MODIFIED,
     SITREP_LIMIT,
-    SITREP_DELETION_THRESHOLD,
+    HISTORY_PRUNING_THRESHOLD,
 ]);
 
 #[cfg(test)]
@@ -353,7 +375,7 @@ mod tests {
         let err = FmConfig::try_from(&FmConfigParam {
             version: V1,
             sitrep_limit: 0,
-            sitrep_deletion_threshold: 2,
+            history_pruning_threshold: 2,
         })
         .unwrap_err();
         assert!(
@@ -367,7 +389,7 @@ mod tests {
         let err = FmConfig::try_from(&FmConfigParam {
             version: V1,
             sitrep_limit: 2,
-            sitrep_deletion_threshold: 2,
+            history_pruning_threshold: 2,
         })
         .unwrap_err();
         assert!(
@@ -377,46 +399,47 @@ mod tests {
     }
 
     #[test]
-    fn test_nonzero_sitrep_deletion_threshold() {
+    fn test_nonzero_history_pruning_threshold() {
         let err = FmConfig::try_from(&FmConfigParam {
             version: V1,
             sitrep_limit: 100,
-            sitrep_deletion_threshold: 0,
+            history_pruning_threshold: 0,
         })
         .unwrap_err();
         assert!(
             err.to_string()
-                .contains("sitrep_deletion_threshold must be nonzero"),
+                .contains("history_pruning_threshold must be nonzero"),
             "unexpected error: {err}"
         );
     }
 
     #[test]
-    fn test_min_sitrep_deletion_threshold() {
+    fn test_min_history_pruning_threshold() {
         let err = FmConfig::try_from(&FmConfigParam {
             version: V1,
             sitrep_limit: 100,
-            sitrep_deletion_threshold: 1,
+            history_pruning_threshold: 1,
         })
         .unwrap_err();
         assert!(
             err.to_string()
-                .contains("sitrep_deletion_threshold must be at least"),
+                .contains("history_pruning_threshold must be at least"),
             "unexpected error: {err}"
         );
     }
 
     #[test]
-    fn test_sitrep_deletion_threshold_must_be_less_than_sitrep_limit() {
+    fn test_history_pruning_threshold_must_be_less_than_sitrep_limit() {
         for threshold in [100, 101] {
             let err = FmConfig::try_from(&FmConfigParam {
                 version: V1,
                 sitrep_limit: 100,
-                sitrep_deletion_threshold: threshold,
+                history_pruning_threshold: threshold,
             })
             .unwrap_err();
             assert!(
-                err.to_string().contains("must be less than the sitrep limit"),
+                err.to_string()
+                    .contains("must be less than the total sitrep limit"),
                 "unexpected error: {err}"
             );
         }

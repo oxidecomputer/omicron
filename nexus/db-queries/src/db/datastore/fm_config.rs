@@ -84,7 +84,7 @@ impl DataStore {
         let db::model::fm::FmConfig {
             version,
             sitrep_limit,
-            sitrep_deletion_threshold,
+            history_pruning_threshold,
             time_modified,
         } = config;
 
@@ -99,7 +99,7 @@ impl DataStore {
         let new_row = diesel::dsl::select((
             version.into_sql::<sql_types::BigInt>(),
             sitrep_limit.into_sql::<sql_types::BigInt>(),
-            sitrep_deletion_threshold.into_sql::<sql_types::BigInt>(),
+            history_pruning_threshold.into_sql::<sql_types::BigInt>(),
             time_modified.into_sql::<sql_types::Timestamptz>(),
         ))
         // `version - 1` cannot underflow: `FmConfigParam::version` is a
@@ -111,7 +111,7 @@ impl DataStore {
             .into_columns((
                 dsl::version,
                 dsl::sitrep_limit,
-                dsl::sitrep_deletion_threshold,
+                dsl::history_pruning_threshold,
                 dsl::time_modified,
             ))
             .execute_async(&*self.pool_connection_authorized(opctx).await?)
@@ -153,7 +153,7 @@ mod tests {
         let mut config = FmConfigParam {
             version: NonZeroU32::new(2).unwrap(),
             sitrep_limit: 5,
-            sitrep_deletion_threshold: 4,
+            history_pruning_threshold: 4,
         };
         assert!(
             datastore
@@ -182,26 +182,26 @@ mod tests {
         };
         assert_eq!(version.get(), 1);
         assert_eq!(read.config.sitrep_limit.get(), 5);
-        assert_eq!(read.config.sitrep_deletion_threshold.get(), 4);
+        assert_eq!(read.config.history_pruning_threshold.get(), 4);
 
         // An invalid config is rejected with an invalid value error.
         // (Validation is tested exhaustively in `nexus-types`; this just
         // checks that invalid configs are rejected on the insert path.)
         config.version = NonZeroU32::new(2).unwrap();
         config.sitrep_limit = 100;
-        config.sitrep_deletion_threshold = 100;
+        config.history_pruning_threshold = 100;
         assert!(
             datastore
                 .fm_config_insert_latest_version(opctx, config)
                 .await
                 .unwrap_err()
                 .to_string()
-                .contains("must be less than the sitrep limit")
+                .contains("must be less than the total sitrep limit")
         );
 
         // Inserting version 2 with a valid config should work.
         config.sitrep_limit = 500;
-        config.sitrep_deletion_threshold = 400;
+        config.history_pruning_threshold = 400;
         datastore
             .fm_config_insert_latest_version(opctx, config)
             .await
@@ -218,7 +218,7 @@ mod tests {
         };
         assert_eq!(version.get(), 2);
         assert_eq!(read.config.sitrep_limit.get(), 500);
-        assert_eq!(read.config.sitrep_deletion_threshold.get(), 400);
+        assert_eq!(read.config.history_pruning_threshold.get(), 400);
 
         db.terminate().await;
         logctx.cleanup_successful();
