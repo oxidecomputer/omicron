@@ -983,7 +983,7 @@
             }
           },
           "external_dns_ips": {
-            "description": "Service IP addresses on which we run external DNS servers.\n\nEach address must be present in `internal_services_ip_pool_ranges`.",
+            "description": "Service IP addresses on which we run external DNS servers.\n\nEach address must be present in the ranges of the pools in `service_ip_pools`.",
             "type": "array",
             "items": {
               "type": "string",
@@ -998,13 +998,6 @@
             "description": "When true, end users may opt in to jumbo frames on the primary interface of an instance, and control plane services with external-facing OPTE NICs are brought up with an 8500 byte MTU. Operators can toggle this at runtime via the fleet networking settings API.",
             "default": false,
             "type": "boolean"
-          },
-          "internal_services_ip_pool_ranges": {
-            "description": "Ranges of the service IP pool which may be used for internal services.",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/IpRange"
-            }
           },
           "ntp_servers": {
             "description": "The external NTP server addresses.",
@@ -1029,6 +1022,25 @@
               }
             ]
           },
+          "service_ip_pools": {
+            "title": "IdOrdMap",
+            "description": "Configuration for service IP Pools.",
+            "x-rust-type": {
+              "crate": "iddqd",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/ServiceIpPoolConfig"
+                }
+              ],
+              "path": "iddqd::IdOrdMap",
+              "version": "*"
+            },
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ServiceIpPoolConfig"
+            },
+            "uniqueItems": true
+          },
           "trust_quorum_peers": {
             "nullable": true,
             "description": "The set of peer_ids required to initialize trust quorum\n\nThe value is `None` if we are not using trust quorum",
@@ -1045,10 +1057,10 @@
           "external_certificates",
           "external_dns_ips",
           "external_dns_zone_name",
-          "internal_services_ip_pool_ranges",
           "ntp_servers",
           "rack_network_config",
-          "recovery_silo"
+          "recovery_silo",
+          "service_ip_pools"
         ]
       },
       "RackNetworkConfig": {
@@ -1576,6 +1588,36 @@
               "status"
             ]
           }
+        ]
+      },
+      "ServiceIpPoolConfig": {
+        "description": "Full details of a system-service IP pool, provided at rack setup (RSS).",
+        "type": "object",
+        "properties": {
+          "description": {
+            "description": "Description of the IP Pool",
+            "type": "string"
+          },
+          "name": {
+            "description": "Name of the IP Pool",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          },
+          "ranges": {
+            "description": "List of IP address ranges in the pool.\n\nThere is guaranteed to be at least one range, and all ranges are of the same IP version.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/IpRange"
+            }
+          }
+        },
+        "required": [
+          "description",
+          "name",
+          "ranges"
         ]
       },
       "SwitchSlot": {

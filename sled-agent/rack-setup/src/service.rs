@@ -849,12 +849,6 @@ impl ServiceInner {
         }
         let crucible_datasets: Vec<_> =
             crucible_datasets.into_values().collect();
-        let internal_services_ip_pool_ranges = config
-            .internal_services_ip_pool_ranges
-            .clone()
-            .into_iter()
-            .map(Into::into)
-            .collect();
 
         let rack_network_config = {
             let config = &config.rack_network_config;
@@ -937,7 +931,7 @@ impl ServiceInner {
             physical_disks,
             zpools,
             crucible_datasets,
-            internal_services_ip_pool_ranges,
+            service_ip_pools: config.service_ip_pools.clone(),
             certs: config.external_certificates.clone(),
             internal_dns_zone_config: service_plan.dns_config.clone(),
             external_dns_zone_name: config.external_dns_zone_name.clone(),
@@ -1718,7 +1712,9 @@ mod test {
     use super::*;
     use crate::plan::service::{ServicePlan, SledInfo};
     use anyhow::Context;
-    use bootstrap_agent_lockstep_types::RecoverySiloConfig;
+    use bootstrap_agent_lockstep_types::{
+        RecoverySiloConfig, ServiceIpPoolConfig,
+    };
     use iddqd::IdOrdMap;
     use nexus_reconfigurator_blippy::{Blippy, BlippyReportSortKey};
     use omicron_common::{
@@ -1834,8 +1830,9 @@ mod test {
 
     #[test]
     fn test_omicron_zone_configs() {
-        let logctx =
-            omicron_test_utils::dev::test_setup_log("make_test_service_plan");
+        let logctx = omicron_test_utils::dev::test_setup_log(
+            "test_omicron_zone_configs",
+        );
 
         let rss_config = rack_initialize_request_test_config();
         let fake_sleds = make_fake_sleds();
@@ -2010,9 +2007,10 @@ mod test {
             dns_servers = [ "1.1.1.1", "9.9.9.9" ]
             external_dns_zone_name = "oxide.test"
 
-            [[internal_services_ip_pool_ranges]]
-            first = "192.168.1.20"
-            last = "192.168.1.22"
+            [[service_ip_pools]]
+            name = "oxide-service-pool-v4"
+            description = "IPv4 IP Pool for Oxide Services"
+            ranges = [ { first = "192.168.1.20", last = "192.168.1.22" } ]
 
             [recovery_silo]
             silo_name = "recovery"
@@ -2036,9 +2034,17 @@ mod test {
             ntp_servers: vec![String::from("test.pool.example.com")],
             dns_servers: vec!["1.1.1.1".parse().unwrap()],
             external_dns_zone_name: String::from("oxide.test"),
-            internal_services_ip_pool_ranges: vec![IpRange::from(IpAddr::V4(
-                Ipv4Addr::new(129, 168, 1, 20),
-            ))],
+            service_ip_pools: IdOrdMap::from_iter_unique([
+                ServiceIpPoolConfig::new(
+                    "ipv4-service-pool".parse().unwrap(),
+                    String::new(),
+                    vec![IpRange::from(IpAddr::V4(Ipv4Addr::new(
+                        129, 168, 1, 20,
+                    )))],
+                )
+                .unwrap(),
+            ])
+            .unwrap(),
             external_dns_ips: vec![],
             external_certificates: vec![],
             recovery_silo: RecoverySiloConfig {
