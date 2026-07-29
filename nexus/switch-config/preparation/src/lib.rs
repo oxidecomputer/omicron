@@ -22,6 +22,7 @@ use sled_agent_types::early_networking::TxEqConfig;
 use slog::Logger;
 use slog::warn;
 use std::net::IpAddr;
+use std::num::NonZeroU8;
 
 /// Read the bootstore network config inputs from the database and assemble them
 /// into a [`RackNetworkConfigInput`].
@@ -95,13 +96,12 @@ pub async fn read_and_assemble(
         bfd.push(BfdPeerConfig {
             local: session.local.map(|x| x.ip()),
             remote: session.remote.ip(),
-            detection_threshold: session
-                .detection_threshold
-                .0
-                .try_into()
-                .map_err(|_| {
+            detection_threshold: u8::try_from(session.detection_threshold.0)
+                .ok()
+                .and_then(NonZeroU8::new)
+                .ok_or_else(|| {
                     Error::internal_error(&format!(
-                        "bfd detection threshold overflow: {}",
+                        "invalid bfd detection threshold: {}",
                         session.detection_threshold.0,
                     ))
                 })?,

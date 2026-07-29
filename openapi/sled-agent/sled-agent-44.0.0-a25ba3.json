@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "43.0.0"
+    "version": "44.0.0"
   },
   "paths": {
     "/artifacts": {
@@ -3257,7 +3257,7 @@
           "detection_threshold": {
             "type": "integer",
             "format": "uint8",
-            "minimum": 0
+            "minimum": 1
           },
           "local": {
             "nullable": true,

@@ -55,7 +55,6 @@ use slog::warn;
 use slog_error_chain::InlineErrorChain;
 use std::collections::{HashMap, HashSet};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
-use std::num::NonZeroU8;
 use std::time::{Duration, Instant};
 use thiserror::Error;
 use tokio::sync::watch;
@@ -780,8 +779,7 @@ impl<'a> EarlyNetworkSetup<'a> {
             }
 
             let cfg = MgBfdPeerConfig {
-                detection_threshold: NonZeroU8::new(spec.detection_threshold)
-                    .unwrap_or_else(|| NonZeroU8::new(1).expect("1 is not 0")),
+                detection_threshold: spec.detection_threshold,
                 listen: spec.local.unwrap_or(Ipv4Addr::UNSPECIFIED.into()),
                 mode: match spec.mode {
                     BfdMode::SingleHop => {

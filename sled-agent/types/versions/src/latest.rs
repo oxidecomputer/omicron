@@ -56,7 +56,6 @@ pub mod disk {
 // <https://github.com/oxidecomputer/omicron/issues/10167>.
 pub mod early_networking {
     pub use crate::v1::early_networking::BfdMode;
-    pub use crate::v1::early_networking::BfdPeerConfig;
     pub use crate::v1::early_networking::ImportExportPolicy;
     pub use crate::v1::early_networking::LinkFec;
     pub use crate::v1::early_networking::LinkSpeed;
@@ -84,8 +83,10 @@ pub mod early_networking {
     pub use crate::v30::early_networking::UplinkIpNetError;
 
     pub use crate::v42::early_networking::EmptyUplinkPortsError;
-    pub use crate::v42::early_networking::RackNetworkConfig;
     pub use crate::v42::early_networking::UplinkPorts;
+
+    pub use crate::v44::early_networking::BfdPeerConfig;
+    pub use crate::v44::early_networking::RackNetworkConfig;
 }
 
 pub mod firewall_rules {
@@ -254,8 +255,8 @@ pub mod system_networking {
 
     pub use crate::v39::system_networking::BlueprintExternalNetworkingConfig;
 
-    pub use crate::v42::system_networking::SystemNetworkingConfig;
-    pub use crate::v42::system_networking::WriteNetworkConfigRequest;
+    pub use crate::v44::system_networking::SystemNetworkingConfig;
+    pub use crate::v44::system_networking::WriteNetworkConfigRequest;
 }
 
 pub mod trust_quorum {
