@@ -10722,113 +10722,6 @@
         }
       }
     },
-    "/v1/system/networking/bgp/unnumbered/interfaces": {
-      "get": {
-        "tags": [
-          "system/networking"
-        ],
-        "summary": "List BGP Unnumbered interfaces",
-        "operationId": "networking_bgp_unnumbered_interface_list",
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "title": "Array_of_SwitchUnnumberedInterface",
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/SwitchUnnumberedInterface"
-                  }
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/v1/system/networking/bgp/unnumbered/interfaces/{switch_slot}/{interface_name}": {
-      "get": {
-        "tags": [
-          "system/networking"
-        ],
-        "summary": "Get BGP Unnumbered interface state",
-        "operationId": "networking_bgp_unnumbered_interface_view",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "interface_name",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "switch_slot",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/SwitchSlot"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SwitchUnnumberedInterface"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/v1/system/networking/bgp/unnumbered/manager": {
-      "get": {
-        "tags": [
-          "system/networking"
-        ],
-        "summary": "Get BGP Unnumbered manager state",
-        "operationId": "networking_bgp_unnumbered_manager_status",
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "title": "Array_of_SwitchUnnumberedManagerState",
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/SwitchUnnumberedManagerState"
-                  }
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
     "/v1/system/networking/bgp-announce-set": {
       "get": {
         "tags": [
@@ -11133,6 +11026,113 @@
                   "type": "array",
                   "items": {
                     "$ref": "#/components/schemas/BgpPeerStatus"
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/networking/bgp-unnumbered-interfaces": {
+      "get": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "List BGP Unnumbered interfaces",
+        "operationId": "networking_bgp_unnumbered_interface_list",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Array_of_SwitchUnnumberedInterface",
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SwitchUnnumberedInterface"
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/networking/bgp-unnumbered-interfaces/{switch_slot}/{interface_name}": {
+      "get": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "Get BGP Unnumbered interface state",
+        "operationId": "networking_bgp_unnumbered_interface_view",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "interface_name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "switch_slot",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SwitchSlot"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SwitchUnnumberedInterface"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/networking/bgp-unnumbered-manager": {
+      "get": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "Get BGP Unnumbered manager state",
+        "operationId": "networking_bgp_unnumbered_manager_status",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Array_of_SwitchUnnumberedManagerState",
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SwitchUnnumberedManagerState"
                   }
                 }
               }

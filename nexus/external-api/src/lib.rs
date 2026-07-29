@@ -6118,7 +6118,7 @@ pub trait NexusExternalApi {
     /// Get BGP Unnumbered manager state
     #[endpoint {
         method = GET,
-        path = "/v1/system/networking/bgp/unnumbered/manager",
+        path = "/v1/system/networking/bgp-unnumbered-manager",
         tags = ["system/networking"],
         versions = VERSION_BGP_UNNUMBERED_STATUS..,
     }]
@@ -6132,7 +6132,7 @@ pub trait NexusExternalApi {
     /// List BGP Unnumbered interfaces
     #[endpoint {
         method = GET,
-        path = "/v1/system/networking/bgp/unnumbered/interfaces",
+        path = "/v1/system/networking/bgp-unnumbered-interfaces",
         tags = ["system/networking"],
         versions = VERSION_BGP_UNNUMBERED_STATUS..,
     }]
@@ -6146,7 +6146,7 @@ pub trait NexusExternalApi {
     /// Get BGP Unnumbered interface state
     #[endpoint {
         method = GET,
-        path = "/v1/system/networking/bgp/unnumbered/interfaces/{switch_slot}/{interface_name}",
+        path = "/v1/system/networking/bgp-unnumbered-interfaces/{switch_slot}/{interface_name}",
         tags = ["system/networking"],
         versions = VERSION_BGP_UNNUMBERED_STATUS..,
     }]
