@@ -573,14 +573,12 @@ impl<'a> CompleteLocalStorageAllocationLists<'a> {
     /// - any of the disks requiring an allocation were detached or deleted
     pub async fn prune_invalidated_allocation_lists(
         &mut self,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
         opctx: &OpContext,
-        datastore: &DataStore,
     ) -> LookupResult<()> {
         // Between when the instance allocation was requested and now, any disk
         // backed by local storage could have been detached and deleted. Check
         // for that here, and prune the entire search space if this happened.
-
-        let conn = datastore.pool_connection_authorized(opctx).await?;
 
         for allocation in &self.allocations_to_perform {
             let disk_id = allocation.request.id();
@@ -1477,7 +1475,7 @@ impl DataStore {
                     // list that we're searching from!
 
                     complete_allocation_lists
-                        .prune_invalidated_allocation_lists(&opctx, &self)
+                        .prune_invalidated_allocation_lists(&conn, &opctx)
                         .await?;
 
                     let Some(allocations) = complete_allocation_lists.next()
@@ -8432,7 +8430,7 @@ pub(in crate::db::datastore) mod test {
 
         loop {
             complete_allocation_lists
-                .prune_invalidated_allocation_lists(&opctx, &datastore)
+                .prune_invalidated_allocation_lists(&conn, &opctx)
                 .await
                 .unwrap();
 
