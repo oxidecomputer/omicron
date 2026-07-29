@@ -543,16 +543,6 @@ impl<'a> ReceiverClient<'a> {
         .header(HDR_ALERT_VERSION, alert_version.to_string())
         .header(HDR_TIMESTAMP, &sent_at)
         .header(http::header::CONTENT_TYPE, "application/json");
-        let mut request = self
-            .client
-            .post(&self.rx.endpoint).expect("TODO ELIZA YOU HAVE TO ACTUALLY HANDLE THE EXTERNAL CLIENT ERROR HERE LOL")
-            .header(HDR_RX_ID, self.hdr_rx_id.clone())
-            .header(HDR_DELIVERY_ID, delivery.id.to_string())
-            .header(HDR_ALERT_ID, delivery.alert_id.to_string())
-            .header(HDR_ALERT_CLASS, alert_class.to_string())
-            .header(HDR_ALERT_VERSION, alert_version.to_string())
-            .header(HDR_TIMESTAMP, &sent_at)
-            .header(http::header::CONTENT_TYPE, "application/json");
 
         // For each secret assigned to this webhook, calculate the HMAC and add a signature header.
         for (secret_id, mac) in &mut self.secrets {
