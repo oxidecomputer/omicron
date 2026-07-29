@@ -9115,7 +9115,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_config (
     CONSTRAINT max_sitrep_limit CHECK (sitrep_limit <= 5000),
 
     CONSTRAINT min_history_pruning_threshold CHECK (
-        history_pruning_threshold >= 2 AND
+        history_pruning_threshold >= 2
     ),
     CONSTRAINT max_history_pruning_threshold CHECK (
         history_pruning_threshold <= 5000
