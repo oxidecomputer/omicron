@@ -186,9 +186,9 @@ impl UpdateContactSupportChecksInput {
                     // Remove services that belong to a propolis zone.
                     svcs.services.retain(|svc| !is_propolis_zone(&svc.zone));
 
-                    // If there are no services left then we drop the sled
-                    // entirely.
-                    !svcs.services.is_empty()
+                    // If there are no services or errors left then we drop the
+                    // sled entirely.
+                    !svcs.is_empty()
                 }
                 // Command errors and unavailable data aren't propolis-specific,
                 // so they're always retained.
