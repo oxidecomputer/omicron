@@ -43,8 +43,8 @@ pub struct SitrepHistoryPruner {
     sitrep_gc: Activator,
     cfg: watch::Receiver<Option<FmConfigView>>,
     /// Maximum batch size for deletion queries. This is currently hard-coded to
-    /// [`SQL_BATCH_SIZE`] but is a field so that it can be overriden to a
-    /// smaller value in tests.
+    /// [`datastore::SQL_BATCH_SIZE`] but is a field so that it can be overriden
+    /// to a smaller value in tests.
     batch_size: NonZeroU32,
 }
 
