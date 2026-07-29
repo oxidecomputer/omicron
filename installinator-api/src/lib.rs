@@ -71,6 +71,9 @@ pub struct GetArtifactPathParams {
     pub kind: String,
 
     /// The hash of the artifact.
+    // Tufaceous v2 introduces a new JSON schema for `ArtifactHash` that is
+    // wire-compatible but perceived as different by drift. Continue using the
+    // old schema in this API version.
     #[schemars(schema_with = "ArtifactHash::v1_json_schema")]
     pub hash: ArtifactHash,
 }
