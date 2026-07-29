@@ -1,7 +1,2 @@
-CREATE TABLE IF NOT EXISTS omicron.public.tuf_repo_metadata (
-    tuf_repo_id UUID NOT NULL,
-    key TEXT NOT NULL,
-    value TEXT NOT NULL,
-
-    PRIMARY KEY (tuf_repo_id, key)
-);
+ALTER TABLE omicron.public.tuf_repo
+    DROP COLUMN IF EXISTS targets_role_version;
