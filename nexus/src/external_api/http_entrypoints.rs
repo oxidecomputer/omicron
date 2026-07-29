@@ -80,6 +80,7 @@ use nexus_types::external_api::vpc::{Vpc, VpcRouter, VpcSubnet};
 use nexus_types_versions::v2025_11_20_00;
 use nexus_types_versions::v2026_01_01_00;
 use nexus_types_versions::v2026_02_13_01;
+use nexus_types_versions::v2026_03_06_01;
 use omicron_common::address::IpRange;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Disk;
@@ -119,6 +120,8 @@ use propolis_client::support::tungstenite::protocol::{
 };
 use range_requests::PotentialRange;
 use ref_cast::RefCast;
+use schemars::JsonSchema;
+use serde::Serialize;
 use trust_quorum_types::types::Epoch;
 
 type NexusApiDescription = ApiDescription<ApiContext>;
@@ -130,6 +133,20 @@ pub(crate) fn external_api() -> NexusApiDescription {
 }
 
 enum NexusExternalApiImpl {}
+
+fn switch_results_response<
+    T: JsonSchema + Send + Serialize + Sync + 'static,
+>(
+    results: SwitchResults<T>,
+) -> Result<HttpResponseOk<SwitchResults<T>>, HttpError> {
+    if results.all_operational_failures() {
+        return Err(HttpError::for_unavail(
+            Some("SwitchQueryFailed".to_owned()),
+            "neither switch could be queried".to_owned(),
+        ));
+    }
+    Ok(HttpResponseOk(results))
+}
 
 impl NexusExternalApi for NexusExternalApiImpl {
     type Context = ApiContext;
@@ -4550,7 +4567,30 @@ impl NexusExternalApi for NexusExternalApiImpl {
         let handler = async {
             let nexus = &apictx.context.nexus;
             let result = nexus.bgp_peer_status(&opctx).await?;
-            Ok(HttpResponseOk(result))
+            switch_results_response(result)
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn networking_bgp_status_v2026_02_13_01(
+        rqctx: RequestContext<ApiContext>,
+    ) -> Result<
+        HttpResponseOk<Vec<v2026_02_13_01::networking::BgpPeerStatus>>,
+        HttpError,
+    > {
+        let apictx = rqctx.context();
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let handler = async {
+            let result = apictx
+                .context
+                .nexus
+                .bgp_peer_status_v2025_11_20_00(&opctx)
+                .await?;
+            Ok(HttpResponseOk(result.into()))
         };
         apictx
             .context
@@ -4572,7 +4612,30 @@ impl NexusExternalApi for NexusExternalApiImpl {
         let handler = async {
             let nexus = &apictx.context.nexus;
             let result = nexus.bgp_exported(&opctx).await?;
-            Ok(HttpResponseOk(result))
+            switch_results_response(result)
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn networking_bgp_exported_v2026_02_13_01(
+        rqctx: RequestContext<ApiContext>,
+    ) -> Result<
+        HttpResponseOk<Vec<v2026_02_13_01::networking::BgpExported>>,
+        HttpError,
+    > {
+        let apictx = rqctx.context();
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let handler = async {
+            let result = apictx
+                .context
+                .nexus
+                .bgp_exported_v2025_11_20_00(&opctx)
+                .await?;
+            Ok(HttpResponseOk(result.into()))
         };
         apictx
             .context
@@ -4596,7 +4659,29 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let nexus = &apictx.context.nexus;
             let sel = query_params.into_inner();
             let result = nexus.bgp_message_history(&opctx, &sel).await?;
-            Ok(HttpResponseOk(result))
+            switch_results_response(result)
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn networking_bgp_message_history_v2025_11_20_00(
+        rqctx: RequestContext<ApiContext>,
+        query_params: Query<networking::BgpRouteSelector>,
+    ) -> Result<
+        HttpResponseOk<v2025_11_20_00::networking::AggregateBgpMessageHistory>,
+        HttpError,
+    > {
+        let apictx = rqctx.context();
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let handler = async {
+            let sel = query_params.into_inner();
+            let result =
+                apictx.context.nexus.bgp_message_history(&opctx, &sel).await?;
+            Ok(HttpResponseOk(result.into()))
         };
         apictx
             .context
@@ -4632,6 +4717,28 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
+    async fn networking_bgp_imported_v2026_02_13_01(
+        rqctx: RequestContext<ApiContext>,
+        query_params: Query<networking::BgpRouteSelector>,
+    ) -> Result<
+        HttpResponseOk<Vec<v2026_02_13_01::networking::BgpImported>>,
+        HttpError,
+    > {
+        let apictx = rqctx.context();
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let handler = async {
+            let sel = query_params.into_inner();
+            let result =
+                apictx.context.nexus.bgp_imported_routes(&opctx, &sel).await?;
+            Ok(HttpResponseOk(result.into()))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
     async fn networking_bgp_imported(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<networking::BgpRouteSelector>,
@@ -4647,7 +4754,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let nexus = &apictx.context.nexus;
             let sel = query_params.into_inner();
             let result = nexus.bgp_imported_routes(&opctx, &sel).await?;
-            Ok(HttpResponseOk(result))
+            switch_results_response(result)
         };
         apictx
             .context
@@ -4799,7 +4906,30 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 crate::context::op_context_for_external_api(&rqctx).await?;
             opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
             let status = nexus.bfd_status(&opctx).await?;
-            Ok(HttpResponseOk(status))
+            switch_results_response(status)
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn networking_bfd_status_v2026_03_06_01(
+        rqctx: RequestContext<ApiContext>,
+    ) -> Result<HttpResponseOk<Vec<v2026_03_06_01::bfd::BfdStatus>>, HttpError>
+    {
+        let apictx = rqctx.context();
+        let handler = async {
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
+            let statuses = apictx.context.nexus.bfd_status(&opctx).await?;
+            Ok(HttpResponseOk(statuses.try_into().map_err(|_| {
+                HttpError::for_internal_error(
+                    "failed to query BFD status from a switch".to_owned(),
+                )
+            })?))
         };
         apictx
             .context
@@ -4819,7 +4949,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 crate::context::op_context_for_external_api(&rqctx).await?;
             opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
             let status = nexus.bgp_unnumbered_manager_status(&opctx).await?;
-            Ok(HttpResponseOk(status))
+            switch_results_response(status)
         };
         apictx
             .context
@@ -4839,7 +4969,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 crate::context::op_context_for_external_api(&rqctx).await?;
             opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
             let status = nexus.bgp_unnumbered_interfaces(&opctx).await?;
-            Ok(HttpResponseOk(status))
+            switch_results_response(status)
         };
         apictx
             .context
@@ -9308,5 +9438,69 @@ impl NexusExternalApi for NexusExternalApiImpl {
             }))
         })
         .await
+    }
+}
+
+#[cfg(test)]
+mod switch_results_response_tests {
+    use nexus_types::external_api::networking::{
+        SwitchError, SwitchResult, UnnumberedInterfaces,
+    };
+
+    use super::*;
+
+    fn rejected() -> SwitchResult<UnnumberedInterfaces> {
+        SwitchResult::Err {
+            error: SwitchError::RequestRejected {
+                error_code: Some("query-error".to_owned()),
+                message: "query failed".to_owned(),
+                upstream_request_id: "request-id".to_owned(),
+            },
+        }
+    }
+
+    fn unavailable() -> SwitchResult<UnnumberedInterfaces> {
+        SwitchResult::Err { error: SwitchError::QueryFailed }
+    }
+
+    #[test]
+    fn returns_success_when_both_switches_reject_the_query() {
+        let results =
+            SwitchResults { switch0: rejected(), switch1: rejected() };
+
+        assert!(switch_results_response(results).is_ok());
+    }
+
+    #[test]
+    fn returns_success_for_application_and_operational_errors() {
+        let results =
+            SwitchResults { switch0: rejected(), switch1: unavailable() };
+
+        assert!(switch_results_response(results).is_ok());
+    }
+
+    #[test]
+    fn returns_success_for_value_and_operational_error() {
+        let results = SwitchResults {
+            switch0: SwitchResult::Ok {
+                value: UnnumberedInterfaces(Vec::new()),
+            },
+            switch1: unavailable(),
+        };
+
+        assert!(switch_results_response(results).is_ok());
+    }
+
+    #[test]
+    fn returns_service_unavailable_when_both_switches_fail_operationally() {
+        let results = SwitchResults {
+            switch0: unavailable(),
+            switch1: SwitchResult::Err { error: SwitchError::MgdUnresolved },
+        };
+
+        let Err(error) = switch_results_response(results) else {
+            panic!("two operational failures unexpectedly returned success");
+        };
+        assert_eq!(error.status_code.as_u16(), 503);
     }
 }

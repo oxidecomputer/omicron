@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use sled_agent_types_versions::v1::early_networking::BfdMode;
 use std::net::IpAddr;
 
-use super::networking::{SwitchResults, SwitchUnavailableReason};
+use super::networking::{SwitchError, SwitchResults};
 
 #[derive(
     Clone,
@@ -37,7 +37,7 @@ pub struct BfdPeerStatuses(pub Vec<BfdPeerStatus>);
 impl TryFrom<SwitchResults<BfdPeerStatuses>>
     for Vec<v2026_03_06_01::bfd::BfdStatus>
 {
-    type Error = SwitchUnavailableReason;
+    type Error = SwitchError;
 
     fn try_from(
         results: SwitchResults<BfdPeerStatuses>,
@@ -46,8 +46,10 @@ impl TryFrom<SwitchResults<BfdPeerStatuses>>
         for (switch_slot, result) in results {
             let value = match result.into_result() {
                 Ok(value) => value,
-                Err(SwitchUnavailableReason::MgdUnresolved) => continue,
-                Err(reason) => return Err(reason),
+                Err(SwitchError::MgdUnresolved) => {
+                    continue;
+                }
+                Err(error) => return Err(error),
             };
             statuses.extend(value.0.into_iter().map(|status| {
                 v2026_03_06_01::bfd::BfdStatus {
@@ -67,7 +69,7 @@ impl TryFrom<SwitchResults<BfdPeerStatuses>>
 
 #[cfg(test)]
 mod tests {
-    use super::super::networking::SwitchResult;
+    use super::super::networking::{SwitchError, SwitchResult};
     use super::*;
     use sled_agent_types_versions::v1::early_networking::SwitchSlot;
     use std::net::{IpAddr, Ipv6Addr};
@@ -76,7 +78,7 @@ mod tests {
     fn conversion_restores_switch_slots_and_omits_unavailable_switches() {
         let peer = IpAddr::V6(Ipv6Addr::LOCALHOST);
         let results = SwitchResults {
-            switch0: SwitchResult::Available {
+            switch0: SwitchResult::Ok {
                 value: BfdPeerStatuses(vec![BfdPeerStatus {
                     peer,
                     state: BfdState::Up,
@@ -86,9 +88,7 @@ mod tests {
                     mode: BfdMode::SingleHop,
                 }]),
             },
-            switch1: SwitchResult::Unavailable {
-                reason: SwitchUnavailableReason::MgdUnresolved,
-            },
+            switch1: SwitchResult::Err { error: SwitchError::MgdUnresolved },
         };
 
         let statuses =
@@ -102,16 +102,13 @@ mod tests {
     #[test]
     fn conversion_preserves_query_failure() {
         let results = SwitchResults {
-            switch0: SwitchResult::Unavailable {
-                reason: SwitchUnavailableReason::QueryFailed,
-            },
-            switch1: SwitchResult::Available {
-                value: BfdPeerStatuses(Vec::new()),
-            },
+            switch0: SwitchResult::Err { error: SwitchError::QueryFailed },
+            switch1: SwitchResult::Ok { value: BfdPeerStatuses(Vec::new()) },
         };
 
-        assert!(
-            Vec::<v2026_03_06_01::bfd::BfdStatus>::try_from(results).is_err()
+        assert_eq!(
+            Vec::<v2026_03_06_01::bfd::BfdStatus>::try_from(results),
+            Err(SwitchError::QueryFailed),
         );
     }
 }

@@ -20,6 +20,26 @@ use omicron_uuid_kinds::GenericUuid;
 use sled_agent_types::early_networking::SwitchSlot;
 use slog_error_chain::InlineErrorChain;
 
+/// Controls how a failure in one constituent query is represented.
+///
+/// An aggregate query may first enumerate its constituents and then query each
+/// one individually. This policy applies when one of those constituent queries
+/// fails after enumeration has succeeded.
+#[derive(Clone, Copy)]
+enum ConstituentErrorPolicy {
+    /// Treat the constituent failure as a failure of the aggregate query.
+    ///
+    /// Any values already collected from other constituents are
+    /// discarded so the response cannot present incomplete data as complete.
+    FailSlot,
+
+    /// Skip the failed constituent query and return other constituents' values.
+    ///
+    /// A successful aggregate result may therefore contain partial data without
+    /// identifying the omitted constituent.
+    RetainPartial,
+}
+
 impl super::Nexus {
     pub async fn bgp_config_create(
         &self,
@@ -201,6 +221,29 @@ impl super::Nexus {
         networking::SwitchResults<networking::BgpPeerStatuses>,
         external::Error,
     > {
+        self.query_bgp_peer_status(opctx, ConstituentErrorPolicy::FailSlot)
+            .await
+    }
+
+    pub async fn bgp_peer_status_v2025_11_20_00(
+        &self,
+        opctx: &OpContext,
+    ) -> Result<
+        networking::SwitchResults<networking::BgpPeerStatuses>,
+        external::Error,
+    > {
+        self.query_bgp_peer_status(opctx, ConstituentErrorPolicy::RetainPartial)
+            .await
+    }
+
+    async fn query_bgp_peer_status(
+        &self,
+        opctx: &OpContext,
+        error_policy: ConstituentErrorPolicy,
+    ) -> Result<
+        networking::SwitchResults<networking::BgpPeerStatuses>,
+        external::Error,
+    > {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         let mg_clients = self.mg_clients().await.map_err(|e| {
             external::Error::internal_error(&format!(
@@ -215,9 +258,8 @@ impl super::Nexus {
                         self.log, "no mgd client found for switch slot";
                         "switch_slot" => ?switch_slot,
                     );
-                    return networking::SwitchResult::Unavailable {
-                        reason:
-                            networking::SwitchUnavailableReason::MgdUnresolved,
+                    return networking::SwitchResult::Err {
+                        error: networking::SwitchError::MgdUnresolved,
                     };
                 };
                 let router_info = match client.read_routers().await {
@@ -228,9 +270,8 @@ impl super::Nexus {
                             "switch_slot" => ?switch_slot,
                             InlineErrorChain::new(&e),
                         );
-                        return networking::SwitchResult::Unavailable {
-                            reason:
-                                networking::SwitchUnavailableReason::QueryFailed,
+                        return networking::SwitchResult::Err {
+                            error: e.into(),
                         };
                     }
                 };
@@ -247,7 +288,16 @@ impl super::Nexus {
                                 "switch_slot" => ?switch_slot,
                                 InlineErrorChain::new(&e),
                             );
-                            continue;
+                            match error_policy {
+                                ConstituentErrorPolicy::FailSlot => {
+                                    return networking::SwitchResult::Err {
+                                        error: e.into(),
+                                    };
+                                }
+                                ConstituentErrorPolicy::RetainPartial => {
+                                    continue;
+                                }
+                            }
                         }
                     };
                     for (peer_id, info) in peers {
@@ -264,7 +314,7 @@ impl super::Nexus {
                         });
                     }
                 }
-                networking::SwitchResult::Available {
+                networking::SwitchResult::Ok {
                     value: networking::BgpPeerStatuses(statuses),
                 }
             }
@@ -278,6 +328,28 @@ impl super::Nexus {
     pub async fn bgp_exported(
         &self,
         opctx: &OpContext,
+    ) -> Result<
+        networking::SwitchResults<networking::BgpExportedRoutes>,
+        external::Error,
+    > {
+        self.query_bgp_exported(opctx, ConstituentErrorPolicy::FailSlot).await
+    }
+
+    pub async fn bgp_exported_v2025_11_20_00(
+        &self,
+        opctx: &OpContext,
+    ) -> Result<
+        networking::SwitchResults<networking::BgpExportedRoutes>,
+        external::Error,
+    > {
+        self.query_bgp_exported(opctx, ConstituentErrorPolicy::RetainPartial)
+            .await
+    }
+
+    async fn query_bgp_exported(
+        &self,
+        opctx: &OpContext,
+        error_policy: ConstituentErrorPolicy,
     ) -> Result<
         networking::SwitchResults<networking::BgpExportedRoutes>,
         external::Error,
@@ -296,9 +368,8 @@ impl super::Nexus {
                         self.log, "no mgd client found for switch slot";
                         "switch_slot" => ?switch_slot,
                     );
-                    return networking::SwitchResult::Unavailable {
-                        reason:
-                            networking::SwitchUnavailableReason::MgdUnresolved,
+                    return networking::SwitchResult::Err {
+                        error: networking::SwitchError::MgdUnresolved,
                     };
                 };
                 let router_info = match client.read_routers().await {
@@ -309,9 +380,8 @@ impl super::Nexus {
                             "switch_slot" => ?switch_slot,
                             InlineErrorChain::new(&e),
                         );
-                        return networking::SwitchResult::Unavailable {
-                            reason:
-                                networking::SwitchUnavailableReason::QueryFailed,
+                        return networking::SwitchResult::Err {
+                            error: e.into(),
                         };
                     }
                 };
@@ -335,7 +405,16 @@ impl super::Nexus {
                                 "switch_slot" => ?switch_slot,
                                 InlineErrorChain::new(&e),
                             );
-                            continue;
+                            match error_policy {
+                                ConstituentErrorPolicy::FailSlot => {
+                                    return networking::SwitchResult::Err {
+                                        error: e.into(),
+                                    };
+                                }
+                                ConstituentErrorPolicy::RetainPartial => {
+                                    continue;
+                                }
+                            }
                         }
                     };
 
@@ -349,7 +428,7 @@ impl super::Nexus {
                         }
                     }
                 }
-                networking::SwitchResult::Available {
+                networking::SwitchResult::Ok {
                     value: networking::BgpExportedRoutes(routes),
                 }
             }
@@ -382,9 +461,8 @@ impl super::Nexus {
                         self.log, "no mgd client found for switch slot";
                         "switch_slot" => ?switch_slot,
                     );
-                    return networking::SwitchResult::Unavailable {
-                        reason:
-                            networking::SwitchUnavailableReason::MgdUnresolved,
+                    return networking::SwitchResult::Err {
+                        error: networking::SwitchError::MgdUnresolved,
                     };
                 };
                 let history = match client
@@ -402,14 +480,13 @@ impl super::Nexus {
                             "switch_slot" => ?switch_slot,
                             InlineErrorChain::new(&e),
                         );
-                        return networking::SwitchResult::Unavailable {
-                            reason:
-                                networking::SwitchUnavailableReason::QueryFailed,
+                        return networking::SwitchResult::Err {
+                            error: e.into(),
                         };
                     }
                 };
 
-                networking::SwitchResult::Available {
+                networking::SwitchResult::Ok {
                     value: networking::BgpMessageHistories(
                         history
                             .into_iter()
@@ -449,9 +526,8 @@ impl super::Nexus {
                         self.log, "no mgd client found for switch slot";
                         "switch_slot" => ?switch_slot,
                     );
-                    return networking::SwitchResult::Unavailable {
-                        reason:
-                            networking::SwitchUnavailableReason::MgdUnresolved,
+                    return networking::SwitchResult::Err {
+                        error: networking::SwitchError::MgdUnresolved,
                     };
                 };
                 let mut imported = Vec::new();
@@ -488,13 +564,12 @@ impl super::Nexus {
                             "switch_slot" => ?switch_slot,
                             InlineErrorChain::new(&e),
                         );
-                        return networking::SwitchResult::Unavailable {
-                            reason:
-                                networking::SwitchUnavailableReason::QueryFailed,
+                        return networking::SwitchResult::Err {
+                            error: e.into(),
                         };
                     }
                 };
-                networking::SwitchResult::Available {
+                networking::SwitchResult::Ok {
                     value: networking::BgpImportedRoutes(imported),
                 }
             }

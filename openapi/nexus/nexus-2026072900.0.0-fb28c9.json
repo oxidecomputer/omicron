@@ -17232,6 +17232,7 @@
         }
       },
       "BfdPeerStatusesSwitchResult": {
+        "description": "The outcome of querying one switch.",
         "oneOf": [
           {
             "type": "object",
@@ -17239,7 +17240,7 @@
               "status": {
                 "type": "string",
                 "enum": [
-                  "available"
+                  "ok"
                 ]
               },
               "value": {
@@ -17254,24 +17255,25 @@
           {
             "type": "object",
             "properties": {
-              "reason": {
-                "$ref": "#/components/schemas/SwitchUnavailableReason"
+              "error": {
+                "$ref": "#/components/schemas/SwitchError"
               },
               "status": {
                 "type": "string",
                 "enum": [
-                  "unavailable"
+                  "err"
                 ]
               }
             },
             "required": [
-              "reason",
+              "error",
               "status"
             ]
           }
         ]
       },
       "BfdPeerStatusesSwitchResults": {
+        "description": "Results of querying both switches.\n\nA successful Nexus response means that Nexus obtained authoritative outcomes from enough of the switch fanout to return this value. It does not mean that either switch returned a value: both fields can contain errors when both switches reject a query, for example when a requested BGP ASN does not exist. Nexus returns a top-level server error only when both switch queries fail operationally.",
         "type": "object",
         "properties": {
           "switch0": {
@@ -17704,6 +17706,7 @@
         }
       },
       "BgpExportedRoutesSwitchResult": {
+        "description": "The outcome of querying one switch.",
         "oneOf": [
           {
             "type": "object",
@@ -17711,7 +17714,7 @@
               "status": {
                 "type": "string",
                 "enum": [
-                  "available"
+                  "ok"
                 ]
               },
               "value": {
@@ -17726,24 +17729,25 @@
           {
             "type": "object",
             "properties": {
-              "reason": {
-                "$ref": "#/components/schemas/SwitchUnavailableReason"
+              "error": {
+                "$ref": "#/components/schemas/SwitchError"
               },
               "status": {
                 "type": "string",
                 "enum": [
-                  "unavailable"
+                  "err"
                 ]
               }
             },
             "required": [
-              "reason",
+              "error",
               "status"
             ]
           }
         ]
       },
       "BgpExportedRoutesSwitchResults": {
+        "description": "Results of querying both switches.\n\nA successful Nexus response means that Nexus obtained authoritative outcomes from enough of the switch fanout to return this value. It does not mean that either switch returned a value: both fields can contain errors when both switches reject a query, for example when a requested BGP ASN does not exist. Nexus returns a top-level server error only when both switch queries fail operationally.",
         "type": "object",
         "properties": {
           "switch0": {
@@ -17795,6 +17799,7 @@
         }
       },
       "BgpImportedRoutesSwitchResult": {
+        "description": "The outcome of querying one switch.",
         "oneOf": [
           {
             "type": "object",
@@ -17802,7 +17807,7 @@
               "status": {
                 "type": "string",
                 "enum": [
-                  "available"
+                  "ok"
                 ]
               },
               "value": {
@@ -17817,24 +17822,25 @@
           {
             "type": "object",
             "properties": {
-              "reason": {
-                "$ref": "#/components/schemas/SwitchUnavailableReason"
+              "error": {
+                "$ref": "#/components/schemas/SwitchError"
               },
               "status": {
                 "type": "string",
                 "enum": [
-                  "unavailable"
+                  "err"
                 ]
               }
             },
             "required": [
-              "reason",
+              "error",
               "status"
             ]
           }
         ]
       },
       "BgpImportedRoutesSwitchResults": {
+        "description": "Results of querying both switches.\n\nA successful Nexus response means that Nexus obtained authoritative outcomes from enough of the switch fanout to return this value. It does not mean that either switch returned a value: both fields can contain errors when both switches reject a query, for example when a requested BGP ASN does not exist. Nexus returns a top-level server error only when both switch queries fail operationally.",
         "type": "object",
         "properties": {
           "switch0": {
@@ -17857,6 +17863,7 @@
         }
       },
       "BgpMessageHistoriesSwitchResult": {
+        "description": "The outcome of querying one switch.",
         "oneOf": [
           {
             "type": "object",
@@ -17864,7 +17871,7 @@
               "status": {
                 "type": "string",
                 "enum": [
-                  "available"
+                  "ok"
                 ]
               },
               "value": {
@@ -17879,24 +17886,25 @@
           {
             "type": "object",
             "properties": {
-              "reason": {
-                "$ref": "#/components/schemas/SwitchUnavailableReason"
+              "error": {
+                "$ref": "#/components/schemas/SwitchError"
               },
               "status": {
                 "type": "string",
                 "enum": [
-                  "unavailable"
+                  "err"
                 ]
               }
             },
             "required": [
-              "reason",
+              "error",
               "status"
             ]
           }
         ]
       },
       "BgpMessageHistoriesSwitchResults": {
+        "description": "Results of querying both switches.\n\nA successful Nexus response means that Nexus obtained authoritative outcomes from enough of the switch fanout to return this value. It does not mean that either switch returned a value: both fields can contain errors when both switches reject a query, for example when a requested BGP ASN does not exist. Nexus returns a top-level server error only when both switch queries fail operationally.",
         "type": "object",
         "properties": {
           "switch0": {
@@ -18186,6 +18194,7 @@
         }
       },
       "BgpPeerStatusesSwitchResult": {
+        "description": "The outcome of querying one switch.",
         "oneOf": [
           {
             "type": "object",
@@ -18193,7 +18202,7 @@
               "status": {
                 "type": "string",
                 "enum": [
-                  "available"
+                  "ok"
                 ]
               },
               "value": {
@@ -18208,24 +18217,25 @@
           {
             "type": "object",
             "properties": {
-              "reason": {
-                "$ref": "#/components/schemas/SwitchUnavailableReason"
+              "error": {
+                "$ref": "#/components/schemas/SwitchError"
               },
               "status": {
                 "type": "string",
                 "enum": [
-                  "unavailable"
+                  "err"
                 ]
               }
             },
             "required": [
-              "reason",
+              "error",
               "status"
             ]
           }
         ]
       },
       "BgpPeerStatusesSwitchResults": {
+        "description": "Results of querying both switches.\n\nA successful Nexus response means that Nexus obtained authoritative outcomes from enough of the switch fanout to return this value. It does not mean that either switch returned a value: both fields can contain errors when both switches reject a query, for example when a requested BGP ASN does not exist. Nexus returns a top-level server error only when both switch queries fail operationally.",
         "type": "object",
         "properties": {
           "switch0": {
@@ -29401,6 +29411,95 @@
           "time_modified"
         ]
       },
+      "SwitchError": {
+        "description": "A normalized failure from one switch query.",
+        "oneOf": [
+          {
+            "description": "The switch authoritatively rejected the query.",
+            "type": "object",
+            "properties": {
+              "error_code": {
+                "nullable": true,
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "request_rejected"
+                ]
+              },
+              "upstream_request_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "message",
+              "type",
+              "upstream_request_id"
+            ]
+          },
+          {
+            "description": "The switch returned an operational error.",
+            "type": "object",
+            "properties": {
+              "error_code": {
+                "nullable": true,
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "upstream_unavailable"
+                ]
+              },
+              "upstream_request_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "message",
+              "type",
+              "upstream_request_id"
+            ]
+          },
+          {
+            "description": "Nexus could not resolve an MGD client for the switch.",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "mgd_unresolved"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "Nexus could not obtain a valid response from the switch.",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "query_failed"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          }
+        ]
+      },
       "SwitchInterfaceConfig": {
         "description": "A switch port interface configuration for a port settings object.",
         "type": "object",
@@ -30149,13 +30248,6 @@
           }
         ]
       },
-      "SwitchUnavailableReason": {
-        "type": "string",
-        "enum": [
-          "mgd_unresolved",
-          "query_failed"
-        ]
-      },
       "SwitchUnnumberedInterface": {
         "type": "object",
         "properties": {
@@ -30716,6 +30808,7 @@
         }
       },
       "UnnumberedInterfacesSwitchResult": {
+        "description": "The outcome of querying one switch.",
         "oneOf": [
           {
             "type": "object",
@@ -30723,7 +30816,7 @@
               "status": {
                 "type": "string",
                 "enum": [
-                  "available"
+                  "ok"
                 ]
               },
               "value": {
@@ -30738,24 +30831,25 @@
           {
             "type": "object",
             "properties": {
-              "reason": {
-                "$ref": "#/components/schemas/SwitchUnavailableReason"
+              "error": {
+                "$ref": "#/components/schemas/SwitchError"
               },
               "status": {
                 "type": "string",
                 "enum": [
-                  "unavailable"
+                  "err"
                 ]
               }
             },
             "required": [
-              "reason",
+              "error",
               "status"
             ]
           }
         ]
       },
       "UnnumberedInterfacesSwitchResults": {
+        "description": "Results of querying both switches.\n\nA successful Nexus response means that Nexus obtained authoritative outcomes from enough of the switch fanout to return this value. It does not mean that either switch returned a value: both fields can contain errors when both switches reject a query, for example when a requested BGP ASN does not exist. Nexus returns a top-level server error only when both switch queries fail operationally.",
         "type": "object",
         "properties": {
           "switch0": {
@@ -30789,6 +30883,7 @@
         ]
       },
       "UnnumberedManagerStateSwitchResult": {
+        "description": "The outcome of querying one switch.",
         "oneOf": [
           {
             "type": "object",
@@ -30796,7 +30891,7 @@
               "status": {
                 "type": "string",
                 "enum": [
-                  "available"
+                  "ok"
                 ]
               },
               "value": {
@@ -30811,24 +30906,25 @@
           {
             "type": "object",
             "properties": {
-              "reason": {
-                "$ref": "#/components/schemas/SwitchUnavailableReason"
+              "error": {
+                "$ref": "#/components/schemas/SwitchError"
               },
               "status": {
                 "type": "string",
                 "enum": [
-                  "unavailable"
+                  "err"
                 ]
               }
             },
             "required": [
-              "reason",
+              "error",
               "status"
             ]
           }
         ]
       },
       "UnnumberedManagerStateSwitchResults": {
+        "description": "Results of querying both switches.\n\nA successful Nexus response means that Nexus obtained authoritative outcomes from enough of the switch fanout to return this value. It does not mean that either switch returned a value: both fields can contain errors when both switches reject a query, for example when a requested BGP ASN does not exist. Nexus returns a top-level server error only when both switch queries fail operationally.",
         "type": "object",
         "properties": {
           "switch0": {

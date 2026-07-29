@@ -342,9 +342,9 @@ pub mod networking {
     pub use crate::v2026_07_29_00::networking::DiscoveredRouter;
     pub use crate::v2026_07_29_00::networking::PendingUnnumberedInterface;
     pub use crate::v2026_07_29_00::networking::RouterDiscoveryRuntimeState;
+    pub use crate::v2026_07_29_00::networking::SwitchError;
     pub use crate::v2026_07_29_00::networking::SwitchResult;
     pub use crate::v2026_07_29_00::networking::SwitchResults;
-    pub use crate::v2026_07_29_00::networking::SwitchUnavailableReason;
     pub use crate::v2026_07_29_00::networking::SwitchUnnumberedInterface;
     pub use crate::v2026_07_29_00::networking::UnnumberedInterface;
     pub use crate::v2026_07_29_00::networking::UnnumberedInterfacePath;

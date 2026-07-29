@@ -62,13 +62,12 @@ impl super::Nexus {
                         self.log, "no mgd client found for switch slot";
                         "switch-slot" => ?switch_slot,
                     );
-                    return networking::SwitchResult::Unavailable {
-                        reason:
-                            networking::SwitchUnavailableReason::MgdUnresolved,
+                    return networking::SwitchResult::Err {
+                        error: networking::SwitchError::MgdUnresolved,
                     };
                 };
                 match mg_client.get_bfd_peers().await {
-                    Ok(status) => networking::SwitchResult::Available {
+                    Ok(status) => networking::SwitchResult::Ok {
                         value: bfd::BfdPeerStatuses(
                             status
                                 .into_inner()
@@ -104,10 +103,7 @@ impl super::Nexus {
                             "switch-slot" => ?switch_slot,
                             "error" => %err,
                         );
-                        networking::SwitchResult::Unavailable {
-                            reason:
-                                networking::SwitchUnavailableReason::QueryFailed,
-                        }
+                        networking::SwitchResult::Err { error: err.into() }
                     }
                 }
             }

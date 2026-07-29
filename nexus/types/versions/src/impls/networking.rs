@@ -10,13 +10,22 @@ use sled_agent_types_versions::v1::early_networking::SwitchSlot;
 use uuid::Uuid;
 
 impl<T> latest::networking::SwitchResult<T> {
-    pub fn into_result(
-        self,
-    ) -> Result<T, latest::networking::SwitchUnavailableReason> {
+    pub fn into_result(self) -> Result<T, latest::networking::SwitchError> {
         match self {
-            Self::Available { value } => Ok(value),
-            Self::Unavailable { reason } => Err(reason),
+            Self::Ok { value } => Ok(value),
+            Self::Err { error } => Err(error),
         }
+    }
+
+    pub fn is_operational_failure(&self) -> bool {
+        matches!(
+            self,
+            Self::Err {
+                error: latest::networking::SwitchError::UpstreamUnavailable { .. }
+                    | latest::networking::SwitchError::MgdUnresolved
+                    | latest::networking::SwitchError::QueryFailed,
+            }
+        )
     }
 }
 
@@ -32,6 +41,11 @@ impl<T> latest::networking::SwitchResults<T> {
             (SwitchSlot::Switch1, &self.switch1),
         ]
         .into_iter()
+    }
+
+    pub fn all_operational_failures(&self) -> bool {
+        self.switch0.is_operational_failure()
+            && self.switch1.is_operational_failure()
     }
 }
 
@@ -128,14 +142,14 @@ mod tests {
         use latest::networking::{SwitchResult, SwitchResults};
 
         let results = SwitchResults {
-            switch0: SwitchResult::Available { value: 0 },
-            switch1: SwitchResult::Available { value: 1 },
+            switch0: SwitchResult::Ok { value: 0 },
+            switch1: SwitchResult::Ok { value: 1 },
         };
 
         let borrowed: Vec<_> = results
             .iter()
             .map(|(slot, result)| {
-                let SwitchResult::Available { value } = result else {
+                let SwitchResult::Ok { value } = result else {
                     panic!("expected an available result");
                 };
                 (slot, *value)

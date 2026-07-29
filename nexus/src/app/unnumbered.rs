@@ -4,8 +4,8 @@
 
 use nexus_db_queries::context::OpContext;
 use nexus_types::external_api::networking::{
-    SwitchResult, SwitchResults, SwitchUnavailableReason,
-    SwitchUnnumberedInterface, UnnumberedInterfaces, UnnumberedManagerState,
+    SwitchError, SwitchResult, SwitchResults, SwitchUnnumberedInterface,
+    UnnumberedInterfaces, UnnumberedManagerState,
 };
 use omicron_common::api::external::Error;
 use omicron_common::tfport::TfportInterfaceName;
@@ -30,14 +30,14 @@ impl super::Nexus {
                         self.log, "no mgd client found for switch slot";
                         "switch-slot" => ?switch_slot,
                     );
-                    return SwitchResult::Unavailable {
-                        reason: SwitchUnavailableReason::MgdUnresolved,
+                    return SwitchResult::Err {
+                        error: SwitchError::MgdUnresolved,
                     };
                 };
                 match mg_client.get_bgp_unnumbered_manager_state().await {
-                    Ok(status) => SwitchResult::Available {
-                        value: status.into_inner().into(),
-                    },
+                    Ok(status) => {
+                        SwitchResult::Ok { value: status.into_inner().into() }
+                    }
                     Err(err) => {
                         error!(
                             self.log,
@@ -45,9 +45,7 @@ impl super::Nexus {
                             "switch-slot" => ?switch_slot,
                             "error" => %err,
                         );
-                        SwitchResult::Unavailable {
-                            reason: SwitchUnavailableReason::QueryFailed,
-                        }
+                        SwitchResult::Err { error: err.into() }
                     }
                 }
             }
@@ -76,12 +74,12 @@ impl super::Nexus {
                         self.log, "no mgd client found for switch slot";
                         "switch-slot" => ?switch_slot,
                     );
-                    return SwitchResult::Unavailable {
-                        reason: SwitchUnavailableReason::MgdUnresolved,
+                    return SwitchResult::Err {
+                        error: SwitchError::MgdUnresolved,
                     };
                 };
                 match mg_client.get_bgp_unnumbered_interfaces().await {
-                    Ok(interfaces) => SwitchResult::Available {
+                    Ok(interfaces) => SwitchResult::Ok {
                         value: UnnumberedInterfaces(
                             interfaces
                                 .into_inner()
@@ -96,9 +94,7 @@ impl super::Nexus {
                             "switch-slot" => ?switch_slot,
                             "error" => %err,
                         );
-                        SwitchResult::Unavailable {
-                            reason: SwitchUnavailableReason::QueryFailed,
-                        }
+                        SwitchResult::Err { error: err.into() }
                     }
                 }
             }

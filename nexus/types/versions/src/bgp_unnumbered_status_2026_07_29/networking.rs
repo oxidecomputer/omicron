@@ -35,6 +35,14 @@ pub struct UnnumberedInterfacePath {
     pub interface_name: String,
 }
 
+/// Results of querying both switches.
+//
+// A successful Nexus response means that Nexus obtained authoritative
+// outcomes from enough of the switch fanout to return this value. It does not
+// mean that either switch returned a value: both fields can contain errors
+// when both switches reject a query, for example when a requested BGP ASN does
+// not exist. Nexus returns a top-level server error only when both switch
+// queries fail operationally.
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
 #[schemars(rename = "{T}SwitchResults")]
 pub struct SwitchResults<T> {
@@ -42,19 +50,77 @@ pub struct SwitchResults<T> {
     pub switch1: SwitchResult<T>,
 }
 
+/// The outcome of querying one switch.
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
 #[serde(tag = "status", rename_all = "snake_case")]
 #[schemars(rename = "{T}SwitchResult")]
 pub enum SwitchResult<T> {
-    Available { value: T },
-    Unavailable { reason: SwitchUnavailableReason },
+    Ok { value: T },
+    Err { error: SwitchError },
 }
 
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum SwitchUnavailableReason {
+/// A normalized failure from one switch query.
+#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum SwitchError {
+    /// The switch authoritatively rejected the query.
+    RequestRejected {
+        error_code: Option<String>,
+        message: String,
+        upstream_request_id: String,
+    },
+
+    /// The switch returned an operational error.
+    UpstreamUnavailable {
+        error_code: Option<String>,
+        message: String,
+        upstream_request_id: String,
+    },
+
+    /// Nexus could not resolve an MGD client for the switch.
     MgdUnresolved,
+
+    /// Nexus could not obtain a valid response from the switch.
     QueryFailed,
+}
+
+impl From<mg_admin_client::Error<mg_admin_client::types::Error>>
+    for SwitchError
+{
+    fn from(
+        error: mg_admin_client::Error<mg_admin_client::types::Error>,
+    ) -> Self {
+        match error {
+            mg_admin_client::Error::ErrorResponse(response)
+                if is_authoritative_rejection(response.status()) =>
+            {
+                Self::RequestRejected {
+                    error_code: response.error_code.clone(),
+                    message: response.message.clone(),
+                    upstream_request_id: response.request_id.clone(),
+                }
+            }
+            mg_admin_client::Error::ErrorResponse(response) => {
+                Self::UpstreamUnavailable {
+                    error_code: response.error_code.clone(),
+                    message: response.message.clone(),
+                    upstream_request_id: response.request_id.clone(),
+                }
+            }
+            _ => Self::QueryFailed,
+        }
+    }
+}
+
+fn is_authoritative_rejection(status: http::StatusCode) -> bool {
+    // These statuses describe the request or the queried resource. Treat all
+    // other error responses, including authentication, timeout, throttling,
+    // and server failures, as operational failures of the upstream service.
+    status == http::StatusCode::BAD_REQUEST
+        || status == http::StatusCode::NOT_FOUND
+        || status == http::StatusCode::CONFLICT
+        || status == http::StatusCode::GONE
+        || status == http::StatusCode::UNPROCESSABLE_ENTITY
 }
 
 /// The current status of a BGP peer.
@@ -123,7 +189,7 @@ impl From<SwitchResults<BgpPeerStatuses>>
     fn from(results: SwitchResults<BgpPeerStatuses>) -> Self {
         let mut statuses = Vec::new();
         for (switch, result) in results {
-            let SwitchResult::Available { value } = result else {
+            let SwitchResult::Ok { value } = result else {
                 continue;
             };
             statuses.extend(value.0.into_iter().map(|status| {
@@ -148,7 +214,7 @@ impl From<SwitchResults<BgpExportedRoutes>>
     fn from(results: SwitchResults<BgpExportedRoutes>) -> Self {
         let mut routes = Vec::new();
         for (switch, result) in results {
-            let SwitchResult::Available { value } = result else {
+            let SwitchResult::Ok { value } = result else {
                 continue;
             };
             routes.extend(value.0.into_iter().map(|route| {
@@ -169,7 +235,7 @@ impl From<SwitchResults<BgpMessageHistories>>
     fn from(results: SwitchResults<BgpMessageHistories>) -> Self {
         let mut switch_histories = Vec::new();
         for (switch, result) in results {
-            let SwitchResult::Available { value } = result else {
+            let SwitchResult::Ok { value } = result else {
                 continue;
             };
             switch_histories.push(
@@ -189,7 +255,7 @@ impl From<SwitchResults<BgpImportedRoutes>>
     fn from(results: SwitchResults<BgpImportedRoutes>) -> Self {
         let mut routes = Vec::new();
         for (switch, result) in results {
-            let SwitchResult::Available { value } = result else {
+            let SwitchResult::Ok { value } = result else {
                 continue;
             };
             routes.extend(value.0.into_iter().map(|route| {
@@ -389,9 +455,77 @@ impl From<MgDiscoveredRouter> for DiscoveredRouter {
 mod tests {
     use std::net::{IpAddr, Ipv4Addr};
 
+    use http::{HeaderMap, StatusCode};
     use sled_agent_types_versions::v1::early_networking::SwitchSlot;
 
     use super::*;
+
+    const ERROR_CODE: &str = "ObjectNotFound";
+    const ERROR_MESSAGE: &str = "requested object does not exist";
+    const REQUEST_ID: &str = "upstream-request-id";
+
+    fn mgd_error_response(
+        status: StatusCode,
+    ) -> mg_admin_client::Error<mg_admin_client::types::Error> {
+        mg_admin_client::Error::ErrorResponse(
+            mg_admin_client::ResponseValue::new(
+                mg_admin_client::types::Error {
+                    error_code: Some(ERROR_CODE.to_owned()),
+                    message: ERROR_MESSAGE.to_owned(),
+                    request_id: REQUEST_ID.to_owned(),
+                },
+                status,
+                HeaderMap::new(),
+            ),
+        )
+    }
+
+    #[test]
+    fn authoritative_mgd_responses_are_rejected_requests() {
+        for status in [
+            StatusCode::BAD_REQUEST,
+            StatusCode::NOT_FOUND,
+            StatusCode::CONFLICT,
+            StatusCode::GONE,
+            StatusCode::UNPROCESSABLE_ENTITY,
+        ] {
+            let error = SwitchError::from(mgd_error_response(status));
+
+            assert_eq!(
+                error,
+                SwitchError::RequestRejected {
+                    error_code: Some(ERROR_CODE.to_owned()),
+                    message: ERROR_MESSAGE.to_owned(),
+                    upstream_request_id: REQUEST_ID.to_owned(),
+                },
+                "unexpected classification for HTTP {status}",
+            );
+        }
+    }
+
+    #[test]
+    fn operational_mgd_responses_are_upstream_unavailable() {
+        for status in [
+            StatusCode::UNAUTHORIZED,
+            StatusCode::FORBIDDEN,
+            StatusCode::REQUEST_TIMEOUT,
+            StatusCode::TOO_MANY_REQUESTS,
+            StatusCode::INTERNAL_SERVER_ERROR,
+            StatusCode::SERVICE_UNAVAILABLE,
+        ] {
+            let error = SwitchError::from(mgd_error_response(status));
+
+            assert_eq!(
+                error,
+                SwitchError::UpstreamUnavailable {
+                    error_code: Some(ERROR_CODE.to_owned()),
+                    message: ERROR_MESSAGE.to_owned(),
+                    upstream_request_id: REQUEST_ID.to_owned(),
+                },
+                "unexpected classification for HTTP {status}",
+            );
+        }
+    }
 
     #[test]
     fn converts_link_zero_tfport_name() {
@@ -411,7 +545,7 @@ mod tests {
     fn peer_status_conversion_restores_switch_slot_and_omits_query_failure() {
         let addr = IpAddr::V4(Ipv4Addr::LOCALHOST);
         let results = SwitchResults {
-            switch0: SwitchResult::Available {
+            switch0: SwitchResult::Ok {
                 value: BgpPeerStatuses(vec![BgpPeerStatus {
                     addr,
                     peer_id: "tfportqsfp0_0".to_owned(),
@@ -421,8 +555,8 @@ mod tests {
                     state_duration_millis: 100,
                 }]),
             },
-            switch1: SwitchResult::Unavailable {
-                reason: SwitchUnavailableReason::QueryFailed,
+            switch1: SwitchResult::Err {
+                error: SwitchError::QueryFailed,
             },
         };
 
@@ -454,10 +588,8 @@ mod tests {
     fn exported_routes_conversion_restores_switch_slot_and_omits_unresolved() {
         let prefix = "192.0.2.0/24".parse().unwrap();
         let results = SwitchResults {
-            switch0: SwitchResult::Unavailable {
-                reason: SwitchUnavailableReason::MgdUnresolved,
-            },
-            switch1: SwitchResult::Available {
+            switch0: SwitchResult::Err { error: SwitchError::MgdUnresolved },
+            switch1: SwitchResult::Ok {
                 value: BgpExportedRoutes(vec![BgpExported {
                     peer_id: "peer".to_owned(),
                     prefix,
@@ -492,10 +624,10 @@ mod tests {
             id,
         };
         let results = SwitchResults {
-            switch0: SwitchResult::Available {
+            switch0: SwitchResult::Ok {
                 value: BgpImportedRoutes(vec![route(0)]),
             },
-            switch1: SwitchResult::Available {
+            switch1: SwitchResult::Ok {
                 value: BgpImportedRoutes(vec![route(1)]),
             },
         };
@@ -535,12 +667,10 @@ mod tests {
     #[test]
     fn message_history_conversion_omits_unavailable_switch() {
         let results = SwitchResults {
-            switch0: SwitchResult::Available {
+            switch0: SwitchResult::Ok {
                 value: BgpMessageHistories(HashMap::new()),
             },
-            switch1: SwitchResult::Unavailable {
-                reason: SwitchUnavailableReason::QueryFailed,
-            },
+            switch1: SwitchResult::Err { error: SwitchError::QueryFailed },
         };
 
         let history: crate::v2025_11_20_00::networking::AggregateBgpMessageHistory =
@@ -550,26 +680,37 @@ mod tests {
     }
 
     #[test]
-    fn unavailable_reasons_have_distinct_wire_representations() {
-        let unresolved = SwitchResult::<BgpPeerStatuses>::Unavailable {
-            reason: SwitchUnavailableReason::MgdUnresolved,
+    fn switch_errors_preserve_normalized_details_on_the_wire() {
+        let unresolved = SwitchResult::<BgpPeerStatuses>::Err {
+            error: SwitchError::MgdUnresolved,
         };
-        let failed = SwitchResult::<BgpPeerStatuses>::Unavailable {
-            reason: SwitchUnavailableReason::QueryFailed,
+        let rejected = SwitchResult::<BgpPeerStatuses>::Err {
+            error: SwitchError::RequestRejected {
+                error_code: Some("ObjectNotFound".to_owned()),
+                message: "ASN not found".to_owned(),
+                upstream_request_id: "request-id".to_owned(),
+            },
         };
 
         assert_eq!(
             serde_json::to_value(unresolved).unwrap(),
             serde_json::json!({
-                "status": "unavailable",
-                "reason": "mgd_unresolved",
+                "status": "err",
+                "error": {
+                    "type": "mgd_unresolved",
+                },
             })
         );
         assert_eq!(
-            serde_json::to_value(failed).unwrap(),
+            serde_json::to_value(rejected).unwrap(),
             serde_json::json!({
-                "status": "unavailable",
-                "reason": "query_failed",
+                "status": "err",
+                "error": {
+                    "type": "request_rejected",
+                    "error_code": "ObjectNotFound",
+                    "message": "ASN not found",
+                    "upstream_request_id": "request-id",
+                },
             })
         );
     }

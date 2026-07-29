@@ -9,7 +9,7 @@ use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::bfd::BfdPeerStatuses;
 use nexus_types::external_api::networking::{
-    SwitchResult, SwitchResults, SwitchUnavailableReason,
+    SwitchError, SwitchResult, SwitchResults,
 };
 
 type ControlPlaneTestContext =
@@ -33,17 +33,15 @@ async fn test_empty_bfd_status(cptestctx: &ControlPlaneTestContext) {
     let mut unavailable = 0;
     for result in [status.switch0, status.switch1] {
         match result {
-            SwitchResult::Available { value: BfdPeerStatuses(statuses) } => {
+            SwitchResult::Ok { value: BfdPeerStatuses(statuses) } => {
                 assert!(statuses.is_empty());
                 available += 1;
             }
-            SwitchResult::Unavailable {
-                reason: SwitchUnavailableReason::MgdUnresolved,
-            } => unavailable += 1,
-            SwitchResult::Unavailable {
-                reason: SwitchUnavailableReason::QueryFailed,
-            } => {
-                panic!("BFD query unexpectedly failed");
+            SwitchResult::Err { error: SwitchError::MgdUnresolved } => {
+                unavailable += 1;
+            }
+            SwitchResult::Err { error } => {
+                panic!("BFD query unexpectedly failed: {error:?}");
             }
         }
     }
