@@ -80,6 +80,7 @@ pub mod early_networking {
     pub use crate::v30::early_networking::UplinkIpNet;
     pub use crate::v30::early_networking::UplinkIpNetError;
 
+    pub use crate::v43::early_networking::AddressFamilyConfigError;
     pub use crate::v43::early_networking::BgpPeerConfig;
     pub use crate::v43::early_networking::EmptyUplinkPortsError;
     pub use crate::v43::early_networking::PortConfig;

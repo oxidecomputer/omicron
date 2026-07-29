@@ -34,6 +34,7 @@ use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::TypedUuid;
 use oxnet::IpNet;
 use serde::{Deserialize, Serialize};
+use sled_agent_types::early_networking::AddressFamilyConfigError;
 use sled_agent_types::early_networking::ImportExportPolicy;
 use sled_agent_types::early_networking::LinkFec;
 use sled_agent_types::early_networking::LinkSpeed;
@@ -755,6 +756,20 @@ pub enum SwitchPortBgpPeerConfigInvalidData {
         #[source]
         err: RouterPeerIpAddrError,
     },
+    #[error(
+        "database inconsistency: \
+        src_addr is set for an unnumbered peer {port_settings_id}"
+    )]
+    SrcAddressUse { port_settings_id: Uuid },
+    #[error(
+        "database inconsistency: \
+        mismatched address families in BGP peer config {port_settings_id}"
+    )]
+    AddressFamily {
+        port_settings_id: Uuid,
+        #[source]
+        err: AddressFamilyConfigError,
+    },
 }
 
 impl SwitchPortBgpPeerConfig {
@@ -772,7 +787,8 @@ impl SwitchPortBgpPeerConfig {
     ) -> Result<RouterPeerType, SwitchPortBgpPeerConfigInvalidData> {
         // We only expect NULL (corresponding to unnumbered, in which case we
         // expect a valid `router_lifetime` too) or `Some(ip)` where `ip` is a
-        // valid router peer IP.
+        // valid router peer IP. `src_addr` should only be set for numbered
+        // peers, and should have a matching address family.
         match self.addr {
             Some(db_ip) => {
                 let ip =
@@ -782,6 +798,7 @@ impl SwitchPortBgpPeerConfig {
                             err,
                         }
                     })?;
+
                 let src_addr = self
                     .src_addr
                     .map(|network| RouterPeerIpAddr::try_from(network.ip()))
@@ -792,6 +809,26 @@ impl SwitchPortBgpPeerConfig {
                             err,
                         }
                     })?;
+
+                if let Some(src_addr) = src_addr {
+                    match (src_addr.is_ipv4(), ip.is_ipv4()) {
+                        (true, false) => Err(
+                            SwitchPortBgpPeerConfigInvalidData::AddressFamily {
+                                port_settings_id: self.port_settings_id,
+                                err: AddressFamilyConfigError::V4toV6,
+                            },
+                        ),
+                        (false, true) => Err(
+                            SwitchPortBgpPeerConfigInvalidData::AddressFamily {
+                                port_settings_id: self.port_settings_id,
+                                err: AddressFamilyConfigError::V6toV4,
+                            },
+                        ),
+                        (true, true) => Ok(()),
+                        (false, false) => Ok(()),
+                    }?
+                }
+
                 Ok(RouterPeerType::Numbered { ip, src_addr })
             }
             None => {
@@ -804,6 +841,15 @@ impl SwitchPortBgpPeerConfig {
                         err,
                     }
                 })?;
+
+                if self.src_addr.is_some() {
+                    return Err(
+                        SwitchPortBgpPeerConfigInvalidData::SrcAddressUse {
+                            port_settings_id: self.port_settings_id,
+                        },
+                    );
+                }
+
                 Ok(RouterPeerType::Unnumbered { router_lifetime })
             }
         }

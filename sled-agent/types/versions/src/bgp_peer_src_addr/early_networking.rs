@@ -402,3 +402,11 @@ impl From<RackNetworkConfig> for v42::RackNetworkConfig {
         }
     }
 }
+
+#[derive(Debug, thiserror::Error)]
+pub enum AddressFamilyConfigError {
+    #[error("src_addr is IPv4 but the peer addr is IPv6")]
+    V4toV6,
+    #[error("src_addr is IPv6 but the peer addr is IPv4")]
+    V6toV4,
+}

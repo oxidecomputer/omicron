@@ -158,6 +158,18 @@ impl FromStr for RouterPeerIpAddr {
     }
 }
 
+impl RouterPeerIpAddr {
+    // Returns true if `Self` contains an IPv4 address; false otherwise.
+    pub fn is_ipv4(&self) -> bool {
+        self.0.is_ipv4()
+    }
+
+    // Returns true if `Self` contains an IPv6 address; false otherwise.
+    pub fn is_ipv6(&self) -> bool {
+        self.0.is_ipv6()
+    }
+}
+
 impl RouterPeerType {
     /// Returns true if `Self` describes a numbered peer; false otherwise.
     pub fn is_numbered(&self) -> bool {

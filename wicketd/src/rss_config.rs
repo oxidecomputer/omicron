@@ -480,6 +480,45 @@ fn validate_rack_network_config(
                 }
             }
         }
+
+        // Check that the src_addr is only specified for numbered peers and
+        // that the address families for addr and src_addr match
+        for peer in &port_config.bgp_peers {
+            match peer.addr {
+                UserSpecifiedRouterPeerAddr::Unnumbered => {
+                    if peer.src_addr.is_some() {
+                        let port = &peer.port;
+                        bail!(
+                            "unnumbered BGP peer for {port} specifies a \
+                             src_addr, but src_addr is only supported \
+                             for numbered BGP peers"
+                        );
+                    }
+                }
+                UserSpecifiedRouterPeerAddr::Numbered(ip) => {
+                    if let Some(src_addr) = peer.src_addr {
+                        match (src_addr.is_ipv4(), ip.is_ipv4()) {
+                            (true, false) => {
+                                bail!(
+                                    "numbered BGP peer {ip} specifies \
+                                    an IPv4 src_addr when it should be \
+                                    IPv6"
+                                );
+                            }
+                            (false, true) => {
+                                bail!(
+                                    "numbered BGP peer {ip} specifies \
+                                    an IPv6 src_addr when it should be
+                                    IPv4"
+                                );
+                            }
+                            (true, true) => (),
+                            (false, false) => (),
+                        }
+                    }
+                }
+            }
+        }
     }
 
     // Check that all auth keys are present.
