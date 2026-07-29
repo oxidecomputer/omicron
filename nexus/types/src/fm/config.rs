@@ -34,8 +34,10 @@ use serde::{Deserialize, Serialize};
 /// type are unvalidated, and their invariants may not hold:
 ///
 /// - [`Self::sitrep_limit`] must be at least [`FmConfig::MIN_SITREP_LIMIT`],
+///   and no more than [`FmConfig::MAX_LIMIT`],
 /// - [`Self::history_pruning_threshold`] must be at least
-///   [`FmConfig::MIN_HISTORY_PRUNING_THRESHOLD`],
+///   [`FmConfig::MIN_HISTORY_PRUNING_THRESHOLD`], and no more than
+///   [`FmConfig::MAX_LIMIT`],
 /// - [`Self::history_pruning_threshold`] must be strictly less than
 ///   [`Self::sitrep_limit`],
 /// - [`Self::comment`] must be non-empty.
@@ -241,6 +243,9 @@ impl FmConfig {
     /// This must be greater than [`Self::MIN_HISTORY_PRUNING_THRESHOLD`], to
     /// allow for new sitreps to be committed when the history has yet to be
     /// pruned to the limit.
+    ///
+    /// **Note:** This value should be kept in sync with the minimum value
+    /// enforced by the CHECK constraint on the `fm_config` table.
     pub const MIN_SITREP_LIMIT: NonZeroU32 = NonZeroU32::new(5).unwrap();
 
     /// The default value of [`Self::sitrep_limit`], used when there is no
@@ -251,13 +256,38 @@ impl FmConfig {
     ///
     /// The current sitrep must always be retained, so at least two sitreps
     /// must exist before any may be deleted.
+    ///
+    /// **Note:** This value should be kept in sync with the minimum value
+    /// enforced by the CHECK constraint on the `fm_config` table.
     pub const MIN_HISTORY_PRUNING_THRESHOLD: NonZeroU32 =
         NonZeroU32::new(2).unwrap();
 
-    /// The default value of [`Self::history_pruning_threshold`], used when there is no
-    /// config override set.
+    /// The default value of [`Self::history_pruning_threshold`], used when
+    /// there is no config override set.
     pub const DEFAULT_HISTORY_PRUNING_THRESHOLD: NonZeroU32 =
         NonZeroU32::new(2000).unwrap();
+
+    /// Maximum value for [`Self::sitrep_limit`] and
+    /// [`Self::history_pruning_threshold`].
+    ///
+    /// Because the implementation of checking whether a database table has
+    /// reached a limit requires scanning up to `limit` rows from that table,
+    /// checking against the limit will (perhaps surprisingly) become
+    /// increasingly costly as the limit increases. Therefore, we must enforce
+    /// an upper bound on how big the limits can be so we don't end up scanning
+    /// hundreds of thousands of rows all the time. It is the author of this
+    /// comment's opinion that it really seems like the daabase *should* be able
+    /// to just sort of cache the number of rows in the table in a way that
+    /// makes those queries O(1), but maybe that's hard for database reasons I
+    /// don't understand. Anyway, 5000 is the value that the reconfigurator uses
+    /// for its (hard-coded) blueprint limit, so using it as our limit on our
+    /// limits (haha) means that in our worst-case config, we are just doing a
+    /// scan that's as big as what the reconfigurator does all the time, which
+    /// seems fine.
+    ///
+    /// **Note:** This value should be kept in sync with the maximum values
+    /// enforced by the CHECK constraint on the `fm_config` table.
+    pub const MAX_LIMIT: NonZeroU32 = NonZeroU32::new(5000).unwrap();
 
     /// Returns a multi-line displayer for this config, with each line
     /// indented by `indent` spaces.
@@ -352,32 +382,46 @@ impl TryFrom<&'_ FmConfigParam> for FmConfig {
             ));
         }
 
-        fn check_minimum(
+        fn check_limit(
             value: u32,
             field: &str,
             min: NonZeroU32,
+            max: NonZeroU32,
         ) -> Result<NonZeroU32, Error> {
             let value = NonZeroU32::new(value).ok_or_else(|| {
                 Error::invalid_value(field, format!("{field} must be nonzero"))
             })?;
+
             if value < min {
                 return Err(Error::invalid_value(
                     field,
-                    format!("{field} must be at least {min} (got {value})",),
+                    format!("{field} must be at least {min} (got {value})"),
+                ));
+            }
+
+            if value > max {
+                return Err(Error::invalid_value(
+                    field,
+                    format!(
+                        "{field} must be less than or equal to {max} (got \
+                         {value})",
+                    ),
                 ));
             }
             Ok(value)
         }
 
-        let sitrep_limit = check_minimum(
+        let sitrep_limit = check_limit(
             sitrep_limit,
             "sitrep_limit",
             Self::MIN_SITREP_LIMIT,
+            Self::MAX_LIMIT,
         )?;
-        let history_pruning_threshold = check_minimum(
+        let history_pruning_threshold = check_limit(
             history_pruning_threshold,
             "history_pruning_threshold",
             Self::MIN_HISTORY_PRUNING_THRESHOLD,
+            Self::MAX_LIMIT,
         )?;
 
         if history_pruning_threshold >= sitrep_limit {

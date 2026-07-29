@@ -9111,10 +9111,16 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_config (
     -- SOMETHING if you really don't want to say anything... :)
     CONSTRAINT comment_required CHECK (comment != '' AND comment != ' '),
 
-    CONSTRAINT sitrep_min_limit CHECK (sitrep_limit >= 5),
+    CONSTRAINT min_sitrep_limit CHECK (sitrep_limit >= 5),
+    CONSTRAINT max_sitrep_limit CHECK (sitrep_limit <= 5000),
 
-    CONSTRAINT history_pruning_threshold_validity CHECK (
+    CONSTRAINT min_history_pruning_threshold CHECK (
         history_pruning_threshold >= 2 AND
+    ),
+    CONSTRAINT max_history_pruning_threshold CHECK (
+        history_pruning_threshold <= 5000
+    ),
+    CONSTRAINT history_limit_is_less_than_sirep_limit CHECK (
         history_pruning_threshold < sitrep_limit
     )
 );
