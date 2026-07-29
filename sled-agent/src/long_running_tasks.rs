@@ -361,7 +361,8 @@ async fn upsert_synthetic_disks_if_needed(
     raw_disks_tx: &RawDisksSender,
     config: &Config,
 ) {
-    if let ExternalDisks::Virtual { vdevs } = &config.external_disks {
+    if let ExternalDisks::Hardcoded { vdevs, disks: _ } = &config.external_disks
+    {
         for (i, vdev) in vdevs.iter().enumerate() {
             info!(
                 log,

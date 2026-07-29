@@ -181,6 +181,7 @@ impl Config {
 #[cfg(test)]
 mod test {
     use super::*;
+    use slog_error_chain::InlineErrorChain;
 
     #[test]
     fn test_smf_configs() {
@@ -197,7 +198,7 @@ mod test {
                     if entry.file_name() == "config.toml" {
                         let path = entry.path();
                         Config::from_file(&path).unwrap_or_else(|e| {
-                            panic!("Failed to parse config {path}: {e}")
+                            panic!("Failed to parse config {path}: {}", InlineErrorChain::new(&e))
                         });
                         configs_seen += 1;
                     }

@@ -172,12 +172,12 @@ impl HardwareSnapshot {
                     )?;
                 }
             }
-            ExternalDisks::HardcodedPhysical { disks: hardcoded_disks } => {
+
+            ExternalDisks::Hardcoded { vdevs: _, disks: hardcoded_disks } => {
                 for disk in hardcoded_disks {
                     disks.insert(disk.identity().clone(), disk.clone());
                 }
             }
-            ExternalDisks::Virtual { .. } => {}
         }
 
         Ok(Self { tofino, disks })
@@ -554,7 +554,7 @@ fn poll_device_tree(
                     // functionality, sled-agent can be supplied a fixed list of
                     // UnparsedDisks. Add those to the HardwareSnapshot here if
                     // they are missing (which they will be for non-sleds).
-                    if let ExternalDisks::HardcodedPhysical { disks } =
+                    if let ExternalDisks::Hardcoded { vdevs: _, disks } =
                         external_disks
                     {
                         for disk in disks {
