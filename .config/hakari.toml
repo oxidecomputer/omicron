@@ -41,3 +41,8 @@ workspace-members = [
     # let's make this explicit.
     "omicron-uuid-kinds",
 ]
+third-party = [
+    # The crate enables serde_json's float_roundtrip feature, which changes the
+    # behavior or floating point serialization across the whole workspace.
+    { name = "serde_json_canonicalizer" },
+]
