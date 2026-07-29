@@ -2115,48 +2115,19 @@ impl UpdateContext {
     /// Via `client`, ask the target RoT for its CMPA page, then extract
     /// and return the RKTH.
     async fn get_rot_rkth(&self) -> Result<[u8; 32], UpdateTerminalError> {
-        let cmpa = match self
-            .mgs_client
+        self.mgs_client
             .sp_rot_cmpa_get(
                 &self.sp.typ,
                 self.sp.slot,
                 SpComponent::ROT.const_as_str(),
             )
             .await
-        {
-            Ok(response) => {
+            .map_err(anyhow::Error::from)
+            .and_then(|response| {
                 let data = response.into_inner().base64_data;
-                self.decode_rot_page(&data).map_err(|error| {
-                    UpdateTerminalError::GetRotCmpaFailed { error }
-                })?
-            }
-            // TODO is there a better way to check the _specific_ error response
-            // we get here? We only have a couple of strings; we could check the
-            // error string contents for something like "WrongVersion", but
-            // that's pretty fragile. Instead we'll treat any error response
-            // here as a "fallback to previous behavior".
-            Err(err @ gateway_client::Error::ErrorResponse(_)) => {
-                error!(
-                    self.log,
-                    "Failed to get RoT CMPA; unable to choose from \
-                     available RoT artifacts";
-                    "err" => %err,
-                );
-                return Err(UpdateTerminalError::GetRotCmpaFailed {
-                    error: err.into(),
-                });
-            }
-            // For any other error (e.g., comms failures), just fail as normal.
-            Err(err) => {
-                return Err(UpdateTerminalError::GetRotCmpaFailed {
-                    error: err.into(),
-                });
-            }
-        };
-        let cmpa = CMPAPage::from_bytes(&cmpa).map_err(|err| {
-            UpdateTerminalError::GetRotCmpaFailed { error: err.into() }
-        })?;
-        Ok(cmpa.rotkh)
+                Ok(CMPAPage::from_bytes(&self.decode_rot_page(&data)?)?.rotkh)
+            })
+            .map_err(|error| UpdateTerminalError::GetRotCmpaFailed { error })
     }
 
     /// Decode a base64-encoded RoT page we received from MGS.
