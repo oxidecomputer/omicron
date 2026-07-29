@@ -215,9 +215,9 @@ pub(crate) mod test_helpers {
         (logctx, sitrep)
     }
 
-    /// The notes slippy produces for `sitrep`, without parent cross-checks.
+    /// The notes slippy produces for `sitrep`.
     pub(crate) fn notes_for(sitrep: &Sitrep) -> Vec<Note> {
-        Slippy::new_sitrep_only(sitrep)
+        Slippy::new(sitrep)
             .into_report(SlippyReportSortKey::Kind)
             .notes()
             .to_vec()

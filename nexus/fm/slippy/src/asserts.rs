@@ -10,13 +10,9 @@ use crate::slippy::Slippy;
 use nexus_types::fm::Sitrep;
 
 /// Panic unless `sitrep` produces an empty slippy report.
-///
-/// Pass the parent sitrep when it is available so that parent cross-checks
-/// also run.
 #[track_caller]
-pub fn assert_sitrep_is_slippy_clean(sitrep: &Sitrep, parent: Option<&Sitrep>) {
-    let report =
-        Slippy::new(sitrep, parent).into_report(SlippyReportSortKey::Kind);
+pub fn assert_sitrep_is_slippy_clean(sitrep: &Sitrep) {
+    let report = Slippy::new(sitrep).into_report(SlippyReportSortKey::Kind);
     if !report.notes().is_empty() {
         panic!(
             "expected sitrep {} to have no slippy notes:\n{}",
@@ -32,12 +28,9 @@ pub fn assert_sitrep_is_slippy_clean(sitrep: &Sitrep, parent: Option<&Sitrep>) {
 /// allowed, since a sitrep legitimately carries contained violations on
 /// closed cases until their rendezvous work drains.
 #[track_caller]
-pub fn assert_sitrep_has_no_fatal_notes(
-    sitrep: &Sitrep,
-    parent: Option<&Sitrep>,
-) {
+pub fn assert_sitrep_has_no_fatal_notes(sitrep: &Sitrep) {
     let report =
-        Slippy::new(sitrep, parent).into_report(SlippyReportSortKey::Severity);
+        Slippy::new(sitrep).into_report(SlippyReportSortKey::Severity);
     if report.notes().iter().any(|n| n.severity == Severity::Fatal) {
         panic!(
             "expected sitrep {} to have no fatal slippy notes:\n{}",

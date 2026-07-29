@@ -9,8 +9,6 @@ use crate::slippy::PhysicalDiskCaseKind;
 use crate::slippy::Severity;
 use crate::slippy::Slippy;
 use nexus_types::fm::DiagnosisEngineKind;
-use nexus_types::fm::DiskFact;
-use nexus_types::inventory::ZpoolHealth;
 use omicron_uuid_kinds::CaseUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use std::collections::BTreeMap;
@@ -56,20 +54,6 @@ pub(super) fn check_physical_disk_cases(slippy: &mut Slippy<'_>) {
                     },
                 ));
             }
-            match disk_fact {
-                DiskFact::ZpoolUnhealthy(payload) => {
-                    if payload.last_seen_health == ZpoolHealth::Online {
-                        notes.push((
-                            case.id,
-                            severity,
-                            PhysicalDiskCaseKind::ZpoolUnhealthyFactClaimsOnline {
-                                fact_id: fact.metadata.id,
-                                zpool_id: payload.zpool_id,
-                            },
-                        ));
-                    }
-                }
-            }
         }
 
         // Having no facts, and sharing a disk with another case, are only
@@ -111,11 +95,11 @@ pub(super) fn check_physical_disk_cases(slippy: &mut Slippy<'_>) {
 mod tests {
     use crate::checks::test_helpers::*;
     use crate::slippy::CaseKind;
+    use crate::slippy::Kind;
     use crate::slippy::PhysicalDiskCaseKind;
+    use crate::slippy::Severity;
     use nexus_fm::test_util::{make_degraded_fact, make_disk_case};
-    use nexus_types::fm;
     use nexus_types::fm::Sitrep;
-    use nexus_types::inventory::ZpoolHealth;
     use omicron_uuid_kinds::CaseUuid;
     use omicron_uuid_kinds::FactUuid;
     use omicron_uuid_kinds::PhysicalDiskUuid;
@@ -270,68 +254,42 @@ mod tests {
         logctx.cleanup_successful();
     }
 
-    #[test]
-    fn zpool_unhealthy_fact_claiming_online_is_flagged() {
-        let (logctx, mut sitrep) =
-            clean_sitrep("zpool_unhealthy_fact_claiming_online_is_flagged");
-        let case_id = sole_case_id(&sitrep);
-        let mut fact = sole_fact(&sitrep);
-        let fact_id = fact.metadata.id;
-        let fm::FactPayload::PhysicalDisk(fm::DiskFact::ZpoolUnhealthy(
-            ref mut payload,
-        )) = fact.payload;
-        payload.last_seen_health = ZpoolHealth::Online;
-        let zpool_id = payload.zpool_id;
-        modify_case(&mut sitrep, case_id, |case| {
-            case.facts.insert_overwrite(fact);
-        });
-        assert_eq!(
-            notes_for(&sitrep),
-            [case_note(
-                case_id,
-                CaseKind::PhysicalDisk(
-                    PhysicalDiskCaseKind::ZpoolUnhealthyFactClaimsOnline {
-                        fact_id,
-                        zpool_id,
-                    }
-                ),
-            )]
-        );
-        logctx.cleanup_successful();
-    }
-
     /// Data-validity violations are flagged on closed cases too: a closed
     /// case may still have rendezvous work pending, so its data matters.
     /// The engine contained the violation by closing the case, so the note
     /// is Quarantined rather than Fatal.
     #[test]
-    fn zpool_unhealthy_fact_claiming_online_on_closed_case_is_flagged() {
-        let (logctx, mut sitrep) = clean_sitrep(
-            "zpool_unhealthy_fact_claiming_online_on_closed_case_is_flagged",
-        );
+    fn disagreeing_disks_on_closed_case_is_quarantined() {
+        let (logctx, mut sitrep) =
+            clean_sitrep("disagreeing_disks_on_closed_case_is_quarantined");
         let case_id = sole_case_id(&sitrep);
-        let mut fact = sole_fact(&sitrep);
-        let fact_id = fact.metadata.id;
-        let fm::FactPayload::PhysicalDisk(fm::DiskFact::ZpoolUnhealthy(
-            ref mut payload,
-        )) = fact.payload;
-        payload.last_seen_health = ZpoolHealth::Online;
-        let zpool_id = payload.zpool_id;
+        let intruder = make_degraded_fact(
+            sitrep.metadata.id,
+            sitrep.metadata.inv_collection_id,
+            PhysicalDiskUuid::new_v4(),
+            ZpoolUuid::new_v4(),
+        );
         modify_case(&mut sitrep, case_id, |case| {
-            case.facts.insert_overwrite(fact);
+            case.facts.insert_unique(intruder).unwrap();
             case.metadata.closed_sitrep_id = Some(SitrepUuid::new_v4());
         });
-        assert_eq!(
-            notes_for(&sitrep),
-            [quarantined_case_note(
-                case_id,
+        let notes = notes_for(&sitrep);
+        let [note] = notes.as_slice() else {
+            panic!("expected exactly one note: {notes:?}");
+        };
+        assert_eq!(note.severity, Severity::Quarantined);
+        let Kind::Case { case_id: noted_case, kind } = &note.kind else {
+            panic!("expected a case note: {note:?}");
+        };
+        assert_eq!(*noted_case, case_id);
+        assert!(
+            matches!(
+                **kind,
                 CaseKind::PhysicalDisk(
-                    PhysicalDiskCaseKind::ZpoolUnhealthyFactClaimsOnline {
-                        fact_id,
-                        zpool_id,
-                    }
-                ),
-            )]
+                    PhysicalDiskCaseKind::DisagreeingDisks { .. }
+                )
+            ),
+            "expected a DisagreeingDisks note: {note:?}"
         );
         logctx.cleanup_successful();
     }

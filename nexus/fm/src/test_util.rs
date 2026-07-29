@@ -379,16 +379,16 @@ pub fn assert_analysis_preserves_slippy_clean(
     sitrep: &Sitrep,
     parent: Option<&Sitrep>,
 ) {
-    nexus_fm_slippy::assert_sitrep_has_no_fatal_notes(sitrep, parent);
+    nexus_fm_slippy::assert_sitrep_has_no_fatal_notes(sitrep);
 
     let parent_is_clean = parent.is_none_or(|parent| {
-        nexus_fm_slippy::Slippy::new_sitrep_only(parent)
+        nexus_fm_slippy::Slippy::new(parent)
             .into_report(nexus_fm_slippy::SlippyReportSortKey::Kind)
             .notes()
             .is_empty()
     });
     if parent_is_clean {
-        assert_sitrep_is_slippy_clean(sitrep, parent);
+        assert_sitrep_is_slippy_clean(sitrep);
     }
 }
 

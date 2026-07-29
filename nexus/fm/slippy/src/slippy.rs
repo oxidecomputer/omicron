@@ -15,7 +15,6 @@ use omicron_uuid_kinds::CaseUuid;
 use omicron_uuid_kinds::FactUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SupportBundleUuid;
-use omicron_uuid_kinds::ZpoolUuid;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Note {
@@ -237,9 +236,6 @@ pub enum PhysicalDiskCaseKind {
         other_case: CaseUuid,
         physical_disk_id: PhysicalDiskUuid,
     },
-    /// A `ZpoolUnhealthy` fact whose recorded health is `Online`, which is
-    /// self-contradictory.
-    ZpoolUnhealthyFactClaimsOnline { fact_id: FactUuid, zpool_id: ZpoolUuid },
 }
 
 impl fmt::Display for PhysicalDiskCaseKind {
@@ -273,16 +269,6 @@ impl fmt::Display for PhysicalDiskCaseKind {
                     "open case for physical disk {physical_disk_id} \
                      duplicates open case {other_case} \
                      (each disk has at most one open case)",
-                )
-            }
-            PhysicalDiskCaseKind::ZpoolUnhealthyFactClaimsOnline {
-                fact_id,
-                zpool_id,
-            } => {
-                write!(
-                    f,
-                    "ZpoolUnhealthy fact {fact_id} records zpool {zpool_id} \
-                     health as Online, which is self-contradictory",
                 )
             }
         }
@@ -334,22 +320,10 @@ pub struct Slippy<'a> {
 
 impl<'a> Slippy<'a> {
     /// Check `sitrep` for internal inconsistencies.
-    ///
-    /// Callers that have `sitrep`'s parent available should pass it.
-    pub fn new(sitrep: &'a Sitrep, parent: Option<&Sitrep>) -> Self {
+    pub fn new(sitrep: &'a Sitrep) -> Self {
         let mut slf = Self { sitrep, notes: Vec::new() };
         checks::perform_single_sitrep_checks(&mut slf);
-        if let Some(_parent) = parent {
-            // TODO: cross-sitrep continuity checks (fact immutability,
-            // created_sitrep_id provenance, generation bumps) belong here.
-        }
         slf
-    }
-
-    /// Check `sitrep` for internal inconsistencies, without any parent
-    /// sitrep cross-checks.
-    pub fn new_sitrep_only(sitrep: &'a Sitrep) -> Self {
-        Self::new(sitrep, None)
     }
 
     pub fn sitrep(&self) -> &'a Sitrep {

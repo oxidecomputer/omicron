@@ -538,26 +538,7 @@ async fn cmd_db_sitrep_slippy(
         .await
         .with_context(|| format!("failed to read {err_ctx}"))?;
 
-    // Lint against the parent sitrep too when it still exists; it may have
-    // been GC'd, in which case only the sitrep-internal checks run.
-    let parent = match sitrep.parent_id() {
-        Some(parent_id) => {
-            match datastore.fm_sitrep_read(opctx, parent_id).await {
-                Ok(parent) => Some(parent),
-                Err(e) => {
-                    eprintln!(
-                        "note: parent sitrep {parent_id} could not be read \
-                     (perhaps it has been garbage collected?), so only \
-                     sitrep-internal checks will run: {e}"
-                    );
-                    None
-                }
-            }
-        }
-        None => None,
-    };
-
-    let report = nexus_fm_slippy::Slippy::new(&sitrep, parent.as_ref())
+    let report = nexus_fm_slippy::Slippy::new(&sitrep)
         .into_report(nexus_fm_slippy::SlippyReportSortKey::Severity);
     println!("{}", report.display());
 
