@@ -9091,14 +9091,14 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_config (
     -- This must be less than `sitrep_limit`, and must be at least 2.
     sitrep_deletion_threshold INT8 NOT NULL,
     -- The time at which this config version was created.
-    time_modified. TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
 
-    CONSTRAINT versions_are_positive CHECK (version >= 0),
+    CONSTRAINT versions_are_positive CHECK (version > 0),
     CONSTRAINT sitrep_min_limit CHECK (sitrep_limit >= 3),
     CONSTRAINT sitrep_deletion_threshold_validity CHECK (
         sitrep_deletion_threshold >= 2 AND
         sitrep_deletion_threshold < sitrep_limit
-    ),
+    )
 );
 
 -- Initial default FM config version.
@@ -9121,7 +9121,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '280.0.0', NULL)
+    (TRUE, NOW(), NOW(), '281.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

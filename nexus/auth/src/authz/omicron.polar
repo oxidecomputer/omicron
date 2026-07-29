@@ -458,6 +458,20 @@ resource TargetReleaseConfig {
 has_relation(fleet: Fleet, "parent_fleet", resource: TargetReleaseConfig)
 	if resource.fleet = fleet;
 
+# Describes the policy for accessing fault management configuration
+resource FmConfig {
+	permissions = [
+	    "read",          # read the current FM configuration
+	    "modify",        # insert a new FM configuration version
+	];
+
+	relations = { parent_fleet: Fleet };
+	"read" if "viewer" on "parent_fleet";
+	"modify" if "admin" on "parent_fleet";
+}
+has_relation(fleet: Fleet, "parent_fleet", resource: FmConfig)
+	if resource.fleet = fleet;
+
 # Describes the policy for reading and modifying low-level inventory
 resource Inventory {
 	permissions = [ "read", "modify" ];

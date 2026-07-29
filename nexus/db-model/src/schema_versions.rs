@@ -28,6 +28,7 @@ pub static KNOWN_VERSIONS: LazyLock<Vec<KnownVersion>> = LazyLock::new(|| {
         // |  leaving the first copy as an example for the next person.
         // v
         // KnownVersion::new(next_int, "unique-dirname-with-the-sql-files"),
+        KnownVersion::new(281, "fm-config"),
         KnownVersion::new(280, "webhook-delivery-unreachable-reason"),
         KnownVersion::new(279, "saga-abandonment-metadata"),
         KnownVersion::new(278, "psu-presence-alert-classes"),
