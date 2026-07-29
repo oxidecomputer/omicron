@@ -17,7 +17,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use futures::future::BoxFuture;
-use tufaceous_artifact_v2::KnownArtifactTags;
+use tufaceous_artifact_v2::{KnownArtifactTags, RotBootloaderTags, RotTags};
 use uuid::Uuid;
 
 use super::super::schema::{DataMigrationFns, MigrationContext};
@@ -103,6 +103,29 @@ fn after<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
             let round_trip =
                 known.to_tags().expect("failed to serialize known tags");
             assert_eq!(tags, round_trip, "tags for {id} did not round trip");
+
+            // The old column type for `sign` was BYTES; make sure the value is
+            // still a 64-character hex string.
+            if let KnownArtifactTags::Rot(RotTags {
+                rot_rkth: Some(rot_rkth),
+                ..
+            })
+            | KnownArtifactTags::RotBootloader(RotBootloaderTags {
+                rot_rkth: Some(rot_rkth),
+                ..
+            }) = known
+            {
+                let Ok(bytes) = hex::decode(rot_rkth.as_str()) else {
+                    panic!(
+                        "{id}'s rot_rkth tag ({rot_rkth:?}) is not a hex string"
+                    );
+                };
+                assert_eq!(
+                    bytes.len(),
+                    32,
+                    "{id}'s rot_rkth tag is an unexpected length"
+                );
+            }
         }
 
         // be kind, rewind

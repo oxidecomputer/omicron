@@ -1,5 +1,9 @@
 SET LOCAL disallow_full_table_scans = 'off';
 
+-- The sign column is BYTES but the bytes it is storing is an ASCII-encoded hex
+-- string. We want the ASCII as-is, not re-hexed.
+SET LOCAL bytea_output = 'escape';
+
 -- 'kind' tag, used by all artifacts
 INSERT INTO omicron.public.tuf_artifact_tag (tuf_artifact_id, key, value)
     SELECT id, 'kind', (CASE kind
