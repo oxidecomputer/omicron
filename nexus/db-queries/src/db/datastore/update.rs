@@ -16,6 +16,7 @@ use crate::db::datastore::target_release::RecentTargetReleases;
 use crate::db::model::SemverVersion;
 use crate::db::pagination::Paginator;
 use crate::db::pagination::paginated;
+use crate::db::pagination::paginated_multicolumn;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
 use diesel::result::Error as DieselError;
@@ -314,6 +315,8 @@ impl DataStore {
         opctx: &OpContext,
     ) -> LookupResult<ArtifactConfig> {
         opctx.check_complex_operations_allowed()?;
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
 
         let generation = self.tuf_get_generation(opctx).await?;
         let repos = self.tuf_list_repos_unpruned_batched(opctx).await?;
@@ -332,13 +335,33 @@ impl DataStore {
 
         let mut config =
             ArtifactConfig { generation, artifacts: BTreeSet::new() };
-        for repo in repos {
-            config.artifacts.extend(
-                self.tuf_list_repo_artifacts_without_tags(opctx, repo.id())
-                    .await?
-                    .into_iter()
-                    .map(|artifact| artifact.sha256.0),
-            );
+        let mut paginator = Paginator::new(
+            SQL_BATCH_SIZE,
+            dropshot::PaginationOrder::Ascending,
+        );
+        while let Some(p) = paginator.next() {
+            use nexus_db_schema::schema::tuf_artifact::dsl as tuf_artifact_dsl;
+            use nexus_db_schema::schema::tuf_repo_artifact::dsl;
+
+            let pagination_columns = (dsl::tuf_repo_id, dsl::tuf_artifact_id);
+            let join_on_dsl = tuf_artifact_dsl::id.eq(dsl::tuf_artifact_id);
+
+            let batch = paginated_multicolumn(
+                dsl::tuf_repo_artifact,
+                pagination_columns,
+                &p.current_pagparams(),
+            )
+            .filter(dsl::tuf_repo_id.eq_any(repos.iter().map(|repo| repo.id)))
+            .inner_join(tuf_artifact_dsl::tuf_artifact.on(join_on_dsl))
+            .select((pagination_columns, tuf_artifact_dsl::sha256))
+            .load_async::<((Uuid, Uuid), ArtifactHash)>(&*conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+            paginator = p.found_batch(&batch, &|(key, _)| *key);
+            config
+                .artifacts
+                .extend(batch.into_iter().map(|(_, sha256)| sha256.0));
         }
         Ok(config)
     }
@@ -517,41 +540,6 @@ impl DataStore {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         let conn = self.pool_connection_authorized(opctx).await?;
         artifacts_for_repo(repo_id, &conn)
-            .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
-    }
-
-    /// List the artifacts present in a TUF repo without their tags.
-    ///
-    /// You almost certainly want `tuf_list_repo_artifacts` instead; this is
-    /// only useful if you don't need to choose a particular type of artifact.
-    pub async fn tuf_list_repo_artifacts_without_tags(
-        &self,
-        opctx: &OpContext,
-        repo_id: TufRepoUuid,
-    ) -> ListResultVec<TufArtifact> {
-        use nexus_db_schema::schema::tuf_artifact::dsl as tuf_artifact_dsl;
-        use nexus_db_schema::schema::tuf_repo_artifact::dsl as tuf_repo_artifact_dsl;
-
-        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
-        let conn = self.pool_connection_authorized(opctx).await?;
-
-        // We don't bother paginating in this method because all callers need
-        // to fully read the list of artifacts in a single repository, and the
-        // number of artifacts in a repository is controlled by the release
-        // engineering tooling, not users. As of July 2026 the artifact count is
-        // <100, and these numbers are expected to grow very slowly.
-
-        let join_on_dsl =
-            tuf_artifact_dsl::id.eq(tuf_repo_artifact_dsl::tuf_artifact_id);
-        tuf_repo_artifact_dsl::tuf_repo_artifact
-            .filter(
-                tuf_repo_artifact_dsl::tuf_repo_id
-                    .eq(nexus_db_model::to_db_typed_uuid(repo_id)),
-            )
-            .inner_join(tuf_artifact_dsl::tuf_artifact.on(join_on_dsl))
-            .select(TufArtifact::as_select())
-            .load_async(&*conn)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
