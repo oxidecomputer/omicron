@@ -9,6 +9,7 @@ use dropshot::test_util::ClientTestContext;
 use gateway_test_utils::setup::GatewayTestContext;
 use http::StatusCode;
 use omicron_test_utils::dev::poll::{CondCheckError, wait_for_condition};
+use sled_hardware_types::BaseboardId;
 use wicketd_commission_client::Error;
 use wicketd_commission_types_versions::latest::inventory::{
     SpIdentifier, SpType,
@@ -51,10 +52,14 @@ impl WicketdTestContext {
         let args = wicketd::Args {
             address: LOCALHOST_PORT_0,
             artifact_address: LOCALHOST_PORT_0,
+            bootstrap_agent_lockstep_address: LOCALHOST_PORT_0,
             commission_address: LOCALHOST_PORT_0,
             mgs_address,
             nexus_proxy_address: LOCALHOST_PORT_0,
-            baseboard: None,
+            baseboard_id: BaseboardId {
+                serial_number: "SimGimlet01".to_string(),
+                part_number: "i86pc".to_string(),
+            },
             rack_subnet: None,
         };
 

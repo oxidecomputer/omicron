@@ -217,11 +217,19 @@ async fn test_omdb_success_cases() {
     //    consumable ereports, so every post-load analysis is a no-op.)
     // 4. `fm_rendezvous` runs against the loaded sitrep, so its status shows
     //    the executed operations rather than "no FM situation report loaded".
+    // 5. `fm_sitrep_history_pruner` runs, determines we have not reached the
+    //    sitrep history limit, and does nothing. However, this task's status
+    //    will print the count of sitrep history entries currently in the
+    //    database, so activating it explicitly *after* analysis has committed
+    //    the first sitrep ensures that its most recent status always says
+    //    there's 1 sitrep, rather than depending on whether it ran before or
+    //    after the analysis task.
     let lockstep_client = &cptestctx.lockstep_client;
     activate_background_task(lockstep_client, "fm_analysis").await;
     activate_background_task(lockstep_client, "fm_sitrep_loader").await;
     activate_background_task(lockstep_client, "fm_analysis").await;
     activate_background_task(lockstep_client, "fm_rendezvous").await;
+    activate_background_task(lockstep_client, "fm_sitrep_history_pruner").await;
 
     let mut output = String::new();
 

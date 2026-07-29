@@ -1748,7 +1748,7 @@ mod tests {
                     }
                 };
 
-                eprintln!("*** qorb lookup successful: {:?}", &**backends);
+                eprintln!("*** qorb lookup successful: {:?}", **backends);
             }
         }
 

@@ -5714,7 +5714,7 @@ mod test {
         );
         println!(
             "all collections: {:?}\n",
-            &[
+            [
                 collection1.id,
                 collection2.id,
                 collection3.id,
