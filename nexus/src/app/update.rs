@@ -180,6 +180,11 @@ impl UpdateContactSupportChecksInput {
             .map(|(sled, svcs)| (sled, svcs.clone()))
             .collect();
 
+        // Propolis zones are continuously torn down depending on the VMM state.
+        // When one of these zones is being torn down, it can cause
+        // false-positives with the contact_support field. In addition, offline
+        // services in these zones do not affect an update. We remove all
+        // services from propolis zones from the problems list.
         enabled_smf_services_not_online_by_sled.retain(|_sled, svcs_result| {
             match svcs_result {
                 SvcsEnabledNotOnlineResult::SvcsEnabledNotOnline(svcs) => {
