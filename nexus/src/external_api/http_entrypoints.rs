@@ -59,8 +59,8 @@ use nexus_types::external_api::ip_pool::IpPool;
 use nexus_types::external_api::ip_pool::IpPoolRange;
 use nexus_types::external_api::metrics::SystemMetricsPathParam;
 use nexus_types::external_api::networking::{
-    SwitchUnnumberedInterface, SwitchUnnumberedManagerState,
-    UnnumberedInterfacePath,
+    SwitchResults, SwitchUnnumberedInterface, UnnumberedInterfacePath,
+    UnnumberedInterfaces, UnnumberedManagerState,
 };
 use nexus_types::external_api::physical_disk::{
     PhysicalDisk, PhysicalDiskAdoptionRequest, PhysicalDiskAdoptionRequestPath,
@@ -4792,7 +4792,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
 
     async fn networking_bgp_unnumbered_manager_status(
         rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<Vec<SwitchUnnumberedManagerState>>, HttpError>
+    ) -> Result<HttpResponseOk<SwitchResults<UnnumberedManagerState>>, HttpError>
     {
         let apictx = rqctx.context();
         let handler = async {
@@ -4812,7 +4812,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
 
     async fn networking_bgp_unnumbered_interface_list(
         rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<Vec<SwitchUnnumberedInterface>>, HttpError> {
+    ) -> Result<HttpResponseOk<SwitchResults<UnnumberedInterfaces>>, HttpError>
+    {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;

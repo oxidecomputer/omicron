@@ -339,11 +339,14 @@ pub mod networking {
     pub use crate::v2026_07_29_00::networking::DiscoveredRouter;
     pub use crate::v2026_07_29_00::networking::PendingUnnumberedInterface;
     pub use crate::v2026_07_29_00::networking::RouterDiscoveryRuntimeState;
+    pub use crate::v2026_07_29_00::networking::SwitchResult;
+    pub use crate::v2026_07_29_00::networking::SwitchResults;
+    pub use crate::v2026_07_29_00::networking::SwitchUnavailableReason;
     pub use crate::v2026_07_29_00::networking::SwitchUnnumberedInterface;
-    pub use crate::v2026_07_29_00::networking::SwitchUnnumberedManagerState;
     pub use crate::v2026_07_29_00::networking::UnnumberedInterface;
     pub use crate::v2026_07_29_00::networking::UnnumberedInterfacePath;
     pub use crate::v2026_07_29_00::networking::UnnumberedInterfaceStatus;
+    pub use crate::v2026_07_29_00::networking::UnnumberedInterfaces;
     pub use crate::v2026_07_29_00::networking::UnnumberedManagerState;
 }
 

@@ -4,88 +4,109 @@
 
 use nexus_db_queries::context::OpContext;
 use nexus_types::external_api::networking::{
-    SwitchUnnumberedInterface, SwitchUnnumberedManagerState,
+    SwitchResult, SwitchResults, SwitchUnavailableReason,
+    SwitchUnnumberedInterface, UnnumberedInterfaces, UnnumberedManagerState,
 };
 use omicron_common::api::external::Error;
 use omicron_common::tfport::TfportInterfaceName;
 use sled_agent_types::early_networking::SwitchSlot;
-use strum::IntoEnumIterator;
 
 impl super::Nexus {
     pub async fn bgp_unnumbered_manager_status(
         &self,
         _opctx: &OpContext,
-    ) -> Result<Vec<SwitchUnnumberedManagerState>, Error> {
+    ) -> Result<SwitchResults<UnnumberedManagerState>, Error> {
         // Ask each switch about the BGP unnumbered interfaces it manages.
         let mg_clients = self.mg_clients().await.map_err(|err| {
             Error::internal_error(&format!("failed to get mg clients: {err}"))
         })?;
-        let mut result = Vec::new();
-        for switch_slot in SwitchSlot::iter() {
-            // Log an error if we only have one scrimlet, but keep going.
-            // We still want to return anything we're able to collect.
-            let Some(mg_client) = mg_clients.get(&switch_slot) else {
-                warn!(
-                    self.log, "no mgd client found for switch slot";
-                    "switch-slot" => ?switch_slot,
-                );
-                continue;
-            };
-            let status = mg_client
-                .get_bgp_unnumbered_manager_state()
-                .await
-                .map_err(|e| {
-                    Error::internal_error(&format!(
-                        "maghemite get BGP unnumbered manager state: {e}"
-                    ))
-                })?
-                .into_inner();
-
-            result.push(SwitchUnnumberedManagerState {
-                switch_slot,
-                state: status.into(),
-            });
-        }
-        Ok(result)
+        let query = |switch_slot| {
+            let mg_clients = &mg_clients;
+            async move {
+                // Log an error if we only have one scrimlet, but keep going.
+                // We still want to return anything we're able to collect.
+                let Some(mg_client) = mg_clients.get(&switch_slot) else {
+                    warn!(
+                        self.log, "no mgd client found for switch slot";
+                        "switch-slot" => ?switch_slot,
+                    );
+                    return SwitchResult::Unavailable {
+                        reason: SwitchUnavailableReason::MgdUnresolved,
+                    };
+                };
+                match mg_client.get_bgp_unnumbered_manager_state().await {
+                    Ok(status) => SwitchResult::Available {
+                        value: status.into_inner().into(),
+                    },
+                    Err(err) => {
+                        error!(
+                            self.log,
+                            "failed to get BGP unnumbered manager state";
+                            "switch-slot" => ?switch_slot,
+                            "error" => %err,
+                        );
+                        SwitchResult::Unavailable {
+                            reason: SwitchUnavailableReason::QueryFailed,
+                        }
+                    }
+                }
+            }
+        };
+        Ok(SwitchResults {
+            switch0: query(SwitchSlot::Switch0).await,
+            switch1: query(SwitchSlot::Switch1).await,
+        })
     }
 
     pub async fn bgp_unnumbered_interfaces(
         &self,
         _opctx: &OpContext,
-    ) -> Result<Vec<SwitchUnnumberedInterface>, Error> {
+    ) -> Result<SwitchResults<UnnumberedInterfaces>, Error> {
         // Ask each switch about the BGP unnumbered interfaces it manages.
         let mg_clients = self.mg_clients().await.map_err(|err| {
             Error::internal_error(&format!("failed to get mg clients: {err}"))
         })?;
-        let mut result = Vec::new();
-        for switch_slot in SwitchSlot::iter() {
-            // Log an error if we only have one scrimlet, but keep going.
-            // We still want to return anything we're able to collect.
-            let Some(mg_client) = mg_clients.get(&switch_slot) else {
-                warn!(
-                    self.log, "no mgd client found for switch slot";
-                    "switch-slot" => ?switch_slot,
-                );
-                continue;
-            };
-            let interfaces = mg_client
-                .get_bgp_unnumbered_interfaces()
-                .await
-                .map_err(|e| {
-                    Error::internal_error(&format!(
-                        "maghemite get BGP unnumbered interfaces: {e}"
-                    ))
-                })?
-                .into_inner();
-
-            for interface in interfaces {
-                result.push(SwitchUnnumberedInterface {
-                    switch_slot,
-                    interface: interface.into(),
-                });
+        let query = |switch_slot| {
+            let mg_clients = &mg_clients;
+            async move {
+                // Log an error if we only have one scrimlet, but keep going.
+                // We still want to return anything we're able to collect.
+                let Some(mg_client) = mg_clients.get(&switch_slot) else {
+                    warn!(
+                        self.log, "no mgd client found for switch slot";
+                        "switch-slot" => ?switch_slot,
+                    );
+                    return SwitchResult::Unavailable {
+                        reason: SwitchUnavailableReason::MgdUnresolved,
+                    };
+                };
+                match mg_client.get_bgp_unnumbered_interfaces().await {
+                    Ok(interfaces) => SwitchResult::Available {
+                        value: UnnumberedInterfaces(
+                            interfaces
+                                .into_inner()
+                                .into_iter()
+                                .map(Into::into)
+                                .collect(),
+                        ),
+                    },
+                    Err(err) => {
+                        error!(
+                            self.log, "failed to get BGP unnumbered interfaces";
+                            "switch-slot" => ?switch_slot,
+                            "error" => %err,
+                        );
+                        SwitchResult::Unavailable {
+                            reason: SwitchUnavailableReason::QueryFailed,
+                        }
+                    }
+                }
             }
-        }
-        Ok(result)
+        };
+        Ok(SwitchResults {
+            switch0: query(SwitchSlot::Switch0).await,
+            switch1: query(SwitchSlot::Switch1).await,
+        })
     }
 
     pub async fn bgp_unnumbered_interface(

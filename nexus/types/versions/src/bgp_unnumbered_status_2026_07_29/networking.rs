@@ -36,9 +36,25 @@ pub struct UnnumberedInterfacePath {
 }
 
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
-pub struct SwitchUnnumberedManagerState {
-    pub switch_slot: SwitchSlot,
-    pub state: UnnumberedManagerState,
+#[schemars(rename = "{T}SwitchResults")]
+pub struct SwitchResults<T> {
+    pub switch0: SwitchResult<T>,
+    pub switch1: SwitchResult<T>,
+}
+
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+#[schemars(rename = "{T}SwitchResult")]
+pub enum SwitchResult<T> {
+    Available { value: T },
+    Unavailable { reason: SwitchUnavailableReason },
+}
+
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SwitchUnavailableReason {
+    MgdUnresolved,
+    QueryFailed,
 }
 
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
@@ -148,6 +164,9 @@ pub struct UnnumberedInterface {
     /// State of rx/tx loops (None if interface not active in NDP)
     pub ndp_state: RouterDiscoveryRuntimeState,
 }
+
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
+pub struct UnnumberedInterfaces(pub Vec<UnnumberedInterface>);
 
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
 pub struct SwitchUnnumberedInterface {

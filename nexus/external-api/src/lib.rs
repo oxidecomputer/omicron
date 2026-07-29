@@ -6125,7 +6125,11 @@ pub trait NexusExternalApi {
     async fn networking_bgp_unnumbered_manager_status(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<
-        HttpResponseOk<Vec<latest::networking::SwitchUnnumberedManagerState>>,
+        HttpResponseOk<
+            latest::networking::SwitchResults<
+                latest::networking::UnnumberedManagerState,
+            >,
+        >,
         HttpError,
     >;
 
@@ -6139,7 +6143,11 @@ pub trait NexusExternalApi {
     async fn networking_bgp_unnumbered_interface_list(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<
-        HttpResponseOk<Vec<latest::networking::SwitchUnnumberedInterface>>,
+        HttpResponseOk<
+            latest::networking::SwitchResults<
+                latest::networking::UnnumberedInterfaces,
+            >,
+        >,
         HttpError,
     >;
 

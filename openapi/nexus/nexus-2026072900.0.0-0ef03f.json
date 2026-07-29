@@ -11053,11 +11053,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "title": "Array_of_SwitchUnnumberedInterface",
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/SwitchUnnumberedInterface"
-                  }
+                  "$ref": "#/components/schemas/UnnumberedInterfacesSwitchResults"
                 }
               }
             }
@@ -11129,11 +11125,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "title": "Array_of_SwitchUnnumberedManagerState",
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/SwitchUnnumberedManagerState"
-                  }
+                  "$ref": "#/components/schemas/UnnumberedManagerStateSwitchResults"
                 }
               }
             }
@@ -29939,6 +29931,13 @@
           }
         ]
       },
+      "SwitchUnavailableReason": {
+        "type": "string",
+        "enum": [
+          "mgd_unresolved",
+          "query_failed"
+        ]
+      },
       "SwitchUnnumberedInterface": {
         "type": "object",
         "properties": {
@@ -29951,21 +29950,6 @@
         },
         "required": [
           "interface",
-          "switch_slot"
-        ]
-      },
-      "SwitchUnnumberedManagerState": {
-        "type": "object",
-        "properties": {
-          "state": {
-            "$ref": "#/components/schemas/UnnumberedManagerState"
-          },
-          "switch_slot": {
-            "$ref": "#/components/schemas/SwitchSlot"
-          }
-        },
-        "required": [
-          "state",
           "switch_slot"
         ]
       },
@@ -30507,6 +30491,67 @@
           }
         ]
       },
+      "UnnumberedInterfaces": {
+        "type": "array",
+        "items": {
+          "$ref": "#/components/schemas/UnnumberedInterface"
+        }
+      },
+      "UnnumberedInterfacesSwitchResult": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "available"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/UnnumberedInterfaces"
+              }
+            },
+            "required": [
+              "status",
+              "value"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "reason": {
+                "$ref": "#/components/schemas/SwitchUnavailableReason"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "unavailable"
+                ]
+              }
+            },
+            "required": [
+              "reason",
+              "status"
+            ]
+          }
+        ]
+      },
+      "UnnumberedInterfacesSwitchResults": {
+        "type": "object",
+        "properties": {
+          "switch0": {
+            "$ref": "#/components/schemas/UnnumberedInterfacesSwitchResult"
+          },
+          "switch1": {
+            "$ref": "#/components/schemas/UnnumberedInterfacesSwitchResult"
+          }
+        },
+        "required": [
+          "switch0",
+          "switch1"
+        ]
+      },
       "UnnumberedManagerState": {
         "type": "object",
         "properties": {
@@ -30523,6 +30568,61 @@
         "required": [
           "interfaces",
           "monitor_running"
+        ]
+      },
+      "UnnumberedManagerStateSwitchResult": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "available"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/UnnumberedManagerState"
+              }
+            },
+            "required": [
+              "status",
+              "value"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "reason": {
+                "$ref": "#/components/schemas/SwitchUnavailableReason"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "unavailable"
+                ]
+              }
+            },
+            "required": [
+              "reason",
+              "status"
+            ]
+          }
+        ]
+      },
+      "UnnumberedManagerStateSwitchResults": {
+        "type": "object",
+        "properties": {
+          "switch0": {
+            "$ref": "#/components/schemas/UnnumberedManagerStateSwitchResult"
+          },
+          "switch1": {
+            "$ref": "#/components/schemas/UnnumberedManagerStateSwitchResult"
+          }
+        },
+        "required": [
+          "switch0",
+          "switch1"
         ]
       },
       "UpdateStatus": {
