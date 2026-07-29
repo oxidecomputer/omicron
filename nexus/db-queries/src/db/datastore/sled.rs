@@ -416,6 +416,8 @@ struct CompleteLocalStorageAllocationLists<'a> {
 
     sled_target: SledUuid,
 
+    instance_id: InstanceUuid,
+
     /// All allocations that need to be performed
     allocations_to_perform: Vec<PossibleAllocationsForRequest<'a>>,
 
@@ -430,6 +432,7 @@ impl<'a> CompleteLocalStorageAllocationLists<'a> {
     fn new(
         log: &Logger,
         sled_target: SledUuid,
+        instance_id: InstanceUuid,
         mut zpools_for_sled: IdOrdMap<ZpoolGetForSledReservationResult>,
         local_storage_disks: &'a [LocalStorageDisk],
     ) -> Option<Self> {
@@ -556,6 +559,7 @@ impl<'a> CompleteLocalStorageAllocationLists<'a> {
         Some(Self {
             log: log.clone(),
             sled_target,
+            instance_id,
             allocations_to_perform,
             queue,
         })
@@ -566,7 +570,7 @@ impl<'a> CompleteLocalStorageAllocationLists<'a> {
     /// - the _current_ size usage for the pools now shows that there is not
     ///   enough room.
     ///
-    /// - any of the disks requiring an allocation were deleted
+    /// - any of the disks requiring an allocation were detached or deleted
     pub async fn prune_invalidated_allocation_lists(
         &mut self,
         opctx: &OpContext,
@@ -579,12 +583,12 @@ impl<'a> CompleteLocalStorageAllocationLists<'a> {
         let conn = datastore.pool_connection_authorized(opctx).await?;
 
         for allocation in &self.allocations_to_perform {
-            let deleted: bool = {
-                let disk_id = allocation.request.id();
+            let disk_id = allocation.request.id();
 
+            let disk = {
                 use nexus_db_schema::schema::disk::dsl;
 
-                let disk = dsl::disk
+                dsl::disk
                     .filter(dsl::id.eq(disk_id))
                     .select(db::model::Disk::as_select())
                     .first_async(&*conn)
@@ -594,16 +598,21 @@ impl<'a> CompleteLocalStorageAllocationLists<'a> {
                             .internal_context(
                                 "zpool_get_for_sled_reservation failed",
                             )
-                    })?;
-
-                disk.time_deleted().is_some()
+                    })?
             };
 
-            if deleted {
+            // Prune the entire space if the disk was deleted, or if the disk
+            // was detached.
+            if disk.time_deleted().is_some()
+                || disk.attach_instance_id
+                    != Some(self.instance_id.into_untyped_uuid())
+            {
                 self.queue.clear();
                 return Ok(());
             }
         }
+
+        // Prune incomplete allocations that are no longer valid.
 
         let zpools_for_sled = DataStore::zpool_get_for_sled_reservation(
             &conn,
@@ -1424,6 +1433,7 @@ impl DataStore {
                     match CompleteLocalStorageAllocationLists::new(
                         &log,
                         sled_target,
+                        instance_id,
                         zpools_for_sled,
                         &local_storage_disks,
                     ) {
@@ -8414,6 +8424,7 @@ pub(in crate::db::datastore) mod test {
             CompleteLocalStorageAllocationLists::new(
                 &logctx.log,
                 config.sleds[0].sled_id,
+                instance.id,
                 zpools_for_sled,
                 &local_storage_disks,
             )
@@ -8443,6 +8454,185 @@ pub(in crate::db::datastore) mod test {
 
             assert_eq!(result, Ok(0));
         }
+
+        let allocation_records: Vec<_> = {
+            let conn = datastore.pool_connection_for_tests().await.unwrap();
+
+            use nexus_db_schema::schema::local_storage_unencrypted_dataset_allocation::dsl;
+
+            dsl::local_storage_unencrypted_dataset_allocation
+                .filter(dsl::time_deleted.is_null())
+                .select(db::model::LocalStorageUnencryptedDatasetAllocation::as_select())
+                .load_async(&*conn)
+                .await
+                .unwrap()
+        };
+
+        assert_eq!(allocation_records.len(), 0);
+
+        validate_local_storage_allocations(&datastore).await;
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    // Ensure that if a disk is detached, no local storage allocation records
+    // are created for that disk.
+    #[tokio::test]
+    async fn local_storage_allocation_detached_fail() {
+        let logctx =
+            dev::test_setup_log("local_storage_allocation_detached_fail");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let config = LocalStorageTest {
+            // One sled, with one U2
+            sleds: vec![LocalStorageTestSled {
+                sled_id: SledUuid::new_v4(),
+                sled_serial: String::from("sled_0"),
+                u2s: (0..10)
+                    .map(|i| LocalStorageTestSledU2 {
+                        physical_disk_id: PhysicalDiskUuid::new_v4(),
+                        physical_disk_serial: format!("phys-{i}"),
+
+                        zpool_id: ZpoolUuid::new_v4(),
+                        control_plane_storage_buffer:
+                            external::ByteCount::from_gibibytes_u32(250),
+
+                        inventory_total_size:
+                            external::ByteCount::from_gibibytes_u32(1024),
+
+                        crucible_dataset_id: DatasetUuid::new_v4(),
+                        crucible_dataset_addr: format!(
+                            "[fd00:1122:3344:10{i}::1]:12345"
+                        )
+                        .parse()
+                        .unwrap(),
+
+                        local_storage_unencrypted_dataset_id:
+                            DatasetUuid::new_v4(),
+                    })
+                    .collect(),
+            }],
+            affinity_groups: vec![],
+            anti_affinity_groups: vec![],
+            instances: vec![LocalStorageTestInstance {
+                id: InstanceUuid::new_v4(),
+                name: "local".to_string(),
+                affinity: None,
+                ncpus: 16,
+                memory: external::ByteCount::from_gibibytes_u32(16),
+                disks: (0..10)
+                    .map(|i| LocalStorageTestInstanceDisk {
+                        id: Uuid::new_v4(),
+                        name: external::Name::try_from(format!("local-{i}"))
+                            .unwrap(),
+                        size: external::ByteCount::from_gibibytes_u32(128),
+                    })
+                    .collect(),
+            }],
+        };
+
+        setup_local_storage_allocation_test(&opctx, datastore, &config).await;
+
+        let instance =
+            Instance::from_local_storage_test_instance(&config.instances[0]);
+
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+
+        // Before "deleting" a disk, query for all local storage attached to an
+        // instance
+
+        let local_storage_disks: Vec<LocalStorageDisk> = datastore
+            .instance_list_disks_on_conn(
+                &conn,
+                instance.id.into_untyped_uuid(),
+                &PaginatedBy::Name(DataPageParams {
+                    marker: None,
+                    direction: dropshot::PaginationOrder::Ascending,
+                    limit: std::num::NonZeroU32::new(MAX_DISKS_PER_INSTANCE)
+                        .unwrap(),
+                }),
+            )
+            .await
+            .unwrap()
+            .into_iter()
+            .filter_map(|disk| match disk {
+                db::datastore::Disk::LocalStorage(disk) => Some(disk),
+                db::datastore::Disk::Crucible(_) => None,
+            })
+            .collect();
+
+        // Detach the disk
+
+        {
+            let (.., authz_instance) = LookupPath::new(&opctx, datastore)
+                .instance_id(instance.id.into_untyped_uuid())
+                .lookup_for(authz::Action::Modify)
+                .await
+                .expect("instance must exist");
+
+            let (.., authz_disk) = LookupPath::new(&opctx, datastore)
+                .disk_id(config.instances[0].disks[1].id)
+                .lookup_for(authz::Action::Read)
+                .await
+                .expect("disk must exist");
+
+            datastore
+                .instance_detach_disk(&opctx, &authz_instance, &authz_disk)
+                .await
+                .unwrap();
+        }
+
+        // Construct a SledResourceVmm by hand for directly calling the insert
+        // resource query
+
+        let resource = SledResourceVmm::new(
+            PropolisUuid::new_v4(),
+            instance.id,
+            config.sleds[0].sled_id,
+            instance.resources(),
+            SledReservationReason::Start.into(),
+        );
+
+        // Duplicate the loop logic that performs the allocation search
+
+        let zpools_for_sled = DataStore::zpool_get_for_sled_reservation(
+            &conn,
+            &opctx,
+            config.sleds[0].sled_id,
+        )
+        .await
+        .unwrap();
+
+        let mut complete_allocation_lists =
+            CompleteLocalStorageAllocationLists::new(
+                &logctx.log,
+                config.sleds[0].sled_id,
+                instance.id,
+                zpools_for_sled,
+                &local_storage_disks,
+            )
+            .unwrap();
+
+        // Skip the pruning step, as that would prune the detached disk - what
+        // we're testing here is that the insertion CTE does not perform a
+        // reservation if the disk is detached.
+
+        let Some(allocations) = complete_allocation_lists.next() else {
+            panic!("no allocations returned!");
+        };
+
+        let result = sled_insert_resource_query(
+            &resource,
+            &LocalStorageAllocationRequired::Yes { allocations },
+        )
+        .execute_async(&*conn)
+        .await;
+
+        // This should insert zero rows.
+
+        assert_eq!(result, Ok(0));
 
         let allocation_records: Vec<_> = {
             let conn = datastore.pool_connection_for_tests().await.unwrap();
