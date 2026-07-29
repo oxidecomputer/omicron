@@ -26,6 +26,7 @@ pub mod disk;
 pub mod policy;
 pub mod resolvable_files;
 pub mod snake_case_result;
+pub mod tfport;
 pub mod update;
 pub mod vlan;
 pub mod zpool_name;

@@ -7,12 +7,9 @@ use nexus_types::external_api::networking::{
     SwitchUnnumberedInterface, SwitchUnnumberedManagerState,
 };
 use omicron_common::api::external::Error;
+use omicron_common::tfport::TfportInterfaceName;
 use sled_agent_types::early_networking::SwitchSlot;
 use strum::IntoEnumIterator;
-
-fn maghemite_interface_name(interface_name: &str) -> String {
-    format!("tfport{interface_name}_0")
-}
 
 impl super::Nexus {
     pub async fn bgp_unnumbered_manager_status(
@@ -106,9 +103,11 @@ impl super::Nexus {
             ))
         })?;
 
-        let interface_name = maghemite_interface_name(&interface_name);
+        let interface_name =
+            TfportInterfaceName::from_port_name(&interface_name)
+                .map_err(|err| Error::invalid_request(&err.to_string()))?;
         let interface = mg_client
-            .get_bgp_unnumbered_interface_detail(&interface_name)
+            .get_bgp_unnumbered_interface_detail(interface_name.as_str())
             .await
             .map_err(|e| {
                 Error::internal_error(&format!(

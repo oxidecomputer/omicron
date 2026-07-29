@@ -15,18 +15,17 @@ use mg_admin_client::types::{
     UnnumberedManagerState as MgUnnumberedManagerState,
 };
 use mg_api_types::unnumbered::DiscoveredRouter as MgDiscoveredRouter;
+use omicron_common::tfport::TfportInterfaceName;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sled_agent_types_versions::v1::early_networking::SwitchSlot;
 
 fn nexus_interface_name(interface: String) -> String {
-    if let Some(interface) = interface
-        .strip_prefix("tfport")
-        .and_then(|interface| interface.strip_suffix("_0"))
-    {
-        interface.to_string()
-    } else {
-        interface
+    match interface.parse::<TfportInterfaceName>() {
+        Ok(interface_name) if interface_name.link_id() == 0 => {
+            interface_name.port_name().to_owned()
+        }
+        Ok(_) | Err(_) => interface,
     }
 }
 
@@ -216,5 +215,24 @@ impl From<MgDiscoveredRouter> for DiscoveredRouter {
             reachable_time,
             retrans_timer,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::nexus_interface_name;
+
+    #[test]
+    fn converts_link_zero_tfport_name() {
+        assert_eq!(nexus_interface_name("tfportqsfp0_0".into()), "qsfp0");
+    }
+
+    #[test]
+    fn preserves_nonzero_and_malformed_tfport_names() {
+        assert_eq!(
+            nexus_interface_name("tfportqsfp0_1".into()),
+            "tfportqsfp0_1"
+        );
+        assert_eq!(nexus_interface_name("tfport-bad".into()), "tfport-bad");
     }
 }

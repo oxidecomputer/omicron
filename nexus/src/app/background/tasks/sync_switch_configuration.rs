@@ -56,6 +56,7 @@ use nexus_types::identity::{Asset, Resource};
 use nexus_types::internal_api::background::IncompleteBootstoreConfigReport;
 use nexus_types::internal_api::background::SwitchPortSettingsManagerStatus;
 use omicron_common::OMICRON_DPD_TAG;
+use omicron_common::tfport::TfportInterfaceName;
 use omicron_common::{
     address::{Ipv6Subnet, get_sled_address},
     api::external::DataPageParams,
@@ -821,9 +822,23 @@ impl BackgroundTask for SwitchPortSettingsManager {
                             }
                             // Unnumbered peer - identified by interface
                             RouterPeerType::Unnumbered { router_lifetime } => {
+                                let interface = match TfportInterfaceName::from_port_name(
+                                    port.port_name.as_str(),
+                                ) {
+                                    Ok(interface) => interface,
+                                    Err(err) => {
+                                        error!(
+                                            log,
+                                            "invalid port name for tfport interface";
+                                            "port_name" => %port.port_name,
+                                            "error" => %err,
+                                        );
+                                        continue;
+                                    }
+                                };
                                 let peer_config = MgUnnumberedBgpPeerConfig {
                                     name: format!("unnumbered-{}", port.port_name),
-                                    interface: format!("tfport{}_0", port.port_name),
+                                    interface: interface.to_string(),
                                     router_lifetime: router_lifetime.as_u16(),
                                     hold_time: peer.hold_time.into(),
                                     idle_hold_time: peer.idle_hold_time.into(),
