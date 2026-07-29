@@ -4,10 +4,12 @@
 
 //! `omdb db sitrep` subcommands
 
+use crate::Omdb;
 use crate::db::DbFetchOptions;
 use crate::db::check_limit;
 use crate::helpers::const_max_len;
 use crate::helpers::datetime_opt_rfc3339_concise;
+use crate::helpers::should_colorize;
 use anyhow::Context;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::{DateTime, Utc};
@@ -239,17 +241,23 @@ impl SitrepSelector {
 }
 
 pub(super) async fn cmd_db_sitrep(
+    omdb: &Omdb,
     opctx: &OpContext,
     datastore: &DataStore,
     fetch_opts: &DbFetchOptions,
     args: &SitrepArgs,
 ) -> anyhow::Result<()> {
+    let colored =
+        should_colorize(omdb.output.color, supports_color::Stream::Stdout);
     match args.command {
         Commands::History(ref args) => {
             cmd_db_sitrep_history(opctx, datastore, fetch_opts, args).await
         }
         Commands::Info { sitrep, opts: ref args } => {
-            cmd_db_sitrep_show(opctx, datastore, fetch_opts, args, sitrep).await
+            cmd_db_sitrep_show(
+                opctx, datastore, fetch_opts, args, sitrep, colored,
+            )
+            .await
         }
         Commands::Current(ref args) => {
             cmd_db_sitrep_show(
@@ -258,12 +266,15 @@ pub(super) async fn cmd_db_sitrep(
                 fetch_opts,
                 args,
                 SitrepSelector::Current,
+                colored,
             )
             .await
         }
         Commands::AnalysisReport(ref args) => {
-            cmd_db_sitrep_analysis_report(opctx, datastore, fetch_opts, args)
-                .await
+            cmd_db_sitrep_analysis_report(
+                opctx, datastore, fetch_opts, args, colored,
+            )
+            .await
         }
     }
 }
@@ -347,6 +358,7 @@ async fn cmd_db_sitrep_show(
     _fetch_opts: &DbFetchOptions,
     opts: &ShowOptions,
     sitrep_selector: SitrepSelector,
+    colored: bool,
 ) -> anyhow::Result<()> {
     let current_version = datastore
         .fm_current_sitrep_version(&opctx)
@@ -499,7 +511,7 @@ async fn cmd_db_sitrep_show(
     if !cases.is_empty() {
         println!("\n{:=<80}\n", "== CASES ");
         for case in cases {
-            println!("{}", case.display_indented(4, Some(id)));
+            println!("{}", case.display_indented(4, Some(id)).colored(colored));
         }
     }
 
@@ -511,6 +523,7 @@ async fn cmd_db_sitrep_analysis_report(
     datastore: &DataStore,
     _fetch_opts: &DbFetchOptions,
     args: &AnalysisReportArgs,
+    colored: bool,
 ) -> anyhow::Result<()> {
     let &AnalysisReportArgs { sitrep, ref opts } = args;
     let (_, id) = sitrep.resolve(&datastore, &opctx).await?;
@@ -519,7 +532,7 @@ async fn cmd_db_sitrep_analysis_report(
         load_analysis_report(datastore, id).await.with_context(|| {
             format!("failed to load analysis report for {err_ctx}",)
         })?;
-    print_analysis_report(&report, opts.json)?;
+    print_analysis_report(&report, opts.json, colored)?;
 
     Ok(())
 }
@@ -527,6 +540,7 @@ async fn cmd_db_sitrep_analysis_report(
 fn print_analysis_report(
     report: &model::fm::SitrepAnalysisReport,
     json: bool,
+    colored: bool,
 ) -> anyhow::Result<()> {
     use nexus_types::fm::analysis_reports::{AnalysisReport, InputReport};
 
@@ -566,27 +580,33 @@ fn print_analysis_report(
 
     println!("\n{:=<80}", "== ANALYSIS INPUT REPORT ");
     match serde_json::from_value::<InputReport>(input_report.clone()) {
-        Ok(report) => println!("{}", report.display_multiline(0)),
+        Ok(report) => {
+            println!("{}", report.display_multiline(0).colored(colored))
+        }
         Err(e) => {
             eprintln!(
                 "WARNING: failed to parse input report; falling back to \
                 less structured output: {e}"
             );
-            let displayer = nexus_types::fm::display::Json::new(&input_report);
+            let displayer = nexus_types::fm::display::Json::new(&input_report)
+                .colored(colored);
             println!("{displayer}");
         }
     }
 
     println!("\n{:=<80}", "== ANALYSIS REPORT ");
     match serde_json::from_value::<AnalysisReport>(analysis_report.clone()) {
-        Ok(report) => println!("{}", report.display_multiline(0)),
+        Ok(report) => {
+            println!("{}", report.display_multiline(0).colored(colored))
+        }
         Err(e) => {
             eprintln!(
                 "WARNING: failed to parse analysis report; falling back to \
                 less structured output: {e}"
             );
             let displayer =
-                nexus_types::fm::display::Json::new(&analysis_report);
+                nexus_types::fm::display::Json::new(&analysis_report)
+                    .colored(colored);
             println!("{displayer}");
         }
     }

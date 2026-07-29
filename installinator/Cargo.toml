@@ -48,7 +48,8 @@ thiserror.workspace = true
 tokio = { workspace = true, features = ["full"] }
 tufaceous-artifact.workspace = true
 tufaceous-lib.workspace = true
-update-engine.workspace = true
+oxide-update-engine.workspace = true
+oxide-update-engine-types.workspace = true
 omicron-workspace-hack.workspace = true
 
 [dev-dependencies]

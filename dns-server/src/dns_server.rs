@@ -237,7 +237,7 @@ fn dns_record_to_record(
             let tgt = Name::from_str(&target).map_err(|error| {
                 RequestError::ServFail(anyhow!(
                     "serialization failed due to bad SRV target {:?}: {:#}",
-                    &target,
+                    target,
                     error
                 ))
             })?;
@@ -252,7 +252,7 @@ fn dns_record_to_record(
             let nsdname = Name::from_str(&nsdname).map_err(|error| {
                 RequestError::ServFail(anyhow!(
                     "serialization failed due to bad NS dname {:?}: {:#}",
-                    &nsdname,
+                    nsdname,
                     error
                 ))
             })?;

@@ -5,13 +5,13 @@
 //! Support for the TOML file we give to and accept from clients for setting
 //! (most of) the rack setup configuration.
 
+use iddqd::IdOrdMap;
 use serde::Serialize;
 use sled_agent_types::early_networking::BgpConfig;
 use sled_agent_types::early_networking::LldpPortConfig;
 use sled_agent_types::early_networking::RouteConfig;
-use sled_hardware_types::Baseboard;
+use sled_hardware_types::BaseboardId;
 use std::borrow::Cow;
-use std::collections::BTreeSet;
 use std::fmt;
 use toml_edit::Array;
 use toml_edit::ArrayOfTables;
@@ -188,27 +188,16 @@ fn format_multiline_array(array: &mut Array) {
     array.set_trailing("\n");
 }
 
-fn build_sleds_array(sleds: &BTreeSet<BootstrapSledDescription>) -> Array {
+fn build_sleds_array(sleds: &IdOrdMap<BootstrapSledDescription>) -> Array {
     // Helper function to build the comment attached to a given sled.
     fn sled_comment(sled: &BootstrapSledDescription, end: &str) -> String {
         let ip = sled
             .bootstrap_ip
             .map(|ip| Cow::from(format!("{ip}")))
             .unwrap_or_else(|| Cow::from("IP address UNKNOWN"));
-        match &sled.baseboard {
-            Baseboard::Gimlet { identifier, model, revision } => {
-                format!(
-                    " # {identifier} (model {model} revision {revision}, {ip})\
-                     {end}"
-                )
-            }
-            Baseboard::Unknown => {
-                format!(" # UNKNOWN SLED ({ip}){end}")
-            }
-            Baseboard::Pc { identifier, model } => {
-                format!(" # NON-OXIDE {identifier} (model {model}, {ip}){end}")
-            }
-        }
+
+        let BaseboardId { serial_number, part_number } = &sled.baseboard_id;
+        format!(" # {serial_number} (model {part_number}, {ip}){end}")
     }
 
     let mut array = Array::new();

@@ -179,7 +179,8 @@ impl From<UserSpecifiedImportExportPolicy> for ImportExportPolicy {
 #[cfg(test)]
 mod tests {
     use crate::latest::rack_setup::{
-        LinkFec, LinkSpeed, ManualPortConfig, UplinkAddress,
+        LinkFec, LinkSpeed, ManualPortConfig, RackOperation,
+        RackOperationState, RssStepInfo, UplinkAddress,
         UserSpecifiedImportExportPolicy, UserSpecifiedPortConfig,
         UserSpecifiedRouterPeerAddr, UserSpecifiedUplinkAddressConfig,
     };
@@ -469,5 +470,47 @@ mod tests {
     #[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
     struct PortConfigWrapper {
         port: UserSpecifiedPortConfig,
+    }
+
+    #[test]
+    fn rack_operation_kind_is_an_open_set() {
+        let operation: RackOperation =
+            serde_json::from_value(serde_json::json!({
+                "kind": "multirack_join",
+                "id": "66666666-6666-4666-8666-666666666666",
+                "state": { "state": "completed" },
+            }))
+            .expect("an unknown kind deserializes");
+        assert_eq!(
+            operation.kind.as_str(),
+            "multirack_join",
+            "the unknown kind is preserved verbatim"
+        );
+        assert_eq!(operation.state, RackOperationState::Completed);
+
+        let value = serde_json::to_value(&operation).expect("serializes");
+        assert_eq!(
+            value["kind"],
+            serde_json::json!("multirack_join"),
+            "the unknown kind survives a round-trip"
+        );
+    }
+
+    #[test]
+    fn rss_step_info_rejects_zero() {
+        for field in ["step", "total_steps"] {
+            let mut value = serde_json::json!({
+                "step": 4,
+                "total_steps": 16,
+                "description": "Initializing sleds",
+            });
+            value[field] = serde_json::json!(0);
+            let err = serde_json::from_value::<RssStepInfo>(value)
+                .expect_err("a zero value is rejected");
+            assert!(
+                err.to_string().contains("nonzero"),
+                "the {field} error should mention nonzero, got: {err}"
+            );
+        }
     }
 }

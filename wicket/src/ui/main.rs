@@ -240,13 +240,11 @@ fn location_spans(location: &GetLocationResponse) -> Vec<Span<'static>> {
             format!("Sled {}", id.slot),
             style::connected(),
         ));
-    } else if let Some(baseboard) = location.sled_baseboard.as_ref() {
+    } else {
         spans.push(Span::styled(
-            format!("Sled {}", baseboard.identifier()),
+            format!("Sled {}", location.sled_baseboard_id.serial_number),
             style::connected(),
         ));
-    } else {
-        spans.push(Span::styled("Sled UNKNOWN", style::delayed()));
     };
     spans.push(Span::styled("/", style::divider()));
     if let Some(id) = location.switch_id.as_ref() {

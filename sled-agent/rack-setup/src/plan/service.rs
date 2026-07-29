@@ -32,8 +32,8 @@ use omicron_common::address::{
     CP_SERVICES_RESERVED_ADDRESSES, DDMD_PORT, DENDRITE_PORT, DNS_HTTP_PORT,
     DNS_PORT, Ipv6Subnet, MGD_PORT, MGS_PORT, NEXUS_INTERNAL_PORT,
     NEXUS_LOCKSTEP_PORT, NTP_PORT, NUM_SOURCE_NAT_PORTS, REPO_DEPOT_PORT,
-    ReservedRackSubnet, SLED_PREFIX, SLED_RESERVED_ADDRESSES, get_sled_address,
-    get_switch_zone_address,
+    ReservedRackSubnet, SLED_PREFIX_LENGTH, SLED_RESERVED_ADDRESSES,
+    get_sled_address, get_switch_zone_address,
 };
 use omicron_common::api::external::{Generation, MacAddr, Vni};
 use omicron_common::api::internal::shared::{
@@ -178,7 +178,7 @@ impl SledConfig {
 pub struct PlannedSledDescription {
     pub underlay_address: SocketAddrV6,
     pub sled_id: SledUuid,
-    pub subnet: Ipv6Subnet<SLED_PREFIX>,
+    pub subnet: Ipv6Subnet<SLED_PREFIX_LENGTH>,
     pub config: SledConfig,
     pub last_allocated_ip_subnet_offset: LastAllocatedSubnetIpOffset,
 }
@@ -995,12 +995,12 @@ impl ServicePlan {
 
 struct AddressBumpAllocator {
     sled_id: SledUuid,
-    subnet: Ipv6Subnet<SLED_PREFIX>,
+    subnet: Ipv6Subnet<SLED_PREFIX_LENGTH>,
     last_addr_offset: u16,
 }
 
 impl AddressBumpAllocator {
-    fn new(sled_id: SledUuid, subnet: Ipv6Subnet<SLED_PREFIX>) -> Self {
+    fn new(sled_id: SledUuid, subnet: Ipv6Subnet<SLED_PREFIX_LENGTH>) -> Self {
         Self { sled_id, subnet, last_addr_offset: SLED_RESERVED_ADDRESSES }
     }
 
@@ -1038,7 +1038,7 @@ pub struct SledInfo {
     /// unique id for the sled agent
     pub sled_id: SledUuid,
     /// the sled's unique IPv6 subnet
-    subnet: Ipv6Subnet<SLED_PREFIX>,
+    subnet: Ipv6Subnet<SLED_PREFIX_LENGTH>,
     /// the address of the Sled Agent on the sled's subnet
     pub sled_address: SocketAddrV6,
     /// the inventory returned by the Sled
@@ -1059,7 +1059,7 @@ pub struct SledInfo {
 impl SledInfo {
     pub fn new(
         sled_id: SledUuid,
-        subnet: Ipv6Subnet<SLED_PREFIX>,
+        subnet: Ipv6Subnet<SLED_PREFIX_LENGTH>,
         sled_address: SocketAddrV6,
         inventory: Inventory,
         is_scrimlet: bool,
@@ -1150,14 +1150,18 @@ impl ServicePortBuilder {
             .collect::<BTreeSet<IpAddr>>();
         let internal_services_ip_pool = Box::new(
             config
-                .internal_services_ip_pool_ranges
-                .clone()
+                .service_ip_pools
+                .iter()
+                .flat_map(|config| config.ranges().iter().copied())
+                // Collect here is unavoidable, otherwise the iterator borrows
+                // the source data from &config. But at least we're collecting
+                // the _ranges_, not individual addresses.
+                .collect::<Vec<_>>()
                 .into_iter()
                 .flat_map(|range| range.iter())
-                // External DNS IPs are required to be present in
-                // `internal_services_ip_pool_ranges`, but we want to skip them
-                // when choosing IPs for non-DNS services, so filter them out
-                // here.
+                // External DNS IPs are required to be present in the ranges of
+                // all the `service_ip_pools`, but we want to skip them when
+                // choosing IPs for non-DNS services, so filter them out here.
                 .filter(move |ip| !external_dns_ips_set.contains(ip)),
         );
         let external_dns_ips = config.external_dns_ips.clone().into_iter();
@@ -1357,6 +1361,7 @@ mod tests {
     use super::*;
     use bootstrap_agent_lockstep_types::BootstrapAddressDiscovery;
     use bootstrap_agent_lockstep_types::RecoverySiloConfig;
+    use bootstrap_agent_lockstep_types::ServiceIpPoolConfig;
     use omicron_common::address::IpRange;
     use omicron_common::address::SLED_RESERVED_ADDRESSES;
     use omicron_common::api::external::ByteCount;
@@ -1371,7 +1376,7 @@ mod tests {
     use sled_agent_types::inventory::OmicronFileSourceResolverInventory;
     use sled_agent_types::inventory::SledCpuFamily;
     use sled_agent_types::inventory::SvcsEnabledNotOnlineResult;
-    use sled_hardware_types::Baseboard;
+    use sled_hardware_types::BaseboardId;
 
     const DISK_COUNT: usize = 10;
 
@@ -1380,7 +1385,7 @@ mod tests {
         let logctx = test_setup_log("bump_allocator_basics");
 
         let address = Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 0);
-        let subnet = Ipv6Subnet::<SLED_PREFIX>::new(address);
+        let subnet = Ipv6Subnet::<SLED_PREFIX_LENGTH>::new(address);
 
         let mut allocator =
             AddressBumpAllocator::new(SledUuid::new_v4(), subnet);
@@ -1419,7 +1424,7 @@ mod tests {
         let logctx = test_setup_log("bump_allocator_exhaustion");
 
         let address = Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 0);
-        let subnet = Ipv6Subnet::<SLED_PREFIX>::new(address);
+        let subnet = Ipv6Subnet::<SLED_PREFIX_LENGTH>::new(address);
 
         let mut allocator =
             AddressBumpAllocator::new(SledUuid::new_v4(), subnet);
@@ -1443,11 +1448,6 @@ mod tests {
         let ip = |string: &str| -> IpAddr { string.parse().unwrap() };
 
         // We still need these values to provision external services
-        let ip_pools = [
-            (ip("192.168.1.10"), ip("192.168.1.14")),
-            (ip("fd00::20"), ip("fd00::23")),
-            (ip("fd01::100"), ip("fd01::103")),
-        ];
         let dns_ips = [
             ip("192.168.1.10"),
             ip("192.168.1.13"),
@@ -1455,16 +1455,45 @@ mod tests {
             ip("fd01::100"),
             ip("fd01::103"),
         ];
+        let mut service_ip_pools = IdOrdMap::new();
+        service_ip_pools
+            .insert_unique(
+                ServiceIpPoolConfig::new(
+                    "ipv4-service-pool".parse().unwrap(),
+                    String::new(),
+                    vec![
+                        IpRange::try_from((
+                            ip("192.168.1.10"),
+                            ip("192.168.1.14"),
+                        ))
+                        .unwrap(),
+                    ],
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        service_ip_pools
+            .insert_unique(
+                ServiceIpPoolConfig::new(
+                    "ipv6-service-pool".parse().unwrap(),
+                    String::new(),
+                    vec![
+                        IpRange::try_from((ip("fd00::20"), ip("fd00::23")))
+                            .unwrap(),
+                        IpRange::try_from((ip("fd01::100"), ip("fd01::103")))
+                            .unwrap(),
+                    ],
+                )
+                .unwrap(),
+            )
+            .unwrap();
 
         let config = Config {
             trust_quorum_peers: None,
             bootstrap_discovery: BootstrapAddressDiscovery::OnlyOurs,
             ntp_servers: Vec::new(),
             dns_servers: Vec::new(),
-            internal_services_ip_pool_ranges: ip_pools
-                .iter()
-                .map(|(a, b)| IpRange::try_from((*a, *b)).unwrap())
-                .collect(),
+            service_ip_pools,
             external_dns_ips: dns_ips.to_vec(),
             external_dns_zone_name: "".to_string(),
             external_certificates: Vec::new(),
@@ -1501,7 +1530,7 @@ mod tests {
     fn test_sled_info() -> SledInfo {
         let sled_id = SledUuid::new_v4();
         let address = Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 0);
-        let subnet = Ipv6Subnet::<SLED_PREFIX>::new(address);
+        let subnet = Ipv6Subnet::<SLED_PREFIX_LENGTH>::new(address);
         let sled_address = get_sled_address(subnet);
         let is_scrimlet = true;
 
@@ -1530,7 +1559,10 @@ mod tests {
                 sled_id,
                 sled_agent_address: sled_address,
                 sled_role: SledRole::Scrimlet,
-                baseboard: Baseboard::Unknown,
+                baseboard_id: BaseboardId {
+                    part_number: "test".to_string(),
+                    serial_number: "test".to_string(),
+                },
                 usable_hardware_threads: 32,
                 usable_physical_ram: ByteCount::try_from(1_u64 << 40).unwrap(),
                 cpu_family: SledCpuFamily::AmdMilan,

@@ -23,7 +23,7 @@ use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::blueprint_zone_type;
 use omicron_common::address::DnsSubnet;
 use omicron_common::address::Ipv6Subnet;
-use omicron_common::address::SLED_PREFIX;
+use omicron_common::address::SLED_PREFIX_LENGTH;
 use omicron_common::api::external::Generation;
 use omicron_common::disk::DatasetKind;
 use omicron_common::disk::M2Slot;
@@ -60,7 +60,7 @@ fn check_underlay_ips(blippy: &mut Blippy<'_>) {
     let mut underlay_ips: BTreeMap<Ipv6Addr, &BlueprintZoneConfig> =
         BTreeMap::new();
     let mut sled_subnets_by_subnet: BTreeMap<
-        Ipv6Subnet<SLED_PREFIX>,
+        Ipv6Subnet<SLED_PREFIX_LENGTH>,
         SledUuid,
     > = BTreeMap::new();
     let mut rack_dns_subnets: BTreeSet<DnsSubnet> = BTreeSet::new();
