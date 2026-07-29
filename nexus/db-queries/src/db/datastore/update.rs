@@ -725,6 +725,19 @@ async fn insert_impl(
             // Now, reset `time_created` to now and ensure `time_pruned` is set
             // to NULL.
             existing_repo.time_created = chrono::Utc::now();
+            if existing_repo.time_pruned.is_some() {
+                // We're changing the set of unpruned repositories, so we need
+                // to bump the generation number.
+                debug!(log, "setting new TUF repo generation";
+                    "generation" => new_generation,
+                );
+                put_generation(
+                    &conn,
+                    old_generation.into(),
+                    new_generation.into(),
+                )
+                .await?;
+            }
             existing_repo.time_pruned = None;
             diesel::update(dsl::tuf_repo)
                 .filter(dsl::id.eq(existing_repo.id))
