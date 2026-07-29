@@ -26,7 +26,6 @@ use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
-use omicron_common::api::external::Vni;
 
 impl DataStore {
     /// Currently used to ensure that a NAT entry exists for an Instance.
@@ -103,84 +102,14 @@ impl DataStore {
         }
     }
 
-    /// Method for synchronizing service zone nat, called by `ServiceZoneNatTracker`
-    /// background task.
-    /// Expects a complete set of service zone nat entries.
-    /// Soft-deletes db entries that are not present in `nat_entries` parameter.
-    /// Creates missing entries idempotently.
-    ///
-    /// returns the number of records added
+    /// TODO-john FIXME delete stale service nat entries in DB migration, then
+    /// delete this method.
     pub async fn nat_sync_service_zones(
         &self,
-        opctx: &OpContext,
-        nat_entries: &[NatEntryValues],
+        _opctx: &OpContext,
+        _nat_entries: &[NatEntryValues],
     ) -> CreateResult<usize> {
-        use nexus_db_schema::schema::nat_entry::dsl;
-
-        let vni = nexus_db_model::Vni(Vni::SERVICES_VNI);
-
-        // find all active nat entries with the services vni
-        let result: Vec<NatEntry> = dsl::nat_entry
-            .filter(dsl::vni.eq(vni))
-            .filter(dsl::version_removed.is_null())
-            .select(NatEntry::as_select())
-            .load_async(&*self.pool_connection_authorized(opctx).await?)
-            .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
-
-        // determine what to keep and what to delete
-        let mut keep: Vec<_> = vec![];
-        let mut delete: Vec<_> = vec![];
-
-        for db_entry in result.iter() {
-            let values = NatEntryValues {
-                external_address: db_entry.external_address,
-                first_port: db_entry.first_port,
-                last_port: db_entry.last_port,
-                sled_address: db_entry.sled_address,
-                vni: db_entry.vni,
-                mac: db_entry.mac,
-            };
-
-            if nat_entries.contains(&values) {
-                keep.push(values);
-            } else {
-                delete.push(db_entry)
-            }
-        }
-
-        // delete entries that are not present in requested entries
-        for entry in delete {
-            if let Err(e) = self.nat_delete(opctx, entry).await {
-                error!(
-                    opctx.log,
-                    "failed to delete service zone nat entry";
-                    "error" => ?e,
-                    "entry" => ?entry,
-                );
-            }
-        }
-
-        // optimization: only attempt to add what is missing
-        let add = nat_entries.iter().filter(|entry| !keep.contains(entry));
-
-        let mut count = 0;
-
-        // insert nat_entries
-        for entry in add {
-            if let Err(e) = self.ensure_nat_entry(opctx, entry.clone()).await {
-                error!(
-                    opctx.log,
-                    "failed to ensure service zone nat entry";
-                    "error" => ?e,
-                    "entry" => ?entry,
-                );
-                continue;
-            }
-            count += 1;
-        }
-
-        Ok(count)
+        Ok(0)
     }
 
     /// Mark the provided NAT entry as removed in the database.
