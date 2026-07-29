@@ -589,7 +589,7 @@ impl<'a> CompleteLocalStorageAllocationLists<'a> {
                 dsl::disk
                     .filter(dsl::id.eq(disk_id))
                     .select(db::model::Disk::as_select())
-                    .first_async(&*conn)
+                    .first_async(conn)
                     .await
                     .map_err(|e| {
                         public_error_from_diesel(e, ErrorHandler::Server)
