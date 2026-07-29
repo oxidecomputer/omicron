@@ -20,7 +20,7 @@ use maplit::btreeset;
 use omicron_common::{
     disk::DiskIdentity,
     update::{
-        MupdateOverrideHashId, MupdateOverrideInfo, OmicronInstallManifest,
+        MupdateOverrideInfo, OmicronInstallManifest,
         OmicronInstallManifestSource,
     },
 };
@@ -34,7 +34,7 @@ use sled_agent_resolvable_files::ZoneImageSourceResolver;
 use sled_agent_types::resolvable_files::MupdateOverrideNonBootResult;
 use sled_storage::config::MountConfig;
 use tokio::sync::oneshot;
-use tufaceous_artifact_v2::{InstallinatorArtifactKind, KnownArtifactTags};
+use tufaceous_artifact_v2::KnownArtifactTags;
 use tufaceous_v2::{Repository, edit::RepositoryEditor};
 use wicket::OutputKind;
 use wicket_common::{
@@ -423,27 +423,6 @@ async fn installinator_fetch_impl(
     let log = wicketd_testctx.log();
     let temp_dir = Utf8TempDir::new().expect("temp dir created");
 
-    let mut expected_ids = BTreeSet::new();
-    for artifact in repo.artifacts() {
-        let Some(kind) =
-            artifact.known_tags().and_then(|tags| tags.to_installinator())
-        else {
-            continue;
-        };
-        let kind = match kind {
-            InstallinatorArtifactKind::Zone { zone_name } => {
-                format!("zone-{zone_name}")
-            }
-            InstallinatorArtifactKind::HostPhase2 => "host_phase2".into(),
-            InstallinatorArtifactKind::MeasurementCorpus => {
-                "measurement_corpus".into()
-            }
-            InstallinatorArtifactKind::ControlPlane => unreachable!(),
-        };
-        expected_ids
-            .insert(MupdateOverrideHashId { kind, hash: artifact.hash });
-    }
-
     let installinator_doc_hash = repo
         .artifacts()
         .get_only(&KnownArtifactTags::InstallinatorDocument)
@@ -552,8 +531,6 @@ async fn installinator_fetch_impl(
     let a_override_info =
         serde_json::from_slice::<MupdateOverrideInfo>(&a_override_bytes)
             .expect("mupdate override file successfully deserialized");
-
-    assert_eq!(a_override_info.hash_ids, expected_ids);
 
     // Ensure that the B path also had the same file written out.
     let b_override_path =

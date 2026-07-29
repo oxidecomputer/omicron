@@ -23,7 +23,7 @@ use installinator_common::{
 use omicron_common::{
     disk::M2Slot,
     update::{
-        MupdateOverrideHashId, MupdateOverrideInfo, OmicronInstallManifest,
+        MupdateOverrideInfo, OmicronInstallManifest,
         OmicronInstallManifestSource, OmicronInstallMetadata,
     },
 };
@@ -225,7 +225,7 @@ pub(crate) struct ArtifactWriter<'a> {
 impl<'a> ArtifactWriter<'a> {
     pub(crate) fn new(
         mupdate_id: MupdateUuid,
-        host_phase_2_id: &'a MupdateOverrideHashId,
+        host_phase_2_hash: ArtifactHash,
         host_phase_2_data: &'a BufList,
         control_plane_zones: &'a [ArtifactToWrite],
         measurement_corpus: &'a [ArtifactToWrite],
@@ -248,7 +248,7 @@ impl<'a> ArtifactWriter<'a> {
             is_host_phase_2_block_device: destination
                 .is_host_phase_2_block_device,
             artifacts: ArtifactsToWrite {
-                host_phase_2_id,
+                host_phase_2_hash,
                 host_phase_2_data,
                 control_plane_zones,
                 mupdate_id,
@@ -516,7 +516,7 @@ impl SlotWriteContext<'_> {
         .unwrap()
         .map_err(WriteError::ChecksumValidationError)?;
 
-        if computed_hash == self.artifacts.host_phase_2_id.hash {
+        if computed_hash == self.artifacts.host_phase_2_hash {
             StepSuccess::new(())
                 .with_message(format!(
                     "validated hash {computed_hash} \
@@ -527,7 +527,7 @@ impl SlotWriteContext<'_> {
             Err(WriteError::ChecksumValidationError(anyhow!(
                 "expected {} but computed {computed_hash} \
                  for host phase 2 written to {slot:?}",
-                self.artifacts.host_phase_2_id.hash
+                self.artifacts.host_phase_2_hash
             )))
         }
     }
@@ -560,7 +560,7 @@ impl SlotWriteContext<'_> {
 
 #[derive(Copy, Clone)]
 struct ArtifactsToWrite<'a> {
-    host_phase_2_id: &'a MupdateOverrideHashId,
+    host_phase_2_hash: ArtifactHash,
     host_phase_2_data: &'a BufList,
     control_plane_zones: &'a [ArtifactToWrite],
     mupdate_id: MupdateUuid,
@@ -591,7 +591,7 @@ impl ArtifactsToWrite<'_> {
             info!(
                 log,
                 "Failed to write host phase 2 image";
-                "artifact_id" => ?self.host_phase_2_id,
+                "hash" => ?self.host_phase_2_hash,
                 InlineErrorChain::new(&error),
             );
         })?;
@@ -616,7 +616,6 @@ impl ArtifactsToWrite<'_> {
             output_directory: &destinations.control_plane_dir,
             measurement_directory: &destinations.measurement_dir,
             zones: self.control_plane_zones,
-            host_phase_2_id: self.host_phase_2_id,
             measurement_corpus: self.measurement_corpus,
             mupdate_id: self.mupdate_id,
             mupdate_override_uuid: self.mupdate_override_uuid,
@@ -645,9 +644,9 @@ impl ArtifactsToWrite<'_> {
 }
 
 pub(crate) struct ArtifactToWrite {
-    pub(crate) id: MupdateOverrideHashId,
     pub(crate) file_name: String,
     pub(crate) data: BufList,
+    pub(crate) hash: ArtifactHash,
 }
 
 impl ArtifactToWrite {
@@ -656,7 +655,7 @@ impl ArtifactToWrite {
         OmicronInstallMetadata::new_v2(
             self.file_name.clone(),
             u64::try_from(file_size).expect("usize fits in u64"),
-            self.id.hash,
+            self.hash,
         )
     }
 }
@@ -667,7 +666,6 @@ struct ControlPlaneZoneWriteContext<'a> {
     output_directory: &'a Utf8Path,
     measurement_directory: &'a Utf8Path,
     zones: &'a [ArtifactToWrite],
-    host_phase_2_id: &'a MupdateOverrideHashId,
     measurement_corpus: &'a [ArtifactToWrite],
     mupdate_id: MupdateUuid,
     mupdate_override_uuid: MupdateOverrideUuid,
@@ -929,15 +927,8 @@ impl ControlPlaneZoneWriteContext<'_> {
         &self,
         mupdate_override_uuid: MupdateOverrideUuid,
     ) -> BufList {
-        let mut hash_ids = BTreeSet::new();
-        hash_ids.insert(self.host_phase_2_id.clone());
-        hash_ids.extend(self.zones.iter().map(|z| z.id.clone()));
-        hash_ids.extend(self.measurement_corpus.iter().map(|z| z.id.clone()));
-
-        let mupdate_override = MupdateOverrideInfo {
-            mupdate_uuid: mupdate_override_uuid,
-            hash_ids,
-        };
+        let mupdate_override =
+            MupdateOverrideInfo { mupdate_uuid: mupdate_override_uuid };
         let json_bytes = serde_json::to_vec(&mupdate_override)
             .expect("this serialization is infallible");
         BufList::from(json_bytes)
@@ -1332,21 +1323,18 @@ mod tests {
         let artifact_measurement_corpus: BufList =
             data3.into_iter().map(Bytes::from).collect();
 
-        let host_id = MupdateOverrideHashId {
-            kind: "host_phase2".into(),
-            hash: {
-                // The `validate_written_host_phase_2_hash()` will fail unless
-                // we give the actual hash of the host phase 2 data, so compute
-                // it here.
-                //
-                // We currently don't have any equivalent check on the control
-                // plane, so it can use `dummy_artifact_hash_id` instead.
-                let mut hasher = Sha256::new();
-                for chunk in artifact_host.iter() {
-                    hasher.update(chunk);
-                }
-                ArtifactHash(hasher.finalize().into())
-            },
+        let host_hash = {
+            // The `validate_written_host_phase_2_hash()` will fail unless
+            // we give the actual hash of the host phase 2 data, so compute
+            // it here.
+            //
+            // We currently don't have any equivalent check on the control
+            // plane, so it can use `dummy_artifact_hash_id` instead.
+            let mut hasher = Sha256::new();
+            for chunk in artifact_host.iter() {
+                hasher.update(chunk);
+            }
+            ArtifactHash(hasher.finalize().into())
         };
 
         // XXX: note we don't assert on the number of attempts it took to write
@@ -1393,28 +1381,22 @@ mod tests {
         // Assemble our one control plane artifact into a 1-long list of zone
         // images.
         let control_plane_zone_images = vec![ArtifactToWrite {
-            id: MupdateOverrideHashId {
-                kind: "zone".into(),
-                hash: ArtifactHash([0; 32]),
-            },
             file_name: destination_control_plane
                 .file_name()
                 .unwrap()
                 .to_string(),
             data: artifact_control_plane.clone(),
+            hash: ArtifactHash([0; 32]),
         }];
 
         let all_corpus = vec![ArtifactToWrite {
-            id: MupdateOverrideHashId {
-                kind: "measurement_corpus".into(),
-                hash: ArtifactHash([0; 32]),
-            },
             file_name: "blah".to_string(),
             data: artifact_measurement_corpus,
+            hash: ArtifactHash([0; 32]),
         }];
         let mut writer = ArtifactWriter::new(
             MupdateUuid::new_v4(),
-            &host_id,
+            host_hash,
             &artifact_host,
             &control_plane_zone_images,
             &all_corpus,

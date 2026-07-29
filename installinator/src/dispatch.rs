@@ -16,7 +16,6 @@ use installinator_common::{
     StepWarning, UpdateEngine,
 };
 use omicron_common::FileKv;
-use omicron_common::update::MupdateOverrideHashId;
 use oxide_update_engine::StepResult;
 use sha2::{Digest, Sha256};
 use sled_hardware::{DataLinks, is_oxide_sled};
@@ -360,24 +359,16 @@ impl InstallOpts {
                         let data = step.into_value(cx.token()).await;
                         match &artifact.kind {
                             InstallinatorArtifactKind::MeasurementCorpus => {
-                                let id = MupdateOverrideHashId {
-                                    kind: "measurement_corpus".into(),
-                                    hash: artifact.hash,
-                                };
                                 measurement_corpus.push(ArtifactToWrite {
-                                    id,
                                     file_name: artifact.file_name,
                                     data,
+                                    hash: artifact.hash,
                                 });
                             }
                             InstallinatorArtifactKind::HostPhase2 => {
-                                let id = MupdateOverrideHashId {
-                                    kind: "host_phase2".into(),
-                                    hash: artifact.hash,
-                                };
-                                host_phase_2 = Some((id, data));
+                                host_phase_2 = Some((artifact.hash, data));
                             }
-                            InstallinatorArtifactKind::Zone { zone_name } => {
+                            InstallinatorArtifactKind::Zone { .. } => {
                                 // We already checked this against other zones
                                 // in the same Installinator document, but we
                                 // might have extracted a legacy control plane
@@ -389,14 +380,10 @@ impl InstallOpts {
                                     "zone with file name {} seen twice",
                                     artifact.file_name
                                 );
-                                let id = MupdateOverrideHashId {
-                                    kind: format!("zone-{zone_name}"),
-                                    hash: artifact.hash,
-                                };
                                 zones.push(ArtifactToWrite {
-                                    id,
                                     file_name: artifact.file_name,
                                     data,
+                                    hash: artifact.hash,
                                 });
                             }
                             // When this branch is removed, remove the duplicate
@@ -423,14 +410,14 @@ impl InstallOpts {
                     }
                     // We checked there is at least one host phase 2 artifact
                     // when we read the installinator document.
-                    let (host_phase_2_id, host_phase_2_data) = host_phase_2
+                    let (host_phase_2_hash, host_phase_2_data) = host_phase_2
                         .expect(
                             "already checked presence of host phase 2 artifact",
                         );
 
                     let mut writer = ArtifactWriter::new(
                         lookup_id.update_id,
-                        &host_phase_2_id,
+                        host_phase_2_hash,
                         &host_phase_2_data,
                         &zones,
                         &measurement_corpus,
@@ -748,15 +735,9 @@ async fn read_legacy_control_plane_tarball(
             }
 
             zones.push(ArtifactToWrite {
-                id: MupdateOverrideHashId {
-                    // We normally write the zone name as found in oxide.json
-                    // but this string is for debugging and reading the inner
-                    // tarball is annoying.
-                    kind: format!("zone-{file_name}"),
-                    hash: ArtifactHash(hasher.finalize().into()),
-                },
                 file_name: file_name.to_owned(),
                 data,
+                hash: ArtifactHash(hasher.finalize().into()),
             });
         }
         ensure!(
