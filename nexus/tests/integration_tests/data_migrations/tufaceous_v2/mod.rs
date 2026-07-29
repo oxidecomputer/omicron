@@ -22,6 +22,56 @@ use uuid::Uuid;
 
 use super::super::schema::{DataMigrationFns, MigrationContext};
 
+struct KindCount {
+    /// A SQL pattern that can be used in a `LIKE` statement to match against
+    /// the Tufaceous v1 kind.
+    kind_like: &'static str,
+    /// The number of artifacts matching this kind in `tuf_artifact.sql`.
+    count: usize,
+    /// The number of tags this kind of artifact will generate when converted to
+    /// Tufaceous v2.
+    tags: usize,
+}
+
+/// `tuf_artifact.sql` contains these kinds of artifacts, from which we will
+/// calculate the correct number of tags in the database after the migration
+/// completes.
+const KINDS: [KindCount; 8] = [
+    KindCount { kind_like: "installinator_document", count: 86, tags: 1 },
+    KindCount { kind_like: "measurement_corpus", count: 16, tags: 1 },
+    KindCount { kind_like: "%_phase_1", count: 344, tags: 3 },
+    KindCount { kind_like: "%_phase_2", count: 172, tags: 2 },
+    KindCount { kind_like: "%_rot_image_%", count: 54, tags: 4 },
+    KindCount { kind_like: "%_rot_bootloader", count: 20, tags: 3 },
+    KindCount { kind_like: "%_sp", count: 240, tags: 2 },
+    KindCount { kind_like: "zone", count: 1032, tags: 2 },
+];
+/// The total number of rows in `tuf_artifact.sql`.
+const ARTIFACT_COUNT: usize = {
+    let mut n = 0;
+    let mut i = 0;
+    while i < KINDS.len() {
+        n += KINDS[i].count;
+        i += 1;
+    }
+    n
+};
+/// There are 6 sets of bart-signed images in the sample, each of which is
+/// listed with the same contents for 3 different kinds (gimlet/switch/psc). The
+/// number of distinct files in the database is thus 12 fewer.
+const ARTIFACT_FILE_COUNT: usize = ARTIFACT_COUNT - (6 * 2);
+/// The number of tags we expect the database to contain after the migration
+/// completes.
+const TAG_COUNT: usize = {
+    let mut n = 0;
+    let mut i = 0;
+    while i < KINDS.len() {
+        n += KINDS[i].count * KINDS[i].tags;
+        i += 1;
+    }
+    n
+};
+
 pub(crate) fn checks() -> DataMigrationFns {
     DataMigrationFns::new().before(before).after(after)
 }
@@ -33,7 +83,7 @@ fn before<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
             .execute(include_str!("tuf_artifact.sql"), &[])
             .await
             .expect("failed to execute tuf_artifact.sql");
-        assert_eq!(rows_inserted, 1964);
+        assert_eq!(rows_inserted, u64::try_from(ARTIFACT_COUNT).unwrap());
 
         // We expect that the number of rows returned here will match
         // the number of rows in `tuf_artifact_file` after the migration
@@ -49,8 +99,22 @@ fn before<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
                 .await
                 .expect("failed to query tuf_artifact (pre-migration)")
                 .len(),
-            1952
+            ARTIFACT_FILE_COUNT
         );
+
+        // Check our per-kind counts above.
+        for KindCount { kind_like, count, .. } in KINDS {
+            assert_eq!(
+                ctx.client
+                    .query_one_scalar::<i64, _>(
+                        "SELECT COUNT(*) FROM tuf_artifact WHERE kind LIKE $1",
+                        &[&kind_like]
+                    )
+                    .await
+                    .expect("failed to count per-kind artifacts"),
+                i64::try_from(count).unwrap(),
+            );
+        }
     })
 }
 
@@ -61,7 +125,7 @@ fn after<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
             .query("SELECT sha256 FROM tuf_artifact", &[])
             .await
             .expect("failed to query tuf_artifact");
-        assert_eq!(artifact_rows.len(), 1964); // matches above
+        assert_eq!(artifact_rows.len(), ARTIFACT_COUNT);
         let artifact_sha256 = artifact_rows
             .into_iter()
             .map(|row| row.get("sha256"))
@@ -71,7 +135,7 @@ fn after<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
             .query("SELECT sha256 FROM tuf_artifact_file", &[])
             .await
             .expect("failed to query tuf_artifact_file");
-        assert_eq!(artifact_file_rows.len(), 1952); // matches above
+        assert_eq!(artifact_file_rows.len(), ARTIFACT_FILE_COUNT); // matches above
         let artifact_file_sha256 = artifact_file_rows
             .into_iter()
             .map(|row| row.get("sha256"))
@@ -86,6 +150,7 @@ fn after<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
             )
             .await
             .expect("failed to query tuf_artifact_tag");
+        assert_eq!(artifact_tag_rows.len(), TAG_COUNT);
         let mut artifacts = BTreeMap::<_, BTreeMap<_, _>>::new();
         for row in artifact_tag_rows {
             let id = row.get::<_, Uuid>("tuf_artifact_id");
