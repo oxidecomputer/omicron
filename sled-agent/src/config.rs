@@ -198,7 +198,10 @@ mod test {
                     if entry.file_name() == "config.toml" {
                         let path = entry.path();
                         Config::from_file(&path).unwrap_or_else(|e| {
-                            panic!("Failed to parse config {path}: {}", InlineErrorChain::new(&e))
+                            panic!(
+                                "Failed to parse config {path}: {}",
+                                InlineErrorChain::new(&e)
+                            )
                         });
                         configs_seen += 1;
                     }
