@@ -7399,10 +7399,12 @@ pub(in crate::db::datastore) mod test {
 
     /// Ensure the iterator that searches through local storage allocations
     /// bails out when a concurrent allocation occurs
+    ///
+    /// Uses two instances each with 10 disks.
     #[tokio::test]
-    async fn local_storage_allocation_iterator_pruning() {
+    async fn local_storage_allocation_iterator_pruning_1() {
         let logctx =
-            dev::test_setup_log("local_storage_allocation_iterator_pruning");
+            dev::test_setup_log("local_storage_allocation_iterator_pruning_1");
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
@@ -7446,6 +7448,173 @@ pub(in crate::db::datastore) mod test {
                     ncpus: 2,
                     memory: external::ByteCount::from_gibibytes_u32(16),
                     disks: (0..10)
+                        .map(|i| LocalStorageTestInstanceDisk {
+                            id: Uuid::new_v4(),
+                            name: external::Name::try_from(format!(
+                                "local1-{i}"
+                            ))
+                            .unwrap(),
+                            size: external::ByteCount::from_gibibytes_u32(512),
+                        })
+                        .collect(),
+                },
+                LocalStorageTestInstance {
+                    id: InstanceUuid::new_v4(),
+                    name: "local2".to_string(),
+                    ncpus: 2,
+                    memory: external::ByteCount::from_gibibytes_u32(16),
+                    affinity: None,
+                    disks: (0..10)
+                        .map(|i| LocalStorageTestInstanceDisk {
+                            id: Uuid::new_v4(),
+                            name: external::Name::try_from(format!(
+                                "local2-{i}"
+                            ))
+                            .unwrap(),
+                            size: external::ByteCount::from_gibibytes_u32(512),
+                        })
+                        .collect(),
+                },
+            ],
+        };
+
+        setup_local_storage_allocation_test(&opctx, datastore, &config).await;
+
+        // Create the iterator for the second instance's search
+
+        let instance_2_local_storage_disks: Vec<LocalStorageDisk> = {
+            let conn = datastore.pool_connection_for_tests().await.unwrap();
+
+            datastore
+                .instance_list_disks_on_conn(
+                    &conn,
+                    config.instances[1].id.into_untyped_uuid(),
+                    &PaginatedBy::Name(DataPageParams {
+                        marker: None,
+                        direction: dropshot::PaginationOrder::Ascending,
+                        limit: std::num::NonZeroU32::new(
+                            MAX_DISKS_PER_INSTANCE,
+                        )
+                        .unwrap(),
+                    }),
+                )
+                .await
+                .unwrap()
+                .into_iter()
+                .filter_map(|disk| match disk {
+                    db::datastore::Disk::LocalStorage(disk) => Some(disk),
+                    db::datastore::Disk::Crucible(_) => None,
+                })
+                .collect()
+        };
+
+        let mut iterator = {
+            let zpools_for_sled = datastore
+                .zpool_get_for_sled_reservation(&opctx, config.sleds[0].sled_id)
+                .await
+                .unwrap();
+
+            CompleteLocalStorageAllocationLists::new(
+                &logctx.log,
+                config.sleds[0].sled_id,
+                zpools_for_sled,
+                &instance_2_local_storage_disks,
+            )
+            .unwrap()
+        };
+
+        // Perform the concurrent reservation for first instance
+
+        {
+            let instance = Instance::from_local_storage_test_instance(
+                &config.instances[0],
+            );
+            let instance_id = instance.id;
+            let resources = instance.resources();
+
+            datastore
+                .sled_reservation_create(
+                    &opctx,
+                    instance_id,
+                    PropolisUuid::new_v4(),
+                    resources,
+                    db::model::SledReservationConstraints::none(),
+                    SledReservationReason::Start,
+                )
+                .await
+                .unwrap();
+        }
+
+        // After pruning, the iterator should not yield any more: the whole
+        // search space should have been pruned.
+
+        {
+            let zpools_for_sled = datastore
+                .zpool_get_for_sled_reservation(&opctx, config.sleds[0].sled_id)
+                .await
+                .unwrap();
+
+            iterator.prune_invalidated_allocation_lists(zpools_for_sled);
+        }
+
+        assert!(iterator.next().is_none());
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    /// Ensure the iterator that searches through local storage allocations
+    /// bails out when a concurrent allocation occurs
+    ///
+    /// Uses one instance with 1 disk, and one instance with 10 disks.
+    #[tokio::test]
+    async fn local_storage_allocation_iterator_pruning_2() {
+        let logctx =
+            dev::test_setup_log("local_storage_allocation_iterator_pruning_2");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let config = LocalStorageTest {
+            // One sled, with ten U2
+            sleds: vec![LocalStorageTestSled {
+                sled_id: SledUuid::new_v4(),
+                sled_serial: String::from("sled_0"),
+                u2s: (0..10)
+                    .map(|i| LocalStorageTestSledU2 {
+                        physical_disk_id: PhysicalDiskUuid::new_v4(),
+                        physical_disk_serial: format!("phys{i}"),
+
+                        zpool_id: ZpoolUuid::new_v4(),
+                        control_plane_storage_buffer:
+                            external::ByteCount::from_gibibytes_u32(250),
+
+                        inventory_total_size:
+                            external::ByteCount::from_gibibytes_u32(1024),
+
+                        crucible_dataset_id: DatasetUuid::new_v4(),
+                        crucible_dataset_addr: format!(
+                            "[fd00:1122:3344:10{i}::1]:12345"
+                        )
+                        .parse()
+                        .unwrap(),
+
+                        local_storage_unencrypted_dataset_id:
+                            DatasetUuid::new_v4(),
+                    })
+                    .collect(),
+            }],
+            affinity_groups: vec![],
+            anti_affinity_groups: vec![],
+            // Two instances, one with one disk, one with ten local storage
+            // disks.
+            instances: vec![
+                LocalStorageTestInstance {
+                    id: InstanceUuid::new_v4(),
+                    name: "local1".to_string(),
+                    affinity: None,
+                    ncpus: 2,
+                    memory: external::ByteCount::from_gibibytes_u32(16),
+                    disks: (0..1)
                         .map(|i| LocalStorageTestInstanceDisk {
                             id: Uuid::new_v4(),
                             name: external::Name::try_from(format!(
