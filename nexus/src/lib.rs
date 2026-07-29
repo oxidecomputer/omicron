@@ -17,6 +17,8 @@ mod lockstep_api;
 mod populate;
 mod saga_interface;
 
+use crate::internal_api::params::ServiceIpPoolConfig;
+use crate::internal_api::params::ServiceIpPoolError;
 pub use app::Nexus;
 pub use app::test_interfaces::TestInterfaces;
 use async_bb8_diesel::AsyncRunQueryDsl;
@@ -459,25 +461,27 @@ impl nexus_test_interface::NexusServer for Server {
         // Create configuration from the _non-empty_ ranges. The
         // `ServiceIpPoolConfig` validates there's at least one range.
         let mut service_ip_pools = IdOrdMap::new();
-        if !ipv4_service_ranges.is_empty() {
-            let service_ipv4_pool =
-                internal_api::params::ServiceIpPoolConfig::new(
-                    "ipv4-service-pool".parse().unwrap(),
-                    String::new(),
-                    ipv4_service_ranges,
-                )
-                .unwrap();
-            service_ip_pools.insert_unique(service_ipv4_pool).unwrap();
+        match ServiceIpPoolConfig::new(
+            "ipv4-service-pool".parse().unwrap(),
+            String::new(),
+            ipv4_service_ranges,
+        ) {
+            Ok(p) => service_ip_pools.insert_unique(p).unwrap(),
+            Err(ServiceIpPoolError::EmptyRanges) => {}
+            Err(ServiceIpPoolError::MixedIpVersions) => {
+                unreachable!("partitioned above")
+            }
         }
-        if !ipv6_service_ranges.is_empty() {
-            let service_ipv6_pool =
-                internal_api::params::ServiceIpPoolConfig::new(
-                    "ipv6-service-pool".parse().unwrap(),
-                    String::new(),
-                    ipv6_service_ranges,
-                )
-                .unwrap();
-            service_ip_pools.insert_unique(service_ipv6_pool).unwrap();
+        match ServiceIpPoolConfig::new(
+            "ipv6-service-pool".parse().unwrap(),
+            String::new(),
+            ipv6_service_ranges,
+        ) {
+            Ok(p) => service_ip_pools.insert_unique(p).unwrap(),
+            Err(ServiceIpPoolError::EmptyRanges) => {}
+            Err(ServiceIpPoolError::MixedIpVersions) => {
+                unreachable!("partitioned above")
+            }
         }
 
         internal_server

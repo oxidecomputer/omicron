@@ -400,17 +400,13 @@ impl ServiceIpPoolConfig {
         name: Name,
         description: String,
         ranges: Vec<IpRange>,
-    ) -> Result<Self, Error> {
+    ) -> Result<Self, ServiceIpPoolError> {
         let mut versions = ranges.iter().map(|r| r.version());
         let Some(first) = versions.next() else {
-            return Err(Error::internal_error(
-                "service IP pool config has no ranges",
-            ));
+            return Err(ServiceIpPoolError::EmptyRanges);
         };
         if versions.any(|v| v != first) {
-            return Err(Error::internal_error(
-                "service IP pool config has ranges of mixed IP versions",
-            ));
+            return Err(ServiceIpPoolError::MixedIpVersions);
         }
         Ok(Self { name, description, ranges })
     }
@@ -427,6 +423,23 @@ impl ServiceIpPoolConfig {
         // Safety: the constructor guarantees at least one range, and that all
         // ranges share an IP version.
         self.ranges[0].version()
+    }
+}
+
+/// Errors constructing a `ServiceIpPoolConfig`.
+#[derive(Clone, Copy, Debug, thiserror::Error)]
+pub enum ServiceIpPoolError {
+    #[error("must provide at least one IP range")]
+    EmptyRanges,
+    #[error("ranges have mixed IP versions")]
+    MixedIpVersions,
+}
+
+impl From<ServiceIpPoolError> for Error {
+    fn from(value: ServiceIpPoolError) -> Self {
+        Error::internal_error(format!(
+            "error constructing service IP pool config: {value}"
+        ))
     }
 }
 
@@ -448,7 +461,7 @@ struct UnvalidatedServiceIpPoolConfig {
 }
 
 impl TryFrom<UnvalidatedServiceIpPoolConfig> for ServiceIpPoolConfig {
-    type Error = Error;
+    type Error = ServiceIpPoolError;
 
     fn try_from(
         value: UnvalidatedServiceIpPoolConfig,

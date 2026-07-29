@@ -9,6 +9,7 @@ use crate::external_api::hardware::Baseboard;
 use crate::external_api::physical_disk::PhysicalDiskKind;
 use bootstrap_agent_lockstep_types::RecoverySiloConfig;
 pub use bootstrap_agent_lockstep_types::ServiceIpPoolConfig;
+pub use bootstrap_agent_lockstep_types::ServiceIpPoolError;
 use iddqd::IdOrdMap;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Generation;

@@ -81,7 +81,9 @@ fn service_ip_pools_from_ranges(
         )
         .context("creating IPv4 service pool config")?;
         if service_ip_pools.insert_unique(service_ipv4_pool).is_err() {
-            anyhow::bail!("duplicate IPv4 service pool name");
+            anyhow::bail!(
+                "duplicate IPv4 service pool name: '{SERVICE_POOL_IPV4_NAME}'"
+            );
         }
     }
     if !service_ipv6_ranges.is_empty() {
@@ -92,7 +94,9 @@ fn service_ip_pools_from_ranges(
         )
         .context("creating IPv6 service pool config")?;
         if service_ip_pools.insert_unique(service_ipv6_pool).is_err() {
-            anyhow::bail!("duplicate IPv6 service pool name");
+            anyhow::bail!(
+                "duplicate IPv6 service pool name: '{SERVICE_POOL_IPV6_NAME}'"
+            );
         }
     }
     Ok(service_ip_pools)

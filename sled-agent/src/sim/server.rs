@@ -662,7 +662,9 @@ pub async fn run_standalone_server(
         internal_services_ipv4_ranges,
     ) {
         if service_ip_pools.insert_unique(service_ipv4_pool).is_err() {
-            anyhow::bail!("duplicate IPv4 service pool name");
+            anyhow::bail!(
+                "duplicate IPv4 service pool name: '{SERVICE_POOL_IPV4_NAME}'"
+            );
         }
     }
     if let Ok(service_ipv6_pool) = ServiceIpPoolConfig::new(
@@ -671,7 +673,9 @@ pub async fn run_standalone_server(
         internal_services_ipv6_ranges,
     ) {
         if service_ip_pools.insert_unique(service_ipv6_pool).is_err() {
-            anyhow::bail!("duplicate IPv6 service pool name");
+            anyhow::bail!(
+                "duplicate IPv6 service pool name: '{SERVICE_POOL_IPV6_NAME}'"
+            );
         }
     }
 
