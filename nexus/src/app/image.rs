@@ -133,7 +133,7 @@ impl super::Nexus {
 
         let created_image = saga_outputs
             .lookup_node_output::<db::model::Image>("created_image")
-            .map_err(|e| Error::internal_error(&format!("{:#}", &e)))
+            .map_err(|e| Error::internal_error(&format!("{:#}", e)))
             .internal_context("looking up output from image create saga")?;
 
         Ok(created_image)

@@ -1015,7 +1015,7 @@ async fn cleanup_former_zone_roots(
             &Mountpoint(Utf8PathBuf::from(&mountpoint)),
         )
         .await
-        .with_context(|| format!("mounting {:?}", &child_dataset_name))
+        .with_context(|| format!("mounting {:?}", child_dataset_name))
         .map_err(|error| {
             DiskManagementError::Other(
                 InlineErrorChain::new(&*error).to_string(),

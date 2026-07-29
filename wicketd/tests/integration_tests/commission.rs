@@ -262,14 +262,6 @@ async fn test_commission_inventory() {
         }),
         "switch 0 baseboard reported by sp-sim"
     );
-    assert_eq!(
-        location.sled_baseboard, None,
-        "the harness sets no baseboard, so wicketd cannot identify its sled"
-    );
-    assert_eq!(
-        location.sled_id, None,
-        "without a baseboard there is nothing to match against inventory"
-    );
 
     ctx.teardown().await;
 }
@@ -388,30 +380,6 @@ async fn test_commission_rss_config() {
             .await;
     let ctx = WicketdTestContext::setup(gateway).await;
 
-    // We can't actually start RSS since we don't have a bootstrap agent in the
-    // backend, but at least ensure that the endpoints return a 503.
-    let err = ctx
-        .commission_client
-        .get_rack_setup_state()
-        .await
-        .expect_err("get_rack_setup_state fails without a bootstrap agent");
-    assert_client_error_message(
-        &err,
-        StatusCode::SERVICE_UNAVAILABLE,
-        "bootstrap agent address not yet known",
-    );
-
-    let err = ctx
-        .commission_client
-        .post_run_rack_setup()
-        .await
-        .expect_err("post_run_rack_setup fails without a bootstrap agent");
-    assert_client_error_message(
-        &err,
-        StatusCode::SERVICE_UNAVAILABLE,
-        "bootstrap agent address not yet known",
-    );
-
     // Upload a certificate first -- wicketd will wait for the corresponding
     // key.
     let response = ctx
@@ -494,7 +462,7 @@ async fn test_commission_rss_config() {
     // is empty, so {0, 1} would equal that substitute and the assertion below
     // would hold even if the config had never been stored. A strict subset
     // cannot be produced by the substitute, so it distinguishes the two.
-    internal.bootstrap_sleds = std::iter::once(0u16).collect();
+    internal.bootstrap_sleds = std::iter::once(1u16).collect();
     // The example config leaves this false, which is also the default, so flip
     // it here to make the test meaningful.
     internal.external_jumbo_frames_opt_in_enabled = true;

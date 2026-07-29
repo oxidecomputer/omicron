@@ -24,6 +24,7 @@ pub mod external_endpoints;
 pub mod fm_analysis;
 pub mod fm_rendezvous;
 pub mod fm_sitrep_gc;
+pub mod fm_sitrep_history_pruner;
 pub mod fm_sitrep_load;
 pub mod instance_reincarnation;
 pub mod instance_updater;
