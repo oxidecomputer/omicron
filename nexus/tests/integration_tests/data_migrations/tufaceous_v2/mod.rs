@@ -104,5 +104,14 @@ fn after<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
                 known.to_tags().expect("failed to serialize known tags");
             assert_eq!(tags, round_trip, "tags for {id} did not round trip");
         }
+
+        // be kind, rewind
+        for table in ["tuf_artifact", "tuf_artifact_file", "tuf_artifact_tag"] {
+            if let Err(err) =
+                ctx.client.execute(&format!("DELETE FROM {table}"), &[]).await
+            {
+                panic!("failed to delete all rows from {table}: {err:?}");
+            }
+        }
     })
 }
