@@ -381,6 +381,10 @@ impl TryFrom<&'_ FmConfigParam> for FmConfig {
                  letter 'a' or a period or something.",
             ));
         }
+        if comment == "a" || comment == "." || comment == "something" {
+            // Humor is an Oxide value.
+            return Err(Error::invalid_value("comment", "very clever."));
+        }
 
         fn check_limit(
             value: u32,
