@@ -10903,11 +10903,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "title": "Array_of_BgpExported",
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/BgpExported"
-                  }
+                  "$ref": "#/components/schemas/BgpExportedRoutesSwitchResults"
                 }
               }
             }
@@ -10947,11 +10943,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "title": "Array_of_BgpImported",
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/BgpImported"
-                  }
+                  "$ref": "#/components/schemas/BgpImportedRoutesSwitchResults"
                 }
               }
             }
@@ -10991,7 +10983,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AggregateBgpMessageHistory"
+                  "$ref": "#/components/schemas/BgpMessageHistoriesSwitchResults"
                 }
               }
             }
@@ -11018,11 +11010,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "title": "Array_of_BgpPeerStatus",
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/BgpPeerStatus"
-                  }
+                  "$ref": "#/components/schemas/BgpPeerStatusesSwitchResults"
                 }
               }
             }
@@ -16191,22 +16179,6 @@
           }
         ]
       },
-      "AggregateBgpMessageHistory": {
-        "description": "BGP message history for rack switches.",
-        "type": "object",
-        "properties": {
-          "switch_histories": {
-            "description": "BGP history organized by switch.",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/SwitchBgpHistory"
-            }
-          }
-        },
-        "required": [
-          "switch_histories"
-        ]
-      },
       "AlertClass": {
         "description": "An alert class.",
         "type": "object",
@@ -17704,7 +17676,7 @@
         }
       },
       "BgpExported": {
-        "description": "Route exported to a peer.",
+        "description": "A route exported to a BGP peer.",
         "type": "object",
         "properties": {
           "peer_id": {
@@ -17718,20 +17690,72 @@
                 "$ref": "#/components/schemas/IpNet"
               }
             ]
-          },
-          "switch": {
-            "description": "Switch the route is exported from.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/SwitchSlot"
-              }
-            ]
           }
         },
         "required": [
           "peer_id",
-          "prefix",
-          "switch"
+          "prefix"
+        ]
+      },
+      "BgpExportedRoutes": {
+        "type": "array",
+        "items": {
+          "$ref": "#/components/schemas/BgpExported"
+        }
+      },
+      "BgpExportedRoutesSwitchResult": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "available"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/BgpExportedRoutes"
+              }
+            },
+            "required": [
+              "status",
+              "value"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "reason": {
+                "$ref": "#/components/schemas/SwitchUnavailableReason"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "unavailable"
+                ]
+              }
+            },
+            "required": [
+              "reason",
+              "status"
+            ]
+          }
+        ]
+      },
+      "BgpExportedRoutesSwitchResults": {
+        "type": "object",
+        "properties": {
+          "switch0": {
+            "$ref": "#/components/schemas/BgpExportedRoutesSwitchResult"
+          },
+          "switch1": {
+            "$ref": "#/components/schemas/BgpExportedRoutesSwitchResult"
+          }
+        },
+        "required": [
+          "switch0",
+          "switch1"
         ]
       },
       "BgpImported": {
@@ -17756,21 +17780,135 @@
                 "$ref": "#/components/schemas/IpNet"
               }
             ]
-          },
-          "switch": {
-            "description": "Switch the route is imported into.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/SwitchSlot"
-              }
-            ]
           }
         },
         "required": [
           "id",
           "nexthop",
-          "prefix",
-          "switch"
+          "prefix"
+        ]
+      },
+      "BgpImportedRoutes": {
+        "type": "array",
+        "items": {
+          "$ref": "#/components/schemas/BgpImported"
+        }
+      },
+      "BgpImportedRoutesSwitchResult": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "available"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/BgpImportedRoutes"
+              }
+            },
+            "required": [
+              "status",
+              "value"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "reason": {
+                "$ref": "#/components/schemas/SwitchUnavailableReason"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "unavailable"
+                ]
+              }
+            },
+            "required": [
+              "reason",
+              "status"
+            ]
+          }
+        ]
+      },
+      "BgpImportedRoutesSwitchResults": {
+        "type": "object",
+        "properties": {
+          "switch0": {
+            "$ref": "#/components/schemas/BgpImportedRoutesSwitchResult"
+          },
+          "switch1": {
+            "$ref": "#/components/schemas/BgpImportedRoutesSwitchResult"
+          }
+        },
+        "required": [
+          "switch0",
+          "switch1"
+        ]
+      },
+      "BgpMessageHistories": {
+        "description": "BGP message history indexed by peer address.",
+        "type": "object",
+        "additionalProperties": {
+          "$ref": "#/components/schemas/BgpMessageHistory"
+        }
+      },
+      "BgpMessageHistoriesSwitchResult": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "available"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/BgpMessageHistories"
+              }
+            },
+            "required": [
+              "status",
+              "value"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "reason": {
+                "$ref": "#/components/schemas/SwitchUnavailableReason"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "unavailable"
+                ]
+              }
+            },
+            "required": [
+              "reason",
+              "status"
+            ]
+          }
+        ]
+      },
+      "BgpMessageHistoriesSwitchResults": {
+        "type": "object",
+        "properties": {
+          "switch0": {
+            "$ref": "#/components/schemas/BgpMessageHistoriesSwitchResult"
+          },
+          "switch1": {
+            "$ref": "#/components/schemas/BgpMessageHistoriesSwitchResult"
+          }
+        },
+        "required": [
+          "switch0",
+          "switch1"
         ]
       },
       "BgpMessageHistory": {},
@@ -18008,7 +18146,7 @@
             "minimum": 0
           },
           "peer_id": {
-            "description": "Interface name",
+            "description": "Interface name.",
             "type": "string"
           },
           "remote_asn": {
@@ -18030,14 +18168,6 @@
             "type": "integer",
             "format": "uint64",
             "minimum": 0
-          },
-          "switch": {
-            "description": "Switch with the peer session.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/SwitchSlot"
-              }
-            ]
           }
         },
         "required": [
@@ -18046,8 +18176,68 @@
           "peer_id",
           "remote_asn",
           "state",
-          "state_duration_millis",
-          "switch"
+          "state_duration_millis"
+        ]
+      },
+      "BgpPeerStatuses": {
+        "type": "array",
+        "items": {
+          "$ref": "#/components/schemas/BgpPeerStatus"
+        }
+      },
+      "BgpPeerStatusesSwitchResult": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "available"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/BgpPeerStatuses"
+              }
+            },
+            "required": [
+              "status",
+              "value"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "reason": {
+                "$ref": "#/components/schemas/SwitchUnavailableReason"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "unavailable"
+                ]
+              }
+            },
+            "required": [
+              "reason",
+              "status"
+            ]
+          }
+        ]
+      },
+      "BgpPeerStatusesSwitchResults": {
+        "type": "object",
+        "properties": {
+          "switch0": {
+            "$ref": "#/components/schemas/BgpPeerStatusesSwitchResult"
+          },
+          "switch1": {
+            "$ref": "#/components/schemas/BgpPeerStatusesSwitchResult"
+          }
+        },
+        "required": [
+          "switch0",
+          "switch1"
         ]
       },
       "BinRangedouble": {
@@ -29209,31 +29399,6 @@
           "rack_id",
           "time_created",
           "time_modified"
-        ]
-      },
-      "SwitchBgpHistory": {
-        "description": "BGP message history for a particular switch.",
-        "type": "object",
-        "properties": {
-          "history": {
-            "description": "Message history indexed by peer address.",
-            "type": "object",
-            "additionalProperties": {
-              "$ref": "#/components/schemas/BgpMessageHistory"
-            }
-          },
-          "switch": {
-            "description": "Switch this message history is associated with.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/SwitchSlot"
-              }
-            ]
-          }
-        },
-        "required": [
-          "history",
-          "switch"
         ]
       },
       "SwitchInterfaceConfig": {

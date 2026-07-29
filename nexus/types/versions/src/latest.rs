@@ -272,7 +272,6 @@ pub mod networking {
     pub use crate::v2025_11_20_00::networking::AddressLotKind;
     pub use crate::v2025_11_20_00::networking::AddressLotSelector;
     pub use crate::v2025_11_20_00::networking::AddressLotViewResponse;
-    pub use crate::v2025_11_20_00::networking::AggregateBgpMessageHistory;
     pub use crate::v2025_11_20_00::networking::BgpAnnounceListSelector;
     pub use crate::v2025_11_20_00::networking::BgpAnnounceSet;
     pub use crate::v2025_11_20_00::networking::BgpAnnounceSetCreate;
@@ -289,7 +288,6 @@ pub mod networking {
     pub use crate::v2025_11_20_00::networking::LldpNeighbor;
     pub use crate::v2025_11_20_00::networking::Route;
     pub use crate::v2025_11_20_00::networking::RouteConfig;
-    pub use crate::v2025_11_20_00::networking::SwitchBgpHistory;
     pub use crate::v2025_11_20_00::networking::SwitchInterfaceConfigCreate;
     pub use crate::v2025_11_20_00::networking::SwitchInterfaceKind;
     pub use crate::v2025_11_20_00::networking::SwitchPortAddressConfig;
@@ -315,10 +313,6 @@ pub mod networking {
 
     pub use crate::v2026_02_13_01::networking::BgpConfig;
     pub use crate::v2026_02_13_01::networking::BgpConfigCreate;
-    pub use crate::v2026_02_13_01::networking::BgpExported;
-    pub use crate::v2026_02_13_01::networking::BgpImported;
-    pub use crate::v2026_02_13_01::networking::BgpPeerStatus;
-
     pub use crate::v2026_03_06_01::networking::BfdSessionDisable;
     pub use crate::v2026_03_06_01::networking::BfdSessionEnable;
     pub use crate::v2026_03_06_01::networking::LldpPortPathSelector;
@@ -338,6 +332,13 @@ pub mod networking {
 
     pub use crate::v2026_06_10_00::networking::BgpConfigUpdate;
 
+    pub use crate::v2026_07_29_00::networking::BgpExported;
+    pub use crate::v2026_07_29_00::networking::BgpExportedRoutes;
+    pub use crate::v2026_07_29_00::networking::BgpImported;
+    pub use crate::v2026_07_29_00::networking::BgpImportedRoutes;
+    pub use crate::v2026_07_29_00::networking::BgpMessageHistories;
+    pub use crate::v2026_07_29_00::networking::BgpPeerStatus;
+    pub use crate::v2026_07_29_00::networking::BgpPeerStatuses;
     pub use crate::v2026_07_29_00::networking::DiscoveredRouter;
     pub use crate::v2026_07_29_00::networking::PendingUnnumberedInterface;
     pub use crate::v2026_07_29_00::networking::RouterDiscoveryRuntimeState;

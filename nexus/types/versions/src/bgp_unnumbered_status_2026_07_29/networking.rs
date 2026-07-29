@@ -4,8 +4,8 @@
 
 //! BGP unnumbered status networking types.
 
-use std::collections::BTreeMap;
-use std::net::Ipv6Addr;
+use std::collections::{BTreeMap, HashMap};
+use std::net::{IpAddr, Ipv6Addr};
 use std::time::Duration;
 
 use mg_admin_client::types::{
@@ -55,6 +55,154 @@ pub enum SwitchResult<T> {
 pub enum SwitchUnavailableReason {
     MgdUnresolved,
     QueryFailed,
+}
+
+/// The current status of a BGP peer.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
+pub struct BgpPeerStatus {
+    /// IP address of the peer.
+    pub addr: IpAddr,
+
+    /// Interface name.
+    pub peer_id: String,
+
+    /// Local autonomous system number.
+    pub local_asn: u32,
+
+    /// Remote autonomous system number.
+    pub remote_asn: u32,
+
+    /// State of the peer.
+    pub state: crate::v2025_12_12_00::networking::BgpPeerState,
+
+    /// Time of last state change.
+    pub state_duration_millis: u64,
+}
+
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
+pub struct BgpPeerStatuses(pub Vec<BgpPeerStatus>);
+
+/// A route exported to a BGP peer.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
+pub struct BgpExported {
+    /// Identifier for the BGP peer.
+    pub peer_id: String,
+
+    /// The destination network prefix.
+    pub prefix: oxnet::IpNet,
+}
+
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
+pub struct BgpExportedRoutes(pub Vec<BgpExported>);
+
+/// BGP message history indexed by peer address.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
+pub struct BgpMessageHistories(
+    pub HashMap<String, crate::v2025_11_20_00::networking::BgpMessageHistory>,
+);
+
+/// A route imported from a BGP peer.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
+pub struct BgpImported {
+    /// The destination network prefix.
+    pub prefix: oxnet::IpNet,
+
+    /// The nexthop the prefix is reachable through.
+    pub nexthop: IpAddr,
+
+    /// BGP identifier of the originating router.
+    pub id: u32,
+}
+
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
+pub struct BgpImportedRoutes(pub Vec<BgpImported>);
+
+impl From<SwitchResults<BgpPeerStatuses>>
+    for Vec<crate::v2026_02_13_01::networking::BgpPeerStatus>
+{
+    fn from(results: SwitchResults<BgpPeerStatuses>) -> Self {
+        let mut statuses = Vec::new();
+        for (switch, result) in results {
+            let SwitchResult::Available { value } = result else {
+                continue;
+            };
+            statuses.extend(value.0.into_iter().map(|status| {
+                crate::v2026_02_13_01::networking::BgpPeerStatus {
+                    addr: status.addr,
+                    peer_id: status.peer_id,
+                    local_asn: status.local_asn,
+                    remote_asn: status.remote_asn,
+                    state: status.state,
+                    state_duration_millis: status.state_duration_millis,
+                    switch,
+                }
+            }));
+        }
+        statuses
+    }
+}
+
+impl From<SwitchResults<BgpExportedRoutes>>
+    for Vec<crate::v2026_02_13_01::networking::BgpExported>
+{
+    fn from(results: SwitchResults<BgpExportedRoutes>) -> Self {
+        let mut routes = Vec::new();
+        for (switch, result) in results {
+            let SwitchResult::Available { value } = result else {
+                continue;
+            };
+            routes.extend(value.0.into_iter().map(|route| {
+                crate::v2026_02_13_01::networking::BgpExported {
+                    peer_id: route.peer_id,
+                    switch,
+                    prefix: route.prefix,
+                }
+            }));
+        }
+        routes
+    }
+}
+
+impl From<SwitchResults<BgpMessageHistories>>
+    for crate::v2025_11_20_00::networking::AggregateBgpMessageHistory
+{
+    fn from(results: SwitchResults<BgpMessageHistories>) -> Self {
+        let mut switch_histories = Vec::new();
+        for (switch, result) in results {
+            let SwitchResult::Available { value } = result else {
+                continue;
+            };
+            switch_histories.push(
+                crate::v2025_11_20_00::networking::SwitchBgpHistory {
+                    switch,
+                    history: value.0,
+                },
+            );
+        }
+        Self { switch_histories }
+    }
+}
+
+impl From<SwitchResults<BgpImportedRoutes>>
+    for Vec<crate::v2026_02_13_01::networking::BgpImported>
+{
+    fn from(results: SwitchResults<BgpImportedRoutes>) -> Self {
+        let mut routes = Vec::new();
+        for (switch, result) in results {
+            let SwitchResult::Available { value } = result else {
+                continue;
+            };
+            routes.extend(value.0.into_iter().map(|route| {
+                crate::v2026_02_13_01::networking::BgpImported {
+                    prefix: route.prefix,
+                    nexthop: route.nexthop,
+                    id: route.id,
+                    switch,
+                }
+            }));
+        }
+        routes
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
@@ -239,7 +387,11 @@ impl From<MgDiscoveredRouter> for DiscoveredRouter {
 
 #[cfg(test)]
 mod tests {
-    use super::nexus_interface_name;
+    use std::net::{IpAddr, Ipv4Addr};
+
+    use sled_agent_types_versions::v1::early_networking::SwitchSlot;
+
+    use super::*;
 
     #[test]
     fn converts_link_zero_tfport_name() {
@@ -253,5 +405,172 @@ mod tests {
             "tfportqsfp0_1"
         );
         assert_eq!(nexus_interface_name("tfport-bad".into()), "tfport-bad");
+    }
+
+    #[test]
+    fn peer_status_conversion_restores_switch_slot_and_omits_query_failure() {
+        let addr = IpAddr::V4(Ipv4Addr::LOCALHOST);
+        let results = SwitchResults {
+            switch0: SwitchResult::Available {
+                value: BgpPeerStatuses(vec![BgpPeerStatus {
+                    addr,
+                    peer_id: "tfportqsfp0_0".to_owned(),
+                    local_asn: 64512,
+                    remote_asn: 64513,
+                    state: crate::v2025_12_12_00::networking::BgpPeerState::Established,
+                    state_duration_millis: 100,
+                }]),
+            },
+            switch1: SwitchResult::Unavailable {
+                reason: SwitchUnavailableReason::QueryFailed,
+            },
+        };
+
+        let statuses: Vec<crate::v2026_02_13_01::networking::BgpPeerStatus> =
+            results.into();
+        assert_eq!(
+            statuses,
+            vec![crate::v2026_02_13_01::networking::BgpPeerStatus {
+                addr,
+                peer_id: "tfportqsfp0_0".to_owned(),
+                local_asn: 64512,
+                remote_asn: 64513,
+                state:
+                    crate::v2025_12_12_00::networking::BgpPeerState::Established,
+                state_duration_millis: 100,
+                switch: SwitchSlot::Switch0,
+            }]
+        );
+
+        let collision_state_statuses: Vec<
+            crate::v2025_12_12_00::networking::BgpPeerStatus,
+        > = statuses.into_iter().map(Into::into).collect();
+        assert_eq!(collision_state_statuses.len(), 1);
+        assert_eq!(collision_state_statuses[0].addr, addr);
+        assert_eq!(collision_state_statuses[0].switch, SwitchSlot::Switch0);
+    }
+
+    #[test]
+    fn exported_routes_conversion_restores_switch_slot_and_omits_unresolved() {
+        let prefix = "192.0.2.0/24".parse().unwrap();
+        let results = SwitchResults {
+            switch0: SwitchResult::Unavailable {
+                reason: SwitchUnavailableReason::MgdUnresolved,
+            },
+            switch1: SwitchResult::Available {
+                value: BgpExportedRoutes(vec![BgpExported {
+                    peer_id: "peer".to_owned(),
+                    prefix,
+                }]),
+            },
+        };
+
+        let routes: Vec<crate::v2026_02_13_01::networking::BgpExported> =
+            results.into();
+        assert_eq!(
+            routes,
+            vec![crate::v2026_02_13_01::networking::BgpExported {
+                peer_id: "peer".to_owned(),
+                switch: SwitchSlot::Switch1,
+                prefix,
+            }]
+        );
+
+        let legacy: crate::v2025_11_20_00::networking::BgpExported =
+            routes.into();
+        assert_eq!(
+            legacy.exports["peer"],
+            vec!["192.0.2.0/24".parse().unwrap()]
+        );
+    }
+
+    #[test]
+    fn imported_routes_conversion_uses_switch_order() {
+        let route = |id| BgpImported {
+            prefix: "192.0.2.0/24".parse().unwrap(),
+            nexthop: IpAddr::V4(Ipv4Addr::LOCALHOST),
+            id,
+        };
+        let results = SwitchResults {
+            switch0: SwitchResult::Available {
+                value: BgpImportedRoutes(vec![route(0)]),
+            },
+            switch1: SwitchResult::Available {
+                value: BgpImportedRoutes(vec![route(1)]),
+            },
+        };
+
+        let routes: Vec<crate::v2026_02_13_01::networking::BgpImported> =
+            results.into();
+        assert_eq!(
+            routes,
+            vec![
+                crate::v2026_02_13_01::networking::BgpImported {
+                    prefix: "192.0.2.0/24".parse().unwrap(),
+                    nexthop: IpAddr::V4(Ipv4Addr::LOCALHOST),
+                    id: 0,
+                    switch: SwitchSlot::Switch0,
+                },
+                crate::v2026_02_13_01::networking::BgpImported {
+                    prefix: "192.0.2.0/24".parse().unwrap(),
+                    nexthop: IpAddr::V4(Ipv4Addr::LOCALHOST),
+                    id: 1,
+                    switch: SwitchSlot::Switch1,
+                },
+            ]
+        );
+
+        let ipv4_routes: Vec<
+            crate::v2025_11_20_00::networking::BgpImportedRouteIpv4,
+        > = routes
+            .into_iter()
+            .map(TryInto::try_into)
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(ipv4_routes.len(), 2);
+        assert_eq!(ipv4_routes[0].switch, SwitchSlot::Switch0);
+        assert_eq!(ipv4_routes[1].switch, SwitchSlot::Switch1);
+    }
+
+    #[test]
+    fn message_history_conversion_omits_unavailable_switch() {
+        let results = SwitchResults {
+            switch0: SwitchResult::Available {
+                value: BgpMessageHistories(HashMap::new()),
+            },
+            switch1: SwitchResult::Unavailable {
+                reason: SwitchUnavailableReason::QueryFailed,
+            },
+        };
+
+        let history: crate::v2025_11_20_00::networking::AggregateBgpMessageHistory =
+            results.into();
+        assert_eq!(history.switch_histories.len(), 1);
+        assert_eq!(history.switch_histories[0].switch, SwitchSlot::Switch0);
+    }
+
+    #[test]
+    fn unavailable_reasons_have_distinct_wire_representations() {
+        let unresolved = SwitchResult::<BgpPeerStatuses>::Unavailable {
+            reason: SwitchUnavailableReason::MgdUnresolved,
+        };
+        let failed = SwitchResult::<BgpPeerStatuses>::Unavailable {
+            reason: SwitchUnavailableReason::QueryFailed,
+        };
+
+        assert_eq!(
+            serde_json::to_value(unresolved).unwrap(),
+            serde_json::json!({
+                "status": "unavailable",
+                "reason": "mgd_unresolved",
+            })
+        );
+        assert_eq!(
+            serde_json::to_value(failed).unwrap(),
+            serde_json::json!({
+                "status": "unavailable",
+                "reason": "query_failed",
+            })
+        );
     }
 }

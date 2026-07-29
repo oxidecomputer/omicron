@@ -96,14 +96,6 @@ impl latest::networking::BgpMessageHistory {
     }
 }
 
-impl latest::networking::AggregateBgpMessageHistory {
-    pub fn new(
-        switch_histories: Vec<latest::networking::SwitchBgpHistory>,
-    ) -> Self {
-        Self { switch_histories }
-    }
-}
-
 impl latest::networking::SwitchPortSettingsCreate {
     pub fn new(identity: IdentityMetadataCreateParams) -> Self {
         Self {

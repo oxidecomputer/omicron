@@ -17,6 +17,7 @@ use omicron_common::api::external::{
 use omicron_uuid_kinds::BgpAnnounceSetUuid;
 use omicron_uuid_kinds::BgpConfigUuid;
 use omicron_uuid_kinds::GenericUuid;
+use sled_agent_types::early_networking::SwitchSlot;
 use slog_error_chain::InlineErrorChain;
 
 impl super::Nexus {
@@ -196,215 +197,311 @@ impl super::Nexus {
     pub async fn bgp_peer_status(
         &self,
         opctx: &OpContext,
-    ) -> ListResultVec<networking::BgpPeerStatus> {
+    ) -> Result<
+        networking::SwitchResults<networking::BgpPeerStatuses>,
+        external::Error,
+    > {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
-        let mut result = Vec::new();
-        for (switch_slot, client) in self.mg_clients().await.map_err(|e| {
+        let mg_clients = self.mg_clients().await.map_err(|e| {
             external::Error::internal_error(&format!(
                 "failed to get mg clients: {e}"
             ))
-        })? {
-            let router_info = match client.read_routers().await {
-                Ok(result) => result.into_inner(),
-                Err(e) => {
-                    error!(
-                        self.log, "failed to get routers from switch";
+        })?;
+        let query = |switch_slot| {
+            let mg_clients = &mg_clients;
+            async move {
+                let Some(client) = mg_clients.get(&switch_slot) else {
+                    warn!(
+                        self.log, "no mgd client found for switch slot";
                         "switch_slot" => ?switch_slot,
-                        InlineErrorChain::new(&e),
                     );
-                    continue;
-                }
-            };
-
-            for r in &router_info {
-                let asn = r.asn;
-                let peers = match client.get_neighbors(asn).await {
+                    return networking::SwitchResult::Unavailable {
+                        reason:
+                            networking::SwitchUnavailableReason::MgdUnresolved,
+                    };
+                };
+                let router_info = match client.read_routers().await {
                     Ok(result) => result.into_inner(),
                     Err(e) => {
                         error!(
-                            self.log,
-                            "failed to get peers for asn {asn} from switch";
+                            self.log, "failed to get routers from switch";
                             "switch_slot" => ?switch_slot,
                             InlineErrorChain::new(&e),
                         );
-                        continue;
+                        return networking::SwitchResult::Unavailable {
+                            reason:
+                                networking::SwitchUnavailableReason::QueryFailed,
+                        };
                     }
                 };
-                for (peer_id, info) in peers {
-                    result.push(networking::BgpPeerStatus {
-                        switch: switch_slot,
-                        peer_id: peer_id.clone(),
-                        addr: info.remote_ip,
-                        local_asn: r.asn,
-                        remote_asn: info.asn.unwrap_or(0),
-                        state: info.fsm_state.into(),
-                        state_duration_millis: u64::try_from(
-                            info.fsm_state_duration.as_millis(),
-                        )
-                        .unwrap_or(u64::MAX),
-                    });
+
+                let mut statuses = Vec::new();
+                for r in &router_info {
+                    let asn = r.asn;
+                    let peers = match client.get_neighbors(asn).await {
+                        Ok(result) => result.into_inner(),
+                        Err(e) => {
+                            error!(
+                                self.log,
+                                "failed to get peers for asn {asn} from switch";
+                                "switch_slot" => ?switch_slot,
+                                InlineErrorChain::new(&e),
+                            );
+                            continue;
+                        }
+                    };
+                    for (peer_id, info) in peers {
+                        statuses.push(networking::BgpPeerStatus {
+                            peer_id: peer_id.clone(),
+                            addr: info.remote_ip,
+                            local_asn: r.asn,
+                            remote_asn: info.asn.unwrap_or(0),
+                            state: info.fsm_state.into(),
+                            state_duration_millis: u64::try_from(
+                                info.fsm_state_duration.as_millis(),
+                            )
+                            .unwrap_or(u64::MAX),
+                        });
+                    }
+                }
+                networking::SwitchResult::Available {
+                    value: networking::BgpPeerStatuses(statuses),
                 }
             }
-        }
-        Ok(result)
+        };
+        Ok(networking::SwitchResults {
+            switch0: query(SwitchSlot::Switch0).await,
+            switch1: query(SwitchSlot::Switch1).await,
+        })
     }
 
     pub async fn bgp_exported(
         &self,
         opctx: &OpContext,
-    ) -> LookupResult<Vec<networking::BgpExported>> {
+    ) -> Result<
+        networking::SwitchResults<networking::BgpExportedRoutes>,
+        external::Error,
+    > {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
-        let mut result = vec![];
-        for (switch_slot, client) in self.mg_clients().await.map_err(|e| {
+        let mg_clients = self.mg_clients().await.map_err(|e| {
             external::Error::internal_error(&format!(
                 "failed to get mg clients: {e}"
             ))
-        })? {
-            let router_info = match client.read_routers().await {
-                Ok(result) => result.into_inner(),
-                Err(e) => {
-                    error!(
-                        self.log, "failed to get routers from switch";
+        })?;
+        let query = |switch_slot| {
+            let mg_clients = &mg_clients;
+            async move {
+                let Some(client) = mg_clients.get(&switch_slot) else {
+                    warn!(
+                        self.log, "no mgd client found for switch slot";
                         "switch_slot" => ?switch_slot,
-                        InlineErrorChain::new(&e),
                     );
-                    continue;
-                }
-            };
-
-            for r in &router_info {
-                let asn = r.asn;
-                let selector = mg_api_types::bgp::session::ExportedSelector {
-                    afi: None,
-                    asn,
-                    peer: None,
+                    return networking::SwitchResult::Unavailable {
+                        reason:
+                            networking::SwitchUnavailableReason::MgdUnresolved,
+                    };
                 };
-
-                let exported = match client.get_exported(&selector).await {
+                let router_info = match client.read_routers().await {
                     Ok(result) => result.into_inner(),
                     Err(e) => {
                         error!(
-                            self.log,
-                            "failed to get exports for asn {asn} from switch";
+                            self.log, "failed to get routers from switch";
                             "switch_slot" => ?switch_slot,
                             InlineErrorChain::new(&e),
                         );
-                        continue;
+                        return networking::SwitchResult::Unavailable {
+                            reason:
+                                networking::SwitchUnavailableReason::QueryFailed,
+                        };
                     }
                 };
 
-                for (peer_id, exports) in exported {
-                    for ex in exports.iter() {
-                        let export = networking::BgpExported {
-                            peer_id: peer_id.clone(),
-                            switch: switch_slot,
-                            prefix: *ex,
+                let mut routes = Vec::new();
+                for r in &router_info {
+                    let asn = r.asn;
+                    let selector =
+                        mg_api_types::bgp::session::ExportedSelector {
+                            afi: None,
+                            asn,
+                            peer: None,
                         };
-                        result.push(export);
+
+                    let exported = match client.get_exported(&selector).await {
+                        Ok(result) => result.into_inner(),
+                        Err(e) => {
+                            error!(
+                                self.log,
+                                "failed to get exports for asn {asn} from switch";
+                                "switch_slot" => ?switch_slot,
+                                InlineErrorChain::new(&e),
+                            );
+                            continue;
+                        }
+                    };
+
+                    for (peer_id, exports) in exported {
+                        for ex in exports.iter() {
+                            let export = networking::BgpExported {
+                                peer_id: peer_id.clone(),
+                                prefix: *ex,
+                            };
+                            routes.push(export);
+                        }
                     }
                 }
+                networking::SwitchResult::Available {
+                    value: networking::BgpExportedRoutes(routes),
+                }
             }
-        }
-        Ok(result)
+        };
+        Ok(networking::SwitchResults {
+            switch0: query(SwitchSlot::Switch0).await,
+            switch1: query(SwitchSlot::Switch1).await,
+        })
     }
 
     pub async fn bgp_message_history(
         &self,
         opctx: &OpContext,
         sel: &networking::BgpRouteSelector,
-    ) -> ListResultVec<networking::SwitchBgpHistory> {
+    ) -> Result<
+        networking::SwitchResults<networking::BgpMessageHistories>,
+        external::Error,
+    > {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
-
-        let mut result = Vec::new();
-        for (switch_slot, client) in self.mg_clients().await.map_err(|e| {
+        let mg_clients = self.mg_clients().await.map_err(|e| {
             external::Error::internal_error(&format!(
                 "failed to get mg clients: {e}"
             ))
-        })? {
-            let history = match client
-                .message_history(&MessageHistoryRequest {
-                    asn: sel.asn,
-                    direction: None,
-                    peer: None,
-                })
-                .await
-            {
-                Ok(result) => result.into_inner().by_peer.clone(),
-                Err(e) => {
-                    error!(
-                        self.log, "failed to get bgp history from switch";
+        })?;
+        let query = |switch_slot| {
+            let mg_clients = &mg_clients;
+            async move {
+                let Some(client) = mg_clients.get(&switch_slot) else {
+                    warn!(
+                        self.log, "no mgd client found for switch slot";
                         "switch_slot" => ?switch_slot,
-                        InlineErrorChain::new(&e),
                     );
-                    continue;
+                    return networking::SwitchResult::Unavailable {
+                        reason:
+                            networking::SwitchUnavailableReason::MgdUnresolved,
+                    };
+                };
+                let history = match client
+                    .message_history(&MessageHistoryRequest {
+                        asn: sel.asn,
+                        direction: None,
+                        peer: None,
+                    })
+                    .await
+                {
+                    Ok(result) => result.into_inner().by_peer.clone(),
+                    Err(e) => {
+                        error!(
+                            self.log, "failed to get bgp history from switch";
+                            "switch_slot" => ?switch_slot,
+                            InlineErrorChain::new(&e),
+                        );
+                        return networking::SwitchResult::Unavailable {
+                            reason:
+                                networking::SwitchUnavailableReason::QueryFailed,
+                        };
+                    }
+                };
+
+                networking::SwitchResult::Available {
+                    value: networking::BgpMessageHistories(
+                        history
+                            .into_iter()
+                            .map(|(k, v)| {
+                                (k, networking::BgpMessageHistory::new(v))
+                            })
+                            .collect(),
+                    ),
                 }
-            };
-
-            result.push(networking::SwitchBgpHistory {
-                switch: switch_slot,
-                history: history
-                    .into_iter()
-                    .map(|(k, v)| (k, networking::BgpMessageHistory::new(v)))
-                    .collect(),
-            });
-        }
-
-        Ok(result)
+            }
+        };
+        Ok(networking::SwitchResults {
+            switch0: query(SwitchSlot::Switch0).await,
+            switch1: query(SwitchSlot::Switch1).await,
+        })
     }
 
     pub async fn bgp_imported_routes(
         &self,
         opctx: &OpContext,
         _sel: &networking::BgpRouteSelector,
-    ) -> ListResultVec<networking::BgpImported> {
+    ) -> Result<
+        networking::SwitchResults<networking::BgpImportedRoutes>,
+        external::Error,
+    > {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
-        let mut result = Vec::new();
-        for (switch_slot, client) in self.mg_clients().await.map_err(|e| {
+        let mg_clients = self.mg_clients().await.map_err(|e| {
             external::Error::internal_error(&format!(
                 "failed to get mg clients: {e}"
             ))
-        })? {
-            let mut imported: Vec<networking::BgpImported> = Vec::new();
-            match client.get_rib_imported(None, None).await {
-                Ok(result) => {
-                    for (prefix, paths) in result.into_inner().iter() {
-                        let ipnet = match prefix.parse() {
-                            Ok(p) => p,
-                            Err(e) => {
-                                error!(
-                                    self.log,
-                                    "failed to parse prefix {prefix}: {e}"
-                                );
-                                continue;
-                            }
-                        };
-                        for p in paths.iter() {
-                            let x = networking::BgpImported {
-                                switch: switch_slot,
-                                prefix: ipnet,
-                                id: p
-                                    .bgp
-                                    .as_ref()
-                                    .map(|bgp| bgp.id)
-                                    .unwrap_or(0),
-                                nexthop: p.nexthop,
+        })?;
+        let query = |switch_slot| {
+            let mg_clients = &mg_clients;
+            async move {
+                let Some(client) = mg_clients.get(&switch_slot) else {
+                    warn!(
+                        self.log, "no mgd client found for switch slot";
+                        "switch_slot" => ?switch_slot,
+                    );
+                    return networking::SwitchResult::Unavailable {
+                        reason:
+                            networking::SwitchUnavailableReason::MgdUnresolved,
+                    };
+                };
+                let mut imported = Vec::new();
+                match client.get_rib_imported(None, None).await {
+                    Ok(result) => {
+                        for (prefix, paths) in result.into_inner().iter() {
+                            let ipnet = match prefix.parse() {
+                                Ok(p) => p,
+                                Err(e) => {
+                                    error!(
+                                        self.log,
+                                        "failed to parse prefix {prefix}: {e}"
+                                    );
+                                    continue;
+                                }
                             };
-                            imported.push(x);
+                            for p in paths.iter() {
+                                let x = networking::BgpImported {
+                                    prefix: ipnet,
+                                    id: p
+                                        .bgp
+                                        .as_ref()
+                                        .map(|bgp| bgp.id)
+                                        .unwrap_or(0),
+                                    nexthop: p.nexthop,
+                                };
+                                imported.push(x);
+                            }
                         }
                     }
+                    Err(e) => {
+                        error!(
+                            self.log, "failed to get BGP imported from switch";
+                            "switch_slot" => ?switch_slot,
+                            InlineErrorChain::new(&e),
+                        );
+                        return networking::SwitchResult::Unavailable {
+                            reason:
+                                networking::SwitchUnavailableReason::QueryFailed,
+                        };
+                    }
+                };
+                networking::SwitchResult::Available {
+                    value: networking::BgpImportedRoutes(imported),
                 }
-                Err(e) => {
-                    error!(
-                        self.log, "failed to get BGP imported from switch";
-                        "switch_slot" => ?switch_slot,
-                        InlineErrorChain::new(&e),
-                    );
-                    continue;
-                }
-            };
-
-            result.extend_from_slice(&imported);
-        }
-        Ok(result)
+            }
+        };
+        Ok(networking::SwitchResults {
+            switch0: query(SwitchSlot::Switch0).await,
+            switch1: query(SwitchSlot::Switch1).await,
+        })
     }
 }
