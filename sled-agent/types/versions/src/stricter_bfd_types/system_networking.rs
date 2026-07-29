@@ -4,7 +4,8 @@
 
 //! Types for system-level networking.
 //!
-//! TODO(nicolas): Add a description
+//! This version exists because [`RackNetworkConfig`]'s embedded BFD peer
+//! configs were tightened (see the module docs in [`crate::v44`]).
 
 use super::early_networking::RackNetworkConfig;
 use crate::v39::system_networking::BlueprintExternalNetworkingConfig;

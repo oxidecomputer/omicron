@@ -38,7 +38,7 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
-    (44, NONZERO_BFD_DETECTION_THRESHOLD),
+    (44, STRICTER_BFD_TYPES),
     (43, INVENTORY_BASEBOARD_ID),
     (42, NON_EMPTY_UPLINK_PORTS),
     (41, ADD_INSTANCE_PRIMARY_NIC_MTU),
@@ -975,7 +975,7 @@ pub trait SledAgentApi {
     #[endpoint {
         method = PUT,
         path = "/network-bootstore-config",
-        versions = VERSION_NONZERO_BFD_DETECTION_THRESHOLD..,
+        versions = VERSION_STRICTER_BFD_TYPES..,
         operation_id = "write_network_bootstore_config",
     }]
     async fn write_network_bootstore_config_v44(
@@ -988,7 +988,7 @@ pub trait SledAgentApi {
     #[endpoint {
         method = PUT,
         path = "/network-bootstore-config",
-        versions = VERSION_NON_EMPTY_UPLINK_PORTS..VERSION_NONZERO_BFD_DETECTION_THRESHOLD,
+        versions = VERSION_NON_EMPTY_UPLINK_PORTS..VERSION_STRICTER_BFD_TYPES,
         operation_id = "write_network_bootstore_config",
     }]
     async fn write_network_bootstore_config_v42(

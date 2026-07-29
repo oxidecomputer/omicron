@@ -7,7 +7,6 @@ use crate::v1::early_networking::BfdMode;
 use crate::v1::early_networking::SwitchSlot;
 use crate::v20::early_networking as v20;
 use crate::v42::early_networking as v42;
-use crate::v44::early_networking as v44;
 use oxnet::Ipv6Net;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -21,13 +20,20 @@ pub struct BfdPeerConfig {
     pub local: Option<IpAddr>,
     pub remote: IpAddr,
     pub detection_threshold: NonZeroU8,
-    pub required_rx: u64,
+    /// The minimum interval, in microseconds, between received BFD Control
+    /// packets that this system requires. Sent on the wire as the 32-bit
+    /// Required Min RX Interval field (RFC 5880 section 4.1). Zero is valid
+    /// and means
+    /// the remote system should not send any periodic BFD Control packets.
+    pub required_rx: u32,
     pub mode: BfdMode,
     pub switch: SwitchSlot,
 }
 
-// This conversion is infallible and will clamp `detection_threshold` to the
-// valid range (1-255) rather than rejecting invalid configs from the bootstore.
+// This conversion is infallible rather than rejecting invalid configs from
+// the bootstore: `detection_threshold` is clamped to the valid range (1-255)
+// and `required_rx` saturates at `u32::MAX` (matching how Nexus already
+// stores it as a u32 in the database).
 impl From<v1::BfdPeerConfig> for BfdPeerConfig {
     fn from(old: v1::BfdPeerConfig) -> Self {
         Self {
@@ -35,7 +41,7 @@ impl From<v1::BfdPeerConfig> for BfdPeerConfig {
             remote: old.remote,
             detection_threshold: NonZeroU8::new(old.detection_threshold)
                 .unwrap_or(NonZeroU8::MIN),
-            required_rx: old.required_rx,
+            required_rx: u32::try_from(old.required_rx).unwrap_or(u32::MAX),
             mode: old.mode,
             switch: old.switch,
         }
@@ -48,7 +54,7 @@ impl From<BfdPeerConfig> for v1::BfdPeerConfig {
             local: new.local,
             remote: new.remote,
             detection_threshold: new.detection_threshold.get(),
-            required_rx: new.required_rx,
+            required_rx: new.required_rx.into(),
             mode: new.mode,
             switch: new.switch,
         }
@@ -70,7 +76,7 @@ pub struct RackNetworkConfig {
     pub bgp: Vec<v20::BgpConfig>,
     /// BFD configuration for connecting the rack to external networks
     #[serde(default)]
-    pub bfd: Vec<v44::BfdPeerConfig>,
+    pub bfd: Vec<BfdPeerConfig>,
 }
 
 impl From<v42::RackNetworkConfig> for RackNetworkConfig {
@@ -129,5 +135,20 @@ mod tests {
         };
         let new = BfdPeerConfig::from(old);
         assert_eq!(new.detection_threshold.get(), 3);
+        assert_eq!(new.required_rx, 1000);
+    }
+
+    #[test]
+    fn bfd_peer_config_conversion_saturates_oversized_required_rx() {
+        let old = v1::BfdPeerConfig {
+            local: None,
+            remote: "192.0.2.1".parse().unwrap(),
+            detection_threshold: 3,
+            required_rx: u64::from(u32::MAX) + 1,
+            mode: BfdMode::SingleHop,
+            switch: SwitchSlot::Switch0,
+        };
+        let new = BfdPeerConfig::from(old);
+        assert_eq!(new.required_rx, u32::MAX);
     }
 }

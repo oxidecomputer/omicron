@@ -790,7 +790,7 @@ impl<'a> EarlyNetworkSetup<'a> {
                     }
                 },
                 peer: spec.remote,
-                required_rx: spec.required_rx,
+                required_rx: spec.required_rx.into(),
             };
 
             if let Err(e) = mgd.add_bfd_peer(&cfg).await {

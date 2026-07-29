@@ -105,7 +105,7 @@ pub async fn read_and_assemble(
                         session.detection_threshold.0,
                     ))
                 })?,
-            required_rx: session.required_rx.0.into(),
+            required_rx: session.required_rx.0,
             mode: session.mode.into(),
             switch: session.switch_slot.into(),
         });
