@@ -1983,10 +1983,9 @@ impl UpdateContext {
                 UpdateTerminalError::GetRotBootloaderCabooseFailed { error }
             })?;
 
-        let rkth = self.get_rot_rkth().await?;
         let tags = KnownArtifactTags::RotBootloader(RotBootloaderTags {
             rot_board: caboose.board,
-            rot_rkth: Some(RotKeyTableHash::from_bytes(rkth)),
+            rot_rkth: Some(self.get_rot_rkth().await?),
         });
         let artifact_to_apply = repo.get_handle(&tags).map_err(|error| {
             UpdateTerminalError::MissingArtifact { tags, error }
@@ -2062,10 +2061,9 @@ impl UpdateContext {
             })?
             .into_inner();
 
-        let rkth = self.get_rot_rkth().await?;
         let tags = KnownArtifactTags::Rot(RotTags {
             rot_board: caboose.board,
-            rot_rkth: Some(RotKeyTableHash::from_bytes(rkth)),
+            rot_rkth: Some(self.get_rot_rkth().await?),
             rot_slot: slot_tag,
         });
         let artifact_to_apply = repo.get_handle(&tags).map_err(|error| {
@@ -2098,7 +2096,9 @@ impl UpdateContext {
 
     /// Via `client`, ask the target RoT for its CMPA page, then extract
     /// and return the RKTH.
-    async fn get_rot_rkth(&self) -> Result<[u8; 32], UpdateTerminalError> {
+    async fn get_rot_rkth(
+        &self,
+    ) -> Result<RotKeyTableHash, UpdateTerminalError> {
         self.mgs_client
             .sp_rot_cmpa_get(
                 &self.sp.typ,
@@ -2109,7 +2109,8 @@ impl UpdateContext {
             .map_err(anyhow::Error::from)
             .and_then(|response| {
                 let data = response.into_inner().base64_data;
-                Ok(CMPAPage::from_bytes(&self.decode_rot_page(&data)?)?.rotkh)
+                let cmpa = CMPAPage::from_bytes(&self.decode_rot_page(&data)?)?;
+                Ok(RotKeyTableHash::from_bytes(cmpa.rotkh))
             })
             .map_err(|error| UpdateTerminalError::GetRotCmpaFailed { error })
     }
