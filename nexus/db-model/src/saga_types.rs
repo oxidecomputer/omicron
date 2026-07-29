@@ -256,32 +256,6 @@ impl SagaRow {
     fn id(&self) -> SagaId {
         self.id
     }
-
-    // Returns the abandonment metadata iff all three columns are set.
-    fn abandon_metadata(&self) -> Result<Option<AbandonMetadata>, Error> {
-        match (
-            self.abandon_time,
-            self.abandon_reason,
-            self.abandon_comment.clone(),
-        ) {
-            (None, None, None) => Ok(None),
-            (Some(time), Some(reason), Some(comment)) => {
-                Ok(Some(AbandonMetadata { time, reason, comment }))
-            }
-            // A partially-populated set is impossible per the
-            // `abandoned_requires_metadata` and
-            // `not_abandoned_requires_no_metadata` CHECK constraints, so treat
-            // it as corruption.
-            _ => Err(Error::internal_error(&format!(
-                "saga {}: abandonment metadata is partially populated. \
-                abandon_time: {:?} abandon_reason: {:?} abandon_comment: {:?}",
-                self.id,
-                self.abandon_time,
-                self.abandon_reason,
-                self.abandon_comment,
-            ))),
-        }
-    }
 }
 
 /// Abandonment metadata for a saga.
@@ -311,6 +285,69 @@ pub enum SagaExecState {
     Unwinding,
     Done,
     Abandoned(AbandonMetadata),
+}
+
+impl SagaExecState {
+    /// Returns the saga's execution state iff the provided columns represent
+    /// a valid state:
+    ///   - The saga is in abandoned state and all three metadata columns are
+    ///     populated.
+    ///   - The saga is not in abandoned state and none of the three metadata
+    ///     columns are populated.
+    ///
+    /// Takes individual columns rather than a [`SagaRow`] so that types
+    /// selecting a subset of the table's columns can use the same validation.
+    pub fn try_from_columns(
+        id: SagaId,
+        saga_state: SagaState,
+        abandon_time: Option<DateTime<Utc>>,
+        abandon_reason: Option<SagaReasonAbandoned>,
+        abandon_comment: Option<String>,
+    ) -> Result<SagaExecState, Error> {
+        match (saga_state, abandon_time, abandon_reason, abandon_comment) {
+            (SagaState::Running, None, None, None) => {
+                Ok(SagaExecState::Running)
+            }
+            (SagaState::Unwinding, None, None, None) => {
+                Ok(SagaExecState::Unwinding)
+            }
+            (SagaState::Done, None, None, None) => Ok(SagaExecState::Done),
+            (SagaState::Abandoned, Some(time), Some(reason), Some(comment)) => {
+                Ok(SagaExecState::Abandoned(AbandonMetadata {
+                    time,
+                    reason,
+                    comment,
+                }))
+            }
+            (SagaState::Abandoned, None, None, None) => {
+                Err(Error::internal_error(&format!(
+                    "saga {id}: \
+                        abandoned but has no abandonment metadata"
+                )))
+            }
+            (
+                SagaState::Running | SagaState::Unwinding | SagaState::Done,
+                Some(time),
+                Some(reason),
+                Some(comment),
+            ) => Err(Error::internal_error(&format!(
+                "saga {id}: has abandonment metadata but is not abandoned. \
+                    abandon_time: {time:?} abandon_reason: {reason:?} \
+                    abandon_comment: {comment:?}"
+            ))),
+            // A partially-populated set is impossible per the
+            // `abandoned_requires_metadata` and
+            // `not_abandoned_requires_no_metadata` CHECK constraints, so treat
+            // it as corruption.
+            (state, time, reason, comment) => {
+                Err(Error::internal_error(&format!(
+                    "saga {id}: abandonment metadata is partially populated. \
+                    saga_state: {state:?} abandon_time: {time:?} \
+                    abandon_reason: {reason:?} abandon_comment: {comment:?}"
+                )))
+            }
+        }
+    }
 }
 
 impl From<SagaExecState> for SagaState {
@@ -416,8 +453,6 @@ impl TryFrom<SagaRow> for Saga {
     type Error = Error;
 
     fn try_from(row: SagaRow) -> Result<Self, Self::Error> {
-        let abandon_metadata = row.abandon_metadata()?;
-
         let SagaRow {
             id,
             creator,
@@ -428,36 +463,20 @@ impl TryFrom<SagaRow> for Saga {
             current_sec,
             adopt_generation,
             adopt_time,
-            abandon_time: _,
-            abandon_reason: _,
-            abandon_comment: _,
+            abandon_time,
+            abandon_reason,
+            abandon_comment,
         } = row;
 
         // The abandon metadata must be present exactly when the saga is
         // abandoned.
-        let saga_state = match (saga_state, abandon_metadata) {
-            (SagaState::Abandoned, Some(metadata)) => {
-                SagaExecState::Abandoned(metadata)
-            }
-            (SagaState::Abandoned, None) => {
-                return Err(Error::internal_error(&format!(
-                    "saga {id}: abandoned but has no abandonment metadata"
-                )));
-            }
-            (SagaState::Running, None) => SagaExecState::Running,
-            (SagaState::Unwinding, None) => SagaExecState::Unwinding,
-            (SagaState::Done, None) => SagaExecState::Done,
-            (
-                SagaState::Running | SagaState::Unwinding | SagaState::Done,
-                Some(AbandonMetadata { time, reason, comment }),
-            ) => {
-                return Err(Error::internal_error(&format!(
-                    "saga {id}: has abandonment metadata but is not abandoned. \
-                    abandon_time: {time:?} abandon_reason: {reason:?} \
-                    abandon_comment: {comment:?}"
-                )));
-            }
-        };
+        let saga_state = SagaExecState::try_from_columns(
+            id,
+            saga_state,
+            abandon_time,
+            abandon_reason,
+            abandon_comment,
+        )?;
 
         Ok(Saga {
             id,
