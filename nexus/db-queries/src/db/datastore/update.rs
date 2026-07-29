@@ -735,7 +735,7 @@ async fn insert_impl(
             }
 
             // Now, reset `time_created` to now and ensure `time_pruned` is set
-            // to NULL. Also update `sha256` in case we updated it above.
+            // to NULL.
             existing_repo.time_created = chrono::Utc::now();
             existing_repo.time_pruned = None;
             diesel::update(dsl::tuf_repo)

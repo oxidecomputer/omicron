@@ -403,6 +403,8 @@ impl super::Nexus {
 
         let repo = loader
             .compute_archive_sha256(true)
+            // Expiration enforcement is disabled for uploaded repos; see
+            // RFD 721.
             .expiration_enforcement(ExpirationEnforcement::Unsafe)
             .v1_compatibility(true)
             .load_zip_stream(body, None, &self.log)

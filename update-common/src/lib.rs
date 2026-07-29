@@ -8,7 +8,7 @@
 //! Nexus used to take to load Tufaceous v1 repositories, and remains in use in
 //! `cargo xtask releng` to verify generated repositories can still be read by
 //! this code. When we stop generating v1 repositories, this crate should be
-//! deleted.
+//! deleted. (Tracked in #10076)
 
 pub mod artifacts;
 pub mod errors;
