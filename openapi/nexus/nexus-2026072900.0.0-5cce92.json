@@ -10534,11 +10534,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "title": "Array_of_BfdStatus",
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/BfdStatus"
-                  }
+                  "$ref": "#/components/schemas/BfdPeerStatusesSwitchResults"
                 }
               }
             }
@@ -17220,6 +17216,104 @@
           "multi_hop"
         ]
       },
+      "BfdPeerStatus": {
+        "type": "object",
+        "properties": {
+          "detection_threshold": {
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
+          },
+          "local": {
+            "nullable": true,
+            "type": "string",
+            "format": "ip"
+          },
+          "mode": {
+            "$ref": "#/components/schemas/BfdMode"
+          },
+          "peer": {
+            "type": "string",
+            "format": "ip"
+          },
+          "required_rx": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "state": {
+            "$ref": "#/components/schemas/BfdState"
+          }
+        },
+        "required": [
+          "detection_threshold",
+          "mode",
+          "peer",
+          "required_rx",
+          "state"
+        ]
+      },
+      "BfdPeerStatuses": {
+        "type": "array",
+        "items": {
+          "$ref": "#/components/schemas/BfdPeerStatus"
+        }
+      },
+      "BfdPeerStatusesSwitchResult": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "available"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/BfdPeerStatuses"
+              }
+            },
+            "required": [
+              "status",
+              "value"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "reason": {
+                "$ref": "#/components/schemas/SwitchUnavailableReason"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "unavailable"
+                ]
+              }
+            },
+            "required": [
+              "reason",
+              "status"
+            ]
+          }
+        ]
+      },
+      "BfdPeerStatusesSwitchResults": {
+        "type": "object",
+        "properties": {
+          "switch0": {
+            "$ref": "#/components/schemas/BfdPeerStatusesSwitchResult"
+          },
+          "switch1": {
+            "$ref": "#/components/schemas/BfdPeerStatusesSwitchResult"
+          }
+        },
+        "required": [
+          "switch0",
+          "switch1"
+        ]
+      },
       "BfdSessionDisable": {
         "description": "Information needed to disable a BFD session",
         "type": "object",
@@ -17325,47 +17419,6 @@
               "up"
             ]
           }
-        ]
-      },
-      "BfdStatus": {
-        "type": "object",
-        "properties": {
-          "detection_threshold": {
-            "type": "integer",
-            "format": "uint8",
-            "minimum": 0
-          },
-          "local": {
-            "nullable": true,
-            "type": "string",
-            "format": "ip"
-          },
-          "mode": {
-            "$ref": "#/components/schemas/BfdMode"
-          },
-          "peer": {
-            "type": "string",
-            "format": "ip"
-          },
-          "required_rx": {
-            "type": "integer",
-            "format": "uint64",
-            "minimum": 0
-          },
-          "state": {
-            "$ref": "#/components/schemas/BfdState"
-          },
-          "switch_slot": {
-            "$ref": "#/components/schemas/SwitchSlot"
-          }
-        },
-        "required": [
-          "detection_threshold",
-          "mode",
-          "peer",
-          "required_rx",
-          "state",
-          "switch_slot"
         ]
       },
       "BgpAnnounceSet": {

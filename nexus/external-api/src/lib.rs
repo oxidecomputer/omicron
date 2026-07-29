@@ -35,6 +35,7 @@ use nexus_types_versions::v2026_01_22_00;
 use nexus_types_versions::v2026_01_30_01;
 use nexus_types_versions::v2026_01_31_00;
 use nexus_types_versions::v2026_02_13_01;
+use nexus_types_versions::v2026_03_06_01;
 use nexus_types_versions::v2026_04_16_00;
 use nexus_types_versions::v2026_06_05_00;
 use omicron_common::address::IpRange;
@@ -6091,11 +6092,37 @@ pub trait NexusExternalApi {
         method = GET,
         path = "/v1/system/networking/bfd-status",
         tags = ["system/networking"],
-        versions = VERSION_SWITCH_SLOT_ENUM..,
+        versions = VERSION_BGP_UNNUMBERED_STATUS..,
     }]
     async fn networking_bfd_status(
         rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<Vec<latest::bfd::BfdStatus>>, HttpError>;
+    ) -> Result<
+        HttpResponseOk<
+            latest::networking::SwitchResults<latest::bfd::BfdPeerStatuses>,
+        >,
+        HttpError,
+    >;
+
+    /// Get BFD status
+    #[endpoint {
+        operation_id = "networking_bfd_status",
+        method = GET,
+        path = "/v1/system/networking/bfd-status",
+        tags = ["system/networking"],
+        versions = VERSION_SWITCH_SLOT_ENUM..VERSION_BGP_UNNUMBERED_STATUS,
+    }]
+    async fn networking_bfd_status_v2026_03_06_01(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Vec<v2026_03_06_01::bfd::BfdStatus>>, HttpError>
+    {
+        Self::networking_bfd_status(rqctx).await?.try_map(|statuses| {
+            statuses.try_into().map_err(|_| {
+                HttpError::for_internal_error(
+                    "failed to query BFD status from a switch".to_string(),
+                )
+            })
+        })
+    }
 
     /// Get BFD status
     #[endpoint {
@@ -6109,10 +6136,13 @@ pub trait NexusExternalApi {
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<Vec<v2025_11_20_00::bfd::BfdStatus>>, HttpError>
     {
-        Self::networking_bfd_status(rqctx).await.map(|response| {
-            response
-                .map(|statuses| statuses.into_iter().map(From::from).collect())
-        })
+        Self::networking_bfd_status_v2026_03_06_01(rqctx).await.map(
+            |response| {
+                response.map(|statuses| {
+                    statuses.into_iter().map(From::from).collect()
+                })
+            },
+        )
     }
 
     /// Get BGP Unnumbered manager state

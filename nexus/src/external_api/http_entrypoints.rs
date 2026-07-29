@@ -49,7 +49,7 @@ use nexus_types::external_api::{
     timeseries, update, user, vpc,
 };
 // Type imports for API implementations (per RFD 619)
-use nexus_types::external_api::bfd::BfdStatus;
+use nexus_types::external_api::bfd::BfdPeerStatuses;
 use nexus_types::external_api::certificate::Certificate;
 use nexus_types::external_api::floating_ip::FloatingIp;
 use nexus_types::external_api::headers::RangeRequest;
@@ -4773,7 +4773,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
 
     async fn networking_bfd_status(
         rqctx: RequestContext<ApiContext>,
-    ) -> Result<HttpResponseOk<Vec<BfdStatus>>, HttpError> {
+    ) -> Result<HttpResponseOk<SwitchResults<BfdPeerStatuses>>, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;

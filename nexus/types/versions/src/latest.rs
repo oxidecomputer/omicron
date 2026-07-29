@@ -70,7 +70,9 @@ pub mod audit {
 
 pub mod bfd {
     pub use crate::v2025_11_20_00::bfd::BfdState;
-    pub use crate::v2026_03_06_01::bfd::BfdStatus;
+
+    pub use crate::v2026_07_29_00::bfd::BfdPeerStatus;
+    pub use crate::v2026_07_29_00::bfd::BfdPeerStatuses;
 }
 
 pub mod device {
