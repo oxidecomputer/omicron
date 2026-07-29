@@ -29,8 +29,7 @@ pub fn assert_sitrep_is_slippy_clean(sitrep: &Sitrep) {
 /// closed cases until their rendezvous work drains.
 #[track_caller]
 pub fn assert_sitrep_has_no_fatal_notes(sitrep: &Sitrep) {
-    let report =
-        Slippy::new(sitrep).into_report(SlippyReportSortKey::Severity);
+    let report = Slippy::new(sitrep).into_report(SlippyReportSortKey::Severity);
     if report.notes().iter().any(|n| n.severity == Severity::Fatal) {
         panic!(
             "expected sitrep {} to have no fatal slippy notes:\n{}",
