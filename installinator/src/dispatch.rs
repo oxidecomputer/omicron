@@ -243,7 +243,8 @@ impl InstallOpts {
                         &last_known_peer,
                         log,
                     )
-                    .await?;
+                    .await
+                    .context("failed to fetch installinator document")?;
 
                     // Read the document as JSON.
                     //
@@ -577,11 +578,12 @@ async fn download_all_artifacts(
                     InstallinatorComponent::ControlPlaneZone
                 }
             };
+            let file_name = artifact.file_name.clone();
             let step = engine
                 .new_step(
                     component,
                     InstallinatorStepId::Download,
-                    format!("Downloading {}", artifact.file_name),
+                    format!("Downloading {}", file_name),
                     async move |cx2| {
                         let fetched = fetch_artifact(
                             &cx2,
@@ -590,7 +592,10 @@ async fn download_all_artifacts(
                             last_known_peer,
                             log,
                         )
-                        .await?;
+                        .await
+                        .with_context(|| {
+                            format!("failed to fetch {file_name}")
+                        })?;
                         StepSuccess::new(fetched.artifact)
                             .with_metadata(
                                 InstallinatorCompletionMetadata::Download {
