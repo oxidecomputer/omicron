@@ -698,7 +698,7 @@ async fn insert_impl(
                     .map(Artifact::from)
                     .collect::<ArtifactSet>();
                 if logical_desc.artifacts != existing_artifacts {
-                    return Err(err.bail(InsertError::RepoMismatch {
+                    return Err(err.bail(InsertError::RepoArtifactMismatch {
                         system_version: desc.repo.system_version,
                     }));
                 }
@@ -708,7 +708,7 @@ async fn insert_impl(
                     .map(|TufMetadataEntry { key, value, .. }| (key, value))
                     .collect::<BTreeMap<_, _>>();
                 if !logical_desc.metadata.iter().eq(existing_metadata) {
-                    return Err(err.bail(InsertError::RepoMismatch {
+                    return Err(err.bail(InsertError::RepoMetadataMismatch {
                         system_version: desc.repo.system_version,
                     }));
                 }
@@ -1083,11 +1083,14 @@ enum InsertError {
         uploaded: ArtifactHash,
         existing: ArtifactHash,
     },
-    /// Either the SHA256 of the existing repository or the uploaded repository
-    /// was not calculated, and the set of artifacts differs.
-    RepoMismatch { system_version: SemverVersion },
-    /// Some uploaded artifacts doesn't match the corresponding entries in the
-    /// database.
+    /// An existing repository with the same system version has a different set
+    /// of artifacts than the uploaded repository.
+    RepoArtifactMismatch { system_version: SemverVersion },
+    /// An existing repository with the same system version has a different set
+    /// of metadata than the uploaded repository.
+    RepoMetadataMismatch { system_version: SemverVersion },
+    /// Some uploaded artifacts with the same hash don't match existing entries
+    /// in the database.
     ArtifactMismatch { mismatch: Vec<(TufArtifactFile, TufArtifactFile)> },
     /// The length of the repository exceeds `i64::MAX`.
     ByteCountRangeError(ByteCountRangeError),
@@ -1105,10 +1108,18 @@ impl From<InsertError> for external::Error {
                  {}, but existing repository has SHA256 hash {}.",
                 system_version, uploaded, existing,
             )),
-            InsertError::RepoMismatch { system_version } => {
+            InsertError::RepoArtifactMismatch { system_version } => {
                 external::Error::conflict(format!(
                     "Uploaded repository with system version {} does not have \
                     the same artifacts as existing repository with same \
+                    system version",
+                    system_version
+                ))
+            }
+            InsertError::RepoMetadataMismatch { system_version } => {
+                external::Error::conflict(format!(
+                    "Uploaded repository with system version {} does not have \
+                    the same metadata as existing repository with same \
                     system version",
                     system_version
                 ))
