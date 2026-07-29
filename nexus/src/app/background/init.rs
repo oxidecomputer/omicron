@@ -1179,7 +1179,6 @@ impl BackgroundTasksInitializer {
                 sitrep_history_pruner: task_fm_sitrep_history_pruner.clone(),
             },
             nexus_id,
-            config.fm.analysis_enabled,
         );
         driver.register(TaskDefinition {
             name: "fm_analysis",

@@ -52,7 +52,7 @@ impl FmConfigLoader {
         let time_loaded = Utc::now();
         let updated = self.tx.send_if_modified(|current| {
             if current.as_ref() != Some(&config) {
-                *current = Some(config);
+                *current = Some(config.clone());
                 true
             } else {
                 false
@@ -131,7 +131,7 @@ mod test {
         assert!(updated);
         assert_eq!(config, initial);
         assert!(rx.has_changed().unwrap());
-        assert_eq!(*rx.borrow_and_update(), Some(initial));
+        assert_eq!(*rx.borrow_and_update(), Some(initial.clone()));
 
         // Activating again should not change anything.
         let status = task.activate(&opctx).await;
@@ -145,6 +145,8 @@ mod test {
         // Insert a config override; the next activation should load it.
         let param = FmConfigParam {
             version: NonZeroU32::new(1).unwrap(),
+            comment: "test override".to_string(),
+            analysis_enabled: true,
             sitrep_limit: 500,
             history_pruning_threshold: 400,
         };
@@ -159,10 +161,11 @@ mod test {
         else {
             panic!("expected updated Status::Loaded, got {status:?}");
         };
-        let FmConfigSource::Override { version, .. } = loaded.source else {
+        let FmConfigSource::Override { version, .. } = &loaded.source else {
             panic!("expected an override source, got {:?}", loaded.source);
         };
         assert_eq!(version.get(), 1);
+        assert!(loaded.config.analysis_enabled);
         assert_eq!(loaded.config.sitrep_limit.get(), 500);
         assert_eq!(loaded.config.history_pruning_threshold.get(), 400);
         assert!(rx.has_changed().unwrap());

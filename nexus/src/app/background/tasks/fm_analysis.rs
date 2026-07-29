@@ -19,6 +19,7 @@ use nexus_db_queries::db::identity::Asset;
 use nexus_db_queries::db::pagination::Paginator;
 use nexus_fm as fm;
 use nexus_types::fm::FmConfig;
+use nexus_types::fm::FmConfigSource;
 use nexus_types::fm::FmConfigView;
 use nexus_types::in_service_disk::InServiceDisk;
 use nexus_types::internal_api::background::FmAnalysisStatus;
@@ -41,7 +42,6 @@ pub struct FmAnalysis {
     cfg_rx: watch::Receiver<Option<FmConfigView>>,
     activators: Activators,
     nexus_id: OmicronZoneUuid,
-    analysis_enabled: bool,
 }
 
 /// This is just because I don't like it when a constructor takes multiple
@@ -80,26 +80,7 @@ impl BackgroundTask for FmAnalysis {
         opctx: &'a OpContext,
     ) -> BoxFuture<'a, serde_json::Value> {
         Box::pin(async {
-            let status = if self.analysis_enabled {
-                self.actually_activate(opctx).await
-            } else {
-                slog::info!(
-                    opctx.log,
-                    "fault management analysis explicitly disabled by config",
-                );
-                let known_classes: Vec<String> =
-                    fm::diagnosis::known_ereport_classes()
-                        .iter()
-                        .map(|s| (*s).to_string())
-                        .collect();
-                FmAnalysisStatus {
-                    parent_sitrep_id: None,
-                    inv_collection_id: None,
-                    known_classes,
-                    outcome: status::Outcome::Disabled,
-                    warnings: Vec::new(),
-                }
-            };
+            let status = self.actually_activate(opctx).await;
             match serde_json::to_value(status) {
                 Ok(val) => val,
                 Err(err) => {
@@ -122,17 +103,8 @@ impl FmAnalysis {
         cfg_rx: watch::Receiver<Option<FmConfigView>>,
         activators: Activators,
         nexus_id: OmicronZoneUuid,
-        analysis_enabled: bool,
     ) -> Self {
-        Self {
-            datastore,
-            sitrep_rx,
-            inv_rx,
-            cfg_rx,
-            activators,
-            nexus_id,
-            analysis_enabled,
-        }
+        Self { datastore, sitrep_rx, inv_rx, cfg_rx, activators, nexus_id }
     }
 
     async fn actually_activate(
@@ -156,21 +128,63 @@ impl FmAnalysis {
         let parent_sitrep = self.sitrep_rx.borrow_and_update().clone();
         let parent_sitrep_id = parent_sitrep.as_ref().map(|s| s.1.id());
 
-        // We can't proceed with analysis until the config has been loaded,
-        // since otherwise, we won't know if we're at the sitrep limit.
-        let Some(cfg) = *self.cfg_rx.borrow_and_update() else {
-            slog::info!(
-                opctx.log,
-                "fault management analysis waiting for the FM config to be \
-                 loaded"
-            );
-            return FmAnalysisStatus {
-                parent_sitrep_id,
-                inv_collection_id: None,
-                known_classes,
-                outcome: status::Outcome::WaitingForConfig,
-                warnings,
+        let cfg = {
+            let cfg_view = self.cfg_rx.borrow_and_update();
+            let Some(cfg_view) = cfg_view.as_ref() else {
+                // We can't proceed with analysis until the config has been
+                // loaded, since otherwise, we won't know if we're at the sitrep
+                // limit (or if we've been totally disabled)
+                slog::info!(
+                    opctx.log,
+                    "fault management analysis waiting for the FM config to be \
+                     loaded"
+                );
+                return FmAnalysisStatus {
+                    parent_sitrep_id,
+                    inv_collection_id: None,
+                    known_classes,
+                    outcome: status::Outcome::WaitingForConfig,
+                    warnings,
+                };
             };
+
+            // Check if the current config has disabled analysis. We do this
+            // inside the borrow of the current config view because we would
+            // like to be able to log the details of the config override that
+            // has turned us off...
+            if !cfg_view.config.analysis_enabled {
+                match cfg_view.source {
+                    FmConfigSource::Default => {
+                        slog::error!(
+                            opctx.log,
+                            "this is weird! the default FM config is not \
+                             supposed to disable the analysis task!",
+                        );
+                    }
+                    FmConfigSource::Override {
+                        version,
+                        ref comment,
+                        time_modified,
+                    } => {
+                        slog::info!(
+                            opctx.log,
+                            "fault management analysis disabled by FM config \
+                             override v{version}";
+                            "config_version" => version.get(),
+                            "comment" => comment,
+                            "time_modified" => %time_modified,
+                        );
+                    }
+                };
+                return FmAnalysisStatus {
+                    parent_sitrep_id,
+                    inv_collection_id: None,
+                    known_classes,
+                    outcome: status::Outcome::Disabled(cfg_view.source.clone()),
+                    warnings,
+                };
+            }
+            cfg_view.config
         };
 
         let Some(inv) = self.inv_rx.borrow_and_update().clone() else {
@@ -257,13 +271,7 @@ impl FmAnalysis {
 
         // Okay, actually run analysis and generate a new sitrep.
         let outcome = self
-            .analyze(
-                &opctx,
-                inputs,
-                &prep_status.report,
-                &cfg.config,
-                &mut warnings,
-            )
+            .analyze(&opctx, inputs, &prep_status.report, &cfg, &mut warnings)
             .await;
 
         FmAnalysisStatus {
@@ -810,8 +818,6 @@ mod tests {
     use std::collections::BTreeSet;
     use std::num::NonZeroU32;
 
-    const ANALYSIS_ENABLED: bool = true;
-
     /// Returns an FM config view with the given sitrep limit and history
     /// pruning threshold.
     ///
@@ -827,6 +833,7 @@ mod tests {
             "test configs must uphold the threshold < limit invariant"
         );
         let config = nexus_types::fm::FmConfig {
+            analysis_enabled: true,
             sitrep_limit,
             history_pruning_threshold,
         };
@@ -929,7 +936,6 @@ mod tests {
                 config_rx(Default::default()),
                 activators(),
                 OmicronZoneUuid::new_v4(),
-                ANALYSIS_ENABLED,
             );
 
             let result = task.actually_activate(opctx).await;
@@ -963,7 +969,6 @@ mod tests {
                 config_rx(Default::default()),
                 activators(),
                 OmicronZoneUuid::new_v4(),
-                ANALYSIS_ENABLED,
             );
 
             let result = task.actually_activate(opctx).await;
@@ -990,7 +995,6 @@ mod tests {
                 config_rx(Default::default()),
                 activators(),
                 OmicronZoneUuid::new_v4(),
-                ANALYSIS_ENABLED,
             );
 
             let result = task.actually_activate(opctx).await;
@@ -1021,7 +1025,6 @@ mod tests {
                 config_rx(Default::default()),
                 activators(),
                 OmicronZoneUuid::new_v4(),
-                ANALYSIS_ENABLED,
             );
 
             let result = task.actually_activate(opctx).await;
@@ -1052,7 +1055,6 @@ mod tests {
                 config_rx(Default::default()),
                 activators(),
                 OmicronZoneUuid::new_v4(),
-                ANALYSIS_ENABLED,
             );
 
             let result = task.actually_activate(opctx).await;
@@ -1211,7 +1213,6 @@ mod tests {
             config_rx(Default::default()),
             activators(),
             OmicronZoneUuid::new_v4(),
-            ANALYSIS_ENABLED,
         );
 
         let (input, prep) = task
@@ -1292,7 +1293,6 @@ mod tests {
             config_rx(cfg.clone()),
             acts.clone(),
             OmicronZoneUuid::new_v4(),
-            ANALYSIS_ENABLED,
         );
 
         let mut model = SitrepModel::new(datastore.clone());
@@ -1437,7 +1437,6 @@ mod tests {
             config_rx(test_config(LIMIT, history_pruning_threshold)),
             acts.clone(),
             OmicronZoneUuid::new_v4(),
-            ANALYSIS_ENABLED,
         );
 
         let mut model = SitrepModel::new(datastore.clone());

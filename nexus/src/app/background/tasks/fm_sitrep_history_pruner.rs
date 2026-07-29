@@ -84,10 +84,11 @@ impl SitrepHistoryPruner {
     }
 
     async fn actually_activate(&mut self, opctx: &OpContext) -> Status {
-        let Some(cfg_view) = *self.cfg.borrow() else {
+        let cfg = self.cfg.borrow().as_ref().map(|view| view.config);
+        let Some(cfg) = cfg else {
             return Status::WaitingForConfig;
         };
-        let thresh = cfg_view.config.history_pruning_threshold;
+        let thresh = cfg.history_pruning_threshold;
         let mut pruned = status::SitrepsPruned::default();
         let params =
             HistoryPruningParams { limit: thresh, batch_size: self.batch_size };
@@ -180,7 +181,7 @@ impl SitrepHistoryPruner {
         };
 
         Status::Activated {
-            cfg: cfg_view,
+            cfg,
             batch_size: self.batch_size.get(),
             outcome,
             pruned,
@@ -207,6 +208,7 @@ mod tests {
         history_pruning_threshold: u32,
     ) -> watch::Receiver<Option<FmConfigView>> {
         let config = nexus_types::fm::FmConfig {
+            analysis_enabled: true,
             history_pruning_threshold: NonZeroU32::new(
                 history_pruning_threshold,
             )
@@ -370,14 +372,14 @@ mod tests {
                      got: {status:?}"
                 ),
             };
-        // The status must echo the config the task was actually given.
+        // The status must echo the config values the task was actually given.
         assert_eq!(
-            Some(&cfg),
-            task.cfg.borrow().as_ref(),
+            Some(cfg),
+            task.cfg.borrow().as_ref().map(|view| view.config),
             "the status should report the config used for pruning",
         );
-        let expected = model
-            .simulate_history_pruning(cfg.config.history_pruning_threshold);
+        let expected =
+            model.simulate_history_pruning(cfg.history_pruning_threshold);
         assert_eq!(
             pruned.total, expected.sitreps_pruned,
             "the number of history entries pruned should match the model's \

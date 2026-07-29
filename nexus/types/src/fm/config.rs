@@ -37,18 +37,26 @@ use serde::{Deserialize, Serialize};
 /// - [`Self::history_pruning_threshold`] must be at least
 ///   [`FmConfig::MIN_HISTORY_PRUNING_THRESHOLD`],
 /// - [`Self::history_pruning_threshold`] must be strictly less than
-///   [`Self::sitrep_limit`].
+///   [`Self::sitrep_limit`],
+/// - [`Self::comment`] must be non-empty.
 ///
 /// The configuration values are validated by converting this type into a
 /// [`FmConfig`] via `TryFrom`. Whether `version` is actually the next version
 /// can only be determined by the database at insert time, so it is not
 /// checked by that conversion.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema,
-)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct FmConfigParam {
     /// The version of the configuration.
     pub version: NonZeroU32,
+
+    /// A comment describing why the default configuration was overridden.
+    ///
+    /// A comment is mandatory when overriding the default configuration, so
+    /// this must be non-empty.
+    pub comment: String,
+
+    /// BREAK GLASS TO COMPLETELY DISABLE FM ANALYSIS
+    pub analysis_enabled: bool,
 
     /// The maximum number of sitreps to keep in the database.
     ///
@@ -69,15 +77,7 @@ pub struct FmConfigParam {
 
 /// A view of the current fault management configuration.
 #[derive(
-    Debug,
-    Clone,
-    Copy,
-    Default,
-    PartialEq,
-    Eq,
-    Serialize,
-    Deserialize,
-    JsonSchema,
+    Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema,
 )]
 pub struct FmConfigView {
     pub config: FmConfig,
@@ -116,26 +116,21 @@ impl fmt::Display for FmConfigView {
 
 /// Where a [`FmConfigView`]'s configuration came from.
 #[derive(
-    Debug,
-    Clone,
-    Copy,
-    Default,
-    PartialEq,
-    Eq,
-    Serialize,
-    Deserialize,
-    JsonSchema,
+    Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema,
 )]
 #[serde(rename_all = "snake_case")]
 pub enum FmConfigSource {
     #[default]
     Default,
 
+    /// The fault management configuration was overridden.
     Override {
         /// The version of the override.
         version: NonZeroU32,
-        /// The time at which this override was inserted.
+        /// The time at which this override was created.
         time_modified: DateTime<Utc>,
+        /// A comment describing why the default configuration was overridden.
+        comment: String,
     },
 }
 
@@ -159,7 +154,11 @@ impl FmConfigSource {
                     FmConfigSource::Default => {
                         writeln!(f, "{:>indent$}{SOURCE:<WIDTH$} default", "")
                     }
-                    FmConfigSource::Override { version, time_modified } => {
+                    FmConfigSource::Override {
+                        version,
+                        time_modified,
+                        comment,
+                    } => {
                         writeln!(
                             f,
                             "{:>indent$}{SOURCE:<WIDTH$} override",
@@ -177,7 +176,15 @@ impl FmConfigSource {
                             humantime::format_rfc3339_millis(
                                 (*time_modified).into()
                             )
-                        )
+                        )?;
+                        writeln!(f, "{:>indent$}{COMMENT:<WIDTH$}", "")?;
+                        // If the comment is multi-line, write it out
+                        // line-by-line so that we can indent them.
+                        let comment_indent = indent + 2;
+                        for line in comment.lines() {
+                            writeln!(f, "{:>comment_indent$}{line}", "")?;
+                        }
+                        Ok(())
                     }
                 }
             }
@@ -208,6 +215,9 @@ impl fmt::Display for FmConfigSource {
     Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema,
 )]
 pub struct FmConfig {
+    /// BREAK GLASS TO COMPLETELY DISABLE FM ANALYSIS
+    pub analysis_enabled: bool,
+
     /// The maximum number of sitreps to keep in the database.
     ///
     /// If the number of sitreps exceeds this limit, the FM analysis background
@@ -260,10 +270,20 @@ impl FmConfig {
         impl fmt::Display for DisplayConfig<'_> {
             fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
                 let DisplayConfig {
-                    config: FmConfig { sitrep_limit, history_pruning_threshold },
+                    config:
+                        FmConfig {
+                            analysis_enabled,
+                            sitrep_limit,
+                            history_pruning_threshold,
+                        },
                     indent,
                 } = self;
 
+                writeln!(
+                    f,
+                    "{:>indent$}{ANALYSIS_ENABLED:<WIDTH$} {analysis_enabled}",
+                    ""
+                )?;
                 writeln!(
                     f,
                     "{:>indent$}{SITREP_LIMIT:<WIDTH$} {sitrep_limit}",
@@ -285,6 +305,7 @@ impl FmConfig {
 impl Default for FmConfig {
     fn default() -> Self {
         Self {
+            analysis_enabled: true,
             sitrep_limit: Self::DEFAULT_SITREP_LIMIT,
             history_pruning_threshold: Self::DEFAULT_HISTORY_PRUNING_THRESHOLD,
         }
@@ -305,9 +326,31 @@ impl TryFrom<&'_ FmConfigParam> for FmConfig {
         // config itself, and its type already ensures it is nonzero.
         let &FmConfigParam {
             version: _,
+            ref comment,
+            analysis_enabled,
             sitrep_limit,
             history_pruning_threshold,
         } = value;
+
+        // Technically, the comment is not actually part of the `FmConfig`
+        // struct, but this conversion is where we validate everything else, so
+        // check that the comment is valid here.
+        if comment.is_empty() {
+            return Err(Error::invalid_value(
+                "comment",
+                "a non-empty comment is required when overriding the fault \
+                 management config",
+            ));
+        }
+        if comment.trim().is_empty() {
+            return Err(Error::invalid_value(
+                "comment",
+                "you sneaky bastard! you thought you could trick me by \
+                 leaving a comment that was entirely whitespace, but I already \
+                 thought of that. you're going to have to at least type the \
+                 letter 'a' or a period or something.",
+            ));
+        }
 
         fn check_minimum(
             value: u32,
@@ -347,19 +390,23 @@ impl TryFrom<&'_ FmConfigParam> for FmConfig {
                 ),
             ));
         }
-        Ok(Self { sitrep_limit, history_pruning_threshold })
+        Ok(Self { analysis_enabled, sitrep_limit, history_pruning_threshold })
     }
 }
 
 const SOURCE: &str = "source:";
 const VERSION: &str = "  version:";
 const TIME_MODIFIED: &str = "  modified at:";
+const COMMENT: &str = "  comment:";
+const ANALYSIS_ENABLED: &str = "analysis enabled:";
 const SITREP_LIMIT: &str = "sitrep limit:";
 const HISTORY_PRUNING_THRESHOLD: &str = "sitrep history pruning threshold:";
 const WIDTH: usize = const_max_len(&[
     SOURCE,
     VERSION,
     TIME_MODIFIED,
+    COMMENT,
+    ANALYSIS_ENABLED,
     SITREP_LIMIT,
     HISTORY_PRUNING_THRESHOLD,
 ]);
@@ -370,14 +417,22 @@ mod tests {
 
     const V1: NonZeroU32 = NonZeroU32::new(1).unwrap();
 
+    fn param(
+        sitrep_limit: u32,
+        history_pruning_threshold: u32,
+    ) -> FmConfigParam {
+        FmConfigParam {
+            version: V1,
+            comment: "test config".to_string(),
+            analysis_enabled: true,
+            sitrep_limit,
+            history_pruning_threshold,
+        }
+    }
+
     #[test]
     fn test_sitrep_limit_nonzero() {
-        let err = FmConfig::try_from(&FmConfigParam {
-            version: V1,
-            sitrep_limit: 0,
-            history_pruning_threshold: 2,
-        })
-        .unwrap_err();
+        let err = FmConfig::try_from(&param(0, 2)).unwrap_err();
         assert!(
             err.to_string().contains("sitrep_limit must be nonzero"),
             "unexpected error: {err}"
@@ -386,12 +441,7 @@ mod tests {
 
     #[test]
     fn test_min_sitrep_limit() {
-        let err = FmConfig::try_from(&FmConfigParam {
-            version: V1,
-            sitrep_limit: 2,
-            history_pruning_threshold: 2,
-        })
-        .unwrap_err();
+        let err = FmConfig::try_from(&param(2, 2)).unwrap_err();
         assert!(
             err.to_string().contains("sitrep_limit must be at least"),
             "unexpected error: {err}"
@@ -400,12 +450,7 @@ mod tests {
 
     #[test]
     fn test_nonzero_history_pruning_threshold() {
-        let err = FmConfig::try_from(&FmConfigParam {
-            version: V1,
-            sitrep_limit: 100,
-            history_pruning_threshold: 0,
-        })
-        .unwrap_err();
+        let err = FmConfig::try_from(&param(100, 0)).unwrap_err();
         assert!(
             err.to_string()
                 .contains("history_pruning_threshold must be nonzero"),
@@ -415,12 +460,7 @@ mod tests {
 
     #[test]
     fn test_min_history_pruning_threshold() {
-        let err = FmConfig::try_from(&FmConfigParam {
-            version: V1,
-            sitrep_limit: 100,
-            history_pruning_threshold: 1,
-        })
-        .unwrap_err();
+        let err = FmConfig::try_from(&param(100, 1)).unwrap_err();
         assert!(
             err.to_string()
                 .contains("history_pruning_threshold must be at least"),
@@ -431,12 +471,7 @@ mod tests {
     #[test]
     fn test_history_pruning_threshold_must_be_less_than_sitrep_limit() {
         for threshold in [100, 101] {
-            let err = FmConfig::try_from(&FmConfigParam {
-                version: V1,
-                sitrep_limit: 100,
-                history_pruning_threshold: threshold,
-            })
-            .unwrap_err();
+            let err = FmConfig::try_from(&param(100, threshold)).unwrap_err();
             assert!(
                 err.to_string()
                     .contains("must be less than the total sitrep limit"),

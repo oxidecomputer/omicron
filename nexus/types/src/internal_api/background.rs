@@ -955,8 +955,8 @@ pub enum SitrepHistoryPrunerStatus {
     WaitingForConfig,
     /// The pruning task has activated normally.
     Activated {
-        /// The maximum number of entries to retain in the history table.
-        cfg: crate::fm::FmConfigView,
+        /// The configuration values used for this pruning pass.
+        cfg: crate::fm::FmConfig,
         /// The maximum number of history table entries deleted per query.
         batch_size: u32,
         /// Tracks how many sitreps were deleted during this activation.
@@ -1019,6 +1019,7 @@ pub struct FmAnalysisStatus {
 
 pub mod fm_analysis {
     use super::*;
+    use crate::fm::FmConfigSource;
     use crate::fm::analysis_reports;
     use std::num::{NonZeroU32, NonZeroU64};
 
@@ -1034,7 +1035,7 @@ pub mod fm_analysis {
     #[allow(clippy::large_enum_variant)]
     pub enum Outcome {
         /// The task is disabled by config.
-        Disabled,
+        Disabled(FmConfigSource),
 
         /// Fault management analysis was not performed, as the fault
         /// management configuration has not yet been loaded from the

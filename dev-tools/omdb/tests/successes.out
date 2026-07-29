@@ -742,6 +742,7 @@ task: "fm_config_loader"
       updated by this activation: false
     current config:
       source:                           default
+      analysis enabled:                 true
       sitrep limit:                     2500
       sitrep history pruning threshold: 2000
 
@@ -815,7 +816,7 @@ task: "fm_sitrep_history_pruner"
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     configuration:
-      source:                           default
+      analysis enabled:                 true
       sitrep limit:                     2500
       sitrep history pruning threshold: 2000
     deletion batch size: 1000
@@ -1478,6 +1479,7 @@ task: "fm_config_loader"
       updated by this activation: false
     current config:
       source:                           default
+      analysis enabled:                 true
       sitrep limit:                     2500
       sitrep history pruning threshold: 2000
 
@@ -1551,7 +1553,7 @@ task: "fm_sitrep_history_pruner"
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     configuration:
-      source:                           default
+      analysis enabled:                 true
       sitrep limit:                     2500
       sitrep history pruning threshold: 2000
     deletion batch size: 1000

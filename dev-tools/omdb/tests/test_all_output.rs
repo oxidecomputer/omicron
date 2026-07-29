@@ -216,7 +216,7 @@ async fn test_omdb_success_cases() {
     //    the config it used and a count of 1, rather than "waiting for
     //    config". If we didn't run it explicitly after the config was loaded,
     //    its initial activation may race with the config loader and sometimes
-    //    display that it's waiting for config, and sometimes display that it 
+    //    display that it's waiting for config, and sometimes display that it
     //    did nothing.
     // 5. `fm_analysis` re-runs with the loaded sitrep as its parent and
     //    reports "no changes" -- the steady-state output asserted below.

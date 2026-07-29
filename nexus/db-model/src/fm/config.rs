@@ -16,6 +16,8 @@ use std::num::NonZeroU32;
 #[diesel(table_name = fm_config)]
 pub struct FmConfig {
     pub version: SqlU32,
+    pub comment: String,
+    pub analysis_enabled: bool,
     pub sitrep_limit: SqlU32,
     pub history_pruning_threshold: SqlU32,
     pub time_modified: DateTime<Utc>,
@@ -30,10 +32,15 @@ impl TryFrom<fm::FmConfigParam> for FmConfig {
         // exhaustively so that if any fields are added to the `nexus_types`
         // version, they must be handled here and included in the `db::model`
         // type.
-        let fm::FmConfig { history_pruning_threshold, sitrep_limit } =
-            fm::FmConfig::try_from(&param)?;
+        let fm::FmConfig {
+            analysis_enabled,
+            history_pruning_threshold,
+            sitrep_limit,
+        } = fm::FmConfig::try_from(&param)?;
         Ok(Self {
             version: param.version.get().into(),
+            comment: param.comment,
+            analysis_enabled,
             sitrep_limit: sitrep_limit.get().into(),
             history_pruning_threshold: history_pruning_threshold.get().into(),
             time_modified: Utc::now(),
@@ -47,6 +54,8 @@ impl TryFrom<FmConfig> for fm::FmConfigView {
     fn try_from(value: FmConfig) -> Result<Self, Self::Error> {
         let FmConfig {
             version,
+            comment,
+            analysis_enabled,
             sitrep_limit,
             history_pruning_threshold,
             time_modified,
@@ -66,11 +75,17 @@ impl TryFrom<FmConfig> for fm::FmConfigView {
         // the database.
         let param = fm::FmConfigParam {
             version,
+            comment,
+            analysis_enabled,
             sitrep_limit: sitrep_limit.into(),
             history_pruning_threshold: history_pruning_threshold.into(),
         };
         let config = fm::FmConfig::try_from(&param)?;
-        let source = fm::FmConfigSource::Override { version, time_modified };
+        let source = fm::FmConfigSource::Override {
+            version,
+            time_modified,
+            comment: param.comment,
+        };
 
         Ok(Self { config, source })
     }

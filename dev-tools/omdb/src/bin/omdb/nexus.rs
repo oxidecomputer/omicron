@@ -3551,11 +3551,11 @@ fn print_task_fm_analysis(details: &serde_json::Value, colored: bool) {
     println!("    FAULT MANAGEMENT ANALYSIS SUMMARY");
     println!("    =================================");
     let (prep_status, analysis_status) = match outcome {
-        Outcome::Disabled => {
+        Outcome::Disabled(config_source) => {
             println!(
-                "    fault management analysis explicitly disabled \
-                 by config!"
+                "    fault management analysis explicitly disabled by config!"
             );
+            println!("{}", config_source.display_multiline(6));
             return;
         }
         Outcome::WaitingForConfig => {

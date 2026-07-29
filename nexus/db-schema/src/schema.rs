@@ -3207,6 +3207,8 @@ allow_tables_to_appear_in_same_query!(
 table! {
     fm_config (version) {
         version -> Int8,
+        comment -> Text,
+        analysis_enabled -> Bool,
         sitrep_limit -> Int8,
         history_pruning_threshold -> Int8,
         time_modified -> Timestamptz,

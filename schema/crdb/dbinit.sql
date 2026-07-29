@@ -9082,6 +9082,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_config (
     -- Configuration changes are made by inserting a new row with a higher
     -- version number.
     version INT8 PRIMARY KEY,
+    -- A comment describing why this override was created.
+    comment TEXT NOT NULL,
+    -- BREAK GLASS TO COMPLETELY DISABLE FAULT MANAGEMENT ANALYSIS
+    analysis_enabled BOOL NOT NULL,
     -- The maximum number of sitreps to keep in the database.
     --
     -- If the number of records in the `omicron.public.fm_sitrep` table
@@ -9100,7 +9104,15 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_config (
     time_modified TIMESTAMPTZ NOT NULL,
 
     CONSTRAINT versions_are_positive CHECK (version > 0),
+
+    -- Comments are mandatory when overriding the default config, so we enforce
+    -- that this is both non-NULL and not the empty string. We can't force the
+    -- operator to write a *good* comment, but at least we can force you to type
+    -- SOMETHING if you really don't want to say anything... :)
+    CONSTRAINT comment_required CHECK (comment != '' AND comment != ' '),
+
     CONSTRAINT sitrep_min_limit CHECK (sitrep_limit >= 5),
+
     CONSTRAINT history_pruning_threshold_validity CHECK (
         history_pruning_threshold >= 2 AND
         history_pruning_threshold < sitrep_limit

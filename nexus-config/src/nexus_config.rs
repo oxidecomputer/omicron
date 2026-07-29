@@ -1016,17 +1016,9 @@ impl Default for MulticastGroupReconcilerConfig {
     }
 }
 
-/// Default for [`FmTasksConfig::analysis_enabled`].
-fn default_fm_analysis_enabled() -> bool {
-    true
-}
-
 #[serde_as]
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct FmTasksConfig {
-    /// whether the fault management analysis background task runs.
-    #[serde(default = "default_fm_analysis_enabled")]
-    pub analysis_enabled: bool,
     /// period (in seconds) for periodic activations of the background task that
     /// drives fault management analysis.
     #[serde_as(as = "DurationSeconds<u64>")]
@@ -1057,7 +1049,6 @@ pub struct FmTasksConfig {
 impl Default for FmTasksConfig {
     fn default() -> Self {
         Self {
-            analysis_enabled: default_fm_analysis_enabled(),
             // Analysis is generally triggered by changes in the current sitrep,
             // inventory, or by the ereport ingester(s), so it need not be
             // periodically activated all that frequently.
@@ -1653,7 +1644,6 @@ mod test {
                             disable: false,
                         },
                         fm: FmTasksConfig {
-                            analysis_enabled: default_fm_analysis_enabled(),
                             analysis_period_secs: Duration::from_secs(52),
                             config_load_period_secs: Duration::from_secs(53),
                             sitrep_load_period_secs: Duration::from_secs(48),

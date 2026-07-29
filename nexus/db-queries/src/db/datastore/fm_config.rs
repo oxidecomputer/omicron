@@ -83,6 +83,8 @@ impl DataStore {
         // prompted to update the query below accordingly.
         let db::model::fm::FmConfig {
             version,
+            comment,
+            analysis_enabled,
             sitrep_limit,
             history_pruning_threshold,
             time_modified,
@@ -98,6 +100,8 @@ impl DataStore {
         // of the query must be updated accordingly!
         let new_row = diesel::dsl::select((
             version.into_sql::<sql_types::BigInt>(),
+            comment.into_sql::<sql_types::Text>(),
+            analysis_enabled.into_sql::<sql_types::Bool>(),
             sitrep_limit.into_sql::<sql_types::BigInt>(),
             history_pruning_threshold.into_sql::<sql_types::BigInt>(),
             time_modified.into_sql::<sql_types::Timestamptz>(),
@@ -110,6 +114,8 @@ impl DataStore {
             .values(new_row)
             .into_columns((
                 dsl::version,
+                dsl::comment,
+                dsl::analysis_enabled,
                 dsl::sitrep_limit,
                 dsl::history_pruning_threshold,
                 dsl::time_modified,
@@ -152,12 +158,14 @@ mod tests {
         // first must be version 1.
         let mut config = FmConfigParam {
             version: NonZeroU32::new(2).unwrap(),
+            comment: "first override".to_string(),
+            analysis_enabled: true,
             sitrep_limit: 5,
             history_pruning_threshold: 4,
         };
         assert!(
             datastore
-                .fm_config_insert_latest_version(opctx, config)
+                .fm_config_insert_latest_version(opctx, config.clone())
                 .await
                 .unwrap_err()
                 .to_string()
@@ -167,7 +175,7 @@ mod tests {
         // Inserting version 1 should work.
         config.version = NonZeroU32::new(1).unwrap();
         datastore
-            .fm_config_insert_latest_version(opctx, config)
+            .fm_config_insert_latest_version(opctx, config.clone())
             .await
             .expect("inserting version 1 should succeed");
 
@@ -177,10 +185,12 @@ mod tests {
             .await
             .unwrap()
             .expect("an override was inserted");
-        let FmConfigSource::Override { version, .. } = read.source else {
+        let FmConfigSource::Override { version, ref comment, .. } = read.source
+        else {
             panic!("expected an override source, got {:?}", read.source);
         };
         assert_eq!(version.get(), 1);
+        assert_eq!(comment, "first override");
         assert_eq!(read.config.sitrep_limit.get(), 5);
         assert_eq!(read.config.history_pruning_threshold.get(), 4);
 
@@ -192,16 +202,29 @@ mod tests {
         config.history_pruning_threshold = 100;
         assert!(
             datastore
-                .fm_config_insert_latest_version(opctx, config)
+                .fm_config_insert_latest_version(opctx, config.clone())
                 .await
                 .unwrap_err()
                 .to_string()
                 .contains("must be less than the total sitrep limit")
         );
 
-        // Inserting version 2 with a valid config should work.
+        // An empty comment is also rejected on the insert path.
         config.sitrep_limit = 500;
         config.history_pruning_threshold = 400;
+        config.comment = String::new();
+        assert!(
+            datastore
+                .fm_config_insert_latest_version(opctx, config.clone())
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains("a comment is required")
+        );
+
+        // Inserting version 2 with a valid config should work.
+        config.comment = "second override".to_string();
+        config.analysis_enabled = false;
         datastore
             .fm_config_insert_latest_version(opctx, config)
             .await
@@ -213,10 +236,13 @@ mod tests {
             .await
             .unwrap()
             .expect("an override was inserted");
-        let FmConfigSource::Override { version, .. } = read.source else {
+        let FmConfigSource::Override { version, ref comment, .. } = read.source
+        else {
             panic!("expected an override source, got {:?}", read.source);
         };
         assert_eq!(version.get(), 2);
+        assert_eq!(comment, "second override");
+        assert!(!read.config.analysis_enabled);
         assert_eq!(read.config.sitrep_limit.get(), 500);
         assert_eq!(read.config.history_pruning_threshold.get(), 400);
 
