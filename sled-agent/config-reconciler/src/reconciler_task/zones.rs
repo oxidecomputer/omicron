@@ -26,7 +26,7 @@ use illumos_utils::zone::Api as _;
 use illumos_utils::zone::DeleteAddressError;
 use illumos_utils::zone::OmicronZoneConfigExt;
 use illumos_utils::zone::Zones;
-use ntp_admin_v1_client::types::TimeSync;
+use ntp_admin_client::types::TimeSync;
 use omicron_common::address::Ipv6Subnet;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use sled_agent_types::inventory::ConfigReconcilerInventoryResult;
@@ -77,9 +77,7 @@ pub enum TimeSyncError {
     #[error("multiple running NTP zones - this should never happen!")]
     MultipleRunningNtpZones,
     #[error("failed to communicate with NTP admin server")]
-    NtpAdmin(
-        #[from] ntp_admin_v1_client::Error<ntp_admin_v1_client::types::Error>,
-    ),
+    NtpAdmin(#[from] ntp_admin_client::Error<ntp_admin_client::types::Error>),
     #[error("failed to execute chronyc within NTP zone")]
     ExecuteChronyc(#[source] RunCommandError),
     #[error(
@@ -589,7 +587,7 @@ impl OmicronZones {
             return Err(TimeSyncError::MultipleRunningNtpZones);
         }
 
-        let client = ntp_admin_v1_client::Client::new(
+        let client = ntp_admin_client::Client::new(
             &format!("http://{ntp_admin_address}"),
             log.clone(),
         );
@@ -1303,7 +1301,7 @@ mod tests {
     use illumos_utils::zpool::PathInPool;
     use illumos_utils::zpool::ZpoolName;
     use illumos_utils::zpool::ZpoolOrRamdisk;
-    use omicron_common::address::SLED_PREFIX;
+    use omicron_common::address::SLED_PREFIX_LENGTH;
     use omicron_common::disk::DatasetConfig;
     use omicron_common::disk::DatasetKind;
     use omicron_common::disk::DatasetName;
@@ -1513,7 +1511,7 @@ mod tests {
     #[derive(Debug)]
     struct FakeSledAgentFacilitiesInner {
         start_responses: VecDeque<anyhow::Result<RunningZone>>,
-        removed_ddm_prefixes: BTreeSet<Ipv6Subnet<SLED_PREFIX>>,
+        removed_ddm_prefixes: BTreeSet<Ipv6Subnet<SLED_PREFIX_LENGTH>>,
         resolver_status: ResolverStatus,
     }
 
@@ -1632,7 +1630,7 @@ mod tests {
 
         fn ddm_remove_internal_dns_prefix(
             &self,
-            prefix: Ipv6Subnet<SLED_PREFIX>,
+            prefix: Ipv6Subnet<SLED_PREFIX_LENGTH>,
         ) {
             self.inner.lock().unwrap().removed_ddm_prefixes.insert(prefix);
         }

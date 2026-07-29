@@ -37,6 +37,7 @@ progenitor::generate_api!(
         "oxnet" = "0.1.0",
     },
     replace = {
+        ArtifactConfig = sled_agent_types::artifact::ArtifactConfig,
         Attestation = sled_agent_types_versions::latest::rot::Attestation,
         Baseboard = sled_agent_types_versions::latest::inventory::Baseboard,
         BaseboardId = sled_hardware_types::BaseboardId,
@@ -49,7 +50,6 @@ progenitor::generate_api!(
         CommitStatus = trust_quorum_types::status::CommitStatus,
         CoordinatorStatus = trust_quorum_types::status::CoordinatorStatus,
         DatasetsConfig = omicron_common::disk::DatasetsConfig,
-        DatasetManagementStatus = omicron_common::disk::DatasetManagementStatus,
         DatasetKind = omicron_common::api::internal::shared::DatasetKind,
         DiskIdentity = omicron_common::disk::DiskIdentity,
         DiskManagementStatus = omicron_common::disk::DiskManagementStatus,
@@ -88,7 +88,6 @@ progenitor::generate_api!(
         NetworkInterfaceKind = sled_agent_types_versions::latest::inventory::NetworkInterfaceKind,
         Nonce = sled_agent_types_versions::latest::rot::Nonce,
         OmicronPhysicalDiskConfig = omicron_common::disk::OmicronPhysicalDiskConfig,
-        OmicronPhysicalDisksConfig = omicron_common::disk::OmicronPhysicalDisksConfig,
         OmicronSledConfig = sled_agent_types_versions::latest::inventory::OmicronSledConfig,
         OmicronZoneConfig = sled_agent_types_versions::latest::inventory::OmicronZoneConfig,
         OmicronZoneDataset = sled_agent_types_versions::latest::inventory::OmicronZoneDataset,

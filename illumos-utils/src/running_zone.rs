@@ -20,7 +20,7 @@ use camino::{Utf8Path, Utf8PathBuf};
 use camino_tempfile::Utf8TempDir;
 use debug_ignore::DebugIgnore;
 use ipnetwork::IpNetwork;
-use omicron_common::address::{AZ_PREFIX, Ipv6Subnet};
+use omicron_common::address::{AZ_PREFIX_LENGTH, Ipv6Subnet};
 use omicron_common::backoff;
 use omicron_common::resolvable_files::ResolvableFileSource;
 use omicron_uuid_kinds::OmicronZoneUuid;
@@ -476,7 +476,8 @@ impl RunningZone {
         gateway: Ipv6Addr,
     ) -> Result<(), RunCommandError> {
         // Route to the underlay AZ's /48 by deriving it from the gateway IP.
-        let underlay_az: Ipv6Subnet<AZ_PREFIX> = Ipv6Subnet::new(gateway);
+        let underlay_az: Ipv6Subnet<AZ_PREFIX_LENGTH> =
+            Ipv6Subnet::new(gateway);
         self.run_cmd([
             ROUTE,
             "add",

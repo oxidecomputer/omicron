@@ -65,6 +65,18 @@ pub enum DataLinks {
     Physical,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "kind")]
+pub enum ExternalDisks {
+    /// Instead of detecting physical disks, use the provided file-backed vdevs.
+    Virtual { vdevs: Vec<String> },
+    /// Instead of detecting physical disks, inject the provided ones during
+    /// device polling.
+    HardcodedPhysical { disks: Vec<UnparsedDisk> },
+    /// Detect physical external disks connected to the sled.
+    DetectPhysical,
+}
+
 /// Configuration for forcing a sled to run as a Scrimlet or compute Sled
 #[derive(Copy, Clone, Debug)]
 pub enum SledMode {
@@ -344,7 +356,7 @@ enum TofinoView {
 pub struct HardwareView {
     tofino: TofinoView,
     disks: HashMap<DiskIdentity, UnparsedDisk>,
-    baseboard: Option<Baseboard>,
+    baseboard: Baseboard,
     online_processor_count: u32,
     usable_physical_pages: u64,
     usable_physical_ram_bytes: u64,
@@ -353,7 +365,7 @@ pub struct HardwareView {
 
 impl HardwareView {
     pub fn baseboard(&self) -> Baseboard {
-        self.baseboard.as_ref().cloned().unwrap_or_else(|| Baseboard::unknown())
+        self.baseboard.clone()
     }
 
     pub fn cpu_family(&self) -> sled_hardware_types::SledCpuFamily {

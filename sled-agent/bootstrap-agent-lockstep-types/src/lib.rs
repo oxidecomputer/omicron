@@ -9,21 +9,24 @@
 //! out of this crate and into the relevant `*-types-versions` / `*-types` crate
 //! pairs.
 
-use omicron_common::address::AZ_PREFIX;
+use iddqd::IdOrdItem;
+use iddqd::IdOrdMap;
+use iddqd::id_upcast;
+use omicron_common::address::AZ_PREFIX_LENGTH;
 use omicron_common::address::IpRange;
 use omicron_common::address::Ipv6Subnet;
-use omicron_common::address::RACK_PREFIX;
-use omicron_common::address::SLED_PREFIX;
+use omicron_common::address::RACK_PREFIX_LENGTH;
+use omicron_common::address::SLED_PREFIX_LENGTH;
 use omicron_common::address::get_64_subnet;
 use omicron_common::api::external::AllowedSourceIps;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::UserId;
 use omicron_common::api::internal::nexus::Certificate;
-use omicron_uuid_kinds::{RackInitUuid, RackResetUuid};
+use omicron_uuid_kinds::RackInitUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sled_agent_types::early_networking::RackNetworkConfig;
-use sled_hardware_types::Baseboard;
+use sled_hardware_types::BaseboardId;
 use std::collections::BTreeSet;
 use std::net::IpAddr;
 use std::net::Ipv6Addr;
@@ -43,7 +46,7 @@ pub struct RackInitializeRequest {
     /// The set of peer_ids required to initialize trust quorum
     ///
     /// The value is `None` if we are not using trust quorum
-    pub trust_quorum_peers: Option<Vec<Baseboard>>,
+    pub trust_quorum_peers: Option<Vec<BaseboardId>>,
 
     /// Describes how bootstrap addresses should be collected during RSS.
     pub bootstrap_discovery: BootstrapAddressDiscovery,
@@ -131,21 +134,21 @@ impl std::fmt::Debug for RackInitializeRequest {
 }
 
 impl RackInitializeRequest {
-    pub fn az_subnet(&self) -> Ipv6Subnet<AZ_PREFIX> {
-        Ipv6Subnet::<AZ_PREFIX>::new(
+    pub fn az_subnet(&self) -> Ipv6Subnet<AZ_PREFIX_LENGTH> {
+        Ipv6Subnet::<AZ_PREFIX_LENGTH>::new(
             self.rack_network_config.rack_subnet.addr(),
         )
     }
 
     /// Returns the subnet for our rack.
-    pub fn rack_subnet(&self) -> Ipv6Subnet<RACK_PREFIX> {
-        Ipv6Subnet::<RACK_PREFIX>::new(
+    pub fn rack_subnet(&self) -> Ipv6Subnet<RACK_PREFIX_LENGTH> {
+        Ipv6Subnet::<RACK_PREFIX_LENGTH>::new(
             self.rack_network_config.rack_subnet.addr(),
         )
     }
 
     /// Returns the subnet for the `index`-th sled in the rack.
-    pub fn sled_subnet(&self, index: u8) -> Ipv6Subnet<SLED_PREFIX> {
+    pub fn sled_subnet(&self, index: u8) -> Ipv6Subnet<SLED_PREFIX_LENGTH> {
         get_64_subnet(self.rack_subnet(), index)
     }
 }
@@ -154,7 +157,7 @@ impl RackInitializeRequest {
 // fields.
 #[derive(Clone, Deserialize)]
 struct UnvalidatedRackInitializeRequest {
-    trust_quorum_peers: Option<Vec<Baseboard>>,
+    trust_quorum_peers: Option<Vec<BaseboardId>>,
     bootstrap_discovery: BootstrapAddressDiscovery,
     ntp_servers: Vec<String>,
     dns_servers: Vec<IpAddr>,
@@ -251,7 +254,9 @@ pub struct RecoverySiloConfig {
 
 /// Current status of any rack-level operation being performed by this bootstrap
 /// agent.
-#[derive(Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema,
+)]
 #[serde(tag = "status", rename_all = "snake_case")]
 pub enum RackOperationStatus {
     Initializing {
@@ -269,22 +274,7 @@ pub enum RackOperationStatus {
     InitializationPanicked {
         id: RackInitUuid,
     },
-    Resetting {
-        id: RackResetUuid,
-    },
-    /// `reset_id` will be None if the rack is in an uninitialized-on-startup,
-    /// or Some if it is in an uninitialized state due to a reset operation
-    /// completing.
-    Uninitialized {
-        reset_id: Option<RackResetUuid>,
-    },
-    ResetFailed {
-        id: RackResetUuid,
-        message: String,
-    },
-    ResetPanicked {
-        id: RackResetUuid,
-    },
+    Uninitialized,
 }
 
 /// Steps we go through during initial rack setup.
@@ -337,6 +327,27 @@ impl RssStep {
         }
         return 0;
     }
+
+    pub fn description(&self) -> &'static str {
+        match self {
+            Self::Requested => "Requested",
+            Self::Starting => "Starting",
+            Self::LoadExistingPlan => "Loading existing plan",
+            Self::CreateSledPlan => "Creating sled plan",
+            Self::InitTrustQuorum => "Initializing trust quorum",
+            Self::InitialNetworkConfigUpdate => "Initial network config update",
+            Self::SledInit => "Initializing sleds",
+            Self::FinalNetworkConfigUpdate => "Final network config update",
+            Self::InitDns => "Initializing DNS",
+            Self::ConfigureDns => "Configuring DNS",
+            Self::InitNtp => "Initializing NTP",
+            Self::WaitForTimeSync => "Waiting for time sync",
+            Self::WaitForDatabase => "Waiting for database",
+            Self::ClusterInit => "Initializing cluster",
+            Self::ZonesInit => "Initializing zones",
+            Self::NexusHandoff => "Handing off to Nexus",
+        }
+    }
 }
 
 /// Wrapper for optional contents of the replicated network config.
@@ -358,4 +369,37 @@ pub struct ReplicatedNetworkConfigContents {
     /// serialization/deserialization of the contents is performed outside the
     /// replication engine, which just deals with a binary blob.
     pub base64_blob: String,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+)]
+pub struct BootstrapIpOfBaseboardId {
+    pub id: BaseboardId,
+    pub ip: Ipv6Addr,
+}
+
+impl IdOrdItem for BootstrapIpOfBaseboardId {
+    type Key<'a> = &'a BaseboardId;
+
+    fn key(&self) -> Self::Key<'_> {
+        &self.id
+    }
+
+    id_upcast!();
+}
+
+/// All `BaseboardId`s that can be found by sprockets connections on the
+/// bootstrap network.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct BaseboardIds {
+    pub data: IdOrdMap<BootstrapIpOfBaseboardId>,
 }

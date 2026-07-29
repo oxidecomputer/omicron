@@ -44,8 +44,8 @@ use nexus_types::inventory::RotSlot;
 use nexus_types::inventory::SpType;
 use omicron_common::address::Ipv4Range;
 use omicron_common::address::Ipv6Subnet;
-use omicron_common::address::RACK_PREFIX;
-use omicron_common::address::SLED_PREFIX;
+use omicron_common::address::RACK_PREFIX_LENGTH;
+use omicron_common::address::SLED_PREFIX_LENGTH;
 use omicron_common::address::get_sled_address;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Generation;
@@ -59,7 +59,6 @@ use omicron_uuid_kinds::MupdateOverrideUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
-use sled_agent_types::inventory::Baseboard;
 use sled_agent_types::inventory::ConfigReconcilerInventory;
 use sled_agent_types::inventory::ConfigReconcilerInventoryStatus;
 use sled_agent_types::inventory::FmdInventory;
@@ -169,7 +168,7 @@ impl SystemDescription {
         let rack_subnet_base: Ipv6Addr =
             "fd00:1122:3344:0100::".parse().unwrap();
         let rack_subnet =
-            ipnet::Ipv6Net::new(rack_subnet_base, RACK_PREFIX).unwrap();
+            ipnet::Ipv6Net::new(rack_subnet_base, RACK_PREFIX_LENGTH).unwrap();
         // Skip the initial DNS subnet.
         // (The same behavior is replicated in RSS in `SledPlan::create()` in
         // sled-agent/rack-setup/src/plan/sled.rs.)
@@ -1235,18 +1234,7 @@ impl SystemDescription {
                 policy: sled.policy,
                 state: sled.state,
                 resources: sled.resources.clone(),
-                baseboard_id: BaseboardId {
-                    part_number: sled
-                        .inventory_sled_agent
-                        .baseboard
-                        .model()
-                        .to_owned(),
-                    serial_number: sled
-                        .inventory_sled_agent
-                        .baseboard
-                        .identifier()
-                        .to_owned(),
-                },
+                baseboard_id: sled.inventory_sled_agent.baseboard_id.clone(),
             };
             builder.add_sled(sled.sled_id, sled_details)?;
         }
@@ -1399,7 +1387,7 @@ impl Sled {
     #[allow(clippy::too_many_arguments)]
     fn new_simulated(
         sled_id: SledUuid,
-        sled_subnet: Ipv6Subnet<SLED_PREFIX>,
+        sled_subnet: Ipv6Subnet<SLED_PREFIX_LENGTH>,
         sled_role: SledRole,
         unique: Option<String>,
         hardware: SledHardware,
@@ -1469,23 +1457,19 @@ impl Sled {
         };
 
         let inventory_sled_agent = {
-            let baseboard = match hardware {
-                SledHardware::Gimlet => Baseboard::Gimlet {
-                    identifier: serial.clone(),
-                    model: model.clone(),
-                    revision,
+            let baseboard_id = match hardware {
+                SledHardware::Gimlet | SledHardware::Pc => BaseboardId {
+                    part_number: model.clone(),
+                    serial_number: serial.clone(),
                 },
-                SledHardware::Pc => Baseboard::Pc {
-                    identifier: serial.clone(),
-                    model: model.clone(),
+                SledHardware::Unknown | SledHardware::Empty => BaseboardId {
+                    part_number: "unknown".to_string(),
+                    serial_number: "unknown".to_string(),
                 },
-                SledHardware::Unknown | SledHardware::Empty => {
-                    Baseboard::Unknown
-                }
             };
             let sled_agent_address = get_sled_address(sled_subnet);
             Inventory {
-                baseboard,
+                baseboard_id,
                 reservoir_size: ByteCount::from(1024),
                 sled_role,
                 sled_agent_address,
@@ -1587,14 +1571,16 @@ impl Sled {
         // the fake `sled_agent_client` types, again so that we can later pass
         // them to the inventory builder so that it can construct the same
         // inventory types again.  This is a little goofy.
-        let baseboard = inventory_sp
+        let baseboard_id = inventory_sp
             .as_ref()
-            .map(|sledhw| Baseboard::Gimlet {
-                identifier: sledhw.baseboard_id.serial_number.clone(),
-                model: sledhw.baseboard_id.part_number.clone(),
-                revision: sledhw.sp.baseboard_revision,
+            .map(|sledhw| BaseboardId {
+                part_number: sledhw.baseboard_id.part_number.clone(),
+                serial_number: sledhw.baseboard_id.serial_number.clone(),
             })
-            .unwrap_or(Baseboard::Unknown);
+            .unwrap_or(BaseboardId {
+                part_number: "unknown".to_string(),
+                serial_number: "unknown".to_string(),
+            });
 
         let stage0_caboose =
             inventory_sp.as_ref().and_then(|hw| hw.stage0.clone());
@@ -1699,7 +1685,7 @@ impl Sled {
         });
 
         let inventory_sled_agent = Inventory {
-            baseboard,
+            baseboard_id,
             reservoir_size: inv_sled_agent.reservoir_size,
             sled_role: inv_sled_agent.sled_role,
             sled_agent_address: inv_sled_agent.sled_agent_address,
@@ -2168,7 +2154,7 @@ struct SubnetIterator {
 
 impl SubnetIterator {
     fn new(rack_subnet: Ipv6Net) -> Self {
-        let mut subnets = rack_subnet.subnets(SLED_PREFIX).unwrap();
+        let mut subnets = rack_subnet.subnets(SLED_PREFIX_LENGTH).unwrap();
         // Skip the initial DNS subnet.
         // (The same behavior is replicated in RSS in `SledPlan::create()` in
         // sled-agent/rack-setup/src/plan/sled.rs.)
@@ -2178,7 +2164,7 @@ impl SubnetIterator {
 }
 
 impl Iterator for SubnetIterator {
-    type Item = Ipv6Subnet<SLED_PREFIX>;
+    type Item = Ipv6Subnet<SLED_PREFIX_LENGTH>;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.subnets.next().map(|s| Ipv6Subnet::new(s.network()))

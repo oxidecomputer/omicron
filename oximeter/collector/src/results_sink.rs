@@ -7,11 +7,11 @@
 //! This includes the usual task that inserts data into ClickHouse, and a
 //! printing task used in `oximeter` standalone.
 
-// Copyright 2026 Oxide Computer Company
-
 use crate::collection_task::CollectionTaskOutput;
 use crate::probes;
+use crate::self_stats;
 use oximeter::Sample;
+use oximeter::histogram::Record;
 use oximeter::queue::BoundedQueue;
 use oximeter::types::ProducerResultsItem;
 use oximeter_db::Client;
@@ -43,6 +43,7 @@ pub async fn database_batcher(
     batch_size: usize,
     batch_interval: Duration,
     mut rx: mpsc::Receiver<CollectionTaskOutput>,
+    sink_stats: Arc<self_stats::CollectorSinkStats>,
 ) {
     // Construct a handoff point between the batch task here, and the database
     // insertion task.
@@ -111,7 +112,7 @@ pub async fn database_batcher(
                         probes::results__sink__item__processed!(|| n_samples);
 
                         // Append the current batch to the handoff buffer.
-                        let n_dropped =
+                        let (n_dropped, queue_depth) =
                             batch_tx.send_and_notify(batch, was_forced_collection);
                         if n_dropped > 0 {
                             probes::dropped__old__samples!(|| n_dropped);
@@ -120,7 +121,13 @@ pub async fn database_batcher(
                                 "sample buffer full, dropped oldest samples";
                                 "n_dropped" => n_dropped,
                             );
+                            *sink_stats.samples_dropped.lock().unwrap() += n_dropped.try_into().unwrap();
                         }
+                        // Note: Histogram::u64::sample should never error.
+                        // The `sample` method only returns a `HistogramError`
+                        // if its argument is non-finite, and `u64` values are
+                        // always finite.
+                        sink_stats.queue_depth.lock().unwrap().sample(queue_depth.try_into().unwrap()).unwrap();
                     }
                     None => {
                         warn!(log, "result queue closed, exiting");
@@ -197,7 +204,7 @@ impl<T> BatchSender<T> {
         &self,
         samples: Vec<T>,
         was_forced_collection: bool,
-    ) -> usize {
+    ) -> (usize, usize) {
         let mut batch = self.handoff.batch.lock().unwrap();
 
         let n_dropped = batch.extend(samples);
@@ -206,7 +213,7 @@ impl<T> BatchSender<T> {
         if was_forced_collection || batch.len() >= self.batch_size {
             self.notify_inserter();
         }
-        n_dropped
+        (n_dropped, batch.len())
     }
 }
 
@@ -313,6 +320,8 @@ pub async fn logger(log: Logger, mut rx: mpsc::Receiver<CollectionTaskOutput>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::Utc;
+    use omicron_test_utils::dev::test_setup_log;
     use proptest::prelude::*;
     use tokio::time::timeout;
 
@@ -324,7 +333,7 @@ mod tests {
         let (batch_tx, batch_rx) = batch_handoff::<()>(BATCH_SIZE);
         let n_samples = 3;
         let samples = vec![(); n_samples];
-        let n_dropped = batch_tx.send_and_notify(samples, true);
+        let (n_dropped, _) = batch_tx.send_and_notify(samples, true);
         assert_eq!(n_dropped, 0);
         assert_eq!(batch_tx.handoff.batch.lock().unwrap().len(), n_samples);
 
@@ -350,7 +359,7 @@ mod tests {
             // Insert the first batch of samples.
             let (batch_tx, batch_rx) = batch_handoff::<usize>(BATCH_SIZE);
             let samples = (0..current_size).collect();
-            let n_dropped = batch_tx.send_and_notify(samples, false);
+            let (n_dropped, _) = batch_tx.send_and_notify(samples, false);
             let expected_n_dropped = current_size.saturating_sub(MAX_BUFFER_SIZE);
             let expected_n_samples = current_size.min(MAX_BUFFER_SIZE);
             assert_eq!(n_dropped, expected_n_dropped);
@@ -386,7 +395,7 @@ mod tests {
             // Push the new set of samples, which start at the end of the first
             // batch, even if we've dropped some.
             let new_samples = (current_size..(current_size + new_size)).collect();
-            let n_dropped = batch_tx.send_and_notify(new_samples, false);
+            let (n_dropped, _) = batch_tx.send_and_notify(new_samples, false);
 
             // We expect to drop all the samples beyond the maximum buffer size.
             // We need to include what we have in the buffer already (some of
@@ -423,5 +432,52 @@ mod tests {
                 }).expect_err("Should not be notified");
             }
         }
+    }
+
+    #[tokio::test]
+    async fn batcher_increments_dropped_counter() {
+        let logctx = test_setup_log("batcher_increments_dropped_counter");
+        let log = &logctx.log;
+
+        // Construct a database batcher with a dummy ClickHouse client.
+        let client = Client::new("[::1]:0".parse().unwrap(), log);
+        let (tx, rx) = mpsc::channel(1);
+        let sink_stats = Arc::new(self_stats::CollectorSinkStats::new(
+            "test".into(),
+            Utc::now(),
+        ));
+        let batcher = tokio::spawn(database_batcher(
+            log.clone(),
+            client,
+            BATCH_SIZE,
+            Duration::from_secs(3600),
+            rx,
+            sink_stats.clone(),
+        ));
+
+        // Insert `want_dropped` too many samples into the batcher.
+        let want_dropped = 50;
+        let samples = (0..MAX_BUFFER_SIZE + want_dropped)
+            .map(|_| oximeter_test_utils::make_sample())
+            .collect();
+        tx.send(CollectionTaskOutput {
+            results: vec![ProducerResultsItem::Ok(samples)],
+            was_forced_collection: false,
+        })
+        .await
+        .unwrap();
+
+        // Drop the sender so that the batcher loop exits.
+        drop(tx);
+        batcher.await.unwrap();
+
+        let samples_dropped = sink_stats.samples_dropped.lock().unwrap();
+        assert_eq!(samples_dropped.value(), want_dropped as u64);
+
+        let queue_depth = sink_stats.queue_depth.lock().unwrap();
+        assert_eq!(queue_depth.n_samples(), 1);
+        assert_eq!(queue_depth.max(), MAX_BUFFER_SIZE as u64);
+
+        logctx.cleanup_successful();
     }
 }

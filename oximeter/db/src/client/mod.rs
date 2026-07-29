@@ -4,8 +4,6 @@
 
 //! Rust client to ClickHouse database
 
-// Copyright 2026 Oxide Computer Company
-
 pub(crate) mod dbwrite;
 #[cfg(any(feature = "oxql", test))]
 pub(crate) mod oxql;
@@ -5039,7 +5037,7 @@ mod tests {
                 WHERE timeseries_name = '{}'",
                 crate::DATABASE_NAME,
                 table,
-                &to_delete[0].to_string(),
+                to_delete[0],
             );
             let count = client
                 .execute_with_block(&mut handle, &sql)

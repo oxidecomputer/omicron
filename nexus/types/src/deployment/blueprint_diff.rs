@@ -1802,11 +1802,11 @@ impl<'a, 'b> BpDiffPendingMgsUpdates<'a, 'b> {
                 BpTableColumn::new(&u1.artifact_version, &u2.artifact_version);
             let details = if u1.details != u2.details {
                 BpTableColumn::diff(
-                    format!("{:?}", &u1.details),
-                    format!("{:?}", &u2.details),
+                    format!("{:?}", u1.details),
+                    format!("{:?}", u2.details),
                 )
             } else {
-                BpTableColumn::value(format!("{:?}", &u1.details))
+                BpTableColumn::value(format!("{:?}", u1.details))
             };
             rows.push(BpTableRow::new(
                 BpDiffState::Modified,

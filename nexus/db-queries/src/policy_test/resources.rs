@@ -181,6 +181,21 @@ pub async fn make_resources(
         LookupType::ById(address_lot_id),
     ));
 
+    let bgp_config_id = "8c1e3f7a-2d4b-4e6c-9a8f-1b2c3d4e5f60".parse().unwrap();
+    builder.new_resource(authz::BgpConfig::new(
+        authz::FLEET,
+        bgp_config_id,
+        LookupType::ById(bgp_config_id.into_untyped_uuid()),
+    ));
+
+    let bgp_announce_set_id =
+        "f1e6c5d4-3b2a-4190-8e7d-6c5b4a392817".parse().unwrap();
+    builder.new_resource(authz::BgpAnnounceSet::new(
+        authz::FLEET,
+        bgp_announce_set_id,
+        LookupType::ById(bgp_announce_set_id.into_untyped_uuid()),
+    ));
+
     let loopback_address_id =
         "9efbf1b1-16f9-45ab-864a-f7ebe501ae5b".parse().unwrap();
     builder.new_resource(authz::LoopbackAddress::new(
@@ -290,6 +305,8 @@ async fn make_silo(
         certificate_id,
         LookupType::ByName(format!("{}-certificate", silo_name)),
     ));
+
+    builder.new_resource(authz::SiloImageList::new(silo.clone()));
 
     builder.new_resource(authz::SiloIdentityProviderList::new(silo.clone()));
     let idp_id = Uuid::new_v4();

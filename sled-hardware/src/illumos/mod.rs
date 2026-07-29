@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::DiskFirmware;
+use crate::ExternalDisks;
 use crate::HardwareView;
 use crate::TofinoSnapshot;
 use crate::TofinoView;
@@ -119,12 +120,14 @@ impl TryFrom<i64> for BootStorageUnit {
 struct HardwareSnapshot {
     tofino: TofinoSnapshot,
     disks: HashMap<DiskIdentity, UnparsedDisk>,
-    baseboard: Baseboard,
 }
 
 impl HardwareSnapshot {
     // Walk the device tree to capture a view of the current hardware.
-    fn new(log: &Logger) -> Result<Self, Error> {
+    fn new(
+        log: &Logger,
+        external_disks: &ExternalDisks,
+    ) -> Result<Self, Error> {
         let mut device_info =
             DevInfo::new_force_load().map_err(Error::DevInfo)?;
 
@@ -145,43 +148,39 @@ impl HardwareSnapshot {
             return Err(Error::NotAnOxideSled(root_node));
         };
 
-        let properties = find_properties(
-            &root,
-            [
-                "baseboard-identifier",
-                "baseboard-model",
-                "baseboard-revision",
-                "boot-storage-unit",
-            ],
-        )?;
-        let baseboard = Baseboard::new_oxide_sled(
-            sled_type,
-            string_from_property(&properties[0])?,
-            string_from_property(&properties[1])?,
-            u32_from_property(&properties[2])?,
-        );
+        let properties = find_properties(&root, ["boot-storage-unit"])?;
         let boot_storage_unit =
-            BootStorageUnit::try_from(i64_from_property(&properties[3])?)?;
+            BootStorageUnit::try_from(i64_from_property(&properties[0])?)?;
 
         // Monitor for the Tofino device and driver.
         let tofino = get_tofino_snapshot(log, &mut device_info);
 
         // Monitor for block devices.
         let mut disks = HashMap::new();
-        let mut node_walker = device_info.walk_driver("blkdev");
-        while let Some(node) =
-            node_walker.next().transpose().map_err(Error::DevInfo)?
-        {
-            poll_blkdev_node(
-                &log,
-                sled_type,
-                &mut disks,
-                node,
-                boot_storage_unit,
-            )?;
+        match external_disks {
+            ExternalDisks::DetectPhysical => {
+                let mut node_walker = device_info.walk_driver("blkdev");
+                while let Some(node) =
+                    node_walker.next().transpose().map_err(Error::DevInfo)?
+                {
+                    poll_blkdev_node(
+                        &log,
+                        sled_type,
+                        &mut disks,
+                        node,
+                        boot_storage_unit,
+                    )?;
+                }
+            }
+            ExternalDisks::HardcodedPhysical { disks: hardcoded_disks } => {
+                for disk in hardcoded_disks {
+                    disks.insert(disk.identity().clone(), disk.clone());
+                }
+            }
+            ExternalDisks::Virtual { .. } => {}
         }
 
-        Ok(Self { tofino, disks, baseboard })
+        Ok(Self { tofino, disks })
     }
 }
 
@@ -192,13 +191,14 @@ impl HardwareView {
     // `HardwareView` to its consumers. This isn't ideal (we leave a window open
     // where we return a mostly-empty view) but is not trivial to rework.
     fn new(
+        baseboard: Baseboard,
         tofino: TofinoView,
         cpu_family: SledCpuFamily,
     ) -> Result<Self, Error> {
         Ok(Self {
             tofino,
             disks: HashMap::new(),
-            baseboard: None,
+            baseboard,
             online_processor_count: sysconf::online_processor_count()?,
             usable_physical_pages: sysconf::usable_physical_pages()?,
             usable_physical_ram_bytes: sysconf::usable_physical_ram_bytes()?,
@@ -499,46 +499,72 @@ fn poll_blkdev_node(
     Ok(())
 }
 
+// Poll just enough of the device info tree to get the Baseboard. We really
+// don't want to deal with an `Option` upstream.
+fn learn_baseboard(log: &Logger) -> Result<Baseboard, Error> {
+    let mut device_info = DevInfo::new_force_load().map_err(Error::DevInfo)?;
+
+    let mut node_walker = device_info.walk_node();
+
+    // First, check the root node. If we aren't running on an Oxide sled,
+    // bail.
+    let Some(root) = node_walker.next().transpose().map_err(Error::DevInfo)?
+    else {
+        return Err(Error::DevInfo(anyhow::anyhow!("No nodes in device tree")));
+    };
+    let root_node = root.node_name();
+    let Some(sled_type) = OxideSled::try_from_root_node_name(&root_node) else {
+        return Ok(get_pc_baseboard(log, root_node.as_str()));
+    };
+
+    let properties = find_properties(
+        &root,
+        ["baseboard-identifier", "baseboard-model", "baseboard-revision"],
+    )?;
+
+    let baseboard = Baseboard::new_oxide_sled(
+        sled_type,
+        string_from_property(&properties[0])?,
+        string_from_property(&properties[1])?,
+        u32_from_property(&properties[2])?,
+    );
+
+    info!(log, "Found baseboard for Oxide hardware"; "baseboard" => %baseboard);
+
+    Ok(baseboard)
+}
+
 // Performs a single walk of the device info tree, updating the view of hardware
 // kept in the `hardware_view_tx` watch channel if anything has changed.
 fn poll_device_tree(
     log: &Logger,
     hardware_view_tx: &watch::Sender<HardwareView>,
-    nonsled_observed_disks: &[UnparsedDisk],
+    external_disks: &ExternalDisks,
 ) -> Result<(), Error> {
     // Construct a view of hardware by walking the device tree.
-    let polled_hw = match HardwareSnapshot::new(log) {
+    let polled_hw = match HardwareSnapshot::new(log, external_disks) {
         Ok(polled_hw) => polled_hw,
 
         Err(e) => {
-            if let Error::NotAnOxideSled(root_node) = &e {
+            if let Error::NotAnOxideSled(_) = &e {
                 hardware_view_tx.send_if_modified(|inner| {
                     let mut did_modify = false;
 
-                    if root_node.as_str() == "i86pc" {
-                        // If on i86pc, generate some baseboard information
-                        // before returning this error. Each sled agent has to
-                        // be uniquely identified for multiple non-sleds to
-                        // work.
-                        if inner.baseboard.is_none() {
-                            inner.baseboard =
-                                Some(get_pc_baseboard(log, root_node.as_str()));
-                            did_modify = true;
-                        }
-                    }
-
                     // For platforms that don't support the HardwareSnapshot
                     // functionality, sled-agent can be supplied a fixed list of
-                    // UnparsedDisks. Add those to the HardwareSnapshot here if they
-                    // are missing (which they will be for non-sleds).
-                    for observed_disk in nonsled_observed_disks {
-                        let identity = observed_disk.identity();
-                        if !inner.disks.contains_key(identity) {
-                            inner.disks.insert(
-                                identity.clone(),
-                                observed_disk.clone(),
-                            );
-                            did_modify = true;
+                    // UnparsedDisks. Add those to the HardwareSnapshot here if
+                    // they are missing (which they will be for non-sleds).
+                    if let ExternalDisks::HardcodedPhysical { disks } =
+                        external_disks
+                    {
+                        for disk in disks {
+                            let identity = disk.identity();
+                            if !inner.disks.contains_key(identity) {
+                                inner
+                                    .disks
+                                    .insert(identity.clone(), disk.clone());
+                                did_modify = true;
+                            }
                         }
                     }
 
@@ -550,15 +576,11 @@ fn poll_device_tree(
         }
     };
 
-    let HardwareSnapshot {
-        tofino: polled_tofino,
-        disks: polled_disks,
-        baseboard: polled_baseboard,
-    } = polled_hw;
+    let HardwareSnapshot { tofino: polled_tofino, disks: polled_disks } =
+        polled_hw;
 
     // Check for any changes since the last view.
     let mut did_modify_tofino = false;
-    let mut did_modify_baseboard = false;
     let mut did_modify_disks = false;
     hardware_view_tx.send_if_modified(|inner| {
         did_modify_tofino = match &mut inner.tofino {
@@ -573,14 +595,6 @@ fn poll_device_tree(
             TofinoView::Stub { .. } => false,
         };
 
-        did_modify_baseboard =
-            if inner.baseboard.as_ref() == Some(&polled_baseboard) {
-                false
-            } else {
-                inner.baseboard = Some(polled_baseboard.clone());
-                true
-            };
-
         did_modify_disks = if inner.disks == polled_disks {
             false
         } else {
@@ -588,20 +602,16 @@ fn poll_device_tree(
             true
         };
 
-        did_modify_tofino || did_modify_baseboard || did_modify_disks
+        did_modify_tofino || did_modify_disks
     });
 
     info!(
         log, "Completed poll of device tree";
         "did_modify_tofino" => did_modify_tofino,
-        "did_modify_baseboard" => did_modify_baseboard,
         "did_modify_disks" => did_modify_disks,
     );
     if did_modify_tofino {
         info!(log, "Updated tofino"; "tofino" => ?polled_tofino);
-    }
-    if did_modify_baseboard {
-        info!(log, "Updated baseboard"; "baseboard" => ?polled_baseboard);
     }
     if did_modify_disks {
         info!(log, "Updated disks"; "disks" => ?polled_disks);
@@ -692,7 +702,7 @@ fn get_pc_baseboard(log: &Logger, root_node: &str) -> Baseboard {
             root_node.to_string(),
         )
     });
-    info!(log, "Generated i86pc baseboard {:?}", pc_baseboard);
+    info!(log, "Generated {} baseboard {:?}", root_node, pc_baseboard);
     pc_baseboard
 }
 
@@ -747,11 +757,10 @@ fn parse_smbios_output(log: &Logger, output: String) -> Option<Baseboard> {
 fn hardware_tracking_task(
     log: Logger,
     hardware_view_tx: watch::Sender<HardwareView>,
-    nonsled_observed_disks: Vec<UnparsedDisk>,
+    external_disks: ExternalDisks,
 ) {
     loop {
-        match poll_device_tree(&log, &hardware_view_tx, &nonsled_observed_disks)
-        {
+        match poll_device_tree(&log, &hardware_view_tx, &external_disks) {
             // We've already warned about `NotAnOxideSled` by this point,
             // so let's not spam the logs.
             Ok(_) | Err(Error::NotAnOxideSled(_)) => (),
@@ -785,11 +794,15 @@ impl HardwareManager {
     pub fn new(
         log: &Logger,
         sled_mode: SledMode,
-        nonsled_observed_disks: Vec<UnparsedDisk>,
+        external_disks: ExternalDisks,
     ) -> Result<Self, String> {
         let log = log.new(o!("component" => "HardwareManager"));
         info!(log, "Creating HardwareManager");
         let cpu_family = crate::detect_cpu_family(&log);
+
+        let baseboard = learn_baseboard(&log).map_err(|err| {
+            format!("Failed to learn baseboard via device tree: {err}")
+        })?;
 
         let hw =
             match sled_mode {
@@ -797,6 +810,7 @@ impl HardwareManager {
                 SledMode::Auto
                 | SledMode::Scrimlet { asic: DendriteAsic::TofinoAsic } => {
                     HardwareView::new(
+                        baseboard,
                         TofinoView::Real(TofinoSnapshot::new()),
                         cpu_family,
                     )
@@ -804,6 +818,7 @@ impl HardwareManager {
 
                 // Treat sled as gimlet and ignore any attached Tofino device.
                 SledMode::Sled => HardwareView::new(
+                    baseboard,
                     TofinoView::Stub { active: false },
                     cpu_family,
                 ),
@@ -811,6 +826,7 @@ impl HardwareManager {
                 // Treat as scrimlet and use the stub Tofino device.
                 SledMode::Scrimlet { asic: DendriteAsic::TofinoStub } => {
                     HardwareView::new(
+                        baseboard,
                         TofinoView::Stub { active: true },
                         cpu_family,
                     )
@@ -826,6 +842,7 @@ impl HardwareManager {
                         DendriteAsic::SoftNpuZone
                         | DendriteAsic::SoftNpuPropolisDevice,
                 } => HardwareView::new(
+                    baseboard,
                     TofinoView::Stub { active: true },
                     cpu_family,
                 ),
@@ -837,8 +854,7 @@ impl HardwareManager {
         // This mitigates issues where the Sled Agent could try to propagate
         // an "empty" view of hardware to other consumers before the first
         // query.
-        match poll_device_tree(&log, &hardware_view_tx, &nonsled_observed_disks)
-        {
+        match poll_device_tree(&log, &hardware_view_tx, &external_disks) {
             Ok(_) => (),
             // Allow non-sled devices to proceed with a "null" view of
             // hardware, otherwise they won't be able to start.
@@ -865,11 +881,7 @@ impl HardwareManager {
         });
 
         std::thread::spawn(move || {
-            hardware_tracking_task(
-                log,
-                hardware_view_tx,
-                nonsled_observed_disks,
-            );
+            hardware_tracking_task(log, hardware_view_tx, external_disks);
         });
 
         Ok(Self { hardware_view_rx })

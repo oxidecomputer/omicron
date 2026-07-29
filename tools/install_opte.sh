@@ -92,7 +92,8 @@ if [[ "x$OPTE_COMMIT" != "x" ]]; then
     curl -fL -o "$P5P_PATH" "$P5P_URL"
 
     RC=0
-    pfexec pkg install -g "$P5P_PATH" pkg://helios-dev/driver/network/opte || RC=$?
+    # The OPTE CI p5p publishes under the "helios" publisher.
+    pfexec pkg install -g "$P5P_PATH" pkg://helios/driver/network/opte || RC=$?
     if [[ "$RC" -eq 0 ]]; then
         echo "xde driver installed from override p5p"
     elif [[ "$RC" -eq 4 ]]; then

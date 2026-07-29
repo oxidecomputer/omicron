@@ -4,8 +4,6 @@
 
 //! Types for serving produced metric data to an Oximeter collector server.
 
-// Copyright 2026 Oxide Computer Company
-
 use dropshot::ConfigDropshot;
 use dropshot::HttpError;
 use dropshot::HttpResponseOk;

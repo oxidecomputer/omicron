@@ -10,8 +10,8 @@ use clap::{Args, Parser, Subcommand};
 use indent_write::indentable::Indentable;
 use omicron_ls_apis::{
     AllApiMetadata, ApiConsumerStatus, ApiDependencyFilter, ApiMetadata,
-    FailedConsumerCheck, LoadArgs, ServerComponentName, SystemApis,
-    VersionedHow, plural,
+    FailedConsumerCheck, LoadArgs, PatchedDepPolicy, ServerComponentName,
+    SystemApis, VersionedHow, plural,
 };
 use parse_display::{Display, FromStr};
 
@@ -25,6 +25,14 @@ struct LsApis {
     /// path to metadata about APIs
     #[arg(long)]
     api_manifest: Option<Utf8PathBuf>,
+
+    /// Assume that any related-repo dependency that has been overridden by a
+    /// local Cargo `[patch]` corresponds to the commit pinned in
+    /// `package-manifest.toml`.  Without this flag, the tool will report an
+    /// error if it encounters such a dependency and cannot find a match by
+    /// commit.
+    #[arg(long, env = "LS_APIS_ASSUME_PATCHED_DEPS_MATCH")]
+    assume_patched_deps_match: bool,
 
     #[command(subcommand)]
     cmd: Cmds,
@@ -340,11 +348,24 @@ impl TryFrom<&LsApis> for LoadArgs {
         let self_manifest_dir_str = std::env::var("CARGO_MANIFEST_DIR")
             .context("expected CARGO_MANIFEST_DIR in environment")?;
         let self_manifest_dir = Utf8PathBuf::from(self_manifest_dir_str);
+        // The API manifest is at the root of this particular package.
         let api_manifest_path = args
             .api_manifest
             .clone()
             .unwrap_or_else(|| self_manifest_dir.join("api-manifest.toml"));
-        Ok(LoadArgs { api_manifest_path })
+
+        // This package is two levels down from the workspace root.
+        let mut workspace_root = self_manifest_dir;
+        workspace_root.pop();
+        workspace_root.pop();
+
+        let patched_dep_policy = if args.assume_patched_deps_match {
+            PatchedDepPolicy::AssumeMatch
+        } else {
+            PatchedDepPolicy::Reject
+        };
+
+        Ok(LoadArgs { workspace_root, api_manifest_path, patched_dep_policy })
     }
 }
 

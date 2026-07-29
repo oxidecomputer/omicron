@@ -5,10 +5,7 @@
 //! [`DataStore`] methods on [`Rack`]s.
 
 use super::DataStore;
-use super::SERVICE_IPV4_POOL_NAME;
-use super::SERVICE_IPV6_POOL_NAME;
 use super::dns::DnsVersionUpdateBuilder;
-use super::ip_pool::ServiceIpPools;
 use crate::authz;
 use crate::context::OpContext;
 use crate::db;
@@ -63,6 +60,7 @@ use omicron_common::api::external::Error;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupType;
+use omicron_common::api::external::Name;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::UserId;
@@ -88,7 +86,7 @@ pub struct RackInit {
     pub physical_disks: Vec<PhysicalDisk>,
     pub zpools: Vec<Zpool>,
     pub datasets: Vec<CrucibleDataset>,
-    pub service_ip_pool_ranges: Vec<IpRange>,
+    pub service_ip_pools: Vec<ServiceIpPoolConfig>,
     pub internal_dns: InitialDnsGroup,
     pub external_dns: InitialDnsGroup,
     pub recovery_silo: silo_types::SiloCreate,
@@ -100,9 +98,58 @@ pub struct RackInit {
     pub initial_trust_quorum_configuration: Option<InitialTrustQuorumConfig>,
 }
 
+/// Full details of a system-service IP pool, provided at rack setup (RSS).
+#[derive(Clone, Debug)]
+pub struct ServiceIpPoolConfig {
+    pub name: Name,
+    pub description: String,
+    // NOTE: Private to ensure non-empty and all the same IP version.
+    ranges: Vec<IpRange>,
+}
+
+impl ServiceIpPoolConfig {
+    /// Construct a new service IP pool configuration.
+    ///
+    /// Errors if `ranges` is empty, or if the ranges are a mix of IPv4 and
+    /// IPv6 addresses.
+    pub fn new(
+        name: Name,
+        description: String,
+        ranges: Vec<IpRange>,
+    ) -> Result<Self, Error> {
+        let mut versions = ranges.iter().map(|r| r.version());
+        let Some(first) = versions.next() else {
+            return Err(Error::internal_error(
+                "service IP pool config has no ranges",
+            ));
+        };
+        if versions.any(|v| v != first) {
+            return Err(Error::internal_error(
+                "service IP pool config has ranges of mixed IP versions",
+            ));
+        }
+        Ok(Self { name, description, ranges })
+    }
+
+    /// The ranges belonging to this pool.
+    ///
+    /// Guaranteed to be non-empty and all of the same IP version.
+    pub fn ranges(&self) -> &[IpRange] {
+        &self.ranges
+    }
+
+    /// The IP version of this pool, derived from its ranges.
+    pub fn ip_version(&self) -> IpVersion {
+        // Safety: the constructor guarantees at least one range, and that all
+        // ranges share an IP version.
+        IpVersion::from(self.ranges[0].version())
+    }
+}
+
 /// Possible errors while trying to initialize rack
 #[derive(Debug)]
 enum RackInitError {
+    AddingServiceIpPool(Error),
     AddingIp(Error),
     AddingNic(Error),
     BlueprintInsert(Error),
@@ -130,6 +177,7 @@ impl From<DieselError> for RackInitError {
 impl From<RackInitError> for Error {
     fn from(e: RackInitError) -> Self {
         match e {
+            RackInitError::AddingServiceIpPool(err) => err,
             RackInitError::AddingIp(err) => err,
             RackInitError::AddingNic(err) => err,
             RackInitError::DatasetInsert { err, zpool_id } => match err {
@@ -531,9 +579,9 @@ impl DataStore {
 
     async fn rack_populate_service_networking_records(
         &self,
+        opctx: &OpContext,
         conn: &async_bb8_diesel::Connection<DbConnection>,
         log: &slog::Logger,
-        service_pools: &ServiceIpPools,
         zone_config: &BlueprintZoneConfig,
     ) -> Result<(), RackInitError> {
         // For services with external connectivity, we record their
@@ -653,26 +701,42 @@ impl DataStore {
             );
             return Ok(());
         };
-        let service_pool =
-            service_pools.pool_for_version(external_ip.ip_version().into());
+        let (_authz_pool, db_pool) = self
+            .ip_pool_fetch_containing_address_for_services_on_connection(
+                opctx,
+                conn,
+                external_ip.ip(),
+            )
+            .await
+            .map_err(|e| {
+                RackInitError::AddingIp(Error::internal_error(&format!(
+                    "no system services pool for external IP '{}': {}",
+                    external_ip.ip(),
+                    e,
+                )))
+            })?;
         let db_ip = IncompleteExternalIp::for_omicron_zone(
-            service_pool.id(),
+            db_pool.id(),
             external_ip,
             zone_config.id,
             zone_config.zone_type.kind(),
         );
-        Self::allocate_external_ip_on_connection(conn, db_ip).await.map_err(
-            |err| {
-                error!(
-                    log,
-                    "Initializing Rack: Failed to allocate \
-                     IP address for {}",
-                     zone_report_str;
-                    "err" => %err,
-                );
-                RackInitError::AddingIp(err.into_public_ignore_retries())
-            },
-        )?;
+        Self::allocate_external_ip_on_connection(
+            conn,
+            db_ip,
+            LookupType::ById(db_pool.id()),
+        )
+        .await
+        .map_err(|err| {
+            error!(
+                log,
+                "Initializing Rack: Failed to allocate \
+                 IP address for {}",
+                 zone_report_str;
+                "err" => %err,
+            );
+            RackInitError::AddingIp(err.into_public_ignore_retries())
+        })?;
 
         self.create_network_interface_raw_conn(conn, db_nic)
             .await
@@ -713,15 +777,6 @@ impl DataStore {
 
         opctx.authorize(authz::Action::CreateChild, &authz::FLEET).await?;
 
-        // The `RackInit` request will eventually be modified to include the
-        // full details of the IP Pool(s) delegated to Oxide at RSS time. For
-        // now, we still rely on the pre-populated IP Pools. There's one for
-        // IPv4 and one for IPv6.
-        //
-        // See https://github.com/oxidecomputer/omicron/issues/8946.
-        let service_ip_pools =
-            self.ip_pools_service_lookup_both_versions(&opctx).await?;
-
         // NOTE: This operation could likely be optimized with a CTE, but given
         // the low-frequency of calls, this optimization has been deferred.
         let log = opctx.log.clone();
@@ -741,8 +796,6 @@ impl DataStore {
                     let physical_disks = rack_init.physical_disks;
                     let zpools = rack_init.zpools;
                     let datasets = rack_init.datasets;
-                    let service_ip_pool_ranges =
-                        rack_init.service_ip_pool_ranges;
                     let internal_dns = rack_init.internal_dns;
                     let external_dns = rack_init.external_dns;
                     let blueprint_execution_enabled =
@@ -773,6 +826,7 @@ impl DataStore {
                     }
 
                     // Otherwise, insert:
+                    // - IP Pools and ranges
                     // - Services
                     // - PhysicalDisks
                     // - Zpools
@@ -782,27 +836,52 @@ impl DataStore {
                     //
                     // Which RSS has already allocated during bootstrapping.
 
-                    // Set up the IP pool for internal services.
-                    for range in service_ip_pool_ranges {
-                        let service_pool = service_ip_pools.pool_for_range(&range);
-                        Self::ip_pool_add_range_on_connection(
-                            &conn,
-                            opctx,
-                            &service_pool.authz_pool,
-                            &service_pool.db_pool,
-                            &range,
-                        )
-                        .await
-                        .map_err(|e| {
-                            error!(
-                                log,
-                                "Initializing Rack: Failed to add \
-                                 IP pool range";
-                                &e,
-                            );
-                            err.set(RackInitError::AddingIp(e)).unwrap();
-                            DieselError::RollbackTransaction
-                        })?;
+                    // Add the service IP Pools and ranges for each.
+                    for pool_config in rack_init.service_ip_pools {
+                        let pool = db::model::IpPool::new(
+                            &IdentityMetadataCreateParams {
+                                name: pool_config.name.clone(),
+                                description: pool_config.description.clone(),
+                            },
+                            pool_config.ip_version(),
+                            nexus_db_model::IpPoolAssignment::SystemServices,
+                        );
+                        let db_pool = Self::ip_pool_create_on_connection(&conn, opctx, pool)
+                            .await
+                            .map_err(|e| {
+                                error!(
+                                    log,
+                                    "Initializing Rack: Failed to add IP Pool";
+                                    &e,
+                                );
+                                err.set(RackInitError::AddingServiceIpPool(e)).unwrap();
+                                DieselError::RollbackTransaction
+                            })?;
+                        let authz_pool = authz::IpPool::new(
+                            authz::FLEET,
+                            db_pool.id(),
+                            LookupType::ById(db_pool.id())
+                        );
+                        for range in pool_config.ranges() {
+                            Self::ip_pool_add_range_on_connection(
+                                &conn,
+                                opctx,
+                                &authz_pool,
+                                &db_pool,
+                                &range,
+                            )
+                            .await
+                            .map_err(|e| {
+                                error!(
+                                    log,
+                                    "Initializing Rack: Failed to add \
+                                     IP pool range";
+                                    &e,
+                                );
+                                err.set(RackInitError::AddingIp(e)).unwrap();
+                                DieselError::RollbackTransaction
+                            })?;
+                        }
                     }
 
                     // Insert the RSS-generated blueprint.
@@ -861,9 +940,9 @@ impl DataStore {
                     // Allocate networking records for all services.
                     for (_, zone_config) in blueprint.in_service_zones() {
                         self.rack_populate_service_networking_records(
+                            opctx,
                             &conn,
                             &log,
-                            &service_ip_pools,
                             zone_config,
                         )
                         .await
@@ -1031,32 +1110,7 @@ impl DataStore {
         opctx: &OpContext,
         rack_id: RackUuid,
     ) -> Result<(), Error> {
-        use omicron_common::api::external::Name;
-
         self.rack_insert(opctx, &db::model::Rack::new(rack_id)).await?;
-
-        // Insert an IP Pool for both IP versions, reserved for Oxide internal
-        // use.
-        for (version, name) in [
-            (IpVersion::V4, SERVICE_IPV4_POOL_NAME),
-            (IpVersion::V6, SERVICE_IPV6_POOL_NAME),
-        ] {
-            let internal_pool = db::model::IpPool::new(
-                &IdentityMetadataCreateParams {
-                    name: name.parse::<Name>().unwrap(),
-                    description: format!(
-                        "IP{version} IP Pool for Oxide Services"
-                    ),
-                },
-                version,
-                nexus_db_model::IpPoolAssignment::SystemServices,
-            );
-            match self.ip_pool_create(opctx, internal_pool).await {
-                Ok(_) | Err(Error::ObjectAlreadyExists { .. }) => {}
-                Err(e) => return Err(e),
-            }
-        }
-
         Ok(())
     }
 }
@@ -1065,6 +1119,8 @@ impl DataStore {
 mod test {
     use super::*;
     use crate::db::datastore::Discoverability;
+    use crate::db::datastore::SERVICE_IPV4_POOL_NAME;
+    use crate::db::datastore::SERVICE_IPV6_POOL_NAME;
     use crate::db::model::ExternalIp;
     use crate::db::model::IpKind;
     use crate::db::model::IpPoolRange;
@@ -1093,6 +1149,8 @@ mod test {
     use nexus_types::external_api::silo::SiloIdentityMode;
     use nexus_types::identity::Asset;
     use nexus_types::internal_api::params::DnsRecord;
+    use omicron_common::address::Ipv4Range;
+    use omicron_common::address::Ipv6Range;
     use omicron_common::address::NEXUS_OPTE_IPV4_SUBNET;
     use omicron_common::api::external::http_pagination::PaginatedBy;
     use omicron_common::api::external::{
@@ -1142,7 +1200,7 @@ mod test {
                 physical_disks: vec![],
                 zpools: vec![],
                 datasets: vec![],
-                service_ip_pool_ranges: vec![],
+                service_ip_pools: vec![],
                 internal_dns: InitialDnsGroup::new(
                     DnsGroup::Internal,
                     DNS_ZONE,
@@ -1362,6 +1420,20 @@ mod test {
         sled
     }
 
+    // Build a single service IP pool config from a built-in pool name and a set
+    // of ranges, mirroring what the RSS shim produces at rack setup.
+    fn service_pool_config(
+        name: &str,
+        ranges: Vec<IpRange>,
+    ) -> ServiceIpPoolConfig {
+        ServiceIpPoolConfig::new(
+            name.parse().expect("valid service pool name"),
+            format!("service IP pool {name}"),
+            ranges,
+        )
+        .expect("valid service IP pool config")
+    }
+
     // Hacky macro helper to:
     // - Perform a transaction...
     // - ... That queries a particular table for all values...
@@ -1411,7 +1483,7 @@ mod test {
         let sled2 = create_test_sled(&datastore, SledUuid::new_v4()).await;
         let sled3 = create_test_sled(&datastore, SledUuid::new_v4()).await;
 
-        let service_ip_pool = IpRange::try_from((
+        let service_ip_pool_range = IpRange::try_from((
             Ipv4Addr::new(1, 2, 3, 4),
             Ipv4Addr::new(1, 2, 3, 6),
         ))
@@ -1419,7 +1491,7 @@ mod test {
         let external_ip_policy = {
             let mut builder = ExternalIpPolicy::builder();
             builder
-                .push_service_pool_range(service_ip_pool)
+                .push_service_pool_range(service_ip_pool_range)
                 .expect("valid pool");
             builder
                 .add_external_dns_ip("1.2.3.4".parse().unwrap())
@@ -1567,7 +1639,10 @@ mod test {
                 &opctx,
                 RackInit {
                     blueprint: blueprint.clone(),
-                    service_ip_pool_ranges: vec![service_ip_pool],
+                    service_ip_pools: vec![service_pool_config(
+                        SERVICE_IPV4_POOL_NAME,
+                        vec![service_ip_pool_range],
+                    )],
                     ..Default::default()
                 },
             )
@@ -1628,10 +1703,15 @@ mod test {
 
         // Furthermore, we should be able to see that these IP addresses have
         // been allocated as a part of a service IP pool.
-        let (.., svc_pool) = datastore
-            .ip_pools_service_lookup(&opctx, IpVersion::V4)
+        let svc_pools = datastore
+            .ip_pools_service_lookup_by_version(
+                &opctx,
+                IpVersion::V4,
+                std::num::NonZeroU32::new(1).unwrap(),
+            )
             .await
             .unwrap();
+        let svc_pool = &svc_pools.first().expect("v4 service ip pool").db_pool;
         assert_eq!(svc_pool.name().as_str(), SERVICE_IPV4_POOL_NAME);
 
         let observed_ip_pool_ranges = get_all_ip_pool_ranges(&datastore).await;
@@ -1686,10 +1766,12 @@ mod test {
         // Ask for two Nexus services, with different external IPs.
         let nexus_ip_start = Ipv4Addr::new(1, 2, 3, 4);
         let nexus_ip_end = Ipv4Addr::new(1, 2, 3, 5);
-        let service_ip_pool = IpRange::try_from((nexus_ip_start, nexus_ip_end))
-            .expect("Cannot create IP Range");
-        let external_ip_policy =
-            ExternalIpPolicy::single_pool_no_external_dns(service_ip_pool);
+        let service_ip_pool_range =
+            IpRange::try_from((nexus_ip_start, nexus_ip_end))
+                .expect("Cannot create IP Range");
+        let external_ip_policy = ExternalIpPolicy::single_pool_no_external_dns(
+            service_ip_pool_range,
+        );
 
         let mut system = SystemDescription::new();
         system
@@ -1752,7 +1834,10 @@ mod test {
                 RackInit {
                     blueprint: blueprint.clone(),
                     datasets: vec![],
-                    service_ip_pool_ranges: vec![service_ip_pool],
+                    service_ip_pools: vec![service_pool_config(
+                        SERVICE_IPV4_POOL_NAME,
+                        vec![service_ip_pool_range],
+                    )],
                     internal_dns,
                     external_dns,
                     ..Default::default()
@@ -1822,10 +1907,15 @@ mod test {
 
         // Furthermore, we should be able to see that this IP addresses have been
         // allocated as a part of a service IP pool.
-        let (.., svc_pool) = datastore
-            .ip_pools_service_lookup(&opctx, IpVersion::V4)
+        let svc_pools = datastore
+            .ip_pools_service_lookup_by_version(
+                &opctx,
+                IpVersion::V4,
+                std::num::NonZeroU32::new(1).unwrap(),
+            )
             .await
             .unwrap();
+        let svc_pool = &svc_pools.first().expect("v4 service ip pool").db_pool;
         assert_eq!(svc_pool.name().as_str(), SERVICE_IPV4_POOL_NAME);
 
         let observed_ip_pool_ranges = get_all_ip_pool_ranges(&datastore).await;
@@ -1881,10 +1971,12 @@ mod test {
             Ipv6Addr::new(0xfd00, 0x1122, 0x3344, 0, 0, 0, 0, 1);
         let nexus_ip_end =
             Ipv6Addr::new(0xfd00, 0x1122, 0x3344, 0, 0, 0, 0, 10);
-        let service_ip_pool = IpRange::try_from((nexus_ip_start, nexus_ip_end))
-            .expect("Cannot create IP Range");
-        let external_ip_policy =
-            ExternalIpPolicy::single_pool_no_external_dns(service_ip_pool);
+        let service_ip_pool_range =
+            IpRange::try_from((nexus_ip_start, nexus_ip_end))
+                .expect("Cannot create IP Range");
+        let external_ip_policy = ExternalIpPolicy::single_pool_no_external_dns(
+            service_ip_pool_range,
+        );
 
         let mut system = SystemDescription::new();
         system
@@ -1948,7 +2040,10 @@ mod test {
                 RackInit {
                     blueprint: blueprint.clone(),
                     datasets: datasets.clone(),
-                    service_ip_pool_ranges: vec![service_ip_pool],
+                    service_ip_pools: vec![service_pool_config(
+                        SERVICE_IPV6_POOL_NAME,
+                        vec![service_ip_pool_range],
+                    )],
                     internal_dns,
                     external_dns,
                     ..Default::default()
@@ -2006,10 +2101,15 @@ mod test {
 
         // Furthermore, we should be able to see that this IP address has been
         // allocated as a part of a service IPv6 IP pool.
-        let (.., svc_pool) = datastore
-            .ip_pools_service_lookup(&opctx, IpVersion::V6)
+        let svc_pools = datastore
+            .ip_pools_service_lookup_by_version(
+                &opctx,
+                IpVersion::V6,
+                std::num::NonZeroU32::new(1).unwrap(),
+            )
             .await
             .unwrap();
+        let svc_pool = &svc_pools.first().expect("v6 service ip pool").db_pool;
         assert_eq!(svc_pool.name().as_str(), SERVICE_IPV6_POOL_NAME);
 
         let observed_ip_pool_ranges = get_all_ip_pool_ranges(&datastore).await;
@@ -2069,8 +2169,8 @@ mod test {
         let mut builder =
             blueprint_builder_with_empty_parent(&opctx.log, &system, test_name);
 
-        // We didn't add anything to the `system` IP pool, but pick an IP
-        // anyway. This should fail below.
+        // The service IP pool below does not contain this address, but pick it
+        // anyway. Allocating it should fail below.
         let nexus_ip = IpAddr::V4(Ipv4Addr::new(1, 2, 3, 4));
         let nexus_pip = NEXUS_OPTE_IPV4_SUBNET
             .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES + 1)
@@ -2102,17 +2202,29 @@ mod test {
         // the link back to the empty parent we started with.
         blueprint.parent_blueprint_id = None;
 
+        // Provide a v4 service IP pool whose range does not contain the address
+        // the Nexus zone requested above. The pool exists, but doesn't contain
+        // the requested address and so the rack-setup request fails.
+        // succeeds, but allocating the out-of-range IP fails.
+        let service_ip_pool_range =
+            IpRange::from(IpAddr::V4(Ipv4Addr::new(9, 9, 9, 9)));
         let result = datastore
             .rack_set_initialized(
                 &opctx,
-                RackInit { blueprint: blueprint.clone(), ..Default::default() },
+                RackInit {
+                    blueprint: blueprint.clone(),
+                    service_ip_pools: vec![service_pool_config(
+                        SERVICE_IPV4_POOL_NAME,
+                        vec![service_ip_pool_range],
+                    )],
+                    ..Default::default()
+                },
             )
             .await;
         assert!(result.is_err());
-        assert_eq!(
-            result.unwrap_err().to_string(),
-            "Invalid Request: Requested external IP address not available"
-        );
+        assert!(result.unwrap_err().to_string().starts_with(
+            "Internal Error: no system services pool for external IP '1.2.3.4'"
+        ));
 
         assert!(get_all_crucible_datasets(&datastore).await.is_empty());
         assert!(get_all_external_ips(&datastore).await.is_empty());
@@ -2131,9 +2243,10 @@ mod test {
         let sled = create_test_sled(&datastore, SledUuid::new_v4()).await;
 
         let ip = IpAddr::V4(Ipv4Addr::new(1, 2, 3, 4));
-        let service_ip_pool = IpRange::from(ip);
-        let external_ip_policy =
-            ExternalIpPolicy::single_pool_no_external_dns(service_ip_pool);
+        let service_ip_pool_range = IpRange::from(ip);
+        let external_ip_policy = ExternalIpPolicy::single_pool_no_external_dns(
+            service_ip_pool_range,
+        );
 
         let mut system = SystemDescription::new();
         system
@@ -2178,7 +2291,10 @@ mod test {
                 RackInit {
                     rack_id: nexus_test_utils::RACK_UUID,
                     blueprint: blueprint.clone(),
-                    service_ip_pool_ranges: vec![service_ip_pool],
+                    service_ip_pools: vec![service_pool_config(
+                        SERVICE_IPV4_POOL_NAME,
+                        vec![service_ip_pool_range],
+                    )],
                     ..Default::default()
                 },
             )
@@ -2472,5 +2588,30 @@ mod test {
 
         db.terminate().await;
         logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn service_ip_pool_config_fails_with_empty_ranges() {
+        ServiceIpPoolConfig::new("foo".parse().unwrap(), String::new(), vec![])
+            .expect_err("should fail with empty IP ranges");
+    }
+
+    #[test]
+    fn service_ip_pool_config_fails_with_mixed_versions() {
+        ServiceIpPoolConfig::new(
+            "foo".parse().unwrap(),
+            String::new(),
+            vec![
+                IpRange::V4(Ipv4Range {
+                    first: "10.0.0.1".parse().unwrap(),
+                    last: "10.0.0.2".parse().unwrap(),
+                }),
+                IpRange::V6(Ipv6Range {
+                    first: "fd00::1".parse().unwrap(),
+                    last: "fd00::2".parse().unwrap(),
+                }),
+            ],
+        )
+        .expect_err("should fail with mixed v4 / v6 ranges");
     }
 }

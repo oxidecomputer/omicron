@@ -219,10 +219,10 @@ impl Inventory {
             }),
         )
         .then(async move |sp_id| {
-            c.sp_get(&sp_id.type_, sp_id.slot)
+            c.sp_get(&sp_id.typ, sp_id.slot)
                 .await
                 .with_context(|| format!("fetching info about SP {:?}", sp_id))
-                .map(|s| (sp_id.type_, sp_id.slot, s))
+                .map(|s| (sp_id.typ, sp_id.slot, s))
         })
         .collect::<Vec<Result<_, _>>>()
         .await

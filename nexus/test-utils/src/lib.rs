@@ -131,12 +131,12 @@ pub fn dpd_client<N: NexusServer>(
     let dendrite_guard = cptestctx.dendrite.read().unwrap();
     let (switch_slot, dendrite_instance) = dendrite_guard
         .iter()
-        .next()
+        .find(|(_, instance)| instance.is_dpd_running())
         .expect("No dendrite instances running for test");
 
     // Copy the values we need while the guard is still alive
     let switch_slot = *switch_slot;
-    let port = dendrite_instance.port;
+    let port = dendrite_instance.port();
     drop(dendrite_guard);
 
     let client_state = dpd_client::ClientState {

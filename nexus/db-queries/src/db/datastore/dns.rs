@@ -687,7 +687,7 @@ impl DnsVersionUpdateBuilder {
             Err(Error::internal_error(&format!(
                 "DNS update ({:?}) attempted to remove name {:?} \
                 multiple times",
-                self.comment, &name,
+                self.comment, name,
             )))
         } else {
             assert!(self.names_removed.insert(name));

@@ -2,8 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-// Copyright 2022 Oxide Computer Company
-
 //! Interface for API requests to a Management Gateway Service (MGS) instance
 
 pub use gateway_messages::SpComponent;
@@ -69,7 +67,6 @@ progenitor::generate_api!(
         RotImageDetails = { derives = [PartialEq, Eq, PartialOrd, Ord] },
         SpComponentCaboose = { derives = [PartialEq, Eq] },
         SpComponentInfo = { derives = [PartialEq, Eq] },
-        SpIdentifier = { derives = [Copy, PartialEq, Hash, Eq] },
         SpUpdateStatus = { derives = [PartialEq, Hash, Eq] },
         UpdatePreparationProgress = { derives = [PartialEq, Hash, Eq] },
     },
@@ -84,27 +81,14 @@ progenitor::generate_api!(
         Ena = ereport_types::Ena,
         Ereport = ereport_types::Ereport,
         Ereports = ereport_types::Ereports,
-        SpType = gateway_types::component::SpType,
-        TaskDump = gateway_types::task_dump::TaskDump,
+        SpIdentifier = gateway_types::component::SpIdentifier,
         SpIgnition = gateway_types::ignition::SpIgnition,
         SpIgnitionSystemType = gateway_types::ignition::SpIgnitionSystemType,
-        SpState = gateway_types::component::SpState
+        SpState = gateway_types::component::SpState,
+        SpType = gateway_types::component::SpType,
+        TaskDump = gateway_types::task_dump::TaskDump,
     },
 );
-
-// Override the impl of Ord for SpIdentifier because the default one orders the
-// fields in a different order than people are likely to want.
-impl Ord for crate::types::SpIdentifier {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.type_.cmp(&other.type_).then(self.slot.cmp(&other.slot))
-    }
-}
-
-impl PartialOrd for crate::types::SpIdentifier {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(other))
-    }
-}
 
 #[derive(Debug, thiserror::Error)]
 pub enum HostPhase1HashError {

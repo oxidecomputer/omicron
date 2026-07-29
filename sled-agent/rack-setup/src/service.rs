@@ -91,7 +91,6 @@ use ntp_admin_client::ClientInfo as _;
 use ntp_admin_client::{
     Client as NtpAdminClient, Error as NtpAdminError, types::TimeSync,
 };
-use omicron_common::address::BOOTSTRAP_AGENT_HTTP_PORT;
 use omicron_common::address::{COCKROACH_ADMIN_PORT, NTP_ADMIN_PORT};
 use omicron_common::api::external::Generation;
 use omicron_common::api::internal::nexus::Certificate;
@@ -99,7 +98,7 @@ use omicron_common::backoff::{
     BackoffError, retry_notify, retry_policy_internal_service_aggressive,
 };
 use omicron_common::disk::DatasetKind;
-use omicron_ddm_admin_client::{Client as DdmAdminClient, DdmError};
+use omicron_ddm_admin_client::DdmError;
 use omicron_ledger::{self as ledger, Ledger, Ledgerable};
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::RackUuid;
@@ -120,13 +119,11 @@ use sled_agent_types::system_networking::BlueprintExternalNetworkingConfig;
 use sled_agent_types::system_networking::ServiceZoneNatEntriesError;
 use sled_agent_types::system_networking::SystemNetworkingConfig;
 use sled_hardware_types::BaseboardId;
-use sled_hardware_types::underlay::BootstrapInterface;
 use slog::Logger;
 use slog_error_chain::{InlineErrorChain, SlogInlineError};
 use std::collections::BTreeSet;
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
-use std::iter;
 use std::net::{Ipv6Addr, SocketAddrV6};
 use std::time::Duration;
 use thiserror::Error;
@@ -152,15 +149,6 @@ pub trait LocalBootstrapAgent: Send + Sync {
     fn initialize_sleds(
         self,
         requests: Vec<(SocketAddrV6, StartSledAgentRequest)>,
-    ) -> impl Future<Output = Result<(), String>> + Send;
-
-    /// Reset sled-agents on the rack's other sleds.
-    ///
-    /// Consumes the handle: RSS performs exactly one of `initialize_sleds` or
-    /// `reset_sleds` per run.
-    fn reset_sleds(
-        self,
-        requests: Vec<SocketAddrV6>,
     ) -> impl Future<Output = Result<(), String>> + Send;
 }
 
@@ -219,9 +207,6 @@ pub enum SetupServiceError {
         .errors.join(", ")
     )]
     DatasetInitialization { errors: Vec<String> },
-
-    #[error("Error resetting sled: {0}")]
-    SledReset(String),
 
     #[error("Error making HTTP request to Sled Agent")]
     SledApi(#[from] SledAgentError<SledAgentTypes::Error>),
@@ -337,26 +322,6 @@ impl RackSetupService {
                 .await
             {
                 error!(log, "RSS injection failed"; &e);
-                Err(e)
-            } else {
-                Ok(())
-            }
-        });
-
-        RackSetupService { handle }
-    }
-
-    pub fn new_reset_rack<T: LocalBootstrapAgent + 'static>(
-        log: Logger,
-        local_bootstrap_agent: T,
-        our_bootstrap_address: Ipv6Addr,
-    ) -> Self {
-        let handle = tokio::task::spawn(async move {
-            let svc = ServiceInner::new(log.clone());
-            if let Err(e) =
-                svc.reset(local_bootstrap_agent, our_bootstrap_address).await
-            {
-                warn!(log, "RSS rack reset failed: {}", e);
                 Err(e)
             } else {
                 Ok(())
@@ -1005,34 +970,6 @@ impl ServiceInner {
         Ok(())
     }
 
-    async fn reset<T: LocalBootstrapAgent>(
-        &self,
-        local_bootstrap_agent: T,
-        our_bootstrap_address: Ipv6Addr,
-    ) -> Result<(), SetupServiceError> {
-        // Gather all peer addresses that we can currently see on the bootstrap
-        // network.
-        let ddm_admin_client = DdmAdminClient::localhost(&self.log)?;
-        let peer_addrs = ddm_admin_client
-            .derive_bootstrap_addrs_from_prefixes(&[
-                BootstrapInterface::GlobalZone,
-            ])
-            .await?;
-        let all_addrs = peer_addrs
-            .chain(iter::once(our_bootstrap_address))
-            .map(|addr| {
-                SocketAddrV6::new(addr, BOOTSTRAP_AGENT_HTTP_PORT, 0, 0)
-            })
-            .collect::<Vec<_>>();
-
-        local_bootstrap_agent
-            .reset_sleds(all_addrs)
-            .await
-            .map_err(SetupServiceError::SledReset)?;
-
-        Ok(())
-    }
-
     async fn initialize_cockroach(
         &self,
         service_plan: &ServicePlan,
@@ -1219,11 +1156,7 @@ impl ServiceInner {
 
         let initial_trust_quorum_configuration =
             if let Some(peers) = &config.trust_quorum_peers {
-                let tq_members: BTreeSet<BaseboardId> = peers
-                    .iter()
-                    .cloned()
-                    .map(|id| id.try_into().expect("known baseboard type"))
-                    .collect();
+                let tq_members: BTreeSet<_> = peers.iter().cloned().collect();
                 let rack_id = RackUuid::from_untyped_uuid(sled_plan.rack_id);
 
                 init_trust_quorum(
@@ -1790,8 +1723,8 @@ mod test {
     use nexus_reconfigurator_blippy::{Blippy, BlippyReportSortKey};
     use omicron_common::{
         address::{
-            AZ_PREFIX, IpRange, Ipv6Subnet, RACK_PREFIX, SLED_PREFIX,
-            get_sled_address,
+            AZ_PREFIX_LENGTH, IpRange, Ipv6Subnet, RACK_PREFIX_LENGTH,
+            SLED_PREFIX_LENGTH, get_sled_address,
         },
         api::external::{AllowedSourceIps, ByteCount, Generation},
         disk::{DiskIdentity, DiskVariant},
@@ -1801,10 +1734,9 @@ mod test {
     use sled_agent_types::{
         early_networking::{PortConfig, RackNetworkConfig, UplinkPorts},
         inventory::{
-            Baseboard, ConfigReconcilerInventoryStatus, FmdInventory,
-            Inventory, InventoryDisk, OmicronFileSourceResolverInventory,
-            OmicronZoneType, SledCpuFamily, SledRole,
-            SvcsEnabledNotOnlineResult,
+            ConfigReconcilerInventoryStatus, FmdInventory, Inventory,
+            InventoryDisk, OmicronFileSourceResolverInventory, OmicronZoneType,
+            SledCpuFamily, SledRole, SvcsEnabledNotOnlineResult,
         },
     };
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
@@ -1817,12 +1749,12 @@ mod test {
             .join("../../smf/sled-agent/non-gimlet/config-rss.toml");
         let contents = std::fs::read_to_string(&path).unwrap();
         toml::from_str(&contents)
-            .unwrap_or_else(|e| panic!("failed to parse {:?}: {}", &path, e))
+            .unwrap_or_else(|e| panic!("failed to parse {:?}: {}", path, e))
     }
 
     fn make_sled_info(
         sled_id: SledUuid,
-        subnet: Ipv6Subnet<SLED_PREFIX>,
+        subnet: Ipv6Subnet<SLED_PREFIX_LENGTH>,
         u2_count: usize,
     ) -> SledInfo {
         let sled_agent_address = get_sled_address(subnet);
@@ -1834,7 +1766,10 @@ mod test {
                 sled_id,
                 sled_agent_address,
                 sled_role: SledRole::Scrimlet,
-                baseboard: Baseboard::Unknown,
+                baseboard_id: BaseboardId {
+                    part_number: "test".to_string(),
+                    serial_number: "test".to_string(),
+                },
                 usable_hardware_threads: 32,
                 usable_physical_ram: ByteCount::from_gibibytes_u32(16),
                 cpu_family: SledCpuFamily::AmdMilan,
@@ -1875,21 +1810,21 @@ mod test {
         vec![
             make_sled_info(
                 SledUuid::new_v4(),
-                Ipv6Subnet::<SLED_PREFIX>::new(
+                Ipv6Subnet::<SLED_PREFIX_LENGTH>::new(
                     "fd00:1122:3344:101::1".parse().unwrap(),
                 ),
                 5,
             ),
             make_sled_info(
                 SledUuid::new_v4(),
-                Ipv6Subnet::<SLED_PREFIX>::new(
+                Ipv6Subnet::<SLED_PREFIX_LENGTH>::new(
                     "fd00:1122:3344:102::1".parse().unwrap(),
                 ),
                 5,
             ),
             make_sled_info(
                 SledUuid::new_v4(),
-                Ipv6Subnet::<SLED_PREFIX>::new(
+                Ipv6Subnet::<SLED_PREFIX_LENGTH>::new(
                     "fd00:1122:3344:103::1".parse().unwrap(),
                 ),
                 5,
@@ -2058,13 +1993,13 @@ mod test {
             manifest.join("../../smf/sled-agent/non-gimlet/config-rss.toml");
         let contents = std::fs::read_to_string(&path).unwrap();
         let _: RackInitializeRequest = toml::from_str(&contents)
-            .unwrap_or_else(|e| panic!("failed to parse {:?}: {}", &path, e));
+            .unwrap_or_else(|e| panic!("failed to parse {:?}: {}", path, e));
 
         let path = manifest
             .join("../../smf/sled-agent/gimlet-standalone/config-rss.toml");
         let contents = std::fs::read_to_string(&path).unwrap();
         let _: RackInitializeRequest = toml::from_str(&contents)
-            .unwrap_or_else(|e| panic!("failed to parse {:?}: {}", &path, e));
+            .unwrap_or_else(|e| panic!("failed to parse {:?}: {}", path, e));
     }
 
     #[test]
@@ -2120,7 +2055,7 @@ mod test {
             rack_network_config: RackNetworkConfig {
                 rack_subnet: Ipv6Net::new(
                     "fd00:1122:3344:0100::".parse().unwrap(),
-                    RACK_PREFIX,
+                    RACK_PREFIX_LENGTH,
                 )
                 .unwrap(),
                 infra_ip_first: IpAddr::V4(Ipv4Addr::LOCALHOST),
@@ -2139,7 +2074,7 @@ mod test {
         };
 
         assert_eq!(
-            omicron_common::address::Ipv6Subnet::<AZ_PREFIX>::new(
+            omicron_common::address::Ipv6Subnet::<AZ_PREFIX_LENGTH>::new(
                 //              Masked out in AZ Subnet
                 //              vv
                 "fd00:1122:3344:0000::".parse::<Ipv6Addr>().unwrap(),
@@ -2147,7 +2082,7 @@ mod test {
             cfg.az_subnet()
         );
         assert_eq!(
-            omicron_common::address::Ipv6Subnet::<RACK_PREFIX>::new(
+            omicron_common::address::Ipv6Subnet::<RACK_PREFIX_LENGTH>::new(
                 //              Shows up from Rack Subnet
                 //              vv
                 "fd00:1122:3344:0100::".parse::<Ipv6Addr>().unwrap(),
@@ -2155,7 +2090,7 @@ mod test {
             cfg.rack_subnet()
         );
         assert_eq!(
-            omicron_common::address::Ipv6Subnet::<SLED_PREFIX>::new(
+            omicron_common::address::Ipv6Subnet::<SLED_PREFIX_LENGTH>::new(
                 //                0th Sled Subnet
                 //                vv
                 "fd00:1122:3344:0100::".parse::<Ipv6Addr>().unwrap(),
@@ -2163,7 +2098,7 @@ mod test {
             cfg.sled_subnet(0)
         );
         assert_eq!(
-            omicron_common::address::Ipv6Subnet::<SLED_PREFIX>::new(
+            omicron_common::address::Ipv6Subnet::<SLED_PREFIX_LENGTH>::new(
                 //                1st Sled Subnet
                 //                vv
                 "fd00:1122:3344:0101::".parse::<Ipv6Addr>().unwrap(),
@@ -2171,7 +2106,7 @@ mod test {
             cfg.sled_subnet(1)
         );
         assert_eq!(
-            omicron_common::address::Ipv6Subnet::<SLED_PREFIX>::new(
+            omicron_common::address::Ipv6Subnet::<SLED_PREFIX_LENGTH>::new(
                 //                Last Sled Subnet
                 //                vv
                 "fd00:1122:3344:01ff::".parse::<Ipv6Addr>().unwrap(),
@@ -2189,7 +2124,7 @@ mod test {
             rack_initialize_request_from_file(&path).unwrap_or_else(|e| {
                 panic!(
                     "failed to parse {:?}: {}",
-                    &path,
+                    path,
                     InlineErrorChain::new(&e)
                 )
             });
@@ -2219,7 +2154,7 @@ mod test {
         let cfg_path = tempdir.path().join("config-rss.toml");
         let _ = std::fs::copy(&path, &cfg_path)
             .with_context(|| {
-                format!("failed to copy file {:?} to {:?}", &path, &cfg_path)
+                format!("failed to copy file {:?} to {:?}", path, cfg_path)
             })
             .unwrap();
 
@@ -2230,14 +2165,14 @@ mod test {
             .into_bytes();
         let cert_path = tempdir.path().join("initial-tls-cert.pem");
         std::fs::write(&cert_path, &cert_bytes)
-            .with_context(|| format!("failed to write to {:?}", &cert_path))
+            .with_context(|| format!("failed to write to {:?}", cert_path))
             .unwrap();
 
         // Write the private key.
         let key_path = tempdir.path().join("initial-tls-key.pem");
         let key_bytes = cert.serialize_private_key_pem().into_bytes();
         std::fs::write(&key_path, &key_bytes)
-            .with_context(|| format!("failed to write to {:?}", &key_path))
+            .with_context(|| format!("failed to write to {:?}", key_path))
             .unwrap();
 
         // Now try to load it all.
