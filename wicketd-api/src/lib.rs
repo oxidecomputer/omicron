@@ -13,12 +13,11 @@ use dropshot::TypedBody;
 use gateway_client::types::IgnitionCommand;
 use omicron_common::update::ArtifactId;
 use omicron_uuid_kinds::RackInitUuid;
-use omicron_uuid_kinds::RackResetUuid;
 use schemars::JsonSchema;
 use semver::Version;
 use serde::Deserialize;
 use serde::Serialize;
-use sled_hardware_types::Baseboard;
+use sled_hardware_types::BaseboardId;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::net::Ipv6Addr;
@@ -200,15 +199,6 @@ pub trait WicketdApi {
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<RackInitUuid>, HttpError>;
 
-    /// Run rack reset.
-    #[endpoint {
-        method = DELETE,
-        path = "/rack-setup"
-    }]
-    async fn post_run_rack_reset(
-        rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<RackResetUuid>, HttpError>;
-
     /// A status endpoint used to report high level information known to
     /// wicketd.
     ///
@@ -368,7 +358,7 @@ pub trait WicketdApi {
     Ord,
 )]
 pub struct BootstrapSledIp {
-    pub baseboard: Baseboard,
+    pub baseboard: BaseboardId,
     pub ip: Ipv6Addr,
 }
 
@@ -500,7 +490,7 @@ pub struct ClearUpdateStateParams {
 #[derive(Clone, Debug, JsonSchema, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub struct GetBaseboardResponse {
-    pub baseboard: Option<Baseboard>,
+    pub baseboard: BaseboardId,
 }
 
 #[derive(Serialize, Deserialize, JsonSchema)]

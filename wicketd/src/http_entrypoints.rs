@@ -27,7 +27,6 @@ use dropshot::StreamingBody;
 use dropshot::TypedBody;
 use internal_dns_resolver::Resolver;
 use omicron_uuid_kinds::RackInitUuid;
-use omicron_uuid_kinds::RackResetUuid;
 use sled_agent_types::early_networking::SwitchSlot;
 use slog::o;
 use std::sync::Arc;
@@ -141,7 +140,7 @@ impl WicketdApi for WicketdApiImpl {
         rss_config
             .update(
                 body.into_inner(),
-                ctx.baseboard.as_ref(),
+                &ctx.baseboard_id,
                 &inventory,
                 &ddm_discovered_sleds,
                 &ctx.log,
@@ -170,7 +169,7 @@ impl WicketdApi for WicketdApiImpl {
             join_config
                 .update(
                     body.into_inner(),
-                    ctx.baseboard.as_ref(),
+                    &ctx.baseboard_id,
                     &inventory,
                     &ddm_discovered_sleds,
                     &ctx.log,
@@ -180,7 +179,7 @@ impl WicketdApi for WicketdApiImpl {
             // Overwrite any non-multirack-join config
             *config = RssOrMultirackJoinConfig::MultirackJoin(
                 CurrentMultirackJoinConfig::new_with_inventory_and_peers(
-                    ctx.baseboard.as_ref(),
+                    &ctx.baseboard_id,
                     body.into_inner(),
                     &inventory,
                     &ddm_discovered_sleds,
@@ -301,8 +300,7 @@ impl WicketdApi for WicketdApiImpl {
     ) -> Result<HttpResponseOk<RackOperationStatus>, HttpError> {
         let ctx = rqctx.context();
 
-        let client = ba_lockstep_client(ctx)?;
-
+        let client = ba_lockstep_client(ctx);
         let op_status = client
             .rack_initialization_status()
             .await
@@ -318,8 +316,7 @@ impl WicketdApi for WicketdApiImpl {
         let ctx = rqctx.context();
         let log = &rqctx.log;
 
-        let client = ba_lockstep_client(ctx)?;
-
+        let client = ba_lockstep_client(ctx);
         let request = {
             let mut config = ctx.rss_or_multirack_join_config.lock().unwrap();
 
@@ -345,28 +342,6 @@ impl WicketdApi for WicketdApiImpl {
             .into_inner();
 
         Ok(HttpResponseOk(init_id))
-    }
-
-    async fn post_run_rack_reset(
-        rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<RackResetUuid>, HttpError> {
-        let ctx = rqctx.context();
-
-        let client = ba_lockstep_client(ctx)?;
-
-        slog::info!(
-            ctx.log,
-            "Sending RSS reset request to {}",
-            client.baseurl()
-        );
-
-        let reset_id = client
-            .rack_reset()
-            .await
-            .map_err(|err| ba_lockstep_error_to_http(err, "rack reset"))?
-            .into_inner();
-
-        Ok(HttpResponseOk(reset_id))
     }
 
     async fn get_inventory(
@@ -476,7 +451,7 @@ impl WicketdApi for WicketdApiImpl {
     ) -> Result<HttpResponseOk<GetBaseboardResponse>, HttpError> {
         let rqctx = rqctx.context();
         Ok(HttpResponseOk(GetBaseboardResponse {
-            baseboard: rqctx.baseboard.clone(),
+            baseboard: rqctx.baseboard_id.clone(),
         }))
     }
 

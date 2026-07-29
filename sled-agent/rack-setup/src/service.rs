@@ -91,7 +91,6 @@ use ntp_admin_client::ClientInfo as _;
 use ntp_admin_client::{
     Client as NtpAdminClient, Error as NtpAdminError, types::TimeSync,
 };
-use omicron_common::address::BOOTSTRAP_AGENT_HTTP_PORT;
 use omicron_common::address::{COCKROACH_ADMIN_PORT, NTP_ADMIN_PORT};
 use omicron_common::api::external::Generation;
 use omicron_common::api::internal::nexus::Certificate;
@@ -99,7 +98,7 @@ use omicron_common::backoff::{
     BackoffError, retry_notify, retry_policy_internal_service_aggressive,
 };
 use omicron_common::disk::DatasetKind;
-use omicron_ddm_admin_client::{Client as DdmAdminClient, DdmError};
+use omicron_ddm_admin_client::DdmError;
 use omicron_ledger::{self as ledger, Ledger, Ledgerable};
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::RackUuid;
@@ -120,13 +119,11 @@ use sled_agent_types::system_networking::BlueprintExternalNetworkingConfig;
 use sled_agent_types::system_networking::ServiceZoneNatEntriesError;
 use sled_agent_types::system_networking::SystemNetworkingConfig;
 use sled_hardware_types::BaseboardId;
-use sled_hardware_types::underlay::BootstrapInterface;
 use slog::Logger;
 use slog_error_chain::{InlineErrorChain, SlogInlineError};
 use std::collections::BTreeSet;
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
-use std::iter;
 use std::net::{Ipv6Addr, SocketAddrV6};
 use std::time::Duration;
 use thiserror::Error;
@@ -152,15 +149,6 @@ pub trait LocalBootstrapAgent: Send + Sync {
     fn initialize_sleds(
         self,
         requests: Vec<(SocketAddrV6, StartSledAgentRequest)>,
-    ) -> impl Future<Output = Result<(), String>> + Send;
-
-    /// Reset sled-agents on the rack's other sleds.
-    ///
-    /// Consumes the handle: RSS performs exactly one of `initialize_sleds` or
-    /// `reset_sleds` per run.
-    fn reset_sleds(
-        self,
-        requests: Vec<SocketAddrV6>,
     ) -> impl Future<Output = Result<(), String>> + Send;
 }
 
@@ -219,9 +207,6 @@ pub enum SetupServiceError {
         .errors.join(", ")
     )]
     DatasetInitialization { errors: Vec<String> },
-
-    #[error("Error resetting sled: {0}")]
-    SledReset(String),
 
     #[error("Error making HTTP request to Sled Agent")]
     SledApi(#[from] SledAgentError<SledAgentTypes::Error>),
@@ -337,26 +322,6 @@ impl RackSetupService {
                 .await
             {
                 error!(log, "RSS injection failed"; &e);
-                Err(e)
-            } else {
-                Ok(())
-            }
-        });
-
-        RackSetupService { handle }
-    }
-
-    pub fn new_reset_rack<T: LocalBootstrapAgent + 'static>(
-        log: Logger,
-        local_bootstrap_agent: T,
-        our_bootstrap_address: Ipv6Addr,
-    ) -> Self {
-        let handle = tokio::task::spawn(async move {
-            let svc = ServiceInner::new(log.clone());
-            if let Err(e) =
-                svc.reset(local_bootstrap_agent, our_bootstrap_address).await
-            {
-                warn!(log, "RSS rack reset failed: {}", e);
                 Err(e)
             } else {
                 Ok(())
@@ -884,12 +849,6 @@ impl ServiceInner {
         }
         let crucible_datasets: Vec<_> =
             crucible_datasets.into_values().collect();
-        let internal_services_ip_pool_ranges = config
-            .internal_services_ip_pool_ranges
-            .clone()
-            .into_iter()
-            .map(Into::into)
-            .collect();
 
         let rack_network_config = {
             let config = &config.rack_network_config;
@@ -972,7 +931,7 @@ impl ServiceInner {
             physical_disks,
             zpools,
             crucible_datasets,
-            internal_services_ip_pool_ranges,
+            service_ip_pools: config.service_ip_pools.clone(),
             certs: config.external_certificates.clone(),
             internal_dns_zone_config: service_plan.dns_config.clone(),
             external_dns_zone_name: config.external_dns_zone_name.clone(),
@@ -1002,34 +961,6 @@ impl ServiceInner {
         .await?;
 
         info!(self.log, "Handoff to Nexus is complete");
-        Ok(())
-    }
-
-    async fn reset<T: LocalBootstrapAgent>(
-        &self,
-        local_bootstrap_agent: T,
-        our_bootstrap_address: Ipv6Addr,
-    ) -> Result<(), SetupServiceError> {
-        // Gather all peer addresses that we can currently see on the bootstrap
-        // network.
-        let ddm_admin_client = DdmAdminClient::localhost(&self.log)?;
-        let peer_addrs = ddm_admin_client
-            .derive_bootstrap_addrs_from_prefixes(&[
-                BootstrapInterface::GlobalZone,
-            ])
-            .await?;
-        let all_addrs = peer_addrs
-            .chain(iter::once(our_bootstrap_address))
-            .map(|addr| {
-                SocketAddrV6::new(addr, BOOTSTRAP_AGENT_HTTP_PORT, 0, 0)
-            })
-            .collect::<Vec<_>>();
-
-        local_bootstrap_agent
-            .reset_sleds(all_addrs)
-            .await
-            .map_err(SetupServiceError::SledReset)?;
-
         Ok(())
     }
 
@@ -1219,11 +1150,7 @@ impl ServiceInner {
 
         let initial_trust_quorum_configuration =
             if let Some(peers) = &config.trust_quorum_peers {
-                let tq_members: BTreeSet<BaseboardId> = peers
-                    .iter()
-                    .cloned()
-                    .map(|id| id.try_into().expect("known baseboard type"))
-                    .collect();
+                let tq_members: BTreeSet<_> = peers.iter().cloned().collect();
                 let rack_id = RackUuid::from_untyped_uuid(sled_plan.rack_id);
 
                 init_trust_quorum(
@@ -1785,7 +1712,9 @@ mod test {
     use super::*;
     use crate::plan::service::{ServicePlan, SledInfo};
     use anyhow::Context;
-    use bootstrap_agent_lockstep_types::RecoverySiloConfig;
+    use bootstrap_agent_lockstep_types::{
+        RecoverySiloConfig, ServiceIpPoolConfig,
+    };
     use iddqd::IdOrdMap;
     use nexus_reconfigurator_blippy::{Blippy, BlippyReportSortKey};
     use omicron_common::{
@@ -1801,10 +1730,9 @@ mod test {
     use sled_agent_types::{
         early_networking::{PortConfig, RackNetworkConfig, UplinkPorts},
         inventory::{
-            Baseboard, ConfigReconcilerInventoryStatus, FmdInventory,
-            Inventory, InventoryDisk, OmicronFileSourceResolverInventory,
-            OmicronZoneType, SledCpuFamily, SledRole,
-            SvcsEnabledNotOnlineResult,
+            ConfigReconcilerInventoryStatus, FmdInventory, Inventory,
+            InventoryDisk, OmicronFileSourceResolverInventory, OmicronZoneType,
+            SledCpuFamily, SledRole, SvcsEnabledNotOnlineResult,
         },
     };
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
@@ -1834,7 +1762,10 @@ mod test {
                 sled_id,
                 sled_agent_address,
                 sled_role: SledRole::Scrimlet,
-                baseboard: Baseboard::Unknown,
+                baseboard_id: BaseboardId {
+                    part_number: "test".to_string(),
+                    serial_number: "test".to_string(),
+                },
                 usable_hardware_threads: 32,
                 usable_physical_ram: ByteCount::from_gibibytes_u32(16),
                 cpu_family: SledCpuFamily::AmdMilan,
@@ -1899,8 +1830,9 @@ mod test {
 
     #[test]
     fn test_omicron_zone_configs() {
-        let logctx =
-            omicron_test_utils::dev::test_setup_log("make_test_service_plan");
+        let logctx = omicron_test_utils::dev::test_setup_log(
+            "test_omicron_zone_configs",
+        );
 
         let rss_config = rack_initialize_request_test_config();
         let fake_sleds = make_fake_sleds();
@@ -2075,9 +2007,10 @@ mod test {
             dns_servers = [ "1.1.1.1", "9.9.9.9" ]
             external_dns_zone_name = "oxide.test"
 
-            [[internal_services_ip_pool_ranges]]
-            first = "192.168.1.20"
-            last = "192.168.1.22"
+            [[service_ip_pools]]
+            name = "oxide-service-pool-v4"
+            description = "IPv4 IP Pool for Oxide Services"
+            ranges = [ { first = "192.168.1.20", last = "192.168.1.22" } ]
 
             [recovery_silo]
             silo_name = "recovery"
@@ -2101,9 +2034,17 @@ mod test {
             ntp_servers: vec![String::from("test.pool.example.com")],
             dns_servers: vec!["1.1.1.1".parse().unwrap()],
             external_dns_zone_name: String::from("oxide.test"),
-            internal_services_ip_pool_ranges: vec![IpRange::from(IpAddr::V4(
-                Ipv4Addr::new(129, 168, 1, 20),
-            ))],
+            service_ip_pools: IdOrdMap::from_iter_unique([
+                ServiceIpPoolConfig::new(
+                    "ipv4-service-pool".parse().unwrap(),
+                    String::new(),
+                    vec![IpRange::from(IpAddr::V4(Ipv4Addr::new(
+                        129, 168, 1, 20,
+                    )))],
+                )
+                .unwrap(),
+            ])
+            .unwrap(),
             external_dns_ips: vec![],
             external_certificates: vec![],
             recovery_silo: RecoverySiloConfig {

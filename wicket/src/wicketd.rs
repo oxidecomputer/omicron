@@ -67,7 +67,6 @@ pub enum Request {
     },
     IgnitionCommand(ComponentId, IgnitionCommand),
     StartRackSetup,
-    StartRackReset,
 }
 
 pub struct WicketdHandle {
@@ -149,9 +148,6 @@ impl WicketdManager {
                         }
                         Request::StartRackSetup => {
                             self.start_rack_initialization();
-                        }
-                        Request::StartRackReset => {
-                            self.start_rack_reset();
                         }
                     }
                 }
@@ -307,24 +303,6 @@ impl WicketdManager {
             slog::info!(log, "Start rack setup response: {:?}", response);
             _ = events_tx.send(Event::Term(Cmd::ShowPopup(
                 ShowPopupCmd::StartRackSetupResponse(response),
-            )));
-        });
-    }
-
-    fn start_rack_reset(&self) {
-        let log = self.log.clone();
-        let addr = self.wicketd_addr;
-        let events_tx = self.events_tx.clone();
-        tokio::spawn(async move {
-            let client = create_wicketd_client(&log, addr, WICKETD_TIMEOUT);
-            let response = match client.post_run_rack_reset().await {
-                Ok(_) => Ok(()),
-                Err(error) => Err(error.to_string()),
-            };
-
-            slog::info!(log, "Start rack setup response: {:?}", response);
-            _ = events_tx.send(Event::Term(Cmd::ShowPopup(
-                ShowPopupCmd::StartRackResetResponse(response),
             )));
         });
     }

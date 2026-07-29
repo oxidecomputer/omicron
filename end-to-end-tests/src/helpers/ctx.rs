@@ -99,10 +99,11 @@ fn external_dns_addr(config: &RackInitializeRequest) -> Result<SocketAddr> {
     // From the RSS config, grab the first address from the configured services
     // IP pool as the DNS server's IP address.
     let dns_ip = config
-        .internal_services_ip_pool_ranges
-        .iter()
-        .flat_map(|range| range.iter())
-        .next()
+        .service_ip_pools
+        .first()
+        .and_then(|pool| {
+            pool.ranges().first().expect("guaranteed non-empty").iter().next()
+        })
         .ok_or_else(|| {
             anyhow!(
                 "failed to get first IP from internal service \
