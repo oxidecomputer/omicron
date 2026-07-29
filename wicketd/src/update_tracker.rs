@@ -139,6 +139,7 @@ impl SpUpdateData {
 
 #[derive(Debug)]
 enum UploadTrampolinePhase2ToMgsStatus {
+    Starting,
     Running { hash: ArtifactHash },
     Done { hash: ArtifactHash, uploaded_image_id: HostPhase2RecoveryImageId },
     Failed(Arc<anyhow::Error>),
@@ -151,7 +152,8 @@ impl UploadTrampolinePhase2ToMgsStatus {
             | UploadTrampolinePhase2ToMgsStatus::Done { hash, .. } => {
                 Some(*hash)
             }
-            UploadTrampolinePhase2ToMgsStatus::Failed(_) => None,
+            UploadTrampolinePhase2ToMgsStatus::Starting
+            | UploadTrampolinePhase2ToMgsStatus::Failed(_) => None,
         }
     }
 }
@@ -347,34 +349,15 @@ impl UpdateTracker {
         &self,
         repo: &Arc<Repository>,
     ) -> UploadTrampolinePhase2ToMgs {
-        match repo.get_handle(&TRAMPOLINE_PHASE_2_TAGS) {
-            Ok(handle) => {
-                let (status_tx, status_rx) = watch::channel(
-                    UploadTrampolinePhase2ToMgsStatus::Running {
-                        hash: handle.artifact().hash,
-                    },
-                );
-                let task = tokio::spawn(upload_trampoline_phase_2_to_mgs(
-                    self.mgs_client.clone(),
-                    handle,
-                    status_tx,
-                    self.log.clone(),
-                ));
-                UploadTrampolinePhase2ToMgs { status: status_rx, task }
-            }
-            Err(error) => {
-                let error = UpdateTerminalError::MissingArtifact {
-                    tags: TRAMPOLINE_PHASE_2_TAGS,
-                    error,
-                };
-                let (_, status) =
-                    watch::channel(UploadTrampolinePhase2ToMgsStatus::Failed(
-                        Arc::new(anyhow!(error)),
-                    ));
-                let task = tokio::spawn(futures::future::ready(()));
-                UploadTrampolinePhase2ToMgs { status, task }
-            }
-        }
+        let (status_tx, status_rx) =
+            watch::channel(UploadTrampolinePhase2ToMgsStatus::Starting);
+        let task = tokio::spawn(upload_trampoline_phase_2_to_mgs(
+            self.mgs_client.clone(),
+            Arc::clone(repo),
+            status_tx,
+            self.log.clone(),
+        ));
+        UploadTrampolinePhase2ToMgs { status: status_rx, task }
     }
 
     /// Updates the repository stored inside the update tracker.
@@ -1427,6 +1410,7 @@ impl UpdateDriver {
                 loop {
                     match &*upload_trampoline_phase_2_to_mgs.borrow_and_update()
                     {
+                        UploadTrampolinePhase2ToMgsStatus::Starting |
                         UploadTrampolinePhase2ToMgsStatus::Running { .. } => {
                             // fall through to `.changed()` below
                         },
@@ -2526,7 +2510,7 @@ enum ComponentUpdateStage {
 
 async fn upload_trampoline_phase_2_to_mgs(
     mgs_client: gateway_client::Client,
-    artifact: ArtifactHandle,
+    repo: Arc<Repository>,
     status: watch::Sender<UploadTrampolinePhase2ToMgsStatus>,
     log: Logger,
 ) {
@@ -2537,7 +2521,23 @@ async fn upload_trampoline_phase_2_to_mgs(
 
     let mut attempt = 1;
     let final_status = loop {
-        let image_stream = match artifact.stream().await {
+        let artifact = match repo.artifacts().get_only(&TRAMPOLINE_PHASE_2_TAGS)
+        {
+            Ok(artifact) => artifact,
+            Err(error) => {
+                break UploadTrampolinePhase2ToMgsStatus::Failed(Arc::new(
+                    anyhow::Error::new(UpdateTerminalError::MissingArtifact {
+                        tags: TRAMPOLINE_PHASE_2_TAGS,
+                        error,
+                    }),
+                ));
+            }
+        };
+        status.send_replace(UploadTrampolinePhase2ToMgsStatus::Running {
+            hash: artifact.hash,
+        });
+
+        let image_stream = match repo.read_artifact(&artifact).await {
             Ok(stream) => stream,
             Err(err) => {
                 error!(
@@ -2559,7 +2559,7 @@ async fn upload_trampoline_phase_2_to_mgs(
         {
             Ok(response) => {
                 break UploadTrampolinePhase2ToMgsStatus::Done {
-                    hash: artifact.artifact().hash,
+                    hash: artifact.hash,
                     uploaded_image_id: response.into_inner(),
                 };
             }
