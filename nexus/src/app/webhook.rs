@@ -28,15 +28,11 @@
 //! [RFD 538]: https://rfd.shared.oxide.computer/538
 
 use crate::Nexus;
-<<<<<<< HEAD
 use crate::app::external_client::ExternalClientBuilder;
 use crate::app::external_client::ExternalHttpClient;
 use crate::app::external_client::ExternalIpError;
 use crate::app::external_client::ExternalUrlError;
 use crate::app::external_dns;
-=======
-use crate::app::external_client::ExternalHttpClient;
->>>>>>> 942542e28 (so it actually turns out this is complicated (WIP))
 use anyhow::Context;
 use chrono::TimeDelta;
 use chrono::Utc;
@@ -332,16 +328,7 @@ pub(super) fn delivery_client(
     external_client_config: &ExternalHttpClientConfig,
     resolver: &Arc<external_dns::Resolver>,
 ) -> Result<ExternalHttpClient, reqwest::Error> {
-<<<<<<< HEAD
     let builder: ExternalClientBuilder = reqwest::ClientBuilder::new()
-=======
-    let builder = reqwest::ClientBuilder::new()
-        // Per [RFD 538 § 4.3.1][1], webhook delivery does *not* follow
-        // redirects.
-        //
-        // [1]: https://rfd.shared.oxide.computer/rfd/538#_success
-        .redirect(reqwest::redirect::Policy::none())
->>>>>>> 942542e28 (so it actually turns out this is complicated (WIP))
         // Per [RFD 538 § 4.3.2][1], the client must be able to connect to a
         // webhook receiver endpoint within 10 seconds, or the delivery is
         // considered failed.
@@ -352,7 +339,6 @@ pub(super) fn delivery_client(
         // each webhook delivery request.
         //
         // [1]: https://rfd.shared.oxide.computer/rfd/538#delivery-failure
-<<<<<<< HEAD
         .timeout(Duration::from_secs(30))
         .into();
     builder
@@ -366,10 +352,6 @@ pub(super) fn delivery_client(
         // [1]: https://rfd.shared.oxide.computer/rfd/538#_success
         .redirect(reqwest::redirect::Policy::none())
         .build(external_client_config, resolver)
-=======
-        .timeout(Duration::from_secs(30));
-    ExternalHttpClient::from_builder(external_client_config, resolver, builder)
->>>>>>> 942542e28 (so it actually turns out this is complicated (WIP))
 }
 
 /// Everything necessary to send a delivery request to a webhook receiver.
@@ -499,7 +481,6 @@ impl<'a> ReceiverClient<'a> {
                 return Err(e).context(MSG);
             }
         };
-<<<<<<< HEAD
         const ERR_BEFORE_RSS: &str =
             "cannot deliver webhook requests before RSS";
         const ERR_IP_POLICY: &str =
@@ -562,7 +543,6 @@ impl<'a> ReceiverClient<'a> {
         .header(HDR_ALERT_VERSION, alert_version.to_string())
         .header(HDR_TIMESTAMP, &sent_at)
         .header(http::header::CONTENT_TYPE, "application/json");
-=======
         let mut request = self
             .client
             .post(&self.rx.endpoint).expect("TODO ELIZA YOU HAVE TO ACTUALLY HANDLE THE EXTERNAL CLIENT ERROR HERE LOL")
@@ -573,7 +553,6 @@ impl<'a> ReceiverClient<'a> {
             .header(HDR_ALERT_VERSION, alert_version.to_string())
             .header(HDR_TIMESTAMP, &sent_at)
             .header(http::header::CONTENT_TYPE, "application/json");
->>>>>>> 942542e28 (so it actually turns out this is complicated (WIP))
 
         // For each secret assigned to this webhook, calculate the HMAC and add a signature header.
         for (secret_id, mac) in &mut self.secrets {
