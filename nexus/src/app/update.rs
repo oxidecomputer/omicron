@@ -12,6 +12,7 @@ use chrono::TimeDelta;
 use chrono::Utc;
 use dropshot::HttpError;
 use futures::Stream;
+use illumos_utils::zone::PROPOLIS_ZONE_PREFIX;
 use nexus_auth::authz;
 use nexus_db_lookup::LookupPath;
 use nexus_db_model::Generation;
@@ -33,7 +34,11 @@ use nexus_types::inventory::Zpool;
 use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::Nullable;
 use omicron_common::api::external::{DataPageParams, Error};
-use omicron_uuid_kinds::{GenericUuid, SledUuid, TufTrustRootUuid};
+use omicron_uuid_kinds::SledKind;
+use omicron_uuid_kinds::TypedUuid;
+use omicron_uuid_kinds::{
+    GenericUuid, PropolisUuid, SledUuid, TufTrustRootUuid,
+};
 use semver::Version;
 use sled_agent_types::inventory::SvcsEnabledNotOnlineResult;
 use sled_hardware_types::BaseboardId;
@@ -167,12 +172,39 @@ impl UpdateContactSupportChecksInput {
             .map(|(sled, zpools)| (sled, zpools.into_iter().cloned().collect()))
             .collect();
 
-        let enabled_smf_services_not_online_by_sled = self
+        let mut enabled_smf_services_not_online_by_sled: BTreeMap<
+            TypedUuid<SledKind>,
+            SvcsEnabledNotOnlineResult,
+        > = self
             .inventory
             .enabled_smf_services_not_online()
             .into_iter()
             .map(|(sled, svcs)| (sled, svcs.clone()))
             .collect();
+
+        enabled_smf_services_not_online_by_sled.retain(|_sled, svcs_result| {
+            match svcs_result {
+                SvcsEnabledNotOnlineResult::SvcsEnabledNotOnline(svcs) => {
+                    // Remove services that belong to a propolis zone.
+                    svcs.services.retain(|svc| {
+                        propolis_id_from_zone(&svc.zone).is_none()
+                    });
+
+                    // TODO-K: Leave this for now to keep the test passing.
+                    // Double check behaviour below based on notes on
+                    // enabled_smf_services_not_online regarding how we report
+                    // services
+                    //
+                    // If there are no services left then we drop the sled
+                    // entirely.
+                    !svcs.services.is_empty()
+                }
+                // Command errors and unavailable data aren't propolis-specific,
+                // so they're always retained.
+                SvcsEnabledNotOnlineResult::DataUnavailable
+                | SvcsEnabledNotOnlineResult::SvcsCmdError(_) => true,
+            }
+        });
 
         UpdateStatusProblems {
             stuck_sagas,
@@ -184,6 +216,13 @@ impl UpdateContactSupportChecksInput {
             missing_sleds,
         }
     }
+}
+
+// TODO-K: this recovers the Propolis ID by string-parsing the zone name.
+// It sucks, fix it. Maybe adding propolis ID somewhere else?
+fn propolis_id_from_zone(zone: &str) -> Option<PropolisUuid> {
+    zone.strip_prefix(PROPOLIS_ZONE_PREFIX)
+        .and_then(|id| id.parse::<PropolisUuid>().ok())
 }
 
 /// Identifies a saga that has been running or unwinding for too long.
