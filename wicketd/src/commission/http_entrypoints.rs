@@ -27,6 +27,7 @@ use wicketd_commission_types::update::{
     ClearUpdateStateParams, ClearUpdateStateResponse,
     GetUpdateProgressResponse, RepositoryDescription, StartUpdateParams,
 };
+use wicketd_commission_types_versions::v1;
 
 use super::conversions;
 use super::progress;
@@ -314,13 +315,40 @@ impl WicketdCommissionApi for WicketdCommissionApiImpl {
         Ok(HttpResponseOk(conversions::rack_setup_status_to_ct(op_status)))
     }
 
-    async fn put_rss_config(
+    async fn put_rss_config_v2(
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<PutRssUserConfigInsensitive>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let ctx = rqctx.context();
 
         let config = body.into_inner();
+
+        let inventory = mgs_inventory_or_unavail(&ctx.mgs_handle).await?;
+
+        let mut guard = ctx.rss_or_multirack_join_config.lock().unwrap();
+        let rss_config = guard.rss_config_mut_or_default();
+
+        let ddm_discovered_sleds = ctx.bootstrap_peers.sleds();
+        rss_config
+            .update(
+                config,
+                &ctx.baseboard_id,
+                &inventory,
+                &ddm_discovered_sleds,
+                &ctx.log,
+            )
+            .map_err(|err| HttpError::for_bad_request(None, err))?;
+
+        Ok(HttpResponseUpdatedNoContent())
+    }
+
+    async fn put_rss_config_v1(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<v1::rack_setup::PutRssUserConfigInsensitive>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let ctx = rqctx.context();
+
+        let config = body.into_inner().into();
 
         let inventory = mgs_inventory_or_unavail(&ctx.mgs_handle).await?;
 

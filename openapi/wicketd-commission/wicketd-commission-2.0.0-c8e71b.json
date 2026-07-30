@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "1.0.0"
+    "version": "2.0.0"
   },
   "paths": {
     "/bootstrap-sleds": {
@@ -181,7 +181,7 @@
       "put": {
         "summary": "Update (a subset of) the current RSS configuration",
         "description": "Sensitive values (certificates, the recovery password hash, and BGP authentication keys) are not set through this endpoint.",
-        "operationId": "put_rss_config",
+        "operationId": "put_rss_config_v2",
         "requestBody": {
           "content": {
             "application/json": {
@@ -4095,6 +4095,13 @@
                 "$ref": "#/components/schemas/RouterLifetimeConfig"
               }
             ]
+          },
+          "src_addr": {
+            "nullable": true,
+            "description": "The optional source address to use for starting a BGP session with a numbered peer.",
+            "default": null,
+            "type": "string",
+            "format": "ip"
           },
           "vlan_id": {
             "nullable": true,

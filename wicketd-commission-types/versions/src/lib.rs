@@ -30,3 +30,5 @@ mod impls;
 pub mod latest;
 #[path = "initial/mod.rs"]
 pub mod v1;
+#[path = "bgp_peer_src_addr/mod.rs"]
+pub mod v2;

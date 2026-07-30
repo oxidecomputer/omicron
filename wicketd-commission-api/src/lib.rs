@@ -11,7 +11,7 @@ use dropshot::{
     RequestContext, StreamingBody, TypedBody,
 };
 use dropshot_api_manager_types::api_versions;
-use wicketd_commission_types_versions::latest;
+use wicketd_commission_types_versions::{latest, v1};
 
 // NOTE: The commission API is server-side versioned, but changing it requires
 // coordinating with rkdeploy (it must stay on the oldest version supported
@@ -29,6 +29,7 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
+    (2, BGP_PEER_SRC_ADDR),
     (1, INITIAL),
 ]);
 
@@ -197,10 +198,25 @@ pub trait WicketdCommissionApi {
     #[endpoint {
         method = PUT,
         path = "/rack-setup/config",
+        versions = VERSION_BGP_PEER_SRC_ADDR..,
     }]
-    async fn put_rss_config(
+    async fn put_rss_config_v2(
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<latest::rack_setup::PutRssUserConfigInsensitive>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Update (a subset of) the current RSS configuration
+    ///
+    /// Sensitive values (certificates, the recovery password hash, and BGP
+    /// authentication keys) are not set through this endpoint.
+    #[endpoint {
+        method = PUT,
+        path = "/rack-setup/config",
+        versions = VERSION_INITIAL..VERSION_BGP_PEER_SRC_ADDR,
+    }]
+    async fn put_rss_config_v1(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<v1::rack_setup::PutRssUserConfigInsensitive>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
     /// Reset all RSS configuration to default values
