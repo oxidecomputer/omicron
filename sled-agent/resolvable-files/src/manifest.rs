@@ -367,7 +367,7 @@ fn make_artifacts_result(
                 file_name: zone.file_name.clone(),
                 path: artifact_path,
                 expected_size: zone.file_size,
-                expected_hash: zone.hash_v2(),
+                expected_hash: zone.hash,
                 status,
             }
         })
@@ -433,11 +433,11 @@ fn synthesize_measurement_manifest(
 
         match compute_size_and_hash(&mut f) {
             Ok((size, hash)) => {
-                files.insert_overwrite(OmicronInstallMetadata::new_v2(
-                    entry.file_name().to_string(),
-                    size,
+                files.insert_overwrite(OmicronInstallMetadata {
+                    file_name: entry.file_name().to_string(),
+                    file_size: size,
                     hash,
-                ));
+                });
             }
             Err(error) => {
                 return Err(InstallMetadataReadError::ReadFile {
@@ -509,11 +509,11 @@ fn synthesize_manifest(
 
         match compute_size_and_hash(&mut f) {
             Ok((size, hash)) => {
-                files.insert_overwrite(OmicronInstallMetadata::new_v2(
-                    entry.file_name().to_string(),
-                    size,
+                files.insert_overwrite(OmicronInstallMetadata {
+                    file_name: entry.file_name().to_string(),
+                    file_size: size,
                     hash,
-                ));
+                });
             }
             Err(error) => {
                 return Err(InstallMetadataReadError::ReadFile {
@@ -543,7 +543,7 @@ fn validate_one(
 
     match compute_size_and_hash(&mut f) {
         Ok((actual_size, actual_hash)) => {
-            if zone.file_size == actual_size && zone.hash_v2() == actual_hash {
+            if zone.file_size == actual_size && zone.hash == actual_hash {
                 ArtifactReadResult::Valid
             } else {
                 ArtifactReadResult::Mismatch { actual_size, actual_hash }
