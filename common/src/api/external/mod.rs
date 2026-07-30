@@ -538,6 +538,8 @@ const MiB: u64 = KiB * 1024;
 const GiB: u64 = MiB * 1024;
 #[allow(non_upper_case_globals)]
 const TiB: u64 = GiB * 1024;
+#[allow(non_upper_case_globals)]
+const PiB: u64 = TiB * 1024;
 
 impl ByteCount {
     // None of these three constructors can create a value larger than
@@ -550,6 +552,12 @@ impl ByteCount {
     }
     pub const fn from_gibibytes_u32(gibibytes: u32) -> ByteCount {
         ByteCount(GiB * gibibytes as u64)
+    }
+    pub const fn from_tebibytes_u32(tebibytes: u32) -> ByteCount {
+        ByteCount(TiB * tebibytes as u64)
+    }
+    pub const fn from_pebibytes_u32(pebibytes: u32) -> ByteCount {
+        ByteCount(PiB * pebibytes as u64)
     }
 
     pub const fn to_bytes(&self) -> u64 {

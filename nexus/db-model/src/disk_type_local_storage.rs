@@ -56,6 +56,14 @@ impl DiskTypeLocalStorage {
         let required_dataset_overhead =
             external::ByteCount::try_from(overhead)?;
 
+        // Check that later `required_dataset_size` calls won't overflow.
+        let size_bytes: i64 = size.into();
+        let overhead_bytes: i64 = required_dataset_overhead.into();
+
+        if size_bytes.checked_add(overhead_bytes).is_none() {
+            return Err(external::ByteCountRangeError::TooLarge);
+        }
+
         Ok(DiskTypeLocalStorage {
             disk_id,
             required_dataset_overhead: required_dataset_overhead.into(),

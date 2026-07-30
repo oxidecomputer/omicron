@@ -262,20 +262,62 @@ impl super::Nexus {
             }
 
             disk::DiskBackend::Local {} => {
+                // Right off the top, reject requests for disks that could not
+                // realistically be serviced by a single zpool. For right now,
+                // the largest NVMe disk that can be bought seems to be ~250 TB.
+                // 10 PiB NVMe disks do not exist, and will not for the
+                // foreseeable future[1] so use that to reject invalid requests.
+                //
+                // Do this check before creating a `DiskTypeLocalStorage` object
+                // in order to prevent an i64 overflow adding the user's
+                // requested size to the required dataset overhead.
+                //
+                // [1]: famously, these types of predictions are never wrong!
+
+                if params.size.to_bytes()
+                    > ByteCount::from_pebibytes_u32(10).to_bytes()
+                {
+                    return Err(Error::invalid_value(
+                        "size",
+                        String::from("requested size over 10 PiB"),
+                    ));
+                }
+
+                // Test that the disk create saga can create the
+                // DiskTypeLocalStorage record. This won't be part of the record
+                // actually used by the created disk, but validation here can be
+                // returned to a user with a non-500 error, and validation
+                // failure in a saga will only show up as a 500.
+
+                let disk = match DiskTypeLocalStorage::new(
+                    Uuid::new_v4(),
+                    params.size,
+                ) {
+                    Ok(disk) => disk,
+
+                    Err(e) => {
+                        return Err(Error::invalid_value(
+                            "size",
+                            format!(
+                                "error computing required dataset overhead: {e}"
+                            ),
+                        ));
+                    }
+                };
+
                 // If a user requests some outlandish number of TB for local
                 // storage, and there isn't a sled allocation that can fulfill
-                // this, instance create will work but instance start (which
-                // performs the actual vmm + local storage dataset allocation)
-                // will fail.
+                // this, disk and/or instance create will work but instance
+                // start (which performs the actual vmm + local storage dataset
+                // allocation) will fail.
                 //
                 // There's an opportunity to consult the latest inventory
                 // collection here, and if there aren't zpools that are as large
                 // as this local storage request, reject it. If the user
-                // mistakenly asks for 30 TB instead of 3 TB, such a check would
-                // prevent the instance start request from succeeding. Later, if
-                // new disks are inserted that have a much larger capacity, then
-                // the same instance create request that could use that larger
-                // capacity.
+                // mistakenly asks for 30 TB instead of 3 TB, there's no way the
+                // sled reservation would succeed. Later, if new disks are
+                // inserted that have a much larger capacity, then the same
+                // instance create request could use that larger capacity.
                 //
                 // We don't want to reject creating a bunch of instances
                 // requesting local storage, where if all of them were started
@@ -285,23 +327,27 @@ impl super::Nexus {
                 // from requesting too much local storage to ever start the
                 // instances for.
                 //
-                // TODO consult the latest inventory collection if it isn't too
-                // expensive, and reject local storage disk requests that are
-                // too large to be served by any sled.
+                // Do the basic check mentioned at the start: consult the latest
+                // inventory collection and reject local storage disk requests
+                // that would not fit anywhere.
 
-                // Test that the disk create saga can create the
-                // DiskTypeLocalStorage record. This won't be the record
-                // actually used by the created disk, but validation here can be
-                // returned to a user with a non-500 error, and validation
-                // failure in a saga will only show up as a 500.
+                let disk_size: i64 = params.size.into();
+                let overhead: i64 = disk.required_dataset_overhead().into();
 
-                if let Err(e) =
-                    DiskTypeLocalStorage::new(Uuid::new_v4(), params.size)
+                if self
+                    .datastore()
+                    .zpools_that_can_fit_local_storage_allocation(
+                        &opctx,
+                        disk_size + overhead,
+                    )
+                    .await?
+                    .is_empty()
                 {
                     return Err(Error::invalid_value(
                         "size",
-                        format!(
-                            "error computing required dataset overhead: {e}"
+                        String::from(
+                            "requested size is too large to fit on any \
+                            physical disk",
                         ),
                     ));
                 }

@@ -306,6 +306,17 @@ impl LocalStorageDisk {
 
     /// Size required for the disk's data plus overhead
     pub fn required_dataset_size(&self) -> i64 {
+        // The value in ByteCount is capped at i64::MAX, but a disk backed by
+        // local storage cannot be created that does not fit in a zpool at the
+        // time of the disk creation request (note this is different from the
+        // time of instance reservation where Nexus actually assigns the disk an
+        // allocation). This means that the size is well below that MAX, meaning
+        // this won't overflow.
+        //
+        // Additionally, there's a checked_add in DiskTypeLocalStorage::New that
+        // checks this won't happen. Note this won't protect against cases of
+        // database modification, but not much will!
+
         self.size().to_bytes() as i64
             + self.required_dataset_overhead().to_bytes() as i64
     }
