@@ -8400,7 +8400,7 @@ pub(in crate::db::datastore) mod test {
             })
             .collect();
 
-        // Set `time_deleted` on the disk
+        // Set `time_deleted` on the first disk
 
         {
             let disk_id = config.instances[0].disks[0].id;
@@ -8415,18 +8415,7 @@ pub(in crate::db::datastore) mod test {
                 .unwrap();
         };
 
-        // Construct a SledResourceVmm by hand for directly calling the insert
-        // resource query
-
-        let resource = SledResourceVmm::new(
-            PropolisUuid::new_v4(),
-            instance.id,
-            config.sleds[0].sled_id,
-            instance.resources(),
-            SledReservationReason::Start.into(),
-        );
-
-        // Duplicate the loop logic that performs the allocation search
+        // Duplicate the loop logic that performs the allocation search.
 
         let zpools_for_sled = DataStore::zpool_get_for_sled_reservation(
             &conn,
@@ -8446,30 +8435,15 @@ pub(in crate::db::datastore) mod test {
             )
             .unwrap();
 
-        loop {
-            complete_allocation_lists
-                .prune_invalidated_allocation_lists(&conn, &opctx)
-                .await
-                .unwrap();
+        // After pruning, there should be no allocations left.to try: a disk was
+        // deleted, so the search should stop.
 
-            let Some(allocations) = complete_allocation_lists.next() else {
-                // We should hit here and _not_ perform an exhaustive search,
-                // _nor_ insert an allocation for a deleted disk.
-                break;
-            };
+        complete_allocation_lists
+            .prune_invalidated_allocation_lists(&conn, &opctx)
+            .await
+            .unwrap();
 
-            let result = sled_insert_resource_query(
-                &resource,
-                &LocalStorageAllocationRequired::Yes { allocations },
-            )
-            .execute_async(&*conn)
-            .await;
-
-            // There currently is no sentinel for the case when a disk was
-            // deleted, so it should return Ok with zero rows inserted.
-
-            assert_eq!(result, Ok(0));
-        }
+        assert!(complete_allocation_lists.next().is_none());
 
         let allocation_records: Vec<_> = {
             let conn = datastore.pool_connection_for_tests().await.unwrap();
