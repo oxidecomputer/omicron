@@ -11,7 +11,7 @@ use serde::Serialize;
 use std::fmt;
 use std::sync::Arc;
 use thiserror::Error;
-use tufaceous_artifact_v2::DisplayTags;
+use tufaceous_artifact::DisplayTags;
 
 use crate::artifact::ArtifactId;
 
@@ -197,9 +197,9 @@ pub enum UpdateTerminalError {
     },
     #[error("failed to find artifact matching {tags}")]
     MissingArtifact {
-        tags: tufaceous_artifact_v2::KnownArtifactTags,
+        tags: tufaceous_artifact::KnownArtifactTags,
         #[source]
-        error: tufaceous_artifact_v2::artifact_set::GetError,
+        error: tufaceous_artifact::artifact_set::GetError,
     },
     #[error("setting installinator image ID failed")]
     SetInstallinatorImageIdFailed {

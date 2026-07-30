@@ -7,7 +7,7 @@
 use omicron_uuid_kinds::{DatasetUuid, SupportBundleUuid, ZpoolUuid};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use tufaceous_artifact_v2::ArtifactHash;
+use tufaceous_artifact::ArtifactHash;
 
 /// Path parameters for Support Bundle list requests.
 #[derive(Deserialize, JsonSchema)]

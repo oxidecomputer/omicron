@@ -25,10 +25,10 @@ use std::collections::HashMap;
 use std::io;
 use tokio::io::AsyncWriteExt;
 use tough::TargetName;
-use tufaceous_artifact::ArtifactHash;
-use tufaceous_artifact::ArtifactHashId;
-use tufaceous_lib::ArchiveExtractor;
-use tufaceous_lib::OmicronRepo;
+use tufaceous_artifact_v1::ArtifactHash;
+use tufaceous_artifact_v1::ArtifactHashId;
+use tufaceous_lib_v1::ArchiveExtractor;
+use tufaceous_lib_v1::OmicronRepo;
 
 /// A collection of artifacts along with an update plan using those artifacts.
 #[derive(Debug)]
@@ -319,7 +319,7 @@ impl ArtifactsWithPlan {
 
 fn lookup_artifact_hash(
     repository: &OmicronRepo,
-    artifact: &tufaceous_artifact::Artifact,
+    artifact: &tufaceous_artifact_v1::Artifact,
     target_name: &TargetName,
 ) -> Result<ArtifactHash, RepositoryError> {
     let target_hash = repository
@@ -392,7 +392,7 @@ mod tests {
     use clap::Parser;
     use omicron_test_utils::dev::test_setup_log;
     use std::{collections::BTreeSet, time::Duration};
-    use tufaceous_artifact::{ArtifactKind, KnownArtifactKind};
+    use tufaceous_artifact_v1::{ArtifactKind, KnownArtifactKind};
 
     /// Test that `ArtifactsWithPlan` can extract the fake repository generated
     /// by tufaceous.
@@ -578,7 +578,7 @@ mod tests {
         log: &slog::Logger,
         archive_path: &Utf8Path,
     ) -> Result<()> {
-        let args = tufaceous::Args::try_parse_from([
+        let args = tufaceous_v1::Args::try_parse_from([
             "tufaceous",
             "assemble",
             "manifests/fake.toml",

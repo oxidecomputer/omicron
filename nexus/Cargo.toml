@@ -129,8 +129,8 @@ tokio = { workspace = true, features = ["full"] }
 tokio-postgres = { workspace = true, features = ["with-serde_json-1"] }
 tokio-util = { workspace = true, features = ["codec", "rt"] }
 trust-quorum-types.workspace = true
-tufaceous-artifact-v2.workspace = true
-tufaceous-v2.workspace = true
+tufaceous.workspace = true
+tufaceous-artifact.workspace = true
 url.workspace = true
 usdt.workspace = true
 uuid.workspace = true
@@ -212,8 +212,8 @@ strum.workspace = true
 subprocess.workspace = true
 term.workspace = true
 transient-dns-server.workspace = true
-tufaceous-artifact-v2.workspace = true
-tufaceous-v2.workspace = true
+tufaceous.workspace = true
+tufaceous-artifact.workspace = true
 
 [[bench]]
 name = "setup_benchmark"

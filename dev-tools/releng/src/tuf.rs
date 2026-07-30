@@ -18,17 +18,17 @@ use fs_err::tokio::File;
 use omicron_zone_package::config::Config;
 use semver::Version;
 use slog::Logger;
-use tufaceous_artifact::ArtifactHash;
-use tufaceous_artifact::ArtifactVersion;
-use tufaceous_artifact::KnownArtifactKind;
-use tufaceous_lib::Key;
-use tufaceous_lib::assemble::ArtifactManifest;
-use tufaceous_lib::assemble::DeserializedArtifactData;
-use tufaceous_lib::assemble::DeserializedArtifactSource;
-use tufaceous_lib::assemble::DeserializedControlPlaneZoneSource;
-use tufaceous_lib::assemble::DeserializedManifest;
-use tufaceous_lib::assemble::OmicronRepoAssembler;
-use tufaceous_v2::RepositoryLoader;
+use tufaceous::RepositoryLoader;
+use tufaceous_artifact_v1::ArtifactHash;
+use tufaceous_artifact_v1::ArtifactVersion;
+use tufaceous_artifact_v1::KnownArtifactKind;
+use tufaceous_lib_v1::Key;
+use tufaceous_lib_v1::assemble::ArtifactManifest;
+use tufaceous_lib_v1::assemble::DeserializedArtifactData;
+use tufaceous_lib_v1::assemble::DeserializedArtifactSource;
+use tufaceous_lib_v1::assemble::DeserializedControlPlaneZoneSource;
+use tufaceous_lib_v1::assemble::DeserializedManifest;
+use tufaceous_lib_v1::assemble::OmicronRepoAssembler;
 use update_common::artifacts::{
     ArtifactsWithPlan, ControlPlaneZonesMode, VerificationMode,
 };

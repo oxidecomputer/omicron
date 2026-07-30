@@ -8,7 +8,7 @@ use iddqd::{IdOrdItem, IdOrdMap, id_upcast};
 use omicron_uuid_kinds::MupdateUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use tufaceous_artifact_v2::ArtifactHash;
+use tufaceous_artifact::ArtifactHash;
 
 /// Describes a set of files written out into an install dataset.
 /// This is currently used for zones and reference measurements

@@ -15,7 +15,7 @@ use sled_agent_types::inventory::{
     ManifestBootInventory, ZoneArtifactInventory, ZoneKind,
 };
 use swrite::{SWrite, swrite};
-use tufaceous_artifact_v2::KnownArtifactTags;
+use tufaceous_artifact::KnownArtifactTags;
 
 use crate::errors::UnknownZoneNamesError;
 

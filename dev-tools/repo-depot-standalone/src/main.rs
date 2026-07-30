@@ -28,12 +28,12 @@ use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use tufaceous_artifact_v2::ArtifactHash;
-use tufaceous_v2::ArtifactHandle;
-use tufaceous_v2::ExpirationEnforcement;
-use tufaceous_v2::Repository;
-use tufaceous_v2::RepositoryLoader;
-use tufaceous_v2::TargetStream;
+use tufaceous::ArtifactHandle;
+use tufaceous::ExpirationEnforcement;
+use tufaceous::Repository;
+use tufaceous::RepositoryLoader;
+use tufaceous::TargetStream;
+use tufaceous_artifact::ArtifactHash;
 
 fn main() -> Result<(), anyhow::Error> {
     oxide_tokio_rt::run(async {
@@ -165,7 +165,7 @@ impl RepoMetadata {
     pub async fn data_for_hash(
         &self,
         requested_sha: &ArtifactHash,
-    ) -> Result<Option<TargetStream>, tufaceous_v2::error::Error> {
+    ) -> Result<Option<TargetStream>, tufaceous::error::Error> {
         let Some(handle) = self.artifacts.get(requested_sha) else {
             return Ok(None);
         };

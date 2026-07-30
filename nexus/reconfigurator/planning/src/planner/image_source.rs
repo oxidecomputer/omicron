@@ -26,7 +26,7 @@ use sled_agent_types::inventory::{
     ZoneKind,
 };
 use slog::{debug, info, o, warn};
-use tufaceous_artifact_v2::{Artifact, ArtifactHash};
+use tufaceous_artifact::{Artifact, ArtifactHash};
 
 use crate::blueprint_builder::{BlueprintBuilder, Error};
 

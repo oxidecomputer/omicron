@@ -17,7 +17,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use futures::future::BoxFuture;
-use tufaceous_artifact_v2::{KnownArtifactTags, RotBootloaderTags, RotTags};
+use tufaceous_artifact::{KnownArtifactTags, RotBootloaderTags, RotTags};
 use uuid::Uuid;
 
 use super::super::schema::{DataMigrationFns, MigrationContext};

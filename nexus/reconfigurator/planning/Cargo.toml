@@ -45,8 +45,8 @@ strum.workspace = true
 swrite.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
-tufaceous-artifact-v2.workspace = true
-tufaceous-v2.workspace = true
+tufaceous.workspace = true
+tufaceous-artifact.workspace = true
 typed-rng.workspace = true
 uuid.workspace = true
 

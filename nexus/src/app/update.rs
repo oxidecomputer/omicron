@@ -51,9 +51,9 @@ use std::error::Error as _;
 use std::iter;
 use std::sync::Arc;
 use tokio::sync::watch;
-use tufaceous_artifact_v2::ArtifactHash;
-use tufaceous_v2::ExpirationEnforcement;
-use tufaceous_v2::RepositoryLoader;
+use tufaceous::ExpirationEnforcement;
+use tufaceous::RepositoryLoader;
+use tufaceous_artifact::ArtifactHash;
 use uuid::Uuid;
 
 /// Threshold at which we consider an active saga stuck.
@@ -908,8 +908,8 @@ mod test {
     use sled_agent_types::inventory::ZpoolHealth;
     use slog::Logger;
     use slog::o;
-    use tufaceous_artifact_v2::ArtifactHash;
-    use tufaceous_artifact_v2::ArtifactVersion;
+    use tufaceous_artifact::ArtifactHash;
+    use tufaceous_artifact::ArtifactVersion;
     use uuid::Uuid;
 
     type ControlPlaneTestContext =

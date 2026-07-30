@@ -703,7 +703,7 @@ mod tests {
     use omicron_test_utils::dev::test_setup_log;
     use test_strategy::proptest;
     use tokio_stream::wrappers::UnboundedReceiverStream;
-    use tufaceous_artifact_v2::ArtifactHash;
+    use tufaceous_artifact::ArtifactHash;
 
     // The #[proptest] macro doesn't currently with with #[tokio::test] sadly.
     #[proptest]

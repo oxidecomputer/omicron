@@ -21,11 +21,11 @@ use nexus_types::tuf_repo::TufRepoDescription;
 use sled_hardware_types::BaseboardId;
 use slog::debug;
 use std::sync::Arc;
-use tufaceous_artifact_v2::ArtifactVersion;
-use tufaceous_artifact_v2::KnownArtifactTags;
-use tufaceous_artifact_v2::RotKeyTableHash;
-use tufaceous_artifact_v2::RotTags;
-use tufaceous_artifact_v2::artifact_set::GetError;
+use tufaceous_artifact::ArtifactVersion;
+use tufaceous_artifact::KnownArtifactTags;
+use tufaceous_artifact::RotKeyTableHash;
+use tufaceous_artifact::RotTags;
+use tufaceous_artifact::artifact_set::GetError;
 
 /// RoT state that gets checked against preconditions in a `PendingMgsUpdate`
 pub struct RotUpdateState {
@@ -154,8 +154,8 @@ pub(super) fn try_make_update(
         // We'll be updating the inactive slot, so we choose the
         // artifact based on the inactive slot's kind.
         rot_slot: match active_slot.toggled() {
-            RotSlot::A => tufaceous_artifact_v2::RotSlot::A,
-            RotSlot::B => tufaceous_artifact_v2::RotSlot::B,
+            RotSlot::A => tufaceous_artifact::RotSlot::A,
+            RotSlot::B => tufaceous_artifact::RotSlot::B,
         },
     });
     let artifact =

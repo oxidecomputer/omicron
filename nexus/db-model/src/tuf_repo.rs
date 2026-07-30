@@ -25,7 +25,7 @@ use omicron_uuid_kinds::TypedUuid;
 use parse_display::Display;
 use serde::{Deserialize, Serialize};
 use std::fmt;
-use tufaceous_artifact_v2::{
+use tufaceous_artifact::{
     ArtifactHash as ExternalArtifactHash, ArtifactVersion,
 };
 
@@ -114,9 +114,9 @@ pub struct TufArtifactDescription {
 
 impl TufArtifactDescription {
     /// Creates a new `TufArtifactDescription` from an
-    /// [`tufaceous_artifact_v2::Artifact`].
+    /// [`tufaceous_artifact::Artifact`].
     pub fn new(
-        artifact: tufaceous_artifact_v2::Artifact,
+        artifact: tufaceous_artifact::Artifact,
         generation_added: external::Generation,
     ) -> Result<Self, external::ByteCountRangeError> {
         let id = TypedUuid::new_v4().into();
@@ -176,9 +176,9 @@ impl TufArtifactDescription {
     }
 }
 
-impl From<TufArtifactDescription> for tufaceous_artifact_v2::Artifact {
+impl From<TufArtifactDescription> for tufaceous_artifact::Artifact {
     fn from(description: TufArtifactDescription) -> Self {
-        tufaceous_artifact_v2::Artifact {
+        tufaceous_artifact::Artifact {
             version: description.version.into(),
             tags: description.tags,
             hash: description.artifact.sha256.0,

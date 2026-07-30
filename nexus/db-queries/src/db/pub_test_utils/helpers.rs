@@ -54,10 +54,10 @@ use std::collections::BTreeMap;
 use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
 use std::str::FromStr;
-use tufaceous_artifact_v2::Artifact;
-use tufaceous_artifact_v2::ArtifactHash;
-use tufaceous_artifact_v2::ArtifactSet;
-use tufaceous_artifact_v2::ArtifactVersion;
+use tufaceous_artifact::Artifact;
+use tufaceous_artifact::ArtifactHash;
+use tufaceous_artifact::ArtifactSet;
+use tufaceous_artifact::ArtifactVersion;
 use uuid::Uuid;
 
 /// Creates a project within the silo of "opctx".
