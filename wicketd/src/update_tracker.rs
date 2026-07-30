@@ -160,9 +160,6 @@ impl UploadTrampolinePhase2ToMgsStatus {
 
 #[derive(Debug)]
 struct UploadTrampolinePhase2ToMgs {
-    // The tuple is the ID of the Trampoline image and a boolean for whether or
-    // not it is complete. The upload task retries forever until it succeeds, so
-    // we don't need to keep a "tried but failed" variant here.
     status: watch::Receiver<UploadTrampolinePhase2ToMgsStatus>,
     task: JoinHandle<()>,
 }
