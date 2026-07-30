@@ -30,7 +30,7 @@ use omicron_common::api::external::ResourceType;
 impl DataStore {
     /// Currently used to ensure that a NAT entry exists for an Instance.
     /// This SHOULD NOT be directly used to create service zone nat entries,
-    /// as they are updated via a background task.
+    /// as they are managed by an entirely separate subsystem.
     pub async fn ensure_nat_entry(
         &self,
         opctx: &OpContext,
@@ -100,16 +100,6 @@ impl DataStore {
             }
             Err(e) => Err(public_error_from_diesel(e, ErrorHandler::Server)),
         }
-    }
-
-    /// TODO-john FIXME delete stale service nat entries in DB migration, then
-    /// delete this method.
-    pub async fn nat_sync_service_zones(
-        &self,
-        _opctx: &OpContext,
-        _nat_entries: &[NatEntryValues],
-    ) -> CreateResult<usize> {
-        Ok(0)
     }
 
     /// Mark the provided NAT entry as removed in the database.
@@ -579,125 +569,6 @@ mod test {
         assert_eq!(active.len(), 0);
         assert_eq!(inactive.len(), 2);
         assert_eq!(datastore.nat_current_version(&opctx).await.unwrap(), 4);
-
-        db.terminate().await;
-        logctx.cleanup_successful();
-    }
-
-    // Test our ability to reconcile a set of service zone nat entries
-    #[tokio::test]
-    async fn nat_sync_service_zones() {
-        let logctx = dev::test_setup_log("nat_sync_service_zones");
-        let db = TestDatabase::new_with_datastore(&logctx.log).await;
-        let (opctx, datastore) = (db.opctx(), db.datastore());
-
-        // We should not have any NAT entries at this moment
-        let initial_state =
-            datastore.nat_list_since_version(&opctx, 0, 10).await.unwrap();
-
-        assert!(initial_state.is_empty());
-        assert_eq!(datastore.nat_current_version(&opctx).await.unwrap(), 0);
-
-        // create two nat entries:
-        // 1. an entry should be deleted during the next sync
-        // 2. an entry that should be kept during the next sync
-
-        let external_address =
-            oxnet::Ipv4Net::host_net("10.0.0.100".parse().unwrap());
-
-        let sled_address =
-            oxnet::Ipv6Net::host_net("fd00:1122:3344:104::1".parse().unwrap());
-
-        // Add a nat entry.
-        let nat1 = NatEntryValues {
-            external_address: external_address.into(),
-            first_port: 0.into(),
-            last_port: 999.into(),
-            sled_address: sled_address.into(),
-            vni: Vni(external::Vni::SERVICES_VNI),
-            mac: MacAddr(
-                external::MacAddr::from_str("A8:40:25:F5:EB:2A").unwrap(),
-            ),
-        };
-
-        let nat2 = NatEntryValues {
-            first_port: 1000.into(),
-            last_port: 1999.into(),
-            ..nat1
-        };
-
-        datastore.ensure_nat_entry(&opctx, nat1.clone()).await.unwrap();
-        datastore.ensure_nat_entry(&opctx, nat2.clone()).await.unwrap();
-
-        let db_entries =
-            datastore.nat_list_since_version(&opctx, 0, 10).await.unwrap();
-
-        assert_eq!(db_entries.len(), 2);
-
-        // sync two nat entries:
-        // 1. a nat entry that already exists
-        // 2. a nat entry that does not already exist
-
-        let nat3 = NatEntryValues {
-            first_port: 2000.into(),
-            last_port: 2999.into(),
-            ..nat2
-        };
-
-        datastore
-            .nat_sync_service_zones(&opctx, &[nat2.clone(), nat3.clone()])
-            .await
-            .unwrap();
-
-        // we should have three nat entries in the db
-        // 1. the old one that was deleted during the last sync
-        // 2. the old one that "survived" the last sync
-        // 3. a new one that was added during the last sync
-        let db_entries =
-            datastore.nat_list_since_version(&opctx, 0, 10).await.unwrap();
-
-        assert_eq!(db_entries.len(), 3);
-
-        // nat2 and nat3 should not be soft deleted
-        for request in [nat2.clone(), nat3.clone()] {
-            assert!(db_entries.iter().any(|entry| {
-                entry.first_port == request.first_port
-                    && entry.last_port == request.last_port
-                    && entry.time_deleted.is_none()
-            }));
-        }
-
-        // nat1 should be soft deleted
-        assert!(db_entries.iter().any(|entry| {
-            entry.first_port == nat1.first_port
-                && entry.last_port == nat1.last_port
-                && entry.time_deleted.is_some()
-                && entry.version_removed.is_some()
-        }));
-
-        // add nat1 back
-        // this simulates a zone leaving and then returning, i.e. when a sled gets restarted
-        datastore
-            .nat_sync_service_zones(
-                &opctx,
-                &[nat1.clone(), nat2.clone(), nat3.clone()],
-            )
-            .await
-            .unwrap();
-
-        // we should have four nat entries in the db
-        let db_entries =
-            datastore.nat_list_since_version(&opctx, 0, 10).await.unwrap();
-
-        assert_eq!(db_entries.len(), 4);
-
-        // there should be an active entry for nat1 again
-        assert!(db_entries.iter().any(|entry| {
-            entry.first_port == nat1.first_port
-                && entry.last_port == nat1.last_port
-                && entry.time_deleted.is_none()
-                && entry.version_removed.is_none()
-        }));
 
         db.terminate().await;
         logctx.cleanup_successful();
