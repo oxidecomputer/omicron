@@ -43,8 +43,8 @@ use slog_error_chain::InlineErrorChain;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::watch;
-use tufaceous_artifact::ArtifactHash;
-use tufaceous_artifact::ArtifactVersion;
+use tufaceous_artifact_v2::ArtifactHash;
+use tufaceous_artifact_v2::ArtifactVersion;
 
 pub enum ExpectedSpComponent {
     Sp {

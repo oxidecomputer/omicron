@@ -156,7 +156,7 @@ mod tests {
         OmicronResolvableFileLocation, OmicronResolvableFileSource,
         RAMDISK_IMAGE_PATH, ZoneImageLocationError,
     };
-    use tufaceous_artifact::ArtifactHash;
+    use tufaceous_artifact_v2::ArtifactHash;
 
     /// Test source resolver behavior when the zone manifest is missing.
     #[test]
@@ -256,7 +256,7 @@ mod tests {
                             ZoneKind::CockroachDb.artifact_in_install_dataset()
                         )
                         .unwrap()
-                        .hash)
+                        .hash_v2())
                 },
                 file_source: ResolvableFileSource {
                     file_name: ZoneKind::CockroachDb
@@ -358,7 +358,7 @@ mod tests {
                             ZoneKind::CockroachDb.artifact_in_install_dataset()
                         )
                         .unwrap()
-                        .hash),
+                        .hash_v2()),
                 },
                 file_source: ResolvableFileSource {
                     file_name: ZoneKind::CockroachDb
@@ -482,7 +482,7 @@ mod tests {
                             ZoneKind::CockroachDb.artifact_in_install_dataset()
                         )
                         .unwrap()
-                        .hash),
+                        .hash_v2()),
                 },
                 file_source: ResolvableFileSource {
                     file_name: ZoneKind::CockroachDb

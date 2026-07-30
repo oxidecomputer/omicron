@@ -29,7 +29,7 @@ use std::collections::BTreeSet;
 use std::net::IpAddr;
 use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
-use tufaceous_artifact::ArtifactHash;
+use tufaceous_artifact_v2::ArtifactHash;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Note {

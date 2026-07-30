@@ -27,6 +27,6 @@ strum.workspace = true
 swrite.workspace = true
 sync-ptr.workspace = true
 thiserror.workspace = true
-tufaceous-artifact.workspace = true
+tufaceous-artifact-v2.workspace = true
 typed-rng.workspace = true
 uuid.workspace = true

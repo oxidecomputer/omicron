@@ -46,7 +46,7 @@ strum.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 trust-quorum-types.workspace = true
-tufaceous-artifact.workspace = true
+tufaceous-artifact-v2.workspace = true
 zone.workspace = true
 
 omicron-workspace-hack.workspace = true

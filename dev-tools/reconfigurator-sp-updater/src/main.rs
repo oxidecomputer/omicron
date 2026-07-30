@@ -40,8 +40,8 @@ use std::time::Duration;
 use swrite::SWrite;
 use swrite::swriteln;
 use tokio::sync::watch;
-use tufaceous_artifact::ArtifactHash;
-use tufaceous_artifact::ArtifactVersion;
+use tufaceous_artifact_v2::ArtifactHash;
+use tufaceous_artifact_v2::ArtifactVersion;
 
 fn main() -> Result<(), anyhow::Error> {
     let args = ReconfiguratorSpUpdater::parse();

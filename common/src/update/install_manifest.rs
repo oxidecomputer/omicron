@@ -94,6 +94,11 @@ impl OmicronInstallMetadata {
     ) -> Self {
         Self { file_name, file_size, hash: ArtifactHash(hash.0) }
     }
+
+    // TODO(iliana): remove when cleaning up Tufaceous v1
+    pub fn hash_v2(&self) -> tufaceous_artifact_v2::ArtifactHash {
+        tufaceous_artifact_v2::ArtifactHash(self.hash.0)
+    }
 }
 
 impl IdOrdItem for OmicronInstallMetadata {

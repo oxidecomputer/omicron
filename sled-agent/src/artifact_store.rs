@@ -47,7 +47,7 @@ use slog_error_chain::{InlineErrorChain, SlogInlineError};
 use tokio::fs::File;
 use tokio::sync::{OwnedSemaphorePermit, mpsc, oneshot, watch};
 use tokio::task::JoinSet;
-use tufaceous_artifact::ArtifactHash;
+use tufaceous_artifact_v2::ArtifactHash;
 
 // These paths are defined under the artifact storage dataset. They
 // cannot conflict with any artifact paths because all artifact paths are
@@ -910,7 +910,7 @@ mod test {
     use tokio::io::AsyncReadExt;
     use tokio::sync::oneshot;
     use tokio::sync::watch;
-    use tufaceous_artifact::ArtifactHash;
+    use tufaceous_artifact_v2::ArtifactHash;
 
     use super::{ArtifactStore, DatasetsManager, Error};
 

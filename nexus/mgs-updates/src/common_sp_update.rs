@@ -23,8 +23,8 @@ use std::fmt::Display;
 use std::net::SocketAddrV6;
 use std::time::Duration;
 use thiserror::Error;
-use tufaceous_artifact::ArtifactHash;
-use tufaceous_artifact::ArtifactVersion;
+use tufaceous_artifact_v2::ArtifactHash;
+use tufaceous_artifact_v2::ArtifactVersion;
 use uuid::Uuid;
 
 /// How frequently do we poll MGS for the update progress?
