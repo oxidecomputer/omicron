@@ -4,7 +4,6 @@
 
 //! Interfaces for working with sled agent configuration
 
-use crate::updates::ConfigUpdates;
 use camino::{Utf8Path, Utf8PathBuf};
 use dropshot::ConfigDropshot;
 use dropshot::ConfigLogging;
@@ -107,9 +106,6 @@ pub struct Config {
     /// The data links sled-agent will use.
     pub data_links: DataLinks,
 
-    #[serde(default)]
-    pub updates: ConfigUpdates,
-
     /// When running on a scrimlet, tfportd in the switch zone will create links
     /// when it boots, and maghemite in the switch zone is configured to use
     /// those in transit mode in order to transit prefix announcements to sleds.
@@ -185,6 +181,7 @@ impl Config {
 #[cfg(test)]
 mod test {
     use super::*;
+    use slog_error_chain::InlineErrorChain;
 
     #[test]
     fn test_smf_configs() {
@@ -201,7 +198,10 @@ mod test {
                     if entry.file_name() == "config.toml" {
                         let path = entry.path();
                         Config::from_file(&path).unwrap_or_else(|e| {
-                            panic!("Failed to parse config {path}: {e}")
+                            panic!(
+                                "Failed to parse config {path}: {}",
+                                InlineErrorChain::new(&e)
+                            )
                         });
                         configs_seen += 1;
                     }

@@ -68,7 +68,7 @@ impl OsoInitBuilder {
         info!(self.log, "registering Oso class"; "class" => &c.name);
         let name = c.name.clone();
         let new_element = self.class_names.insert(name.clone());
-        ensure!(new_element, "Oso class was already registered: {:?}", &name);
+        ensure!(new_element, "Oso class was already registered: {:?}", name);
         self.oso
             .register_class(c)
             .with_context(|| format!("registering Oso class {:?}", name))?;

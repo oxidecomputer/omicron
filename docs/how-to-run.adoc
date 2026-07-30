@@ -274,12 +274,13 @@ The relevant configuration files are in `./smf/sled-agent/$MACHINE`.  Start with
 
 [source,toml]
 ----
-[[internal_services_ip_pool_ranges]]
-first = "192.168.1.20"
-last = "192.168.1.29"
+[[service_ip_pools]]
+name = "oxide-service-pool-v4"
+description = "IPv4 IP Pool for Oxide Services"
+ranges = [ { first = "192.168.1.20", last = "192.168.1.29" } ]
 ----
 
-This is a range of IP addresses on your external network that Omicron can assign to externally-facing services (like DNS and the API).  You'll need to change these if you've picked different addresses for your external network.  See <<_external_networking>> above for more on this.
+This pool contains a range of IP addresses on your external network that Omicron can assign to externally-facing services (like DNS and the API).  You'll need to change the range if you've picked different addresses for your external network.  See <<_external_networking>> above for more on this. You can also add more ranges or additional pools.
 
 You will also need to update route information if your `$GATEWAY_IP` differs from the default.
 The below example demonstrates a single static gateway route; in-depth explanations for testing with BGP can be found https://docs.oxide.computer/guides/system/network-preparations#_rack_switch_configuration_with_bgp[in the Network Preparations guide] and https://docs.oxide.computer/guides/operator/configuring-bgp[the Configuring BGP guide]:

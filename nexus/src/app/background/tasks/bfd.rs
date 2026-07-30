@@ -18,6 +18,7 @@ use omicron_common::api::external::DataPageParams;
 use serde_json::json;
 use sled_agent_types::early_networking::SwitchSlot;
 use slog_error_chain::InlineErrorChain;
+use std::num::NonZeroU8;
 use std::{
     collections::HashSet,
     hash::Hash,
@@ -145,7 +146,10 @@ impl BackgroundTask for BfdManager {
                     current.insert(BfdSessionKey {
                         local: Some(info.config.listen),
                         remote: info.config.peer,
-                        detection_threshold: info.config.detection_threshold,
+                        detection_threshold: info
+                            .config
+                            .detection_threshold
+                            .into(),
                         required_rx: info.config.required_rx,
                         switch: *location,
                         mode: match info.config.mode {
@@ -188,7 +192,12 @@ impl BackgroundTask for BfdManager {
                 if let Err(e) = mg
                     .add_bfd_peer(&BfdPeerConfig {
                         peer: x.remote,
-                        detection_threshold: x.detection_threshold,
+                        detection_threshold: NonZeroU8::new(
+                            x.detection_threshold,
+                        )
+                        .unwrap_or_else(|| {
+                            NonZeroU8::new(1).expect("1 is not 0")
+                        }),
                         listen: x.local.unwrap_or(Ipv4Addr::UNSPECIFIED.into()),
                         mode: match x.mode {
                             BfdMode::SingleHop => SessionMode::SingleHop,

@@ -390,6 +390,11 @@ task: "fm_sitrep_gc"
     garbage collects fault management situation reports
 
 
+task: "fm_sitrep_history_pruner"
+    maintains the configured limit on the fault management sitrep history table
+    by deleting the oldest entries
+
+
 task: "fm_sitrep_loader"
     loads the current fault management situation report from the database
 
@@ -795,7 +800,7 @@ task: "fm_rendezvous"
       errors:          0
 
 task: "fm_sitrep_gc"
-  configured period: every <REDACTED_DURATION>s
+  configured period: every <REDACTED_DURATION>m
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     batch size:                                                               1000
@@ -819,6 +824,15 @@ task: "fm_sitrep_gc"
       batches:                                                                   1
     orphaned fm_support_bundle_request_data_selection_host_info rows deleted:    0
       batches:                                                                   1
+
+task: "fm_sitrep_history_pruner"
+  configured period: every <REDACTED_DURATION>m
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    max sitreps to keep: 2000
+    deletion batch size: 1000
+    status: within limit (nothing was deleted)
+      current count:        1
 
 task: "fm_sitrep_loader"
   configured period: every <REDACTED_DURATION>s
@@ -1513,7 +1527,7 @@ task: "fm_rendezvous"
       errors:          0
 
 task: "fm_sitrep_gc"
-  configured period: every <REDACTED_DURATION>s
+  configured period: every <REDACTED_DURATION>m
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     batch size:                                                               1000
@@ -1537,6 +1551,15 @@ task: "fm_sitrep_gc"
       batches:                                                                   1
     orphaned fm_support_bundle_request_data_selection_host_info rows deleted:    0
       batches:                                                                   1
+
+task: "fm_sitrep_history_pruner"
+  configured period: every <REDACTED_DURATION>m
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    max sitreps to keep: 2000
+    deletion batch size: 1000
+    status: within limit (nothing was deleted)
+      current count:        1
 
 task: "fm_sitrep_loader"
   configured period: every <REDACTED_DURATION>s
