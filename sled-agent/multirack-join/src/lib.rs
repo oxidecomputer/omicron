@@ -41,6 +41,9 @@ use trust_quorum_types::{
     types::{Epoch, Threshold},
 };
 
+const INITIAL_TRUST_QUORUM_EPOCH: Epoch = Epoch(1);
+const TRUST_QUORUM_RETRY_TIMEOUT: Duration = Duration::from_millis(500);
+
 /// Describes errors which may occur while operating the multirack join service.
 #[derive(Error, Debug, SlogInlineError)]
 pub enum MultirackJoinServiceError {
@@ -75,6 +78,7 @@ impl From<RunRssError> for MultirackJoinServiceError {
     }
 }
 
+/// The state of the commit phase of the trust quorum protocol
 #[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
 pub struct CommitState {
     rack_id: RackUuid,
@@ -175,6 +179,8 @@ impl MultirackJoinServiceTask {
         // TODO:
         //   Start sled-agents
         //   Configure networking
+        //
+        // https://github.com/oxidecomputer/omicron/issues/10637
 
         Ok(())
     }
@@ -194,7 +200,7 @@ impl MultirackJoinServiceTask {
     ) -> Result<(), MultirackJoinServiceError> {
         let members =
             self.input_rx.borrow_and_update().trust_quorum_peers.clone();
-        let epoch = trust_quorum_types::types::Epoch(1);
+        let epoch = INITIAL_TRUST_QUORUM_EPOCH;
         let last_committed_epoch = None;
 
         self.tq_run(rack_id, members, epoch, last_committed_epoch).await
@@ -261,6 +267,14 @@ impl MultirackJoinServiceTask {
         let threshold =
             TrustQuorumConfig::threshold(members.len().try_into().unwrap());
 
+        info!(
+            self.log,
+            "Starting trust quorum reconfiguration";
+            "epoch" => %epoch,
+            "last_committed_epoch" => ?last_committed_epoch,
+            "threshold" => %threshold
+        );
+
         let msg = TqReconfigureMsg {
             rack_id,
             epoch,
@@ -280,7 +294,9 @@ impl MultirackJoinServiceTask {
         info!(
             self.log,
             "Trust quorum reconfiguration started";
-            "epoch" => %epoch
+            "epoch" => %epoch,
+            "last_committed_epoch" => ?last_committed_epoch,
+            "threshold" => %threshold
         );
 
         Ok(())
@@ -358,7 +374,7 @@ impl MultirackJoinServiceTask {
                 });
             }
 
-            tokio::time::sleep(Duration::from_millis(500)).await;
+            tokio::time::sleep(TRUST_QUORUM_RETRY_TIMEOUT).await;
         }
 
         // Before we return, let's see if the operator has changed the
@@ -557,7 +573,7 @@ impl MultirackJoinServiceTask {
                     Err(e) => {
                         let s = InlineErrorChain::new(&e).to_string();
                         transient_errors.lock().unwrap().insert(peer, s);
-                        tokio::time::sleep(Duration::from_millis(500)).await;
+                        tokio::time::sleep(TRUST_QUORUM_RETRY_TIMEOUT).await;
                     }
                 }
             }

@@ -95,6 +95,7 @@ impl RssContext {
         &self,
         log: &Logger,
     ) -> Result<(), RunRssError> {
+        info!(log, "Checking to see if RSS configuration is complete");
         let started_ledger =
             Ledger::<RssStartedMarker>::new(log, self.started_marker_paths())
                 .await;
