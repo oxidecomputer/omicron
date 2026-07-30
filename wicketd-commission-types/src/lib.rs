@@ -7,5 +7,6 @@
 //! Business logic and the wicketd implementation use this crate so they do not
 //! have to depend on `wicketd-commission-types-versions` directly. See RFD 619.
 
+pub mod inventory;
 pub mod rack_setup;
 pub mod update;

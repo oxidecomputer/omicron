@@ -626,7 +626,7 @@ async fn test_login_redirect_multiple_silos(
                     name: idp_name.parse().unwrap(),
                     description: format!(
                         "silo {:?} idp {:?}",
-                        &silo.identity.name, idp_name
+                        silo.identity.name, idp_name
                     ),
                 },
 
@@ -648,7 +648,7 @@ async fn test_login_redirect_multiple_silos(
             };
             let idp_create_url = format!(
                 "/v1/system/identity-providers/saml?silo={}",
-                &silo.identity.name
+                silo.identity.name
             );
             let _: identity_provider::SamlIdentityProvider =
                 object_create(client, &idp_create_url, &idp_params).await;
@@ -779,7 +779,7 @@ async fn test_login_redirect_multiple_silos(
     assert_eq!(
         make_request(&reqwest_client, cptestctx.silo_name.as_str(), port, None)
             .await,
-        Redirect::Location(format!("/login/{}/local", &cptestctx.silo_name,)),
+        Redirect::Location(format!("/login/{}/local", cptestctx.silo_name,)),
     );
 
     // same thing, but with state param in URL
@@ -793,7 +793,7 @@ async fn test_login_redirect_multiple_silos(
         .await,
         Redirect::Location(format!(
             "/login/{}/local?redirect_uri=%2Fabc%2Fdef",
-            &cptestctx.silo_name,
+            cptestctx.silo_name,
         )),
     );
 
