@@ -65,7 +65,6 @@ use sled_agent_types::support_bundle::{
 use sled_agent_types::trust_quorum::{
     ProxyCommitRequest, ProxyPrepareAndCommitRequest, TrustQuorumNetworkConfig,
 };
-use sled_agent_types::uplink::SwitchPorts;
 use sled_agent_types::zone_bundle::{
     BundleUtilization, CleanupContext, CleanupContextUpdate, CleanupCount,
     CleanupPeriod, StorageLimit, ZoneBundleFilter, ZoneBundleId,
@@ -930,24 +929,6 @@ impl SledAgentApi for SledAgentImpl {
                 Ok(HttpResponseOk(vnics))
             })
             .await
-    }
-
-    async fn uplink_ensure(
-        _rqctx: RequestContext<Self::Context>,
-        _body: TypedBody<SwitchPorts>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        // TODO-john bump sled-agent API and remove this endpoint
-        //
-        // Nexus's `sync_switch_configuration` used to call this endpoint to
-        // induce us to update SMF properties of services within the switch
-        // zone. Now, `sync_switch_configuration` pushes config to the
-        // bootstore, and the scrimlet reconcilers automatically update those
-        // properties. During a live update, we may be updated before Nexus, so
-        // may receive this request after we've transitioned to the scrimlet
-        // reconcilers system, but Nexus still thinks it needs to tell us to do
-        // this explicitly. We have nothing to do in that case - just claim
-        // success.
-        Ok(HttpResponseUpdatedNoContent())
     }
 
     async fn read_network_bootstore_config_cache(
