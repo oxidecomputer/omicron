@@ -5106,25 +5106,17 @@
         "description": "An unvalidated FM configuration override at a particular version, such as a request to insert a new FM config version.\n\nAn insert succeeds only if `version` is exactly one greater than the current latest override version (or 1, if no overrides exist), and if the configuration values pass validation. The configuration values in this type are unvalidated, and their invariants may not hold:\n\n- [`Self::sitrep_limit`] must be at least [`FmConfig::MIN_SITREP_LIMIT`], and no more than [`FmConfig::MAX_LIMIT`], - [`Self::history_pruning_threshold`] must be at least [`FmConfig::MIN_HISTORY_PRUNING_THRESHOLD`], and no more than [`FmConfig::MAX_LIMIT`], - [`Self::history_pruning_threshold`] must be strictly less than [`Self::sitrep_limit`], - [`Self::comment`] must be non-empty.\n\nThe configuration values are validated by converting this type into a [`FmConfig`] via `TryFrom`. Whether `version` is actually the next version can only be determined by the database at insert time, so it is not checked by that conversion.",
         "type": "object",
         "properties": {
-          "analysis_enabled": {
-            "description": "BREAK GLASS TO COMPLETELY DISABLE FM ANALYSIS",
-            "type": "boolean"
-          },
           "comment": {
             "description": "A comment describing why the default configuration was overridden.\n\nA comment is mandatory when overriding the default configuration, so this must be non-empty.",
             "type": "string"
           },
-          "history_pruning_threshold": {
-            "description": "The maximum number of sitreps committed to the `fm_sitrep_history` table. If the number of sitreps exceeds this threshold, the `fm_sitrep_history_pruner` background task will remove the oldest entries from the history.",
-            "type": "integer",
-            "format": "uint32",
-            "minimum": 0
-          },
-          "sitrep_limit": {
-            "description": "The maximum number of sitreps to keep in the database.\n\nIf the number of sitreps exceeds this limit, the FM analysis background task will not produce a new sitrep until old ones are deleted.\n\nThis limit applies to both committed sitreps in the history *and* orphaned sitreps left behind when multiple Nexuses race to commit a sitrep.",
-            "type": "integer",
-            "format": "uint32",
-            "minimum": 0
+          "config": {
+            "description": "The configuration itself.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/FmConfig"
+              }
+            ]
           },
           "version": {
             "description": "The version of the configuration.",
@@ -5134,10 +5126,8 @@
           }
         },
         "required": [
-          "analysis_enabled",
           "comment",
-          "history_pruning_threshold",
-          "sitrep_limit",
+          "config",
           "version"
         ]
       },

@@ -57,24 +57,41 @@ pub struct FmConfigParam {
     /// this must be non-empty.
     pub comment: String,
 
-    /// BREAK GLASS TO COMPLETELY DISABLE FM ANALYSIS
-    pub analysis_enabled: bool,
+    /// The configuration itself.
+    pub config: FmConfig,
+}
 
-    /// The maximum number of sitreps to keep in the database.
-    ///
-    /// If the number of sitreps exceeds this limit, the FM analysis background
-    /// task will not produce a new sitrep until old ones are deleted.
-    ///
-    /// This limit applies to both committed sitreps in the history *and*
-    /// orphaned sitreps left behind when multiple Nexuses race to commit a
-    /// sitrep.
-    pub sitrep_limit: u32,
+impl FmConfigParam {
+    pub fn validate(&self) -> Result<(), Error> {
+        // Technically, the comment is not actually part of the `FmConfig`
+        // struct, but this conversion is where we validate everything else, so
+        // check that the comment is valid here.
+        if self.comment.is_empty() {
+            return Err(Error::invalid_value(
+                "comment",
+                "a non-empty comment is required when overriding the fault \
+                 management config",
+            ));
+        }
+        if self.comment.trim().is_empty() {
+            return Err(Error::invalid_value(
+                "comment",
+                "you sneaky bastard! you thought you could trick me by \
+                 leaving a comment that was entirely whitespace, but I already \
+                 thought of that. you're going to have to at least type the \
+                 letter 'a' or a period or something.",
+            ));
+        }
+        if self.comment == "a"
+            || self.comment == "."
+            || self.comment == "something"
+        {
+            // Humor is an Oxide value.
+            return Err(Error::invalid_value("comment", "very clever."));
+        }
 
-    /// The maximum number of sitreps committed to the `fm_sitrep_history`
-    /// table. If the number of sitreps exceeds this threshold, the
-    /// `fm_sitrep_history_pruner` background task will remove the oldest
-    /// entries from the history.
-    pub history_pruning_threshold: u32,
+        self.config.validate()
+    }
 }
 
 /// A view of the current fault management configuration.
@@ -330,72 +347,15 @@ impl FmConfig {
 
         DisplayConfig { config: self, indent }
     }
-}
 
-impl Default for FmConfig {
-    fn default() -> Self {
-        Self {
-            analysis_enabled: true,
-            sitrep_limit: Self::DEFAULT_SITREP_LIMIT,
-            history_pruning_threshold: Self::DEFAULT_HISTORY_PRUNING_THRESHOLD,
-        }
-    }
-}
-
-impl TryFrom<&'_ FmConfigParam> for FmConfig {
-    type Error = Error;
-
-    fn try_from(value: &'_ FmConfigParam) -> Result<Self, Self::Error> {
-        // This exhaustive destructuring exists to trigger compilation errors
-        // when the `FmConfigParam` type changes, so that people are prompted
-        // to update this validation (and the database insert query in
-        // `nexus-db-queries`). If you get a compiler error here, you probably
-        // added or removed a field, and will need to adjust both accordingly.
-        //
-        // `version` is not used by this conversion: it is not part of the
-        // config itself, and its type already ensures it is nonzero.
-        let &FmConfigParam {
-            version: _,
-            ref comment,
-            analysis_enabled,
-            sitrep_limit,
-            history_pruning_threshold,
-        } = value;
-
-        // Technically, the comment is not actually part of the `FmConfig`
-        // struct, but this conversion is where we validate everything else, so
-        // check that the comment is valid here.
-        if comment.is_empty() {
-            return Err(Error::invalid_value(
-                "comment",
-                "a non-empty comment is required when overriding the fault \
-                 management config",
-            ));
-        }
-        if comment.trim().is_empty() {
-            return Err(Error::invalid_value(
-                "comment",
-                "you sneaky bastard! you thought you could trick me by \
-                 leaving a comment that was entirely whitespace, but I already \
-                 thought of that. you're going to have to at least type the \
-                 letter 'a' or a period or something.",
-            ));
-        }
-        if comment == "a" || comment == "." || comment == "something" {
-            // Humor is an Oxide value.
-            return Err(Error::invalid_value("comment", "very clever."));
-        }
-
+    /// Validate this `FmConfig`.
+    pub fn validate(&self) -> Result<(), Error> {
         fn check_limit(
-            value: u32,
+            value: NonZeroU32,
             field: &str,
             min: NonZeroU32,
             max: NonZeroU32,
-        ) -> Result<NonZeroU32, Error> {
-            let value = NonZeroU32::new(value).ok_or_else(|| {
-                Error::invalid_value(field, format!("{field} must be nonzero"))
-            })?;
-
+        ) -> Result<(), Error> {
             if value < min {
                 return Err(Error::invalid_value(
                     field,
@@ -412,33 +372,44 @@ impl TryFrom<&'_ FmConfigParam> for FmConfig {
                     ),
                 ));
             }
-            Ok(value)
+            Ok(())
         }
 
-        let sitrep_limit = check_limit(
-            sitrep_limit,
+        check_limit(
+            self.sitrep_limit,
             "sitrep_limit",
             Self::MIN_SITREP_LIMIT,
             Self::MAX_LIMIT,
         )?;
-        let history_pruning_threshold = check_limit(
-            history_pruning_threshold,
+        check_limit(
+            self.history_pruning_threshold,
             "history_pruning_threshold",
             Self::MIN_HISTORY_PRUNING_THRESHOLD,
             Self::MAX_LIMIT,
         )?;
 
-        if history_pruning_threshold >= sitrep_limit {
+        if self.history_pruning_threshold >= self.sitrep_limit {
             return Err(Error::invalid_value(
                 "history_pruning_threshold",
                 format!(
-                    "sitrep history pruning threshold ({history_pruning_threshold}) \
-                     must be less than the total sitrep limit \
-                    ({sitrep_limit})",
+                    "sitrep history pruning threshold ({})  must be less than \
+                     the total sitrep limit ({})",
+                    self.history_pruning_threshold, self.sitrep_limit,
                 ),
             ));
         }
-        Ok(Self { analysis_enabled, sitrep_limit, history_pruning_threshold })
+
+        Ok(())
+    }
+}
+
+impl Default for FmConfig {
+    fn default() -> Self {
+        Self {
+            analysis_enabled: true,
+            sitrep_limit: Self::DEFAULT_SITREP_LIMIT,
+            history_pruning_threshold: Self::DEFAULT_HISTORY_PRUNING_THRESHOLD,
+        }
     }
 }
 
@@ -472,24 +443,21 @@ mod tests {
         FmConfigParam {
             version: V1,
             comment: "test config".to_string(),
-            analysis_enabled: true,
-            sitrep_limit,
-            history_pruning_threshold,
+            config: FmConfig {
+                analysis_enabled: true,
+                sitrep_limit: NonZeroU32::new(sitrep_limit)
+                    .expect("test sitrep_limit must be nonzero"),
+                history_pruning_threshold: NonZeroU32::new(
+                    history_pruning_threshold,
+                )
+                .expect("test history_pruning_threshold must be nonzero"),
+            },
         }
     }
 
     #[test]
-    fn test_sitrep_limit_nonzero() {
-        let err = FmConfig::try_from(&param(0, 2)).unwrap_err();
-        assert!(
-            err.to_string().contains("sitrep_limit must be nonzero"),
-            "unexpected error: {err}"
-        );
-    }
-
-    #[test]
     fn test_min_sitrep_limit() {
-        let err = FmConfig::try_from(&param(2, 2)).unwrap_err();
+        let err = param(2, 2).validate().unwrap_err();
         assert!(
             err.to_string().contains("sitrep_limit must be at least"),
             "unexpected error: {err}"
@@ -497,18 +465,8 @@ mod tests {
     }
 
     #[test]
-    fn test_nonzero_history_pruning_threshold() {
-        let err = FmConfig::try_from(&param(100, 0)).unwrap_err();
-        assert!(
-            err.to_string()
-                .contains("history_pruning_threshold must be nonzero"),
-            "unexpected error: {err}"
-        );
-    }
-
-    #[test]
     fn test_min_history_pruning_threshold() {
-        let err = FmConfig::try_from(&param(100, 1)).unwrap_err();
+        let err = param(100, 1).validate().unwrap_err();
         assert!(
             err.to_string()
                 .contains("history_pruning_threshold must be at least"),
@@ -519,7 +477,7 @@ mod tests {
     #[test]
     fn test_history_pruning_threshold_must_be_less_than_sitrep_limit() {
         for threshold in [100, 101] {
-            let err = FmConfig::try_from(&param(100, threshold)).unwrap_err();
+            let err = param(100, threshold).validate().unwrap_err();
             assert!(
                 err.to_string()
                     .contains("must be less than the total sitrep limit"),

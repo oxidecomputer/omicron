@@ -102,7 +102,7 @@ mod test {
     use super::*;
     use crate::app::background::BackgroundTask;
     use nexus_db_queries::db::pub_test_utils::TestDatabase;
-    use nexus_types::fm::{FmConfigParam, FmConfigSource};
+    use nexus_types::fm::{FmConfig, FmConfigParam, FmConfigSource};
     use omicron_test_utils::dev;
     use std::num::NonZeroU32;
 
@@ -146,9 +146,11 @@ mod test {
         let param = FmConfigParam {
             version: NonZeroU32::new(1).unwrap(),
             comment: "test override".to_string(),
-            analysis_enabled: true,
-            sitrep_limit: 500,
-            history_pruning_threshold: 400,
+            config: FmConfig {
+                analysis_enabled: true,
+                sitrep_limit: NonZeroU32::new(500).unwrap(),
+                history_pruning_threshold: NonZeroU32::new(400).unwrap(),
+            },
         };
         datastore
             .fm_config_insert_latest_version(opctx, param)

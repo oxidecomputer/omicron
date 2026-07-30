@@ -130,18 +130,13 @@ impl ConfigOpts {
                         })?
                     }
                 };
-                let FmConfig {
-                    sitrep_limit,
-                    history_pruning_threshold,
-                    analysis_enabled,
-                } = new;
-                Ok(FmConfigParam {
+                let param = FmConfigParam {
                     version,
                     comment: comment.clone(),
-                    sitrep_limit: sitrep_limit.get(),
-                    history_pruning_threshold: history_pruning_threshold.get(),
-                    analysis_enabled,
-                })
+                    config: new,
+                };
+                param.validate()?;
+                Ok(param)
             })
             .transpose()
     }

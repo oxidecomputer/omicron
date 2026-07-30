@@ -161,6 +161,7 @@ impl DataStore {
 mod tests {
     use super::*;
     use crate::db::pub_test_utils::TestDatabase;
+    use nexus_types::fm::FmConfig;
     use nexus_types::fm::FmConfigSource;
     use omicron_test_utils::dev;
     use std::num::NonZeroU32;
@@ -180,9 +181,11 @@ mod tests {
         let mut config = FmConfigParam {
             version: NonZeroU32::new(2).unwrap(),
             comment: "first override".to_string(),
-            analysis_enabled: true,
-            sitrep_limit: 5,
-            history_pruning_threshold: 4,
+            config: FmConfig {
+                analysis_enabled: true,
+                sitrep_limit: NonZeroU32::new(5).unwrap(),
+                history_pruning_threshold: NonZeroU32::new(4).unwrap(),
+            },
         };
         assert!(
             datastore
@@ -219,8 +222,8 @@ mod tests {
         // (Validation is tested exhaustively in `nexus-types`; this just
         // checks that invalid configs are rejected on the insert path.)
         config.version = NonZeroU32::new(2).unwrap();
-        config.sitrep_limit = 100;
-        config.history_pruning_threshold = 100;
+        config.config.sitrep_limit = NonZeroU32::new(100).unwrap();
+        config.config.history_pruning_threshold = NonZeroU32::new(100).unwrap();
         assert!(
             datastore
                 .fm_config_insert_latest_version(opctx, config.clone())
@@ -231,8 +234,8 @@ mod tests {
         );
 
         // An empty comment is also rejected on the insert path.
-        config.sitrep_limit = 500;
-        config.history_pruning_threshold = 400;
+        config.config.sitrep_limit = NonZeroU32::new(500).unwrap();
+        config.config.history_pruning_threshold = NonZeroU32::new(400).unwrap();
         config.comment = String::new();
         assert!(
             datastore
@@ -245,7 +248,7 @@ mod tests {
 
         // Inserting version 2 with a valid config should work.
         config.comment = "second override".to_string();
-        config.analysis_enabled = false;
+        config.config.analysis_enabled = false;
         datastore
             .fm_config_insert_latest_version(opctx, config)
             .await

@@ -27,19 +27,23 @@ impl TryFrom<fm::FmConfigParam> for FmConfig {
     type Error = Error;
 
     fn try_from(param: fm::FmConfigParam) -> Result<Self, Self::Error> {
-        // Validate the config values by converting the `FmConfigParam` into a
-        // `nexus_types::fm::FmConfig`. This `FmConfig` is destructured
-        // exhaustively so that if any fields are added to the `nexus_types`
-        // version, they must be handled here and included in the `db::model`
-        // type.
-        let fm::FmConfig {
-            analysis_enabled,
-            history_pruning_threshold,
-            sitrep_limit,
-        } = fm::FmConfig::try_from(&param)?;
+        param.validate()?;
+        // This `FmConfigParam` is destructured exhaustively so that if any
+        // fields are added to the `nexus_types` version, they must be handled
+        // here and included in the `db::model` type.
+        let fm::FmConfigParam {
+            comment,
+            version,
+            config:
+                fm::FmConfig {
+                    analysis_enabled,
+                    history_pruning_threshold,
+                    sitrep_limit,
+                },
+        } = param;
         Ok(Self {
-            version: param.version.get().into(),
-            comment: param.comment,
+            version: version.get().into(),
+            comment,
             analysis_enabled,
             sitrep_limit: sitrep_limit.get().into(),
             history_pruning_threshold: history_pruning_threshold.get().into(),
@@ -61,30 +65,32 @@ impl TryFrom<FmConfig> for fm::FmConfigView {
             time_modified,
         } = value;
 
-        let version = NonZeroU32::new(version.into()).ok_or_else(|| {
-            Error::invalid_value(
-                "version",
-                "the fm_config row has version 0, violating the \
-                 `versions_are_positive` CHECK constraint",
-            )
-        })?;
+        macro_rules! nz {
+            ($field: ident) => {{
+                let name = stringify!($field);
+                NonZeroU32::new($field.into()).ok_or_else(|| {
+                    Error::invalid_value(
+                        name,
+                        format!(
+                            "the fm_config row has {name} 0, which should \
+                                have violated a CHECK constraint!"
+                        ),
+                    )
+                })
+            }};
+        }
 
-        // Construct the validated domain type by first constructing an
-        // (unvalidated) `FmConfigParam` and then converting it into a
-        // `nexus_types::fm::FmConfig`. This validates the values we read from
-        // the database.
-        let param = fm::FmConfigParam {
-            version,
-            comment,
+        // Construct the domain type, and then validate it.
+        let config = fm::FmConfig {
             analysis_enabled,
-            sitrep_limit: sitrep_limit.into(),
-            history_pruning_threshold: history_pruning_threshold.into(),
+            sitrep_limit: nz!(sitrep_limit)?,
+            history_pruning_threshold: nz!(history_pruning_threshold)?,
         };
-        let config = fm::FmConfig::try_from(&param)?;
+        config.validate()?;
         let source = fm::FmConfigSource::Override {
-            version,
+            version: nz!(version)?,
             time_modified,
-            comment: param.comment,
+            comment,
         };
 
         Ok(Self { config, source })
