@@ -37,6 +37,10 @@ pub enum RouterPeerType {
         /// Optional local IP address to bind when establishing outbound TCP
         /// connections to this peer. If `None`, the OS selects the source
         /// address.
+        // We derive default here because this type gets shared with the
+        // Nexus external api, and many users will not need to specify this
+        // parameter for their configurations
+        #[serde(default)]
         src_addr: Option<v30::RouterPeerIpAddr>,
     },
 }
