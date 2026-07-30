@@ -183,9 +183,8 @@ impl FmConfigSource {
                         writeln!(f, "{:>indent$}{COMMENT:<WIDTH$}", "")?;
                         // If the comment is multi-line, write it out
                         // line-by-line so that we can indent them.
-                        let comment_indent = indent + 2;
                         for line in comment.lines() {
-                            writeln!(f, "{:>comment_indent$}{line}", "")?;
+                            writeln!(f, "{:>indent$}    {line}", "")?;
                         }
                         Ok(())
                     }
@@ -449,7 +448,7 @@ const TIME_MODIFIED: &str = "  modified at:";
 const COMMENT: &str = "  comment:";
 const ANALYSIS_ENABLED: &str = "analysis enabled:";
 const SITREP_LIMIT: &str = "sitrep limit:";
-const HISTORY_PRUNING_THRESHOLD: &str = "sitrep history pruning threshold:";
+const HISTORY_PRUNING_THRESHOLD: &str = "history pruning threshold:";
 const WIDTH: usize = const_max_len(&[
     SOURCE,
     VERSION,

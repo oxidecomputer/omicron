@@ -1828,8 +1828,7 @@ Usage: omdb nexus fm-config [OPTIONS] <COMMAND>
 Commands:
   current  Show the current fault management configuration
   show     Show a configuration at a given version
-  set      Set the value of all config options for the latest version Values carry over from the
-           latest version if unset on the CLI
+  set      Override one or more config option(s), creating a new version
   help     Print this message or the help of the given subcommand(s)
 
 Options:
@@ -1878,8 +1877,10 @@ EXECUTING COMMAND: omdb ["nexus", "fm-config", "set", "--help"]
 termination: Exited(0)
 ---------------------------------------------
 stdout:
-Set the value of all config options for the latest version Values carry over from the latest version
-if unset on the CLI
+Override one or more config option(s), creating a new version.
+
+Any values which are not provided are carried forwards from the current version (or the default, if
+no overrides exist).
 
 Usage: omdb nexus fm-config set [OPTIONS] --comment <COMMENT> <--sitrep-limit <SITREP_LIMIT>|--history-pruning-threshold <HISTORY_PRUNING_THRESHOLD>|--analysis-enabled <ANALYSIS_ENABLED>>
 

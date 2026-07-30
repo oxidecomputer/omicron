@@ -741,10 +741,10 @@ task: "fm_config_loader"
     config last updated at:       <REDACTED_TIMESTAMP>
       updated by this activation: false
     current config:
-      source:                           default
-      analysis enabled:                 true
-      sitrep limit:                     2500
-      sitrep history pruning threshold: 2000
+      source:                    default
+      analysis enabled:          true
+      sitrep limit:              2500
+      history pruning threshold: 2000
 
 task: "fm_rendezvous"
   configured period: every <REDACTED_DURATION>m
@@ -816,9 +816,9 @@ task: "fm_sitrep_history_pruner"
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     configuration:
-      analysis enabled:                 true
-      sitrep limit:                     2500
-      sitrep history pruning threshold: 2000
+      analysis enabled:          true
+      sitrep limit:              2500
+      history pruning threshold: 2000
     deletion batch size: 1000
     status: within limit (nothing was deleted)
       current count:        1
@@ -1478,10 +1478,10 @@ task: "fm_config_loader"
     config last updated at:       <REDACTED_TIMESTAMP>
       updated by this activation: false
     current config:
-      source:                           default
-      analysis enabled:                 true
-      sitrep limit:                     2500
-      sitrep history pruning threshold: 2000
+      source:                    default
+      analysis enabled:          true
+      sitrep limit:              2500
+      history pruning threshold: 2000
 
 task: "fm_rendezvous"
   configured period: every <REDACTED_DURATION>m
@@ -1553,9 +1553,9 @@ task: "fm_sitrep_history_pruner"
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     configuration:
-      analysis enabled:                 true
-      sitrep limit:                     2500
-      sitrep history pruning threshold: 2000
+      analysis enabled:          true
+      sitrep limit:              2500
+      history pruning threshold: 2000
     deletion batch size: 1000
     status: within limit (nothing was deleted)
       current count:        1
@@ -2436,10 +2436,10 @@ termination: Exited(0)
 ---------------------------------------------
 stdout:
 fault management configuration:
-  source:                           default
-  analysis enabled:                 true
-  sitrep limit:                     2500
-  sitrep history pruning threshold: 2000
+  source:                    default
+  analysis enabled:          true
+  sitrep limit:              2500
+  history pruning threshold: 2000
 
 ---------------------------------------------
 stderr:
@@ -2459,14 +2459,14 @@ termination: Exited(0)
 ---------------------------------------------
 stdout:
 fault management configuration:
-  source:                           override
-    version:                        1
-    modified at:                    <REDACTED_TIMESTAMP>
-    comment:                       
-    I am altering the config. Pray I do not alter it further.
-  analysis enabled:                 true
-  sitrep limit:                     3000
-  sitrep history pruning threshold: 2000
+  source:                    override
+    version:                 1
+    modified at:             <REDACTED_TIMESTAMP>
+    comment:                
+      I am altering the config. Pray I do not alter it further.
+  analysis enabled:          true
+  sitrep limit:              3000
+  history pruning threshold: 2000
 
 ---------------------------------------------
 stderr:
@@ -2486,14 +2486,14 @@ termination: Exited(0)
 ---------------------------------------------
 stdout:
 fault management configuration:
-  source:                           override
-    version:                        2
-    modified at:                    <REDACTED_TIMESTAMP>
-    comment:                       
-    oops i altered it further
-  analysis enabled:                 false
-  sitrep limit:                     3000
-  sitrep history pruning threshold: 2000
+  source:                    override
+    version:                 2
+    modified at:             <REDACTED_TIMESTAMP>
+    comment:                
+      oops i altered it further
+  analysis enabled:          false
+  sitrep limit:              3000
+  history pruning threshold: 2000
 
 ---------------------------------------------
 stderr:
@@ -2504,14 +2504,14 @@ termination: Exited(0)
 ---------------------------------------------
 stdout:
 fault management configuration:
-  source:                           override
-    version:                        1
-    modified at:                    <REDACTED_TIMESTAMP>
-    comment:                       
-    I am altering the config. Pray I do not alter it further.
-  analysis enabled:                 true
-  sitrep limit:                     3000
-  sitrep history pruning threshold: 2000
+  source:                    override
+    version:                 1
+    modified at:             <REDACTED_TIMESTAMP>
+    comment:                
+      I am altering the config. Pray I do not alter it further.
+  analysis enabled:          true
+  sitrep limit:              3000
+  history pruning threshold: 2000
 
 ---------------------------------------------
 stderr:
