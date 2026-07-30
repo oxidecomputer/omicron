@@ -34,8 +34,10 @@ enum Commands {
     /// Show a configuration at a given version
     Show(ShowArgs),
 
-    /// Set the value of all config options for the latest version
-    /// Values carry over from the latest version if unset on the CLI.
+    /// Override one or more config option(s), creating a new version.
+    ///
+    /// Any values which are not provided are carried forwards from the current
+    /// version (or the default, if no overrides exist).
     Set(SetArgs),
 }
 
