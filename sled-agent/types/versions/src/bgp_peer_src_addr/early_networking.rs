@@ -202,24 +202,6 @@ pub struct PortConfig {
     pub tx_eq: Option<v1::TxEqConfig>,
 }
 
-impl PortConfig {
-    /// Create a placeholder `PortConfig` for use in tests.
-    pub fn empty_for_tests(port: &str) -> Self {
-        Self {
-            routes: Vec::new(),
-            addresses: Vec::new(),
-            switch: v1::SwitchSlot::Switch0,
-            port: port.to_string(),
-            uplink_port_speed: v1::LinkSpeed::Speed100G,
-            uplink_port_fec: None,
-            bgp_peers: Vec::new(),
-            autoneg: false,
-            lldp: None,
-            tx_eq: None,
-        }
-    }
-}
-
 impl From<v30::PortConfig> for PortConfig {
     fn from(value: v30::PortConfig) -> Self {
         Self {
@@ -264,7 +246,7 @@ pub struct EmptyUplinkPortsError;
 
 /// A non-empty list of uplink [`PortConfig`]s.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct UplinkPorts(Vec<PortConfig>);
+pub struct UplinkPorts(pub(crate) Vec<PortConfig>);
 
 impl UplinkPorts {
     /// Constructs an `UplinkPorts` from a list of ports, returning an error if
@@ -274,82 +256,6 @@ impl UplinkPorts {
             return Err(EmptyUplinkPortsError);
         }
         Ok(Self(ports))
-    }
-
-    /// Returns the first port.
-    pub fn first(&self) -> &PortConfig {
-        &self.0[0]
-    }
-
-    /// Returns the number of ports, which is always at least one.
-    #[expect(clippy::len_without_is_empty)]
-    pub fn len(&self) -> usize {
-        self.0.len()
-    }
-
-    /// Returns an iterator over the ports.
-    pub fn iter(&self) -> std::slice::Iter<'_, PortConfig> {
-        self.0.iter()
-    }
-
-    /// Returns the ports as a (non-empty) slice.
-    pub fn as_slice(&self) -> &[PortConfig] {
-        &self.0
-    }
-
-    /// Consumes `self`, returning the inner (non-empty) list of ports.
-    pub fn into_vec(self) -> Vec<PortConfig> {
-        self.0
-    }
-}
-
-impl IntoIterator for UplinkPorts {
-    type Item = PortConfig;
-    type IntoIter = std::vec::IntoIter<PortConfig>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        self.0.into_iter()
-    }
-}
-
-impl<'a> IntoIterator for &'a UplinkPorts {
-    type Item = &'a PortConfig;
-    type IntoIter = std::slice::Iter<'a, PortConfig>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        self.0.iter()
-    }
-}
-
-impl<'de> Deserialize<'de> for UplinkPorts {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let ports = Vec::<PortConfig>::deserialize(deserializer)?;
-        UplinkPorts::new(ports).map_err(|EmptyUplinkPortsError| {
-            serde::de::Error::invalid_length(0, &"at least one uplink port")
-        })
-    }
-}
-
-impl JsonSchema for UplinkPorts {
-    fn schema_name() -> String {
-        "UplinkPorts".to_string()
-    }
-
-    fn json_schema(
-        generator: &mut schemars::r#gen::SchemaGenerator,
-    ) -> schemars::schema::Schema {
-        schemars::schema::Schema::Object(schemars::schema::SchemaObject {
-            instance_type: Some(schemars::schema::InstanceType::Array.into()),
-            array: Some(Box::new(schemars::schema::ArrayValidation {
-                items: Some(generator.subschema_for::<PortConfig>().into()),
-                min_items: Some(1),
-                ..Default::default()
-            })),
-            ..Default::default()
-        })
     }
 }
 
