@@ -8,6 +8,7 @@ use crate::link::{Link, LinkKind};
 use crate::zone::IPADM;
 use crate::{ExecutionError, PFEXEC, execute_async};
 use omicron_common::api::external::MacAddr;
+use omicron_common::tfport::TfportInterfaceName;
 use omicron_common::vlan::VlanID;
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
@@ -463,8 +464,8 @@ impl Dladm {
     }
 
     /// Returns simnet links masquerading as tfport devices
-    pub async fn get_simulated_tfports() -> Result<Vec<String>, GetSimnetError>
-    {
+    pub async fn get_simulated_tfports()
+    -> Result<Vec<TfportInterfaceName>, GetSimnetError> {
         let mut command = Command::new(PFEXEC);
         let cmd = command.args(&[DLADM, "show-simnet", "-p", "-o", "LINK"]);
         let output =
@@ -472,13 +473,7 @@ impl Dladm {
 
         let tfports = String::from_utf8_lossy(&output.stdout)
             .lines()
-            .filter_map(|name| {
-                if name.starts_with("tfport") {
-                    Some(name.to_owned())
-                } else {
-                    None
-                }
-            })
+            .filter_map(|name| name.parse().ok())
             .collect();
         Ok(tfports)
     }

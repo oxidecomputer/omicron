@@ -35,6 +35,7 @@ use nexus_types_versions::v2026_01_22_00;
 use nexus_types_versions::v2026_01_30_01;
 use nexus_types_versions::v2026_01_31_00;
 use nexus_types_versions::v2026_02_13_01;
+use nexus_types_versions::v2026_03_06_01;
 use nexus_types_versions::v2026_04_16_00;
 use nexus_types_versions::v2026_06_05_00;
 use omicron_common::address::IpRange;
@@ -86,6 +87,7 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyy_mm_dd_nn, IDENT),
+    (2026_07_29_00, BGP_UNNUMBERED_STATUS),
     (2026_07_28_00, INTERNET_GATEWAY_CASCADE_DOCS),
     (2026_06_11_00, ADD_SYSTEM_IP_POOL_APIS),
     (2026_06_10_00, BGP_CONFIGURATION_UPDATE),
@@ -5821,11 +5823,35 @@ pub trait NexusExternalApi {
         method = GET,
         path = "/v1/system/networking/bgp-status",
         tags = ["system/networking"],
-        versions = VERSION_BGP_UNNUMBERED_PEERS..,
+        versions = VERSION_BGP_UNNUMBERED_STATUS..,
     }]
     async fn networking_bgp_status(
         rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<Vec<latest::networking::BgpPeerStatus>>, HttpError>;
+    ) -> Result<
+        HttpResponseOk<
+            latest::networking::SwitchResults<
+                latest::networking::BgpPeerStatuses,
+            >,
+        >,
+        HttpError,
+    >;
+
+    /// Get BGP peer status
+    #[endpoint {
+        operation_id = "networking_bgp_status",
+        method = GET,
+        path = "/v1/system/networking/bgp-status",
+        tags = ["system/networking"],
+        versions = VERSION_BGP_UNNUMBERED_PEERS..VERSION_BGP_UNNUMBERED_STATUS,
+    }]
+    async fn networking_bgp_status_v2026_02_13_01(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<
+        HttpResponseOk<Vec<v2026_02_13_01::networking::BgpPeerStatus>>,
+        HttpError,
+    > {
+        Ok(HttpResponseOk(Self::networking_bgp_status(rqctx).await?.0.into()))
+    }
 
     //TODO pagination? the normal by-name/by-id stuff does not work here
     /// Get BGP peer status
@@ -5843,11 +5869,11 @@ pub trait NexusExternalApi {
         HttpError,
     > {
         Ok(HttpResponseOk(
-            Self::networking_bgp_status(rqctx)
+            Self::networking_bgp_status_v2026_02_13_01(rqctx)
                 .await?
                 .0
                 .into_iter()
-                .map(v2025_12_12_00::networking::BgpPeerStatus::from)
+                .map(Into::into)
                 .collect(),
         ))
     }
@@ -5880,11 +5906,35 @@ pub trait NexusExternalApi {
         method = GET,
         path = "/v1/system/networking/bgp-exported",
         tags = ["system/networking"],
-        versions = VERSION_BGP_UNNUMBERED_PEERS..,
+        versions = VERSION_BGP_UNNUMBERED_STATUS..,
     }]
     async fn networking_bgp_exported(
         rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<Vec<latest::networking::BgpExported>>, HttpError>;
+    ) -> Result<
+        HttpResponseOk<
+            latest::networking::SwitchResults<
+                latest::networking::BgpExportedRoutes,
+            >,
+        >,
+        HttpError,
+    >;
+
+    /// List BGP exported routes
+    #[endpoint {
+        operation_id = "networking_bgp_exported",
+        method = GET,
+        path = "/v1/system/networking/bgp-exported",
+        tags = ["system/networking"],
+        versions = VERSION_BGP_UNNUMBERED_PEERS..VERSION_BGP_UNNUMBERED_STATUS,
+    }]
+    async fn networking_bgp_exported_v2026_02_13_01(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<
+        HttpResponseOk<Vec<v2026_02_13_01::networking::BgpExported>>,
+        HttpError,
+    > {
+        Ok(HttpResponseOk(Self::networking_bgp_exported(rqctx).await?.0.into()))
+    }
 
     //TODO pagination? the normal by-name/by-id stuff does not work here
     /// Get BGP exported routes
@@ -5901,7 +5951,8 @@ pub trait NexusExternalApi {
         HttpResponseOk<v2025_11_20_00::networking::BgpExported>,
         HttpError,
     > {
-        let result = Self::networking_bgp_exported(rqctx).await?.0;
+        let result =
+            Self::networking_bgp_exported_v2026_02_13_01(rqctx).await?.0;
         Ok(HttpResponseOk(result.into()))
     }
 
@@ -5910,14 +5961,42 @@ pub trait NexusExternalApi {
         method = GET,
         path = "/v1/system/networking/bgp-message-history",
         tags = ["system/networking"],
+        versions = VERSION_BGP_UNNUMBERED_STATUS..,
     }]
     async fn networking_bgp_message_history(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<latest::networking::BgpRouteSelector>,
     ) -> Result<
-        HttpResponseOk<latest::networking::AggregateBgpMessageHistory>,
+        HttpResponseOk<
+            latest::networking::SwitchResults<
+                latest::networking::BgpMessageHistories,
+            >,
+        >,
         HttpError,
     >;
+
+    /// Get BGP router message history
+    #[endpoint {
+        operation_id = "networking_bgp_message_history",
+        method = GET,
+        path = "/v1/system/networking/bgp-message-history",
+        tags = ["system/networking"],
+        versions = ..VERSION_BGP_UNNUMBERED_STATUS,
+    }]
+    async fn networking_bgp_message_history_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<latest::networking::BgpRouteSelector>,
+    ) -> Result<
+        HttpResponseOk<v2025_11_20_00::networking::AggregateBgpMessageHistory>,
+        HttpError,
+    > {
+        Ok(HttpResponseOk(
+            Self::networking_bgp_message_history(rqctx, query_params)
+                .await?
+                .0
+                .into(),
+        ))
+    }
 
     //TODO pagination? the normal by-name/by-id stuff does not work here
     /// Get imported IPv4 BGP routes
@@ -5940,12 +6019,39 @@ pub trait NexusExternalApi {
         method = GET,
         path = "/v1/system/networking/bgp-imported",
         tags = ["system/networking"],
-        versions = VERSION_BGP_UNNUMBERED_PEERS..,
+        versions = VERSION_BGP_UNNUMBERED_STATUS..,
     }]
     async fn networking_bgp_imported(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<latest::networking::BgpRouteSelector>,
-    ) -> Result<HttpResponseOk<Vec<latest::networking::BgpImported>>, HttpError>;
+    ) -> Result<
+        HttpResponseOk<
+            latest::networking::SwitchResults<
+                latest::networking::BgpImportedRoutes,
+            >,
+        >,
+        HttpError,
+    >;
+
+    /// Get imported BGP routes
+    #[endpoint {
+        operation_id = "networking_bgp_imported",
+        method = GET,
+        path = "/v1/system/networking/bgp-imported",
+        tags = ["system/networking"],
+        versions = VERSION_BGP_UNNUMBERED_PEERS..VERSION_BGP_UNNUMBERED_STATUS,
+    }]
+    async fn networking_bgp_imported_v2026_02_13_01(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<latest::networking::BgpRouteSelector>,
+    ) -> Result<
+        HttpResponseOk<Vec<v2026_02_13_01::networking::BgpImported>>,
+        HttpError,
+    > {
+        Ok(HttpResponseOk(
+            Self::networking_bgp_imported(rqctx, query_params).await?.0.into(),
+        ))
+    }
 
     /// Delete BGP configuration
     #[endpoint {
@@ -6090,11 +6196,37 @@ pub trait NexusExternalApi {
         method = GET,
         path = "/v1/system/networking/bfd-status",
         tags = ["system/networking"],
-        versions = VERSION_SWITCH_SLOT_ENUM..,
+        versions = VERSION_BGP_UNNUMBERED_STATUS..,
     }]
     async fn networking_bfd_status(
         rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<Vec<latest::bfd::BfdStatus>>, HttpError>;
+    ) -> Result<
+        HttpResponseOk<
+            latest::networking::SwitchResults<latest::bfd::BfdPeerStatuses>,
+        >,
+        HttpError,
+    >;
+
+    /// Get BFD status
+    #[endpoint {
+        operation_id = "networking_bfd_status",
+        method = GET,
+        path = "/v1/system/networking/bfd-status",
+        tags = ["system/networking"],
+        versions = VERSION_SWITCH_SLOT_ENUM..VERSION_BGP_UNNUMBERED_STATUS,
+    }]
+    async fn networking_bfd_status_v2026_03_06_01(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Vec<v2026_03_06_01::bfd::BfdStatus>>, HttpError>
+    {
+        Self::networking_bfd_status(rqctx).await?.try_map(|statuses| {
+            statuses.try_into().map_err(|_| {
+                HttpError::for_internal_error(
+                    "failed to query BFD status from a switch".to_string(),
+                )
+            })
+        })
+    }
 
     /// Get BFD status
     #[endpoint {
@@ -6108,11 +6240,65 @@ pub trait NexusExternalApi {
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<Vec<v2025_11_20_00::bfd::BfdStatus>>, HttpError>
     {
-        Self::networking_bfd_status(rqctx).await.map(|response| {
-            response
-                .map(|statuses| statuses.into_iter().map(From::from).collect())
-        })
+        Self::networking_bfd_status_v2026_03_06_01(rqctx).await.map(
+            |response| {
+                response.map(|statuses| {
+                    statuses.into_iter().map(From::from).collect()
+                })
+            },
+        )
     }
+
+    /// Get BGP Unnumbered manager state
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/networking/bgp-unnumbered-manager",
+        tags = ["system/networking"],
+        versions = VERSION_BGP_UNNUMBERED_STATUS..,
+    }]
+    async fn networking_bgp_unnumbered_manager_status(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<
+        HttpResponseOk<
+            latest::networking::SwitchResults<
+                latest::networking::UnnumberedManagerState,
+            >,
+        >,
+        HttpError,
+    >;
+
+    /// List BGP Unnumbered interfaces
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/networking/bgp-unnumbered-interfaces",
+        tags = ["system/networking"],
+        versions = VERSION_BGP_UNNUMBERED_STATUS..,
+    }]
+    async fn networking_bgp_unnumbered_interface_list(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<
+        HttpResponseOk<
+            latest::networking::SwitchResults<
+                latest::networking::UnnumberedInterfaces,
+            >,
+        >,
+        HttpError,
+    >;
+
+    /// Get BGP Unnumbered interface state
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/networking/bgp-unnumbered-interfaces/{switch_slot}/{interface_name}",
+        tags = ["system/networking"],
+        versions = VERSION_BGP_UNNUMBERED_STATUS..,
+    }]
+    async fn networking_bgp_unnumbered_interface_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::networking::UnnumberedInterfacePath>,
+    ) -> Result<
+        HttpResponseOk<latest::networking::SwitchUnnumberedInterface>,
+        HttpError,
+    >;
 
     /// Get user-facing services IP allowlist
     #[endpoint {

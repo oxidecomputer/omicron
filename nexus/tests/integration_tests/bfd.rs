@@ -7,7 +7,10 @@
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils_macros::nexus_test;
-use nexus_types::external_api::bfd::BfdStatus;
+use nexus_types::external_api::bfd::BfdPeerStatuses;
+use nexus_types::external_api::networking::{
+    SwitchError, SwitchResult, SwitchResults,
+};
 
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
@@ -20,11 +23,28 @@ async fn test_empty_bfd_status(cptestctx: &ControlPlaneTestContext) {
 
     let status = NexusRequest::object_get(client, STATUS_URL)
         .authn_as(AuthnMode::PrivilegedUser)
-        .execute_and_parse_unwrap::<Vec<BfdStatus>>()
+        .execute_and_parse_unwrap::<SwitchResults<BfdPeerStatuses>>()
         .await;
 
     // `#[nexus_test]` doesn't set up BFD, so we should have no status. But we
     // should still be able to ask for that! (#[nexus_test] also only sets up
     // one fake scrimlet - that used to cause this endpoint to fail.)
-    assert_eq!(status, Vec::new());
+    let mut available = 0;
+    let mut unavailable = 0;
+    for result in [status.switch0, status.switch1] {
+        match result {
+            SwitchResult::Ok { value: BfdPeerStatuses(statuses) } => {
+                assert!(statuses.is_empty());
+                available += 1;
+            }
+            SwitchResult::Err { error: SwitchError::MgdUnresolved } => {
+                unavailable += 1;
+            }
+            SwitchResult::Err { error } => {
+                panic!("BFD query unexpectedly failed: {error:?}");
+            }
+        }
+    }
+    assert_eq!(available, 1);
+    assert_eq!(unavailable, 1);
 }

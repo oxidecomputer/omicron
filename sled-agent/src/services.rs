@@ -84,6 +84,7 @@ use omicron_common::backoff::{
     BackoffError, retry_notify, retry_policy_internal_service_aggressive,
 };
 use omicron_common::disk::{DatasetKind, DatasetName};
+use omicron_common::tfport::TfportInterfaceName;
 use omicron_ddm_admin_client::DdmError;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::RackUuid;
@@ -3115,8 +3116,10 @@ impl ServiceManager {
                                 // future to include a subset of
                                 // "front" ports too, when racks are
                                 // cabled together.
+                                let interface =
+                                    TfportInterfaceName::rear_port(i);
                                 AddrObject::new(
-                                    &format!("tfportrear{}_0", i),
+                                    interface.as_str(),
                                     IPV6_LINK_LOCAL_ADDROBJ_NAME,
                                 )
                                 .unwrap()
@@ -3346,7 +3349,11 @@ impl ServiceManager {
                         ..Default::default()
                     };
                     filesystems.push(softnpu_filesystem);
-                    data_links = Dladm::get_simulated_tfports().await?;
+                    data_links = Dladm::get_simulated_tfports()
+                        .await?
+                        .into_iter()
+                        .map(|name| name.to_string())
+                        .collect();
                 }
                 vec![
                     SwitchService::Dendrite { asic },

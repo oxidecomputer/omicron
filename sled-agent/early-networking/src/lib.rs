@@ -39,6 +39,7 @@ use omicron_common::address::{MGD_PORT, MGS_PORT};
 use omicron_common::backoff::{
     BackoffError, ExponentialBackoff, ExponentialBackoffBuilder, retry_notify,
 };
+use omicron_common::tfport::TfportInterfaceName;
 use omicron_ddm_admin_client::DdmError;
 use oxnet::IpNet;
 use sled_agent_types::early_networking::{
@@ -611,9 +612,17 @@ impl<'a> EarlyNetworkSetup<'a> {
 
                     // Unnumbered peer - identified by interface
                     RouterPeerType::Unnumbered { router_lifetime } => {
+                        let interface = TfportInterfaceName::from_port_name(
+                            &port.port,
+                        )
+                        .map_err(|err| {
+                            EarlyNetworkSetupError::BgpConfigurationError(
+                                err.to_string(),
+                            )
+                        })?;
                         let bpc = MgUnnumberedBgpPeerConfig {
                             name: format!("unnumbered-{}", port.port),
-                            interface: format!("tfport{}_0", port.port),
+                            interface: interface.to_string(),
                             hold_time: peer
                                 .hold_time
                                 .unwrap_or(BgpPeerConfig::DEFAULT_HOLD_TIME),
