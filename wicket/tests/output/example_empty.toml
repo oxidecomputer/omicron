@@ -13,14 +13,16 @@ external_dns_zone_name = ""
 # the DNS domain delegated to the rack by the customer. Each of these addresses
 # must be contained in one of the "internal services" IP Pool ranges listed
 # below.
-external_dns_ips = []
+external_dns_ips = [
+]
 
 # External NTP servers; e.g., "ntp.eng.oxide.computer".
 ntp_servers = [
 ]
 
 # External DNS server IP Addresses; e.g., "1.1.1.1", "9.9.9.9".
-dns_servers = []
+dns_servers = [
+]
 
 # List of sleds to initialize.
 #

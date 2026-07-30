@@ -484,7 +484,7 @@ async fn test_commission_rss_config() {
         bootstrap_sleds: expected_slots,
         ntp_servers: expected_ntp_servers,
         dns_servers: expected_dns_servers,
-        internal_services_ip_pool_ranges: expected_pool_ranges,
+        service_ip_pools: expected_service_ip_pools,
         external_dns_ips: expected_external_dns_ips,
         external_dns_zone_name: expected_dns_zone_name,
         rack_network_config: expected_rack_network_config,
@@ -496,7 +496,7 @@ async fn test_commission_rss_config() {
         bootstrap_sleds,
         ntp_servers,
         dns_servers,
-        internal_services_ip_pool_ranges,
+        service_ip_pools,
         external_dns_ips,
         external_dns_zone_name,
         rack_network_config,
@@ -510,8 +510,8 @@ async fn test_commission_rss_config() {
     assert_eq!(ntp_servers, expected_ntp_servers, "ntp_servers stored");
     assert_eq!(dns_servers, expected_dns_servers, "dns_servers stored");
     assert_eq!(
-        internal_services_ip_pool_ranges, expected_pool_ranges,
-        "internal_services_ip_pool_ranges stored"
+        service_ip_pools, expected_service_ip_pools,
+        "service_ip_pools stored"
     );
     assert_eq!(
         external_dns_ips, expected_external_dns_ips,

@@ -19,19 +19,19 @@ use tufaceous_artifact::ArtifactHash;
 use wicketd_commission_types::rack_setup::AllowedSourceIps;
 use wicketd_commission_types::rack_setup::BgpAuthKey;
 use wicketd_commission_types::rack_setup::BgpAuthKeyId;
-use wicketd_commission_types::rack_setup::IpRange;
+use wicketd_commission_types::rack_setup::ServiceIpPoolConfig;
 use wicketd_commission_types::rack_setup::UserSpecifiedRackNetworkConfig;
 
 use crate::inventory::SpIdentifier;
 
 /// The subset of `RackInitializeRequest` that the user fills in as clear text
 /// (e.g., via an uploaded config file).
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
 pub struct CurrentRssUserConfigInsensitive {
     pub bootstrap_sleds: IdOrdMap<BootstrapSledDescription>,
     pub ntp_servers: Vec<String>,
     pub dns_servers: Vec<IpAddr>,
-    pub internal_services_ip_pool_ranges: Vec<IpRange>,
+    pub service_ip_pools: IdOrdMap<ServiceIpPoolConfig>,
     pub external_dns_ips: Vec<IpAddr>,
     pub external_dns_zone_name: String,
     pub rack_network_config: Option<UserSpecifiedRackNetworkConfig>,
