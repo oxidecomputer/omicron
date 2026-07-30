@@ -281,14 +281,11 @@ impl TryFrom<v42::RackNetworkConfig> for RackNetworkConfig {
     type Error = EmptyUplinkPortsError;
 
     fn try_from(old: v42::RackNetworkConfig) -> Result<Self, Self::Error> {
-        let ports = UplinkPorts::new(
-            old.ports.into_vec().into_iter().map(From::from).collect(),
-        )?;
         Ok(Self {
             rack_subnet: old.rack_subnet,
             infra_ip_first: old.infra_ip_first,
             infra_ip_last: old.infra_ip_last,
-            ports,
+            ports: old.ports.into(),
             bgp: old.bgp,
             bfd: old.bfd,
         })
@@ -310,6 +307,12 @@ impl From<RackNetworkConfig> for v42::RackNetworkConfig {
             bgp: new.bgp,
             bfd: new.bfd,
         }
+    }
+}
+
+impl From<v42::UplinkPorts> for UplinkPorts {
+    fn from(old: v42::UplinkPorts) -> Self {
+        Self(old.into_vec().into_iter().map(From::from).collect())
     }
 }
 
