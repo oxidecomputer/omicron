@@ -1085,7 +1085,7 @@ enum InsertError {
     /// Some uploaded artifacts with the same hash don't match existing entries
     /// in the database.
     ArtifactMismatch { mismatch: Vec<(TufArtifactFile, TufArtifactFile)> },
-    /// The length of the repository exceeds `i64::MAX`.
+    /// The length of an artifact exceeds `i64::MAX`.
     ByteCountRangeError(ByteCountRangeError),
 }
 
@@ -1140,7 +1140,7 @@ impl From<InsertError> for external::Error {
             }
             InsertError::ByteCountRangeError(error) => {
                 external::Error::internal_error(&format!(
-                    "could not convert repo length: {error}"
+                    "could not convert artifact length: {error}"
                 ))
             }
         }
