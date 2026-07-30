@@ -14,9 +14,9 @@ use wicket_common::artifact::ArtifactId;
 use wicket_common::inventory::RackV1Inventory;
 use wicket_common::update_events::EventReport;
 use wicketd_client::types::{
-    CurrentRssUserConfig, GetLocationResponse, IgnitionCommand,
-    RackOperationStatus,
+    CurrentRssUserConfig, IgnitionCommand, RackOperationStatus,
 };
+use wicketd_commission_types::inventory::LocationInfo;
 
 /// Event report type returned by the get_artifacts_and_event_reports API call.
 pub type EventReportMap = HashMap<String, HashMap<String, EventReport>>;
@@ -46,7 +46,7 @@ pub enum Event {
     RackSetupStatus(Result<RackOperationStatus, String>),
 
     /// The location within the rack where wicketd is running.
-    WicketdLocation(GetLocationResponse),
+    WicketdLocation(LocationInfo),
 
     /// The tick of a Timer
     /// This can be used to draw a frame to the terminal

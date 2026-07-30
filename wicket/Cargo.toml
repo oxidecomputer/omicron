@@ -54,6 +54,7 @@ oxide-update-engine-types.workspace = true
 oxide-update-engine-display.workspace = true
 wicket-common.workspace = true
 wicketd-client.workspace = true
+wicketd-commission-client.workspace = true
 wicketd-commission-types.workspace = true
 omicron-workspace-hack.workspace = true
 semver.workspace = true
