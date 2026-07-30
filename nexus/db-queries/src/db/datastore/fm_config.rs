@@ -243,7 +243,7 @@ mod tests {
                 .await
                 .unwrap_err()
                 .to_string()
-                .contains("a comment is required")
+                .contains("a non-empty comment is required")
         );
 
         // Inserting version 2 with a valid config should work.
