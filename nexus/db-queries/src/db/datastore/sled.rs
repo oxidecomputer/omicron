@@ -554,7 +554,7 @@ impl<'a> CompleteLocalStorageAllocationLists<'a> {
         &mut self,
         zpools_for_sled: IdOrdMap<ZpoolGetForSledReservationResult>,
     ) {
-        let mut removed = 0;
+        let mut incomplete_allocations_removed = 0;
 
         self.queue.retain(|incomplete_allocation_list| {
             // An incomplete allocation list has a set of local storage
@@ -583,14 +583,14 @@ impl<'a> CompleteLocalStorageAllocationLists<'a> {
                         ) {
                             // Do not retain this incomplete list of
                             // allocations: one of them is no longer valid.
-                            removed += 1;
+                            incomplete_allocations_removed += 1;
                             return false;
                         }
                     }
 
                     None => {
                         // Zpool doesn't exist anymore!
-                        removed += 1;
+                        incomplete_allocations_removed += 1;
                         return false;
                     }
                 }
@@ -600,28 +600,32 @@ impl<'a> CompleteLocalStorageAllocationLists<'a> {
             true
         });
 
-        if removed > 0 {
-            info!(self.log, "removed {removed} from queue");
+        if incomplete_allocations_removed > 0 {
+            info!(
+                self.log,
+                "pruned {incomplete_allocations_removed} incomplete \
+                allocation lists during instance provisioning",
+            );
         }
 
         // Each allocation to perform was created with a list of candidate
-        // zpools:
+        // datasets, themselves located on zpools:
         //
         //   allocation: [zpool0, zpool1, ..., zpool6, ..., zpool8, zpool9]
         //
-        // If zpool6 originally had room for this allocation but no longer does,
-        // and it is not removed from the candidate list, this iterator's search
-        // will still add a mapping of that allocation to it, only to be pruned
-        // by the incomplete_allocation_list pruning step above after the insert
-        // CTE does not create any rows.
+        // If the dataset on zpool6 originally had room for this allocation but
+        // no longer does, and it is not removed from the candidate list, this
+        // iterator's search will still add a mapping of that allocation to it,
+        // only to be pruned by the incomplete_allocation_list pruning step
+        // above after the insert CTE does not create any rows.
         //
-        // The original zpool list was created based on an old snapshot of zpool
+        // The original list was created based on an old snapshot of zpool
         // information. Based on the updated zpool information passed into this
-        // function, prune each allocation's candidate zpool list. This will
+        // function, prune each allocation's candidate dataset list. This will
         // reduce the combations that will never work but get added to the queue
         // anyway.
 
-        removed = 0;
+        let mut candidate_datasets_removed = 0;
 
         for allocation in &mut self.allocations_to_perform {
             // Update the candidate datasets for an allocation based on the
@@ -636,14 +640,14 @@ impl<'a> CompleteLocalStorageAllocationLists<'a> {
                         ) {
                             // Do not retain this as a candidate dataset, it no
                             // longer has room.
-                            removed += 1;
+                            candidate_datasets_removed += 1;
                             return false;
                         }
                     }
 
                     None => {
                         // Zpool doesn't exist anymore!
-                        removed += 1;
+                        candidate_datasets_removed += 1;
                         return false;
                     }
                 }
@@ -652,8 +656,12 @@ impl<'a> CompleteLocalStorageAllocationLists<'a> {
             });
         }
 
-        if removed > 0 {
-            info!(self.log, "removed {removed} from candidate datasets");
+        if candidate_datasets_removed > 0 {
+            info!(
+                self.log,
+                "pruned {candidate_datasets_removed} candidate datasets \
+                during instance provisioning",
+            );
         }
     }
 }
