@@ -30,6 +30,7 @@ http.workspace = true
 http-body-util.workspace = true
 hubtools.workspace = true
 hyper.workspace = true
+iddqd.workspace = true
 illumos-utils.workspace = true
 internal-dns-resolver.workspace = true
 internal-dns-types.workspace = true
@@ -55,7 +56,6 @@ tough.workspace = true
 transceiver-controller.workspace = true
 uuid.workspace = true
 
-bootstrap-agent-client.workspace = true
 bootstrap-agent-lockstep-client.workspace = true
 bootstrap-agent-lockstep-types.workspace = true
 omicron-ddm-admin-client.workspace = true
@@ -70,9 +70,12 @@ omicron-uuid-kinds.workspace = true
 sled-agent-types.workspace = true
 sled-hardware-types.workspace = true
 update-common.workspace = true
-update-engine.workspace = true
+oxide-update-engine.workspace = true
+oxide-update-engine-types.workspace = true
 wicket-common.workspace = true
 wicketd-api.workspace = true
+wicketd-commission-api.workspace = true
+wicketd-commission-types.workspace = true
 wicketd-client.workspace = true
 omicron-workspace-hack.workspace = true
 semver.workspace = true
@@ -85,6 +88,9 @@ doc = false
 [dev-dependencies]
 expectorate.workspace = true
 flate2.workspace = true
+omicron-common.workspace = true
+wicketd-commission-client.workspace = true
+wicketd-commission-types-versions.workspace = true
 fs-err.workspace = true
 gateway-test-utils.workspace = true
 http.workspace = true
@@ -99,6 +105,7 @@ sled-agent-config-reconciler = { workspace = true, features = ["testing"] }
 sled-agent-resolvable-files.workspace = true
 sled-agent-resolvable-files-examples.workspace = true
 sled-storage.workspace = true
+sp-sim.workspace = true
 subprocess.workspace = true
 tar.workspace = true
 tokio = { workspace = true, features = ["test-util"] }

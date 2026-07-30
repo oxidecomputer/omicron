@@ -349,7 +349,7 @@ mod test {
     };
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::external_api::ip_pool::{
-        IpPool, IpPoolCreate, IpPoolRange,
+        IpPool, IpPoolAssignment, IpPoolCreate, IpPoolRange, IpPoolType,
     };
     use nexus_types::multicast::MulticastGroupCreate;
     use omicron_common::address::{IpRange, IpVersion, Ipv4Range};
@@ -478,13 +478,15 @@ mod test {
 
         // Create multicast IP pool
         let pool_name = "saga-state-pool";
-        let pool_params = IpPoolCreate::new_multicast(
-            IdentityMetadataCreateParams {
+        let pool_params = IpPoolCreate {
+            identity: IdentityMetadataCreateParams {
                 name: pool_name.parse().unwrap(),
                 description: "Multicast IP pool for saga test".to_string(),
             },
-            IpVersion::V4,
-        );
+            ip_version: IpVersion::V4,
+            pool_type: IpPoolType::Multicast,
+            assignment: IpPoolAssignment::Silos,
+        };
         object_create::<_, IpPool>(client, "/v1/system/ip-pools", &pool_params)
             .await;
 

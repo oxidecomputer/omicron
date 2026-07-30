@@ -10,7 +10,7 @@ use derive_more::From;
 use iddqd::{IdOrdItem, id_upcast};
 use key_manager::StorageKeyRequester;
 use omicron_common::disk::{DiskIdentity, DiskVariant};
-use omicron_common::zpool_name::{ZpoolKind, ZpoolName};
+use omicron_common::zpool_name::ZpoolName;
 use omicron_uuid_kinds::ZpoolUuid;
 use sled_hardware::{
     DiskFirmware, Partition, PooledDisk, PooledDiskError, UnparsedDisk,
@@ -202,10 +202,6 @@ impl RawDisk {
         }
     }
 
-    pub fn is_real(&self) -> bool {
-        !self.is_synthetic()
-    }
-
     pub fn u2_zpool_path(&self) -> Result<Utf8PathBuf, PooledDiskError> {
         if !matches!(self.variant(), DiskVariant::U2) {
             return Err(PooledDiskError::UnexpectedVariant);
@@ -310,17 +306,6 @@ impl Disk {
         Ok(disk)
     }
 
-    pub fn is_synthetic(&self) -> bool {
-        match self {
-            Self::Real(_) => false,
-            Self::Synthetic(_) => true,
-        }
-    }
-
-    pub fn is_real(&self) -> bool {
-        !self.is_synthetic()
-    }
-
     pub fn is_boot_disk(&self) -> bool {
         match self {
             Self::Real(disk) => disk.is_boot_disk,
@@ -339,13 +324,7 @@ impl Disk {
     }
 
     pub fn variant(&self) -> DiskVariant {
-        match self {
-            Self::Real(disk) => disk.variant,
-            Self::Synthetic(disk) => match disk.zpool_name.kind() {
-                ZpoolKind::External => DiskVariant::U2,
-                ZpoolKind::Internal => DiskVariant::M2,
-            },
-        }
+        self.zpool_name().kind().into()
     }
 
     pub fn devfs_path(&self) -> &Utf8PathBuf {
@@ -372,7 +351,9 @@ impl Disk {
                 Partition::BootImage,
                 raw,
             ),
-            Self::Synthetic(_) => unreachable!(),
+            Self::Synthetic(_) => {
+                Err(PooledDiskError::SyntheticDiskNoDevfsPath)
+            }
         }
     }
 
@@ -386,7 +367,9 @@ impl Disk {
                 Partition::DumpDevice,
                 raw,
             ),
-            Self::Synthetic(_) => unreachable!(),
+            Self::Synthetic(_) => {
+                Err(PooledDiskError::SyntheticDiskNoDevfsPath)
+            }
         }
     }
 
@@ -423,7 +406,7 @@ impl From<Disk> for RawDisk {
                 pooled_disk.paths.devfs_path,
                 pooled_disk.paths.dev_path,
                 pooled_disk.slot,
-                pooled_disk.variant,
+                pooled_disk.zpool_name.kind().into(),
                 pooled_disk.identity,
                 pooled_disk.is_boot_disk,
                 pooled_disk.firmware,

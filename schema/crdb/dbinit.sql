@@ -2919,6 +2919,16 @@ CREATE TYPE IF NOT EXISTS omicron.public.saga_state AS ENUM (
     'abandoned'
 );
 
+/*
+ * Why a saga was abandoned (only set when `saga_state` is 'abandoned')
+ */
+CREATE TYPE IF NOT EXISTS omicron.public.saga_abandon_reason AS ENUM (
+    /* the saga was explicitly abandoned via omdb */
+    'omdb',
+    /* during saga recovery, the persistent state was unable to processed */
+    'unrecoverable'
+);
+
 
 CREATE TABLE IF NOT EXISTS omicron.public.saga (
     /* immutable fields */
@@ -2944,7 +2954,41 @@ CREATE TABLE IF NOT EXISTS omicron.public.saga (
     saga_state omicron.public.saga_state NOT NULL,
     current_sec UUID,
     adopt_generation INT NOT NULL,
-    adopt_time TIMESTAMPTZ NOT NULL
+    adopt_time TIMESTAMPTZ NOT NULL,
+
+    /*
+     * Abandonment metadata. These are only set when `saga_state` is
+     * 'abandoned' and are NULL otherwise.
+     */
+    abandon_time TIMESTAMPTZ,
+    abandon_reason omicron.public.saga_abandon_reason,
+    abandon_comment TEXT,
+
+    /*
+     * If a saga has been abandoned, it must record why, when, and any
+     * additional context.
+     */
+    CONSTRAINT abandoned_requires_metadata CHECK (
+        saga_state != 'abandoned'
+        OR (
+            abandon_time IS NOT NULL
+            AND abandon_reason IS NOT NULL
+            AND abandon_comment IS NOT NULL
+        )
+    ),
+
+    /*
+     * Conversely, a saga that isn't abandoned must not have any abandonment
+     * metadata.
+     */
+    CONSTRAINT not_abandoned_requires_no_metadata CHECK (
+        saga_state = 'abandoned'
+        OR (
+            abandon_time IS NULL
+            AND abandon_reason IS NULL
+            AND abandon_comment IS NULL
+        )
+    )
 );
 
 /*
@@ -7131,7 +7175,9 @@ CREATE TYPE IF NOT EXISTS omicron.public.alert_class AS ENUM (
     'test.foo.bar',
     'test.foo.baz',
     'test.quux.bar',
-    'test.quux.bar.baz'
+    'test.quux.bar.baz',
+    'hardware.power_shelf.psu.insert',
+    'hardware.power_shelf.psu.remove'
     -- Add new alert classes here!
 );
 
@@ -7454,6 +7500,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.webhook_delivery_attempt (
     time_created TIMESTAMPTZ NOT NULL,
     -- UUID of the Nexus who did this delivery attempt.
     deliverator_id UUID NOT NULL,
+    unreachable_reason STRING,
 
     -- Attempt numbers start at 1
     CONSTRAINT attempts_start_at_1 CHECK (attempt >= 1),
@@ -7483,6 +7530,13 @@ CREATE TABLE IF NOT EXISTS omicron.public.webhook_delivery_attempt (
                 response_duration IS NULL
             )
         )
+    ),
+
+    -- If the result is 'failed_unreachable', we must also record the error
+    -- message. Otherwise, that field must be NULL.
+    CONSTRAINT unreachable_reason_iff_unreachable CHECK (
+        (result = 'failed_unreachable' AND unreachable_reason IS NOT NULL) OR
+        (result != 'failed_unreachable' AND unreachable_reason IS NULL)
     )
 );
 
@@ -9053,7 +9107,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '279.0.0', NULL)
+    (TRUE, NOW(), NOW(), '282.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

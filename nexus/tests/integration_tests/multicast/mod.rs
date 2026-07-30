@@ -46,7 +46,8 @@ use nexus_types::external_api::instance::{
     InstanceState,
 };
 use nexus_types::external_api::ip_pool::{
-    IpPool, IpPoolCreate, IpPoolRange, IpRange, IpVersion, Ipv4Range,
+    IpPool, IpPoolAssignment, IpPoolCreate, IpPoolRange, IpPoolType, IpRange,
+    IpVersion, Ipv4Range,
 };
 use nexus_types::external_api::multicast::{
     InstanceMulticastGroupJoin, MulticastGroup, MulticastGroupIdentifier,
@@ -155,13 +156,15 @@ pub(crate) async fn create_multicast_ip_pool_with_range(
     range_start: (u8, u8, u8, u8),
     range_end: (u8, u8, u8, u8),
 ) -> IpPool {
-    let pool_params = IpPoolCreate::new_multicast(
-        IdentityMetadataCreateParams {
+    let pool_params = IpPoolCreate {
+        identity: IdentityMetadataCreateParams {
             name: pool_name.parse().unwrap(),
             description: "Multicast IP pool for testing".to_string(),
         },
-        IpVersion::V4,
-    );
+        ip_version: IpVersion::V4,
+        pool_type: IpPoolType::Multicast,
+        assignment: IpPoolAssignment::Silos,
+    };
 
     let pool: IpPool =
         object_create(client, "/v1/system/ip-pools", &pool_params).await;
@@ -201,13 +204,15 @@ pub(crate) async fn create_multicast_ip_pool_v6(
     use nexus_types::external_api::ip_pool::Ipv6Range;
     use std::net::Ipv6Addr;
 
-    let pool_params = IpPoolCreate::new_multicast(
-        IdentityMetadataCreateParams {
+    let pool_params = IpPoolCreate {
+        identity: IdentityMetadataCreateParams {
             name: pool_name.parse().unwrap(),
             description: "IPv6 multicast IP pool for testing".to_string(),
         },
-        IpVersion::V6,
-    );
+        ip_version: IpVersion::V6,
+        pool_type: IpPoolType::Multicast,
+        assignment: IpPoolAssignment::Silos,
+    };
 
     let pool: IpPool =
         object_create(client, "/v1/system/ip-pools", &pool_params).await;

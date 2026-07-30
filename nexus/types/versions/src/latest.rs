@@ -210,20 +210,25 @@ pub mod internet_gateway {
 }
 
 pub mod ip_pool {
-    pub use crate::v2025_11_20_00::ip_pool::IpPool;
-    pub use crate::v2025_11_20_00::ip_pool::IpPoolCreate;
     pub use crate::v2025_11_20_00::ip_pool::IpPoolRange;
     pub use crate::v2025_11_20_00::ip_pool::IpPoolSiloLink;
     pub use crate::v2025_11_20_00::ip_pool::IpPoolSiloPath;
     pub use crate::v2025_11_20_00::ip_pool::IpPoolType;
     pub use crate::v2025_11_20_00::ip_pool::IpPoolUpdate;
     pub use crate::v2025_11_20_00::ip_pool::IpPoolUtilization;
+    pub use crate::v2026_06_11_00::ip_pool::IpPool;
 
     pub use crate::v2026_01_01_00::ip_pool::SiloIpPool;
 
     pub use crate::v2026_01_05_00::ip_pool::IpPoolLinkSilo;
     pub use crate::v2026_01_05_00::ip_pool::IpPoolSiloUpdate;
     pub use crate::v2026_01_05_00::ip_pool::PoolSelector;
+
+    pub use crate::v2026_06_11_00::ip_pool::IpPoolAssignParam;
+    pub use crate::v2026_06_11_00::ip_pool::IpPoolAssignment;
+    pub use crate::v2026_06_11_00::ip_pool::IpPoolCreate;
+    pub use crate::v2026_06_11_00::ip_pool::IpPoolFilter;
+    pub use crate::v2026_06_11_00::ip_pool::SystemIpPoolFilter;
 }
 
 pub mod metrics {
@@ -245,8 +250,8 @@ pub mod multicast {
     pub use crate::v2026_01_08_00::multicast::MulticastGroupPath;
     pub use crate::v2026_01_08_00::multicast::MulticastGroupSelector;
 
-    pub use crate::v2026_07_16_01::multicast::MulticastGroupMember;
-    pub use crate::v2026_07_16_01::multicast::MulticastGroupMemberParentKind;
+    pub use crate::v2026_07_30_01::multicast::MulticastGroupMember;
+    pub use crate::v2026_07_30_01::multicast::MulticastGroupMemberParentKind;
 
     pub use crate::v2026_03_14_00::multicast::MulticastGroup;
     pub use crate::v2026_03_14_00::multicast::MulticastGroupCreate;
@@ -357,7 +362,7 @@ pub mod probe {
 
     pub use crate::v2026_01_03_00::probe::ProbeInfo;
 
-    pub use crate::v2026_07_16_01::probe::ProbeCreate;
+    pub use crate::v2026_07_30_01::probe::ProbeCreate;
 }
 
 pub mod project {

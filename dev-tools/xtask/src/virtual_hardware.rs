@@ -502,7 +502,7 @@ struct SledAgentConfig {
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "kind")]
 enum SledAgentExternalDisks {
-    Virtual {
+    Hardcoded {
         vdevs: Vec<Utf8PathBuf>,
     },
     #[serde(other)]
@@ -524,7 +524,7 @@ fn ensure_vdevs(
 ) -> Result<()> {
     let config = SledAgentConfig::read(sled_agent_config)?;
 
-    let SledAgentExternalDisks::Virtual { vdevs } = &config.external_disks
+    let SledAgentExternalDisks::Hardcoded { vdevs } = &config.external_disks
     else {
         bail!("No vdevs found in this configuration");
     };
@@ -575,7 +575,8 @@ fn destroy_vdevs(
 
     // Remove the vdev files themselves, if they are regular files
     let config = SledAgentConfig::read(sled_agent_config)?;
-    if let SledAgentExternalDisks::Virtual { vdevs } = &config.external_disks {
+    if let SledAgentExternalDisks::Hardcoded { vdevs } = &config.external_disks
+    {
         for vdev in vdevs {
             let vdev_path = if vdev.is_absolute() {
                 vdev.to_owned()

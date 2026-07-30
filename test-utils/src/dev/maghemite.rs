@@ -4,7 +4,9 @@
 
 //! Tools for managing Maghemite during development
 
+use std::net::Ipv6Addr;
 use std::net::SocketAddr;
+use std::net::SocketAddrV6;
 use std::process::Stdio;
 use std::time::Duration;
 
@@ -84,7 +86,7 @@ impl MgdInstance {
             .kill_on_drop(true)
             .spawn()
             .with_context(|| {
-                format!("failed to spawn `mgd` (with args: {:?})", &args)
+                format!("failed to spawn `mgd` (with args: {:?})", args)
             })?;
 
         let temp_dir = temp_dir.keep();
@@ -98,6 +100,10 @@ impl MgdInstance {
             })?;
 
         Ok(Self { port, args, child: Some(child), data_dir: Some(temp_dir) })
+    }
+
+    pub fn address(&self) -> SocketAddrV6 {
+        SocketAddrV6::new(Ipv6Addr::LOCALHOST, self.port, 0, 0)
     }
 
     pub async fn cleanup(&mut self) -> Result<(), anyhow::Error> {
@@ -211,7 +217,7 @@ impl DdmInstance {
             .kill_on_drop(true)
             .spawn()
             .with_context(|| {
-                format!("failed to spawn `ddmd` (with args: {:?})", &args)
+                format!("failed to spawn `ddmd` (with args: {:?})", args)
             })?;
 
         let temp_dir = temp_dir.keep();

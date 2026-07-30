@@ -8,6 +8,7 @@ use std::mem;
 use std::time::Duration;
 use std::time::Instant;
 
+use crate::ROT_STAGING_DEVEL_SIGN;
 use crate::SIM_GIMLET_BOARD;
 use crate::SIM_ROT_BOARD;
 use crate::SIM_SIDECAR_BOARD;
@@ -90,9 +91,6 @@ impl SimSpUpdate {
         const ROT_GITC1: &str = "edededed";
         const ROT_VERS0: &str = "0.0.4";
         const ROT_VERS1: &str = "0.0.3";
-        // staging/devel key signature
-        const ROT_STAGING_DEVEL_SIGN: &str =
-            "11594bb5548a757e918e6fe056e2ad9e084297c9555417a025d8788eacf55daf";
 
         const STAGE0_GITC0: &str = "ddddddddd";
         const STAGE0_GITC1: &str = "dadadadad";

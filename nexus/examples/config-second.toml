@@ -49,6 +49,13 @@ techport_external_server_port = 0
 # These are the DNS servers it should use.
 external_dns_servers = ["1.1.1.1", "9.9.9.9"]
 
+# Simulated/development deployments run "external" servers (e.g. webhook
+# receivers) on localhost, so external HTTP clients must be permitted to
+# connect to loopback addresses. This must never be enabled in production
+# configs.
+[deployment.external_http_clients]
+treat_loopback_as_external = "yes_for_test_purposes_only"
+
 [deployment.dropshot_external]
 # IP Address and TCP port on which to listen for the external API
 # This config file uses 12222 to avoid colliding with the usual 12220 that's
@@ -183,6 +190,10 @@ fm.analysis_period_secs = 120
 # is activated every time the current sitrep changes. Periodic activations are
 # only necessary to ensure that it always happens eventually.
 fm.sitrep_gc_period_secs = 600
+# The sitrep history pruning task is explicitly activated when the sitrep
+# capacity in the database is reaching the limit. Periodic activations are
+# necessary only as a backstop, so they need not be frequent.
+fm.sitrep_history_prune_period_secs = 600
 # Updating database state to match the current sitrep is triggered whenever a
 # new sitrep is loaded, so we need not set the periodic activation interval
 # too high.

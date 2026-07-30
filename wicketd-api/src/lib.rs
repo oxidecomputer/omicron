@@ -13,12 +13,12 @@ use dropshot::TypedBody;
 use gateway_client::types::IgnitionCommand;
 use omicron_common::update::ArtifactId;
 use omicron_uuid_kinds::RackInitUuid;
-use omicron_uuid_kinds::RackResetUuid;
 use schemars::JsonSchema;
 use semver::Version;
 use serde::Deserialize;
 use serde::Serialize;
 use sled_hardware_types::Baseboard;
+use sled_hardware_types::BaseboardId;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::net::Ipv6Addr;
@@ -29,18 +29,19 @@ use wicket_common::inventory::SpType;
 use wicket_common::multirack_setup::CurrentMultirackJoinUserConfig;
 use wicket_common::multirack_setup::MultirackJoinConfigBaseUserInput;
 use wicket_common::preflight_check;
-use wicket_common::rack_setup::BgpAuthKey;
-use wicket_common::rack_setup::BgpAuthKeyId;
 use wicket_common::rack_setup::CurrentRssUserConfigInsensitive;
 use wicket_common::rack_setup::GetBgpAuthKeyInfoResponse;
-use wicket_common::rack_setup::PutRssUserConfigInsensitive;
 use wicket_common::rack_update::AbortUpdateOptions;
 use wicket_common::rack_update::ClearUpdateStateOptions;
-use wicket_common::rack_update::ClearUpdateStateResponse;
 use wicket_common::rack_update::StartUpdateOptions;
 use wicket_common::update_events::EventReport;
-// Temporary re-exports -- a later commit will remove them.
-pub use wicketd_commission_types::rack_setup::CertificateUploadResponse;
+use wicketd_commission_types::rack_setup::BgpAuthKey;
+use wicketd_commission_types::rack_setup::BgpAuthKeyId;
+use wicketd_commission_types::rack_setup::CertificateUploadResponse;
+use wicketd_commission_types::rack_setup::PutRssUserConfigInsensitive;
+use wicketd_commission_types::rack_setup::SetBgpAuthKeyStatus;
+use wicketd_commission_types::update::ClearUpdateStateResponse;
+use wicketd_commission_types::update::UpdateTargets;
 
 /// Full release repositories are currently (Dec 2024) 1.8 GiB and are likely to
 /// continue growing.
@@ -198,15 +199,6 @@ pub trait WicketdApi {
     async fn post_run_rack_setup(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<RackInitUuid>, HttpError>;
-
-    /// Run rack reset.
-    #[endpoint {
-        method = DELETE,
-        path = "/rack-setup"
-    }]
-    async fn post_run_rack_reset(
-        rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<RackResetUuid>, HttpError>;
 
     /// A status endpoint used to report high level information known to
     /// wicketd.
@@ -377,7 +369,7 @@ pub trait WicketdApi {
     Ord,
 )]
 pub struct BootstrapSledIp {
-    pub baseboard: Baseboard,
+    pub baseboard: BaseboardId,
     pub ip: Ipv6Addr,
 }
 
@@ -436,19 +428,6 @@ pub struct PutBgpAuthKeyResponse {
     pub status: SetBgpAuthKeyStatus,
 }
 
-#[derive(Clone, Debug, Serialize, JsonSchema, PartialEq)]
-#[serde(rename_all = "snake_case")]
-pub enum SetBgpAuthKeyStatus {
-    /// The key was accepted and replaced an old key.
-    Replaced,
-
-    /// The key was accepted, and is the same as the existing key.
-    Unchanged,
-
-    /// The key was accepted and is new.
-    Added,
-}
-
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct PutRssRecoveryUserPasswordHash {
     pub hash: omicron_passwords::NewPasswordHash,
@@ -503,8 +482,8 @@ pub struct GetArtifactsAndEventReportsResponse {
 
 #[derive(Clone, Debug, JsonSchema, Deserialize)]
 pub struct StartUpdateParams {
-    /// The SP identifiers to start the update with. Must be non-empty.
-    pub targets: BTreeSet<SpIdentifier>,
+    /// The SP identifiers to start the update with.
+    pub targets: UpdateTargets,
 
     /// Options for the update.
     pub options: StartUpdateOptions,
@@ -512,8 +491,8 @@ pub struct StartUpdateParams {
 
 #[derive(Clone, Debug, JsonSchema, Deserialize)]
 pub struct ClearUpdateStateParams {
-    /// The SP identifiers to clear the update state for. Must be non-empty.
-    pub targets: BTreeSet<SpIdentifier>,
+    /// The SP identifiers to clear the update state for.
+    pub targets: UpdateTargets,
 
     /// Options for clearing update state
     pub options: ClearUpdateStateOptions,
@@ -522,7 +501,7 @@ pub struct ClearUpdateStateParams {
 #[derive(Clone, Debug, JsonSchema, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub struct GetBaseboardResponse {
-    pub baseboard: Option<Baseboard>,
+    pub baseboard: BaseboardId,
 }
 
 /// All the fields of this response are optional, because it's possible we don't
@@ -535,7 +514,7 @@ pub struct GetLocationResponse {
     /// The identity of our sled (where wicketd is running).
     pub sled_id: Option<SpIdentifier>,
     /// The baseboard of our sled (where wicketd is running).
-    pub sled_baseboard: Option<Baseboard>,
+    pub sled_baseboard_id: BaseboardId,
     /// The baseboard of the switch our sled is physically connected to.
     pub switch_baseboard: Option<Baseboard>,
     /// The identity of the switch our sled is physically connected to.
