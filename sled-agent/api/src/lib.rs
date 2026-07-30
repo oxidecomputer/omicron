@@ -21,7 +21,7 @@ use omicron_common::api::internal::{
 };
 use sled_agent_types_versions::{
     latest, v1, v4, v6, v7, v9, v10, v11, v12, v14, v16, v17, v18, v20, v22,
-    v24, v25, v26, v28, v29, v30, v31, v32, v33, v34, v37, v39, v40, v42,
+    v24, v25, v26, v28, v29, v30, v31, v32, v33, v34, v37, v39, v40, v42, v44,
 };
 use sled_diagnostics::SledDiagnosticsQueryOutput;
 use slog_error_chain::InlineErrorChain;
@@ -38,6 +38,7 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
+    (44, STRICTER_BFD_TYPES),
     (43, INVENTORY_BASEBOARD_ID),
     (42, NON_EMPTY_UPLINK_PORTS),
     (41, ADD_INSTANCE_PRIMARY_NIC_MTU),
@@ -964,7 +965,7 @@ pub trait SledAgentApi {
     // -------------------------------------------------------------------------
     fn static_assert_latest_write_network_config_type() {
         static_assertions::assert_type_eq_all!(
-            v42::system_networking::WriteNetworkConfigRequest,
+            v44::system_networking::WriteNetworkConfigRequest,
             latest::system_networking::WriteNetworkConfigRequest
         );
     }
@@ -974,7 +975,20 @@ pub trait SledAgentApi {
     #[endpoint {
         method = PUT,
         path = "/network-bootstore-config",
-        versions = VERSION_NON_EMPTY_UPLINK_PORTS..,
+        versions = VERSION_STRICTER_BFD_TYPES..,
+        operation_id = "write_network_bootstore_config",
+    }]
+    async fn write_network_bootstore_config_v44(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<v44::system_networking::WriteNetworkConfigRequest>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    // As described above, this must not forward to newer versions; sled-agent
+    // must implement this by faithfully serializing the requested version.
+    #[endpoint {
+        method = PUT,
+        path = "/network-bootstore-config",
+        versions = VERSION_NON_EMPTY_UPLINK_PORTS..VERSION_STRICTER_BFD_TYPES,
         operation_id = "write_network_bootstore_config",
     }]
     async fn write_network_bootstore_config_v42(

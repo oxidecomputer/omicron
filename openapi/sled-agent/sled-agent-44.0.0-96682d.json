@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "43.0.0"
+    "version": "44.0.0"
   },
   "paths": {
     "/artifacts": {
@@ -3257,7 +3257,7 @@
           "detection_threshold": {
             "type": "integer",
             "format": "uint8",
-            "minimum": 0
+            "minimum": 1
           },
           "local": {
             "nullable": true,
@@ -3272,8 +3272,9 @@
             "format": "ip"
           },
           "required_rx": {
+            "description": "The minimum interval, in microseconds, between received BFD Control packets that this system requires. Sent on the wire as the 32-bit Required Min RX Interval field (RFC 5880 section 4.1). Zero is valid and means the remote system should not send any periodic BFD Control packets.",
             "type": "integer",
-            "format": "uint64",
+            "format": "uint32",
             "minimum": 0
           },
           "switch": {
