@@ -80,13 +80,13 @@ pub mod early_networking {
     pub use crate::v30::early_networking::UplinkIpNet;
     pub use crate::v30::early_networking::UplinkIpNetError;
 
-    pub use crate::v43::early_networking::AddressFamilyConfigError;
-    pub use crate::v43::early_networking::BgpPeerConfig;
-    pub use crate::v43::early_networking::EmptyUplinkPortsError;
-    pub use crate::v43::early_networking::PortConfig;
-    pub use crate::v43::early_networking::RackNetworkConfig;
-    pub use crate::v43::early_networking::RouterPeerType;
-    pub use crate::v43::early_networking::UplinkPorts;
+    pub use crate::v44::early_networking::AddressFamilyConfigError;
+    pub use crate::v44::early_networking::BgpPeerConfig;
+    pub use crate::v44::early_networking::EmptyUplinkPortsError;
+    pub use crate::v44::early_networking::PortConfig;
+    pub use crate::v44::early_networking::RackNetworkConfig;
+    pub use crate::v44::early_networking::RouterPeerType;
+    pub use crate::v44::early_networking::UplinkPorts;
 }
 
 pub mod firewall_rules {
@@ -193,7 +193,7 @@ pub mod inventory {
     pub use crate::v40::inventory::FmdInventoryError;
     pub use crate::v40::inventory::FmdInventoryErrorKind;
     pub use crate::v40::inventory::FmdResource;
-    pub use crate::v40::inventory::Inventory;
+    pub use crate::v43::inventory::Inventory;
 
     pub use crate::impls::inventory::FmdHostCaseDisplay;
     pub use crate::impls::inventory::FmdInventoryDisplay;
@@ -255,8 +255,8 @@ pub mod system_networking {
 
     pub use crate::v39::system_networking::BlueprintExternalNetworkingConfig;
 
-    pub use crate::v43::system_networking::SystemNetworkingConfig;
-    pub use crate::v43::system_networking::WriteNetworkConfigRequest;
+    pub use crate::v44::system_networking::SystemNetworkingConfig;
+    pub use crate::v44::system_networking::WriteNetworkConfigRequest;
 }
 
 pub mod trust_quorum {

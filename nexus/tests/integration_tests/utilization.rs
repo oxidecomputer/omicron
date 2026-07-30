@@ -110,7 +110,7 @@ async fn test_utilization_view(cptestctx: &ControlPlaneTestContext) {
 
     let instance_start_url = format!(
         "/v1/instances/{}/start?project={}",
-        &INSTANCE_NAME, &PROJECT_NAME
+        INSTANCE_NAME, PROJECT_NAME
     );
 
     // Start instance
@@ -140,7 +140,7 @@ async fn test_utilization_view(cptestctx: &ControlPlaneTestContext) {
     // Simulate space for disks
     DiskTest::new(&cptestctx).await;
 
-    let disk_url = format!("/v1/disks?project={}", &PROJECT_NAME);
+    let disk_url = format!("/v1/disks?project={}", PROJECT_NAME);
     // provision disk
     NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &disk_url)

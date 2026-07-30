@@ -110,6 +110,7 @@ use super::tasks::external_endpoints;
 use super::tasks::fm_analysis::{self, FmAnalysis};
 use super::tasks::fm_rendezvous::FmRendezvous;
 use super::tasks::fm_sitrep_gc;
+use super::tasks::fm_sitrep_history_pruner;
 use super::tasks::fm_sitrep_load;
 use super::tasks::fm_sitrep_load::CurrentSitrep;
 use super::tasks::instance_reincarnation;
@@ -146,6 +147,7 @@ use super::tasks::vpc_routes;
 use super::tasks::webhook_deliverator;
 use crate::Nexus;
 use crate::app::background::tasks::populate_switch_ports;
+use crate::app::external_client::ExternalHttpClient;
 use crate::app::oximeter::PRODUCER_LEASE_DURATION;
 use crate::app::quiesce::NexusQuiesceHandle;
 use crate::app::saga::StartSaga;
@@ -272,6 +274,7 @@ impl BackgroundTasksInitializer {
             task_fm_analysis: Activator::new(),
             task_fm_sitrep_loader: Activator::new(),
             task_fm_sitrep_gc: Activator::new(),
+            task_fm_sitrep_history_pruner: Activator::new(),
             task_fm_rendezvous: Activator::new(),
             task_probe_distributor: Activator::new(),
             task_multicast_reconciler: Activator::new(),
@@ -366,6 +369,7 @@ impl BackgroundTasksInitializer {
             task_fm_analysis,
             task_fm_sitrep_loader,
             task_fm_sitrep_gc,
+            task_fm_sitrep_history_pruner,
             task_fm_rendezvous,
             task_probe_distributor,
             task_multicast_reconciler,
@@ -1153,6 +1157,7 @@ impl BackgroundTasksInitializer {
                 inventory_loader: task_inventory_loader.clone(),
                 sitrep_loader: task_fm_sitrep_loader.clone(),
                 sitrep_gc: task_fm_sitrep_gc.clone(),
+                sitrep_history_pruner: task_fm_sitrep_history_pruner.clone(),
             },
             nexus_id,
             config.fm.analysis_enabled,
@@ -1191,9 +1196,28 @@ impl BackgroundTasksInitializer {
         });
 
         driver.register(TaskDefinition {
+            name: "fm_sitrep_history_pruner",
+            description:
+                "maintains the configured limit on the fault management sitrep \
+                 history table by deleting the oldest entries",
+            period: config.fm.sitrep_history_prune_period_secs,
+            task_impl: Box::new(
+                fm_sitrep_history_pruner::SitrepHistoryPruner::new(
+                    datastore.clone(),
+                    // The pruner pokes the GC task whenever it orphans some
+                    // sitreps for it to delete.
+                    task_fm_sitrep_gc.clone(),
+                ),
+            ),
+            opctx: opctx.child(BTreeMap::new()),
+            watchers: vec![],
+            activator: task_fm_sitrep_history_pruner,
+        });
+
+        driver.register(TaskDefinition {
             name: "fm_sitrep_gc",
             description: "garbage collects fault management situation reports",
-            period: config.fm.sitrep_load_period_secs,
+            period: config.fm.sitrep_gc_period_secs,
             task_impl: Box::new(fm_sitrep_gc::SitrepGc::new(datastore.clone())),
             opctx: opctx.child(BTreeMap::new()),
             watchers: vec![Box::new(sitrep_watcher)],
@@ -1334,11 +1358,11 @@ pub struct BackgroundTasksData {
     pub tuf_artifact_replication_rx: mpsc::Receiver<ArtifactsWithPlan>,
     /// Channel for exposing the latest loaded blueprint
     pub blueprint_load_tx: watch::Sender<Option<LoadedTargetBlueprint>>,
-    /// `reqwest::Client` for webhook delivery requests.
+    /// [`ExternalHttpClient`] for webhook delivery requests.
     ///
     /// This is shared with the external API as it's also used when sending
     /// webhook liveness probe requests from the API.
-    pub webhook_delivery_client: reqwest::Client,
+    pub webhook_delivery_client: ExternalHttpClient,
     /// Channel for configuring pending MGS updates
     pub mgs_updates_tx: watch::Sender<PendingMgsUpdates>,
     /// handle for controlling Nexus quiesce

@@ -87,7 +87,8 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyy_mm_dd_nn, IDENT),
-    (2026_07_20_00, BGP_PEER_SRC_ADDR),
+    (2026_07_30_00, BGP_PEER_SRC_ADDR),
+    (2026_07_28_00, INTERNET_GATEWAY_CASCADE_DOCS),
     (2026_06_11_00, ADD_SYSTEM_IP_POOL_APIS),
     (2026_06_10_00, BGP_CONFIGURATION_UPDATE),
     (2026_06_08_00, INSTANCE_CPU_TYPE_TURIN_V2),

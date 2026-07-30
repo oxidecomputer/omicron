@@ -7,7 +7,11 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
+<<<<<<<< HEAD:openapi/nexus/nexus-2026072000.0.0-a9e724.json
     "version": "2026072000.0.0"
+========
+    "version": "2026072800.0.0"
+>>>>>>>> main:openapi/nexus/nexus-2026072800.0.0-acf991.json
   },
   "paths": {
     "/device/auth": {
@@ -5388,7 +5392,7 @@
           {
             "in": "query",
             "name": "cascade",
-            "description": "Also delete routes targeting this gateway element.",
+            "description": "Detach attached IP pools/addresses and delete any routes targeting this gateway. Without `cascade`, delete fails if the gateway has any IP pools or IP addresses attached.",
             "schema": {
               "type": "boolean"
             }
@@ -5598,7 +5602,7 @@
           {
             "in": "query",
             "name": "cascade",
-            "description": "Also delete routes targeting this gateway element.",
+            "description": "Detach attached IP pools/addresses and delete any routes targeting this gateway. Without `cascade`, delete fails if the gateway has any IP pools or IP addresses attached.",
             "schema": {
               "type": "boolean"
             }
@@ -5844,7 +5848,7 @@
           {
             "in": "query",
             "name": "cascade",
-            "description": "Also delete routes targeting this gateway.",
+            "description": "Detach attached IP pools/addresses and delete any routes targeting this gateway. Without `cascade`, delete fails if the gateway has any IP pools or IP addresses attached.",
             "schema": {
               "type": "boolean"
             }

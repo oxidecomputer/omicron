@@ -367,28 +367,6 @@
             "$ref": "#/components/responses/Error"
           }
         }
-      },
-      "delete": {
-        "summary": "Run rack reset.",
-        "operationId": "post_run_rack_reset",
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RackResetUuid"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
       }
     },
     "/rack-setup/config": {
@@ -920,47 +898,35 @@
           "media_lane_count"
         ]
       },
-      "ArtifactHashId": {
-        "description": "A hash-based identifier for an artifact or deployment unit: the kind and hash.",
-        "type": "object",
-        "properties": {
-          "hash": {
-            "description": "The hash of the artifact.",
-            "type": "string",
-            "format": "hex string (32 bytes)"
-          },
-          "kind": {
-            "description": "The kind of artifact this is.",
-            "type": "string"
-          }
-        },
-        "required": [
-          "hash",
-          "kind"
-        ]
-      },
       "ArtifactId": {
-        "description": "An identifier for an artifact.",
+        "description": "The identifying components of an [`Artifact`], sent over the wire from wicketd to the wicket client to show versions of artifacts we will be updating to.",
         "type": "object",
         "properties": {
-          "kind": {
-            "description": "The kind of artifact this is.",
-            "type": "string"
-          },
-          "name": {
-            "description": "The artifact's name.",
-            "type": "string"
+          "tags": {
+            "description": "The Tufaceous tags used to select the artifact.",
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
           },
           "version": {
-            "description": "The artifact's version.",
-            "type": "string"
+            "description": "The artifact's version string.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ArtifactVersion"
+              }
+            ]
           }
         },
         "required": [
-          "kind",
-          "name",
+          "tags",
           "version"
         ]
+      },
+      "ArtifactVersion": {
+        "description": "An artifact version.\n\nThis is a freeform identifier with some basic validation. It may be the serialized form of a semver version, or a custom identifier that uses the same character set as a semver, plus `_`.\n\nThe exact pattern accepted is `^[a-zA-Z0-9._+-]{1,63}$`.\n\n# Ord implementation\n\n`ArtifactVersion`s are not intended to be sorted, just compared for equality. `ArtifactVersion` implements `Ord` only for storage within sorted collections.",
+        "type": "string",
+        "pattern": "^[a-zA-Z0-9._+-]{1,63}$"
       },
       "Aux1Monitor": {
         "description": "The first auxlliary CMIS monitor.",
@@ -1146,20 +1112,6 @@
           {
             "type": "object",
             "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "unknown"
-                ]
-              }
-            },
-            "required": [
-              "type"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
               "identifier": {
                 "type": "string"
               },
@@ -1179,6 +1131,24 @@
               "type"
             ]
           }
+        ]
+      },
+      "BaseboardId": {
+        "description": "A representation of a Baseboard ID as used in the inventory subsystem.\n\nThis type is essentially the same as a `Baseboard` except it doesn't have a revision or HW type (Gimlet, PC, Unknown).",
+        "type": "object",
+        "properties": {
+          "part_number": {
+            "description": "Oxide Part Number",
+            "type": "string"
+          },
+          "serial_number": {
+            "description": "Serial number (unique for a given part number)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "part_number",
+          "serial_number"
         ]
       },
       "BgpAuthKey": {
@@ -1229,8 +1199,15 @@
               },
               "sha256": {
                 "description": "A SHA-256 digest of the key.",
+                "x-rust-type": {
+                  "crate": "byte-wrapper",
+                  "path": "byte_wrapper::HexArray::<32>",
+                  "version": "0.1.0"
+                },
                 "type": "string",
-                "format": "hex string (32 bytes)"
+                "pattern": "^[0-9a-fA-F]{64}$",
+                "minLength": 64,
+                "maxLength": 64
               }
             },
             "required": [
@@ -1330,8 +1307,8 @@
       "BootstrapSledDescription": {
         "type": "object",
         "properties": {
-          "baseboard": {
-            "$ref": "#/components/schemas/Baseboard"
+          "baseboard_id": {
+            "$ref": "#/components/schemas/BaseboardId"
           },
           "bootstrap_ip": {
             "nullable": true,
@@ -1344,7 +1321,7 @@
           }
         },
         "required": [
-          "baseboard",
+          "baseboard_id",
           "id"
         ]
       },
@@ -1352,7 +1329,7 @@
         "type": "object",
         "properties": {
           "baseboard": {
-            "$ref": "#/components/schemas/Baseboard"
+            "$ref": "#/components/schemas/BaseboardId"
           },
           "ip": {
             "type": "string",
@@ -2012,10 +1989,10 @@
         "type": "object",
         "properties": {
           "artifacts": {
-            "description": "Map of artifacts we ingested from the most-recently-uploaded TUF repository to a list of artifacts we're serving over the bootstrap network. In some cases the list of artifacts being served will have length 1 (when we're serving the artifact directly); in other cases the artifact in the TUF repo contains multiple nested artifacts inside it (e.g., RoT artifacts contain both A and B images), and we serve the list of extracted artifacts but not the original combination.\n\nConceptually, this is a `BTreeMap<ArtifactId, Vec<ArtifactHashId>>`, but JSON requires string keys for maps, so we give back a vec of pairs instead.",
+            "description": "List of artifacts we ingested from the most-recently-uploaded TUF repository.",
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/InstallableArtifacts"
+              "$ref": "#/components/schemas/ArtifactId"
             }
           },
           "event_reports": {
@@ -2042,14 +2019,12 @@
         "type": "object",
         "properties": {
           "baseboard": {
-            "nullable": true,
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Baseboard"
-              }
-            ]
+            "$ref": "#/components/schemas/BaseboardId"
           }
-        }
+        },
+        "required": [
+          "baseboard"
+        ]
       },
       "GetBgpAuthKeyInfoResponse": {
         "description": "Returns information about BGP keys for rack network setup.\n\nThis is part of a wicketd response, but is returned here because our tooling turns BTreeMaps into HashMaps. So we use a `replace` directive instead.",
@@ -2147,12 +2122,11 @@
         "description": "All the fields of this response are optional, because it's possible we don't know any of them (yet) if MGS has not yet finished discovering its location or (ever) if we're running in a dev environment that doesn't support MGS-location / baseboard mapping.",
         "type": "object",
         "properties": {
-          "sled_baseboard": {
-            "nullable": true,
+          "sled_baseboard_id": {
             "description": "The baseboard of our sled (where wicketd is running).",
             "allOf": [
               {
-                "$ref": "#/components/schemas/Baseboard"
+                "$ref": "#/components/schemas/BaseboardId"
               }
             ]
           },
@@ -2183,33 +2157,9 @@
               }
             ]
           }
-        }
-      },
-      "InstallableArtifacts": {
-        "type": "object",
-        "properties": {
-          "artifact_id": {
-            "$ref": "#/components/schemas/ArtifactId"
-          },
-          "installable": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/ArtifactHashId"
-            }
-          },
-          "sign": {
-            "nullable": true,
-            "type": "array",
-            "items": {
-              "type": "integer",
-              "format": "uint8",
-              "minimum": 0
-            }
-          }
         },
         "required": [
-          "artifact_id",
-          "installable"
+          "sled_baseboard_id"
         ]
       },
       "IpNet": {
@@ -3656,7 +3606,7 @@
         ]
       },
       "PutRssUserConfigInsensitive": {
-        "description": "The portion of the RSS configuration that can be posted in one shot.\n\nIt is provided by the operator uploading a TOML file. Sensitive values (certificates and the recovery password hash) are set separately.",
+        "description": "The portion of the RSS configuration that can be posted in one shot.\n\nIt is provided by the operator uploading a TOML file. Sensitive values (certificates, the recovery password hash, and BGP authentication keys) are set separately.",
         "type": "object",
         "properties": {
           "allowed_source_ips": {
@@ -3837,33 +3787,6 @@
           {
             "type": "object",
             "properties": {
-              "id": {
-                "$ref": "#/components/schemas/RackResetUuid"
-              },
-              "status": {
-                "type": "string",
-                "enum": [
-                  "resetting"
-                ]
-              }
-            },
-            "required": [
-              "id",
-              "status"
-            ]
-          },
-          {
-            "description": "`reset_id` will be None if the rack is in an uninitialized-on-startup, or Some if it is in an uninitialized state due to a reset operation completing.",
-            "type": "object",
-            "properties": {
-              "reset_id": {
-                "nullable": true,
-                "allOf": [
-                  {
-                    "$ref": "#/components/schemas/RackResetUuid"
-                  }
-                ]
-              },
               "status": {
                 "type": "string",
                 "enum": [
@@ -3874,57 +3797,8 @@
             "required": [
               "status"
             ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "id": {
-                "$ref": "#/components/schemas/RackResetUuid"
-              },
-              "message": {
-                "type": "string"
-              },
-              "status": {
-                "type": "string",
-                "enum": [
-                  "reset_failed"
-                ]
-              }
-            },
-            "required": [
-              "id",
-              "message",
-              "status"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "id": {
-                "$ref": "#/components/schemas/RackResetUuid"
-              },
-              "status": {
-                "type": "string",
-                "enum": [
-                  "reset_panicked"
-                ]
-              }
-            },
-            "required": [
-              "id",
-              "status"
-            ]
           }
         ]
-      },
-      "RackResetUuid": {
-        "x-rust-type": {
-          "crate": "omicron-uuid-kinds",
-          "path": "omicron_uuid_kinds::RackResetUuid",
-          "version": "*"
-        },
-        "type": "string",
-        "format": "uuid"
       },
       "RackV1Inventory": {
         "description": "The current state of the v1 Rack as known to wicketd",

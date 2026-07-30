@@ -26,6 +26,7 @@ use std::net::IpAddr;
     Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq, Hash, JsonSchema,
 )]
 #[serde(tag = "type", rename_all = "snake_case")]
+#[cfg_attr(any(test, feature = "testing"), derive(test_strategy::Arbitrary))]
 pub enum RouterPeerType {
     Unnumbered {
         /// Router lifetime in seconds for unnumbered BGP peers.

@@ -428,8 +428,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
         let log = &self.logctx.log;
         debug!(log, "Starting Dendrite"; "switch_slot" => ?switch_slot);
         let mgs = self.gateway.get(&switch_slot).unwrap();
-        let mgs_addr =
-            SocketAddrV6::new(Ipv6Addr::LOCALHOST, mgs.port, 0, 0).into();
+        let mgs_addr = mgs.address().into();
 
         // Set up a stub instance of dendrite
         let dendrite = dev::dendrite::DendriteInstance::start(
@@ -454,9 +453,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
     pub async fn start_mgd(&mut self, switch_slot: SwitchSlot) {
         let log = &self.logctx.log;
         debug!(log, "Starting mgd"; "switch_slot" => ?switch_slot);
-        let mgs = self.gateway.get(&switch_slot).unwrap();
-        let mgs_addr =
-            SocketAddrV6::new(Ipv6Addr::LOCALHOST, mgs.port, 0, 0).into();
+        let mgs_addr = self.gateway.get(&switch_slot).unwrap().address().into();
 
         // Set up an instance of mgd
         let mgd =
@@ -508,7 +505,12 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
                         .get(&switch_slot)
                         .unwrap()
                         .port(),
-                    mgs: self.gateway.get(&switch_slot).unwrap().port,
+                    mgs: self
+                        .gateway
+                        .get(&switch_slot)
+                        .unwrap()
+                        .address()
+                        .port(),
                     mgd: self.mgd.get(&switch_slot).unwrap().port,
                     ddm: self.ddm.get(&switch_slot).unwrap().port,
                 },
@@ -906,7 +908,6 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
         let nexus_address =
             self.nexus_internal_addr.expect("Must launch Nexus first");
 
-        let tempdir = camino_tempfile::tempdir().unwrap();
         let sled_agent = start_sled_agent(
             self.logctx.log.new(o!(
                 "component" => "omicron_sled_agent::sim::Server",
@@ -915,7 +916,6 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
             nexus_address,
             sled_id,
             sled_index,
-            tempdir.path(),
             sim_mode,
             &self.simulated_upstairs,
         )
@@ -933,10 +933,8 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
             ServiceName::RepoDepot,
         );
 
-        self.sled_agents.push(ControlPlaneTestContextSledAgent {
-            _storage: tempdir,
-            server: sled_agent,
-        });
+        self.sled_agents
+            .push(ControlPlaneTestContextSledAgent { server: sled_agent });
     }
 
     /// Tell our first Sled Agent to report the zones that we configured, and
@@ -1031,7 +1029,6 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
         let nexus_address =
             self.nexus_internal_addr.expect("Must launch Nexus first");
 
-        let tempdir = camino_tempfile::tempdir().unwrap();
         let sled_agent = start_sled_agent(
             self.logctx.log.new(o!(
                 "component" => "omicron_sled_agent::sim::Server",
@@ -1040,17 +1037,14 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
             nexus_address,
             sled_id,
             sled_index,
-            tempdir.path(),
             sim_mode,
             &self.simulated_upstairs,
         )
         .await
         .expect("Failed to start sled agent");
 
-        self.sled_agents.push(ControlPlaneTestContextSledAgent {
-            _storage: tempdir,
-            server: sled_agent,
-        })
+        self.sled_agents
+            .push(ControlPlaneTestContextSledAgent { server: sled_agent })
     }
 
     /// Configure a mock boundary-NTP server on the first sled agent
@@ -1442,8 +1436,6 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
 }
 
 pub struct ControlPlaneTestContextSledAgent {
-    _storage: camino_tempfile::Utf8TempDir,
-
     server: sim::Server,
 }
 
@@ -1885,7 +1877,6 @@ pub async fn start_sled_agent(
     nexus_address: SocketAddr,
     id: SledUuid,
     sled_index: u16,
-    update_directory: &Utf8Path,
     sim_mode: sim::SimMode,
     simulated_upstairs: &Arc<sim::SimulatedUpstairs>,
 ) -> Result<sim::Server, String> {
@@ -1898,7 +1889,6 @@ pub async fn start_sled_agent(
         id,
         sim_mode,
         Some(nexus_address),
-        Some(update_directory),
         sim::ZpoolConfig::None,
         SledCpuFamily::AmdMilan,
         Some(baseboard_serial),

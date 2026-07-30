@@ -26,7 +26,7 @@ use std::io::Read;
 use std::mem;
 use std::net::SocketAddrV6;
 use std::time::Duration;
-use wicket_common::rack_setup::BgpAuthKey;
+use wicket_common::rack_setup::BgpAuthKeyInfo;
 use wicket_common::rack_setup::BgpAuthKeyStatus;
 use wicket_common::rack_setup::DisplaySlice;
 use wicketd_client::types::GetBgpAuthKeyParams;
@@ -34,6 +34,7 @@ use wicketd_client::types::NewPasswordHash;
 use wicketd_client::types::PutBgpAuthKeyBody;
 use wicketd_client::types::PutRssRecoveryUserPasswordHash;
 use wicketd_client::types::SetBgpAuthKeyStatus;
+use wicketd_commission_types::rack_setup::BgpAuthKey;
 use wicketd_commission_types::rack_setup::BgpAuthKeyId;
 use wicketd_commission_types::rack_setup::CertificateUploadResponse;
 use wicketd_commission_types::rack_setup::PutRssUserConfigInsensitive;
@@ -393,7 +394,8 @@ impl SetBgpAuthKeyArgs {
                     );
 
                     let key = read_bgp_md5_key(&prompt)?;
-                    let info = key.info().to_string_styled(styles.bold);
+                    let info = BgpAuthKeyInfo::for_key(&key)
+                        .to_string_styled(styles.bold);
                     let response = client
                         .put_bgp_auth_key(&key_id, &PutBgpAuthKeyBody { key })
                         .await

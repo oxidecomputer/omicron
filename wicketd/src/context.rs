@@ -8,6 +8,7 @@ use crate::MgsHandle;
 use crate::bgp_auth_keys::BgpAuthKeyError;
 use crate::bgp_auth_keys::BgpAuthKeys;
 use crate::bootstrap_addrs::BootstrapPeersFromDdm;
+use crate::helpers::SpIdentifierDisplay;
 use crate::http_helpers::http_error_with_message;
 use crate::multirack_config::CurrentMultirackJoinConfig;
 use crate::preflight_check::PreflightCheckerHandler;
@@ -15,14 +16,12 @@ use crate::rss_config::CurrentRssConfig;
 use crate::transceivers::Handle as TransceiverHandle;
 use crate::update_tracker::UpdateTracker;
 use anyhow::Result;
-use anyhow::anyhow;
-use anyhow::bail;
 use dropshot::ClientErrorStatusCode;
 use dropshot::HttpError;
 use iddqd::IdOrdMap;
 use internal_dns_resolver::Resolver;
-use sled_hardware_types::Baseboard;
-use slog::info;
+use sled_agent_types::early_networking::SwitchSlot;
+use sled_hardware_types::BaseboardId;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
@@ -35,11 +34,12 @@ use std::sync::OnceLock;
 use wicket_common::inventory::MgsV1Inventory;
 use wicket_common::inventory::SledInventory;
 use wicket_common::inventory::SpIdentifier;
-use wicket_common::rack_setup::BgpAuthKey;
+use wicket_common::inventory::SpType;
 use wicket_common::rack_setup::BgpAuthKeyStatus;
 use wicket_common::rack_setup::BootstrapSledDescription;
-use wicketd_api::SetBgpAuthKeyStatus;
+use wicketd_commission_types::rack_setup::BgpAuthKey;
 use wicketd_commission_types::rack_setup::BgpAuthKeyId;
+use wicketd_commission_types::rack_setup::SetBgpAuthKeyStatus;
 
 #[derive(Default)]
 pub(crate) struct RssOrMultirackJoinConfigCommon {
@@ -73,7 +73,7 @@ impl RssOrMultirackJoinConfigCommon {
     pub(crate) fn update_sled_inventory(
         &mut self,
         inventory: &MgsV1Inventory,
-        ddm_discovered_sleds: &BTreeMap<Baseboard, Ipv6Addr>,
+        ddm_discovered_sleds: &BTreeMap<BaseboardId, Ipv6Addr>,
         log: &slog::Logger,
     ) {
         self.inventory =
@@ -84,9 +84,9 @@ impl RssOrMultirackJoinConfigCommon {
         &mut self,
         bootstrap_slots: &BTreeSet<u16>,
         new_bgp_auth_key_ids: impl IntoIterator<Item = BgpAuthKeyId>,
-        our_baseboard: Option<&Baseboard>,
+        our_baseboard: &BaseboardId,
         inventory: &MgsV1Inventory,
-        ddm_discovered_sleds: &BTreeMap<Baseboard, Ipv6Addr>,
+        ddm_discovered_sleds: &BTreeMap<BaseboardId, Ipv6Addr>,
         log: &slog::Logger,
     ) -> Result<(), String> {
         self.update_sled_inventory(inventory, ddm_discovered_sleds, log);
@@ -118,7 +118,7 @@ impl RssOrMultirackJoinConfigCommon {
 
     pub(crate) fn update_ip_addresses_for_existing_bootstrap_sleds(
         &mut self,
-        ddm_discovered_sleds: &BTreeMap<Baseboard, Ipv6Addr>,
+        ddm_discovered_sleds: &BTreeMap<BaseboardId, Ipv6Addr>,
     ) {
         // If the user has already uploaded a config specifying bootstrap_sleds,
         // also update our knowledge of those sleds' bootstrap addresses as
@@ -128,7 +128,7 @@ impl RssOrMultirackJoinConfigCommon {
             .into_iter()
             .map(|mut sled_desc| {
                 sled_desc.bootstrap_ip =
-                    ddm_discovered_sleds.get(&sled_desc.baseboard).copied();
+                    ddm_discovered_sleds.get(&sled_desc.baseboard_id).copied();
                 sled_desc
             })
             .collect();
@@ -137,7 +137,7 @@ impl RssOrMultirackJoinConfigCommon {
     pub(crate) fn get_latest<'a, T: CommonConfigContainer>(
         config: &'a mut T,
         inventory: &MgsV1Inventory,
-        ddm_discovered_sleds: &BTreeMap<Baseboard, Ipv6Addr>,
+        ddm_discovered_sleds: &BTreeMap<BaseboardId, Ipv6Addr>,
         log: &slog::Logger,
     ) -> &'a T {
         config.common_mut().update_sled_inventory(
@@ -158,7 +158,7 @@ pub(crate) trait CommonConfigContainer {
     fn get_latest(
         &mut self,
         inventory: &MgsV1Inventory,
-        ddm_discovered_sleds: &BTreeMap<Baseboard, Ipv6Addr>,
+        ddm_discovered_sleds: &BTreeMap<BaseboardId, Ipv6Addr>,
         log: &slog::Logger,
     ) -> &Self
     where
@@ -275,7 +275,16 @@ impl RssOrMultirackJoinConfig {
 
 /// Shared state used by API handlers
 pub struct ServerContext {
+    /// The main wicketd API address, stored as `config.address` in the SMF
+    /// configuration.
+    ///
+    /// This address is used to reject SMF updates which attempt to change it.
     pub(crate) bind_address: SocketAddrV6,
+    /// The commission API address, stored as `config.commission-address` in the
+    /// SMF configuration.
+    ///
+    /// This address is used to reject SMF updates which attempt to change it.
+    pub(crate) commission_bind_address: SocketAddrV6,
     pub mgs_handle: MgsHandle,
     pub mgs_client: gateway_client::Client,
     pub transceiver_handle: TransceiverHandle,
@@ -285,52 +294,16 @@ pub struct ServerContext {
     /// (plugging us into a different switch would require powering off our sled
     /// and physically moving it).
     pub(crate) local_switch_id: OnceLock<SpIdentifier>,
+    pub(crate) bootstrap_agent_lockstep_address: SocketAddrV6,
     pub(crate) bootstrap_peers: BootstrapPeersFromDdm,
     pub(crate) update_tracker: Arc<UpdateTracker>,
-    pub(crate) baseboard: Option<Baseboard>,
+    pub(crate) baseboard_id: BaseboardId,
     pub(crate) rss_or_multirack_join_config: Mutex<RssOrMultirackJoinConfig>,
     pub(crate) preflight_checker: PreflightCheckerHandler,
     pub(crate) internal_dns_resolver: Arc<Mutex<Option<Resolver>>>,
 }
 
 impl ServerContext {
-    pub(crate) fn bootstrap_agent_lockstep_addr(&self) -> Result<SocketAddrV6> {
-        // Port on which the bootstrap agent lockstep API dropshot server within
-        // sled-agent is listening.
-        const BOOTSTRAP_AGENT_LOCKSTEP_PORT: u16 = 8080;
-
-        let ip = self.bootstrap_agent_ip()?;
-        Ok(SocketAddrV6::new(ip, BOOTSTRAP_AGENT_LOCKSTEP_PORT, 0, 0))
-    }
-
-    fn bootstrap_agent_ip(&self) -> Result<Ipv6Addr> {
-        let mut any_bootstrap_peer = None;
-        for (baseboard, ip) in self.bootstrap_peers.sleds() {
-            if self.baseboard.as_ref() == Some(&baseboard) {
-                return Ok(ip);
-            }
-            any_bootstrap_peer = Some((baseboard, ip));
-        }
-
-        // If we get past the loop above, we did not find a match for our
-        // baseboard in our list of peers. If we know our own baseboard, this is
-        // an error: we didn't find ourself. If we don't know our own
-        // baseboard, we can pick any IP.
-        if let Some(baseboard) = self.baseboard.as_ref() {
-            bail!("IP address not known for our own sled ({baseboard:?})");
-        } else {
-            let (baseboard, ip) = any_bootstrap_peer
-                .ok_or_else(|| anyhow!("no bootstrap agent peers found"))?;
-            info!(
-                self.log,
-                "Baseboard unknown; choosing arbitrary bootstrap peer as 'our' sled-agent";
-                "peer_baseboard" => ?baseboard,
-                "peer_ip" => %ip,
-            );
-            Ok(ip)
-        }
-    }
-
     pub(crate) async fn local_switch_id(
         &self,
     ) -> Result<SpIdentifier, LocalSwitchIdError> {
@@ -347,13 +320,31 @@ impl ServerContext {
             Ok(response) => {
                 let switch_id = response.into_inner();
 
+                // Validate the switch slot before caching it to avoid negative
+                // caching.
+                let switch_slot = match (switch_id.typ, switch_id.slot) {
+                    (SpType::Switch, 0) => SwitchSlot::Switch0,
+                    (SpType::Switch, 1) => SwitchSlot::Switch1,
+                    (SpType::Switch, _)
+                    | (SpType::Sled, _)
+                    | (SpType::Power, _) => {
+                        let err = LocalSwitchIdError::Invalid(switch_id);
+                        slog::warn!(
+                            self.log,
+                            "Failed to validate local switch ID from MGS";
+                            InlineErrorChain::new(&err),
+                        );
+                        return Err(err);
+                    }
+                };
+
                 // Ignore failures on set - that just means we lost the race and
                 // another concurrent call to us already set it.
                 //
                 // However, we do need to notify the transceiver-fetching task
                 // that we've learned our ID.
                 if self.local_switch_id.set(switch_id).is_ok() {
-                    self.transceiver_handle.set_local_switch_id(switch_id);
+                    self.transceiver_handle.set_local_switch_id(switch_slot);
                 }
 
                 Ok(switch_id)
@@ -362,7 +353,7 @@ impl ServerContext {
                 slog::warn!(
                     self.log,
                     "Failed to fetch local switch ID from MGS";
-                    "err" => #%err,
+                    InlineErrorChain::new(&err),
                 );
                 Err(LocalSwitchIdError::from(err))
             }
@@ -372,17 +363,41 @@ impl ServerContext {
 
 /// An error returned when the local switch ID cannot be fetched from MGS.
 #[derive(Debug, thiserror::Error)]
-#[error("failed to fetch local switch ID from MGS")]
-pub(crate) struct LocalSwitchIdError(
-    #[from] gateway_client::Error<gateway_client::types::Error>,
-);
+pub(crate) enum LocalSwitchIdError {
+    #[error("failed to fetch local switch ID from MGS")]
+    Fetch(#[from] gateway_client::Error<gateway_client::types::Error>),
+
+    #[error(
+        "MGS reported an invalid local switch ID: expected switch 0 or \
+         switch 1, got {}",
+        SpIdentifierDisplay::from(.0)
+    )]
+    Invalid(SpIdentifier),
+}
 
 impl LocalSwitchIdError {
     pub(crate) fn to_http_error(&self) -> HttpError {
-        http_error_with_message(
-            dropshot::ErrorStatusCode::SERVICE_UNAVAILABLE,
-            Some("UnknownSwitchSlot".to_string()),
-            format!("{} (is MGS running?)", InlineErrorChain::new(self)),
-        )
+        match self {
+            Self::Fetch(_) => http_error_with_message(
+                dropshot::ErrorStatusCode::SERVICE_UNAVAILABLE,
+                Some("UnknownSwitchSlot".to_string()),
+                format!(
+                    "{}; MGS may be down, or wicketd may not yet have \
+                     established contact with it (see wicketd logs for \
+                     details)",
+                    InlineErrorChain::new(self),
+                ),
+            ),
+            Self::Invalid(_) => http_error_with_message(
+                dropshot::ErrorStatusCode::INTERNAL_SERVER_ERROR,
+                Some("UnknownSwitchSlot".to_string()),
+                format!(
+                    "{}; MGS derives this identity from its own \
+                     configuration, so this indicates a misconfigured or \
+                     miswired MGS: check MGS's configuration on this sled",
+                    InlineErrorChain::new(self),
+                ),
+            ),
+        }
     }
 }

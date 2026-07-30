@@ -2462,7 +2462,7 @@ impl InstanceRunner {
 
         let reqwest_client = reqwest::ClientBuilder::new().build().unwrap();
         let client = Arc::new(PropolisClient::new_with_client(
-            &format!("http://{}", &self.propolis_addr),
+            &format!("http://{}", self.propolis_addr),
             reqwest_client,
         ));
 

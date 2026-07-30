@@ -55,7 +55,6 @@ use wicketd_commission_types::rack_setup::UserSpecifiedUplinkAddressConfig;
 #[derive(Debug)]
 enum Popup {
     RackSetup(PopupKind),
-    RackReset(PopupKind),
     RackStatusDetails(PopupScrollOffset),
 }
 
@@ -64,17 +63,13 @@ impl Popup {
         Self::RackSetup(PopupKind::Prompting)
     }
 
-    fn new_rack_reset() -> Self {
-        Self::RackReset(PopupKind::Prompting)
-    }
-
     fn new_rack_status_details() -> Self {
         Self::RackStatusDetails(PopupScrollOffset::default())
     }
 
     fn scroll_offset_mut(&mut self) -> Option<&mut PopupScrollOffset> {
         match self {
-            Popup::RackSetup(kind) | Popup::RackReset(kind) => match kind {
+            Popup::RackSetup(kind) => match kind {
                 PopupKind::Prompting | PopupKind::Waiting => None,
                 PopupKind::Failed { scroll_offset, .. } => Some(scroll_offset),
             },
@@ -120,7 +115,6 @@ impl Default for RackSetupPane {
             rack_initialized_help: vec![
                 ("Scroll", "<Up/Down>"),
                 ("Current Status Details", "<D>"),
-                ("Start Rack Reset", "<Ctrl-R Ctrl-R>"),
             ],
             scroll_offset: 0,
             pending_scroll: None,
@@ -146,14 +140,9 @@ impl RackSetupPane {
         }
 
         match (popup, cmd) {
-            (
-                Popup::RackSetup(PopupKind::Prompting)
-                | Popup::RackReset(PopupKind::Prompting),
-                Cmd::No,
-            )
+            (Popup::RackSetup(PopupKind::Prompting), Cmd::No)
             | (
                 Popup::RackSetup(PopupKind::Failed { .. })
-                | Popup::RackReset(PopupKind::Failed { .. })
                 | Popup::RackStatusDetails(_),
                 Cmd::Exit,
             ) => {
@@ -164,30 +153,9 @@ impl RackSetupPane {
                 *kind = PopupKind::Waiting;
                 Some(Action::StartRackSetup)
             }
-            (Popup::RackReset(kind @ PopupKind::Prompting), Cmd::Yes) => {
-                *kind = PopupKind::Waiting;
-                Some(Action::StartRackReset)
-            }
             (
                 Popup::RackSetup(kind @ PopupKind::Waiting),
                 Cmd::ShowPopup(ShowPopupCmd::StartRackSetupResponse(response)),
-            ) => {
-                match response {
-                    Ok(()) => {
-                        self.popup = None;
-                    }
-                    Err(message) => {
-                        *kind = PopupKind::Failed {
-                            message,
-                            scroll_offset: PopupScrollOffset::default(),
-                        };
-                    }
-                }
-                Some(Action::Redraw)
-            }
-            (
-                Popup::RackReset(kind @ PopupKind::Waiting),
-                Cmd::ShowPopup(ShowPopupCmd::StartRackResetResponse(response)),
             ) => {
                 match response {
                     Ok(()) => {
@@ -271,89 +239,6 @@ fn draw_rack_setup_popup(
     }
 }
 
-fn draw_rack_reset_popup(
-    state: &State,
-    frame: &mut Frame<'_>,
-    kind: &mut PopupKind,
-) {
-    let full_screen = Rect {
-        width: state.screen_width,
-        height: state.screen_height,
-        x: 0,
-        y: 0,
-    };
-
-    match kind {
-        PopupKind::Prompting => {
-            let header = Line::from(vec![Span::styled(
-                "Rack Reset (DESTRUCTIVE!)",
-                style::header(true),
-            )]);
-            let mut body = Text::from(vec![Line::from(vec![Span::styled(
-                "Would you like to reset the rack to an uninitialized state?",
-                style::plain_text(),
-            )])]);
-            // One might see this warning and ask "why is this feature even
-            // here, then?" We do eventually want "rack reset" to work as a
-            // sort of factory reset, and the current implementation is a good
-            // starting point, so there's no sense in removing it (this is
-            // certainly not the only feature currently in this state).
-            //
-            // The warning is intended to remove the speed bump where someone
-            // has to find out the hard way that this doesn't work, without
-            // removing the speed bump where we're reminded of the feature that
-            // doesn't work yet.
-            body.lines.push(Line::from(""));
-            body.lines.push(Line::from(vec![
-                Span::styled("WARNING: ", style::warning()),
-                Span::styled(
-                    "This does not work yet and will leave the rack \
-                     in an unknown state (see omicron#3820)",
-                    style::plain_text(),
-                ),
-            ]));
-            let buttons =
-                vec![ButtonText::new("Yes", "Y"), ButtonText::new("No", "N")];
-
-            let popup_builder = PopupBuilder { header, body, buttons };
-            let popup = popup_builder.build(full_screen);
-            frame.render_widget(popup, full_screen);
-        }
-        PopupKind::Waiting => {
-            let header = Line::from(vec![Span::styled(
-                "Rack Reset",
-                style::header(true),
-            )]);
-            let body = Text::from(vec![Line::from(vec![Span::styled(
-                "Waiting for rack reset to start",
-                style::plain_text(),
-            )])]);
-            let buttons = vec![];
-
-            let popup_builder = PopupBuilder { header, body, buttons };
-            let popup = popup_builder.build(full_screen);
-            frame.render_widget(popup, full_screen);
-        }
-        PopupKind::Failed { message, scroll_offset } => {
-            let header = Line::from(vec![Span::styled(
-                "Rack Reset Failed",
-                style::failed_update(),
-            )]);
-            let mut failed_body = Text::default();
-            let prefix = vec![Span::styled("Message: ", style::selected())];
-            push_text_lines(message, prefix, &mut failed_body.lines);
-            let body = failed_body;
-            let buttons = vec![ButtonText::new("Close", "Esc")];
-
-            let popup_builder = PopupBuilder { header, body, buttons };
-            let popup =
-                popup_builder.build_scrollable(full_screen, *scroll_offset);
-            *scroll_offset = popup.actual_scroll_offset();
-            frame.render_widget(popup, full_screen);
-        }
-    }
-}
-
 fn draw_rack_status_details_popup(
     state: &State,
     frame: &mut Frame<'_>,
@@ -369,17 +254,11 @@ fn draw_rack_status_details_popup(
     let status = Span::styled("Status: ", style::selected());
     let prefix = vec![Span::styled("Message: ", style::selected())];
     match state.rack_setup_state.as_ref() {
-        Ok(RackOperationStatus::Uninitialized { reset_id }) => {
+        Ok(RackOperationStatus::Uninitialized) => {
             body.lines.push(Line::from(vec![
                 status,
                 Span::styled("Uninitialized", style::plain_text()),
             ]));
-            if let Some(id) = reset_id {
-                body.lines.push(Line::from(vec![Span::styled(
-                    format!("Last reset operation ID: {}", id),
-                    style::plain_text(),
-                )]));
-            }
         }
         Ok(RackOperationStatus::Initialized { id }) => {
             body.lines.push(Line::from(vec![
@@ -414,27 +293,6 @@ fn draw_rack_status_details_popup(
                 style::plain_text(),
             )]));
         }
-        Ok(RackOperationStatus::ResetFailed { id, message }) => {
-            body.lines.push(Line::from(vec![
-                status,
-                Span::styled("Reset Failed", style::plain_text()),
-            ]));
-            body.lines.push(Line::from(vec![Span::styled(
-                format!("Last reset operation ID: {}", id),
-                style::plain_text(),
-            )]));
-            push_text_lines(message, prefix, &mut body.lines);
-        }
-        Ok(RackOperationStatus::ResetPanicked { id }) => {
-            body.lines.push(Line::from(vec![
-                status,
-                Span::styled("Reset Panicked", style::plain_text()),
-            ]));
-            body.lines.push(Line::from(vec![Span::styled(
-                format!("Last reset operation ID: {}", id),
-                style::plain_text(),
-            )]));
-        }
         Ok(RackOperationStatus::Initializing { id, step }) => {
             body.lines.push(Line::from(vec![
                 status,
@@ -450,16 +308,6 @@ fn draw_rack_status_details_popup(
                 format!("Current operation: {:?}", step),
                 style::plain_text(),
             )]));
-            body.lines.push(Line::from(vec![Span::styled(
-                format!("Current operation ID: {}", id),
-                style::plain_text(),
-            )]));
-        }
-        Ok(RackOperationStatus::Resetting { id }) => {
-            body.lines.push(Line::from(vec![
-                status,
-                Span::styled("Resetting", style::plain_text()),
-            ]));
             body.lines.push(Line::from(vec![Span::styled(
                 format!("Current operation ID: {}", id),
                 style::plain_text(),
@@ -508,13 +356,6 @@ impl Control for RackSetupPane {
             Cmd::StartRackSetup => match state.rack_setup_state.as_ref() {
                 Ok(RackOperationStatus::Uninitialized { .. }) => {
                     self.popup = Some(Popup::new_rack_setup());
-                    Some(Action::Redraw)
-                }
-                _ => None,
-            },
-            Cmd::ResetState => match state.rack_setup_state.as_ref() {
-                Ok(RackOperationStatus::Initialized { .. }) => {
-                    self.popup = Some(Popup::new_rack_reset());
                     Some(Action::Redraw)
                 }
                 _ => None,
@@ -604,9 +445,6 @@ impl Control for RackSetupPane {
                 Popup::RackSetup(kind) => {
                     draw_rack_setup_popup(state, frame, kind);
                 }
-                Popup::RackReset(kind) => {
-                    draw_rack_reset_popup(state, frame, kind);
-                }
                 Popup::RackStatusDetails(scroll_offset) => {
                     draw_rack_status_details_popup(state, frame, scroll_offset);
                 }
@@ -652,17 +490,10 @@ fn rss_config_text<'a>(
             let msg = format!("Initializing: Step {}/{}", index, max);
             Span::styled(msg, warn_style)
         }
-        Ok(RackOperationStatus::Resetting { .. }) => {
-            Span::styled("Resetting", warn_style)
-        }
         Ok(
             RackOperationStatus::InitializationFailed { .. }
             | RackOperationStatus::InitializationPanicked { .. },
         ) => Span::styled("Initialization Failed", bad_style),
-        Ok(
-            RackOperationStatus::ResetFailed { .. }
-            | RackOperationStatus::ResetPanicked { .. },
-        ) => Span::styled("Resetting Failed", bad_style),
         Err(_) => Span::styled("Unknown", bad_style),
     };
 
@@ -1361,7 +1192,7 @@ fn rss_config_text<'a>(
         bootstrap_sleds
             .iter()
             .map(|desc| {
-                let identifier = desc.baseboard.identifier();
+                let identifier = &desc.baseboard_id.serial_number;
                 let mut spans = vec![
                     Span::styled("  • ", label_style),
                     Span::styled(format!("Cubby {}", desc.id.slot), ok_style),

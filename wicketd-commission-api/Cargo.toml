@@ -1,0 +1,16 @@
+[package]
+name = "wicketd-commission-api"
+version = "0.1.0"
+edition.workspace = true
+license = "MPL-2.0"
+
+[lints]
+workspace = true
+
+[dependencies]
+dropshot.workspace = true
+dropshot-api-manager-types.workspace = true
+iddqd.workspace = true
+omicron-uuid-kinds.workspace = true
+wicketd-commission-types-versions.workspace = true
+omicron-workspace-hack.workspace = true

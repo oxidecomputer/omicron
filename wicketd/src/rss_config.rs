@@ -18,7 +18,9 @@ use bootstrap_agent_lockstep_client::types::Name;
 use bootstrap_agent_lockstep_client::types::RackInitializeRequest;
 use bootstrap_agent_lockstep_client::types::RecoverySiloConfig;
 use bootstrap_agent_lockstep_client::types::UserId;
+use bootstrap_agent_lockstep_types::ServiceIpPoolConfig;
 use display_error_chain::DisplayErrorChain;
+use iddqd::IdOrdMap;
 use omicron_certificates::CertificateError;
 use omicron_common::address;
 use omicron_common::address::IpRange;
@@ -32,17 +34,17 @@ use sled_agent_types::early_networking::RouterPeerType;
 use sled_agent_types::early_networking::SwitchSlot;
 use sled_agent_types::early_networking::UplinkAddress;
 use sled_agent_types::early_networking::UplinkPorts;
-use sled_hardware_types::Baseboard;
+use sled_hardware_types::BaseboardId;
 use slog::warn;
 use std::collections::BTreeMap;
 use std::net::IpAddr;
 use std::net::Ipv6Addr;
 use wicket_common::inventory::MgsV1Inventory;
-use wicket_common::rack_setup::BgpAuthKey;
 use wicket_common::rack_setup::CurrentRssUserConfigInsensitive;
 use wicket_common::rack_setup::GetBgpAuthKeyInfoResponse;
 use wicketd_api::CurrentRssUserConfig;
 use wicketd_api::CurrentRssUserConfigSensitive;
+use wicketd_commission_types::rack_setup::BgpAuthKey;
 use wicketd_commission_types::rack_setup::CertificateUploadResponse;
 use wicketd_commission_types::rack_setup::ManualPortConfig;
 use wicketd_commission_types::rack_setup::PutRssUserConfigInsensitive;
@@ -51,6 +53,54 @@ use wicketd_commission_types::rack_setup::UserSpecifiedRouterPeerAddr;
 
 const RECOVERY_SILO_NAME: &str = "recovery";
 const RECOVERY_SILO_USERNAME: &str = "recovery";
+
+// TODO(#8946) Remove these when we plumb the names all the way from the RSS
+// config file.
+const SERVICE_POOL_IPV4_NAME: &str = "oxide-service-pool-v4";
+const SERVICE_POOL_IPV6_NAME: &str = "oxide-service-pool-v6";
+
+// Synthesize the system-service IP pool configuration from a flat list of IP
+// ranges.
+//
+// TODO(#8946): IP Pools need to be plumbed all the way from the RSS
+// configuration file. In the meantime, we synthesize the pool configuration
+// here using our well-known names and descriptions. One pool is created per
+// IP version that has at least one range; a version with no ranges is
+// omitted, so a v4-only or v6-only rack produces a single pool.
+fn service_ip_pools_from_ranges(
+    ranges: &[address::IpRange],
+) -> Result<IdOrdMap<ServiceIpPoolConfig>> {
+    let (service_ipv4_ranges, service_ipv6_ranges): (Vec<_>, Vec<_>) =
+        ranges.iter().partition(|range| range.is_ipv4());
+    let mut service_ip_pools = IdOrdMap::new();
+    if !service_ipv4_ranges.is_empty() {
+        let service_ipv4_pool = ServiceIpPoolConfig::new(
+            SERVICE_POOL_IPV4_NAME.parse().unwrap(),
+            String::from("IPv4 IP Pool for Oxide Services"),
+            service_ipv4_ranges,
+        )
+        .context("creating IPv4 service pool config")?;
+        if service_ip_pools.insert_unique(service_ipv4_pool).is_err() {
+            anyhow::bail!(
+                "duplicate IPv4 service pool name: '{SERVICE_POOL_IPV4_NAME}'"
+            );
+        }
+    }
+    if !service_ipv6_ranges.is_empty() {
+        let service_ipv6_pool = ServiceIpPoolConfig::new(
+            SERVICE_POOL_IPV6_NAME.parse().unwrap(),
+            String::from("IPv6 IP Pool for Oxide Services"),
+            service_ipv6_ranges,
+        )
+        .context("creating IPv6 service pool config")?;
+        if service_ip_pools.insert_unique(service_ipv6_pool).is_err() {
+            anyhow::bail!(
+                "duplicate IPv6 service pool name: '{SERVICE_POOL_IPV6_NAME}'"
+            );
+        }
+    }
+    Ok(service_ip_pools)
+}
 
 #[derive(Default)]
 struct PartialCertificate {
@@ -165,12 +215,13 @@ impl CurrentRssConfig {
         let known_bootstrap_sleds = bootstrap_peers.sleds();
         let mut bootstrap_ips = Vec::new();
         for sled in &self.common.bootstrap_sleds {
-            let Some(ip) = known_bootstrap_sleds.get(&sled.baseboard).copied()
+            let Some(ip) =
+                known_bootstrap_sleds.get(&sled.baseboard_id).copied()
             else {
                 bail!(
                     "IP address not (yet?) known for sled {} ({:?})",
                     sled.id.slot,
-                    sled.baseboard,
+                    sled.baseboard_id,
                 );
             };
             bootstrap_ips.push(ip);
@@ -182,13 +233,13 @@ impl CurrentRssConfig {
         // a small rack cluster that does not support trust quorum.
         // https://github.com/oxidecomputer/omicron/issues/3690
         const TRUST_QUORUM_MIN_SIZE: usize = 3;
-        let trust_quorum_peers: Option<Vec<Baseboard>> =
+        let trust_quorum_peers: Option<Vec<BaseboardId>> =
             if self.common.bootstrap_sleds.len() >= TRUST_QUORUM_MIN_SIZE {
                 Some(
                     self.common
                         .bootstrap_sleds
                         .iter()
-                        .map(|sled| sled.baseboard.clone())
+                        .map(|sled| sled.baseboard_id.clone())
                         .collect(),
                 )
             } else {
@@ -205,25 +256,10 @@ impl CurrentRssConfig {
             bootstrap_agent_lockstep_client::types::NewPasswordHash(
                 recovery_silo_password_hash.to_string(),
             );
-        let internal_services_ip_pool_ranges = self
-            .internal_services_ip_pool_ranges
-            .iter()
-            .map(|pool| {
-                use bootstrap_agent_lockstep_client::types::IpRange;
-                use bootstrap_agent_lockstep_client::types::Ipv4Range;
-                use bootstrap_agent_lockstep_client::types::Ipv6Range;
-                match pool {
-                    address::IpRange::V4(range) => IpRange::V4(Ipv4Range {
-                        first: range.first,
-                        last: range.last,
-                    }),
-                    address::IpRange::V6(range) => IpRange::V6(Ipv6Range {
-                        first: range.first,
-                        last: range.last,
-                    }),
-                }
-            })
-            .collect();
+
+        let service_ip_pools = service_ip_pools_from_ranges(
+            &self.internal_services_ip_pool_ranges,
+        )?;
 
         let request = RackInitializeRequest {
             trust_quorum_peers,
@@ -232,7 +268,7 @@ impl CurrentRssConfig {
             ),
             ntp_servers: self.ntp_servers.clone(),
             dns_servers: self.dns_servers.clone(),
-            internal_services_ip_pool_ranges,
+            service_ip_pools,
             external_dns_ips: self.external_dns_ips.clone(),
             external_dns_zone_name: self.external_dns_zone_name.clone(),
             external_certificates: self.external_certificates.clone(),
@@ -340,9 +376,9 @@ impl CurrentRssConfig {
     pub(crate) fn update(
         &mut self,
         config: PutRssUserConfigInsensitive,
-        our_baseboard: Option<&Baseboard>,
+        our_baseboard: &BaseboardId,
         inventory: &MgsV1Inventory,
-        ddm_discovered_sleds: &BTreeMap<Baseboard, Ipv6Addr>,
+        ddm_discovered_sleds: &BTreeMap<BaseboardId, Ipv6Addr>,
         log: &slog::Logger,
     ) -> Result<(), String> {
         self.common.update(
@@ -738,9 +774,10 @@ mod tests {
     use omicron_test_utils::certificates::CertificateChain;
     use omicron_test_utils::dev;
     use wicket_common::example::ExampleRackSetupData;
+    use wicket_common::rack_setup::BgpAuthKeyInfo;
     use wicket_common::rack_setup::BgpAuthKeyStatus;
-    use wicketd_api::SetBgpAuthKeyStatus;
     use wicketd_commission_types::rack_setup::BgpAuthKeyId;
+    use wicketd_commission_types::rack_setup::SetBgpAuthKeyStatus;
 
     use super::*;
 
@@ -851,7 +888,7 @@ mod tests {
         config
             .update(
                 example.put_insensitive.clone(),
-                example.our_baseboard.as_ref(),
+                &example.our_baseboard_id,
                 &example.inventory,
                 &example.ddm_discovered_sleds,
                 &logctx.log,
@@ -892,7 +929,7 @@ mod tests {
         let err = config
             .update(
                 config_b,
-                example.our_baseboard.as_ref(),
+                &example.our_baseboard_id,
                 &example.inventory,
                 &example.ddm_discovered_sleds,
                 &logctx.log,
@@ -937,7 +974,7 @@ mod tests {
         current_config
             .update(
                 example.put_insensitive.clone(),
-                example.our_baseboard.as_ref(),
+                &example.our_baseboard_id,
                 &example.inventory,
                 &example.ddm_discovered_sleds,
                 &logctx.log,
@@ -970,7 +1007,9 @@ mod tests {
             let key_data = current_config.common.get_bgp_auth_key_data();
             assert_eq!(
                 key_data.get(&key1),
-                Some(&BgpAuthKeyStatus::Set { info: shared_key.info() })
+                Some(&BgpAuthKeyStatus::Set {
+                    info: BgpAuthKeyInfo::for_key(&shared_key)
+                })
             );
         }
 
@@ -984,7 +1023,9 @@ mod tests {
             let key_data = current_config.common.get_bgp_auth_key_data();
             assert_eq!(
                 key_data.get(&key1),
-                Some(&BgpAuthKeyStatus::Set { info: shared_key.info() })
+                Some(&BgpAuthKeyStatus::Set {
+                    info: BgpAuthKeyInfo::for_key(&shared_key)
+                })
             );
         }
 
@@ -998,7 +1039,9 @@ mod tests {
             let key_data = current_config.common.get_bgp_auth_key_data();
             assert_eq!(
                 key_data.get(&key1),
-                Some(&BgpAuthKeyStatus::Set { info: new_key.info() })
+                Some(&BgpAuthKeyStatus::Set {
+                    info: BgpAuthKeyInfo::for_key(&new_key)
+                })
             );
         }
 
@@ -1038,7 +1081,9 @@ mod tests {
 
             assert_eq!(
                 key_data.get(&key2),
-                Some(&BgpAuthKeyStatus::Set { info: shared_key.info() })
+                Some(&BgpAuthKeyStatus::Set {
+                    info: BgpAuthKeyInfo::for_key(&shared_key)
+                })
             );
         }
 
@@ -1047,7 +1092,7 @@ mod tests {
         current_config
             .update(
                 example_data_2.put_insensitive,
-                example_data_2.our_baseboard.as_ref(),
+                &example_data_2.our_baseboard_id,
                 &example_data_2.inventory,
                 &example_data_2.ddm_discovered_sleds,
                 &logctx.log,
@@ -1059,7 +1104,9 @@ mod tests {
         assert_eq!(key_data.len(), 1);
         assert_eq!(
             key_data.get(&key1),
-            Some(&BgpAuthKeyStatus::Set { info: new_key.info() })
+            Some(&BgpAuthKeyStatus::Set {
+                info: BgpAuthKeyInfo::for_key(&new_key)
+            })
         );
         assert_eq!(key_data.get(&key2), None, "key2 should have been dropped",);
 
@@ -1067,7 +1114,7 @@ mod tests {
         current_config
             .update(
                 example.put_insensitive,
-                example.our_baseboard.as_ref(),
+                &example.our_baseboard_id,
                 &example.inventory,
                 &example.ddm_discovered_sleds,
                 &logctx.log,
@@ -1079,7 +1126,9 @@ mod tests {
         assert_eq!(key_data.len(), 2);
         assert_eq!(
             key_data.get(&key1),
-            Some(&BgpAuthKeyStatus::Set { info: new_key.info() })
+            Some(&BgpAuthKeyStatus::Set {
+                info: BgpAuthKeyInfo::for_key(&new_key)
+            })
         );
         assert_eq!(key_data.get(&key2), Some(&BgpAuthKeyStatus::Unset));
 
@@ -1149,5 +1198,94 @@ mod tests {
         assert_eq!(config.external_certificates[0].key, key);
         assert_eq!(config.external_certificates[1].cert, other_cert);
         assert_eq!(config.external_certificates[1].key, other_key);
+    }
+
+    fn v4_range(first: &str, last: &str) -> address::IpRange {
+        address::IpRange::try_from((
+            first.parse::<std::net::Ipv4Addr>().unwrap(),
+            last.parse::<std::net::Ipv4Addr>().unwrap(),
+        ))
+        .unwrap()
+    }
+
+    fn v6_range(first: &str, last: &str) -> address::IpRange {
+        address::IpRange::try_from((
+            first.parse::<std::net::Ipv6Addr>().unwrap(),
+            last.parse::<std::net::Ipv6Addr>().unwrap(),
+        ))
+        .unwrap()
+    }
+
+    fn find_pool<'a>(
+        pools: &'a IdOrdMap<ServiceIpPoolConfig>,
+        name: &str,
+    ) -> Option<&'a ServiceIpPoolConfig> {
+        pools.iter().find(|p| p.name.as_str() == name)
+    }
+
+    // A rack whose service ranges are all IPv4 should produce a single IPv4
+    // service pool and no IPv6 pool.
+    #[test]
+    fn service_ip_pools_v4_only() {
+        let range = v4_range("192.168.1.20", "192.168.1.29");
+        let pools = service_ip_pools_from_ranges(&[range])
+            .expect("v4-only ranges should synthesize a pool");
+
+        assert_eq!(pools.len(), 1);
+        let pool =
+            find_pool(&pools, SERVICE_POOL_IPV4_NAME).expect("v4 pool present");
+        assert_eq!(pool.ranges(), &[range]);
+        assert!(
+            find_pool(&pools, SERVICE_POOL_IPV6_NAME).is_none(),
+            "no v6 pool expected"
+        );
+    }
+
+    // A rack whose service ranges are all IPv6 should produce a single IPv6
+    // service pool and no IPv4 pool.
+    #[test]
+    fn service_ip_pools_v6_only() {
+        let range = v6_range("fd00::20", "fd00::29");
+        let pools = service_ip_pools_from_ranges(&[range])
+            .expect("v6-only ranges should synthesize a pool");
+
+        assert_eq!(pools.len(), 1);
+        let pool =
+            find_pool(&pools, SERVICE_POOL_IPV6_NAME).expect("v6 pool present");
+        assert_eq!(pool.ranges(), &[range]);
+        assert!(
+            find_pool(&pools, SERVICE_POOL_IPV4_NAME).is_none(),
+            "no v4 pool expected"
+        );
+    }
+
+    // A dual-stack rack should produce one pool per version.
+    #[test]
+    fn service_ip_pools_dual_stack() {
+        let v4 = v4_range("192.168.1.20", "192.168.1.29");
+        let v6 = v6_range("fd00::20", "fd00::29");
+        let pools = service_ip_pools_from_ranges(&[v4, v6])
+            .expect("dual-stack ranges should synthesize both pools");
+
+        assert_eq!(pools.len(), 2);
+        assert_eq!(
+            find_pool(&pools, SERVICE_POOL_IPV4_NAME).unwrap().ranges(),
+            &[v4]
+        );
+        assert_eq!(
+            find_pool(&pools, SERVICE_POOL_IPV6_NAME).unwrap().ranges(),
+            &[v6]
+        );
+    }
+
+    // With no ranges the helper produces no pools. The requirement that a real
+    // rack init request carry at least one pool is enforced separately, both by
+    // `start_rss_request` (on the flat range list) and by
+    // `RackInitializeRequest`'s validation at deserialization time.
+    #[test]
+    fn service_ip_pools_empty() {
+        let pools = service_ip_pools_from_ranges(&[])
+            .expect("empty ranges should synthesize no pools");
+        assert!(pools.is_empty());
     }
 }

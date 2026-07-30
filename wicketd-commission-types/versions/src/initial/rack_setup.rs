@@ -4,23 +4,21 @@
 
 //! Rack setup (RSS) types for the commissioning API.
 //!
-//! The RSS configuration tree (rooted at [`PutRssUserConfigInsensitive`]) is
-//! copied verbatim from `wicket-common`, `sled-agent-types`, and
-//! `omicron-common` so that its serde shape is byte-for-byte compatible with
-//! the internal types (see the round-trip tests in wicketd). The functional
-//! machinery of the originals (validation error types, inherent methods, and
-//! conversions to internal types) lives elsewhere: validation and conversion
-//! happen at the wicketd boundary.
+//! The root struct is [`PutRssUserConfigInsensitive`].
 
+use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::net::{IpAddr, Ipv6Addr};
+use std::num::NonZeroU32;
 
 use omicron_common::api::external::Name;
+use omicron_uuid_kinds::RackInitUuid;
 use oxnet::IpNet;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize, Serializer};
 use slog_error_chain::InlineErrorChain;
+use uuid::Uuid;
 
 // Re-exports of pinned types from sled-agent-types-versions.
 pub use sled_agent_types_versions::v1::early_networking::{
@@ -43,7 +41,8 @@ pub use omicron_common::api::internal::shared::{
 /// The portion of the RSS configuration that can be posted in one shot.
 ///
 /// It is provided by the operator uploading a TOML file. Sensitive values
-/// (certificates and the recovery password hash) are set separately.
+/// (certificates, the recovery password hash, and BGP authentication keys) are
+/// set separately.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct PutRssUserConfigInsensitive {
@@ -500,6 +499,50 @@ impl<'de> Deserialize<'de> for UserSpecifiedRouterPeerAddr {
 )]
 pub struct BgpAuthKeyId(pub(crate) Name);
 
+/// Describes the actual authentication key to use with a BGP peer.
+///
+/// Currently, only TCP-MD5 authentication is supported.
+#[derive(Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum BgpAuthKey {
+    /// TCP-MD5 authentication.
+    TcpMd5 {
+        /// The pre-shared key.
+        key: String,
+    },
+}
+
+// Ensure that the key is not displayed in debug output.
+impl fmt::Debug for BgpAuthKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            BgpAuthKey::TcpMd5 { key: _ } => {
+                f.debug_struct("TcpMd5").field("key", &"********").finish()
+            }
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum SetBgpAuthKeyStatus {
+    /// The key was accepted and replaced an old key.
+    Replaced,
+
+    /// The key was accepted, and is the same as the existing key.
+    Unchanged,
+
+    /// The key was accepted and is new.
+    Added,
+}
+
+/// Identifies the BGP authentication key being set.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+pub struct BgpAuthKeyPath {
+    /// The key ID, as referenced by a BGP peer in the RSS configuration.
+    pub key_id: BgpAuthKeyId,
+}
+
 /// The result of uploading half of a certificate/key pair.
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
 #[serde(tag = "status", rename_all = "snake_case")]
@@ -589,4 +632,156 @@ impl JsonSchema for UserSpecifiedImportExportPolicy {
     ) -> schemars::schema::Schema {
         Option::<Vec<IpNet>>::json_schema(r#gen)
     }
+}
+
+/// A recovery-silo user password hash, in PHC string format.
+///
+/// This shares its name with the validated `omicron_passwords::NewPasswordHash`
+/// it converts into, but holds an unvalidated string. The hash is validated (as
+/// an Argon2id PHC string) only at the wicketd conversion boundary.
+#[derive(Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(transparent)]
+pub struct NewPasswordHash(pub String);
+
+impl fmt::Debug for NewPasswordHash {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("NewPasswordHash").field(&"********").finish()
+    }
+}
+
+/// A certificate in PEM format, uploaded during rack setup.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+pub struct CertificatePem(pub String);
+
+/// A private key in PEM format, uploaded during rack setup.
+///
+/// The key material is redacted from the `Debug` output.
+#[derive(Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+pub struct PrivateKeyPem(pub String);
+
+impl fmt::Debug for PrivateKeyPem {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("PrivateKeyPem").field(&"********").finish()
+    }
+}
+
+/// The body of a request to set the recovery-silo user password hash.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct PutRecoveryUserPasswordHash {
+    /// The password hash, in PHC string format.
+    pub hash: NewPasswordHash,
+}
+
+/// The response to a request to run rack setup.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+pub struct RunRackSetupResponse {
+    /// The ID of the rack initialization that was started.
+    ///
+    /// A query for the state of rack setup reports this same ID, in untyped
+    /// form, as `RackOperation::id` with `kind` set to `initialize`.
+    pub id: RackInitUuid,
+}
+
+/// The current state of rack setup.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+pub struct RackSetupStatus {
+    /// The overall state of the rack.
+    pub rack_state: RackState,
+    /// The rack-level operation in progress or most recently observed, if any.
+    pub operation: Option<RackOperation>,
+}
+
+/// The overall state of the rack.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum RackState {
+    /// The rack is initialized: Nexus handoff has completed.
+    Initialized,
+    /// The rack is uninitialized: it has never been set up, or a teardown
+    /// removed all of it.
+    ///
+    /// This is a clean starting point for rack setup.
+    Uninitialized,
+    /// The rack is neither initialized nor uninitialized.
+    ///
+    /// Setup or teardown is in progress, or one started and did not complete
+    /// cleanly. Either way, the rack sits somewhere between the two resting
+    /// states, and how far it got is not reported here.
+    Other,
+}
+
+/// A rack-level operation, in progress or most recently observed.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+pub struct RackOperation {
+    /// The kind of operation.
+    pub kind: RackOperationKind,
+    /// The ID of the operation.
+    ///
+    /// This correlates with the ID returned by the endpoint that started the
+    /// operation; `kind` disambiguates which endpoint that was.
+    pub id: Uuid,
+    /// The state of the operation.
+    pub state: RackOperationState,
+}
+
+/// The kind of a rack-level operation.
+///
+/// This is an open set, represented on the wire as a plain string so that new
+/// operation kinds can be added without a breaking change to this API. A client
+/// must handle unknown values generically.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(transparent)]
+pub struct RackOperationKind(Cow<'static, str>);
+
+impl RackOperationKind {
+    /// The well-known kind for a rack initialization operation.
+    pub const INITIALIZE: Self = Self(Cow::Borrowed("initialize"));
+
+    /// The well-known kind for a rack reset operation.
+    pub const RESET: Self = Self(Cow::Borrowed("reset"));
+
+    /// Returns the operation kind as a string.
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+/// The state of a rack-level operation.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum RackOperationState {
+    /// The operation is in progress.
+    InProgress {
+        /// Information about the current step, if a step is being reported.
+        current_step: Option<RssStepInfo>,
+    },
+    /// The operation completed successfully.
+    Completed,
+    /// The operation failed.
+    Failed {
+        /// A message describing the failure.
+        message: String,
+        /// Information about the step that failed, if known.
+        ///
+        /// This is reserved for future use.
+        failed_step: Option<RssStepInfo>,
+    },
+    /// The operation panicked.
+    Panicked,
+}
+
+/// Information about a step of a rack-level operation.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+pub struct RssStepInfo {
+    /// The 1-based index of the step.
+    ///
+    /// The invariant `step <= total_steps` always holds.
+    pub step: NonZeroU32,
+    /// The total number of steps.
+    pub total_steps: NonZeroU32,
+    /// A human-readable description of the step.
+    ///
+    /// This is free-form display text; it is not stable or parseable.
+    pub description: String,
 }

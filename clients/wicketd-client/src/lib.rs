@@ -38,9 +38,10 @@ progenitor::generate_api!(
     replace = {
         AbortUpdateOptions = wicket_common::rack_update::AbortUpdateOptions,
         AllowedSourceIps = omicron_common::api::internal::shared::AllowedSourceIps,
-        ArtifactId = omicron_common::update::ArtifactId,
+        ArtifactId = wicket_common::artifact::ArtifactId,
         Baseboard = sled_hardware_types::Baseboard,
-        BgpAuthKey = wicket_common::rack_setup::BgpAuthKey,
+        BaseboardId = sled_hardware_types::BaseboardId,
+        BgpAuthKey = wicketd_commission_types_versions::latest::rack_setup::BgpAuthKey,
         BgpAuthKeyId = wicketd_commission_types_versions::latest::rack_setup::BgpAuthKeyId,
         BgpAuthKeyInfo = wicket_common::rack_setup::BgpAuthKeyInfo,
         BgpAuthKeyStatus = wicket_common::rack_setup::BgpAuthKeyStatus,

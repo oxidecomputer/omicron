@@ -20,7 +20,6 @@ use wicketd_client::types::{
 };
 use wicketd_commission_types::update::UpdateTargets;
 
-use crate::events::{ArtifactData, EventReportMap};
 use crate::keymap::ShowPopupCmd;
 use crate::state::ComponentId;
 use crate::{Cmd, Event};
@@ -66,7 +65,6 @@ pub enum Request {
     },
     IgnitionCommand(ComponentId, IgnitionCommand),
     StartRackSetup,
-    StartRackReset,
 }
 
 pub struct WicketdHandle {
@@ -140,9 +138,6 @@ impl WicketdManager {
                         }
                         Request::StartRackSetup => {
                             self.start_rack_initialization();
-                        }
-                        Request::StartRackReset => {
-                            self.start_rack_reset();
                         }
                     }
                 }
@@ -302,24 +297,6 @@ impl WicketdManager {
         });
     }
 
-    fn start_rack_reset(&self) {
-        let log = self.log.clone();
-        let addr = self.wicketd_addr;
-        let events_tx = self.events_tx.clone();
-        tokio::spawn(async move {
-            let client = create_wicketd_client(&log, addr, WICKETD_TIMEOUT);
-            let response = match client.post_run_rack_reset().await {
-                Ok(_) => Ok(()),
-                Err(error) => Err(error.to_string()),
-            };
-
-            slog::info!(log, "Start rack setup response: {:?}", response);
-            _ = events_tx.send(Event::Term(Cmd::ShowPopup(
-                ShowPopupCmd::StartRackResetResponse(response),
-            )));
-        });
-    }
-
     fn poll_rack_setup_status(&self) {
         let log = self.log.clone();
         let tx = self.events_tx.clone();
@@ -381,14 +358,13 @@ impl WicketdManager {
                 // Check this prior to sending the event to avoid an extra
                 // clone.
                 let GetLocationResponse {
-                    sled_baseboard,
+                    sled_baseboard_id: _,
                     sled_id,
                     switch_baseboard,
                     switch_id,
                 } = &location;
 
-                let location_fully_provided = sled_baseboard.is_some()
-                    && sled_id.is_some()
+                let location_fully_provided = sled_id.is_some()
                     && switch_baseboard.is_some()
                     && switch_id.is_some();
 
@@ -449,20 +425,10 @@ impl WicketdManager {
                     Ok(val) => {
                         // TODO: Only send on changes
                         let rsp = val.into_inner();
-                        let artifacts = rsp
-                            .artifacts
-                            .into_iter()
-                            .map(|artifact| ArtifactData {
-                                id: artifact.artifact_id,
-                                sign: artifact.sign,
-                            })
-                            .collect();
-                        let system_version = rsp.system_version;
-                        let event_reports: EventReportMap = rsp.event_reports;
                         let _ = tx.send(Event::ArtifactsAndEventReports {
-                            system_version,
-                            artifacts,
-                            event_reports,
+                            system_version: rsp.system_version,
+                            artifacts: rsp.artifacts,
+                            event_reports: rsp.event_reports,
                         });
                     }
                     Err(e) => {

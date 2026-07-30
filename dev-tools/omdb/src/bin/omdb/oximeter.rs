@@ -70,7 +70,7 @@ impl OximeterArgs {
                 format!("http://{}", addr)
             }
         };
-        eprintln!("note: using Oximeter URL {}", &oximeter_url);
+        eprintln!("note: using Oximeter URL {}", oximeter_url);
 
         let client = Client::new(
             &oximeter_url,
