@@ -372,32 +372,36 @@ impl SagaExecState {
                 }))
             }
             (SagaState::Abandoned, None, None, None) => {
-                Err(Error::internal_error(&format!(
-                    "saga {id}: \
+                Err(Error::InternalError {
+                    internal_message: format!(
+                        "saga {id}: \
                         abandoned but has no abandonment metadata"
-                )))
+                    ),
+                })
             }
             (
                 SagaState::Running | SagaState::Unwinding | SagaState::Done,
                 Some(time),
                 Some(reason),
                 Some(comment),
-            ) => Err(Error::internal_error(&format!(
-                "saga {id}: has abandonment metadata but is not abandoned. \
-                    abandon_time: {time:?} abandon_reason: {reason:?} \
-                    abandon_comment: {comment:?}"
-            ))),
+            ) => Err(Error::InternalError {
+                internal_message: format!(
+                    "saga {id}: has abandonment metadata but is not abandoned. \
+                    saga_state: {saga_state:?} abandon_time: {time} \
+                    abandon_reason: {reason:?} abandon_comment: {comment}"
+                ),
+            }),
             // A partially-populated set is impossible per the
             // `abandoned_requires_metadata` and
             // `not_abandoned_requires_no_metadata` CHECK constraints, so treat
             // it as corruption.
-            (state, time, reason, comment) => {
-                Err(Error::internal_error(&format!(
+            (state, time, reason, comment) => Err(Error::InternalError {
+                internal_message: format!(
                     "saga {id}: abandonment metadata is partially populated. \
                     saga_state: {state:?} abandon_time: {time:?} \
                     abandon_reason: {reason:?} abandon_comment: {comment:?}"
-                )))
-            }
+                ),
+            }),
         }
     }
 }
@@ -433,7 +437,7 @@ impl From<steno::SagaCachedState> for SagaExecState {
 /// variant so invalid state/metadata combinations can't be represented.
 /// Reads from the database go through `TryFrom<SagaRow>`, which rejects rows
 /// whose metadata is inconsistent with `saga_state` with an
-/// [`Error::internal_error`].
+/// [`Error::InternalError`].
 #[derive(Clone, Debug, PartialEq)]
 pub struct Saga {
     pub id: SagaId,
