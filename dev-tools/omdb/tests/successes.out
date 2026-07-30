@@ -2431,3 +2431,89 @@ stderr:
 note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
 note: database schema version matches expected (<redacted database version>)
 =============================================
+EXECUTING COMMAND: omdb ["nexus", "fm-config", "show", "current"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+fault management configuration:
+  source:                           default
+  analysis enabled:                 true
+  sitrep limit:                     2500
+  sitrep history pruning threshold: 2000
+
+---------------------------------------------
+stderr:
+note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
+=============================================
+EXECUTING COMMAND: omdb ["-w", "nexus", "fm-config", "set", "--sitrep-limit", "3000", "--comment", "I am altering the config. Pray I do not alter it further."]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+fault management config updated to version 1:
+---------------------------------------------
+stderr:
+note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
+=============================================
+EXECUTING COMMAND: omdb ["nexus", "fm-config", "current"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+fault management configuration:
+  source:                           override
+    version:                        1
+    modified at:                    <REDACTED_TIMESTAMP>
+    comment:                       
+    I am altering the config. Pray I do not alter it further.
+  analysis enabled:                 true
+  sitrep limit:                     3000
+  sitrep history pruning threshold: 2000
+
+---------------------------------------------
+stderr:
+note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
+=============================================
+EXECUTING COMMAND: omdb ["-w", "nexus", "fm-config", "set", "--analysis-enabled", "false", "--comment", "oops i altered it further"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+fault management config updated to version 2:
+---------------------------------------------
+stderr:
+note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
+=============================================
+EXECUTING COMMAND: omdb ["nexus", "fm-config", "current"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+fault management configuration:
+  source:                           override
+    version:                        2
+    modified at:                    <REDACTED_TIMESTAMP>
+    comment:                       
+    oops i altered it further
+  analysis enabled:                 false
+  sitrep limit:                     3000
+  sitrep history pruning threshold: 2000
+
+---------------------------------------------
+stderr:
+note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
+=============================================
+EXECUTING COMMAND: omdb ["nexus", "fm-config", "show", "v1"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+fault management configuration:
+  source:                           override
+    version:                        1
+    modified at:                    <REDACTED_TIMESTAMP>
+    comment:                       
+    I am altering the config. Pray I do not alter it further.
+  analysis enabled:                 true
+  sitrep limit:                     3000
+  sitrep history pruning threshold: 2000
+
+---------------------------------------------
+stderr:
+note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
+=============================================

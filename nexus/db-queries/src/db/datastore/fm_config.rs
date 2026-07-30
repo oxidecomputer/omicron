@@ -22,6 +22,7 @@ use nexus_db_schema::schema::fm_config::dsl;
 use nexus_types::fm::FmConfigParam;
 use nexus_types::fm::FmConfigView;
 use omicron_common::api::external::Error;
+use std::num::NonZeroU32;
 
 define_sql_function! {
     fn coalesce(
@@ -48,6 +49,26 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
         latest.map(TryInto::try_into).transpose()
+    }
+
+    /// Read the FM configuration override at a specific version, or `None` if
+    /// no override exists at that version.
+    pub async fn fm_config_get(
+        &self,
+        opctx: &OpContext,
+        version: NonZeroU32,
+    ) -> Result<Option<FmConfigView>, Error> {
+        opctx.authorize(authz::Action::Read, &authz::FM_CONFIG).await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        let config = dsl::fm_config
+            .filter(dsl::version.eq(SqlU32::new(version.get())))
+            .first_async::<db::model::fm::FmConfig>(&*conn)
+            .await
+            .optional()
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        config.map(TryInto::try_into).transpose()
     }
 
     /// Insert a new version of the FM configuration override in the database.

@@ -121,6 +121,7 @@ impl fmt::Display for FmConfigView {
     Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema,
 )]
 #[serde(rename_all = "snake_case")]
+#[serde(tag = "type")]
 pub enum FmConfigSource {
     #[default]
     Default,
