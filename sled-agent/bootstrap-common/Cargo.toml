@@ -5,6 +5,9 @@ edition.workspace = true
 license = "MPL-2.0"
 description = "shared code for bootstrap agent related crates"
 
+[lints]
+workspace = true
+
 [dependencies]
 bootstore.workspace = true
 camino.workspace = true
