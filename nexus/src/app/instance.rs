@@ -822,7 +822,7 @@ impl super::Nexus {
 
         let instance_id = saga_outputs
             .lookup_node_output::<Uuid>("instance_id")
-            .map_err(|e| Error::internal_error(&format!("{:#}", &e)))
+            .map_err(|e| Error::internal_error(&format!("{:#}", e)))
             .internal_context("looking up output from instance create saga")?;
 
         // If the caller asked to start the instance, kick off that saga.
@@ -2566,7 +2566,7 @@ impl super::Nexus {
 
         let out = saga_outputs
             .lookup_node_output::<external_ip::ExternalIp>("output")
-            .map_err(|e| Error::internal_error(&format!("{:#}", &e)))
+            .map_err(|e| Error::internal_error(&format!("{:#}", e)))
             .internal_context("looking up output from ip attach saga");
 
         // The VPC routing RPW currently has double-duty on ensuring that
@@ -2604,7 +2604,7 @@ impl super::Nexus {
 
         saga_outputs
             .lookup_node_output::<Option<external_ip::ExternalIp>>("output")
-            .map_err(|e| Error::internal_error(&format!("{:#}", &e)))
+            .map_err(|e| Error::internal_error(&format!("{:#}", e)))
             .internal_context("looking up output from ip detach saga")
             .and_then(|eip| {
                 // Saga idempotency means we'll get Ok(None) on double detach

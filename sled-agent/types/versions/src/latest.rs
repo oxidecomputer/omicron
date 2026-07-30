@@ -121,8 +121,8 @@ pub mod instance {
     pub use crate::v32::instance::ExternalIpv6Config;
     pub use crate::v41::instance::InstanceSledLocalConfig;
 
-    pub use crate::v43::instance::InstanceEnsureBody;
-    pub use crate::v43::instance::VmmSpec;
+    pub use crate::v44::instance::InstanceEnsureBody;
+    pub use crate::v44::instance::VmmSpec;
 }
 
 pub mod inventory {
@@ -192,7 +192,7 @@ pub mod inventory {
     pub use crate::v40::inventory::FmdInventoryError;
     pub use crate::v40::inventory::FmdInventoryErrorKind;
     pub use crate::v40::inventory::FmdResource;
-    pub use crate::v40::inventory::Inventory;
+    pub use crate::v43::inventory::Inventory;
 
     pub use crate::impls::inventory::FmdHostCaseDisplay;
     pub use crate::impls::inventory::FmdInventoryDisplay;

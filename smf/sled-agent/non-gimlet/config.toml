@@ -91,7 +91,7 @@ switch_zone_maghemite_links = ["tfportrear0_0"]
 # These paths have the prefix of either "u2" or "m2", followed by an underscore,
 # followed by a string that is embedded into their fake serial values.
 [external_disks]
-kind = "virtual"
+kind = "hardcoded"
 vdevs = [
   "m2_0.vdev",
   "m2_1.vdev",
@@ -106,6 +106,7 @@ vdevs = [
   "u2_7.vdev",
   "u2_8.vdev",
 ]
+disks = []
 
 [data_links]
 kind = "virtual"

@@ -31,6 +31,7 @@
 //! [`app::webhook`]: crate::app::webhook
 
 use crate::app::background::BackgroundTask;
+use crate::app::external_client::ExternalHttpClient;
 use crate::app::webhook::ReceiverClient;
 use futures::future::BoxFuture;
 use nexus_db_queries::context::OpContext;
@@ -102,7 +103,7 @@ use std::sync::Arc;
 pub struct WebhookDeliverator {
     datastore: Arc<DataStore>,
     nexus_id: OmicronZoneUuid,
-    client: reqwest::Client,
+    client: ExternalHttpClient,
     cfg: DeliveryConfig,
 }
 
@@ -135,7 +136,7 @@ impl WebhookDeliverator {
         datastore: Arc<DataStore>,
         cfg: DeliveryConfig,
         nexus_id: OmicronZoneUuid,
-        client: reqwest::Client,
+        client: ExternalHttpClient,
     ) -> Self {
         Self { datastore, nexus_id, cfg, client }
     }

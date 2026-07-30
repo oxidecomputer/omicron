@@ -91,8 +91,10 @@ pub mod v40;
 pub mod v41;
 #[path = "non_empty_uplink_ports/mod.rs"]
 pub mod v42;
-#[path = "propolis_nvme_vwc/mod.rs"]
+#[path = "inventory_baseboard_id/mod.rs"]
 pub mod v43;
+#[path = "propolis_nvme_vwc/mod.rs"]
+pub mod v44;
 #[path = "add_probe_put_endpoint/mod.rs"]
 pub mod v6;
 #[path = "multicast_support/mod.rs"]

@@ -817,7 +817,6 @@ mod test {
     use omicron_test_utils::dev::test_setup_log;
     use omicron_uuid_kinds::SledUuid;
     use omicron_uuid_kinds::ZpoolUuid;
-    use sled_agent_types::inventory::Baseboard;
     use sled_agent_types::inventory::ConfigReconcilerInventoryStatus;
     use sled_agent_types::inventory::FmdInventory;
     use sled_agent_types::inventory::Inventory;
@@ -844,9 +843,9 @@ mod test {
         smf_services: SvcsEnabledNotOnlineResult,
     ) -> Inventory {
         Inventory {
-            baseboard: Baseboard::Pc {
-                identifier: "test-pc".to_string(),
-                model: "test-model".to_string(),
+            baseboard_id: BaseboardId {
+                part_number: "test-model".to_string(),
+                serial_number: "test-pc".to_string(),
             },
             reservoir_size: ByteCount::from(1024),
             sled_role: SledRole::Gimlet,
