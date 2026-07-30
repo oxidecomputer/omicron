@@ -7754,4 +7754,106 @@ pub(in crate::db::datastore) mod test {
         db.terminate().await;
         logctx.cleanup_successful();
     }
+
+    /// What happens when you ask for more disks than there are zpools?
+    #[tokio::test]
+    async fn local_storage_allocation_iterator_too_many() {
+        let logctx =
+            dev::test_setup_log("local_storage_allocation_iterator_too_many");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let config = LocalStorageTest {
+            // One sled, with five U2
+            sleds: vec![LocalStorageTestSled {
+                sled_id: SledUuid::new_v4(),
+                sled_serial: String::from("sled_0"),
+                u2s: (0..5)
+                    .map(|i| LocalStorageTestSledU2 {
+                        physical_disk_id: PhysicalDiskUuid::new_v4(),
+                        physical_disk_serial: format!("phys{i}"),
+
+                        zpool_id: ZpoolUuid::new_v4(),
+                        control_plane_storage_buffer:
+                            external::ByteCount::from_gibibytes_u32(250),
+
+                        inventory_total_size:
+                            external::ByteCount::from_gibibytes_u32(1024),
+
+                        crucible_dataset_id: DatasetUuid::new_v4(),
+                        crucible_dataset_addr: format!(
+                            "[fd00:1122:3344:10{i}::1]:12345"
+                        )
+                        .parse()
+                        .unwrap(),
+
+                        local_storage_unencrypted_dataset_id:
+                            DatasetUuid::new_v4(),
+                    })
+                    .collect(),
+            }],
+            affinity_groups: vec![],
+            anti_affinity_groups: vec![],
+            // One instance with ten local storage disks.
+            instances: vec![LocalStorageTestInstance {
+                id: InstanceUuid::new_v4(),
+                name: "local1".to_string(),
+                affinity: None,
+                ncpus: 2,
+                memory: external::ByteCount::from_gibibytes_u32(16),
+                disks: (0..10)
+                    .map(|i| LocalStorageTestInstanceDisk {
+                        id: Uuid::new_v4(),
+                        name: external::Name::try_from(format!("local1-{i}"))
+                            .unwrap(),
+                        size: external::ByteCount::from_gibibytes_u32(512),
+                    })
+                    .collect(),
+            }],
+        };
+
+        setup_local_storage_allocation_test(&opctx, datastore, &config).await;
+
+        // Sled reservation should _not_ succeed
+
+        {
+            let instance = Instance::from_local_storage_test_instance(
+                &config.instances[0],
+            );
+            let instance_id = instance.id;
+            let resources = instance.resources();
+
+            datastore
+                .sled_reservation_create(
+                    &opctx,
+                    instance_id,
+                    PropolisUuid::new_v4(),
+                    resources,
+                    db::model::SledReservationConstraints::none(),
+                    SledReservationReason::Start,
+                )
+                .await
+                .unwrap_err();
+        }
+
+        let allocation_records: Vec<_> = {
+            let conn = datastore.pool_connection_for_tests().await.unwrap();
+
+            use nexus_db_schema::schema::local_storage_unencrypted_dataset_allocation::dsl;
+
+            dsl::local_storage_unencrypted_dataset_allocation
+                .filter(dsl::time_deleted.is_null())
+                .select(db::model::LocalStorageUnencryptedDatasetAllocation::as_select())
+                .load_async(&*conn)
+                .await
+                .unwrap()
+        };
+
+        assert_eq!(allocation_records.len(), 0);
+
+        validate_local_storage_allocations(&datastore).await;
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
 }
