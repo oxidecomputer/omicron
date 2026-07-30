@@ -67,7 +67,7 @@ gateway-ereport-messages = { git = "https://github.com/oxidecomputer/management-
 gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "6c0aca2545a73fd75536e149d29faa7108be5862", features = ["std"] }
 generic-array = { version = "0.14.7", default-features = false, features = ["more_lengths", "zeroize"] }
 getrandom-6f8ce4dd05d13bba = { package = "getrandom", version = "0.2.17", default-features = false, features = ["js", "rdrand", "std"] }
-getrandom-9fbad63c4bcf4a8f = { package = "getrandom", version = "0.4.1", default-features = false, features = ["std", "sys_rng", "wasm_js"] }
+getrandom-9fbad63c4bcf4a8f = { package = "getrandom", version = "0.4.3", default-features = false, features = ["std", "sys_rng", "wasm_js"] }
 group = { version = "0.13.0", default-features = false, features = ["alloc"] }
 hashbrown-3575ec1268b04181 = { package = "hashbrown", version = "0.15.5" }
 hashbrown-986da7b5efc2b80e = { package = "hashbrown", version = "0.16.1" }
