@@ -1036,6 +1036,7 @@ pub static DEMO_ROUTER_CONFIGURATION_CREATE: LazyLock<
         name: "demo-router-configuration".parse().unwrap(),
         description: "a demo router configuration".into(),
     },
+    switch: SwitchSlot::Switch0,
 });
 pub static DEMO_ROUTER_CONFIGURATION_UPDATE: LazyLock<
     networking::RouterConfigurationUpdate,
@@ -1044,6 +1045,7 @@ pub static DEMO_ROUTER_CONFIGURATION_UPDATE: LazyLock<
         name: Some("demo-router-configuration".parse().unwrap()),
         description: Some("an updated demo router configuration".into()),
     },
+    switch: None,
 });
 pub static DEMO_ROUTER_CONFIGURATION_BGP_CONFIG_SET: LazyLock<
     networking::RouterConfigurationBgpConfigSet,
@@ -1099,7 +1101,6 @@ pub static DEMO_ROUTER_CONFIGURATION_BFD_PEER: LazyLock<networking::BfdPeer> =
         mode: BfdMode::MultiHop,
         detection_threshold: 3,
         required_rx: 1000000,
-        switch: SwitchSlot::Switch0,
     });
 
 pub const DEMO_BGP_ANNOUNCE_SET_URL: &'static str =

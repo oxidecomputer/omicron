@@ -48,6 +48,9 @@ pub struct RouterConfiguration {
     #[serde(flatten)]
     pub identity: IdentityMetadata,
 
+    /// The switch this router configuration applies to
+    pub switch: SwitchSlot,
+
     /// The BGP configuration for this router configuration, if set
     pub bgp_config: Option<RouterConfigurationBgpConfig>,
 
@@ -66,6 +69,9 @@ pub struct RouterConfiguration {
 pub struct RouterConfigurationCreate {
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
+
+    /// The switch this router configuration applies to
+    pub switch: SwitchSlot,
 }
 
 /// Parameters for updating a router configuration
@@ -75,6 +81,9 @@ pub struct RouterConfigurationCreate {
 pub struct RouterConfigurationUpdate {
     #[serde(flatten)]
     pub identity: IdentityMetadataUpdateParams,
+
+    /// The switch this router configuration applies to
+    pub switch: Option<SwitchSlot>,
 }
 
 /// Select a router configuration by a name or id
@@ -117,14 +126,10 @@ pub struct RouterConfigurationBgpConfigSet {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum BgpPeerKind {
-    /// A session with a specific peer address on a given port
+    /// A session with a specific peer address
     Numbered {
         /// Address of the peer.
         addr: RouterPeerIpAddr,
-
-        /// Name of the external port the peer is reachable on, such as
-        /// `qsfp0`.
-        port: Name,
     },
     /// An unnumbered session on a given port
     Unnumbered {
@@ -263,9 +268,6 @@ pub struct BfdPeer {
     /// The minimum interval, in microseconds, between received BFD
     /// Control packets that this system requires
     pub required_rx: u64,
-
-    /// The switch hosting this BFD session
-    pub switch: SwitchSlot,
 }
 
 /// Select a BFD peer within a router configuration

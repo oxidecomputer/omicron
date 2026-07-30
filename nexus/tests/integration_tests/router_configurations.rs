@@ -110,6 +110,7 @@ async fn test_router_configuration_basic_crud(ctx: &ControlPlaneTestContext) {
             name: "routy".parse().unwrap(),
             description: "just a router configuration".into(),
         },
+        switch: SwitchSlot::Switch0,
     };
     let created: RouterConfiguration =
         NexusRequest::objects_post(client, CONFIGURATIONS_URL, &params)
@@ -121,6 +122,7 @@ async fn test_router_configuration_basic_crud(ctx: &ControlPlaneTestContext) {
             .unwrap();
     assert_eq!(created.identity.name, "routy");
     assert_eq!(created.identity.description, "just a router configuration");
+    assert_eq!(created.switch, SwitchSlot::Switch0);
     assert_eq!(created.bgp_config, None);
     assert!(created.bgp_peers.is_empty());
     assert!(created.routes.is_empty());
@@ -163,6 +165,7 @@ async fn test_router_configuration_basic_crud(ctx: &ControlPlaneTestContext) {
             name: Some("routy2".parse().unwrap()),
             description: Some("a renamed router configuration".into()),
         },
+        switch: Some(SwitchSlot::Switch1),
     };
     let updated: RouterConfiguration =
         NexusRequest::object_put(client, &configuration_url, Some(&update))
@@ -175,6 +178,7 @@ async fn test_router_configuration_basic_crud(ctx: &ControlPlaneTestContext) {
     assert_eq!(updated.identity.id, created.identity.id);
     assert_eq!(updated.identity.name, "routy2");
     assert_eq!(updated.identity.description, "a renamed router configuration");
+    assert_eq!(updated.switch, SwitchSlot::Switch1);
 
     // The router configuration can be fetched by its new name and deleted.
     let configuration_url = format!("{CONFIGURATIONS_URL}/routy2");
@@ -211,6 +215,7 @@ async fn test_router_configuration_bgp_config(ctx: &ControlPlaneTestContext) {
             name: "routy".parse().unwrap(),
             description: "just a router configuration".into(),
         },
+        switch: SwitchSlot::Switch0,
     };
     NexusRequest::objects_post(client, CONFIGURATIONS_URL, &params)
         .authn_as(AuthnMode::PrivilegedUser)
@@ -333,10 +338,7 @@ async fn test_router_configuration_bgp_config(ctx: &ControlPlaneTestContext) {
 fn demo_bgp_peer() -> RouterConfigurationBgpPeer {
     RouterConfigurationBgpPeer {
         name: "spine1".parse().unwrap(),
-        peer: BgpPeerKind::Numbered {
-            addr: "203.0.113.10".parse().unwrap(),
-            port: "qsfp0".parse().unwrap(),
-        },
+        peer: BgpPeerKind::Numbered { addr: "203.0.113.10".parse().unwrap() },
         remote_asn: Some(65001),
         allowed_import: ImportExportPolicy::NoFiltering,
         allowed_export: ImportExportPolicy::NoFiltering,
@@ -373,7 +375,6 @@ fn demo_bfd_peer() -> BfdPeer {
         mode: BfdMode::MultiHop,
         detection_threshold: 3,
         required_rx: 1000000,
-        switch: SwitchSlot::Switch0,
     }
 }
 
@@ -389,6 +390,7 @@ async fn test_router_configuration_sub_resources(
             name: "routy".parse().unwrap(),
             description: "just a router configuration".into(),
         },
+        switch: SwitchSlot::Switch0,
     };
     NexusRequest::objects_post(client, CONFIGURATIONS_URL, &params)
         .authn_as(AuthnMode::PrivilegedUser)
@@ -620,6 +622,7 @@ async fn test_silo_router_configurations(ctx: &ControlPlaneTestContext) {
                 name: name.parse().unwrap(),
                 description: String::new(),
             },
+            switch: SwitchSlot::Switch0,
         };
         let configuration: RouterConfiguration =
             NexusRequest::objects_post(client, CONFIGURATIONS_URL, &params)
