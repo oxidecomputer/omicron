@@ -8305,7 +8305,7 @@ pub(in crate::db::datastore) mod test {
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
         let config = LocalStorageTest {
-            // One sled, with one U2
+            // One sled, with ten U2s
             sleds: vec![LocalStorageTestSled {
                 sled_id: SledUuid::new_v4(),
                 sled_serial: String::from("sled_0"),
@@ -8484,7 +8484,7 @@ pub(in crate::db::datastore) mod test {
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
         let config = LocalStorageTest {
-            // One sled, with one U2
+            // One sled, with ten U2s
             sleds: vec![LocalStorageTestSled {
                 sled_id: SledUuid::new_v4(),
                 sled_serial: String::from("sled_0"),
