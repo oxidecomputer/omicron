@@ -34,8 +34,6 @@ use nexus_types::inventory::Zpool;
 use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::Nullable;
 use omicron_common::api::external::{DataPageParams, Error};
-use omicron_uuid_kinds::SledKind;
-use omicron_uuid_kinds::TypedUuid;
 use omicron_uuid_kinds::{GenericUuid, SledUuid, TufTrustRootUuid};
 use semver::Version;
 use sled_agent_types::inventory::SvcsEnabledNotOnlineResult;
@@ -170,37 +168,39 @@ impl UpdateContactSupportChecksInput {
             .map(|(sled, zpools)| (sled, zpools.into_iter().cloned().collect()))
             .collect();
 
-        let mut enabled_smf_services_not_online_by_sled: BTreeMap<
-            TypedUuid<SledKind>,
-            SvcsEnabledNotOnlineResult,
-        > = self
+        let enabled_smf_services_not_online_by_sled = self
             .inventory
             .enabled_smf_services_not_online()
             .into_iter()
-            .map(|(sled, svcs)| (sled, svcs.clone()))
-            .collect();
-
-        // Propolis zones are continuously torn down depending on the VMM state.
-        // When one of these zones is being torn down, it can cause
-        // false-positives with the contact_support field. In addition, offline
-        // services in these zones do not affect an update. We remove all
-        // services from propolis zones from the problems list.
-        enabled_smf_services_not_online_by_sled.retain(|_sled, svcs_result| {
-            match svcs_result {
-                SvcsEnabledNotOnlineResult::SvcsEnabledNotOnline(svcs) => {
-                    // Remove services that belong to a propolis zone.
-                    svcs.services.retain(|svc| !is_propolis_zone(&svc.zone));
-
-                    // If there are no services or errors left then we drop the
-                    // sled entirely.
-                    !svcs.is_empty()
+            .filter_map(|(sled, svcs_result)| {
+                let mut svcs_result = svcs_result.clone();
+                match &mut svcs_result {
+                    SvcsEnabledNotOnlineResult::SvcsEnabledNotOnline(svcs) => {
+                        // Propolis zones are continuously torn down depending
+                        // on the VMM state. When one of these zones is being
+                        // torn down, it can cause false-positives with the
+                        // contact_support field. In addition, offline services
+                        // in these zones do not affect an update. We remove all
+                        // services from propolis zones from the problems list.
+                        svcs.services
+                            .retain(|svc| !is_propolis_zone(&svc.zone));
+                        // If there are no services or errors left then we drop
+                        // the sled entirely.
+                        if svcs.is_empty() {
+                            None
+                        } else {
+                            Some((sled, svcs_result))
+                        }
+                    }
+                    // Command errors and unavailable data aren't
+                    // propolis-specific, so they're always retained.
+                    SvcsEnabledNotOnlineResult::DataUnavailable
+                    | SvcsEnabledNotOnlineResult::SvcsCmdError(_) => {
+                        Some((sled, svcs_result))
+                    }
                 }
-                // Command errors and unavailable data aren't propolis-specific,
-                // so they're always retained.
-                SvcsEnabledNotOnlineResult::DataUnavailable
-                | SvcsEnabledNotOnlineResult::SvcsCmdError(_) => true,
-            }
-        });
+            })
+            .collect();
 
         UpdateStatusProblems {
             stuck_sagas,
