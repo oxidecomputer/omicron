@@ -17,9 +17,8 @@ pub use inventory::{
 pub use rack::{KnightRiderMode, RackState};
 pub use status::ServiceStatus;
 pub use update::{
-    ArtifactVersions, CreateClearUpdateStateOptions, CreateStartUpdateOptions,
-    RackUpdateState, UpdateItemState, parse_event_report_map,
-    update_component_title,
+    CreateClearUpdateStateOptions, CreateStartUpdateOptions, RackUpdateState,
+    UpdateItemState, parse_event_report_map, update_component_title,
 };
 
 use serde::{Deserialize, Serialize};
@@ -60,8 +59,8 @@ impl State {
         }
     }
 
-    pub fn selected_component_matches_wicked_location(&self) -> bool {
-        // TODO-RAINCLAUDE: nothing matches until wicketd has reported a location.
+    pub fn selected_component_matches_wicketd_location(&self) -> bool {
+        // Return false until the location is known.
         let Some(location) = self.wicketd_location.as_ref() else {
             return false;
         };
