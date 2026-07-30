@@ -604,6 +604,23 @@ impl<'a> CompleteLocalStorageAllocationLists<'a> {
             info!(self.log, "removed {removed} from queue");
         }
 
+        // Each allocation to perform was created with a list of candidate
+        // zpools:
+        //
+        //   allocation: [zpool0, zpool1, ..., zpool6, ..., zpool8, zpool9]
+        //
+        // If zpool6 originally had room for this allocation but no longer does,
+        // and it is not removed from the candidate list, this iterator's search
+        // will still add a mapping of that allocation to it, only to be pruned
+        // by the incomplete_allocation_list pruning step above after the insert
+        // CTE does not create any rows.
+        //
+        // The original zpool list was created based on an old snapshot of zpool
+        // information. Based on the updated zpool information passed into this
+        // function, prune each allocation's candidate zpool list. This will
+        // reduce the combations that will never work but get added to the queue
+        // anyway.
+
         removed = 0;
 
         for allocation in &mut self.allocations_to_perform {
