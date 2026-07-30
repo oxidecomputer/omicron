@@ -71,6 +71,7 @@ use slog::Logger;
 use slog_error_chain::InlineErrorChain;
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
+use std::collections::HashMap;
 use std::collections::HashSet;
 use std::fmt;
 use strum::IntoEnumIterator;
@@ -580,23 +581,41 @@ impl<'a> CompleteLocalStorageAllocationLists<'a> {
         // backed by local storage could have been detached and deleted. Check
         // for that here, and prune the entire search space if this happened.
 
+        let disks: HashMap<Uuid, db::model::Disk> = {
+            use nexus_db_schema::schema::disk::dsl;
+
+            let disk_ids: Vec<Uuid> = self
+                .allocations_to_perform
+                .iter()
+                .map(|allocation| allocation.request.id())
+                .collect();
+
+            dsl::disk
+                .filter(dsl::id.eq_any(disk_ids))
+                .select(db::model::Disk::as_select())
+                .load_async(conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                        .internal_context(
+                            "zpool_get_for_sled_reservation failed",
+                        )
+                })?
+                .into_iter()
+                .map(|disk| (disk.id(), disk))
+                .collect()
+        };
+
         for allocation in &self.allocations_to_perform {
             let disk_id = allocation.request.id();
 
-            let disk = {
-                use nexus_db_schema::schema::disk::dsl;
-
-                dsl::disk
-                    .filter(dsl::id.eq(disk_id))
-                    .select(db::model::Disk::as_select())
-                    .first_async(conn)
-                    .await
-                    .map_err(|e| {
-                        public_error_from_diesel(e, ErrorHandler::Server)
-                            .internal_context(
-                                "zpool_get_for_sled_reservation failed",
-                            )
-                    })?
+            let Some(disk) = disks.get(&disk_id) else {
+                // Is it possible the disk has been hard-deleted somehow?
+                // Otherwise how would we land here, given that we just created
+                // the map!
+                return Err(Error::internal_error(&format!(
+                    "disk id {disk_id} not found in map"
+                )));
             };
 
             // Prune the entire space if the disk was deleted, or if the disk
@@ -2192,7 +2211,6 @@ pub(in crate::db::datastore) mod test {
     use predicates::{BoxPredicate, prelude::*};
     use sled_agent_types::inventory::ZpoolHealth;
     use std::collections::BTreeMap;
-    use std::collections::HashMap;
     use std::net::SocketAddrV6;
 
     #[tokio::test]
