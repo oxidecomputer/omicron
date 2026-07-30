@@ -276,6 +276,33 @@ struct UnvalidatedTunables {
     load_timeout: Option<std::time::Duration>,
 }
 
+/// Whether HTTP clients for external services permit requests to loopback
+/// addresses.
+///
+/// This is an enum rather than a `bool`, so that if you want to turn on the
+/// test-only config, you have to type the string "yes_for_test_purposes_only"
+/// in the config file so you know what you're doing.
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    Deserialize,
+    Eq,
+    JsonSchema,
+    PartialEq,
+    Serialize,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum TreatLoopbackAsExternal {
+    /// Loopback addresses are considered "external". This must only be used
+    /// in test environments.
+    YesForTestPurposesOnly,
+    /// Loopback addresses are rejected (the default).
+    #[default]
+    No,
+}
+
 /// Configuration for HTTP clients to external services.
 #[derive(
     Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema,
@@ -285,6 +312,15 @@ pub struct ExternalHttpClientConfig {
     /// specified interface name.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub interface: Option<String>,
+    /// Whether external HTTP clients are permitted to make requests to
+    /// loopback addresses (and names in the special-use "localhost." zone).
+    ///
+    /// External HTTP clients normally refuse to make requests to any address
+    /// that isn't external to the rack, including loopback addresses. Test
+    /// environments, however, run their "external" servers on localhost, so
+    /// the test suite needs a way to turn that off.
+    #[serde(default)]
+    pub treat_loopback_as_external: TreatLoopbackAsExternal,
 }
 
 /// Tunable configuration parameters, intended for use in test environments or
@@ -1026,6 +1062,10 @@ pub struct FmTasksConfig {
     #[serde_as(as = "DurationSeconds<u64>")]
     pub sitrep_gc_period_secs: Duration,
     /// period (in seconds) for periodic activations of the background task that
+    /// prunes the oldest entries from the fault management sitrep history
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub sitrep_history_prune_period_secs: Duration,
+    /// period (in seconds) for periodic activations of the background task that
     /// updates externally-visible database tables to match the current situation
     /// report.
     #[serde_as(as = "DurationSeconds<u64>")]
@@ -1045,6 +1085,11 @@ impl Default for FmTasksConfig {
             // time the current sitrep changes, and activating it more
             // frequently won't make things more responsive.
             sitrep_gc_period_secs: Duration::from_secs(600),
+            // This need not be activated very frequently, as it's triggered
+            // whenever a new sitrep is committed and by the analysis task when
+            // nearing capacity limits, so periodic activation is only a
+            // backstop.
+            sitrep_history_prune_period_secs: Duration::from_secs(600),
             // This, too, is activated whenever a new sitrep is loaded, so we
             // need not set the periodic activation interval too high.
             rendezvous_period_secs: Duration::from_secs(300),
@@ -1279,6 +1324,7 @@ mod test {
             external_dns_servers = [ "1.1.1.1", "9.9.9.9" ]
             [deployment.external_http_clients]
             interface = "opte0"
+            treat_loopback_as_external = "yes_for_test_purposes_only"
             [deployment.dropshot_external]
             bind_address = "10.1.2.3:4567"
             default_request_body_max_bytes = 1024
@@ -1359,6 +1405,7 @@ mod test {
             sp_ereport_ingester.period_secs = 47
             fm.sitrep_load_period_secs = 48
             fm.sitrep_gc_period_secs = 49
+            fm.sitrep_history_prune_period_secs = 53
             probe_distributor.period_secs = 50
             multicast_reconciler.period_secs = 60
             fm.rendezvous_period_secs = 51
@@ -1426,6 +1473,7 @@ mod test {
                     ],
                     external_http_clients: ExternalHttpClientConfig {
                         interface: Some("opte0".to_string()),
+                        treat_loopback_as_external: TreatLoopbackAsExternal::YesForTestPurposesOnly,
                     },
                 },
                 pkg: PackageConfig {
@@ -1623,6 +1671,8 @@ mod test {
                             analysis_period_secs: Duration::from_secs(52),
                             sitrep_load_period_secs: Duration::from_secs(48),
                             sitrep_gc_period_secs: Duration::from_secs(49),
+                            sitrep_history_prune_period_secs:
+                                Duration::from_secs(53),
                             rendezvous_period_secs: Duration::from_secs(51),
                         },
                         probe_distributor: ProbeDistributorConfig {
@@ -1759,6 +1809,7 @@ mod test {
             sp_ereport_ingester.period_secs = 44
             fm.sitrep_load_period_secs = 45
             fm.sitrep_gc_period_secs = 46
+            fm.sitrep_history_prune_period_secs = 50
             probe_distributor.period_secs = 47
             fm.rendezvous_period_secs = 48
             fm.analysis_period_secs = 49

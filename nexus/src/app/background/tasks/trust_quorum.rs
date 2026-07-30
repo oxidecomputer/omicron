@@ -274,7 +274,7 @@ async fn prepare(
             format!(
                 "failed to retrieve commissioned sled \
                     by baseboard_id {} and rack_id {}.",
-                &config.coordinator, &config.rack_id
+                config.coordinator, config.rack_id
             )
         })?
     else {
@@ -289,7 +289,7 @@ async fn prepare(
         .with_context(|| {
             format!(
                 "Failed to get coordinator status from {}.",
-                &config.coordinator
+                config.coordinator
             )
         })?
         .into_inner();

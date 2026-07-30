@@ -281,13 +281,8 @@ impl Query {
                         // A filter can be pushed through a limiting table
                         // operation in a few cases, see `can_reorder_around`
                         // for details.
-                        maybe_filter.and_then(|filter| {
-                            if filter.can_reorder_around(limit) {
-                                Some(filter)
-                            } else {
-                                None
-                            }
-                        })
+                        maybe_filter
+                            .filter(|filter| filter.can_reorder_around(limit))
                     }
                     _ => maybe_filter,
                 }
@@ -314,13 +309,8 @@ impl Query {
                         // A limit can be pushed through a filter operation, in
                         // only a few cases, see `can_reorder_around` for
                         // details.
-                        maybe_limit.and_then(|limit| {
-                            if filter.can_reorder_around(&limit) {
-                                Some(limit)
-                            } else {
-                                None
-                            }
-                        })
+                        maybe_limit
+                            .filter(|&limit| filter.can_reorder_around(&limit))
                     }
                     BasicTableOp::Limit(limit) => {
                         // It is possible to "merge" limits if they're of the

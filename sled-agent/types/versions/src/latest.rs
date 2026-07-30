@@ -93,15 +93,15 @@ pub mod firewall_rules {
 }
 
 pub mod multicast {
-    pub use crate::v43::multicast::ClearMcast2Phys;
-    pub use crate::v43::multicast::ClearMcastForwarding;
-    pub use crate::v43::multicast::Mcast2PhysMapping;
-    pub use crate::v43::multicast::McastFilterMode;
-    pub use crate::v43::multicast::McastForwardingEntry;
-    pub use crate::v43::multicast::McastForwardingNextHop;
-    pub use crate::v43::multicast::McastReplication;
-    pub use crate::v43::multicast::McastSourceFilter;
-    pub use crate::v43::multicast::MulticastGroupCfg;
+    pub use crate::v44::multicast::ClearMcast2Phys;
+    pub use crate::v44::multicast::ClearMcastForwarding;
+    pub use crate::v44::multicast::Mcast2PhysMapping;
+    pub use crate::v44::multicast::McastFilterMode;
+    pub use crate::v44::multicast::McastForwardingEntry;
+    pub use crate::v44::multicast::McastForwardingNextHop;
+    pub use crate::v44::multicast::McastReplication;
+    pub use crate::v44::multicast::McastSourceFilter;
+    pub use crate::v44::multicast::MulticastGroupCfg;
 }
 
 pub mod instance {
@@ -204,7 +204,7 @@ pub mod inventory {
     pub use crate::v40::inventory::FmdInventoryError;
     pub use crate::v40::inventory::FmdInventoryErrorKind;
     pub use crate::v40::inventory::FmdResource;
-    pub use crate::v40::inventory::Inventory;
+    pub use crate::v43::inventory::Inventory;
 
     pub use crate::impls::inventory::FmdHostCaseDisplay;
     pub use crate::impls::inventory::FmdInventoryDisplay;
