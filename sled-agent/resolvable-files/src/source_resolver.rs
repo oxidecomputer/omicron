@@ -256,7 +256,7 @@ mod tests {
                             ZoneKind::CockroachDb.artifact_in_install_dataset()
                         )
                         .unwrap()
-                        .hash_v2())
+                        .hash)
                 },
                 file_source: ResolvableFileSource {
                     file_name: ZoneKind::CockroachDb
@@ -358,7 +358,7 @@ mod tests {
                             ZoneKind::CockroachDb.artifact_in_install_dataset()
                         )
                         .unwrap()
-                        .hash_v2()),
+                        .hash),
                 },
                 file_source: ResolvableFileSource {
                     file_name: ZoneKind::CockroachDb
@@ -482,7 +482,7 @@ mod tests {
                             ZoneKind::CockroachDb.artifact_in_install_dataset()
                         )
                         .unwrap()
-                        .hash_v2()),
+                        .hash),
                 },
                 file_source: ResolvableFileSource {
                     file_name: ZoneKind::CockroachDb
