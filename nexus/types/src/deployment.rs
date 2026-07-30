@@ -1996,6 +1996,9 @@ pub enum BlueprintZoneImageSource {
     #[serde(rename_all = "snake_case")]
     Artifact {
         version: BlueprintArtifactVersion,
+        // Tufaceous v2 introduces a new JSON schema for `ArtifactHash` that is
+        // wire-compatible but perceived as different by drift. Continue using
+        // the old schema in this API version.
         #[schemars(schema_with = "ArtifactHash::v1_json_schema")]
         hash: ArtifactHash,
     },
@@ -2092,6 +2095,9 @@ impl fmt::Display for BlueprintArtifactVersion {
 )]
 pub struct BlueprintSingleMeasurement {
     pub version: BlueprintArtifactVersion,
+    // Tufaceous v2 introduces a new JSON schema for `ArtifactHash` that is
+    // wire-compatible but perceived as different by drift. Continue using the
+    // old schema in this API version.
     #[schemars(schema_with = "ArtifactHash::v1_json_schema")]
     pub hash: ArtifactHash,
 }
@@ -2370,6 +2376,9 @@ pub enum BlueprintHostPhase2DesiredContents {
     /// The artifact will come from an unpacked and distributed TUF repo.
     Artifact {
         version: BlueprintArtifactVersion,
+        // Tufaceous v2 introduces a new JSON schema for `ArtifactHash` that is
+        // wire-compatible but perceived as different by drift. Continue using
+        // the old schema in this API version.
         #[schemars(schema_with = "ArtifactHash::v1_json_schema")]
         hash: ArtifactHash,
     },
@@ -2542,6 +2551,9 @@ pub struct PendingMgsUpdate {
     pub details: PendingMgsUpdateDetails,
 
     /// which artifact to apply to this device
+    // Tufaceous v2 introduces a new JSON schema for `ArtifactHash` that is
+    // wire-compatible but perceived as different by drift. Continue using the
+    // old schema in this API version.
     #[schemars(schema_with = "ArtifactHash::v1_json_schema")]
     pub artifact_hash: ArtifactHash,
     pub artifact_version: ArtifactVersion,
@@ -2844,6 +2856,10 @@ pub struct PendingMgsUpdateHostPhase1Details {
     pub expected_active_phase_1_slot: M2Slot,
     /// Which slot the host OS most recently booted from.
     pub expected_boot_disk: M2Slot,
+
+    // Tufaceous v2 introduces a new JSON schema for `ArtifactHash` that is
+    // wire-compatible but perceived as different by drift. Continue using the
+    // old schema in this API version.
     /// The hash of the phase 1 slot specified by
     /// `expected_active_phase_1_hash`.
     ///
@@ -2877,6 +2893,7 @@ pub struct PendingMgsUpdateHostPhase1Details {
     /// don't need to be able to represent an invalid inactive slot.
     #[schemars(schema_with = "ArtifactHash::v1_json_schema")]
     pub expected_inactive_phase_2_hash: ArtifactHash,
+
     /// Address for contacting sled-agent to check phase 2 contents.
     #[cfg_attr(test, strategy(socket_addr_v6_without_flowinfo()))]
     pub sled_agent_address: SocketAddrV6,

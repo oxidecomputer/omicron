@@ -51,6 +51,9 @@ pub struct SupportBundleTransferQueryParams {
 /// Query parameters for support bundle finalization.
 #[derive(Deserialize, Serialize, JsonSchema)]
 pub struct SupportBundleFinalizeQueryParams {
+    // Tufaceous v2 introduces a new JSON schema for `ArtifactHash` that is
+    // wire-compatible but perceived as different by drift. Continue using the
+    // old schema in this API version.
     #[schemars(schema_with = "ArtifactHash::v1_json_schema")]
     pub hash: ArtifactHash,
 }

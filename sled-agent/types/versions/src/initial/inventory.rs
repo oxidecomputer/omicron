@@ -175,6 +175,9 @@ pub enum HostPhase2DesiredContents {
     ///
     /// The artifact will come from an unpacked and distributed TUF repo.
     Artifact {
+        // Tufaceous v2 introduces a new JSON schema for `ArtifactHash` that is
+        // wire-compatible but perceived as different by drift. Continue using
+        // the old schema in this API version.
         #[schemars(schema_with = "ArtifactHash::v1_json_schema")]
         hash: ArtifactHash,
     },
@@ -226,6 +229,9 @@ pub struct BootPartitionContents {
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]
 pub struct BootPartitionDetails {
     pub header: BootImageHeader,
+    // Tufaceous v2 introduces a new JSON schema for `ArtifactHash` that is
+    // wire-compatible but perceived as different by drift. Continue using the
+    // old schema in this API version.
     #[schemars(schema_with = "ArtifactHash::v1_json_schema")]
     pub artifact_hash: ArtifactHash,
     pub artifact_size: usize,
@@ -381,6 +387,9 @@ pub struct ZoneArtifactInventory {
     pub expected_size: u64,
 
     /// The expected digest of the file's contents.
+    // Tufaceous v2 introduces a new JSON schema for `ArtifactHash` that is
+    // wire-compatible but perceived as different by drift. Continue using the
+    // old schema in this API version.
     #[schemars(schema_with = "ArtifactHash::v1_json_schema")]
     pub expected_hash: ArtifactHash,
 
@@ -546,6 +555,9 @@ pub enum OmicronZoneImageSource {
     /// This originates from TUF repos uploaded to Nexus which are then
     /// replicated out to all sleds.
     Artifact {
+        // Tufaceous v2 introduces a new JSON schema for `ArtifactHash` that is
+        // wire-compatible but perceived as different by drift. Continue using
+        // the old schema in this API version.
         #[schemars(schema_with = "ArtifactHash::v1_json_schema")]
         hash: ArtifactHash,
     },

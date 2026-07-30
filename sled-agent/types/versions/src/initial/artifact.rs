@@ -18,6 +18,9 @@ use tufaceous_artifact_v2::ArtifactHash;
 /// Path parameters for Artifact requests.
 #[derive(Deserialize, JsonSchema)]
 pub struct ArtifactPathParam {
+    // Tufaceous v2 introduces a new JSON schema for `ArtifactHash` that is
+    // wire-compatible but perceived as different by drift. Continue using the
+    // old schema in this API version.
     #[schemars(schema_with = "ArtifactHash::v1_json_schema")]
     pub sha256: ArtifactHash,
 }
@@ -63,6 +66,9 @@ pub struct ArtifactPutResponse {
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize, JsonSchema)]
 pub struct ArtifactConfig {
     pub generation: Generation,
+    // Tufaceous v2 introduces a new JSON schema for `ArtifactHash` that is
+    // wire-compatible but perceived as different by drift. Continue using the
+    // old schema in this API version.
     #[schemars(schema_with = "artifact_hash_set_schema")]
     pub artifacts: BTreeSet<ArtifactHash>,
 }
