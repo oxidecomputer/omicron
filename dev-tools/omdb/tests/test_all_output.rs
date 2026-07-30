@@ -137,6 +137,11 @@ async fn test_omdb_usage_errors() {
         &["reconfigurator"],
         &["reconfigurator", "export"],
         &["reconfigurator", "archive"],
+        // FM config help text. Mostly, let's check that the help text for the
+        // settings look reasonable.
+        &["nexus", "fm-config"],
+        &["nexus", "fm-config", "show", "--help"],
+        &["nexus", "fm-config", "set", "--help"],
     ];
 
     for args in invocations {
@@ -391,6 +396,31 @@ async fn test_omdb_success_cases() {
             "--skip-blueprint-validation",
             &cptestctx.server.server_context().nexus.id().to_string(),
         ],
+        // FM config: show and set
+        &["nexus", "fm-config", "show", "current"],
+        &[
+            "-w",
+            "nexus",
+            "fm-config",
+            "set",
+            "--sitrep-limit",
+            "3000",
+            "--comment",
+            "I am altering the config. Pray I do not alter it further.",
+        ],
+        &["nexus", "fm-config", "current"],
+        &[
+            "-w",
+            "nexus",
+            "fm-config",
+            "set",
+            "--analysis-enabled",
+            "false",
+            "--comment",
+            "oops i altered it further",
+        ],
+        &["nexus", "fm-config", "current"],
+        &["nexus", "fm-config", "show", "v1"],
     ];
 
     let mut redactor = Redactor::default();

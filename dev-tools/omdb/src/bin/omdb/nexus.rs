@@ -4,6 +4,7 @@
 
 //! omdb commands that query or update specific Nexus instances
 
+mod fm_config;
 mod quiesce;
 mod reconfigurator_config;
 mod update_status;
@@ -26,6 +27,8 @@ use clap::Args;
 use clap::ColorChoice;
 use clap::Subcommand;
 use clap::ValueEnum;
+use fm_config::FmConfigArgs;
+use fm_config::cmd_nexus_fm_config;
 use futures::StreamExt;
 use futures::TryStreamExt;
 use http::StatusCode;
@@ -185,6 +188,8 @@ enum NexusCommands {
     TrustQuorum(TrustQuorumArgs),
     /// show running artifact versions
     UpdateStatus(UpdateStatusArgs),
+    /// view or modify fault management config
+    FmConfig(FmConfigArgs),
 }
 
 #[derive(Debug, Args)]
@@ -945,6 +950,9 @@ impl NexusArgs {
             }
             NexusCommands::UpdateStatus(args) => {
                 cmd_nexus_update_status(&client, args).await
+            }
+            NexusCommands::FmConfig(args) => {
+                cmd_nexus_fm_config(omdb, &client, args).await
             }
         }
     }

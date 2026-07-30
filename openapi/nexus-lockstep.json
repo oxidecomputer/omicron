@@ -982,6 +982,89 @@
         }
       }
     },
+    "/fm/config": {
+      "get": {
+        "operationId": "fm_config_show_current",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FmConfigView"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "summary": "Update the fault management config at the latest version",
+        "operationId": "fm_config_set",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FmConfigParam"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/fm/config/versions/{version}": {
+      "get": {
+        "operationId": "fm_config_show_version",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "version",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FmConfigView"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/fm/known-ereport-classes": {
       "get": {
         "summary": "List ereport classes that this Nexus's diagnosis engines consume.",
@@ -4990,6 +5073,130 @@
               "value"
             ]
           }
+        ]
+      },
+      "FmConfig": {
+        "description": "A validated fault management configuration.\n\nNote that deserializing a `FmConfig` (e.g., from a serialized [`FmConfigView`]) does *not* re-validate the fields; deserialization is intended for round-tripping values that were validated when they were first constructed.",
+        "type": "object",
+        "properties": {
+          "analysis_enabled": {
+            "description": "BREAK GLASS TO COMPLETELY DISABLE FM ANALYSIS",
+            "type": "boolean"
+          },
+          "history_pruning_threshold": {
+            "description": "The maximum number of sitreps committed to the `fm_sitrep_history` table. If the number of sitreps exceeds this threshold, the `fm_sitrep_history_pruner` background task will remove the oldest entries from the history.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 1
+          },
+          "sitrep_limit": {
+            "description": "The maximum number of sitreps to keep in the database.\n\nIf the number of sitreps exceeds this limit, the FM analysis background task will not produce a new sitrep until old ones are deleted.\n\nThis limit applies to both committed sitreps in the history *and* orphaned sitreps left behind when multiple Nexuses race to commit a sitrep.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "analysis_enabled",
+          "history_pruning_threshold",
+          "sitrep_limit"
+        ]
+      },
+      "FmConfigParam": {
+        "description": "An unvalidated FM configuration override at a particular version, such as a request to insert a new FM config version.\n\nAn insert succeeds only if `version` is exactly one greater than the current latest override version (or 1, if no overrides exist), and if the configuration values pass validation. The configuration values in this type are unvalidated, and their invariants may not hold:\n\n- [`Self::sitrep_limit`] must be at least [`FmConfig::MIN_SITREP_LIMIT`], and no more than [`FmConfig::MAX_LIMIT`], - [`Self::history_pruning_threshold`] must be at least [`FmConfig::MIN_HISTORY_PRUNING_THRESHOLD`], and no more than [`FmConfig::MAX_LIMIT`], - [`Self::history_pruning_threshold`] must be strictly less than [`Self::sitrep_limit`], - [`Self::comment`] must be non-empty.\n\nThe configuration values are validated by converting this type into a [`FmConfig`] via `TryFrom`. Whether `version` is actually the next version can only be determined by the database at insert time, so it is not checked by that conversion.",
+        "type": "object",
+        "properties": {
+          "comment": {
+            "description": "A comment describing why the default configuration was overridden.\n\nA comment is mandatory when overriding the default configuration, so this must be non-empty.",
+            "type": "string"
+          },
+          "config": {
+            "description": "The configuration itself.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/FmConfig"
+              }
+            ]
+          },
+          "version": {
+            "description": "The version of the configuration.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "comment",
+          "config",
+          "version"
+        ]
+      },
+      "FmConfigSource": {
+        "description": "Where a [`FmConfigView`]'s configuration came from.",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "default"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "The fault management configuration was overridden.",
+            "type": "object",
+            "properties": {
+              "comment": {
+                "description": "A comment describing why the default configuration was overridden.",
+                "type": "string"
+              },
+              "time_modified": {
+                "description": "The time at which this override was created.",
+                "type": "string",
+                "format": "date-time"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "override"
+                ]
+              },
+              "version": {
+                "description": "The version of the override.",
+                "type": "integer",
+                "format": "uint32",
+                "minimum": 1
+              }
+            },
+            "required": [
+              "comment",
+              "time_modified",
+              "type",
+              "version"
+            ]
+          }
+        ]
+      },
+      "FmConfigView": {
+        "description": "A view of the current fault management configuration.",
+        "type": "object",
+        "properties": {
+          "config": {
+            "$ref": "#/components/schemas/FmConfig"
+          },
+          "source": {
+            "$ref": "#/components/schemas/FmConfigSource"
+          }
+        },
+        "required": [
+          "config",
+          "source"
         ]
       },
       "Generation": {
