@@ -6,6 +6,8 @@ CREATE TABLE IF NOT EXISTS omicron.public.router_configuration (
     time_modified TIMESTAMPTZ NOT NULL,
     time_deleted TIMESTAMPTZ,
 
+    switch omicron.public.switch_slot NOT NULL,
+
     bgp_asn INT8,
     bgp_max_paths INT2 CHECK (
         bgp_max_paths IS NULL

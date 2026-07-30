@@ -4042,9 +4042,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.bgp_announcement (
 );
 
 /*
- * A router configuration: a named collection of rack routing configuration.
- * The BGP configuration sub-resource is stored inline in the `bgp_*` columns;
- * either all of them are null (no BGP configuration) or all of them are set.
+ * A router configuration: a named collection of routing configuration for a
+ * single switch. The BGP configuration sub-resource is stored inline in the
+ * `bgp_*` columns; either all of them are null (no BGP configuration) or all
+ * of them are set.
  */
 CREATE TABLE IF NOT EXISTS omicron.public.router_configuration (
     id UUID PRIMARY KEY,
@@ -4053,6 +4054,8 @@ CREATE TABLE IF NOT EXISTS omicron.public.router_configuration (
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
     time_deleted TIMESTAMPTZ,
+
+    switch omicron.public.switch_slot NOT NULL,
 
     bgp_asn INT8,
     bgp_max_paths INT2 CHECK (
@@ -4083,16 +4086,16 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_router_configuration_by_name ON omicron
 
 /*
  * A BGP peer within a router configuration. Peers are identified by name
- * within their parent router configuration. A null `addr` means the peer is
- * unnumbered; `router_lifetime` (0 = disabled) is set only when the peer
- * is unnumbered. A null `allowed_import`/`allowed_export` means no
+ * within their parent router configuration. A numbered peer has only `addr`
+ * set; an unnumbered peer has only `port_name` and `router_lifetime`
+ * (0 = disabled) set. A null `allowed_import`/`allowed_export` means no
  * filtering.
  */
 CREATE TABLE IF NOT EXISTS omicron.public.router_configuration_bgp_peer (
     router_configuration_id UUID NOT NULL,
     name STRING(63) NOT NULL,
     addr INET CHECK (host(addr) != '0.0.0.0' AND host(addr) != '::'),
-    port_name TEXT NOT NULL,
+    port_name TEXT,
     remote_asn INT8,
     allowed_import INET[],
     allowed_export INET[],
@@ -4112,8 +4115,18 @@ CREATE TABLE IF NOT EXISTS omicron.public.router_configuration_bgp_peer (
         router_lifetime >= 0 AND router_lifetime <= 9000
     ),
 
-    CONSTRAINT router_lifetime_iff_unnumbered_peer CHECK (
-        (addr IS NULL) != (router_lifetime IS NULL)
+    CONSTRAINT numbered_xor_unnumbered_peer CHECK (
+        (
+            addr IS NOT NULL
+            AND port_name IS NULL
+            AND router_lifetime IS NULL
+        )
+        OR
+        (
+            addr IS NULL
+            AND port_name IS NOT NULL
+            AND router_lifetime IS NOT NULL
+        )
     ),
 
     PRIMARY KEY (router_configuration_id, name)
@@ -6644,7 +6657,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.router_configuration_bfd_peer (
     mode omicron.public.bfd_mode NOT NULL,
     detection_threshold INT2 NOT NULL,
     required_rx INT8 NOT NULL,
-    switch omicron.public.switch_slot NOT NULL,
 
     PRIMARY KEY (router_configuration_id, name)
 );

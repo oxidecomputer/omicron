@@ -18253,14 +18253,6 @@
             "type": "integer",
             "format": "uint64",
             "minimum": 0
-          },
-          "switch": {
-            "description": "The switch hosting this BFD session",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/SwitchSlot"
-              }
-            ]
           }
         },
         "required": [
@@ -18268,8 +18260,7 @@
           "mode",
           "name",
           "remote",
-          "required_rx",
-          "switch"
+          "required_rx"
         ]
       },
       "BfdSessionDisable": {
@@ -18934,21 +18925,13 @@
         "description": "The peer to establish a BGP session with",
         "oneOf": [
           {
-            "description": "A session with a specific peer address on a given port",
+            "description": "A session with a specific peer address",
             "type": "object",
             "properties": {
               "addr": {
                 "description": "Address of the peer.",
                 "type": "string",
                 "format": "ip"
-              },
-              "port": {
-                "description": "Name of the external port the peer is reachable on, such as `qsfp0`.",
-                "allOf": [
-                  {
-                    "$ref": "#/components/schemas/Name"
-                  }
-                ]
               },
               "type": {
                 "type": "string",
@@ -18959,7 +18942,6 @@
             },
             "required": [
               "addr",
-              "port",
               "type"
             ]
           },
@@ -28172,6 +28154,14 @@
               "$ref": "#/components/schemas/StaticRoute"
             }
           },
+          "switch": {
+            "description": "The switch this router configuration applies to",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SwitchSlot"
+              }
+            ]
+          },
           "time_created": {
             "description": "Timestamp when this resource was created",
             "type": "string",
@@ -28190,6 +28180,7 @@
           "id",
           "name",
           "routes",
+          "switch",
           "time_created",
           "time_modified"
         ]
@@ -28407,11 +28398,20 @@
           },
           "name": {
             "$ref": "#/components/schemas/Name"
+          },
+          "switch": {
+            "description": "The switch this router configuration applies to",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SwitchSlot"
+              }
+            ]
           }
         },
         "required": [
           "description",
-          "name"
+          "name",
+          "switch"
         ]
       },
       "RouterConfigurationResultsPage": {
@@ -28448,6 +28448,15 @@
             "allOf": [
               {
                 "$ref": "#/components/schemas/Name"
+              }
+            ]
+          },
+          "switch": {
+            "nullable": true,
+            "description": "The switch this router configuration applies to",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SwitchSlot"
               }
             ]
           }

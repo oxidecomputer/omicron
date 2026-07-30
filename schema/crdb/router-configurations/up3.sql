@@ -2,7 +2,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.router_configuration_bgp_peer (
     router_configuration_id UUID NOT NULL,
     name STRING(63) NOT NULL,
     addr INET CHECK (host(addr) != '0.0.0.0' AND host(addr) != '::'),
-    port_name TEXT NOT NULL,
+    port_name TEXT,
     remote_asn INT8,
     allowed_import INET[],
     allowed_export INET[],
@@ -22,8 +22,18 @@ CREATE TABLE IF NOT EXISTS omicron.public.router_configuration_bgp_peer (
         router_lifetime >= 0 AND router_lifetime <= 9000
     ),
 
-    CONSTRAINT router_lifetime_iff_unnumbered_peer CHECK (
-        (addr IS NULL) != (router_lifetime IS NULL)
+    CONSTRAINT numbered_xor_unnumbered_peer CHECK (
+        (
+            addr IS NOT NULL
+            AND port_name IS NULL
+            AND router_lifetime IS NULL
+        )
+        OR
+        (
+            addr IS NULL
+            AND port_name IS NOT NULL
+            AND router_lifetime IS NOT NULL
+        )
     ),
 
     PRIMARY KEY (router_configuration_id, name)

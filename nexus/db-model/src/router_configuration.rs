@@ -91,6 +91,7 @@ impl TryFrom<RouterConfigurationBgpConfig>
 pub struct RouterConfiguration {
     #[diesel(embed)]
     pub identity: RouterConfigurationIdentity,
+    pub switch: DbSwitchSlot,
     #[diesel(embed)]
     pub bgp_config: Option<RouterConfigurationBgpConfig>,
 }
@@ -105,6 +106,7 @@ impl RouterConfiguration {
                     description: c.identity.description.clone(),
                 },
             ),
+            switch: c.switch.into(),
             bgp_config: None,
         }
     }
@@ -124,6 +126,7 @@ impl TryFrom<RouterConfiguration> for networking::RouterConfiguration {
         let bgp_config = value.bgp_config()?;
         Ok(Self {
             identity: value.identity(),
+            switch: value.switch.into(),
             bgp_config,
             bgp_peers: Vec::new(),
             routes: Vec::new(),
@@ -137,6 +140,7 @@ impl TryFrom<RouterConfiguration> for networking::RouterConfiguration {
 pub struct RouterConfigurationUpdate {
     pub name: Option<Name>,
     pub description: Option<String>,
+    pub switch: Option<DbSwitchSlot>,
     pub time_modified: DateTime<Utc>,
 }
 
@@ -145,6 +149,7 @@ impl From<networking::RouterConfigurationUpdate> for RouterConfigurationUpdate {
         Self {
             name: update.identity.name.map(Into::into),
             description: update.identity.description,
+            switch: update.switch.map(Into::into),
             time_modified: Utc::now(),
         }
     }
@@ -174,10 +179,10 @@ fn import_export_policy_from_db(
 
 /// A BGP peer for a [`RouterConfiguration`].
 ///
-/// A numbered peer has `addr` set and `router_lifetime` null, while an
-/// unnumbered peer is the reverse; a CHECK constraint ensures exactly one of
-/// the two is set, so [`RouterConfigurationBgpPeer::peer()`] can rebuild the
-/// peer as a [`networking::BgpPeerKind`].
+/// A numbered peer has only `addr` set, while an unnumbered peer has only
+/// `port_name` and `router_lifetime` set; a CHECK constraint enforces this,
+/// so [`RouterConfigurationBgpPeer::peer()`] can rebuild the peer as a
+/// [`networking::BgpPeerKind`].
 #[derive(
     Queryable, Insertable, Selectable, Clone, Debug, Serialize, Deserialize,
 )]
@@ -186,7 +191,7 @@ pub struct RouterConfigurationBgpPeer {
     pub router_configuration_id: DbTypedUuid<RouterConfigurationKind>,
     pub name: Name,
     pub addr: Option<IpNetwork>,
-    pub port_name: Name,
+    pub port_name: Option<Name>,
     pub remote_asn: Option<SqlU32>,
     pub allowed_import: Option<Vec<IpNetwork>>,
     pub allowed_export: Option<Vec<IpNetwork>>,
@@ -211,18 +216,18 @@ impl RouterConfigurationBgpPeer {
         peer: networking::RouterConfigurationBgpPeer,
     ) -> Self {
         let (addr, port_name, router_lifetime) = match peer.peer {
-            networking::BgpPeerKind::Numbered { addr, port } => {
-                (Some(IpAddr::from(addr).into()), port, None)
+            networking::BgpPeerKind::Numbered { addr } => {
+                (Some(IpAddr::from(addr).into()), None, None)
             }
             networking::BgpPeerKind::Unnumbered { port, router_lifetime } => {
-                (None, port, Some(router_lifetime.as_u16().into()))
+                (None, Some(port), Some(router_lifetime.as_u16().into()))
             }
         };
         Self {
             router_configuration_id: router_configuration_id.into(),
             name: peer.name.into(),
             addr,
-            port_name: port_name.into(),
+            port_name: port_name.map(Into::into),
             remote_asn: peer.remote_asn.map(Into::into),
             allowed_import: import_export_policy_to_db(&peer.allowed_import),
             allowed_export: import_export_policy_to_db(&peer.allowed_export),
@@ -248,9 +253,8 @@ impl RouterConfigurationBgpPeer {
     ///
     /// Only fails if invalid data has been stored in the database.
     pub fn peer(&self) -> Result<networking::BgpPeerKind, Error> {
-        let port = self.port_name.clone().into();
-        match (self.addr, self.router_lifetime) {
-            (Some(addr), None) => {
+        match (self.addr, &self.port_name, self.router_lifetime) {
+            (Some(addr), None, None) => {
                 let addr =
                     RouterPeerIpAddr::try_from(addr.ip()).map_err(|err| {
                         Error::internal_error(&format!(
@@ -259,9 +263,9 @@ impl RouterConfigurationBgpPeer {
                             InlineErrorChain::new(&err)
                         ))
                     })?;
-                Ok(networking::BgpPeerKind::Numbered { addr, port })
+                Ok(networking::BgpPeerKind::Numbered { addr })
             }
-            (None, Some(lifetime)) => {
+            (None, Some(port), Some(lifetime)) => {
                 let router_lifetime = RouterLifetimeConfig::new(*lifetime)
                     .map_err(|err| {
                         Error::internal_error(&format!(
@@ -271,13 +275,14 @@ impl RouterConfigurationBgpPeer {
                         ))
                     })?;
                 Ok(networking::BgpPeerKind::Unnumbered {
-                    port,
+                    port: port.clone().into(),
                     router_lifetime,
                 })
             }
-            (Some(_), Some(_)) | (None, None) => Err(Error::internal_error(
-                "invalid database contents: exactly one of addr and \
-                 router_lifetime must be set for a BGP peer",
+            _ => Err(Error::internal_error(
+                "invalid database contents: a BGP peer must have either \
+                 addr set (numbered) or port_name and router_lifetime set \
+                 (unnumbered)",
             )),
         }
     }
@@ -371,7 +376,6 @@ pub struct RouterConfigurationBfdPeer {
     pub mode: BfdMode,
     pub detection_threshold: SqlU8,
     pub required_rx: SqlU32,
-    pub switch: DbSwitchSlot,
 }
 
 impl RouterConfigurationBfdPeer {
@@ -389,7 +393,6 @@ impl RouterConfigurationBfdPeer {
             required_rx: SqlU32::new(
                 peer.required_rx.try_into().unwrap_or(u32::MAX),
             ),
-            switch: peer.switch.into(),
         }
     }
 }
@@ -403,7 +406,6 @@ impl From<RouterConfigurationBfdPeer> for networking::BfdPeer {
             mode: value.mode.into(),
             detection_threshold: value.detection_threshold.0,
             required_rx: (*value.required_rx).into(),
-            switch: value.switch.into(),
         }
     }
 }

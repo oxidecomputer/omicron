@@ -375,6 +375,7 @@ table! {
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
+        switch -> crate::enums::SwitchSlotEnum,
         bgp_asn -> Nullable<Int8>,
         bgp_max_paths -> Nullable<Int2>,
         bgp_announce_set_id -> Nullable<Uuid>,
@@ -386,7 +387,7 @@ table! {
         router_configuration_id -> Uuid,
         name -> Text,
         addr -> Nullable<Inet>,
-        port_name -> Text,
+        port_name -> Nullable<Text>,
         remote_asn -> Nullable<Int8>,
         allowed_import -> Nullable<Array<Inet>>,
         allowed_export -> Nullable<Array<Inet>>,
@@ -426,7 +427,6 @@ table! {
         mode -> crate::enums::BfdModeEnum,
         detection_threshold -> Int2,
         required_rx -> Int8,
-        switch -> crate::enums::SwitchSlotEnum,
     }
 }
 
