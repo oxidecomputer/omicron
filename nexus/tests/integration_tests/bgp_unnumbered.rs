@@ -101,7 +101,7 @@ async fn test_bgp_aggregate_status_api_versions(
                 },
         } => {
             assert_eq!(error_code, None);
-            assert_eq!(message, "not found: no bgp router configured");
+            assert_eq!(message, "Not Found");
             assert!(!upstream_request_id.is_empty());
         }
         SwitchResult::Ok { .. } => panic!("unknown ASN unexpectedly succeeded"),

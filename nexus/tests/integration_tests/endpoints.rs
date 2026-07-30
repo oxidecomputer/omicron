@@ -1047,11 +1047,11 @@ pub const DEMO_BGP_ROUTES_IPV4_URL: &'static str =
 pub const DEMO_BGP_MESSAGE_HISTORY_URL: &'static str =
     "/v1/system/networking/bgp-message-history?asn=47";
 pub const DEMO_BGP_UNNUMBERED_MANAGER_URL: &'static str =
-    "/v1/system/networking/bgp/unnumbered/manager";
+    "/v1/system/networking/bgp-unnumbered-manager";
 pub const DEMO_BGP_UNNUMBERED_INTERFACES_URL: &'static str =
-    "/v1/system/networking/bgp/unnumbered/interfaces";
+    "/v1/system/networking/bgp-unnumbered-interfaces";
 pub const DEMO_BGP_UNNUMBERED_INTERFACE_URL: &'static str =
-    "/v1/system/networking/bgp/unnumbered/interfaces/switch0/qsfp0";
+    "/v1/system/networking/bgp-unnumbered-interfaces/switch0/qsfp0";
 
 pub const DEMO_BFD_STATUS_URL: &'static str =
     "/v1/system/networking/bfd-status";

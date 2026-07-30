@@ -17273,7 +17273,7 @@
         ]
       },
       "BfdPeerStatusesSwitchResults": {
-        "description": "Results of querying both switches.\n\nA successful Nexus response means that Nexus obtained authoritative outcomes from enough of the switch fanout to return this value. It does not mean that either switch returned a value: both fields can contain errors when both switches reject a query, for example when a requested BGP ASN does not exist. Nexus returns a top-level server error only when both switch queries fail operationally.",
+        "description": "Results of querying both switches.",
         "type": "object",
         "properties": {
           "switch0": {
@@ -17747,7 +17747,7 @@
         ]
       },
       "BgpExportedRoutesSwitchResults": {
-        "description": "Results of querying both switches.\n\nA successful Nexus response means that Nexus obtained authoritative outcomes from enough of the switch fanout to return this value. It does not mean that either switch returned a value: both fields can contain errors when both switches reject a query, for example when a requested BGP ASN does not exist. Nexus returns a top-level server error only when both switch queries fail operationally.",
+        "description": "Results of querying both switches.",
         "type": "object",
         "properties": {
           "switch0": {
@@ -17840,7 +17840,7 @@
         ]
       },
       "BgpImportedRoutesSwitchResults": {
-        "description": "Results of querying both switches.\n\nA successful Nexus response means that Nexus obtained authoritative outcomes from enough of the switch fanout to return this value. It does not mean that either switch returned a value: both fields can contain errors when both switches reject a query, for example when a requested BGP ASN does not exist. Nexus returns a top-level server error only when both switch queries fail operationally.",
+        "description": "Results of querying both switches.",
         "type": "object",
         "properties": {
           "switch0": {
@@ -17904,7 +17904,7 @@
         ]
       },
       "BgpMessageHistoriesSwitchResults": {
-        "description": "Results of querying both switches.\n\nA successful Nexus response means that Nexus obtained authoritative outcomes from enough of the switch fanout to return this value. It does not mean that either switch returned a value: both fields can contain errors when both switches reject a query, for example when a requested BGP ASN does not exist. Nexus returns a top-level server error only when both switch queries fail operationally.",
+        "description": "Results of querying both switches.",
         "type": "object",
         "properties": {
           "switch0": {
@@ -18235,7 +18235,7 @@
         ]
       },
       "BgpPeerStatusesSwitchResults": {
-        "description": "Results of querying both switches.\n\nA successful Nexus response means that Nexus obtained authoritative outcomes from enough of the switch fanout to return this value. It does not mean that either switch returned a value: both fields can contain errors when both switches reject a query, for example when a requested BGP ASN does not exist. Nexus returns a top-level server error only when both switch queries fail operationally.",
+        "description": "Results of querying both switches.",
         "type": "object",
         "properties": {
           "switch0": {
@@ -30849,7 +30849,7 @@
         ]
       },
       "UnnumberedInterfacesSwitchResults": {
-        "description": "Results of querying both switches.\n\nA successful Nexus response means that Nexus obtained authoritative outcomes from enough of the switch fanout to return this value. It does not mean that either switch returned a value: both fields can contain errors when both switches reject a query, for example when a requested BGP ASN does not exist. Nexus returns a top-level server error only when both switch queries fail operationally.",
+        "description": "Results of querying both switches.",
         "type": "object",
         "properties": {
           "switch0": {
@@ -30924,7 +30924,7 @@
         ]
       },
       "UnnumberedManagerStateSwitchResults": {
-        "description": "Results of querying both switches.\n\nA successful Nexus response means that Nexus obtained authoritative outcomes from enough of the switch fanout to return this value. It does not mean that either switch returned a value: both fields can contain errors when both switches reject a query, for example when a requested BGP ASN does not exist. Nexus returns a top-level server error only when both switch queries fail operationally.",
+        "description": "Results of querying both switches.",
         "type": "object",
         "properties": {
           "switch0": {
