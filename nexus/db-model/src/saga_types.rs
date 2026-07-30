@@ -256,7 +256,59 @@ impl SagaRow {
     fn id(&self) -> SagaId {
         self.id
     }
+
+    // Reassemble a raw row from the loaded column tuple, so the (private)
+    // validation logic in `TryFrom<SagaRow>` can be reused by the `Queryable`
+    // impls without exposing `SagaRow` in any signature.
+    fn from_columns(columns: SagaRowColumns) -> Self {
+        let (
+            id,
+            creator,
+            time_created,
+            name,
+            saga_dag,
+            saga_state,
+            current_sec,
+            adopt_generation,
+            adopt_time,
+            abandon_time,
+            abandon_reason,
+            abandon_comment,
+        ) = columns;
+        SagaRow {
+            id,
+            creator,
+            time_created,
+            name,
+            saga_dag,
+            saga_state,
+            current_sec,
+            adopt_generation,
+            adopt_time,
+            abandon_time,
+            abandon_reason,
+            abandon_comment,
+        }
+    }
 }
+
+// The Rust-side tuple that [`SagaColumns`] deserializes into, mirroring
+// `SagaRow`'s fields. Used as `Queryable::Row` for `Saga` and `LoadedSaga`.
+// Spelled out in public types so it doesn't leak the crate-private `SagaRow`.
+type SagaRowColumns = (
+    SagaId,
+    SecId,
+    DateTime<Utc>,
+    String,
+    serde_json::Value,
+    SagaState,
+    Option<SecId>,
+    super::Generation,
+    DateTime<Utc>,
+    Option<DateTime<Utc>>,
+    Option<SagaReasonAbandoned>,
+    Option<String>,
+);
 
 /// Abandonment metadata for a saga.
 ///
@@ -295,7 +347,7 @@ impl SagaExecState {
     ///   - The saga is not in abandoned state and none of the three metadata
     ///     columns are populated.
     ///
-    /// Takes individual columns rather than a [`SagaRow`] so that types
+    /// Takes individual columns rather than a `SagaRow` so that types
     /// selecting a subset of the table's columns can use the same validation.
     pub fn try_from_columns(
         id: SagaId,
@@ -526,95 +578,6 @@ impl From<&Saga> for SagaRow {
     }
 }
 
-// The `saga` table's columns, in the order `SagaRow` declares them. Named via
-// the public schema so `Saga`/`LoadedSaga` can use them as their
-// `Selectable::SelectExpression`. We do this to avoid making `SagaRow` public.
-type SagaColumns = (
-    saga::id,
-    saga::creator,
-    saga::time_created,
-    saga::name,
-    saga::saga_dag,
-    saga::saga_state,
-    saga::current_sec,
-    saga::adopt_generation,
-    saga::adopt_time,
-    saga::abandon_time,
-    saga::abandon_reason,
-    saga::abandon_comment,
-);
-
-fn saga_columns() -> SagaColumns {
-    (
-        saga::id,
-        saga::creator,
-        saga::time_created,
-        saga::name,
-        saga::saga_dag,
-        saga::saga_state,
-        saga::current_sec,
-        saga::adopt_generation,
-        saga::adopt_time,
-        saga::abandon_time,
-        saga::abandon_reason,
-        saga::abandon_comment,
-    )
-}
-
-// The Rust-side tuple that [`SagaColumns`] deserializes into, mirroring
-// `SagaRow`'s fields. Used as `Queryable::Row` for `Saga` and `LoadedSaga`.
-// Spelled out in public types so it doesn't leak the crate-private `SagaRow`.
-type SagaRowColumns = (
-    SagaId,
-    SecId,
-    DateTime<Utc>,
-    String,
-    serde_json::Value,
-    SagaState,
-    Option<SecId>,
-    super::Generation,
-    DateTime<Utc>,
-    Option<DateTime<Utc>>,
-    Option<SagaReasonAbandoned>,
-    Option<String>,
-);
-
-impl SagaRow {
-    // Reassemble a raw row from the loaded column tuple, so the (private)
-    // validation logic in `TryFrom<SagaRow>` can be reused by the `Queryable`
-    // impls without exposing `SagaRow` in any signature.
-    fn from_columns(columns: SagaRowColumns) -> Self {
-        let (
-            id,
-            creator,
-            time_created,
-            name,
-            saga_dag,
-            saga_state,
-            current_sec,
-            adopt_generation,
-            adopt_time,
-            abandon_time,
-            abandon_reason,
-            abandon_comment,
-        ) = columns;
-        SagaRow {
-            id,
-            creator,
-            time_created,
-            name,
-            saga_dag,
-            saga_state,
-            current_sec,
-            adopt_generation,
-            adopt_time,
-            abandon_time,
-            abandon_reason,
-            abandon_comment,
-        }
-    }
-}
-
 // Allow `Saga` to be selected and loaded directly, so query sites can use
 // `.select(Saga::as_select())` and `.load::<Saga>()` without naming the private
 // `SagaRow`. `Queryable::build` is fallible, so validation happens as part of
@@ -624,10 +587,10 @@ impl SagaRow {
 // row that fails validation fails the entire query. Callers that need to skip
 // individual invalid rows should load [`LoadedSaga`] instead.
 impl diesel::Selectable<Pg> for Saga {
-    type SelectExpression = SagaColumns;
+    type SelectExpression = <saga::table as diesel::Table>::AllColumns;
 
     fn construct_selection() -> Self::SelectExpression {
-        saga_columns()
+        <saga::table as diesel::Table>::all_columns()
     }
 }
 
@@ -642,13 +605,13 @@ where
     }
 }
 
-/// The `saga` column assignments produced when inserting a `Saga`.
-///
-/// This is the type of the `(col.eq(value), ...)` tuple built by
-/// `Saga::insert_values`. It's named via the public `diesel::dsl::Eq` so that
-/// the `Insertable` impl on `&Saga` can delegate its `Values` to it without
-/// naming the crate-private `SagaRow`.
-pub type SagaInsertValues = (
+// The `saga` column assignments produced when inserting a `Saga`.
+//
+// This is the type of the `(col.eq(value), ...)` tuple built by
+// `Saga::insert_values`. It's named via the public `diesel::dsl::Eq` so that
+// the `Insertable` impl on `&Saga` can delegate its `Values` to it without
+// naming the crate-private `SagaRow`.
+type SagaInsertValues = (
     diesel::dsl::Eq<saga::id, SagaId>,
     diesel::dsl::Eq<saga::creator, SecId>,
     diesel::dsl::Eq<saga::time_created, DateTime<Utc>>,
@@ -745,10 +708,10 @@ impl TryFrom<LoadedSaga> for Saga {
 }
 
 impl diesel::Selectable<Pg> for LoadedSaga {
-    type SelectExpression = SagaColumns;
+    type SelectExpression = <saga::table as diesel::Table>::AllColumns;
 
     fn construct_selection() -> Self::SelectExpression {
-        saga_columns()
+        <saga::table as diesel::Table>::all_columns()
     }
 }
 
