@@ -2,6 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use std::collections::BTreeMap;
 use std::str::FromStr;
 
 use crate::{ByteCount, Generation, SemverVersion, typed_uuid::DbTypedUuid};
@@ -102,8 +103,13 @@ impl From<TufRepoDescription> for nexus_types::tuf_repo::TufRepoDescription {
 #[derive(Debug, Clone)]
 pub struct TufArtifactDescription {
     pub artifact: TufArtifact,
-    pub file: TufArtifactFile,
-    pub tags: Vec<TufArtifactTag>,
+
+    // `TufArtifactFile`, minus `sha256`
+    pub version: DbArtifactVersion,
+    pub artifact_size: ByteCount,
+
+    // `Vec<TufArtifactTag>`, minus `tuf_artifact_id`
+    pub tags: BTreeMap<String, String>,
 }
 
 impl TufArtifactDescription {
@@ -121,35 +127,62 @@ impl TufArtifactDescription {
                 sha256: artifact.hash.into(),
                 generation_added: generation_added.into(),
             },
-            file: TufArtifactFile {
-                sha256: artifact.hash.into(),
-                version: artifact.version.into(),
-                artifact_size: ByteCount(artifact.length.try_into()?),
-            },
-            tags: artifact
-                .tags
-                .into_iter()
-                .map(|(key, value)| TufArtifactTag {
-                    tuf_artifact_id: id,
-                    key,
-                    value,
-                })
-                .collect(),
+            version: artifact.version.into(),
+            artifact_size: ByteCount(artifact.length.try_into()?),
+            tags: artifact.tags,
         })
+    }
+
+    pub fn from_db_untagged(
+        artifact: TufArtifact,
+        file: TufArtifactFile,
+    ) -> Self {
+        Self {
+            artifact,
+            // `file.sha256` is ignored
+            version: file.version,
+            artifact_size: file.artifact_size,
+            tags: BTreeMap::new(),
+        }
+    }
+
+    pub fn to_db_file(&self) -> TufArtifactFile {
+        TufArtifactFile {
+            sha256: self.artifact.sha256,
+            version: self.version.clone(),
+            artifact_size: self.artifact_size,
+        }
+    }
+
+    pub fn into_db(
+        self,
+    ) -> (TufArtifact, TufArtifactFile, impl Iterator<Item = TufArtifactTag>)
+    {
+        let id = self.artifact.id;
+        let sha256 = self.artifact.sha256;
+        (
+            self.artifact,
+            TufArtifactFile {
+                sha256,
+                version: self.version,
+                artifact_size: self.artifact_size,
+            },
+            self.tags.into_iter().map(move |(key, value)| TufArtifactTag {
+                tuf_artifact_id: id,
+                key,
+                value,
+            }),
+        )
     }
 }
 
 impl From<TufArtifactDescription> for tufaceous_artifact_v2::Artifact {
     fn from(description: TufArtifactDescription) -> Self {
         tufaceous_artifact_v2::Artifact {
-            version: description.file.version.into(),
-            tags: description
-                .tags
-                .into_iter()
-                .map(|tag| (tag.key, tag.value))
-                .collect(),
+            version: description.version.into(),
+            tags: description.tags,
             hash: description.artifact.sha256.0,
-            length: description.file.artifact_size.0.to_bytes(),
+            length: description.artifact_size.0.to_bytes(),
         }
     }
 }
@@ -222,6 +255,16 @@ pub struct TufArtifactFile {
     pub sha256: ArtifactHash,
     pub version: DbArtifactVersion,
     pub artifact_size: ByteCount,
+}
+
+impl IdHashItem for TufArtifactFile {
+    type Key<'a> = &'a ArtifactHash;
+
+    fn key(&self) -> Self::Key<'_> {
+        &self.sha256
+    }
+
+    id_upcast!();
 }
 
 /// Artifact version in the database: a freeform identifier.

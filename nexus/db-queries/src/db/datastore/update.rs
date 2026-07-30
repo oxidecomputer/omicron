@@ -78,10 +78,8 @@ async fn artifacts_for_repo(
             .await?;
     let mut artifacts = artifacts
         .into_iter()
-        .map(|(artifact, file)| TufArtifactDescription {
-            artifact,
-            file,
-            tags: Vec::new(),
+        .map(|(artifact, file)| {
+            TufArtifactDescription::from_db_untagged(artifact, file)
         })
         .collect::<IdHashMap<_>>();
 
@@ -99,7 +97,7 @@ async fn artifacts_for_repo(
         .await?
     {
         if let Some(mut artifact) = artifacts.get_mut(&tag.tuf_artifact_id) {
-            artifact.tags.push(tag);
+            artifact.tags.insert(tag.key, tag.value);
         }
     }
 
@@ -819,10 +817,8 @@ async fn insert_impl(
             .load_async(&conn)
             .await?
             .into_iter()
-            .map(|(artifact, file)| TufArtifactDescription {
-                artifact,
-                file,
-                tags: Vec::new(),
+            .map(|(artifact, file)| {
+                TufArtifactDescription::from_db_untagged(artifact, file)
             })
             .collect::<IdHashMap<_>>();
         // Now fetch their tags and add them.
@@ -838,7 +834,7 @@ async fn insert_impl(
                 if let Some(mut artifact) =
                     results.get_mut(&tag.tuf_artifact_id)
                 {
-                    artifact.tags.push(tag);
+                    artifact.tags.insert(tag.key, tag.value);
                 }
             }
         }
@@ -855,23 +851,17 @@ async fn insert_impl(
         // keys and values as the key.
         let mut lookup = HashMap::<_, HashMap<_, _>>::new();
         for artifact in &results {
-            let tags = artifact
-                .tags
-                .iter()
-                .map(|tag| (&tag.key, &tag.value))
-                .collect::<BTreeMap<_, _>>();
             lookup
                 .entry(artifact.artifact.sha256)
                 .or_default()
-                .insert(tags, artifact);
+                .insert(&artifact.tags, artifact);
         }
 
         // Iterate through our uploaded artifacts, check that their length and
         // version are equal to what's in the database, and then look for an
         // existing entry we can use instead or insert our new entry.
         let mut mismatch = Vec::new();
-        let mut new_files: HashMap<ArtifactHash, TufArtifactFile> =
-            HashMap::new();
+        let mut new_files: IdHashMap<TufArtifactFile> = IdHashMap::new();
         let mut new_artifacts = Vec::new();
         let mut all_artifacts = Vec::new();
 
@@ -905,11 +895,13 @@ async fn insert_impl(
 
         for uploaded_artifact in &desc.artifacts {
             let mut status = ArtifactStatus::New;
+            let uploaded_file = uploaded_artifact.to_db_file();
             // Check that this isn't a mismatch within the repository.
-            if let Some(file) = new_files.get(&uploaded_artifact.file.sha256) {
-                if uploaded_artifact.file != *file {
-                    mismatch
-                        .push((uploaded_artifact.file.clone(), file.clone()));
+            if let Some(file) =
+                new_files.get(&uploaded_artifact.artifact.sha256)
+            {
+                if uploaded_file != *file {
+                    mismatch.push((uploaded_file.clone(), file.clone()));
                     status.mark_mismatch();
                 }
             }
@@ -918,23 +910,16 @@ async fn insert_impl(
                 // Check that this isn't a mismatch within previously-uploaded
                 // artifacts.
                 for artifact in inner.values() {
-                    if uploaded_artifact.file != artifact.file {
-                        mismatch.push((
-                            uploaded_artifact.file.clone(),
-                            artifact.file.clone(),
-                        ));
+                    let artifact_file = artifact.to_db_file();
+                    if uploaded_file != artifact_file {
+                        mismatch.push((uploaded_file.clone(), artifact_file));
                         status.mark_mismatch();
                         break;
                     }
                 }
                 // Check to see if this artifact already exists with the same
                 // tags.
-                let tags = uploaded_artifact
-                    .tags
-                    .iter()
-                    .map(|tag| (&tag.key, &tag.value))
-                    .collect::<BTreeMap<_, _>>();
-                if let Some(artifact) = inner.get(&tags) {
+                if let Some(artifact) = inner.get(&uploaded_artifact.tags) {
                     status.mark_existing(artifact);
                 }
             }
@@ -942,10 +927,7 @@ async fn insert_impl(
             match status {
                 ArtifactStatus::New => {
                     new_artifacts.push(uploaded_artifact.clone());
-                    new_files.insert(
-                        uploaded_artifact.file.sha256,
-                        uploaded_artifact.file.clone(),
-                    );
+                    new_files.insert_overwrite(uploaded_file);
                     all_artifacts.push(uploaded_artifact.clone());
                 }
                 ArtifactStatus::Existing(existing_artifact) => {
@@ -982,9 +964,7 @@ async fn insert_impl(
 
             let (new_artifacts, mut new_files, new_tags) = new_artifacts
                 .into_iter()
-                .map(|artifact| {
-                    (artifact.artifact, artifact.file, artifact.tags)
-                })
+                .map(TufArtifactDescription::into_db)
                 .collect::<(Vec<_>, Vec<_>, Vec<_>)>();
             let new_tags: Vec<_> = new_tags.into_iter().flatten().collect();
             // Only insert values in `tuf_artifact_file` that we have not seen
