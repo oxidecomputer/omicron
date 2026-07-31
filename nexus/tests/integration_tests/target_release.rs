@@ -14,10 +14,10 @@ use http::method::Method;
 use nexus_db_queries::authn;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
-use nexus_lockstep_client::types::BackgroundTasksActivateRequest;
 use nexus_lockstep_client::types::BlueprintTargetSet;
 use nexus_test_interface::NexusServer;
 use nexus_test_utils::ControlPlaneTestContext;
+use nexus_test_utils::background::run_blueprint_loader;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::TestResponse;
 use nexus_test_utils::http_testing::{NexusRequest, RequestBuilder};
@@ -233,13 +233,8 @@ async fn mupdate_recovery_after_noop_conversion() -> Result<()> {
 
     // The update status endpoint should report the system as suspended. Its
     // view of the blueprint comes from the blueprint loader background task,
-    // which runs infrequently in the test configuration, so activate it and
-    // poll.
-    ctx.lockstep_client()
-        .bgtask_activate(&BackgroundTasksActivateRequest {
-            bgtask_names: vec!["blueprint_loader".to_string()],
-        })
-        .await?;
+    // so activate it first.
+    run_blueprint_loader(&ctx.lockstep_client).await;
     wait_for_condition(
         || async {
             let status: update::UpdateStatus =
