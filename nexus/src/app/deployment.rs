@@ -706,9 +706,7 @@ impl BlueprintTargetReleaseStatus {
                 BlueprintZoneImageSource::Artifact { version, .. } => {
                     match version {
                         BlueprintArtifactVersion::Available { version: v } => {
-                            if v.as_str() != version_to_check
-                                && found_different_version.is_none()
-                            {
+                            if v.as_str() != version_to_check {
                                 found_different_version.get_or_insert_with(
                                     || (sled_id, version.clone()),
                                 );
