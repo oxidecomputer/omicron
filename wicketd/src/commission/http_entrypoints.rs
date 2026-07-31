@@ -315,7 +315,7 @@ impl WicketdCommissionApi for WicketdCommissionApiImpl {
         Ok(HttpResponseOk(conversions::rack_setup_status_to_ct(op_status)))
     }
 
-    async fn put_rss_config_v2(
+    async fn put_rss_config(
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<PutRssUserConfigInsensitive>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {

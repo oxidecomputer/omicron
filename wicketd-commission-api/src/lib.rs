@@ -200,7 +200,7 @@ pub trait WicketdCommissionApi {
         path = "/rack-setup/config",
         versions = VERSION_BGP_PEER_SRC_ADDR..,
     }]
-    async fn put_rss_config_v2(
+    async fn put_rss_config(
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<latest::rack_setup::PutRssUserConfigInsensitive>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
