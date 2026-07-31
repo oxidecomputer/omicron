@@ -1138,6 +1138,7 @@
             ]
           },
           {
+            "description": "The state of the commit phase of the trust quorum protocol",
             "type": "object",
             "properties": {
               "acked": {
