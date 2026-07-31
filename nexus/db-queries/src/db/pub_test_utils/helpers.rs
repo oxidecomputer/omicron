@@ -7,8 +7,6 @@
 use crate::authz;
 use crate::context::OpContext;
 use crate::db::DataStore;
-use crate::db::datastore::SERVICE_IPV4_POOL_NAME;
-use crate::db::datastore::SERVICE_IPV6_POOL_NAME;
 use crate::db::datastore::ServiceIpPool;
 use nexus_db_lookup::LookupPath;
 
@@ -665,10 +663,10 @@ pub async fn create_service_ip_pool(
 ) -> ServiceIpPool {
     let (name, description) = match version {
         external::IpVersion::V4 => {
-            (SERVICE_IPV4_POOL_NAME, "IPv4 IP Pool for Oxide Services")
+            ("oxide-service-pool-v4", "IPv4 IP Pool for Oxide Services")
         }
         external::IpVersion::V6 => {
-            (SERVICE_IPV6_POOL_NAME, "IPv6 IP Pool for Oxide Services")
+            ("oxide-service-pool-v6", "IPv6 IP Pool for Oxide Services")
         }
     };
     let name: external::Name = name.parse().expect("valid service pool name");

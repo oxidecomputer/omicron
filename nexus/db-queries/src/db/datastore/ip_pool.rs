@@ -11,8 +11,6 @@ use crate::authz::ApiResource;
 use crate::context::OpContext;
 use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
-use crate::db::datastore::SERVICE_IPV4_POOL_NAME;
-use crate::db::datastore::SERVICE_IPV6_POOL_NAME;
 use crate::db::identity::Resource;
 use crate::db::model::IncompleteIpPoolResource;
 use crate::db::model::IpKind;
@@ -43,7 +41,6 @@ use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_errors::public_error_from_diesel_lookup;
 use nexus_db_lookup::DbConnection;
-use nexus_db_lookup::LookupPath;
 use nexus_db_model::InternetGateway;
 use nexus_db_model::InternetGatewayIpPool;
 use nexus_db_model::IpVersion;
@@ -792,29 +789,6 @@ impl DataStore {
             authz::IpPool::new(authz::FLEET, pool.id(), lookup_type);
         opctx.authorize(authz::Action::CreateChild, &authz_pool).await?;
         Ok((authz_pool, pool))
-    }
-
-    /// Look up system services IP pool by its well-known name.
-    ///
-    /// This method may require an index by Availability Zone in the future.
-    //
-    // The only remaining callers are the deprecated `ip-pools-service` API
-    // handlers. Everything else resolves system-service pools by assignment via
-    // `ip_pools_service_lookup_by_version` / `_both_versions`. This method and
-    // the well-known name constants are removed once those handlers move off
-    // the builtin names. See https://github.com/oxidecomputer/omicron/issues/8950.
-    pub async fn ip_pools_service_lookup(
-        &self,
-        opctx: &OpContext,
-        ip_version: IpVersion,
-    ) -> LookupResult<(authz::IpPool, IpPool)> {
-        let name = match ip_version {
-            IpVersion::V4 => SERVICE_IPV4_POOL_NAME,
-            IpVersion::V6 => SERVICE_IPV6_POOL_NAME,
-        };
-        let name =
-            Name(name.parse().expect("should be able to parse builtin names"));
-        LookupPath::new(&opctx, self).ip_pool_name(&name).fetch().await
     }
 
     /// Creates a new IP pool.
