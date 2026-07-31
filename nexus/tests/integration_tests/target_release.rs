@@ -184,8 +184,7 @@ async fn get_set_target_release() -> Result<()> {
 /// update recovery must be allowed when all components have been no-op
 /// converted to artifacts matching the current release, AND the proposed new
 /// version matches the current release, AND the blueprint's minimum target
-/// release generation is higher than the current target release TUF repo's
-/// generation.
+/// release generation is higher than the current target release generation.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn mupdate_recovery_after_noop_conversion() -> Result<()> {
     let ctx = nexus_test_utils::ControlPlaneBuilder::new(
@@ -438,7 +437,7 @@ async fn install_target_blueprint<N: NexusServer>(
     blueprint.creator = "target_release.rs test helper".to_string();
     blueprint.comment = format!("manual update to {system_version}");
 
-    // Modify all the OS and zone sources to point to the 1.0.0 TUF repo.
+    // Modify all the OS and zone sources to point to this TUF repo.
     let bp_artifact_version = BlueprintArtifactVersion::Available {
         version: ArtifactVersion::new(system_version.to_string()).unwrap(),
     };
