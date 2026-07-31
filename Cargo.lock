@@ -14115,16 +14115,22 @@ version = "0.1.0"
 dependencies = [
  "bootstore",
  "camino",
+ "omicron-common",
  "omicron-ledger",
+ "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "serde",
+ "serde_json",
  "sled-agent-config-reconciler",
  "sled-agent-measurements",
+ "sled-agent-types",
  "slog",
  "slog-error-chain 0.1.0 (git+https://github.com/oxidecomputer/slog-error-chain?branch=main)",
  "sprockets-tls",
  "thiserror 2.0.18",
+ "tokio",
  "trust-quorum",
+ "uuid",
 ]
 
 [[package]]
@@ -14279,6 +14285,7 @@ dependencies = [
  "bootstrap-agent-lockstep-types",
  "camino",
  "camino-tempfile",
+ "iddqd",
  "itertools 0.14.0",
  "nexus-types",
  "omicron-common",

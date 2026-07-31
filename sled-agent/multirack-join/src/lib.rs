@@ -18,12 +18,26 @@ extern crate slog;
 use bootstrap_agent_lockstep_types::{
     CommitState, MultirackJoinRequest, MultirackJoinServiceState,
 };
+use iddqd::{BiHashItem, BiHashMap, bi_upcast};
 use nexus_types::trust_quorum::TrustQuorumConfig;
-use omicron_uuid_kinds::RackUuid;
+use omicron_common::address::BOOTSTRAP_AGENT_RACK_INIT_PORT;
+use omicron_common::address::Ipv6Subnet;
+use omicron_common::address::RACK_PREFIX_LENGTH;
+use omicron_common::address::SLED_PREFIX_LENGTH;
+use omicron_common::address::get_64_subnet;
+use omicron_uuid_kinds::{RackUuid, SledUuid};
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
+use sled_agent_bootstrap_common::sprockets::{
+    SprocketsClient, SprocketsClientError,
+};
 use sled_agent_bootstrap_common::{RssContext, RunRssError};
+use sled_agent_types::sled::StartSledAgentRequest;
+use sled_agent_types::sled::StartSledAgentRequestBody;
 use sled_hardware_types::BaseboardId;
-use slog::{Logger, info};
+use slog::{Logger, error, info};
 use slog_error_chain::{InlineErrorChain, SlogInlineError};
+use std::net::{Ipv6Addr, SocketAddrV6};
 use std::{
     collections::{BTreeMap, BTreeSet},
     time::Duration,
@@ -64,6 +78,22 @@ pub enum MultirackJoinServiceError {
 
     #[error("Failed to join proxy commit task")]
     ProxyCommit(#[from] JoinError),
+
+    #[error(
+        "Sprockets connections not available for all sleds. Missing {0:#?}"
+    )]
+    MissingSledConnections(BTreeSet<BaseboardId>),
+
+    #[error("Failed to start sled-agents: {0:#?}")]
+    StartSledAgents(BTreeSet<BaseboardId>),
+}
+
+#[derive(Error, Debug, SlogInlineError)]
+#[error("Failed to start sled agent on {baseboard_id}")]
+pub struct SledSpecificSprocketsError {
+    baseboard_id: BaseboardId,
+    #[source]
+    err: SprocketsClientError,
 }
 
 impl From<RunRssError> for MultirackJoinServiceError {
@@ -143,8 +173,9 @@ impl MultirackJoinServiceTask {
 
         self.init_trust_quorum(rack_id).await?;
 
+        self.start_sled_agents(rack_id).await?;
+
         // TODO:
-        //   Start sled-agents
         //   Configure networking
         //
         // https://github.com/oxidecomputer/omicron/issues/10637
@@ -152,6 +183,185 @@ impl MultirackJoinServiceTask {
         Ok(())
     }
 
+    /// Try to start all sled agents on each sled with no other zones
+    async fn start_sled_agents(
+        &mut self,
+        rack_id: RackUuid,
+    ) -> Result<(), MultirackJoinServiceError> {
+        info!(self.log, "Starting Sled agents");
+        let req = self.input_rx.borrow_and_update().clone();
+        let tq_members = req.trust_quorum_peers.clone();
+        let status = StartSledAgentsStatus::new(req);
+        self.output_tx.send_modify(|state| {
+            *state = MultirackJoinServiceState::StartSledAgents(status.clone())
+        });
+
+        let mut bootstrap_ips: BTreeMap<_, _> = self
+            .ctx
+            .trust_quorum_handle
+            .conn_mgr_status()
+            .await?
+            .connected_peers()
+            .into_iter()
+            .collect();
+
+        // Insert this node into our map. Connected peers don't include ourself.
+        bootstrap_ips.insert(
+            self.ctx.trust_quorum_handle.baseboard_id().clone(),
+            self.ctx.global_zone_bootstrap_ip,
+        );
+
+        let mut missing_sleds = BTreeSet::new();
+        for baseboard_id in tq_members {
+            if !bootstrap_ips.contains_key(&baseboard_id) {
+                missing_sleds.insert(baseboard_id);
+            }
+        }
+        // We have already initialized the trust quorum on all nodes at this
+        // point, and so the number of bootstrap ips should match our expected
+        // configuration.
+        if !missing_sleds.is_empty() {
+            return Err(MultirackJoinServiceError::MissingSledConnections(
+                missing_sleds,
+            ));
+        }
+
+        // Attempt to start all our sled agents in parallel
+        let mut set = JoinSet::new();
+        for sled in status.sleds.iter().cloned() {
+            // Unwrap is safe, because we constructed both bootstrap_ips and
+            // status from trust_quorum_peers.
+            let bootstrap_ip = *bootstrap_ips.get(&sled.baseboard_id).unwrap();
+            self.spawn_start_sled_agent_task(
+                &mut set,
+                sled.to_start_sled_agent_info(rack_id, bootstrap_ip),
+            );
+        }
+
+        let mut failed = BTreeSet::new();
+
+        // Wait for the result of each sled-agent
+        while let Some(res) = set.join_next().await {
+            match res? {
+                Ok(baseboard_id) => {
+                    info!(
+                        self.log,
+                        "Started sled agent";
+                        "baseboard_id" => %baseboard_id
+                    );
+                    self.output_tx.send_modify(|state| {
+                        let MultirackJoinServiceState::StartSledAgents(status) =
+                            state
+                        else {
+                            panic!(
+                                "MultirackJoinService in wrong state: {:#?}",
+                                state
+                            );
+                        };
+                        // Safe to unwrap since we only start tasks that return
+                        // baseboards that already exist in status.
+                        let mut info =
+                            status.sleds.get1_mut(&baseboard_id).unwrap();
+                        info.started = true;
+                    });
+                }
+                Err(err) => {
+                    // We already logged this error in the spawn task
+                    self.output_tx.send_modify(|state| {
+                        let MultirackJoinServiceState::StartSledAgents(status) =
+                            state
+                        else {
+                            panic!(
+                                "MultirackJoinService in wrong state: {:#?}",
+                                state
+                            );
+                        };
+                        // Safe to unwrap since we only start tasks that return
+                        // baseboards that already exist in status.
+                        let mut info =
+                            status.sleds.get1_mut(&err.baseboard_id).unwrap();
+                        info.fatal_error =
+                            Some(InlineErrorChain::new(&err).to_string());
+                    });
+                    failed.insert(err.baseboard_id);
+                }
+            }
+        }
+
+        if failed.is_empty() {
+            Ok(())
+        } else {
+            Err(MultirackJoinServiceError::StartSledAgents(failed))
+        }
+    }
+
+    /// Spawn a task that connects to the remote sprockets server and sends a
+    /// `StartSledAgentRequest`.
+    fn spawn_start_sled_agent_task(
+        &mut self,
+        set: &mut JoinSet<Result<BaseboardId, SledSpecificSprocketsError>>,
+        info: StartSledAgentInfo,
+    ) {
+        let log = self.log.new(o!(
+            "baseboard_id" => info.baseboard_id.to_string(),
+            "bootstrap_ip" => info.bootstrap_ip.to_string()
+        ));
+
+        info!(log, "Attempting to start sled agent";
+        );
+
+        let bootstrap_addr = SocketAddrV6::new(
+            info.bootstrap_ip,
+            BOOTSTRAP_AGENT_RACK_INIT_PORT,
+            0,
+            0,
+        );
+
+        let client = SprocketsClient::new(
+            bootstrap_addr,
+            self.ctx.sprockets_config.clone(),
+            self.ctx.measurements.clone(),
+            self.log.clone(),
+        );
+
+        set.spawn(async move {
+            match client.start_sled_agent(&info.req).await {
+                Ok(_) => Ok(info.baseboard_id),
+                Err(err) => {
+                    // There really aren't any transient errors worth worrying
+                    // about here. At this point we've already established trust
+                    // quorum and know that we can reach each sled. We should
+                    // be able to open another sprockets connection and start a
+                    // sled-agent. We could backoff on failure to connect (the
+                    // only possible transient error), but then how long do we
+                    // wait until we give up?
+                    //
+                    // The client could see the transient error and then issue
+                    // a new request with new sled membership that comes in
+                    // on `input_rx`. We would then restart the trust quorum
+                    // configuration. However, that's a bunch of extra code for
+                    // a situation where the debugging of the issue by support
+                    // is likely to take longer than doing the clean slate and
+                    // join again. And we will want to debug this, as it should
+                    // basically never happen, and means bootstrap network
+                    // endpoints are becoming unavailable for some reason.
+                    error!(
+                        log,
+                        "Failed to start sled agent";
+                        InlineErrorChain::new(&err)
+                    );
+                    Err(SledSpecificSprocketsError {
+                        baseboard_id: info.baseboard_id,
+                        err,
+                    })
+                }
+            }
+        });
+    }
+
+    // We have already initialized the trust quorum on all nodes at this
+    // point, and so the number of bootstrap ips should match our expected
+    // configuration.
     /// Start initializing trust quorum given the the existing
     /// `MultirackJoinRequest` in input_rx.
     ///
@@ -619,6 +829,9 @@ impl MultirackJoinServiceTask {
     // Check if we have received an updated membership set from an operator.
     //
     // If we have received a new set, return it. Otherwise, return `None`.
+    // We have already initialized the trust quorum on all nodes at this
+    // point, and so the number of bootstrap ips should match our expected
+    // configuration.
     // Return an error if checking for the update fails.
     async fn has_membership_changed(
         &mut self,
@@ -632,5 +845,72 @@ impl MultirackJoinServiceTask {
             }
         }
         Ok(None)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::BTreeSet;
+
+    use sled_agent_types::early_networking::{
+        LinkSpeed, PortConfig, RackNetworkConfig, SwitchSlot, UplinkPorts,
+    };
+    use sled_hardware_types::BaseboardId;
+
+    fn rack_network_config() -> RackNetworkConfig {
+        // RackNetworkConfig's ports must be nonempty.
+        let ports = vec![PortConfig {
+            routes: Vec::new(),
+            addresses: Vec::new(),
+            switch: SwitchSlot::Switch1,
+            port: "qsfp0".to_owned(),
+            uplink_port_speed: LinkSpeed::Speed100G,
+            uplink_port_fec: None,
+            bgp_peers: Vec::new(),
+            autoneg: false,
+            lldp: None,
+            tx_eq: None,
+        }];
+
+        RackNetworkConfig {
+            rack_subnet: "fd00:abcd:ffff::/56".parse().unwrap(),
+            infra_ip_first: "10.0.0.1".parse().unwrap(),
+            infra_ip_last: "10.0.0.100".parse().unwrap(),
+            ports: UplinkPorts::new(ports).unwrap(),
+            bgp: Vec::new(),
+            bfd: Vec::new(),
+        }
+    }
+
+    fn trust_quorum_peers() -> BTreeSet<BaseboardId> {
+        (0..32)
+            .into_iter()
+            .map(|i| BaseboardId {
+                part_number: "FAKE_PART".to_string(),
+                serial_number: format!("2FAKE{:03}", i),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn new_start_sled_agent_status() {
+        let req = MultirackJoinRequest {
+            trust_quorum_peers: trust_quorum_peers(),
+            rack_network_config: rack_network_config(),
+        };
+
+        let status = StartSledAgentsStatus::new(req.clone());
+        assert_eq!(status.sleds.len(), req.trust_quorum_peers.len());
+
+        let actual_sled_subnets: BTreeSet<_> =
+            status.sleds.iter().map(|s| s.sled_subnet.to_string()).collect();
+        let expected_sled_subnets: BTreeSet<_> =
+            (0..req.trust_quorum_peers.len())
+                .into_iter()
+                .map(|i| format!("fd00:abcd:ffff:{:x}::/64", i + 1))
+                .collect();
+
+        assert_eq!(actual_sled_subnets, expected_sled_subnets);
     }
 }
