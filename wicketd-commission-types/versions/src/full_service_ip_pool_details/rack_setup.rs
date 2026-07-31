@@ -198,6 +198,16 @@ impl ServiceIpPoolConfig {
     }
 }
 
+impl iddqd::IdOrdItem for ServiceIpPoolConfig {
+    type Key<'a> = &'a Name;
+
+    fn key(&self) -> Self::Key<'_> {
+        &self.name
+    }
+
+    iddqd::id_upcast!();
+}
+
 /// Errors constructing a `ServiceIpPoolConfig`.
 #[derive(Clone, Copy, Debug, thiserror::Error)]
 pub enum ServiceIpPoolError {

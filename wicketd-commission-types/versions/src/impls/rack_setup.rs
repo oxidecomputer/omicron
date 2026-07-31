@@ -201,16 +201,6 @@ impl From<ServiceIpPoolError> for omicron_common::api::external::Error {
     }
 }
 
-impl iddqd::IdOrdItem for ServiceIpPoolConfig {
-    type Key<'a> = &'a Name;
-
-    fn key(&self) -> Self::Key<'_> {
-        &self.name
-    }
-
-    iddqd::id_upcast!();
-}
-
 #[cfg(test)]
 mod tests {
     use crate::latest::rack_setup::{
