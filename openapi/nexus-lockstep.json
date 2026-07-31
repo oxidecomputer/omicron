@@ -5076,7 +5076,7 @@
         ]
       },
       "FmConfig": {
-        "description": "A validated fault management configuration.\n\nNote that deserializing a `FmConfig` (e.g., from a serialized [`FmConfigView`]) does *not* re-validate the fields; deserialization is intended for round-tripping values that were validated when they were first constructed.",
+        "description": "A fault management configuration.\n\n# Validation\n\nFor a config to be valid, the following requirements must be upheld:\n\n- [`Self::sitrep_limit`] must be at least [`Self::MIN_SITREP_LIMIT`], and no more than [`Self::MAX_LIMIT`], - [`Self::history_pruning_threshold`] must be at least [`Self::MIN_HISTORY_PRUNING_THRESHOLD`], and no more than [`Self::MAX_LIMIT`], - [`Self::history_pruning_threshold`] must be strictly less than [`Self::sitrep_limit`],\n\nThese rules are checked by the [`Self::validate`] method, which is called prior to accepting a config update.",
         "type": "object",
         "properties": {
           "analysis_enabled": {
@@ -5103,7 +5103,7 @@
         ]
       },
       "FmConfigParam": {
-        "description": "An unvalidated FM configuration override at a particular version, such as a request to insert a new FM config version.\n\nAn insert succeeds only if `version` is exactly one greater than the current latest override version (or 1, if no overrides exist), and if the configuration values pass validation. The configuration values in this type are unvalidated, and their invariants may not hold:\n\n- [`Self::sitrep_limit`] must be at least [`FmConfig::MIN_SITREP_LIMIT`], and no more than [`FmConfig::MAX_LIMIT`], - [`Self::history_pruning_threshold`] must be at least [`FmConfig::MIN_HISTORY_PRUNING_THRESHOLD`], and no more than [`FmConfig::MAX_LIMIT`], - [`Self::history_pruning_threshold`] must be strictly less than [`Self::sitrep_limit`], - [`Self::comment`] must be non-empty.\n\nThe configuration values are validated by converting this type into a [`FmConfig`] via `TryFrom`. Whether `version` is actually the next version can only be determined by the database at insert time, so it is not checked by that conversion.",
+        "description": "Parameters to insert a new FM configuration override at a particular version.\n\nA config override is accepted if and only if:\n\n- [`Self::version`] is exactly one greater than the current latest override version (or 1, if no overrides exist), - [`Self::comment`] is a non-empty string, and does not  consist entirely of whitespace characters, and, - The values in [`Self::config`] pass [validation](FmConfig#validation).\n\nThe [`FmConfigParam::validate`] method checks all of these requirements and is called prior to inserting a new config.",
         "type": "object",
         "properties": {
           "comment": {
