@@ -52,52 +52,65 @@ async fn artifacts_for_repo(
     use nexus_db_schema::schema::tuf_artifact_tag::dsl as tuf_artifact_tag_dsl;
     use nexus_db_schema::schema::tuf_repo_artifact::dsl as tuf_repo_artifact_dsl;
 
-    // We don't bother paginating in this method because all callers need to
-    // fully read the list of artifacts in a single repository, and the number
-    // of artifacts in a repository is controlled by the release engineering
-    // tooling, not users. As of July 2026 the artifact count is <100 and tag
-    // count is <250, and these numbers are expected to grow very slowly.
+    let mut artifacts = IdHashMap::new();
 
     // First collect all the artifacts belonging to this repo ID.
-    let join_on_dsl_1 =
-        tuf_artifact_dsl::id.eq(tuf_repo_artifact_dsl::tuf_artifact_id);
-    let join_on_dsl_2 =
-        tuf_artifact_file_dsl::sha256.eq(tuf_artifact_dsl::sha256);
-    let artifacts: Vec<(TufArtifact, TufArtifactFile)> =
-        tuf_repo_artifact_dsl::tuf_repo_artifact
-            .filter(
-                tuf_repo_artifact_dsl::tuf_repo_id
-                    .eq(nexus_db_model::to_db_typed_uuid(repo_id)),
-            )
-            .inner_join(tuf_artifact_dsl::tuf_artifact.on(join_on_dsl_1))
-            .inner_join(
-                tuf_artifact_file_dsl::tuf_artifact_file.on(join_on_dsl_2),
-            )
-            .select((TufArtifact::as_select(), TufArtifactFile::as_select()))
-            .load_async(conn)
-            .await?;
-    let mut artifacts = artifacts
-        .into_iter()
-        .map(|(artifact, file)| {
-            TufArtifactDescription::from_db_untagged(artifact, file)
-        })
-        .collect::<IdHashMap<_>>();
-
-    // Now collect all the tags.
-    let join_on_dsl = tuf_artifact_tag_dsl::tuf_artifact_id
-        .eq(tuf_repo_artifact_dsl::tuf_artifact_id);
-    for tag in tuf_repo_artifact_dsl::tuf_repo_artifact
+    let mut paginator =
+        Paginator::new(SQL_BATCH_SIZE, dropshot::PaginationOrder::Ascending);
+    while let Some(p) = paginator.next() {
+        let batch = paginated(
+            tuf_repo_artifact_dsl::tuf_repo_artifact,
+            tuf_repo_artifact_dsl::tuf_artifact_id,
+            &p.current_pagparams(),
+        )
         .filter(
             tuf_repo_artifact_dsl::tuf_repo_id
                 .eq(nexus_db_model::to_db_typed_uuid(repo_id)),
         )
-        .inner_join(tuf_artifact_tag_dsl::tuf_artifact_tag.on(join_on_dsl))
+        .inner_join(tuf_artifact_dsl::tuf_artifact.on(
+            tuf_artifact_dsl::id.eq(tuf_repo_artifact_dsl::tuf_artifact_id),
+        ))
+        .inner_join(
+            tuf_artifact_file_dsl::tuf_artifact_file
+                .on(tuf_artifact_file_dsl::sha256.eq(tuf_artifact_dsl::sha256)),
+        )
+        .select((TufArtifact::as_select(), TufArtifactFile::as_select()))
+        .load_async(conn)
+        .await?;
+        paginator = p.found_batch(&batch, &|(artifact, _)| artifact.id);
+        artifacts.extend(batch.into_iter().map(|(artifact, file)| {
+            TufArtifactDescription::from_db_untagged(artifact, file)
+        }));
+    }
+
+    // Now collect all the tags.
+    let mut paginator =
+        Paginator::new(SQL_BATCH_SIZE, dropshot::PaginationOrder::Ascending);
+    while let Some(p) = paginator.next() {
+        let batch = paginated_multicolumn(
+            tuf_artifact_tag_dsl::tuf_artifact_tag,
+            (tuf_artifact_tag_dsl::tuf_artifact_id, tuf_artifact_tag_dsl::key),
+            &p.current_pagparams(),
+        )
+        .inner_join(
+            tuf_repo_artifact_dsl::tuf_repo_artifact
+                .on(tuf_repo_artifact_dsl::tuf_artifact_id
+                    .eq(tuf_artifact_tag_dsl::tuf_artifact_id)),
+        )
+        .filter(
+            tuf_repo_artifact_dsl::tuf_repo_id
+                .eq(nexus_db_model::to_db_typed_uuid(repo_id)),
+        )
         .select(TufArtifactTag::as_select())
         .load_async(conn)
-        .await?
-    {
-        if let Some(mut artifact) = artifacts.get_mut(&tag.tuf_artifact_id) {
-            artifact.tags.insert(tag.key, tag.value);
+        .await?;
+        paginator = p
+            .found_batch(&batch, &|tag| (tag.tuf_artifact_id, tag.key.clone()));
+        for tag in batch {
+            if let Some(mut artifact) = artifacts.get_mut(&tag.tuf_artifact_id)
+            {
+                artifact.tags.insert(tag.key, tag.value);
+            }
         }
     }
 
@@ -110,16 +123,23 @@ async fn metadata_for_repo(
 ) -> Result<Vec<TufMetadataEntry>, DieselError> {
     use nexus_db_schema::schema::tuf_repo_metadata::dsl;
 
-    // We don't bother paginating in this method because all callers need to
-    // fully read the list of metadata, and the amount of metadata keys in a
-    // repository is controlled by the release engineering tooling, not users.
-    // As of July 2026 the number of metadata keys per repository is 0, and when
-    // we start adding metadata it is expected to grow very slowly.
-    dsl::tuf_repo_metadata
-        .filter(dsl::tuf_repo_id.eq(nexus_db_model::to_db_typed_uuid(repo_id)))
-        .select(TufMetadataEntry::as_select())
-        .load_async(conn)
-        .await
+    let mut entries = Vec::new();
+    let mut paginator =
+        Paginator::new(SQL_BATCH_SIZE, dropshot::PaginationOrder::Ascending);
+    while let Some(p) = paginator.next() {
+        let batch =
+            paginated(dsl::tuf_repo_metadata, dsl::key, &p.current_pagparams())
+                .filter(
+                    dsl::tuf_repo_id
+                        .eq(nexus_db_model::to_db_typed_uuid(repo_id)),
+                )
+                .select(TufMetadataEntry::as_select())
+                .load_async(conn)
+                .await?;
+        paginator = p.found_batch(&batch, &|entry| entry.key.clone());
+        entries.extend(batch);
+    }
+    Ok(entries)
 }
 
 impl DataStore {
