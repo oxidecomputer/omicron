@@ -1373,8 +1373,8 @@ mod tests {
             ("zone set to install dataset", bp_zone_mupdate),
         ] {
             // We should detect these sleds that need mupdate recovery whether
-            // or not the blueprint min target release generation is behind the
-            // current target release generation; try both.
+            // or not the blueprint min target release generation is ahead of
+            // the current target release generation; try both.
             for (gen_description, generation) in [
                 (
                     "generation behind blueprint minimum",
