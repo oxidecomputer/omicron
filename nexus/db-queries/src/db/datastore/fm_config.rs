@@ -140,11 +140,11 @@ impl DataStore {
     /// [`db::model::fm::FmConfig`]'s version is exactly one greater, using the
     /// [`TrueOrCastError`] pattern to fail the query if it is not. We do it
     /// this way, rather than using an `INSERT ... FROM SELECT ... WHERE ...` to
-    /// perform the check, because I wanted to be able to use the [`Insertable`]
+    /// perform the check, because I wanted to be able to use the `Insertable`
     /// implementation for `FmConfig` to generate the insert part of the query.
     /// This felt nicer because it will always work if new fields are added to
     /// the table and to the model struct without requiring the query itself to
-    /// also be updated. But, using [`Insertable`] means we have to do it like
+    /// also be updated. But, using `Insertable` means we have to do it like
     /// this rather than using a `WHERE` clause, because it cannot be used to
     /// generate a SELECT statement, only a complete
     /// `INSERT INTO ... VALUES (...)` statement.
