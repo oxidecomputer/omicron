@@ -31,7 +31,7 @@ use std::fmt::Debug;
 use tufaceous_artifact_v2::{Artifact, ArtifactSet, KnownArtifactTags, SpTags};
 use tufaceous_v2::edit::{Ed25519Key, RepositoryEditor, Root};
 
-use crate::integration_tests::target_release::set_target_release_for_mupdate_recovery;
+use crate::integration_tests::target_release::set_target_release_for_mupdate_recovery_with_expected_status;
 
 const TRUST_ROOTS_URL: &str = "/v1/system/update/trust-roots";
 
@@ -700,7 +700,12 @@ async fn test_update_status() -> Result<()> {
         .to_upload_request(client, StatusCode::OK)
         .execute()
         .await?;
-    set_target_release_for_mupdate_recovery(client, &v1).await?;
+    set_target_release_for_mupdate_recovery_with_expected_status(
+        client,
+        &v1,
+        StatusCode::NO_CONTENT,
+    )
+    .await?;
 
     let status: update::UpdateStatus =
         object_get(client, "/v1/system/update/status").await;
@@ -714,7 +719,8 @@ async fn test_update_status() -> Result<()> {
     assert_eq!(counts.get("install dataset").unwrap(), &7);
     assert_eq!(counts.get("unknown").unwrap(), &11);
 
-    // do it again so there are two, so both versions are associated with tuf repos
+    // do it again so there are two, so both versions are associated with tuf
+    // repos
     let v2 = Version::new(2, 0, 0);
     trust_root
         .assemble_repo(RepositoryEditor::fake(v2.clone())?)
@@ -722,7 +728,12 @@ async fn test_update_status() -> Result<()> {
         .to_upload_request(client, StatusCode::OK)
         .execute()
         .await?;
-    set_target_release_for_mupdate_recovery(client, &v2).await?;
+    set_target_release_for_mupdate_recovery_with_expected_status(
+        client,
+        &v2,
+        StatusCode::NO_CONTENT,
+    )
+    .await?;
 
     let status: update::UpdateStatus =
         object_get(client, "/v1/system/update/status").await;
@@ -737,8 +748,8 @@ async fn test_update_status() -> Result<()> {
     assert_eq!(counts.get("install dataset").unwrap(), &7);
     assert_eq!(counts.get("unknown").unwrap(), &11);
 
-    // `set_target_release_for_mupdate_recovery` only updates the target_release
-    // row, but the blueprint stays in its initial
+    // Setting the target release for mupdate recovery only updates the
+    // target_release row, but the blueprint stays in its initial
     // `WaitingForMupdateToBeCleared` state. This state is not treated as an
     // update in progress, so `contact_support()` runs the full health checks
     // instead of skipping them due to an "update in-progress".
@@ -883,13 +894,15 @@ async fn test_repo_list() -> Result<()> {
             .context("error deserializing third response body")?;
     assert_eq!(response3.status, TufRepoUploadStatus::Inserted);
 
-    // List repositories - should return all 3, ordered by system version (newest first)
+    // List repositories - should return all 3, ordered by system version
+    // (newest first)
     let list: ResultsPage<update::TufRepo> =
         objects_list_page_authz(client, "/v1/system/update/repositories").await;
 
     assert_eq!(list.items.len(), 3);
 
-    // Repositories should be ordered by system version descending (newest first)
+    // Repositories should be ordered by system version descending (newest
+    // first)
     let system_versions: Vec<String> =
         list.items.iter().map(|item| item.system_version.to_string()).collect();
     assert_eq!(system_versions, vec!["3.0.0", "2.0.0", "1.0.0"]);
@@ -939,7 +952,8 @@ async fn test_repo_list() -> Result<()> {
         .collect();
     assert_eq!(paginated_versions, vec!["3.0.0", "2.0.0"]);
 
-    // Fetch the next page via the returned page token and expect the remaining repo
+    // Fetch the next page via the returned page token and expect the remaining
+    // repo
     let next_page_url = format!(
         "/v1/system/update/repositories?limit=2&page_token={}",
         paginated_list.next_page.clone().expect("expected next page token"),

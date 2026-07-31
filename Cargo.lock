@@ -963,7 +963,7 @@ dependencies = [
  "sled-agent-types",
  "sled-hardware-types",
  "strum 0.27.2",
- "thiserror 2.0.18",
+ "wicketd-commission-types",
 ]
 
 [[package]]
@@ -17803,6 +17803,7 @@ dependencies = [
  "sled-hardware-types",
  "slog-error-chain",
  "test-strategy",
+ "thiserror 2.0.18",
  "toml 0.8.23",
  "uuid",
 ]

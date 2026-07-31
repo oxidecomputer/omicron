@@ -23,10 +23,10 @@ use crate::{
 };
 use wicketd_commission_types::rack_setup::{
     AllowedSourceIps, BgpAuthKeyId, IpRange, Ipv4Range, ManualPortConfig,
-    PutRssUserConfigInsensitive, UplinkAddress, UserSpecifiedBgpPeerConfig,
-    UserSpecifiedImportExportPolicy, UserSpecifiedPortConfig,
-    UserSpecifiedRackNetworkConfig, UserSpecifiedRouterPeerAddr,
-    UserSpecifiedUplinkAddressConfig,
+    PutRssUserConfigInsensitive, ServiceIpPoolConfig, UplinkAddress,
+    UserSpecifiedBgpPeerConfig, UserSpecifiedImportExportPolicy,
+    UserSpecifiedPortConfig, UserSpecifiedRackNetworkConfig,
+    UserSpecifiedRouterPeerAddr, UserSpecifiedUplinkAddressConfig,
 };
 
 /// A collection of example data structures.
@@ -138,10 +138,17 @@ impl ExampleRackSetupData {
         let dns_servers =
             vec!["1.1.1.1".parse().unwrap(), "2.2.2.2".parse().unwrap()];
         let external_dns_zone_name = "oxide.computer".to_owned();
-        let internal_services_ip_pool_ranges = vec![IpRange::V4(Ipv4Range {
-            first: "10.0.0.1".parse().unwrap(),
-            last: "10.0.0.5".parse().unwrap(),
-        })];
+        let service_ip_pools = id_ord_map! {
+            ServiceIpPoolConfig::new(
+                "oxide-service-pool-v4".parse().unwrap(),
+                "IPv4 IP Pool for Oxide Services".to_string(),
+                vec![IpRange::V4(Ipv4Range {
+                    first: "10.0.0.1".parse().unwrap(),
+                    last: "10.0.0.5".parse().unwrap(),
+                })],
+            )
+            .unwrap(),
+        };
         let external_dns_ips = vec!["10.0.0.1".parse().unwrap()];
         let ntp_servers = vec!["ntp1.com".into(), "ntp2.com".into()];
 
@@ -314,7 +321,7 @@ impl ExampleRackSetupData {
             bootstrap_sleds,
             dns_servers,
             external_dns_zone_name,
-            internal_services_ip_pool_ranges,
+            service_ip_pools,
             external_dns_ips,
             ntp_servers,
             rack_network_config: Some(rack_network_config),
@@ -344,9 +351,7 @@ impl ExampleRackSetupData {
             external_dns_zone_name: current_insensitive
                 .external_dns_zone_name
                 .clone(),
-            internal_services_ip_pool_ranges: current_insensitive
-                .internal_services_ip_pool_ranges
-                .clone(),
+            service_ip_pools: current_insensitive.service_ip_pools.clone(),
             external_dns_ips: current_insensitive.external_dns_ips.clone(),
             ntp_servers: current_insensitive.ntp_servers.clone(),
             rack_network_config: current_insensitive
