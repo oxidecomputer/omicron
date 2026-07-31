@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Checks specific to the physical-disk diagnosis engine's cases.
+//! Checks specific to the physical-disk diagnosis engine.
 
 use crate::slippy::CaseKind;
 use crate::slippy::PhysicalDiskCaseKind;
@@ -38,11 +38,17 @@ pub(super) fn check_physical_disk_cases(slippy: &mut Slippy<'_>) {
         for fact in &case.facts {
             // A fact carrying another engine's payload is reported by the
             // generic ForeignFactPayload check; skip it here.
+            //
+            // (Yes, it indicates corruption, but we'll catch it elsewhere! For
+            // now, just nab the fact that tells us which disk this is).
             let Some(disk_fact) = fact.payload.as_physical_disk() else {
                 continue;
             };
             let disk_id = disk_fact.physical_disk_id();
             let expected = *case_disk_id.get_or_insert(disk_id);
+
+            // Catch the case where multiple facts exist for a single case, but
+            // point to different disks.
             if disk_id != expected {
                 notes.push((
                     case.id,
@@ -56,8 +62,11 @@ pub(super) fn check_physical_disk_cases(slippy: &mut Slippy<'_>) {
             }
         }
 
-        // Having no facts, and sharing a disk with another case, are only
-        // invalid for open cases.
+        // For open cases:
+        // - ... If there are no facts, throw an error. The case lacks context
+        // to identify the disk.
+        // - ... If there is another open case referencing the same disk, throw
+        // an error.
         if !case.is_open() {
             continue;
         }
@@ -108,15 +117,16 @@ mod tests {
 
     #[test]
     fn open_disk_case_with_no_facts_is_flagged() {
-        let (logctx, mut sitrep) =
-            clean_sitrep("open_disk_case_with_no_facts_is_flagged");
+        let (logctx, mut sitrep) = clean_sitrep_with_one_degraded_disk(
+            "open_disk_case_with_no_facts_is_flagged",
+        );
         let case_id = sole_case_id(&sitrep);
         let fact_id = sole_fact(&sitrep).metadata.id;
         modify_case(&mut sitrep, case_id, |case| {
             case.facts.remove(&fact_id).unwrap();
         });
         assert_eq!(
-            notes_for(&sitrep),
+            slippy_notes_for(&sitrep),
             [case_note(
                 case_id,
                 CaseKind::PhysicalDisk(
@@ -129,8 +139,9 @@ mod tests {
 
     #[test]
     fn case_with_disagreeing_disks_is_flagged() {
-        let (logctx, mut sitrep) =
-            clean_sitrep("case_with_disagreeing_disks_is_flagged");
+        let (logctx, mut sitrep) = clean_sitrep_with_one_degraded_disk(
+            "case_with_disagreeing_disks_is_flagged",
+        );
         let case_id = sole_case_id(&sitrep);
         let expected = sole_fact(&sitrep)
             .payload
@@ -148,7 +159,7 @@ mod tests {
         modify_case(&mut sitrep, case_id, |case| {
             case.facts.insert_unique(intruder).unwrap();
         });
-        let notes = notes_for(&sitrep);
+        let notes = slippy_notes_for(&sitrep);
         // The check takes the first fact (in FactUuid order) as the case's
         // disk and flags the second, so which fact gets flagged depends on
         // how the two UUIDs happened to sort.
@@ -213,8 +224,9 @@ mod tests {
 
     #[test]
     fn duplicate_open_case_for_disk_is_flagged() {
-        let (logctx, mut sitrep) =
-            clean_sitrep("duplicate_open_case_for_disk_is_flagged");
+        let (logctx, mut sitrep) = clean_sitrep_with_one_degraded_disk(
+            "duplicate_open_case_for_disk_is_flagged",
+        );
         let case1 = sole_case_id(&sitrep);
         let physical_disk_id = sole_fact(&sitrep)
             .payload
@@ -240,7 +252,7 @@ mod tests {
         let (first, second) =
             if case1 < case2 { (case1, case2) } else { (case2, case1) };
         assert_eq!(
-            notes_for(&sitrep),
+            slippy_notes_for(&sitrep),
             [case_note(
                 second,
                 CaseKind::PhysicalDisk(
@@ -254,14 +266,12 @@ mod tests {
         logctx.cleanup_successful();
     }
 
-    /// Data-validity violations are flagged on closed cases too: a closed
-    /// case may still have rendezvous work pending, so its data matters.
-    /// The engine contained the violation by closing the case, so the note
-    /// is Quarantined rather than Fatal.
+    /// A case referencing two different disks should be quarantined.
     #[test]
     fn disagreeing_disks_on_closed_case_is_quarantined() {
-        let (logctx, mut sitrep) =
-            clean_sitrep("disagreeing_disks_on_closed_case_is_quarantined");
+        let (logctx, mut sitrep) = clean_sitrep_with_one_degraded_disk(
+            "disagreeing_disks_on_closed_case_is_quarantined",
+        );
         let case_id = sole_case_id(&sitrep);
         let intruder = make_degraded_fact(
             sitrep.metadata.id,
@@ -273,7 +283,7 @@ mod tests {
             case.facts.insert_unique(intruder).unwrap();
             case.metadata.closed_sitrep_id = Some(SitrepUuid::new_v4());
         });
-        let notes = notes_for(&sitrep);
+        let notes = slippy_notes_for(&sitrep);
         let [note] = notes.as_slice() else {
             panic!("expected exactly one note: {notes:?}");
         };
@@ -295,18 +305,20 @@ mod tests {
     }
 
     /// A closed case with no facts is the engine's correct disposal of an
-    /// uninterpretable case, not a violation.
+    /// uninterpretable case. Therefore, we opt to avoid "flagging a slippy error"
+    /// in this scenario.
     #[test]
     fn closed_empty_case_is_not_flagged() {
-        let (logctx, mut sitrep) =
-            clean_sitrep("closed_empty_case_is_not_flagged");
+        let (logctx, mut sitrep) = clean_sitrep_with_one_degraded_disk(
+            "closed_empty_case_is_not_flagged",
+        );
         let case_id = sole_case_id(&sitrep);
         let fact_id = sole_fact(&sitrep).metadata.id;
         modify_case(&mut sitrep, case_id, |case| {
             case.facts.remove(&fact_id).unwrap();
             case.metadata.closed_sitrep_id = Some(SitrepUuid::new_v4());
         });
-        assert_eq!(notes_for(&sitrep), Vec::new());
+        assert_eq!(slippy_notes_for(&sitrep), Vec::new());
         logctx.cleanup_successful();
     }
 
@@ -314,8 +326,9 @@ mod tests {
     /// (the disk failed, recovered, and failed again), not a violation.
     #[test]
     fn closed_case_for_same_disk_is_not_flagged() {
-        let (logctx, mut sitrep) =
-            clean_sitrep("closed_case_for_same_disk_is_not_flagged");
+        let (logctx, mut sitrep) = clean_sitrep_with_one_degraded_disk(
+            "closed_case_for_same_disk_is_not_flagged",
+        );
         let physical_disk_id = sole_fact(&sitrep)
             .payload
             .as_physical_disk()
@@ -334,7 +347,7 @@ mod tests {
         );
         closed_case.metadata.closed_sitrep_id = Some(SitrepUuid::new_v4());
         sitrep.cases.insert_unique(closed_case).unwrap();
-        assert_eq!(notes_for(&sitrep), Vec::new());
+        assert_eq!(slippy_notes_for(&sitrep), Vec::new());
         logctx.cleanup_successful();
     }
 }

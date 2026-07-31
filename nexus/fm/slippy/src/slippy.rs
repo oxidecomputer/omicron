@@ -156,11 +156,19 @@ impl fmt::Display for SitrepKind {
                 )
             }
             SitrepKind::DuplicateCaseEreportId { id, case1, case2 } => {
-                write!(
-                    f,
-                    "duplicate ereport assignment ID {id} \
-                     (cases {case1} and {case2})",
-                )
+                if case1 == case2 {
+                    write!(
+                        f,
+                        "duplicate ereport assignment ID {id} \
+                         (twice within case {case1})",
+                    )
+                } else {
+                    write!(
+                        f,
+                        "duplicate ereport assignment ID {id} \
+                         (cases {case1} and {case2})",
+                    )
+                }
             }
             SitrepKind::DuplicateFactId { fact_id, case1, case2 } => {
                 write!(

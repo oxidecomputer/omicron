@@ -28,8 +28,15 @@ pub(crate) fn perform_single_sitrep_checks(slippy: &mut Slippy<'_>) {
 }
 
 /// `ereports_by_id` is a derived index of every ereport referenced by a case.
-/// Check that it is exactly that: every case ereport appears in the index
-/// with identical content, and every index entry is referenced by some case.
+///
+/// Check that it's consistent:
+/// - Each erpeort in this index should match a "CaseEreport"
+/// - Each "CaseEreport" should appear in the index
+/// - Their values should match
+///
+/// (This is a little pedantic, and should be "not necessary" if we trust the
+/// derivation process, but it acts as a straightforward verification mechanism
+/// we can apply to all sitreps)
 fn check_ereport_index(slippy: &mut Slippy<'_>) {
     let sitrep = slippy.sitrep();
     let mut referenced = BTreeSet::new();
@@ -73,11 +80,20 @@ fn check_ereport_index(slippy: &mut Slippy<'_>) {
     }
 }
 
-/// Ereport assignment, fact, alert request, and support bundle request IDs
-/// must be unique across the whole sitrep: each becomes a database primary
-/// key, and the alert/support-bundle IDs additionally key rendezvous work.
-/// Uniqueness within one case is already guaranteed by the map keying, so
-/// only cross-case collisions are checked for.
+/// Each case can store "associated data", including: ereports, facts, alerts,
+/// support bundles, etc.
+///
+/// Facts, alerts, and support bundles are stored as IdOrdMaps keyed by these
+/// same IDs, which guarantees they're unique within the context of a single
+/// case. For those, this check validates that the primary keys are unique
+/// between DIFFERENT cases (e.g., that we aren't re-using the primary key for
+/// "fact X in case A" as the ID in "fact Y for case B").
+///
+/// Ereport assignments are the exception: `case.ereports` is keyed by the
+/// ereport's own ID, not the `CaseEreportUuid` assignment ID, so two
+/// assignments of different ereports within ONE case can also collide on
+/// `CaseEreportUuid`. For ereports, this check flags any repeated assignment
+/// ID, same-case or cross-case.
 fn check_cross_case_id_uniqueness(slippy: &mut Slippy<'_>) {
     let mut ereport_ids: BTreeMap<CaseEreportUuid, CaseUuid> = BTreeMap::new();
     let mut fact_ids: BTreeMap<FactUuid, CaseUuid> = BTreeMap::new();
@@ -86,10 +102,15 @@ fn check_cross_case_id_uniqueness(slippy: &mut Slippy<'_>) {
 
     let mut notes = Vec::new();
     for case in &slippy.sitrep().cases {
+        // As a reminder: ereports can absolutely be shared between different
+        // cases, but a "case_ereport" has a "CaseEreportUuid", which is a
+        // slightly different thing than an "ereport UUID" - it's the
+        // association of an "ereport" to a single "case".
+        //
+        // Basically, even if an ereport is shared by multiple cases, the
+        // "case_ereport.id" values should be distinct for each usage.
         for case_ereport in &case.ereports {
-            if let Some(case1) = ereport_ids.insert(case_ereport.id, case.id)
-                && case1 != case.id
-            {
+            if let Some(case1) = ereport_ids.insert(case_ereport.id, case.id) {
                 notes.push(SitrepKind::DuplicateCaseEreportId {
                     id: case_ereport.id,
                     case1,
@@ -140,7 +161,7 @@ fn check_cross_case_id_uniqueness(slippy: &mut Slippy<'_>) {
 /// case's diagnosis engine. This applies to closed cases too: a closed case
 /// may still have rendezvous work pending, so its data validity matters.
 /// On a closed case the violation is reported as `Quarantined` rather than
-/// `Fatal`, since the engine contains a corrupt case by closing it.
+/// `Fatal`, since DEs are allowed to cope with corrupt cases by closing them.
 fn check_fact_payload_engines(slippy: &mut Slippy<'_>) {
     let mut notes = Vec::new();
     for case in &slippy.sitrep().cases {
@@ -181,7 +202,7 @@ pub(crate) mod test_helpers {
     use crate::slippy::SitrepKind;
     use crate::slippy::Slippy;
     use nexus_fm::test_util::{
-        FmTest, build_input, mk_in_service, run_analyze, set_health,
+        FmTest, build_input, make_in_service_disks, run_analyze, set_health,
     };
     use nexus_types::fm;
     use nexus_types::fm::Sitrep;
@@ -190,10 +211,12 @@ pub(crate) mod test_helpers {
     use omicron_uuid_kinds::CaseUuid;
     use omicron_uuid_kinds::ZpoolUuid;
 
-    /// Produce a clean sitrep the way the diagnosis engines do: build the
-    /// example system, degrade one zpool, and run analysis. The result has
-    /// one open physical-disk case carrying one `ZpoolUnhealthy` fact.
-    pub(crate) fn clean_sitrep(
+    /// Produce a slippy-clean sitrep (zero notes, asserted during
+    /// construction) the way the diagnosis engines do: build the example
+    /// system, degrade one zpool, and run analysis. The result has one open
+    /// physical-disk case carrying one `ZpoolUnhealthy` fact, ready for
+    /// tests to mutate into a violation.
+    pub(crate) fn clean_sitrep_with_one_degraded_disk(
         test_name: &'static str,
     ) -> (dev::LogContext, Sitrep) {
         let (fm_test, logctx) = FmTest::new_with_logctx(test_name);
@@ -209,14 +232,14 @@ pub(crate) mod test_helpers {
             "example system should have at least one zpool"
         );
         set_health(&mut collection, zpools[0], ZpoolHealth::Degraded);
-        let in_service = mk_in_service(zpools.iter().copied());
+        let in_service = make_in_service_disks(zpools.iter().copied());
         let input = build_input(collection, None, in_service);
         let (sitrep, _report) = run_analyze(&logctx.log, &input);
         (logctx, sitrep)
     }
 
     /// The notes slippy produces for `sitrep`.
-    pub(crate) fn notes_for(sitrep: &Sitrep) -> Vec<Note> {
+    pub(crate) fn slippy_notes_for(sitrep: &Sitrep) -> Vec<Note> {
         Slippy::new(sitrep)
             .into_report(SlippyReportSortKey::Kind)
             .notes()
@@ -338,15 +361,18 @@ mod tests {
 
     #[test]
     fn engine_produced_sitrep_is_clean() {
-        let (logctx, sitrep) = clean_sitrep("engine_produced_sitrep_is_clean");
-        assert_eq!(notes_for(&sitrep), Vec::new());
+        let (logctx, sitrep) = clean_sitrep_with_one_degraded_disk(
+            "engine_produced_sitrep_is_clean",
+        );
+        assert_eq!(slippy_notes_for(&sitrep), Vec::new());
         logctx.cleanup_successful();
     }
 
     #[test]
     fn ereport_missing_from_index_is_flagged() {
-        let (logctx, mut sitrep) =
-            clean_sitrep("ereport_missing_from_index_is_flagged");
+        let (logctx, mut sitrep) = clean_sitrep_with_one_degraded_disk(
+            "ereport_missing_from_index_is_flagged",
+        );
         let case_id = sole_case_id(&sitrep);
         let ereport =
             Arc::new(mk_test_ereport(EreporterRestartUuid::new_v4(), 1));
@@ -359,7 +385,7 @@ mod tests {
             true,
         );
         assert_eq!(
-            notes_for(&sitrep),
+            slippy_notes_for(&sitrep),
             [sitrep_note(SitrepKind::EreportMissingFromIndex {
                 case_id,
                 ereport_id,
@@ -370,14 +396,15 @@ mod tests {
 
     #[test]
     fn orphaned_indexed_ereport_is_flagged() {
-        let (logctx, mut sitrep) =
-            clean_sitrep("orphaned_indexed_ereport_is_flagged");
+        let (logctx, mut sitrep) = clean_sitrep_with_one_degraded_disk(
+            "orphaned_indexed_ereport_is_flagged",
+        );
         let ereport =
             Arc::new(mk_test_ereport(EreporterRestartUuid::new_v4(), 1));
         let ereport_id = ereport.id;
         sitrep.ereports_by_id.insert_overwrite(ereport);
         assert_eq!(
-            notes_for(&sitrep),
+            slippy_notes_for(&sitrep),
             [sitrep_note(SitrepKind::OrphanedIndexedEreport { ereport_id })]
         );
         logctx.cleanup_successful();
@@ -385,8 +412,9 @@ mod tests {
 
     #[test]
     fn indexed_ereport_content_mismatch_is_flagged() {
-        let (logctx, mut sitrep) =
-            clean_sitrep("indexed_ereport_content_mismatch_is_flagged");
+        let (logctx, mut sitrep) = clean_sitrep_with_one_degraded_disk(
+            "indexed_ereport_content_mismatch_is_flagged",
+        );
         let case_id = sole_case_id(&sitrep);
         let restart_id = EreporterRestartUuid::new_v4();
         let ereport = Arc::new(mk_test_ereport(restart_id, 1));
@@ -403,7 +431,7 @@ mod tests {
         doppelganger.collector_id = OmicronZoneUuid::new_v4();
         sitrep.ereports_by_id.insert_overwrite(Arc::new(doppelganger));
         assert_eq!(
-            notes_for(&sitrep),
+            slippy_notes_for(&sitrep),
             [sitrep_note(SitrepKind::IndexedEreportContentMismatch {
                 case_id,
                 ereport_id,
@@ -437,8 +465,9 @@ mod tests {
 
     #[test]
     fn duplicate_case_ereport_id_is_flagged() {
-        let (logctx, mut sitrep) =
-            clean_sitrep("duplicate_case_ereport_id_is_flagged");
+        let (logctx, mut sitrep) = clean_sitrep_with_one_degraded_disk(
+            "duplicate_case_ereport_id_is_flagged",
+        );
         let (case1, case2) = add_second_case(&mut sitrep);
         // Two distinct ereports assigned under the same assignment ID.
         let restart_id = EreporterRestartUuid::new_v4();
@@ -458,7 +487,7 @@ mod tests {
             false,
         );
         assert_eq!(
-            notes_for(&sitrep),
+            slippy_notes_for(&sitrep),
             [sitrep_note(SitrepKind::DuplicateCaseEreportId {
                 id: assignment_id,
                 case1,
@@ -468,9 +497,49 @@ mod tests {
         logctx.cleanup_successful();
     }
 
+    /// `case.ereports` is keyed by ereport ID, not assignment ID, so a single
+    /// case can hold two assignments of different ereports that collide on
+    /// `CaseEreportUuid`. That collision is a violation too: assignment IDs
+    /// become database primary keys.
+    #[test]
+    fn duplicate_case_ereport_id_within_one_case_is_flagged() {
+        let (logctx, mut sitrep) = clean_sitrep_with_one_degraded_disk(
+            "duplicate_case_ereport_id_within_one_case_is_flagged",
+        );
+        let case_id = sole_case_id(&sitrep);
+        // Two distinct ereports assigned to the same case under one
+        // assignment ID.
+        let restart_id = EreporterRestartUuid::new_v4();
+        let assignment_id = CaseEreportUuid::new_v4();
+        assign_ereport(
+            &mut sitrep,
+            case_id,
+            assignment_id,
+            Arc::new(mk_test_ereport(restart_id, 1)),
+            false,
+        );
+        assign_ereport(
+            &mut sitrep,
+            case_id,
+            assignment_id,
+            Arc::new(mk_test_ereport(restart_id, 2)),
+            false,
+        );
+        assert_eq!(
+            slippy_notes_for(&sitrep),
+            [sitrep_note(SitrepKind::DuplicateCaseEreportId {
+                id: assignment_id,
+                case1: case_id,
+                case2: case_id,
+            })]
+        );
+        logctx.cleanup_successful();
+    }
+
     #[test]
     fn duplicate_fact_id_is_flagged() {
-        let (logctx, mut sitrep) = clean_sitrep("duplicate_fact_id_is_flagged");
+        let (logctx, mut sitrep) =
+            clean_sitrep_with_one_degraded_disk("duplicate_fact_id_is_flagged");
         let existing = sole_case_id(&sitrep);
         let fact_id = sole_fact(&sitrep).metadata.id;
         // A second case (about a different disk) reusing the same FactUuid.
@@ -496,7 +565,7 @@ mod tests {
             (added, existing)
         };
         assert_eq!(
-            notes_for(&sitrep),
+            slippy_notes_for(&sitrep),
             [sitrep_note(SitrepKind::DuplicateFactId {
                 fact_id,
                 case1,
@@ -508,8 +577,9 @@ mod tests {
 
     #[test]
     fn duplicate_alert_id_is_flagged() {
-        let (logctx, mut sitrep) =
-            clean_sitrep("duplicate_alert_id_is_flagged");
+        let (logctx, mut sitrep) = clean_sitrep_with_one_degraded_disk(
+            "duplicate_alert_id_is_flagged",
+        );
         let (case1, case2) = add_second_case(&mut sitrep);
         let alert_id = AlertUuid::new_v4();
         let sitrep_id = sitrep.metadata.id;
@@ -528,7 +598,7 @@ mod tests {
             });
         }
         assert_eq!(
-            notes_for(&sitrep),
+            slippy_notes_for(&sitrep),
             [sitrep_note(SitrepKind::DuplicateAlertId {
                 alert_id,
                 case1,
@@ -540,8 +610,9 @@ mod tests {
 
     #[test]
     fn duplicate_support_bundle_id_is_flagged() {
-        let (logctx, mut sitrep) =
-            clean_sitrep("duplicate_support_bundle_id_is_flagged");
+        let (logctx, mut sitrep) = clean_sitrep_with_one_degraded_disk(
+            "duplicate_support_bundle_id_is_flagged",
+        );
         let (case1, case2) = add_second_case(&mut sitrep);
         let bundle_id = omicron_uuid_kinds::SupportBundleUuid::new_v4();
         let sitrep_id = sitrep.metadata.id;
@@ -559,7 +630,7 @@ mod tests {
             });
         }
         assert_eq!(
-            notes_for(&sitrep),
+            slippy_notes_for(&sitrep),
             [sitrep_note(SitrepKind::DuplicateSupportBundleId {
                 bundle_id,
                 case1,
@@ -571,8 +642,9 @@ mod tests {
 
     #[test]
     fn foreign_fact_payload_is_flagged() {
-        let (logctx, mut sitrep) =
-            clean_sitrep("foreign_fact_payload_is_flagged");
+        let (logctx, mut sitrep) = clean_sitrep_with_one_degraded_disk(
+            "foreign_fact_payload_is_flagged",
+        );
         let case_id = sole_case_id(&sitrep);
         let fact_id = sole_fact(&sitrep).metadata.id;
         // Only one payload variant exists today, so simulate the mismatch
@@ -581,7 +653,7 @@ mod tests {
             case.metadata.de = DiagnosisEngineKind::PowerShelf;
         });
         assert_eq!(
-            notes_for(&sitrep),
+            slippy_notes_for(&sitrep),
             [case_note(
                 case_id,
                 CaseKind::ForeignFactPayload {
@@ -600,8 +672,9 @@ mod tests {
     /// is Quarantined rather than Fatal.
     #[test]
     fn foreign_fact_payload_on_closed_case_is_flagged() {
-        let (logctx, mut sitrep) =
-            clean_sitrep("foreign_fact_payload_on_closed_case_is_flagged");
+        let (logctx, mut sitrep) = clean_sitrep_with_one_degraded_disk(
+            "foreign_fact_payload_on_closed_case_is_flagged",
+        );
         let case_id = sole_case_id(&sitrep);
         let fact_id = sole_fact(&sitrep).metadata.id;
         modify_case(&mut sitrep, case_id, |case| {
@@ -609,7 +682,7 @@ mod tests {
             case.metadata.closed_sitrep_id = Some(SitrepUuid::new_v4());
         });
         assert_eq!(
-            notes_for(&sitrep),
+            slippy_notes_for(&sitrep),
             [quarantined_case_note(
                 case_id,
                 CaseKind::ForeignFactPayload {

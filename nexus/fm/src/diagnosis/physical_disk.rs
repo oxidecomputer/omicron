@@ -314,7 +314,7 @@ mod tests {
     use super::*;
     use crate::test_util::{
         FmTest, build_input, make_degraded_fact, make_disk_case,
-        make_parent_sitrep, mk_in_service, run_analyze, set_health,
+        make_in_service_disks, make_parent_sitrep, run_analyze, set_health,
     };
     use nexus_types::fm::{self, Sitrep};
     use nexus_types::in_service_disk::InServiceDisk;
@@ -422,7 +422,7 @@ mod tests {
             setup("disk_open_degraded_in_service");
         let target = zpools[0];
         set_health(&mut collection, target, ZpoolHealth::Degraded);
-        let in_service = mk_in_service(zpools.iter().copied());
+        let in_service = make_in_service_disks(zpools.iter().copied());
         let expected_disk_id = disk_id_for(&in_service, target);
         let input = build_input(collection, None, in_service);
 
@@ -450,7 +450,7 @@ mod tests {
         let target = zpools[0];
         set_health(&mut collection, target, ZpoolHealth::Faulted);
         // target is *not* in the in-service set.
-        let in_service = mk_in_service(zpools.iter().copied().skip(1));
+        let in_service = make_in_service_disks(zpools.iter().copied().skip(1));
         let input = build_input(collection, None, in_service);
 
         let (sitrep, _report) = run_analyze(&logctx.log, &input);
@@ -468,7 +468,7 @@ mod tests {
         let (logctx, mut collection, zpools) = setup("disk_idempotent");
         let target = zpools[0];
         set_health(&mut collection, target, ZpoolHealth::Degraded);
-        let in_service = mk_in_service(zpools.iter().copied());
+        let in_service = make_in_service_disks(zpools.iter().copied());
         let target_disk_id = disk_id_for(&in_service, target);
         let parent_id = SitrepUuid::new_v4();
         let parent = make_parent_with_disk_case(
@@ -498,7 +498,7 @@ mod tests {
         let (logctx, collection, zpools) = setup("disk_close_on_recovery");
         let target = zpools[0];
         // The example system reports zpools as Online by default.
-        let in_service = mk_in_service(zpools.iter().copied());
+        let in_service = make_in_service_disks(zpools.iter().copied());
         let target_disk_id = disk_id_for(&in_service, target);
         let parent_id = SitrepUuid::new_v4();
         let parent = make_parent_with_disk_case(
@@ -533,7 +533,7 @@ mod tests {
         set_health(&mut collection, target, ZpoolHealth::Degraded);
         // Target is NOT in-service in this sitrep (just expunged), so
         // disk_id_for fabricates a stable PhysicalDiskUuid for it.
-        let in_service = mk_in_service(zpools.iter().copied().skip(1));
+        let in_service = make_in_service_disks(zpools.iter().copied().skip(1));
         let target_disk_id = disk_id_for(&in_service, target);
         let parent_id = SitrepUuid::new_v4();
         let parent = make_parent_with_disk_case(
@@ -568,7 +568,8 @@ mod tests {
         let (logctx, collection, zpools) = setup("disk_keep_open_on_absence");
         let phantom = ZpoolUuid::new_v4();
         assert!(!zpools.contains(&phantom));
-        let in_service = mk_in_service(zpools.iter().copied().chain([phantom]));
+        let in_service =
+            make_in_service_disks(zpools.iter().copied().chain([phantom]));
         let phantom_disk_id = disk_id_for(&in_service, phantom);
         let parent_id = SitrepUuid::new_v4();
         let parent = make_parent_with_disk_case(
@@ -597,7 +598,7 @@ mod tests {
     #[test]
     fn empty_case_is_closed() {
         let (logctx, collection, _zpools) = setup("disk_empty_case_closed");
-        let in_service = mk_in_service(std::iter::empty());
+        let in_service = make_in_service_disks(std::iter::empty());
 
         let parent_sitrep_id = SitrepUuid::new_v4();
         let empty_case_id = omicron_uuid_kinds::CaseUuid::new_v4();
@@ -633,7 +634,7 @@ mod tests {
         let (logctx, mut collection, zpools) = setup("disk_duplicate_closed");
         let target = zpools[0];
         set_health(&mut collection, target, ZpoolHealth::Degraded);
-        let in_service = mk_in_service(zpools.iter().copied());
+        let in_service = make_in_service_disks(zpools.iter().copied());
         let target_disk_id = disk_id_for(&in_service, target);
         let parent_id = SitrepUuid::new_v4();
 
@@ -701,7 +702,7 @@ mod tests {
             setup("disk_uninterpretable_replaced");
         let target = zpools[0];
         set_health(&mut collection, target, ZpoolHealth::Degraded);
-        let in_service = mk_in_service(zpools.iter().copied());
+        let in_service = make_in_service_disks(zpools.iter().copied());
         let target_disk_id = disk_id_for(&in_service, target);
         let parent_id = SitrepUuid::new_v4();
 
@@ -778,7 +779,7 @@ mod tests {
         let (logctx, mut collection, zpools) = setup("disk_fact_uuid_stable");
         let target = zpools[0];
         set_health(&mut collection, target, ZpoolHealth::Degraded);
-        let in_service = mk_in_service(zpools.iter().copied());
+        let in_service = make_in_service_disks(zpools.iter().copied());
         let target_disk_id = disk_id_for(&in_service, target);
         let parent_id = SitrepUuid::new_v4();
         let parent = make_parent_with_disk_case(
@@ -822,7 +823,7 @@ mod tests {
         let target = zpools[0];
         // Parent recorded Degraded; current inventory shows Faulted.
         set_health(&mut collection, target, ZpoolHealth::Faulted);
-        let in_service = mk_in_service(zpools.iter().copied());
+        let in_service = make_in_service_disks(zpools.iter().copied());
         let target_disk_id = disk_id_for(&in_service, target);
         let parent_id = SitrepUuid::new_v4();
         let parent = make_parent_with_disk_case(
@@ -873,7 +874,7 @@ mod tests {
             setup("disk_fact_uuid_rotates_zpool_replaced");
         let target = zpools[0];
         set_health(&mut collection, target, ZpoolHealth::Degraded);
-        let in_service = mk_in_service(zpools.iter().copied());
+        let in_service = make_in_service_disks(zpools.iter().copied());
         let target_disk_id = disk_id_for(&in_service, target);
         // The parent's fact records the same disk and the same health
         // (Degraded), but a zpool that no longer exists.

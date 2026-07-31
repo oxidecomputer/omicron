@@ -396,7 +396,7 @@ pub fn assert_analysis_preserves_slippy_clean(
 /// its own fresh `PhysicalDiskUuid` and dummy identity fields
 /// (vendor/serial/model); tests using this only care about the zpool
 /// dimension.
-pub fn mk_in_service(
+pub fn make_in_service_disks(
     zpool_ids: impl IntoIterator<Item = ZpoolUuid>,
 ) -> IdOrdMap<InServiceDisk> {
     zpool_ids
