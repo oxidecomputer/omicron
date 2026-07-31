@@ -4,18 +4,17 @@
 
 //! Runtime configuration for the fault management subsystem.
 //!
+//! [`FmConfigParam`] is the params type for setting a new config, while
+//! [`FmConfigView`] is the view representing an already-set config version.
+//! [`FmConfig`] is a shared representation of the configuration values
+//! themselves.
+//!
 //! The default configuration is defined by [`FmConfig::default`]. This
 //! configuration may be persistently overridden by creating rows in the
 //! `fm_config` database table. Overrides are versioned: changes are made by
 //! inserting a new config with the next version number, rather than by updating
 //! the current one in place. [`FmConfigView::source`] indicates whether a
 //! configuration came from the current default or a database override.
-//!
-//! Configuration values are represented by two types: a [`FmConfigParam`]
-//! holds unvalidated values (a new override requested by a caller, or a row
-//! read back from the database), while a [`FmConfig`] has been validated
-//! against the invariants described in [`FmConfigParam`]'s documentation.
-
 use super::display::const_max_len;
 use std::fmt;
 use std::num::NonZeroU32;
@@ -25,27 +24,19 @@ use omicron_common::api::external::Error;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-/// An unvalidated FM configuration override at a particular version, such as
-/// a request to insert a new FM config version.
+/// Parameters to insert a new FM configuration override at a particular
+/// version.
 ///
-/// An insert succeeds only if `version` is exactly one greater than the
-/// current latest override version (or 1, if no overrides exist), and if the
-/// configuration values pass validation. The configuration values in this
-/// type are unvalidated, and their invariants may not hold:
+/// A config override is accepted if and only if:
 ///
-/// - [`Self::sitrep_limit`] must be at least [`FmConfig::MIN_SITREP_LIMIT`],
-///   and no more than [`FmConfig::MAX_LIMIT`],
-/// - [`Self::history_pruning_threshold`] must be at least
-///   [`FmConfig::MIN_HISTORY_PRUNING_THRESHOLD`], and no more than
-///   [`FmConfig::MAX_LIMIT`],
-/// - [`Self::history_pruning_threshold`] must be strictly less than
-///   [`Self::sitrep_limit`],
-/// - [`Self::comment`] must be non-empty.
+/// - [`Self::version`] is exactly one greater than the current latest override
+///    version (or 1, if no overrides exist),
+/// - [`Self::comment`] is a non-empty string, and does not  consist entirely
+///   of whitespace characters, and,
+/// - The values in [`Self::config`] pass [validation](FmConfig#validation).
 ///
-/// The configuration values are validated by converting this type into a
-/// [`FmConfig`] via `TryFrom`. Whether `version` is actually the next version
-/// can only be determined by the database at insert time, so it is not
-/// checked by that conversion.
+/// The [`FmConfigParam::validate`] method checks all of these requirements and
+/// is called prior to inserting a new config.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct FmConfigParam {
     /// The version of the configuration.
@@ -224,12 +215,22 @@ impl fmt::Display for FmConfigSource {
     }
 }
 
-/// A validated fault management configuration.
+/// A fault management configuration.
 ///
-/// Note that deserializing a `FmConfig` (e.g., from a serialized
-/// [`FmConfigView`]) does *not* re-validate the fields; deserialization is
-/// intended for round-tripping values that were validated when they were
-/// first constructed.
+/// # Validation
+///
+/// For a config to be valid, the following requirements must be upheld:
+///
+/// - [`Self::sitrep_limit`] must be at least [`Self::MIN_SITREP_LIMIT`],
+///   and no more than [`Self::MAX_LIMIT`],
+/// - [`Self::history_pruning_threshold`] must be at least
+///   [`Self::MIN_HISTORY_PRUNING_THRESHOLD`], and no more than
+///   [`Self::MAX_LIMIT`],
+/// - [`Self::history_pruning_threshold`] must be strictly less than
+///   [`Self::sitrep_limit`],
+///
+/// These rules are checked by the [`Self::validate`] method, which is called
+/// prior to accepting a config update.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema,
 )]
