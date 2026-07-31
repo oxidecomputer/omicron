@@ -322,23 +322,13 @@ impl MultirackJoinServiceTask {
             );
 
             // Set the output state and notifiy receivers if it has changed
-            self.output_tx.send_if_modified(|state| match state {
-                MultirackJoinServiceState::TrustQuorumPreparing(
-                    coordinator_status,
-                ) => {
-                    if &status != coordinator_status {
-                        *state =
-                            MultirackJoinServiceState::TrustQuorumPreparing(
-                                status,
-                            );
-                        true
-                    } else {
-                        false
-                    }
-                }
-                _ => {
-                    *state =
-                        MultirackJoinServiceState::TrustQuorumPreparing(status);
+            self.output_tx.send_if_modified(|state| {
+                let new_state =
+                    MultirackJoinServiceState::TrustQuorumPreparing(status);
+                if *state == new_state {
+                    false
+                } else {
+                    *state = new_state;
                     true
                 }
             });
