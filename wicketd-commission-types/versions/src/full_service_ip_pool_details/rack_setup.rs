@@ -11,12 +11,8 @@
 use std::collections::BTreeSet;
 use std::net::IpAddr;
 
-use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
-use iddqd::id_upcast;
 use omicron_common::address::IpRange;
-use omicron_common::address::IpVersion;
-use omicron_common::api::external::Error;
 use omicron_common::api::external::Name;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -178,7 +174,7 @@ pub struct ServiceIpPoolConfig {
     /// same IP version.
     // NOTE: Private to ensure the above invariants. `new()` checks them, and we
     // deserialize through `UnvalidatedServiceIpPoolConfig` to check them.
-    ranges: Vec<IpRange>,
+    pub(crate) ranges: Vec<IpRange>,
 }
 
 impl ServiceIpPoolConfig {
@@ -200,20 +196,6 @@ impl ServiceIpPoolConfig {
         }
         Ok(Self { name, description, ranges })
     }
-
-    /// The ranges belonging to this pool.
-    ///
-    /// Guaranteed to be non-empty and all of the same IP version.
-    pub fn ranges(&self) -> &[IpRange] {
-        &self.ranges
-    }
-
-    /// The IP version of this pool, derived from its ranges.
-    pub fn ip_version(&self) -> IpVersion {
-        // Safety: the constructor guarantees at least one range, and that all
-        // ranges share an IP version.
-        self.ranges[0].version()
-    }
 }
 
 /// Errors constructing a `ServiceIpPoolConfig`.
@@ -223,24 +205,6 @@ pub enum ServiceIpPoolError {
     EmptyRanges,
     #[error("ranges have mixed IP versions")]
     MixedIpVersions,
-}
-
-impl From<ServiceIpPoolError> for Error {
-    fn from(value: ServiceIpPoolError) -> Self {
-        Error::internal_error(format!(
-            "error constructing service IP pool config: {value}"
-        ))
-    }
-}
-
-impl IdOrdItem for ServiceIpPoolConfig {
-    type Key<'a> = &'a Name;
-
-    fn key(&self) -> Self::Key<'_> {
-        &self.name
-    }
-
-    id_upcast!();
 }
 
 #[derive(Deserialize)]
