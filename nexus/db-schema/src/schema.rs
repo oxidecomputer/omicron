@@ -2976,6 +2976,7 @@ table! {
         response_duration -> Nullable<Interval>,
         time_created -> Timestamptz,
         deliverator_id -> Uuid,
+        unreachable_reason -> Nullable<Text>,
     }
 }
 

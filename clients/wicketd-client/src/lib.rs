@@ -22,12 +22,10 @@ progenitor::generate_api!(
     patch = {
         CurrentRssUserConfig = { derives = [PartialEq] },
         CurrentRssUserConfigSensitive = { derives = [PartialEq, Eq, PartialOrd, Ord] },
-        GetLocationResponse = { derives = [PartialEq, Eq, PartialOrd, Ord] },
         ImageVersion = { derives = [PartialEq, Eq, PartialOrd, Ord]},
         RackInitId = { derives = [PartialEq, Eq, PartialOrd, Ord] },
         RackNetworkConfigV2 = { derives = [PartialEq, Eq, PartialOrd, Ord] },
         RackOperationStatus = { derives = [PartialEq, Eq, PartialOrd, Ord] },
-        RackResetId = { derives = [PartialEq, Eq, PartialOrd, Ord] },
         RotImageDetails = { derives = [PartialEq, Eq, PartialOrd, Ord]},
         UplinkConfig = { derives = [PartialEq, Eq, PartialOrd, Ord] },
     },
@@ -38,8 +36,9 @@ progenitor::generate_api!(
     replace = {
         AbortUpdateOptions = wicket_common::rack_update::AbortUpdateOptions,
         AllowedSourceIps = omicron_common::api::internal::shared::AllowedSourceIps,
-        ArtifactId = omicron_common::update::ArtifactId,
+        ArtifactId = wicket_common::artifact::ArtifactId,
         Baseboard = sled_hardware_types::Baseboard,
+        BaseboardId = sled_hardware_types::BaseboardId,
         BgpAuthKey = wicketd_commission_types_versions::latest::rack_setup::BgpAuthKey,
         BgpAuthKeyId = wicketd_commission_types_versions::latest::rack_setup::BgpAuthKeyId,
         BgpAuthKeyInfo = wicket_common::rack_setup::BgpAuthKeyInfo,

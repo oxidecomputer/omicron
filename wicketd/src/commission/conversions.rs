@@ -12,7 +12,7 @@ use bootstrap_agent_lockstep_types as bootstrap;
 use gateway_types::rot::RotImageError;
 use iddqd::IdOrdMap;
 use omicron_uuid_kinds::GenericUuid;
-use sled_hardware_types::{Baseboard, UnknownBaseboardError};
+use sled_hardware_types::BaseboardId;
 use transceiver_controller::message::ExtendedStatus;
 use transceiver_controller::{
     CmisDatapath, CmisDatapathState, CmisLaneStatus, Datapath, Monitors,
@@ -244,24 +244,12 @@ pub(crate) fn sp_info_to_ct(record: &SpRecord) -> ct_inv::SpInfo {
 
 pub(crate) fn bootstrap_sleds_to_ct(
     records: &IdOrdMap<SpRecord>,
-    ddm_discovered_sleds: &BTreeMap<Baseboard, Ipv6Addr>,
+    ddm_discovered_sleds: &BTreeMap<BaseboardId, Ipv6Addr>,
 ) -> ct_inv::GetBootstrapSledsResponse {
     // Use the BaseboardId (part number + serial number) to match peers to
     // sleds.
-    let mut peers = BTreeMap::new();
-    let mut unidentified_peers = BTreeSet::new();
-    for (baseboard, ip) in ddm_discovered_sleds {
-        match ct_inv::BaseboardId::try_from(baseboard.clone()) {
-            Ok(baseboard) => {
-                peers.insert(baseboard, *ip);
-            }
-            // A peer that cannot identify its own baseboard can't be matched at
-            // all, so report the address alone.
-            Err(UnknownBaseboardError) => {
-                unidentified_peers.insert(*ip);
-            }
-        }
-    }
+    let mut peers = ddm_discovered_sleds.clone();
+    let unidentified_peers = BTreeSet::new();
 
     let sleds = IdOrdMap::from_iter_unique(records.iter().filter_map(
         |record| {
@@ -714,17 +702,9 @@ pub(crate) fn rack_setup_status_to_ct(
 ) -> RackSetupStatus {
     use bootstrap::RackOperationStatus as B;
     match status {
-        B::Uninitialized { reset_id: None } => RackSetupStatus {
+        B::Uninitialized => RackSetupStatus {
             rack_state: RackState::Uninitialized,
             operation: None,
-        },
-        B::Uninitialized { reset_id: Some(id) } => RackSetupStatus {
-            rack_state: RackState::Uninitialized,
-            operation: Some(RackOperation {
-                kind: RackOperationKind::RESET,
-                id: id.into_untyped_uuid(),
-                state: RackOperationState::Completed,
-            }),
         },
         B::Initializing { id, step } => RackSetupStatus {
             rack_state: RackState::Other,
@@ -767,33 +747,6 @@ pub(crate) fn rack_setup_status_to_ct(
             rack_state: RackState::Initialized,
             operation: None,
         },
-        B::Resetting { id } => RackSetupStatus {
-            rack_state: RackState::Other,
-            operation: Some(RackOperation {
-                kind: RackOperationKind::RESET,
-                id: id.into_untyped_uuid(),
-                state: RackOperationState::InProgress { current_step: None },
-            }),
-        },
-        B::ResetFailed { id, message } => RackSetupStatus {
-            rack_state: RackState::Other,
-            operation: Some(RackOperation {
-                kind: RackOperationKind::RESET,
-                id: id.into_untyped_uuid(),
-                state: RackOperationState::Failed {
-                    message,
-                    failed_step: None,
-                },
-            }),
-        },
-        B::ResetPanicked { id } => RackSetupStatus {
-            rack_state: RackState::Other,
-            operation: Some(RackOperation {
-                kind: RackOperationKind::RESET,
-                id: id.into_untyped_uuid(),
-                state: RackOperationState::Panicked,
-            }),
-        },
     }
 }
 
@@ -834,7 +787,7 @@ mod tests {
     use bootstrap::RackOperationStatus as B;
     use gateway_types::component::PowerState;
     use iddqd::id_ord_map;
-    use omicron_uuid_kinds::{RackInitUuid, RackResetUuid};
+    use omicron_uuid_kinds::RackInitUuid;
     use sled_agent_types::early_networking::SwitchSlot;
     use std::collections::BTreeMap;
     use std::time::Duration;
@@ -1226,38 +1179,33 @@ mod tests {
         let ip = |last: u16| -> Ipv6Addr {
             format!("fdb0::{last}").parse().expect("valid IPv6 address")
         };
-        let (sled0_ip, sled1_ip, stranger_ip, unidentified_ip) =
-            (ip(1), ip(2), ip(3), ip(4));
+        let (sled0_ip, sled1_ip, stranger_ip, _) = (ip(1), ip(2), ip(3), ip(4));
 
         let mut ddm = BTreeMap::new();
         ddm.insert(
-            Baseboard::new_gimlet(
-                "SimGimlet00".to_string(),
-                "model".to_string(),
-                0,
-            ),
+            BaseboardId {
+                serial_number: "SimGimlet00".to_string(),
+                part_number: "model".to_string(),
+            },
             sled0_ip,
         );
         // Make sled 1's peer report a different _revision_ from what MGS
         // reports. The identity is part number + serial number, so it still
         // matches.
         ddm.insert(
-            Baseboard::new_gimlet(
-                "SimGimlet01".to_string(),
-                "model".to_string(),
-                4,
-            ),
+            BaseboardId {
+                serial_number: "SimGimlet01".to_string(),
+                part_number: "model".to_string(),
+            },
             sled1_ip,
         );
         ddm.insert(
-            Baseboard::new_gimlet(
-                "SimGimlet99".to_string(),
-                "model".to_string(),
-                0,
-            ),
+            BaseboardId {
+                serial_number: "SimGimlet99".to_string(),
+                part_number: "model".to_string(),
+            },
             stranger_ip,
         );
-        ddm.insert(Baseboard::unknown(), unidentified_ip);
 
         let response = bootstrap_sleds_to_ct(&records, &ddm);
 
@@ -1332,12 +1280,6 @@ mod tests {
                 },
             },
             "the peer matching no sled in inventory is surfaced as unmatched",
-        );
-        assert_eq!(
-            response.unidentified_peers,
-            BTreeSet::from([unidentified_ip]),
-            "the peer that could not identify its own baseboard is surfaced \
-             by address alone",
         );
     }
 
@@ -2193,34 +2135,15 @@ mod tests {
         let init_uuid: Uuid = "11111111-1111-4111-8111-111111111111"
             .parse()
             .expect("valid init uuid");
-        let reset_uuid: Uuid = "22222222-2222-4222-8222-222222222222"
-            .parse()
-            .expect("valid reset uuid");
         let init_id = RackInitUuid::from_untyped_uuid(init_uuid);
-        let reset_id = RackResetUuid::from_untyped_uuid(reset_uuid);
 
         assert_eq!(
-            rack_setup_status_to_ct(B::Uninitialized { reset_id: None }),
+            rack_setup_status_to_ct(B::Uninitialized),
             RackSetupStatus {
                 rack_state: RackState::Uninitialized,
                 operation: None,
             },
             "uninitialized on startup carries no operation",
-        );
-
-        assert_eq!(
-            rack_setup_status_to_ct(B::Uninitialized {
-                reset_id: Some(reset_id),
-            }),
-            RackSetupStatus {
-                rack_state: RackState::Uninitialized,
-                operation: Some(RackOperation {
-                    kind: RackOperationKind::RESET,
-                    id: reset_uuid,
-                    state: RackOperationState::Completed,
-                }),
-            },
-            "uninitialized after a completed reset carries the reset operation",
         );
 
         assert_eq!(
@@ -2300,54 +2223,6 @@ mod tests {
                 operation: None,
             },
             "a rack initialized on startup carries no operation",
-        );
-
-        assert_eq!(
-            rack_setup_status_to_ct(B::Resetting { id: reset_id }),
-            RackSetupStatus {
-                rack_state: RackState::Other,
-                operation: Some(RackOperation {
-                    kind: RackOperationKind::RESET,
-                    id: reset_uuid,
-                    state: RackOperationState::InProgress {
-                        current_step: None
-                    },
-                }),
-            },
-            "a reset in progress reports no step and leaves the rack \
-             part-way through",
-        );
-
-        assert_eq!(
-            rack_setup_status_to_ct(B::ResetFailed {
-                id: reset_id,
-                message: "reset boom".to_string(),
-            }),
-            RackSetupStatus {
-                rack_state: RackState::Other,
-                operation: Some(RackOperation {
-                    kind: RackOperationKind::RESET,
-                    id: reset_uuid,
-                    state: RackOperationState::Failed {
-                        message: "reset boom".to_string(),
-                        failed_step: None,
-                    },
-                }),
-            },
-            "a failed reset carries its message and no failed step",
-        );
-
-        assert_eq!(
-            rack_setup_status_to_ct(B::ResetPanicked { id: reset_id }),
-            RackSetupStatus {
-                rack_state: RackState::Other,
-                operation: Some(RackOperation {
-                    kind: RackOperationKind::RESET,
-                    id: reset_uuid,
-                    state: RackOperationState::Panicked,
-                }),
-            },
-            "a panicked reset leaves the rack part-way through",
         );
     }
 }

@@ -84,7 +84,7 @@ impl super::Nexus {
                     },
                     switch_slot,
                     local: Some(info.config.listen),
-                    detection_threshold: info.config.detection_threshold,
+                    detection_threshold: info.config.detection_threshold.into(),
                     required_rx: info.config.required_rx,
                     mode: match info.config.mode {
                         mg_admin_client::types::SessionMode::SingleHop => {

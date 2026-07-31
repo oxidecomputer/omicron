@@ -172,13 +172,6 @@ packages = [ "oximeter-collector" ]
 ################################################################################
 
 [[apis]]
-client_package_name = "bootstrap-agent-client"
-label = "Bootstrap Agent"
-server_package_name = "bootstrap-agent-api"
-versioned_how = "client"
-versioned_how_reason = "depends on itself (i.e., instances call each other)"
-
-[[apis]]
 client_package_name = "bootstrap-agent-lockstep-client"
 label = "Bootstrap Agent Lockstep API"
 server_package_name = "bootstrap-agent-lockstep-api"
@@ -440,7 +433,8 @@ versioned_how = "server"
 notes = """
 Stable rack commissioning API (RFD 710), served by wicketd on its own port. The
 production consumer is rkdeploy, which lives outside this workspace and is
-not currently modeled by ls-apis.
+not currently modeled by ls-apis. Wicket also uses it, and is deployed in a
+unit with wicketd.
 """
 
 [[apis]]

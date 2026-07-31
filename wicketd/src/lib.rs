@@ -31,6 +31,7 @@ pub(crate) use context::RssOrMultirackJoinConfigCommon;
 pub(crate) use context::ServerContext;
 use display_error_chain::DisplayErrorChain;
 use dropshot::{ConfigDropshot, HandlerTaskMode, HttpServer};
+use helpers::SpIdentifierDisplay;
 pub use installinator_progress::{IprUpdateTracker, RunningUpdateState};
 use internal_dns_resolver::Resolver;
 use mgs::make_mgs_client;
@@ -40,14 +41,15 @@ use omicron_common::FileKv;
 use omicron_common::address::{AZ_PREFIX_LENGTH, Ipv6Subnet};
 use oxide_update_engine_types::spec::merge_anyhow_list;
 use preflight_check::PreflightCheckerHandler;
-use sled_hardware_types::Baseboard;
-use slog::{Drain, debug, error, o};
+use sled_hardware_types::BaseboardId;
+use slog::{Drain, debug, error, info, o};
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 use std::{
     net::{SocketAddr, SocketAddrV6},
     sync::Arc,
 };
+use tokio::task::JoinHandle;
 use transceivers::Manager as TransceiverManager;
 pub use update_tracker::{StartUpdateError, UpdateTracker};
 use wicketd_client::ClientInfo as _;
@@ -59,8 +61,9 @@ pub struct Args {
     pub commission_address: SocketAddrV6,
     pub mgs_address: SocketAddrV6,
     pub nexus_proxy_address: SocketAddrV6,
-    pub baseboard: Option<Baseboard>,
+    pub baseboard_id: BaseboardId,
     pub rack_subnet: Option<Ipv6Subnet<AZ_PREFIX_LENGTH>>,
+    pub bootstrap_agent_lockstep_address: SocketAddrV6,
 }
 
 pub struct SmfConfigValues {
@@ -136,6 +139,9 @@ pub struct Server {
     pub update_tracker: Arc<UpdateTracker>,
     pub ipr_update_tracker: IprUpdateTracker,
     nexus_tcp_proxy: NexusTcpProxy,
+    // The local switch ID resolver task owns an Arc<ServerContext>, and letting
+    // it outlive the server would keep the context alive.
+    local_switch_id_resolver: JoinHandle<()>,
 }
 
 impl Server {
@@ -183,7 +189,10 @@ impl Server {
             ipr_update_tracker.clone(),
         ));
 
-        let bootstrap_peers = BootstrapPeersFromDdm::new(&log);
+        let bootstrap_peers = BootstrapPeersFromDdm::new(
+            &log,
+            args.bootstrap_agent_lockstep_address,
+        );
         let internal_dns_resolver = args
             .rack_subnet
             .map(|addr| {
@@ -222,9 +231,11 @@ impl Server {
             transceiver_handle,
             log: log.clone(),
             local_switch_id: OnceLock::new(),
+            bootstrap_agent_lockstep_address: args
+                .bootstrap_agent_lockstep_address,
             bootstrap_peers,
             update_tracker: update_tracker.clone(),
-            baseboard: args.baseboard,
+            baseboard_id: args.baseboard_id,
             rss_or_multirack_join_config: Default::default(),
             preflight_checker,
             internal_dns_resolver,
@@ -299,6 +310,16 @@ impl Server {
             })?
         };
 
+        // Spin up a small task to ensure the local switch ID is populated.
+        //
+        // Without this task, the transceiver manager stays blocked until
+        // get_location is polled or someone starts a preflight check.
+        //
+        // (Do this at the end, after fallible ? returns, so that we don't leak
+        // a task in case of failure.)
+        let local_switch_id_resolver =
+            tokio::spawn(resolve_local_switch_id(Arc::clone(&server_context)));
+
         Ok(Self {
             wicketd_server,
             commission_server,
@@ -307,11 +328,18 @@ impl Server {
             update_tracker,
             ipr_update_tracker,
             nexus_tcp_proxy,
+            local_switch_id_resolver,
         })
     }
 
     /// Close all running dropshot servers.
     pub async fn close(mut self) -> Result<()> {
+        // (Aborting a task that already exited is a no-op. Also, the only thing
+        // the local switch ID task does is set the switch slot, which is being
+        // torn down here anyway, so cancelling it is RFD 400 cancel-_correct_
+        // even though it isn't cancel-safe.)
+        self.local_switch_id_resolver.abort();
+
         // Close the servers concurrently and shut down the proxy, then report
         // every error that occurred.
         let (wicketd, commission, installinator) = tokio::join!(
@@ -422,5 +450,49 @@ impl Server {
                 return Err(err).context("failed to contact wicketd");
             }
         }
+    }
+}
+
+/// A small task to ensure local_switch_id is populated.
+async fn resolve_local_switch_id(server_context: Arc<ServerContext>) {
+    // The escalation threshold times the fast retry interval matches
+    // MgsManager. Past that threshold, something is genuinely wrong, so back
+    // off.
+    const FAST_RETRY_INTERVAL: Duration = Duration::from_secs(1);
+    const SLOW_RETRY_INTERVAL: Duration = Duration::from_secs(30);
+    const ESCALATION_THRESHOLD: u64 = 60;
+
+    let mut failures: u64 = 0;
+    loop {
+        if let Ok(switch_id) = server_context.local_switch_id().await {
+            info!(
+                server_context.log,
+                "resolved local switch ID";
+                "switch_id" => %SpIdentifierDisplay(switch_id),
+            );
+            return;
+        }
+
+        failures += 1;
+        if failures == ESCALATION_THRESHOLD {
+            error!(
+                server_context.log,
+                "cannot resolve the local switch ID from MGS; transceiver \
+                 inventory and wicketd's rack location remain unavailable \
+                 until this succeeds (see the preceding warnings for the \
+                 underlying error); retrying every {}s from now on",
+                SLOW_RETRY_INTERVAL.as_secs();
+                "attempts" => failures,
+            );
+        }
+
+        // (local_switch_id warns on every failure, so logging each attempt here
+        // too would be unhelpful.)
+        let interval = if failures < ESCALATION_THRESHOLD {
+            FAST_RETRY_INTERVAL
+        } else {
+            SLOW_RETRY_INTERVAL
+        };
+        tokio::time::sleep(interval).await;
     }
 }

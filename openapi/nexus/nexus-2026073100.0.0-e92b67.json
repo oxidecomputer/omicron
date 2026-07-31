@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "2026062800.0.0"
+    "version": "2026073100.0.0"
   },
   "paths": {
     "/device/auth": {
@@ -5388,7 +5388,7 @@
           {
             "in": "query",
             "name": "cascade",
-            "description": "Also delete routes targeting this gateway element.",
+            "description": "Detach attached IP pools/addresses and delete any routes targeting this gateway. Without `cascade`, delete fails if the gateway has any IP pools or IP addresses attached.",
             "schema": {
               "type": "boolean"
             }
@@ -5598,7 +5598,7 @@
           {
             "in": "query",
             "name": "cascade",
-            "description": "Also delete routes targeting this gateway element.",
+            "description": "Detach attached IP pools/addresses and delete any routes targeting this gateway. Without `cascade`, delete fails if the gateway has any IP pools or IP addresses attached.",
             "schema": {
               "type": "boolean"
             }
@@ -5844,7 +5844,7 @@
           {
             "in": "query",
             "name": "cascade",
-            "description": "Also delete routes targeting this gateway.",
+            "description": "Detach attached IP pools/addresses and delete any routes targeting this gateway. Without `cascade`, delete fails if the gateway has any IP pools or IP addresses attached.",
             "schema": {
               "type": "boolean"
             }

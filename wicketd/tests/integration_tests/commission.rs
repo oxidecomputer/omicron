@@ -9,14 +9,14 @@ use super::setup::{
     Cond, WicketdTestContext, assert_client_error, assert_client_error_message,
     wait_for_sled0_progress,
 };
-use camino_tempfile::Utf8TempDir;
-use clap::Parser;
 use gateway_messages::SpPort;
 use gateway_test_utils::setup as gateway_setup;
 use http::StatusCode;
 use iddqd::{IdOrdMap, id_ord_map};
 use omicron_test_utils::dev::poll::{CondCheckError, wait_for_condition};
+use semver::Version;
 use sp_sim::ROT_STAGING_DEVEL_SIGN;
+use tufaceous_v2::edit::RepositoryEditor;
 use wicket_common::example::ExampleRackSetupData;
 use wicket_common::rack_setup::CurrentRssUserConfigInsensitive;
 use wicketd_commission_types::rack_setup::PutRssUserConfigInsensitive;
@@ -262,25 +262,16 @@ async fn test_commission_inventory() {
         }),
         "switch 0 baseboard reported by sp-sim"
     );
-    assert_eq!(
-        location.sled_baseboard, None,
-        "the harness sets no baseboard, so wicketd cannot identify its sled"
-    );
-    assert_eq!(
-        location.sled_id, None,
-        "without a baseboard there is nothing to match against inventory"
-    );
 
     ctx.teardown().await;
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[tokio::test]
 async fn test_commission_start_update() {
     let gateway =
         gateway_setup::test_setup("test_commission_start_update", SpPort::One)
             .await;
     let ctx = WicketdTestContext::setup(gateway).await;
-    let log = ctx.log();
 
     // Since a repository hasn't been uploaded yet, the described system version
     // is absent.
@@ -323,18 +314,18 @@ async fn test_commission_start_update() {
     );
 
     // Now upload a fake TUF repository so a real update can start.
-    let temp_dir = Utf8TempDir::new().expect("temp dir created");
-    let archive_path = temp_dir.path().join("archive.zip");
-    let args = tufaceous::Args::try_parse_from([
-        "tufaceous",
-        "assemble",
-        "../update-common/manifests/fake.toml",
-        archive_path.as_str(),
-    ])
-    .expect("args parsed correctly");
-    args.exec(log).await.expect("assemble command completed successfully");
-    let zip_bytes =
-        fs_err::read(&archive_path).expect("archive read correctly");
+    let zip_bytes = RepositoryEditor::fake(Version::new(1, 0, 0))
+        .unwrap()
+        .finish()
+        .await
+        .unwrap()
+        .generate_root()
+        .sign()
+        .await
+        .unwrap()
+        .write_zip(Vec::new(), chrono::Utc::now())
+        .await
+        .unwrap();
     ctx.commission_client
         .put_repository(zip_bytes)
         .await
@@ -388,30 +379,6 @@ async fn test_commission_rss_config() {
         gateway_setup::test_setup("test_commission_rss_config", SpPort::One)
             .await;
     let ctx = WicketdTestContext::setup(gateway).await;
-
-    // We can't actually start RSS since we don't have a bootstrap agent in the
-    // backend, but at least ensure that the endpoints return a 503.
-    let err = ctx
-        .commission_client
-        .get_rack_setup_state()
-        .await
-        .expect_err("get_rack_setup_state fails without a bootstrap agent");
-    assert_client_error_message(
-        &err,
-        StatusCode::SERVICE_UNAVAILABLE,
-        "bootstrap agent address not yet known",
-    );
-
-    let err = ctx
-        .commission_client
-        .post_run_rack_setup()
-        .await
-        .expect_err("post_run_rack_setup fails without a bootstrap agent");
-    assert_client_error_message(
-        &err,
-        StatusCode::SERVICE_UNAVAILABLE,
-        "bootstrap agent address not yet known",
-    );
 
     // Upload a certificate first -- wicketd will wait for the corresponding
     // key.
@@ -495,7 +462,7 @@ async fn test_commission_rss_config() {
     // is empty, so {0, 1} would equal that substitute and the assertion below
     // would hold even if the config had never been stored. A strict subset
     // cannot be produced by the substitute, so it distinguishes the two.
-    internal.bootstrap_sleds = std::iter::once(0u16).collect();
+    internal.bootstrap_sleds = std::iter::once(1u16).collect();
     // The example config leaves this false, which is also the default, so flip
     // it here to make the test meaningful.
     internal.external_jumbo_frames_opt_in_enabled = true;
