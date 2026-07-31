@@ -19,6 +19,7 @@ use crate::db::pagination::paginated;
 use crate::db::pagination::paginated_multicolumn;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
+use diesel::result::DatabaseErrorKind;
 use diesel::result::Error as DieselError;
 use iddqd::IdHashMap;
 use nexus_db_errors::OptionalError;
@@ -107,10 +108,22 @@ async fn artifacts_for_repo(
         paginator = p
             .found_batch(&batch, &|tag| (tag.tuf_artifact_id, tag.key.clone()));
         for tag in batch {
-            if let Some(mut artifact) = artifacts.get_mut(&tag.tuf_artifact_id)
-            {
-                artifact.tags.insert(tag.key, tag.value);
-            }
+            let Some(mut artifact) = artifacts.get_mut(&tag.tuf_artifact_id)
+            else {
+                // This implies that the contents of `tuf_repo_artifact` for our
+                // repo ID changed between the first batch of queries (listing
+                // artifacts) and this batch (listing tags). Not only should
+                // this not happen because we are in a transaction, this should
+                // never happen because the set of artifacts for a particular
+                // repository never changes after first being inserted!
+                return Err(DieselError::DatabaseError(
+                    DatabaseErrorKind::ForeignKeyViolation,
+                    Box::new(format!(
+                        "artifact for {tag:?} was not seen in previous query"
+                    )),
+                ));
+            };
+            artifact.tags.insert(tag.key, tag.value);
         }
     }
 
