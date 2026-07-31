@@ -357,6 +357,11 @@ impl super::Nexus {
                 // 3. Reconfigurator notices the mupdate and bumps the minimum
                 //    target release generation, and pauses the update as a
                 //    result.
+                // 4. Reconfigurator performs a no-op conversion of this sled,
+                //    updating all its components to artifacts sourced from
+                //    release B. (No-op conversion is _not_ paused by the
+                //    blueprint's minimum target release generation being ahead
+                //    of the current target release.)
                 //
                 // If the operator attempts to use this endpoint to set the
                 // target release to B, what should we do? In the current
