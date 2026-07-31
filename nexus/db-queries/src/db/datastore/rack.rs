@@ -25,6 +25,7 @@ use chrono::Utc;
 use diesel::prelude::*;
 use diesel::result::Error as DieselError;
 use diesel::upsert::excluded;
+use iddqd::IdOrdMap;
 use ipnetwork::IpNetwork;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::TransactionError;
@@ -36,7 +37,6 @@ use nexus_db_lookup::DbConnection;
 use nexus_db_lookup::LookupPath;
 use nexus_db_model::IncompleteNetworkInterface;
 use nexus_db_model::InitialDnsGroup;
-use nexus_db_model::IpVersion;
 use nexus_db_model::PasswordHashString;
 use nexus_db_model::SiloUser;
 use nexus_db_model::SiloUserPasswordHash;
@@ -53,14 +53,13 @@ use nexus_types::external_api::policy::{RoleAssignment, SiloRole};
 use nexus_types::external_api::silo as silo_types;
 use nexus_types::identity::Resource;
 use nexus_types::internal_api::params::InitialTrustQuorumConfig;
-use omicron_common::address::IpRange;
+use nexus_types::internal_api::params::ServiceIpPoolConfig;
 use omicron_common::api::external::AllowedSourceIps;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupType;
-use omicron_common::api::external::Name;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::UserId;
@@ -86,7 +85,7 @@ pub struct RackInit {
     pub physical_disks: Vec<PhysicalDisk>,
     pub zpools: Vec<Zpool>,
     pub datasets: Vec<CrucibleDataset>,
-    pub service_ip_pools: Vec<ServiceIpPoolConfig>,
+    pub service_ip_pools: IdOrdMap<ServiceIpPoolConfig>,
     pub internal_dns: InitialDnsGroup,
     pub external_dns: InitialDnsGroup,
     pub recovery_silo: silo_types::SiloCreate,
@@ -96,54 +95,6 @@ pub struct RackInit {
     pub dns_update: DnsVersionUpdateBuilder,
     pub allowed_source_ips: AllowedSourceIps,
     pub initial_trust_quorum_configuration: Option<InitialTrustQuorumConfig>,
-}
-
-/// Full details of a system-service IP pool, provided at rack setup (RSS).
-#[derive(Clone, Debug)]
-pub struct ServiceIpPoolConfig {
-    pub name: Name,
-    pub description: String,
-    // NOTE: Private to ensure non-empty and all the same IP version.
-    ranges: Vec<IpRange>,
-}
-
-impl ServiceIpPoolConfig {
-    /// Construct a new service IP pool configuration.
-    ///
-    /// Errors if `ranges` is empty, or if the ranges are a mix of IPv4 and
-    /// IPv6 addresses.
-    pub fn new(
-        name: Name,
-        description: String,
-        ranges: Vec<IpRange>,
-    ) -> Result<Self, Error> {
-        let mut versions = ranges.iter().map(|r| r.version());
-        let Some(first) = versions.next() else {
-            return Err(Error::internal_error(
-                "service IP pool config has no ranges",
-            ));
-        };
-        if versions.any(|v| v != first) {
-            return Err(Error::internal_error(
-                "service IP pool config has ranges of mixed IP versions",
-            ));
-        }
-        Ok(Self { name, description, ranges })
-    }
-
-    /// The ranges belonging to this pool.
-    ///
-    /// Guaranteed to be non-empty and all of the same IP version.
-    pub fn ranges(&self) -> &[IpRange] {
-        &self.ranges
-    }
-
-    /// The IP version of this pool, derived from its ranges.
-    pub fn ip_version(&self) -> IpVersion {
-        // Safety: the constructor guarantees at least one range, and that all
-        // ranges share an IP version.
-        IpVersion::from(self.ranges[0].version())
-    }
 }
 
 /// Possible errors while trying to initialize rack
@@ -843,7 +794,7 @@ impl DataStore {
                                 name: pool_config.name.clone(),
                                 description: pool_config.description.clone(),
                             },
-                            pool_config.ip_version(),
+                            pool_config.ip_version().into(),
                             nexus_db_model::IpPoolAssignment::SystemServices,
                         );
                         let db_pool = Self::ip_pool_create_on_connection(&conn, opctx, pool)
@@ -1130,7 +1081,7 @@ mod test {
     use async_bb8_diesel::AsyncSimpleConnection;
     use internal_dns_types::names::DNS_ZONE;
     use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
-    use nexus_db_model::{DnsGroup, Generation, InitialDnsGroup};
+    use nexus_db_model::{DnsGroup, Generation, InitialDnsGroup, IpVersion};
     use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
     use nexus_reconfigurator_planning::blueprint_editor::ExternalNetworkingAllocator;
     use nexus_reconfigurator_planning::blueprint_editor::ExternalNetworkingChoice;
@@ -1149,6 +1100,7 @@ mod test {
     use nexus_types::external_api::silo::SiloIdentityMode;
     use nexus_types::identity::Asset;
     use nexus_types::internal_api::params::DnsRecord;
+    use omicron_common::address::IpRange;
     use omicron_common::address::Ipv4Range;
     use omicron_common::address::Ipv6Range;
     use omicron_common::address::NEXUS_OPTE_IPV4_SUBNET;
@@ -1200,7 +1152,7 @@ mod test {
                 physical_disks: vec![],
                 zpools: vec![],
                 datasets: vec![],
-                service_ip_pools: vec![],
+                service_ip_pools: IdOrdMap::new(),
                 internal_dns: InitialDnsGroup::new(
                     DnsGroup::Internal,
                     DNS_ZONE,
@@ -1639,10 +1591,13 @@ mod test {
                 &opctx,
                 RackInit {
                     blueprint: blueprint.clone(),
-                    service_ip_pools: vec![service_pool_config(
-                        SERVICE_IPV4_POOL_NAME,
-                        vec![service_ip_pool_range],
-                    )],
+                    service_ip_pools: IdOrdMap::from_iter_unique([
+                        service_pool_config(
+                            SERVICE_IPV4_POOL_NAME,
+                            vec![service_ip_pool_range],
+                        ),
+                    ])
+                    .unwrap(),
                     ..Default::default()
                 },
             )
@@ -1834,10 +1789,13 @@ mod test {
                 RackInit {
                     blueprint: blueprint.clone(),
                     datasets: vec![],
-                    service_ip_pools: vec![service_pool_config(
-                        SERVICE_IPV4_POOL_NAME,
-                        vec![service_ip_pool_range],
-                    )],
+                    service_ip_pools: IdOrdMap::from_iter_unique([
+                        service_pool_config(
+                            SERVICE_IPV4_POOL_NAME,
+                            vec![service_ip_pool_range],
+                        ),
+                    ])
+                    .unwrap(),
                     internal_dns,
                     external_dns,
                     ..Default::default()
@@ -2040,10 +1998,13 @@ mod test {
                 RackInit {
                     blueprint: blueprint.clone(),
                     datasets: datasets.clone(),
-                    service_ip_pools: vec![service_pool_config(
-                        SERVICE_IPV6_POOL_NAME,
-                        vec![service_ip_pool_range],
-                    )],
+                    service_ip_pools: IdOrdMap::from_iter_unique([
+                        service_pool_config(
+                            SERVICE_IPV6_POOL_NAME,
+                            vec![service_ip_pool_range],
+                        ),
+                    ])
+                    .unwrap(),
                     internal_dns,
                     external_dns,
                     ..Default::default()
@@ -2213,10 +2174,13 @@ mod test {
                 &opctx,
                 RackInit {
                     blueprint: blueprint.clone(),
-                    service_ip_pools: vec![service_pool_config(
-                        SERVICE_IPV4_POOL_NAME,
-                        vec![service_ip_pool_range],
-                    )],
+                    service_ip_pools: IdOrdMap::from_iter_unique([
+                        service_pool_config(
+                            SERVICE_IPV4_POOL_NAME,
+                            vec![service_ip_pool_range],
+                        ),
+                    ])
+                    .unwrap(),
                     ..Default::default()
                 },
             )
@@ -2291,10 +2255,13 @@ mod test {
                 RackInit {
                     rack_id: nexus_test_utils::RACK_UUID,
                     blueprint: blueprint.clone(),
-                    service_ip_pools: vec![service_pool_config(
-                        SERVICE_IPV4_POOL_NAME,
-                        vec![service_ip_pool_range],
-                    )],
+                    service_ip_pools: IdOrdMap::from_iter_unique([
+                        service_pool_config(
+                            SERVICE_IPV4_POOL_NAME,
+                            vec![service_ip_pool_range],
+                        ),
+                    ])
+                    .unwrap(),
                     ..Default::default()
                 },
             )

@@ -13,6 +13,7 @@ use chrono::Utc;
 use display_error_chain::DisplayErrorChain;
 use dropshot::HttpError;
 use futures::Stream;
+use illumos_utils::zone::PROPOLIS_ZONE_PREFIX;
 use nexus_auth::authz;
 use nexus_db_lookup::LookupPath;
 use nexus_db_model::Generation;
@@ -174,7 +175,34 @@ impl UpdateContactSupportChecksInput {
             .inventory
             .enabled_smf_services_not_online()
             .into_iter()
-            .map(|(sled, svcs)| (sled, svcs.clone()))
+            .filter_map(|(sled, svcs_result)| {
+                let mut svcs_result = svcs_result.clone();
+                match &mut svcs_result {
+                    SvcsEnabledNotOnlineResult::SvcsEnabledNotOnline(svcs) => {
+                        // Propolis zones are continuously torn down depending
+                        // on the VMM state. When one of these zones is being
+                        // torn down, it can cause false-positives with the
+                        // contact_support field. In addition, offline services
+                        // in these zones do not affect an update. We remove all
+                        // services from propolis zones from the problems list.
+                        svcs.services
+                            .retain(|svc| !is_propolis_zone(&svc.zone));
+                        // If there are no services or errors left then we drop
+                        // the sled entirely.
+                        if svcs.is_empty() {
+                            None
+                        } else {
+                            Some((sled, svcs_result))
+                        }
+                    }
+                    // Command errors and unavailable data aren't
+                    // propolis-specific, so they're always retained.
+                    SvcsEnabledNotOnlineResult::DataUnavailable
+                    | SvcsEnabledNotOnlineResult::SvcsCmdError(_) => {
+                        Some((sled, svcs_result))
+                    }
+                }
+            })
             .collect();
 
         UpdateStatusProblems {
@@ -187,6 +215,20 @@ impl UpdateContactSupportChecksInput {
             missing_sleds,
         }
     }
+}
+
+// String matching here because it is the most straightforward way to check
+// if a zone is a propolis zone or not. This way of identifying a zone is not
+// ideal but in this case it makes sense. This `contact_support` field will only
+// be in use until a proper FM implementation is in place. The only consequence
+// of this pattern matching failing (e.g. the propolis zone prefix changes and
+// is also no longer set by this constant) would be that the contact_support
+// field reports a false positive, but would have no further impact than that.
+//
+// This function should not be used for anything other than filtering propolis
+// zones out of the `enabled_smf_services_not_online_by_sled` field
+fn is_propolis_zone(zone: &str) -> bool {
+    zone.starts_with(PROPOLIS_ZONE_PREFIX)
 }
 
 /// Identifies a saga that has been running or unwinding for too long.
@@ -848,6 +890,7 @@ mod test {
     use nexus_types::deployment::BlueprintZoneImageSource;
     use omicron_common::api::external::ByteCount;
     use omicron_test_utils::dev::test_setup_log;
+    use omicron_uuid_kinds::PropolisUuid;
     use omicron_uuid_kinds::SledUuid;
     use omicron_uuid_kinds::ZpoolUuid;
     use sled_agent_types::inventory::ConfigReconcilerInventoryStatus;
@@ -861,6 +904,7 @@ mod test {
     use sled_agent_types::inventory::SvcEnabledNotOnlineState;
     use sled_agent_types::inventory::SvcsEnabledNotOnline;
     use sled_agent_types::inventory::SvcsEnabledNotOnlineResult;
+    use sled_agent_types::inventory::SvcsError;
     use sled_agent_types::inventory::ZpoolHealth;
     use slog::Logger;
     use slog::o;
@@ -949,6 +993,10 @@ mod test {
             errors: vec![],
             time_of_status: Utc::now(),
         })
+    }
+
+    fn propolis_zone_name() -> String {
+        format!("{PROPOLIS_ZONE_PREFIX}{}", PropolisUuid::new_v4())
     }
 
     fn fake_opctx(cptestctx: &ControlPlaneTestContext) -> OpContext {
@@ -1266,6 +1314,110 @@ mod test {
             fake_blueprint(&cptestctx.logctx.log, &version, Utc::now(), false);
         // There are unhealthy SMF services and no update is running, contact
         // support should be true
+        assert!(
+            nexus
+                .contact_support(
+                    &opctx,
+                    inventory,
+                    blueprint,
+                    Some(&version),
+                    empty_internal_update_status(),
+                )
+                .await
+                .unwrap()
+        );
+    }
+
+    #[nexus_test(server = crate::Server)]
+    async fn test_contact_support_only_propolis_services(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        let nexus = &cptestctx.server.server_context().nexus;
+        let opctx = fake_opctx(cptestctx);
+        let services = SvcsEnabledNotOnlineResult::SvcsEnabledNotOnline(
+            SvcsEnabledNotOnline {
+                services: vec![SvcEnabledNotOnline {
+                    fmri: "svc:/system/illumos/propolis-server:default"
+                        .to_string(),
+                    zone: propolis_zone_name(),
+                    state: SvcEnabledNotOnlineState::Maintenance,
+                }],
+                errors: vec![],
+                time_of_status: Utc::now(),
+            },
+        );
+
+        insert_fake_collection(cptestctx, &opctx, healthy_zpools(), services)
+            .await;
+        let inventory = Arc::new(
+            nexus
+                .datastore()
+                .inventory_get_latest_collection(&opctx)
+                .await
+                .unwrap()
+                .unwrap(),
+        );
+        let version = fake_target_version();
+        let blueprint =
+            fake_blueprint(&cptestctx.logctx.log, &version, Utc::now(), false);
+
+        // The only unhealthy service is a propolis service, so it is ignored
+        // and contact support should be false.
+        assert!(
+            !nexus
+                .contact_support(
+                    &opctx,
+                    inventory,
+                    blueprint,
+                    Some(&version),
+                    empty_internal_update_status(),
+                )
+                .await
+                .unwrap()
+        );
+    }
+
+    #[nexus_test(server = crate::Server)]
+    async fn test_contact_support_mixed_propolis_and_other_services(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        let nexus = &cptestctx.server.server_context().nexus;
+        let opctx = fake_opctx(cptestctx);
+        let services = SvcsEnabledNotOnlineResult::SvcsEnabledNotOnline(
+            SvcsEnabledNotOnline {
+                services: vec![
+                    SvcEnabledNotOnline {
+                        fmri: "svc:/system/illumos/propolis-server:default"
+                            .to_string(),
+                        zone: propolis_zone_name(),
+                        state: SvcEnabledNotOnlineState::Maintenance,
+                    },
+                    SvcEnabledNotOnline {
+                        fmri: "svc:/system/test:default".to_string(),
+                        zone: "global".to_string(),
+                        state: SvcEnabledNotOnlineState::Offline,
+                    },
+                ],
+                errors: vec![],
+                time_of_status: Utc::now(),
+            },
+        );
+        insert_fake_collection(cptestctx, &opctx, healthy_zpools(), services)
+            .await;
+        let inventory = Arc::new(
+            nexus
+                .datastore()
+                .inventory_get_latest_collection(&opctx)
+                .await
+                .unwrap()
+                .unwrap(),
+        );
+        let version = fake_target_version();
+        let blueprint =
+            fake_blueprint(&cptestctx.logctx.log, &version, Utc::now(), false);
+
+        // An unhealthy propolis service should be filtered out, but a non
+        // propolis service is still there. Contact support should be true.
         assert!(
             nexus
                 .contact_support(
@@ -1874,6 +2026,165 @@ mod test {
             )]),
             ..Default::default()
         };
+        assert_eq!(checks.problems(), expected);
+
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn test_problems_unhealthy_services_propolis_and_other() {
+        let logctx = test_setup_log(
+            "test_problems_unhealthy_services_propolis_and_other",
+        );
+        let blueprint = fake_blueprint(
+            &logctx.log,
+            &fake_target_version(),
+            Utc::now(),
+            false,
+        );
+        let sled_id = sled_id();
+
+        let propolis_svc = SvcEnabledNotOnline {
+            fmri: "svc:/system/illumos/propolis-server:default".to_string(),
+            zone: propolis_zone_name(),
+            state: SvcEnabledNotOnlineState::Maintenance,
+        };
+        let non_propolis_svc = SvcEnabledNotOnline {
+            fmri: "svc:/system/test:default".to_string(),
+            zone: "global".to_string(),
+            state: SvcEnabledNotOnlineState::Offline,
+        };
+        let non_propolis_svc2 = SvcEnabledNotOnline {
+            fmri: "svc:/system/test2:default".to_string(),
+            zone: "global".to_string(),
+            state: SvcEnabledNotOnlineState::Maintenance,
+        };
+
+        let time_of_status = Utc::now();
+        let services = SvcsEnabledNotOnlineResult::SvcsEnabledNotOnline(
+            SvcsEnabledNotOnline {
+                services: vec![
+                    propolis_svc,
+                    non_propolis_svc.clone(),
+                    non_propolis_svc2.clone(),
+                ],
+                errors: vec![],
+                time_of_status,
+            },
+        );
+        let collection =
+            fake_collection_with_ids(sled_id, healthy_zpools(), services);
+
+        let checks = UpdateContactSupportChecksInput {
+            inventory: Arc::new(collection),
+            stuck_sagas: Ok(vec![]),
+            blueprint,
+            current_target_version: Some(fake_target_version()),
+            internal_update_status: empty_internal_update_status(),
+        };
+
+        // Only the non-propolis services should remain for this sled.
+        let expected_services =
+            SvcsEnabledNotOnlineResult::SvcsEnabledNotOnline(
+                SvcsEnabledNotOnline {
+                    services: vec![non_propolis_svc, non_propolis_svc2],
+                    errors: vec![],
+                    time_of_status,
+                },
+            );
+        let expected = UpdateStatusProblems {
+            enabled_smf_services_not_online_by_sled: BTreeMap::from([(
+                sled_id,
+                expected_services,
+            )]),
+            ..Default::default()
+        };
+        assert_eq!(checks.problems(), expected);
+
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn test_problems_unhealthy_services_only_propolis() {
+        let logctx = test_setup_log("test_problems_services_only_propolis");
+        let blueprint = fake_blueprint(
+            &logctx.log,
+            &fake_target_version(),
+            Utc::now(),
+            false,
+        );
+        let sled_id = sled_id();
+
+        let services = SvcsEnabledNotOnlineResult::SvcsEnabledNotOnline(
+            SvcsEnabledNotOnline {
+                services: vec![SvcEnabledNotOnline {
+                    fmri: "svc:/system/illumos/propolis-server:default"
+                        .to_string(),
+                    zone: propolis_zone_name(),
+                    state: SvcEnabledNotOnlineState::Maintenance,
+                }],
+                errors: vec![],
+                time_of_status: Utc::now(),
+            },
+        );
+        let collection =
+            fake_collection_with_ids(sled_id, healthy_zpools(), services);
+
+        let checks = UpdateContactSupportChecksInput {
+            inventory: Arc::new(collection),
+            stuck_sagas: Ok(vec![]),
+            blueprint,
+            current_target_version: Some(fake_target_version()),
+            internal_update_status: empty_internal_update_status(),
+        };
+
+        // All unhealthy services were from the propolis zone. The sled drops
+        // out of the map entirely and there are no problems.
+        assert_eq!(checks.problems(), UpdateStatusProblems::default());
+
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn test_problems_unhealthy_services_command_error() {
+        let logctx = test_setup_log("test_problems_services_command_error");
+        let blueprint = fake_blueprint(
+            &logctx.log,
+            &fake_target_version(),
+            Utc::now(),
+            false,
+        );
+        let sled_id = sled_id();
+
+        let svcs_result = SvcsEnabledNotOnlineResult::SvcsCmdError(SvcsError {
+            error: "test".to_string(),
+            time_of_status: Utc::now(),
+        });
+        let collection = fake_collection_with_ids(
+            sled_id,
+            healthy_zpools(),
+            svcs_result.clone(),
+        );
+
+        let checks = UpdateContactSupportChecksInput {
+            inventory: Arc::new(collection),
+            stuck_sagas: Ok(vec![]),
+            blueprint,
+            current_target_version: Some(fake_target_version()),
+            internal_update_status: empty_internal_update_status(),
+        };
+
+        let expected = UpdateStatusProblems {
+            enabled_smf_services_not_online_by_sled: BTreeMap::from([(
+                sled_id,
+                svcs_result,
+            )]),
+            ..Default::default()
+        };
+
+        // There are no unhealthy services that we know of, but there was a
+        // problem running the command to retrieve them. The error should be
+        // part of the update status problems.
         assert_eq!(checks.problems(), expected);
 
         logctx.cleanup_successful();
