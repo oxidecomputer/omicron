@@ -597,9 +597,7 @@ impl<'a> CompleteLocalStorageAllocationLists<'a> {
                 .await
                 .map_err(|e| {
                     public_error_from_diesel(e, ErrorHandler::Server)
-                        .internal_context(
-                            "zpool_get_for_sled_reservation failed",
-                        )
+                        .internal_context("selecting multiple disks failed")
                 })?
                 .into_iter()
                 .map(|disk| (disk.id(), disk))
