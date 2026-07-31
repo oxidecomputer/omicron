@@ -27,7 +27,7 @@ use omicron_common::api::external::NameOrId;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sled_agent_types_versions::v1::early_networking::ImportExportPolicy;
-use sled_agent_types_versions::v44::early_networking::RouterPeerType;
+use sled_agent_types_versions::v45::early_networking::RouterPeerType;
 
 // Re-export the error type unchanged from the previous version.
 pub use crate::v2026_04_16_00::networking::BgpPeerConversionError;

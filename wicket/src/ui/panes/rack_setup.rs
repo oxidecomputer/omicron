@@ -93,7 +93,6 @@ enum PopupKind {
 pub struct RackSetupPane {
     help: Vec<(&'static str, &'static str)>,
     rack_uninitialized_help: Vec<(&'static str, &'static str)>,
-    rack_initialized_help: Vec<(&'static str, &'static str)>,
     scroll_offset: usize,
     pending_scroll: Option<PendingScroll>,
 
@@ -111,10 +110,6 @@ impl Default for RackSetupPane {
                 ("Scroll", "<Up/Down>"),
                 ("Current Status Details", "<D>"),
                 ("Start Rack Setup", "<Ctrl-K>"),
-            ],
-            rack_initialized_help: vec![
-                ("Scroll", "<Up/Down>"),
-                ("Current Status Details", "<D>"),
             ],
             scroll_offset: 0,
             pending_scroll: None,
@@ -423,13 +418,16 @@ impl Control for RackSetupPane {
 
         // Draw the help bar
         let help = match state.rack_setup_state.as_ref() {
-            Ok(RackOperationStatus::Uninitialized { .. }) => {
+            Ok(RackOperationStatus::Uninitialized) => {
                 &self.rack_uninitialized_help
             }
-            Ok(RackOperationStatus::Initialized { .. }) => {
-                &self.rack_initialized_help
-            }
-            _ => &self.help,
+            Ok(
+                RackOperationStatus::Initialized { .. }
+                | RackOperationStatus::Initializing { .. }
+                | RackOperationStatus::InitializationFailed { .. }
+                | RackOperationStatus::InitializationPanicked { .. },
+            )
+            | Err(_) => &self.help,
         };
         let help = help_text(help).block(block.clone());
         frame.render_widget(help, chunks[2]);

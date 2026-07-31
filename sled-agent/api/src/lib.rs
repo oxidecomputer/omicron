@@ -21,7 +21,8 @@ use omicron_common::api::internal::{
 };
 use sled_agent_types_versions::{
     latest, v1, v4, v6, v7, v9, v10, v11, v12, v14, v16, v17, v18, v20, v22,
-    v24, v25, v26, v28, v29, v30, v31, v32, v33, v34, v37, v39, v40, v42, v44,
+    v24, v25, v26, v28, v29, v30, v31, v32, v33, v34, v37, v39, v40, v41, v42,
+    v45,
 };
 use sled_diagnostics::SledDiagnosticsQueryOutput;
 use slog_error_chain::InlineErrorChain;
@@ -38,7 +39,8 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
-    (44, BGP_PEER_SRC_ADDR),
+    (45, BGP_PEER_SRC_ADDR),
+    (44, PROPOLIS_NVME_VWC),
     (43, INVENTORY_BASEBOARD_ID),
     (42, NON_EMPTY_UPLINK_PORTS),
     (41, ADD_INSTANCE_PRIMARY_NIC_MTU),
@@ -448,13 +450,27 @@ pub trait SledAgentApi {
         operation_id = "vmm_register",
         method = PUT,
         path = "/vmms/{propolis_id}",
-        versions = VERSION_ADD_INSTANCE_PRIMARY_NIC_MTU..
+        versions = VERSION_PROPOLIS_NVME_VWC..
     }]
     async fn vmm_register(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<latest::instance::VmmPathParam>,
         body: TypedBody<latest::instance::InstanceEnsureBody>,
     ) -> Result<HttpResponseOk<latest::instance::SledVmmState>, HttpError>;
+
+    #[endpoint {
+        operation_id = "vmm_register",
+        method = PUT,
+        path = "/vmms/{propolis_id}",
+        versions = VERSION_ADD_INSTANCE_PRIMARY_NIC_MTU..VERSION_PROPOLIS_NVME_VWC
+    }]
+    async fn vmm_register_v41(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::instance::VmmPathParam>,
+        body: TypedBody<v41::instance::InstanceEnsureBody>,
+    ) -> Result<HttpResponseOk<latest::instance::SledVmmState>, HttpError> {
+        Self::vmm_register(rqctx, path_params, body.map(Into::into)).await
+    }
 
     #[endpoint {
         operation_id = "vmm_register",
@@ -467,7 +483,7 @@ pub trait SledAgentApi {
         path_params: Path<latest::instance::VmmPathParam>,
         body: TypedBody<v32::instance::InstanceEnsureBody>,
     ) -> Result<HttpResponseOk<latest::instance::SledVmmState>, HttpError> {
-        Self::vmm_register(rqctx, path_params, body.map(Into::into)).await
+        Self::vmm_register_v41(rqctx, path_params, body.map(Into::into)).await
     }
 
     #[endpoint {
@@ -965,7 +981,7 @@ pub trait SledAgentApi {
     // -------------------------------------------------------------------------
     fn static_assert_latest_write_network_config_type() {
         static_assertions::assert_type_eq_all!(
-            v44::system_networking::WriteNetworkConfigRequest,
+            v45::system_networking::WriteNetworkConfigRequest,
             latest::system_networking::WriteNetworkConfigRequest
         );
     }
@@ -978,9 +994,9 @@ pub trait SledAgentApi {
         versions = VERSION_BGP_PEER_SRC_ADDR..,
         operation_id = "write_network_bootstore_config",
     }]
-    async fn write_network_bootstore_config_v44(
+    async fn write_network_bootstore_config_v45(
         rqctx: RequestContext<Self::Context>,
-        body: TypedBody<v44::system_networking::WriteNetworkConfigRequest>,
+        body: TypedBody<v45::system_networking::WriteNetworkConfigRequest>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
     // As described above, this must not forward to newer versions; sled-agent

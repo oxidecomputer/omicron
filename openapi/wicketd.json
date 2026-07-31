@@ -247,31 +247,6 @@
         }
       }
     },
-    "/location": {
-      "get": {
-        "summary": "Report the identity of the sled and switch we're currently running on /",
-        "description": "connected to.",
-        "operationId": "get_location",
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/GetLocationResponse"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
     "/preflight/uplink": {
       "get": {
         "summary": "Get the report for the most recent (or still running) preflight uplink",
@@ -1077,61 +1052,6 @@
             "maxItems": 2
           }
         }
-      },
-      "Baseboard": {
-        "description": "Describes properties that should uniquely identify a Gimlet.",
-        "oneOf": [
-          {
-            "type": "object",
-            "properties": {
-              "identifier": {
-                "type": "string"
-              },
-              "model": {
-                "type": "string"
-              },
-              "revision": {
-                "type": "integer",
-                "format": "uint32",
-                "minimum": 0
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "gimlet"
-                ]
-              }
-            },
-            "required": [
-              "identifier",
-              "model",
-              "revision",
-              "type"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "identifier": {
-                "type": "string"
-              },
-              "model": {
-                "type": "string"
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "pc"
-                ]
-              }
-            },
-            "required": [
-              "identifier",
-              "model",
-              "type"
-            ]
-          }
-        ]
       },
       "BaseboardId": {
         "description": "A representation of a Baseboard ID as used in the inventory subsystem.\n\nThis type is essentially the same as a `Baseboard` except it doesn't have a revision or HW type (Gimlet, PC, Unknown).",
@@ -2116,50 +2036,6 @@
               "type"
             ]
           }
-        ]
-      },
-      "GetLocationResponse": {
-        "description": "All the fields of this response are optional, because it's possible we don't know any of them (yet) if MGS has not yet finished discovering its location or (ever) if we're running in a dev environment that doesn't support MGS-location / baseboard mapping.",
-        "type": "object",
-        "properties": {
-          "sled_baseboard_id": {
-            "description": "The baseboard of our sled (where wicketd is running).",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/BaseboardId"
-              }
-            ]
-          },
-          "sled_id": {
-            "nullable": true,
-            "description": "The identity of our sled (where wicketd is running).",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/SpIdentifier"
-              }
-            ]
-          },
-          "switch_baseboard": {
-            "nullable": true,
-            "description": "The baseboard of the switch our sled is physically connected to.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Baseboard"
-              }
-            ]
-          },
-          "switch_id": {
-            "nullable": true,
-            "description": "The identity of the switch our sled is physically connected to.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/SpIdentifier"
-              }
-            ]
-          }
-        },
-        "required": [
-          "sled_baseboard_id"
         ]
       },
       "IpNet": {
