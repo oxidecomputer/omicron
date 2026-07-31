@@ -19,7 +19,7 @@ use crate::addrobj::AddrObject;
 use crate::dladm::{EtherstubVnic, VNIC_PREFIX_BOOTSTRAP, VNIC_PREFIX_CONTROL};
 use crate::zpool::PathInPool;
 use crate::{PFEXEC, execute_async};
-use omicron_common::address::SLED_PREFIX;
+use omicron_common::address::SLED_PREFIX_LENGTH;
 use omicron_uuid_kinds::OmicronZoneUuid;
 
 const DLADM: &str = "/usr/sbin/dladm";
@@ -230,7 +230,7 @@ impl AddressRequest {
     pub fn new_static(ip: IpAddr, prefix: Option<u8>) -> Self {
         let prefix = prefix.unwrap_or_else(|| match ip {
             IpAddr::V4(_) => 24,
-            IpAddr::V6(_) => SLED_PREFIX,
+            IpAddr::V6(_) => SLED_PREFIX_LENGTH,
         });
         let addr = IpNetwork::new(ip, prefix).unwrap();
         AddressRequest::Static(addr)
@@ -894,7 +894,7 @@ impl Zones {
                     .map_err(|err| anyhow!(err))?,
                 AddressRequest::new_static(
                     IpAddr::V6(address),
-                    Some(omicron_common::address::SLED_PREFIX),
+                    Some(omicron_common::address::SLED_PREFIX_LENGTH),
                 ),
             )
             .await

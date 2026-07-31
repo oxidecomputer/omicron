@@ -25,6 +25,7 @@ pub use self::oximeter_collector::DatabaseQueueDepth;
 pub use self::oximeter_collector::DatabaseSamplesDropped;
 pub use self::oximeter_collector::FailedCollections;
 pub use self::oximeter_collector::OximeterCollector;
+pub use self::oximeter_collector::SamplesCollected;
 
 /// The interval on which we report self statistics
 pub const COLLECTION_INTERVAL: Duration = Duration::from_secs(60);
@@ -148,6 +149,7 @@ pub struct CollectionTaskStats {
     pub collector: OximeterCollector,
     pub collections: Collections,
     pub failed_collections: BTreeMap<FailureReason, FailedCollections>,
+    pub samples_collected: SamplesCollected,
 }
 
 impl CollectionTaskStats {
@@ -165,6 +167,13 @@ impl CollectionTaskStats {
                 datum: Cumulative::new(0),
             },
             failed_collections: BTreeMap::new(),
+            samples_collected: SamplesCollected {
+                producer_id: producer.id,
+                producer_ip: producer.address.ip(),
+                producer_port: producer.address.port(),
+                base_route: "".into(),
+                datum: Cumulative::new(0),
+            },
         }
     }
 
@@ -192,6 +201,9 @@ impl CollectionTaskStats {
             each.producer_port = new_port;
             each.datum = Cumulative::new(0);
         }
+        self.samples_collected.producer_ip = new_ip;
+        self.samples_collected.producer_port = new_port;
+        self.samples_collected.datum = Cumulative::new(0);
     }
 
     pub fn failures_for_reason(
@@ -217,13 +229,17 @@ impl CollectionTaskStats {
                 Err(s) => ProducerResultsItem::Err(s),
             }
         }
-        let mut samples = Vec::with_capacity(1 + self.failed_collections.len());
+        let mut samples = Vec::with_capacity(2 + self.failed_collections.len());
         samples.push(to_item(Sample::new(&self.collector, &self.collections)));
         samples.extend(
             self.failed_collections
                 .values()
                 .map(|metric| to_item(Sample::new(&self.collector, metric))),
         );
+        samples.push(to_item(Sample::new(
+            &self.collector,
+            &self.samples_collected,
+        )));
         samples
     }
 }

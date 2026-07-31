@@ -55,6 +55,7 @@ progenitor-extras.workspace = true
 omicron-workspace-hack.workspace = true
 regress.workspace = true
 tufaceous-artifact.workspace = true
+tufaceous-artifact-v2.workspace = true
 
 [dev-dependencies]
 camino-tempfile.workspace = true

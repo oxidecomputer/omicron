@@ -360,6 +360,8 @@ use crate::app::instance_network::InstanceNetworkFilters;
 use crate::app::sagas::declare_saga_actions;
 use anyhow::Context;
 use chrono::Utc;
+use dropshot::HttpError;
+use futures::{TryFutureExt, future};
 use nexus_db_lookup::LookupPath;
 use nexus_db_queries::{authn, authz};
 use nexus_types::identity::Resource;
@@ -367,6 +369,7 @@ use nexus_types::instance::SledVmmState;
 use nexus_types::saga::saga_action_failed;
 use omicron_common::api::external::Error;
 use omicron_common::backoff;
+use omicron_common::backoff::BackoffError;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::PropolisUuid;
@@ -1026,35 +1029,127 @@ async fn siu_become_updater(
         crate::context::op_context_for_saga_action(&sagactx, serialized_authn);
     let osagactx = sagactx.user_data();
     let log = osagactx.log();
+    let instance_id = authz_instance.id();
 
     debug!(
         log,
         "instance update: trying to become instance updater...";
-        "instance_id" => %authz_instance.id(),
+        "instance_id" => %instance_id,
         "saga_id" => %saga_id,
         "parent_lock" => ?orig_lock,
     );
 
-    let lock = osagactx
-        .datastore()
-        .instance_updater_inherit_lock(
-            &opctx,
-            &authz_instance,
-            orig_lock,
-            saga_id,
-        )
-        .await
-        .map_err(|e| match e {
-            // The `AlreadyLocked` variant must be serialized as
-            // `UpdaterLockError` so that the parent `start-instance-update`
-            // saga can identify this specific failure mode and handle it
-            // gracefully.
-            #[expect(clippy::disallowed_methods)]
-            instance::UpdaterLockError::AlreadyLocked => {
-                ActionError::action_failed(e)
+    // /!\ EXTREMELY IMPORTANT WARNING /!\
+    //
+    // We are about to attempt to inherit the instance record's updater lock
+    // from the "parent" `start_instance_update` saga. If the parent saga is
+    // still holding the lock (which we expect it should be), we will proceed to
+    // actually perform the rest of the update. However, we may encounter a
+    // transient database error (i.e., one which does not positively indicate
+    // that either the expected parent lock ID was not present, or that the
+    // instance has been deleted out from under us) while attempting to do so.
+    // In that case, this action MUST continue retrying the lock operation
+    // forever until it either succeeds or indicates affirmatively that it
+    // cannot succeed ever, in order to satisfy the distributed saga requirement
+    // that executing an action must be idempotent. Retrying indefinitely is
+    // necessary to ensure idempotency because it is possible that a previous
+    // execution of this action *did* successfully inherit the lock but crashed
+    // before it completed.
+    //
+    // As an example of why this is important, consider a particularly
+    // unlucky sequence of a Nexus crash followed by a transient database error
+    // could leave the instance record permanently locked by this (now failed)
+    // saga. The scenario in which this would occur is as follows:
+    //
+    // 1. A Nexus starts executing this action, successfully inherits the lock
+    //    and writes this saga's lock ID to the instance record, and then
+    //    crashes *before* marking the saga node as having completed.
+    // 2. Subsequently, a new Nexus resumes executing the saga and runs this
+    //    action again. It hits a transient query failure trying to inherit the
+    //    lock, returns an `ActionFailed` error, and unwinds.
+    // 3. Because the saga node has not *completed*, our undo action
+    //    (`siu_unbecome_updater()`), will *not* execute, so the instance
+    //    record remains locked by this saga's lock ID. Since this saga has
+    //    now failed, no one will ever unlock the instance.
+    //
+    // Due to this potential danger, we shall retry the lock operation forever
+    // until it either succeeds or indicates that the instance has been locked
+    // by another saga or has been deleted. Because the inherit-lock operation
+    // is idempotent if either *our* updater ID or the parent saga's ID is the
+    // one inside the lock, it is fine if this node executes multiple times.
+    // Retrying indefinitely is reasonable here based on the assumption that if
+    // we can't talk to the database, our only options are to keep retrying or
+    // unwind, and unwinding *also* requires that we be able to talk to the
+    // database, so we may as well retry. We will complain loudly if we've been
+    // retrying for a long time.
+    let lock = backoff::retry_notify_ext(
+        // This is an internal service query to CockroachDB.
+        backoff::retry_policy_internal_service(),
+        || {
+            osagactx
+                .datastore()
+                .instance_updater_inherit_lock(
+                    &opctx,
+                    &authz_instance,
+                    &orig_lock,
+                    saga_id,
+                )
+                .map_err(move |e| match e {
+                    // The `AlreadyLocked` variant must be serialized as
+                    // `UpdaterLockError` so that the parent
+                    // `start-instance-update` saga can identify this specific
+                    // failure mode and handle it gracefully.
+                    #[expect(clippy::disallowed_methods)]
+                    instance::UpdaterLockError::AlreadyLocked => {
+                        BackoffError::permanent(ActionError::action_failed(e))
+                    }
+                    // The instance record has been deleted, give up.
+                    instance::UpdaterLockError::Query(
+                        err @ Error::ObjectNotFound { .. },
+                    ) => BackoffError::permanent(saga_action_failed(err)),
+                    // Any other potential error should be retried.
+                    instance::UpdaterLockError::Query(err) => {
+                        BackoffError::transient(saga_action_failed(err))
+                    }
+                })
+        },
+        |error, call_count, total_duration| {
+            // N.B. that other notify closures attempt to distinguish between
+            // "client errors" and "server errors" based on the status code of
+            // the `HttpError` produced from the `external::Error`, so that we
+            // can log about them differently. That's a bit too tricky to do
+            // here, given that we must special-case the way the `AlreadyLocked`
+            // error is turned into an `ActionError` above, so...this code
+            // doesn't try to do that. Which is fine.
+            const MSG: &str =
+                "instance update: error while inheriting instance lock, \
+                retrying";
+            if total_duration > RETRY_WARN_AFTER {
+                warn!(
+                    log,
+                    "{MSG}";
+                    "instance_id" => %instance_id,
+                    "saga_id" => %saga_id,
+                    "parent_lock" => ?orig_lock,
+                    "error" => %error,
+                    "call_count" => call_count,
+                    "total_duration" => ?total_duration,
+                );
+            } else {
+                info!(
+                    log,
+                    "{MSG}";
+                    "instance_id" => %instance_id,
+                    "saga_id" => %saga_id,
+                    "parent_lock" => ?orig_lock,
+                    "error" => %error,
+                    "call_count" => call_count,
+                    "total_duration" => ?total_duration,
+                );
             }
-            instance::UpdaterLockError::Query(err) => saga_action_failed(err),
-        })?;
+        },
+    )
+    .await?;
 
     info!(
         log,
@@ -1580,8 +1675,6 @@ async fn unwind_instance_lock(
     // - succeeds, and we know the instance is now unlocked.
     // - fails *because the instance doesn't exist*, in which case we can die
     //   happily because it doesn't matter if the instance is actually unlocked.
-    use dropshot::HttpError;
-    use futures::{TryFutureExt, future};
 
     let osagactx = sagactx.user_data();
     let log = osagactx.log();
@@ -2057,6 +2150,89 @@ mod test {
             &cptestctx.logctx.log,
         )
         .await;
+    }
+
+    // Regression test for
+    // <https://github.com/oxidecomputer/omicron/issues/10784>.
+    //
+    // This test ensures that start sagas unwind correctly when the instance to
+    // be updated is deleted before the saga attempts to lock it.
+    #[nexus_test(server = crate::Server)]
+    async fn test_start_saga_fails_when_instance_deleted(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        let _project_id = setup_test_project(&cptestctx.external_client).await;
+        let nexus = &cptestctx.server.server_context().nexus;
+        let (_, params) = setup_active_vmm_destroyed_test(cptestctx).await;
+
+        // Delete the instance out from under the saga-to-be. Since the
+        // instance record still points at the (now destroyed) active VMM, it
+        // cannot yet be deleted through the external API, so manually update
+        // the DB record into a deletable state first.
+        let state = test_helpers::instance_fetch_by_name(
+            cptestctx,
+            INSTANCE_NAME,
+            PROJECT_NAME,
+        )
+        .await;
+        let instance = state.instance();
+        let instance_id = InstanceUuid::from_untyped_uuid(instance.id());
+        nexus
+            .datastore()
+            .instance_update_runtime(
+                &instance_id,
+                &InstanceRuntimeState {
+                    time_updated: Utc::now(),
+                    generation: Generation(
+                        instance.runtime().generation.0.next(),
+                    ),
+                    propolis_id: None,
+                    dst_propolis_id: None,
+                    migration_id: None,
+                    nexus_state: InstanceState::NoVmm,
+                    time_last_auto_restarted: None,
+                },
+            )
+            .await
+            .unwrap();
+        test_helpers::instance_delete_by_name(
+            cptestctx,
+            INSTANCE_NAME,
+            PROJECT_NAME,
+        )
+        .await;
+
+        // Now, run the start saga. If `siu_lock_instance` (incorrectly)
+        // retries the lock query forever when the instance is gone, the saga
+        // will never complete, so bound how long we wait for it.
+        const TIMEOUT: Duration = Duration::from_secs(60);
+        let dag = create_saga_dag::<SagaInstanceUpdate>(params).unwrap();
+        let running_saga = nexus
+            .sagas
+            .saga_prepare(dag)
+            .await
+            .expect("saga should prepare successfully")
+            .start()
+            .await
+            .expect("saga should start successfully");
+        let result = tokio::time::timeout(
+            TIMEOUT,
+            running_saga.wait_until_stopped(),
+        )
+        .await
+        .expect(
+            "a start saga must  complete within a reasonable period of time \
+             if the instance record has been deleted.",
+        )
+        .into_omicron_result();
+        let error = result.expect_err(
+            "start saga should fail when the instance has been deleted",
+        );
+        assert!(
+            matches!(error, Error::ObjectNotFound { .. }),
+            "expected the start saga to fail with `ObjectNotFound`, but saw: \
+             {error:#?}",
+        );
     }
 
     // --- test helpers ---

@@ -111,7 +111,7 @@ impl<T: ObjectIdentity> SimpleIdentityOrName for T {
 /// collection of objects
 ///
 /// This is logically analogous to Dropshot's `PageSelector` (plus the limit from
-/// Dropshot's `PaginationParams).  However, this type is HTTP-agnostic.  More
+/// Dropshot's `PaginationParams`).  However, this type is HTTP-agnostic.  More
 /// importantly, by the time this struct is generated, we know the type of the
 /// sort field and we can specialize `DataPageParams` to that type.  This makes
 /// it considerably simpler to implement the backend for most of our paginated

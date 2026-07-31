@@ -8,39 +8,36 @@ use std::{collections::BTreeMap, net::Ipv6Addr};
 
 use gateway_types::component::{SpState, SpType};
 use gateway_types::rot::{RotSlot, RotState};
-use maplit::{btreemap, btreeset};
-use omicron_common::{
-    address::{IpRange, Ipv4Range},
-    api::external::AllowedSourceIps,
-};
+use iddqd::id_ord_map;
+use maplit::btreemap;
 use sled_agent_types::early_networking::{
     BgpConfig, BgpPeerConfig, LinkFec, LinkSpeed, LldpAdminStatus,
     LldpPortConfig, MaxPathConfig, RouteConfig, RouterLifetimeConfig,
-    TxEqConfig, UplinkAddress,
+    TxEqConfig,
 };
-use sled_hardware_types::Baseboard;
+use sled_hardware_types::BaseboardId;
 
 use crate::{
     inventory::{MgsV1Inventory, SpIdentifier, SpInventory},
-    rack_setup::{
-        BgpAuthKeyId, BootstrapSledDescription,
-        CurrentRssUserConfigInsensitive, ManualPortConfig,
-        PutRssUserConfigInsensitive, UserSpecifiedBgpPeerConfig,
-        UserSpecifiedImportExportPolicy, UserSpecifiedPortConfig,
-        UserSpecifiedRackNetworkConfig, UserSpecifiedRouterPeerAddr,
-        UserSpecifiedUplinkAddressConfig,
-    },
+    rack_setup::{BootstrapSledDescription, CurrentRssUserConfigInsensitive},
+};
+use wicketd_commission_types::rack_setup::{
+    AllowedSourceIps, BgpAuthKeyId, IpRange, Ipv4Range, ManualPortConfig,
+    PutRssUserConfigInsensitive, UplinkAddress, UserSpecifiedBgpPeerConfig,
+    UserSpecifiedImportExportPolicy, UserSpecifiedPortConfig,
+    UserSpecifiedRackNetworkConfig, UserSpecifiedRouterPeerAddr,
+    UserSpecifiedUplinkAddressConfig,
 };
 
 /// A collection of example data structures.
 pub struct ExampleRackSetupData {
     /// The example baseboard where wicket/wicketd is presumed to be running.
-    pub our_baseboard: Option<Baseboard>,
+    pub our_baseboard_id: BaseboardId,
     pub put_insensitive: PutRssUserConfigInsensitive,
     pub current_insensitive: CurrentRssUserConfigInsensitive,
     pub bgp_auth_keys: Vec<BgpAuthKeyId>,
     pub inventory: MgsV1Inventory,
-    pub ddm_discovered_sleds: BTreeMap<Baseboard, Ipv6Addr>,
+    pub ddm_discovered_sleds: BTreeMap<BaseboardId, Ipv6Addr>,
 }
 
 impl ExampleRackSetupData {
@@ -66,20 +63,14 @@ impl ExampleRackSetupData {
 
         // our_baseboard matches the baseboard of the first sled in
         // bootstrap_sleds.
-        let our_baseboard = Baseboard::Gimlet {
-            model: "model1".into(),
-            revision: 3,
-            identifier: "serial 1 2 3".into(),
+        let our_baseboard = BaseboardId {
+            part_number: "model1".into(),
+            serial_number: "serial 1 2 3".into(),
         };
 
-        let mut inventory = MgsV1Inventory {
-            sps: vec![
-                SpInventory::new(SpIdentifier { slot: 1, type_: SpType::Sled }),
-                SpInventory::new(SpIdentifier { slot: 5, type_: SpType::Sled }),
-            ],
-        };
-
-        inventory.sps[0].state = Some(SpState {
+        let mut sp0 =
+            SpInventory::new(SpIdentifier { slot: 1, typ: SpType::Sled });
+        sp0.state = Some(SpState {
             serial_number: "serial 1 2 3".into(),
             model: "model1".into(),
             revision: 3,
@@ -95,7 +86,9 @@ impl ExampleRackSetupData {
                 slot_b_sha3_256_digest: None,
             },
         });
-        inventory.sps[1].state = Some(SpState {
+        let mut sp1 =
+            SpInventory::new(SpIdentifier { slot: 5, typ: SpType::Sled });
+        sp1.state = Some(SpState {
             serial_number: "serial 4 5 6".into(),
             model: "model2".into(),
             revision: 5,
@@ -111,14 +104,14 @@ impl ExampleRackSetupData {
                 slot_b_sha3_256_digest: None,
             },
         });
+        let inventory = MgsV1Inventory { sps: id_ord_map! { sp0, sp1 } };
 
         let ddm_discovered_sleds: BTreeMap<_, _> = [
             (our_baseboard.clone(), Ipv6Addr::LOCALHOST),
             (
-                Baseboard::Gimlet {
-                    model: "model2".into(),
-                    revision: 5,
-                    identifier: "serial 4 5 6".into(),
+                BaseboardId {
+                    part_number: "model2".into(),
+                    serial_number: "serial 4 5 6".into(),
                 },
                 Ipv6Addr::LOCALHOST,
             ),
@@ -126,22 +119,21 @@ impl ExampleRackSetupData {
         .into_iter()
         .collect();
 
-        let bootstrap_sleds = btreeset![
+        let bootstrap_sleds = id_ord_map! {
             BootstrapSledDescription {
-                id: SpIdentifier { slot: 1, type_: SpType::Sled },
-                baseboard: our_baseboard.clone(),
+                id: SpIdentifier { slot: 1, typ: SpType::Sled },
+                baseboard_id: our_baseboard.clone(),
                 bootstrap_ip: Some(Ipv6Addr::LOCALHOST)
             },
             BootstrapSledDescription {
-                id: SpIdentifier { slot: 5, type_: SpType::Sled },
-                baseboard: Baseboard::Gimlet {
-                    model: "model2".into(),
-                    revision: 5,
-                    identifier: "serial 4 5 6".into(),
+                id: SpIdentifier { slot: 5, typ: SpType::Sled },
+                baseboard_id: BaseboardId {
+                    part_number: "model2".into(),
+                    serial_number: "serial 4 5 6".into(),
                 },
                 bootstrap_ip: None
             },
-        ];
+        };
 
         let dns_servers =
             vec!["1.1.1.1".parse().unwrap(), "2.2.2.2".parse().unwrap()];
@@ -366,7 +358,7 @@ impl ExampleRackSetupData {
         };
 
         Self {
-            our_baseboard: Some(our_baseboard),
+            our_baseboard_id: our_baseboard,
             current_insensitive,
             put_insensitive,
             bgp_auth_keys: bgp_auth_keys.into_iter().collect(),

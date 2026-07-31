@@ -35,7 +35,6 @@ use nexus_db_errors::TransactionError;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_errors::retryable;
 use nexus_db_lookup::DbConnection;
-use nexus_db_model::IpVersion;
 use nexus_db_model::Ipv4Addr;
 use nexus_db_model::Ipv6Addr;
 use nexus_db_model::ServiceNetworkInterface;
@@ -268,9 +267,15 @@ impl DataStore {
         //
         // Note that the IP version doesn't matter here, both pools have the
         // same permissions.
-        let (authz_pool, _pool) =
-            self.ip_pools_service_lookup(opctx, IpVersion::V4).await?;
-        opctx.authorize(authz::Action::ListChildren, &authz_pool).await?;
+        let service_pools =
+            self.ip_pools_service_lookup_both_versions(opctx).await?;
+        let authz_pool = &service_pools
+            .any_pool()
+            .ok_or_else(|| {
+                Error::internal_error("no system services IP pool found")
+            })?
+            .authz_pool;
+        opctx.authorize(authz::Action::ListChildren, authz_pool).await?;
 
         paginated(dsl::service_network_interface, dsl::id, pagparams)
             .filter(dsl::time_deleted.is_null())
@@ -332,12 +337,20 @@ impl DataStore {
         //
         // Note that the IP version here doesn't matter, both IPv4 and IPv6
         // service pools have the same permissions.
-        let (authz_service_ip_pool, _) = self
-            .ip_pools_service_lookup(opctx, IpVersion::V4)
+        let service_pools = self
+            .ip_pools_service_lookup_both_versions(opctx)
             .await
             .map_err(network_interface::InsertError::External)?;
+        let authz_service_ip_pool = &service_pools
+            .any_pool()
+            .ok_or_else(|| {
+                network_interface::InsertError::External(Error::internal_error(
+                    "no system services IP pool found",
+                ))
+            })?
+            .authz_pool;
         opctx
-            .authorize(authz::Action::CreateChild, &authz_service_ip_pool)
+            .authorize(authz::Action::CreateChild, authz_service_ip_pool)
             .await
             .map_err(network_interface::InsertError::External)?;
         self.service_create_network_interface_raw(opctx, interface).await
@@ -1034,9 +1047,15 @@ impl DataStore {
         //
         // But assuming this check is correct, both service pools have the same
         // permissions, so the actual IP version here doesn't matter.
-        let (authz_pool, _pool) =
-            self.ip_pools_service_lookup(opctx, IpVersion::V4).await?;
-        opctx.authorize(authz::Action::ListChildren, &authz_pool).await?;
+        let service_pools =
+            self.ip_pools_service_lookup_both_versions(opctx).await?;
+        let authz_pool = &service_pools
+            .any_pool()
+            .ok_or_else(|| {
+                Error::internal_error("no system services IP pool found")
+            })?
+            .authz_pool;
+        opctx.authorize(authz::Action::ListChildren, authz_pool).await?;
 
         paginated(dsl::instance_network_interface, dsl::id, pagparams)
             .filter(dsl::time_deleted.is_null())
@@ -1051,6 +1070,7 @@ impl DataStore {
 mod tests {
     use super::*;
     use crate::db::pub_test_utils::TestDatabase;
+    use crate::db::pub_test_utils::helpers::create_service_ip_pool;
     use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
     use nexus_db_fixed_data::vpc_subnet::NEXUS_VPC_SUBNET;
     use nexus_types::external_api::instance::PrivateIpStackCreate;
@@ -1083,6 +1103,15 @@ mod tests {
             dev::test_setup_log("test_service_network_interfaces_list");
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // A system-service IP pool must exist for listing and creating service
+        // NICs to authorize against.
+        create_service_ip_pool(
+            &opctx,
+            &datastore,
+            omicron_common::api::external::IpVersion::V4,
+        )
+        .await;
 
         // No IPs, to start
         let nics = read_all_service_nics(&datastore, &opctx).await;

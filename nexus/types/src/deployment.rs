@@ -30,7 +30,7 @@ use iddqd::id_ord_map::RefMut;
 use iddqd::id_upcast;
 use ipnet::IpAdd;
 use omicron_common::address::Ipv6Subnet;
-use omicron_common::address::SLED_PREFIX;
+use omicron_common::address::SLED_PREFIX_LENGTH;
 use omicron_common::address::SLED_RESERVED_ADDRESSES;
 use omicron_common::address::get_sled_address;
 use omicron_common::api::external::ByteCount;
@@ -1583,7 +1583,7 @@ impl fmt::Display for BlueprintDisplay<'_> {
 )]
 pub struct BlueprintSledConfig {
     pub state: SledState,
-    pub subnet: Ipv6Subnet<SLED_PREFIX>,
+    pub subnet: Ipv6Subnet<SLED_PREFIX_LENGTH>,
 
     /// Each sled is assigned an IPv6 /64 `subnet` (above). Currently, the
     /// lowest /112 subnet within the sled subnet is reserved for control plane
@@ -1722,7 +1722,7 @@ impl LastAllocatedSubnetIpOffset {
     }
 
     /// Convert this offset into the `offset`'th IP in `subnet`.
-    pub fn to_ip(self, subnet: Ipv6Subnet<SLED_PREFIX>) -> Ipv6Addr {
+    pub fn to_ip(self, subnet: Ipv6Subnet<SLED_PREFIX_LENGTH>) -> Ipv6Addr {
         subnet.net().prefix().saturating_add(u128::from(self.0))
     }
 

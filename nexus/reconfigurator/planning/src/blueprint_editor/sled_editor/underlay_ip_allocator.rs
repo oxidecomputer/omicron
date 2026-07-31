@@ -9,7 +9,7 @@ use ipnet::IpSub;
 use nexus_types::deployment::LastAllocatedSubnetIpOffset;
 use omicron_common::address::CP_SERVICES_RESERVED_ADDRESSES;
 use omicron_common::address::Ipv6Subnet;
-use omicron_common::address::SLED_PREFIX;
+use omicron_common::address::SLED_PREFIX_LENGTH;
 use omicron_common::address::SLED_RESERVED_ADDRESSES;
 use omicron_common::address::get_sled_address;
 use omicron_common::address::get_switch_zone_address;
@@ -25,7 +25,7 @@ use std::net::Ipv6Addr;
 // general enough to use here, though this one could potentially be used there.
 #[derive(Debug)]
 pub(crate) struct SledUnderlayIpAllocator {
-    subnet: Ipv6Subnet<SLED_PREFIX>,
+    subnet: Ipv6Subnet<SLED_PREFIX_LENGTH>,
     last: Ipv6Addr,
     maximum: Ipv6Addr,
 }
@@ -35,7 +35,7 @@ impl SledUnderlayIpAllocator {
     /// IPs from the "reserved for control plane usage" block up through
     /// `last_allocated_ip_subnet_offset`.
     pub fn new(
-        sled_subnet: Ipv6Subnet<SLED_PREFIX>,
+        sled_subnet: Ipv6Subnet<SLED_PREFIX_LENGTH>,
         last_allocated_ip_subnet_offset: LastAllocatedSubnetIpOffset,
     ) -> Self {
         let sled_subnet_addr = sled_subnet.net().prefix();
@@ -71,7 +71,7 @@ impl SledUnderlayIpAllocator {
     }
 
     /// Get the subnet used to create this allocator.
-    pub fn subnet(&self) -> Ipv6Subnet<SLED_PREFIX> {
+    pub fn subnet(&self) -> Ipv6Subnet<SLED_PREFIX_LENGTH> {
         self.subnet
     }
 

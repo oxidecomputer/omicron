@@ -6,12 +6,15 @@
 
 use std::{collections::BTreeSet, sync::Arc, time::Duration};
 
-use super::setup::WicketdTestContext;
+use super::setup::{
+    WicketdTestContext, assert_client_error_message, wait_for_sled0_progress,
+};
 use camino::Utf8Path;
 use camino_tempfile::Utf8TempDir;
 use clap::Parser;
 use gateway_messages::SpPort;
 use gateway_test_utils::setup as gateway_setup;
+use http::StatusCode;
 use installinator::HOST_PHASE_2_FILE_NAME;
 use maplit::btreeset;
 use omicron_common::{
@@ -22,6 +25,8 @@ use omicron_common::{
     },
 };
 use omicron_uuid_kinds::{InternalZpoolUuid, MupdateUuid};
+use oxide_update_engine_types::spec::SerializableError;
+use semver::Version;
 use sled_agent_config_reconciler::{
     InternalDiskDetails, InternalDisksReceiver, InternalDisksWithBootDisk,
 };
@@ -29,15 +34,13 @@ use sled_agent_resolvable_files::ZoneImageSourceResolver;
 use sled_agent_types::resolvable_files::MupdateOverrideNonBootResult;
 use sled_storage::config::MountConfig;
 use tokio::sync::oneshot;
-use tufaceous_artifact::{ArtifactHashId, ArtifactKind, KnownArtifactKind};
-use update_common::artifacts::UpdatePlan;
-use update_engine::NestedError;
+use tufaceous_artifact_v2::KnownArtifactTags;
+use tufaceous_v2::{Repository, edit::RepositoryEditor};
 use wicket::OutputKind;
 use wicket_common::{
     inventory::{SpIdentifier, SpType},
     rack_update::{
-        ClearUpdateStateResponse, ExitMessage, RackUpdateStatus,
-        StartUpdateOptions, UpdateState,
+        ExitMessage, RackUpdateStatus, StartUpdateOptions, UpdateState,
     },
     update_events::{StepEventKind, UpdateComponent},
 };
@@ -45,8 +48,12 @@ use wicketd::{RunningUpdateState, StartUpdateError};
 use wicketd_client::types::{
     GetInventoryParams, GetInventoryResponse, StartUpdateParams,
 };
+use wicketd_commission_types_versions::latest::update::{
+    self, ClearUpdateStateParams, ClearUpdateStateResponse, StepOutcome,
+    UpdateStepStatus, UpdateTargets,
+};
 
-/// The list of zone file names defined in fake-non-semver.toml.
+/// The list of zone file names defined in Tufaceous's `FAKE_ZONES`.
 static FAKE_NON_SEMVER_ZONE_FILE_NAMES: &[&str] = &[
     "clickhouse.tar.gz",
     "clickhouse_keeper.tar.gz",
@@ -61,30 +68,24 @@ static FAKE_NON_SEMVER_ZONE_FILE_NAMES: &[&str] = &[
     "oximeter.tar.gz",
 ];
 
-// See documentation for extract_nested_artifact_pair in update_plan.rs for why
-// multi_thread is required.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[tokio::test]
 async fn test_updates() {
     let gateway = gateway_setup::test_setup("test_updates", SpPort::One).await;
     let wicketd_testctx = WicketdTestContext::setup(gateway).await;
     let log = wicketd_testctx.log();
 
-    let temp_dir = Utf8TempDir::new().expect("temp dir created");
-    let archive_path = temp_dir.path().join("archive.zip");
-
-    let args = tufaceous::Args::try_parse_from([
-        "tufaceous",
-        "assemble",
-        "../update-common/manifests/fake.toml",
-        archive_path.as_str(),
-    ])
-    .expect("args parsed correctly");
-
-    args.exec(log).await.expect("assemble command completed successfully");
-
-    // Read the archive and upload it to the server.
-    let zip_bytes =
-        fs_err::read(&archive_path).expect("archive read correctly");
+    let zip_bytes = RepositoryEditor::fake(Version::new(1, 0, 0))
+        .unwrap()
+        .finish()
+        .await
+        .unwrap()
+        .generate_root()
+        .sign()
+        .await
+        .unwrap()
+        .write_zip(Vec::new(), chrono::Utc::now())
+        .await
+        .unwrap();
     wicketd_testctx
         .wicketd_client
         .put_repository(zip_bytes)
@@ -92,68 +93,18 @@ async fn test_updates() {
         .expect("bytes read and archived");
 
     // List out the artifacts in the repository.
-    let response = wicketd_testctx
-        .wicketd_client
-        .get_artifacts_and_event_reports()
-        .await
-        .expect("get_artifacts_and_event_reports succeeded")
-        .into_inner();
+    let expected_artifact_ids = {
+        let mut response = wicketd_testctx
+            .wicketd_client
+            .get_artifacts_and_event_reports()
+            .await
+            .expect("get_artifacts_and_event_reports succeeded")
+            .into_inner();
+        response.artifacts.sort_unstable();
+        response.artifacts
+    };
 
-    // We should have an artifact for every known artifact kind (except
-    // `Zone`), as well as the installinator document...
-    let expected_kinds: BTreeSet<_> = KnownArtifactKind::iter()
-        .filter(|k| !matches!(k, KnownArtifactKind::Zone))
-        .map(ArtifactKind::from)
-        .collect();
-
-    // ... and installable artifacts that replace the top level host,
-    // trampoline, and RoT with their inner parts (phase1/phase2 for OS images
-    // and A/B images for the RoT) during import.
-    let mut expected_installable_kinds = expected_kinds.clone();
-    for remove in [
-        KnownArtifactKind::Host,
-        KnownArtifactKind::Trampoline,
-        KnownArtifactKind::GimletRot,
-        KnownArtifactKind::PscRot,
-        KnownArtifactKind::SwitchRot,
-    ] {
-        assert!(expected_installable_kinds.remove(&remove.into()));
-    }
-    for add in [
-        ArtifactKind::GIMLET_HOST_PHASE_1,
-        ArtifactKind::COSMO_HOST_PHASE_1,
-        ArtifactKind::HOST_PHASE_2,
-        ArtifactKind::GIMLET_TRAMPOLINE_PHASE_1,
-        ArtifactKind::COSMO_TRAMPOLINE_PHASE_1,
-        ArtifactKind::TRAMPOLINE_PHASE_2,
-        ArtifactKind::GIMLET_ROT_IMAGE_A,
-        ArtifactKind::GIMLET_ROT_IMAGE_B,
-        ArtifactKind::PSC_ROT_IMAGE_A,
-        ArtifactKind::PSC_ROT_IMAGE_B,
-        ArtifactKind::SWITCH_ROT_IMAGE_A,
-        ArtifactKind::SWITCH_ROT_IMAGE_B,
-    ] {
-        assert!(expected_installable_kinds.insert(add));
-    }
-
-    // Ensure that this is a sensible result.
-    let mut kinds = BTreeSet::new();
-    let mut installable_kinds = BTreeSet::new();
-    let expected_artifact_ids: BTreeSet<_> =
-        response.artifacts.iter().map(|a| a.artifact_id.clone()).collect();
-    for artifact in response.artifacts {
-        kinds.insert(artifact.artifact_id.kind);
-        for installable in artifact.installable {
-            installable_kinds.insert(installable.kind.parse().unwrap());
-        }
-    }
-    assert_eq!(expected_kinds, kinds, "all expected kinds present");
-    assert_eq!(
-        expected_installable_kinds, installable_kinds,
-        "all expected installable kinds present"
-    );
-
-    let target_sp = SpIdentifier { type_: SpType::Sled, slot: 0 };
+    let target_sp = SpIdentifier { typ: SpType::Sled, slot: 0 };
 
     // Ensure wicketd knows our target_sp (which is simulated) is online and
     // available to update.
@@ -191,10 +142,10 @@ async fn test_updates() {
     {
         // Before starting, all artifacts should be present, no components should be present,
         // and the state should be NotStarted.
-        let status = get_rack_update_status(&wicketd_testctx, &[]).await;
-        let actual_ids: BTreeSet<_> = status.artifacts.into_iter().collect();
+        let mut status = get_rack_update_status(&wicketd_testctx, &[]).await;
+        status.artifacts.sort_unstable();
         assert_eq!(
-            expected_artifact_ids, actual_ids,
+            expected_artifact_ids, status.artifacts,
             "all uploaded artifacts appear in status"
         );
         assert_eq!(
@@ -210,7 +161,10 @@ async fn test_updates() {
 
     // Now, try starting the update on SP 0.
     let options = StartUpdateOptions::default();
-    let params = StartUpdateParams { targets: vec![target_sp], options };
+    let params = StartUpdateParams {
+        targets: UpdateTargets::single(target_sp),
+        options,
+    };
     wicketd_testctx
         .wicketd_client
         .post_start_update(&params)
@@ -231,7 +185,7 @@ async fn test_updates() {
 
         let event_report = wicketd_testctx
             .wicketd_client
-            .get_update_sp(&target_sp.type_, target_sp.slot)
+            .get_update_sp(&target_sp.typ, target_sp.slot)
             .await
             .expect("get_update_sp successful")
             .into_inner();
@@ -287,6 +241,28 @@ async fn test_updates() {
         assert!(filtered.components.is_empty());
     }
 
+    // The commission API will report this as a Failed progress entry carrying a
+    // non-empty operator message.
+    let entry = wait_for_sled0_progress(
+        &wicketd_testctx,
+        "sled 0 reached Failed",
+        |p| matches!(p.progress.state, update::UpdateState::Failed { .. }),
+    )
+    .await;
+    // Assert the failure message:
+    //
+    // * The step that fails is "Get host type".
+    // * The step fails because the simulated gimlet reports model
+    //   "i86pc" (`FAKE_GIMLET_MODEL`), which is not a known Oxide host
+    //   type.
+    assert_eq!(
+        entry.progress.state,
+        update::UpdateState::Failed {
+            message: "Get host type: Unknown host type i86pc".to_string(),
+        },
+        "the failed update carries the expected operator-facing message",
+    );
+
     // Try starting the update again -- this should fail because we require that
     // update state is cleared before starting a new one.
     {
@@ -330,17 +306,14 @@ async fn test_updates() {
             .expect("wicket rack-update clear failed");
 
         // stdout should contain a JSON object.
-        let response: Result<ClearUpdateStateResponse, NestedError> =
+        let response: Result<ClearUpdateStateResponse, SerializableError> =
             serde_json::from_slice(&stdout).expect("stdout is valid JSON");
         assert_eq!(
             response.expect("expected Ok response"),
             ClearUpdateStateResponse {
-                cleared: btreeset![SpIdentifier {
-                    type_: SpType::Sled,
-                    slot: 0
-                }],
+                cleared: btreeset![SpIdentifier { typ: SpType::Sled, slot: 0 }],
                 no_update_data: btreeset![SpIdentifier {
-                    type_: SpType::Sled,
+                    typ: SpType::Sled,
                     slot: 1
                 }],
             }
@@ -350,7 +323,7 @@ async fn test_updates() {
     {
         // After clearing, status should show NotStarted and no components.
         // Uploaded artifacts should be unaffected by the clear.
-        let status = get_rack_update_status(&wicketd_testctx, &[]).await;
+        let mut status = get_rack_update_status(&wicketd_testctx, &[]).await;
         assert_eq!(
             status.state,
             UpdateState::NotStarted,
@@ -360,9 +333,9 @@ async fn test_updates() {
             status.components.is_empty(),
             "no components should be present"
         );
-        let actual_ids: BTreeSet<_> = status.artifacts.into_iter().collect();
+        status.artifacts.sort_unstable();
         assert_eq!(
-            expected_artifact_ids, actual_ids,
+            expected_artifact_ids, status.artifacts,
             "artifacts should be unaffected by clear"
         );
     }
@@ -370,7 +343,7 @@ async fn test_updates() {
     // Check to see that the update state for SP 0 was cleared.
     let event_report = wicketd_testctx
         .wicketd_client
-        .get_update_sp(&target_sp.type_, target_sp.slot)
+        .get_update_sp(&target_sp.typ, target_sp.slot)
         .await
         .expect("get_update_sp successful")
         .into_inner();
@@ -405,9 +378,7 @@ async fn get_rack_update_status(
         .expect("rack-update status --json output is valid JSON")
 }
 
-// See documentation for extract_nested_artifact_pair in update_plan.rs for why
-// multi_thread is required.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[tokio::test]
 async fn test_installinator_fetch() {
     let gateway = gateway_setup::test_setup(
         "test_installinator_fetch_no_installinator_document",
@@ -415,92 +386,53 @@ async fn test_installinator_fetch() {
     )
     .await;
     let wicketd_testctx = WicketdTestContext::setup(gateway).await;
-    let log = wicketd_testctx.log();
 
-    let temp_dir = Utf8TempDir::new().expect("temp dir created");
-    let archive_path = temp_dir.path().join("archive.zip");
-
-    // Test ingestion of an artifact with non-semver versions. This ensures that
-    // wicketd for v14 and above can handle non-semver versions.
-    //
-    // --allow-non-semver can be removed once customer systems are updated to
-    // v14 and above.
-    let args = tufaceous::Args::try_parse_from([
-        "tufaceous",
-        "assemble",
-        "../update-common/manifests/fake-non-semver.toml",
-        "--allow-non-semver",
-        archive_path.as_str(),
-    ])
-    .expect("args parsed correctly");
-
-    args.exec(log).await.expect("assemble command completed successfully");
-
-    // Read the archive and upload it to the server.
-    let zip_bytes =
-        fs_err::read(&archive_path).expect("archive read correctly");
+    let zip_bytes = RepositoryEditor::fake(Version::new(1, 0, 0))
+        .unwrap()
+        .finish()
+        .await
+        .unwrap()
+        .generate_root()
+        .sign()
+        .await
+        .unwrap()
+        .write_zip(Vec::new(), chrono::Utc::now())
+        .await
+        .unwrap();
     wicketd_testctx
         .wicketd_client
         .put_repository(zip_bytes)
         .await
         .expect("bytes read and archived");
 
-    let update_plan = wicketd_testctx
+    let repo = wicketd_testctx
         .server
         .artifact_store
-        .current_plan()
+        .current_repository()
         .expect("we just uploaded a repository, so there should be a plan");
 
-    installinator_fetch_impl(&wicketd_testctx, &temp_dir, &update_plan).await;
+    installinator_fetch_impl(&wicketd_testctx, &repo).await;
 
     wicketd_testctx.teardown().await;
 }
 
 async fn installinator_fetch_impl(
     wicketd_testctx: &WicketdTestContext,
-    temp_dir: &Utf8TempDir,
-    update_plan: &UpdatePlan,
+    repo: &Repository,
 ) {
     let log = wicketd_testctx.log();
+    let temp_dir = Utf8TempDir::new().expect("temp dir created");
 
-    // Are the host phase 2 and control plane artifacts available when looked up
-    // by hash?
-    let host_phase_2_id = ArtifactHashId {
-        kind: ArtifactKind::HOST_PHASE_2,
-        hash: update_plan.host_phase_2_hash,
-    };
+    let installinator_doc_hash = repo
+        .artifacts()
+        .get_only(&KnownArtifactTags::InstallinatorDocument)
+        .unwrap()
+        .hash;
     assert!(
         wicketd_testctx
             .server
             .artifact_store
-            .contains_by_hash(&host_phase_2_id),
-        "host phase 2 ID found by hash"
-    );
-
-    let control_plane_id = ArtifactHashId {
-        kind: KnownArtifactKind::ControlPlane.into(),
-        hash: update_plan.control_plane_hash,
-    };
-    assert!(
-        wicketd_testctx
-            .server
-            .artifact_store
-            .contains_by_hash(&control_plane_id),
-        "control plane ID found by hash"
-    );
-
-    let installinator_doc_hash = update_plan
-        .installinator_doc_hash
-        .expect("expected installinator document to be present");
-    let installinator_doc_id = ArtifactHashId {
-        kind: KnownArtifactKind::InstallinatorDocument.into(),
-        hash: installinator_doc_hash,
-    };
-    assert!(
-        wicketd_testctx
-            .server
-            .artifact_store
-            .contains_by_hash(&installinator_doc_id),
+            .contains_installinator_artifact(installinator_doc_hash),
         "installinator document ID found by hash"
     );
 
@@ -573,8 +505,8 @@ async fn installinator_fetch_impl(
     // Check that the host and control plane artifacts were downloaded
     // correctly.
     //
-    // The control plane zone names here are defined in `fake-non-semver.toml`
-    // which we load above.
+    // The control plane zone names here are defined in Tufaceous's `FAKE_ZONES`
+    // which we have a copy of above.
     for file_name in [HOST_PHASE_2_FILE_NAME.to_owned()].into_iter().chain(
         FAKE_NON_SEMVER_ZONE_FILE_NAMES.iter().map(|z| format!("install/{z}")),
     ) {
@@ -599,13 +531,6 @@ async fn installinator_fetch_impl(
     let a_override_info =
         serde_json::from_slice::<MupdateOverrideInfo>(&a_override_bytes)
             .expect("mupdate override file successfully deserialized");
-
-    assert_eq!(
-        a_override_info.hash_ids,
-        btreeset! {
-            host_phase_2_id, control_plane_id,
-        }
-    );
 
     // Ensure that the B path also had the same file written out.
     let b_override_path =
@@ -750,9 +675,7 @@ async fn installinator_fetch_impl(
     recv_handle.await.expect("recv_handle succeeded");
 }
 
-// See documentation for extract_nested_artifact_pair in update_plan.rs for why
-// multi_thread is required.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[tokio::test]
 async fn test_update_races() {
     let gateway = gateway_setup::test_setup(
         "test_artifact_upload_while_updating",
@@ -760,33 +683,50 @@ async fn test_update_races() {
     )
     .await;
     let wicketd_testctx = WicketdTestContext::setup(gateway).await;
-    let log = wicketd_testctx.log();
 
-    let temp_dir = Utf8TempDir::new().expect("temp dir created");
-    let archive_path = temp_dir.path().join("archive.zip");
-
-    let args = tufaceous::Args::try_parse_from([
-        "tufaceous",
-        "assemble",
-        "../update-common/manifests/fake.toml",
-        archive_path.as_str(),
-    ])
-    .expect("args parsed correctly");
-
-    args.exec(log).await.expect("assemble command completed successfully");
-
-    // Read the archive and upload it to the server.
-    let zip_bytes =
-        fs_err::read(&archive_path).expect("archive read correctly");
+    let zip_bytes = RepositoryEditor::fake(Version::new(1, 0, 0))
+        .unwrap()
+        .finish()
+        .await
+        .unwrap()
+        .generate_root()
+        .sign()
+        .await
+        .unwrap()
+        .write_zip(Vec::new(), chrono::Utc::now())
+        .await
+        .unwrap();
     wicketd_testctx
         .wicketd_client
         .put_repository(zip_bytes.clone())
         .await
         .expect("bytes read and archived");
 
+    // Also check that the repository is available via the commissioning API,
+    // and that there's no progress there yet.
+    let repo = wicketd_testctx
+        .commission_client
+        .get_repository()
+        .await
+        .expect("get_repository succeeded")
+        .into_inner();
+    assert_eq!(
+        repo.system_version,
+        Some("1.0.0".parse().unwrap()),
+        "system version from the fake manifest"
+    );
+
+    let progress = wicketd_testctx
+        .commission_client
+        .get_update_progress()
+        .await
+        .expect("get_update_progress succeeded")
+        .into_inner();
+    assert!(progress.sps.is_empty(), "no updates in progress yet");
+
     // Now start an update.
-    let sp = SpIdentifier { slot: 0, type_: SpType::Sled };
-    let sps: BTreeSet<_> = vec![sp].into_iter().collect();
+    let sp = SpIdentifier { slot: 0, typ: SpType::Sled };
+    let sps = UpdateTargets::single(sp);
 
     let (sender, receiver) = oneshot::channel();
     wicketd_testctx
@@ -821,6 +761,60 @@ async fn test_update_races() {
         );
     }
 
+    // Clearing a target whose update is still running (here, it is
+    // deterministically blocked on the oneshot channel passed into
+    // start_fake_update) is rejected with a 400 naming the in-progress target.
+    let running = ClearUpdateStateParams {
+        targets: UpdateTargets::single(SpIdentifier {
+            typ: SpType::Sled,
+            slot: 0,
+        }),
+    };
+    let err = wicketd_testctx
+        .commission_client
+        .post_clear_update_state(&running)
+        .await
+        .expect_err("clearing a running update is rejected");
+    assert_client_error_message(
+        &err,
+        StatusCode::BAD_REQUEST,
+        "targets are currently being updated",
+    );
+
+    // Check that the commission API reports sled 0 as Running with reasonable
+    // step counts while the fake update is running.
+    let entry = wait_for_sled0_progress(
+        &wicketd_testctx,
+        "sled 0 reached Running with its single step running",
+        |p| {
+            p.progress.state == update::UpdateState::Running
+                && p.progress.innermost_running_steps().count() == 1
+        },
+    )
+    .await;
+    assert_eq!(
+        entry.progress.state,
+        update::UpdateState::Running,
+        "sled 0 rolls up to Running",
+    );
+    assert_eq!(
+        entry.progress.steps.len(),
+        1,
+        "the fake update has one top-level step: {:?}",
+        entry.progress.steps,
+    );
+    let running: Vec<_> = entry.progress.innermost_running_steps().collect();
+    assert_eq!(
+        running.len(),
+        1,
+        "exactly one running step in the tree: {running:?}",
+    );
+    assert!(
+        running[0].description.contains("Fake step"),
+        "running step is the fake step: {}",
+        running[0].description,
+    );
+
     // Unblock the update, letting it run to completion.
     let (final_sender, final_receiver) = oneshot::channel();
     sender.send(final_sender).expect("receiver kept open by update engine");
@@ -836,6 +830,113 @@ async fn test_update_races() {
     assert!(
         matches!(last_event.kind, StepEventKind::ExecutionCompleted { .. }),
         "last event is execution completed: {last_event:#?}"
+    );
+
+    // Check that the commission API reports the fake update as having
+    // completed.
+    let entry = wait_for_sled0_progress(
+        &wicketd_testctx,
+        "sled 0 reached Completed",
+        |p| p.progress.state == update::UpdateState::Completed,
+    )
+    .await;
+    assert_eq!(
+        entry.progress,
+        update::UpdateProgress {
+            state: update::UpdateState::Completed,
+            steps: vec![update::UpdateStep {
+                description: "Fake step that waits for receiver to resolve"
+                    .to_string(),
+                status: UpdateStepStatus::Completed {
+                    outcome: StepOutcome::Success { message: None },
+                },
+                children: Vec::new(),
+            }],
+        },
+        "the fake update rolls up to Completed with its single clean step",
+    );
+
+    // sled 0's update completed, so it reports as cleared and no_update_data is
+    // empty.
+    let sled0_id = SpIdentifier { typ: SpType::Sled, slot: 0 };
+    let params =
+        ClearUpdateStateParams { targets: UpdateTargets::single(sled0_id) };
+    let response = wicketd_testctx
+        .commission_client
+        .post_clear_update_state(&params)
+        .await
+        .expect("clearing sled 0 succeeded")
+        .into_inner();
+    assert_eq!(
+        response,
+        ClearUpdateStateResponse {
+            cleared: std::iter::once(sled0_id).collect(),
+            no_update_data: BTreeSet::new(),
+        },
+        "clearing sled 0 reports exactly sled 0 as cleared",
+    );
+
+    // sled 1 never had an update, so it reports under no_update_data with
+    // nothing cleared.
+    let sled1_id = SpIdentifier { typ: SpType::Sled, slot: 1 };
+    let params =
+        ClearUpdateStateParams { targets: UpdateTargets::single(sled1_id) };
+    let response = wicketd_testctx
+        .commission_client
+        .post_clear_update_state(&params)
+        .await
+        .expect("clearing sled 1 succeeded")
+        .into_inner();
+    assert_eq!(
+        response,
+        ClearUpdateStateResponse {
+            cleared: BTreeSet::new(),
+            no_update_data: std::iter::once(sled1_id).collect(),
+        },
+        "clearing sled 1 reports it as having no update data",
+    );
+
+    let progress = wicketd_testctx
+        .commission_client
+        .get_update_progress()
+        .await
+        .expect("get_update_progress succeeded")
+        .into_inner();
+    assert!(progress.sps.is_empty(), "update progress cleared for sled 0");
+
+    let event_buffer = wicketd_testctx
+        .wicketd_client
+        .get_update_sp(&SpType::Sled, 0)
+        .await
+        .expect("received event buffer successfully");
+    assert!(
+        event_buffer.step_events.is_empty(),
+        "event buffer cleared for sled 0: {event_buffer:#?}"
+    );
+
+    // Run a second fake update to completion so the event buffer is populated
+    // again -- otherwise the re-upload check below would be vacuous now that
+    // the clear emptied the buffer.
+    let sps = UpdateTargets::single(sp);
+    let (sender, receiver) = oneshot::channel();
+    wicketd_testctx
+        .server
+        .update_tracker
+        .start_fake_update(sps, receiver)
+        .await
+        .expect("start_fake_update successful");
+    let (final_sender, final_receiver) = oneshot::channel();
+    sender.send(final_sender).expect("receiver kept open by update engine");
+    final_receiver.await.expect("update engine completed successfully");
+
+    let event_buffer = wicketd_testctx
+        .wicketd_client
+        .get_update_sp(&SpType::Sled, 0)
+        .await
+        .expect("received event buffer successfully");
+    assert!(
+        !event_buffer.step_events.is_empty(),
+        "event buffer populated by the second update: {event_buffer:#?}"
     );
 
     // Try uploading the repository again -- since no updates are running, this
