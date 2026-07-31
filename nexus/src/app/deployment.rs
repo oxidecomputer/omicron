@@ -933,9 +933,7 @@ impl SledUpdateStatus {
         } else if num_slots_with_current_contents == 2 {
             Self::HasUnresolvedMupdate(SledMupdateDetectedHow::BootDiskContents)
         } else {
-            Self::FoundDifferentVersion {
-                os_version: found_different_version,
-            }
+            Self::FoundDifferentVersion { os_version: found_different_version }
         }
     }
 }
