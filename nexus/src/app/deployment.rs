@@ -468,7 +468,7 @@ enum TargetReleaseChangeError {
 // We must be very generous here, as discussed at our call site in
 // `target_release_update()` above. We only reject this request if there is no
 // evidence that we need to recover from a mupdate, or if we have enough
-// information to know the operator is trying to recovery to an incorrect
+// information to know the operator is trying to recover to an incorrect
 // version. Evidence we consider:
 //
 // 1. Are any sleds waiting for mupdate recovery (either they have a mupdate
@@ -675,7 +675,7 @@ impl BlueprintTargetReleaseStatus {
         // Blueprint artifact versions are stored as strings, not
         // `semver::Version`s. Here we're only looking at zone and OS versions,
         // which are guaranteed to match the system version, but we still need
-        // to convert the `semver::Version` we got to a string for comparision.
+        // to convert the `semver::Version` we got to a string for comparison.
         let version_to_check = version_to_check.to_string();
 
         // Check sled configs first.
