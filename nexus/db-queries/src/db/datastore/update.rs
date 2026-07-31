@@ -60,17 +60,17 @@ async fn artifacts_for_repo(
         Paginator::new(SQL_BATCH_SIZE, dropshot::PaginationOrder::Ascending);
     while let Some(p) = paginator.next() {
         let batch = paginated(
-            tuf_repo_artifact_dsl::tuf_repo_artifact,
-            tuf_repo_artifact_dsl::tuf_artifact_id,
+            tuf_artifact_dsl::tuf_artifact,
+            tuf_artifact_dsl::id,
             &p.current_pagparams(),
         )
+        .inner_join(tuf_repo_artifact_dsl::tuf_repo_artifact.on(
+            tuf_repo_artifact_dsl::tuf_artifact_id.eq(tuf_artifact_dsl::id),
+        ))
         .filter(
             tuf_repo_artifact_dsl::tuf_repo_id
                 .eq(nexus_db_model::to_db_typed_uuid(repo_id)),
         )
-        .inner_join(tuf_artifact_dsl::tuf_artifact.on(
-            tuf_artifact_dsl::id.eq(tuf_repo_artifact_dsl::tuf_artifact_id),
-        ))
         .inner_join(
             tuf_artifact_file_dsl::tuf_artifact_file
                 .on(tuf_artifact_file_dsl::sha256.eq(tuf_artifact_dsl::sha256)),
@@ -836,7 +836,17 @@ async fn insert_impl(
 
         // First, build a list of artifacts matching any artifact hash present
         // in the uploaded repository.
-        let mut results = tuf_artifact_dsl::tuf_artifact
+        let mut results = IdHashMap::new();
+        let mut paginator = Paginator::new(
+            SQL_BATCH_SIZE,
+            dropshot::PaginationOrder::Ascending,
+        );
+        while let Some(p) = paginator.next() {
+            let batch = paginated(
+                tuf_artifact_dsl::tuf_artifact,
+                tuf_artifact_dsl::id,
+                &p.current_pagparams(),
+            )
             .filter(
                 tuf_artifact_dsl::sha256
                     .eq_any(desc.artifacts.iter().map(|a| a.artifact.sha256)),
@@ -848,25 +858,55 @@ async fn insert_impl(
             )
             .select((TufArtifact::as_select(), TufArtifactFile::as_select()))
             .load_async(&conn)
-            .await?
-            .into_iter()
-            .map(|(artifact, file)| {
+            .await?;
+            paginator = p.found_batch(&batch, &|(artifact, _)| artifact.id);
+            results.extend(batch.into_iter().map(|(artifact, file)| {
                 TufArtifactDescription::from_db_untagged(artifact, file)
-            })
-            .collect::<IdHashMap<_>>();
+            }));
+        }
         // Now fetch their tags and add them.
         if !results.is_empty() {
-            for tag in tuf_artifact_tag_dsl::tuf_artifact_tag
+            let mut paginator = Paginator::new(
+                SQL_BATCH_SIZE,
+                dropshot::PaginationOrder::Ascending,
+            );
+            while let Some(p) = paginator.next() {
+                let batch = paginated_multicolumn(
+                    tuf_artifact_tag_dsl::tuf_artifact_tag,
+                    (
+                        tuf_artifact_tag_dsl::tuf_artifact_id,
+                        tuf_artifact_tag_dsl::key,
+                    ),
+                    &p.current_pagparams(),
+                )
                 .filter(tuf_artifact_tag_dsl::tuf_artifact_id.eq_any(
                     results.iter().map(|artifact| artifact.artifact.id),
                 ))
                 .select(TufArtifactTag::as_select())
                 .load_async(&conn)
-                .await?
-            {
-                if let Some(mut artifact) =
-                    results.get_mut(&tag.tuf_artifact_id)
-                {
+                .await?;
+                paginator = p.found_batch(&batch, &|tag| {
+                    (tag.tuf_artifact_id, tag.key.clone())
+                });
+                for tag in batch {
+                    let Some(mut artifact) =
+                        results.get_mut(&tag.tuf_artifact_id)
+                    else {
+                        // This implies that the contents of `tuf_repo_artifact`
+                        // for our repo ID changed between the first batch of
+                        // queries (listing artifacts) and this batch (listing
+                        // tags). Not only should this not happen because we are
+                        // in a transaction, this should never happen because
+                        // the set of artifacts for a particular repository
+                        // never changes after first being inserted!
+                        return Err(DieselError::DatabaseError(
+                            DatabaseErrorKind::ForeignKeyViolation,
+                            Box::new(format!(
+                                "artifact for {tag:?} was not seen \
+                                in previous query"
+                            )),
+                        ));
+                    };
                     artifact.tags.insert(tag.key, tag.value);
                 }
             }
