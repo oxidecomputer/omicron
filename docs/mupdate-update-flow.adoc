@@ -133,7 +133,7 @@ root@oxz_switch1:~# omdb nexus blueprints diff latest
 
 image::assets/mupdate-update-flow/bp-clear-will-remove-mupdate.png[]
 
-== Fully recovering
+== Fully recovering [[fully_recovering]]
 
 Nexus will not add or update zones until it is sure it can take over updates again. The operator instructs Nexus by:
 
@@ -178,7 +178,7 @@ MUPdating a single sled is only supported in a very restricted set of conditions
 
 In particular, mupdating single sleds (a) during a live update or (b) to a version that doesn't match the rest of the control plane is *extremely dangerous* and may lead to arbitrary control plane corruption.
 
-When recovering from a supported single-sled mupdate, the flow differs from the description in <<Fully Recovering>> in that the operator does not need to upload the TUF repo again, and Nexus will perform no-op conversion on its own once it detects the mupdate. This will typically look like two blueprints separated by a small window of time, where the first detects the MUPdate and bumps the blueprint's minimum target release generation and the second performs no-op conversion of the sled(s); e.g.,
+When recovering from a supported single-sled mupdate, the flow differs from the description in <<fully_recovering>> in that the operator does not need to upload the TUF repo again, and Nexus will perform no-op conversion on its own once it detects the mupdate. This will typically look like two blueprints separated by a small window of time, where the first detects the MUPdate and bumps the blueprint's minimum target release generation and the second performs no-op conversion of the sled(s); e.g.,
 
 [source,console]
 ----
