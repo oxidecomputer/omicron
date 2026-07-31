@@ -2450,6 +2450,10 @@ termination: Exited(0)
 ---------------------------------------------
 stdout:
 fault management config updated to version 1:
+  analysis enabled:          true
+  sitrep limit:              3000
+  history pruning threshold: 2000
+
 ---------------------------------------------
 stderr:
 note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
@@ -2477,6 +2481,10 @@ termination: Exited(0)
 ---------------------------------------------
 stdout:
 fault management config updated to version 2:
+  analysis enabled:          false
+  sitrep limit:              3000
+  history pruning threshold: 2000
+
 ---------------------------------------------
 stderr:
 note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
