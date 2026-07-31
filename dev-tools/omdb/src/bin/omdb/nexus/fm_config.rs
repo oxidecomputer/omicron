@@ -230,8 +230,13 @@ async fn set_config(
 
     client.fm_config_set(&new_config).await?;
     println!(
-        "fault management config updated to version {}:",
-        new_config.version
+        "fault management config updated to version {}:\n{}",
+        new_config.version,
+        // TODO(eliza): it would be nice to display a diff here the way the
+        // reconfigurator config does, but a lot of the diff-displaying
+        // machinery is currently kind of reconfigurator-specific. Let's figure
+        // out what can be generalized later.
+        new_config.config.display_multiline(2),
     );
 
     Ok(())
