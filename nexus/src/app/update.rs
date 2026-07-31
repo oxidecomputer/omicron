@@ -1076,7 +1076,7 @@ mod test {
         // To make the blueprint look like an update is in progress, override
         // the first zone's `image_source` to an older artifact version. That
         // single zone is enough for `BlueprintTargetReleaseStatus::new` to
-        // return `PreviousUpdateInProgress` against `version`.
+        // return `FoundDifferentVersion` against `version`.
         if in_progress {
             let older_zone_artifact = BlueprintZoneImageSource::Artifact {
                 version: BlueprintArtifactVersion::Available {
@@ -1701,7 +1701,7 @@ mod test {
         let target_release = fake_target_version();
         // The whole blueprint is on `prev_version`, which differs from the
         // current target `target_release` we pass below — that's what makes
-        // `BlueprintTargetReleaseStatus::new` return `PreviousUpdateInProgress`
+        // `BlueprintTargetReleaseStatus::new` return `FoundDifferentVersion`
         // and the system look mid-update. `in_progress: false` is fine here
         // because the version mismatch alone is sufficient.
         let blueprint = fake_blueprint(

@@ -651,7 +651,7 @@ impl BlueprintTargetReleaseStatus {
     // 1. If any sleds are waiting for a mupdate to be cleared,
     //    `WaitingForMupdateToBeCleared { .. }` will be returned
     // 2. Otherwise, if we find any components at a version other than
-    //    `current_version`, `PreviousUpdateInProgress { .. }` will be returned
+    //    `version_to_check`, `FoundDifferentVersion { .. }` will be returned
     // 3. Otherwise, `AllComponentsMatchTargetRelease` will be returned.
     //
     // We don't attempt to check Hubris components:
@@ -718,7 +718,8 @@ impl BlueprintTargetReleaseStatus {
                         // the artifacts in the current target release and check
                         // hashes?
                         //
-                        // For now, treat this as "not the current version".
+                        // For now, record this as "not the version we're
+                        // checking for".
                         BlueprintArtifactVersion::Unknown => {
                             found_different_version.get_or_insert_with(|| {
                                 (sled_id, version.clone())
@@ -829,7 +830,7 @@ pub(super) enum SledMupdateDetectedHow {
 }
 
 // Status of any update or mupdate on a sled, not considering its zones, based
-// on the current target version.
+// on a provided version to check against.
 enum SledUpdateStatus {
     // The sled has been mupdated and is waiting on mupdate recovery.
     HasUnresolvedMupdate(SledMupdateDetectedHow),
@@ -868,9 +869,9 @@ impl SledUpdateStatus {
         // `InstallDataset`. (Zone checks are performed elsewhere.)
 
         // If both OS slots are set to `CurrentContents`, we've been mupdated.
-        // Otherwise, we consider this sled to be running the current target
-        // version if either slot matches. Ideally we'd only check the slot that
-        // is supposed to be booting, but blueprints don't currently track that
+        // Otherwise, we consider this sled to be running `version_to_check` if
+        // either slot matches. Ideally we'd only check the slot that is
+        // supposed to be booting, but blueprints don't currently track that
         // (maybe they should?).
         //
         // This is not as precise as we'd like, but in practice is unlikely to
@@ -880,7 +881,7 @@ impl SledUpdateStatus {
         // that are not yet updated.
         let mut num_slots_with_current_contents = 0;
         let mut found_version_to_check_in_either_slot = false;
-        let mut found_non_current_version = BlueprintArtifactVersion::Unknown;
+        let mut found_different_version = BlueprintArtifactVersion::Unknown;
         for slot in
             [&sled_config.host_phase_2.slot_a, &sled_config.host_phase_2.slot_b]
         {
@@ -897,7 +898,7 @@ impl SledUpdateStatus {
                             found_version_to_check_in_either_slot = true;
                             break;
                         } else {
-                            found_non_current_version = version.clone();
+                            found_different_version = version.clone();
                         }
                     }
                     BlueprintArtifactVersion::Unknown => {
@@ -908,7 +909,7 @@ impl SledUpdateStatus {
                         // mupdate, though, so we treat it just like any other
                         // "not current version".
                         //
-                        // We initialize `found_non_current_version` to
+                        // We initialize `found_different_version` to
                         // `Unknown`; if both slots are unknown, we leave it in
                         // that state. If either slot is known, we'll update it
                         // in the `::Available` branch above.
@@ -928,7 +929,7 @@ impl SledUpdateStatus {
             Self::HasUnresolvedMupdate(SledMupdateDetectedHow::BootDiskContents)
         } else {
             Self::FoundDifferentVersion {
-                os_version: found_non_current_version,
+                os_version: found_different_version,
             }
         }
     }
