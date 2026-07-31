@@ -750,6 +750,7 @@ fn rss_config_text<'a>(
                     enforce_first_as,
                     allowed_import,
                     allowed_export,
+                    src_addr,
                     vlan_id,
                     router_lifetime,
                 } = p;
@@ -839,6 +840,12 @@ fn rss_config_text<'a>(
                                 communities.iter().join(","),
                                 ok_style,
                             ),
+                        ]);
+                    }
+                    if let Some(src_addr) = src_addr {
+                        settings.extend([
+                            Span::styled(" src_addr=", label_style),
+                            Span::styled(src_addr.to_string(), ok_style),
                         ]);
                     }
                     if let Some(vlan_id) = vlan_id {

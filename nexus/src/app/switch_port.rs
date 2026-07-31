@@ -58,7 +58,6 @@ impl super::Nexus {
         }
     }
 
-    // TODO: more validation wanted
     fn switch_port_settings_validate(
         params: &networking::SwitchPortSettingsCreate,
     ) -> CreateResult<()> {
@@ -66,7 +65,7 @@ impl super::Nexus {
             for p in x.peers.iter() {
                 if let Some(ref key) = p.md5_auth_key {
                     let peer_id = match p.addr {
-                        RouterPeerType::Numbered { ip } => {
+                        RouterPeerType::Numbered { ip, .. } => {
                             format!("peer {ip}")
                         }
                         RouterPeerType::Unnumbered { .. } => {
@@ -92,6 +91,21 @@ impl super::Nexus {
                                 ),
                             ));
                         }
+                    }
+                }
+                if let RouterPeerType::Numbered {
+                    ip,
+                    src_addr: Some(src_addr),
+                } = p.addr
+                {
+                    if src_addr.is_ipv4() != ip.is_ipv4() {
+                        return Err(Error::invalid_value(
+                            "src_addr",
+                            format!(
+                                "src_addr {src_addr} and peer address {ip} \
+                                must have the same address family"
+                            ),
+                        ));
                     }
                 }
             }

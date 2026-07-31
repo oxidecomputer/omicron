@@ -1538,7 +1538,7 @@ impl DiffableBgpConfig {
                 RouterPeerType::Unnumbered { .. } => {
                     format!("unnumbered-{port_name}")
                 }
-                RouterPeerType::Numbered { ip } => ip.to_string(),
+                RouterPeerType::Numbered { ip, src_addr: _ } => ip.to_string(),
             };
 
             let common = DiffableBgpCommonPeerConfig {
@@ -1583,7 +1583,7 @@ impl DiffableBgpConfig {
                     max: 1.0.into(),
                     min: 0.75.into(),
                 }),
-                src_addr: None,
+                src_addr: addr.src_addr().map(From::from),
                 src_port: None,
             };
 
@@ -1603,7 +1603,7 @@ impl DiffableBgpConfig {
                         );
                     }
                 }
-                RouterPeerType::Numbered { ip } => {
+                RouterPeerType::Numbered { ip, src_addr: _ } => {
                     let addr = SocketAddr::new((*ip).into(), BGP_PORT);
                     if let Some(_prev) = numbered_peers.insert(addr, common) {
                         bail!(

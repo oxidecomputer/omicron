@@ -80,7 +80,7 @@ struct TestInput {
                     .into_iter()
                     .map(|(ip, mut peer)| {
                         peer.asn = #asn;
-                        peer.addr = RouterPeerType::Numbered { ip };
+                        peer.addr = RouterPeerType::Numbered { ip, src_addr: None };
                         (ip, peer)
                     })
                     .collect()
@@ -244,7 +244,10 @@ impl MgdNeighborKind for MgdNeighbor {
         self.vlan_id
     }
     fn peer_type(&self) -> RouterPeerType {
-        RouterPeerType::Numbered { ip: self.host.ip().try_into().unwrap() }
+        RouterPeerType::Numbered {
+            ip: self.host.ip().try_into().unwrap(),
+            src_addr: None,
+        }
     }
 }
 
