@@ -1028,18 +1028,35 @@ impl SledAgentApi for SledAgentSimImpl {
     }
 
     async fn support_logs(
-        _request_context: RequestContext<Self::Context>,
+        request_context: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<Vec<String>>, HttpError> {
-        // Return an empty zone list for testing.
-        Ok(HttpResponseOk(Default::default()))
+        // Return the zones tests have injected logs for (empty by default).
+        let sa = request_context.context();
+        Ok(HttpResponseOk(sa.support_log_zones()))
     }
 
     async fn support_logs_download(
-        _request_context: RequestContext<Self::Context>,
-        _path_params: Path<SledDiagnosticsLogsDownloadPathParam>,
-        _query_params: Query<SledDiagnosticsLogsDownloadQueryParam>,
+        request_context: RequestContext<Self::Context>,
+        path_params: Path<SledDiagnosticsLogsDownloadPathParam>,
+        query_params: Query<SledDiagnosticsLogsDownloadQueryParam>,
     ) -> Result<http::Response<dropshot::Body>, HttpError> {
-        method_unimplemented()
+        let sa = request_context.context();
+        let SledDiagnosticsLogsDownloadPathParam { zone } =
+            path_params.into_inner();
+        let SledDiagnosticsLogsDownloadQueryParam {
+            max_rotated,
+            start_time,
+            end_time,
+        } = query_params.into_inner();
+        super::sim_support_logs::serve_zip(
+            sa,
+            &zone,
+            max_rotated,
+            sled_diagnostics::LogTimeWindow {
+                start: start_time,
+                end: end_time,
+            },
+        )
     }
 
     async fn chicken_switch_destroy_orphaned_datasets_get_v1(
