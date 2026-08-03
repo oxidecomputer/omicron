@@ -41,10 +41,14 @@ use wicket_common::rack_setup::BgpAuthKeyStatus;
 use wicket_common::rack_setup::CurrentRssUserConfigInsensitive;
 use wicketd_client::types::CurrentRssUserConfig;
 use wicketd_client::types::CurrentRssUserConfigSensitive;
-use wicketd_client::types::RackOperationStatus;
 use wicketd_commission_types::rack_setup::AllowedSourceIps;
 use wicketd_commission_types::rack_setup::IpRange;
 use wicketd_commission_types::rack_setup::ManualPortConfig;
+use wicketd_commission_types::rack_setup::RackOperation;
+use wicketd_commission_types::rack_setup::RackOperationState;
+use wicketd_commission_types::rack_setup::RackSetupStatus;
+use wicketd_commission_types::rack_setup::RackState;
+use wicketd_commission_types::rack_setup::RssStepInfo;
 use wicketd_commission_types::rack_setup::UplinkAddress;
 use wicketd_commission_types::rack_setup::UserSpecifiedBgpPeerConfig;
 use wicketd_commission_types::rack_setup::UserSpecifiedImportExportPolicy;
@@ -246,71 +250,107 @@ fn draw_rack_status_details_popup(
     let buttons = vec![ButtonText::new("Close", "Esc")];
     let mut body = Text::default();
 
-    let status = Span::styled("Status: ", style::selected());
+    let status_label = Span::styled("Status: ", style::selected());
     let prefix = vec![Span::styled("Message: ", style::selected())];
     match state.rack_setup_state.as_ref() {
-        Ok(RackOperationStatus::Uninitialized) => {
-            body.lines.push(Line::from(vec![
-                status,
-                Span::styled("Uninitialized", style::plain_text()),
-            ]));
-        }
-        Ok(RackOperationStatus::Initialized { id }) => {
-            body.lines.push(Line::from(vec![
-                status,
-                Span::styled("Initialized", style::plain_text()),
-            ]));
-            if let Some(id) = id {
-                body.lines.push(Line::from(vec![Span::styled(
-                    format!("Last initialization operation ID: {}", id),
-                    style::plain_text(),
-                )]));
+        Ok(rack_status) => match &rack_status.rack_state {
+            RackState::Uninitialized => {
+                body.lines.push(Line::from(vec![
+                    status_label,
+                    Span::styled("Uninitialized", style::plain_text()),
+                ]));
             }
-        }
-        Ok(RackOperationStatus::InitializationFailed { id, message }) => {
-            body.lines.push(Line::from(vec![
-                status,
-                Span::styled("Initialization Failed", style::plain_text()),
-            ]));
-            body.lines.push(Line::from(vec![Span::styled(
-                format!("Last initialization operation ID: {}", id),
-                style::plain_text(),
-            )]));
-            push_text_lines(message, prefix, &mut body.lines);
-        }
-        Ok(RackOperationStatus::InitializationPanicked { id }) => {
-            body.lines.push(Line::from(vec![
-                status,
-                Span::styled("Initialization Panicked", style::plain_text()),
-            ]));
-            body.lines.push(Line::from(vec![Span::styled(
-                format!("Last initialization operation ID: {}", id),
-                style::plain_text(),
-            )]));
-        }
-        Ok(RackOperationStatus::Initializing { id, step }) => {
-            body.lines.push(Line::from(vec![
-                status,
-                Span::styled("Initializing", style::plain_text()),
-            ]));
-            let max = step.max_step();
-            let index = step.index();
-            body.lines.push(Line::from(vec![Span::styled(
-                format!("Current step: {}/{}", index, max),
-                style::plain_text(),
-            )]));
-            body.lines.push(Line::from(vec![Span::styled(
-                format!("Current operation: {:?}", step),
-                style::plain_text(),
-            )]));
-            body.lines.push(Line::from(vec![Span::styled(
-                format!("Current operation ID: {}", id),
-                style::plain_text(),
-            )]));
-        }
+            RackState::Initialized => {
+                body.lines.push(Line::from(vec![
+                    status_label,
+                    Span::styled("Initialized", style::plain_text()),
+                ]));
+                if let Some(op) = &rack_status.operation {
+                    body.lines.push(Line::from(vec![Span::styled(
+                        format!("Last operation ID: {}", op.id),
+                        style::plain_text(),
+                    )]));
+                }
+            }
+            RackState::Other => match &rack_status.operation {
+                Some(op) => match &op.state {
+                    RackOperationState::InProgress { current_step } => {
+                        body.lines.push(Line::from(vec![
+                            status_label,
+                            Span::styled("Initializing", style::plain_text()),
+                        ]));
+                        if let Some(step) = current_step {
+                            body.lines.push(Line::from(vec![Span::styled(
+                                format!(
+                                    "Current step: {}/{}",
+                                    step.step, step.total_steps
+                                ),
+                                style::plain_text(),
+                            )]));
+                            body.lines.push(Line::from(vec![Span::styled(
+                                format!(
+                                    "Current operation: {}",
+                                    step.description
+                                ),
+                                style::plain_text(),
+                            )]));
+                        }
+                        body.lines.push(Line::from(vec![Span::styled(
+                            format!("Operation ID: {}", op.id),
+                            style::plain_text(),
+                        )]));
+                    }
+                    RackOperationState::Failed { message, .. } => {
+                        body.lines.push(Line::from(vec![
+                            status_label,
+                            Span::styled(
+                                "Initialization Failed",
+                                style::plain_text(),
+                            ),
+                        ]));
+                        body.lines.push(Line::from(vec![Span::styled(
+                            format!("Operation ID: {}", op.id),
+                            style::plain_text(),
+                        )]));
+                        push_text_lines(message, prefix, &mut body.lines);
+                    }
+                    RackOperationState::Panicked => {
+                        body.lines.push(Line::from(vec![
+                            status_label,
+                            Span::styled(
+                                "Initialization Panicked",
+                                style::plain_text(),
+                            ),
+                        ]));
+                        body.lines.push(Line::from(vec![Span::styled(
+                            format!("Operation ID: {}", op.id),
+                            style::plain_text(),
+                        )]));
+                    }
+                    RackOperationState::Completed => {
+                        body.lines.push(Line::from(vec![
+                            status_label,
+                            Span::styled(
+                                "Other (operation completed)",
+                                style::plain_text(),
+                            ),
+                        ]));
+                    }
+                },
+                None => {
+                    body.lines.push(Line::from(vec![
+                        status_label,
+                        Span::styled(
+                            "Other (no operation recorded)",
+                            style::plain_text(),
+                        ),
+                    ]));
+                }
+            },
+        },
         Err(message) => {
             body.lines.push(Line::from(vec![
-                status,
+                status_label,
                 Span::styled(
                     "Unknown (request to wicketd failed)",
                     style::plain_text(),
@@ -348,13 +388,24 @@ impl Control for RackSetupPane {
                 self.popup = Some(Popup::new_rack_status_details());
                 Some(Action::Redraw)
             }
-            Cmd::StartRackSetup => match state.rack_setup_state.as_ref() {
-                Ok(RackOperationStatus::Uninitialized { .. }) => {
+            Cmd::StartRackSetup => {
+                let ready = state.rack_setup_state.as_ref().map_or(
+                    false,
+                    |s| {
+                        matches!(s.rack_state, RackState::Uninitialized)
+                            && !matches!(
+                                s.operation.as_ref().map(|op| &op.state),
+                                Some(RackOperationState::InProgress { .. })
+                            )
+                    },
+                );
+                if ready {
                     self.popup = Some(Popup::new_rack_setup());
                     Some(Action::Redraw)
+                } else {
+                    None
                 }
-                _ => None,
-            },
+            }
             _ => None,
         }
     }
@@ -418,16 +469,10 @@ impl Control for RackSetupPane {
 
         // Draw the help bar
         let help = match state.rack_setup_state.as_ref() {
-            Ok(RackOperationStatus::Uninitialized) => {
+            Ok(s) if matches!(s.rack_state, RackState::Uninitialized) => {
                 &self.rack_uninitialized_help
             }
-            Ok(
-                RackOperationStatus::Initialized { .. }
-                | RackOperationStatus::Initializing { .. }
-                | RackOperationStatus::InitializationFailed { .. }
-                | RackOperationStatus::InitializationPanicked { .. },
-            )
-            | Err(_) => &self.help,
+            _ => &self.help,
         };
         let help = help_text(help).block(block.clone());
         frame.render_widget(help, chunks[2]);
@@ -452,7 +497,7 @@ impl Control for RackSetupPane {
 }
 
 fn rss_config_text<'a>(
-    setup_state: Result<&RackOperationStatus, &String>,
+    setup_state: Result<&RackSetupStatus, &String>,
     config: Option<&'a CurrentRssUserConfig>,
 ) -> Text<'a> {
     fn dyn_span<'a>(
@@ -476,22 +521,36 @@ fn rss_config_text<'a>(
     let dyn_style = |ok| if ok { ok_style } else { bad_style };
 
     let setup_description = match setup_state {
-        Ok(RackOperationStatus::Uninitialized { .. }) => {
-            Span::styled("Uninitialized", ok_style)
-        }
-        Ok(RackOperationStatus::Initialized { .. }) => {
-            Span::styled("Initialized", ok_style)
-        }
-        Ok(RackOperationStatus::Initializing { step, .. }) => {
-            let max = step.max_step();
-            let index = step.index();
-            let msg = format!("Initializing: Step {}/{}", index, max);
-            Span::styled(msg, warn_style)
-        }
-        Ok(
-            RackOperationStatus::InitializationFailed { .. }
-            | RackOperationStatus::InitializationPanicked { .. },
-        ) => Span::styled("Initialization Failed", bad_style),
+        Ok(rack_status) => match &rack_status.rack_state {
+            RackState::Uninitialized => {
+                Span::styled("Uninitialized", ok_style)
+            }
+            RackState::Initialized => Span::styled("Initialized", ok_style),
+            RackState::Other => {
+                match rack_status.operation.as_ref().map(|op| &op.state) {
+                    Some(RackOperationState::InProgress { current_step }) => {
+                        if let Some(step) = current_step {
+                            Span::styled(
+                                format!(
+                                    "Initializing: Step {}/{}",
+                                    step.step, step.total_steps
+                                ),
+                                warn_style,
+                            )
+                        } else {
+                            Span::styled("Initializing", warn_style)
+                        }
+                    }
+                    Some(
+                        RackOperationState::Failed { .. }
+                        | RackOperationState::Panicked,
+                    ) => Span::styled("Initialization Failed", bad_style),
+                    Some(RackOperationState::Completed) | None => {
+                        Span::styled("Other", warn_style)
+                    }
+                }
+            }
+        },
         Err(_) => Span::styled("Unknown", bad_style),
     };
 
@@ -1296,7 +1355,10 @@ mod preview {
             },
         };
         let text = rss_config_text(
-            Ok(&RackOperationStatus::Uninitialized),
+            Ok(&RackSetupStatus {
+                rack_state: RackState::Uninitialized,
+                operation: None,
+            }),
             Some(&config),
         );
 

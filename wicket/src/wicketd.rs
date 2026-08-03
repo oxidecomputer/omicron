@@ -309,9 +309,9 @@ impl WicketdManager {
     fn poll_rack_setup_status(&self) {
         let log = self.log.clone();
         let tx = self.events_tx.clone();
-        let addr = self.wicketd_addr;
+        let addr = self.commission_addr;
         tokio::spawn(async move {
-            let client = create_wicketd_client(&log, addr, WICKETD_TIMEOUT);
+            let client = create_commission_client(&log, addr, WICKETD_TIMEOUT);
             let mut ticker = interval(WICKETD_POLL_INTERVAL * 2);
             let mut prev = None;
             ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);

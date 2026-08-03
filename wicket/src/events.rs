@@ -13,10 +13,9 @@ use std::time::SystemTime;
 use wicket_common::artifact::ArtifactId;
 use wicket_common::inventory::RackV1Inventory;
 use wicket_common::update_events::EventReport;
-use wicketd_client::types::{
-    CurrentRssUserConfig, IgnitionCommand, RackOperationStatus,
-};
+use wicketd_client::types::{CurrentRssUserConfig, IgnitionCommand};
 use wicketd_commission_types::inventory::LocationInfo;
+use wicketd_commission_types::rack_setup::RackSetupStatus;
 
 /// Event report type returned by the get_artifacts_and_event_reports API call.
 pub type EventReportMap = HashMap<String, HashMap<String, EventReport>>;
@@ -43,7 +42,7 @@ pub enum Event {
     RssConfig(Box<CurrentRssUserConfig>),
 
     /// The current state of rack initialization.
-    RackSetupStatus(Result<RackOperationStatus, String>),
+    RackSetupStatus(Result<RackSetupStatus, String>),
 
     /// The location within the rack where wicketd is running.
     WicketdLocation(LocationInfo),

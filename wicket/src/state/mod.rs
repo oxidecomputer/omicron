@@ -22,8 +22,9 @@ pub use update::{
 };
 
 use serde::{Deserialize, Serialize};
-use wicketd_client::types::{CurrentRssUserConfig, RackOperationStatus};
+use wicketd_client::types::CurrentRssUserConfig;
 use wicketd_commission_types::inventory::{LocationInfo, SwitchSlot};
+use wicketd_commission_types::rack_setup::RackSetupStatus;
 
 /// The global state of wicket
 ///
@@ -39,7 +40,7 @@ pub struct State {
     pub update_state: RackUpdateState,
     pub force_update_state: ForceUpdateState,
     pub rss_config: Option<CurrentRssUserConfig>,
-    pub rack_setup_state: Result<RackOperationStatus, String>,
+    pub rack_setup_state: Result<RackSetupStatus, String>,
     pub wicketd_location: Option<LocationInfo>,
 }
 
