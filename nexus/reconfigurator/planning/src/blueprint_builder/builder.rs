@@ -2765,8 +2765,8 @@ pub mod test {
     use omicron_test_utils::dev::test_setup_log;
     use std::collections::BTreeSet;
     use std::mem;
-    use tufaceous_artifact::ArtifactHash;
-    use tufaceous_artifact::ArtifactVersion;
+    use tufaceous_artifact_v2::ArtifactHash;
+    use tufaceous_artifact_v2::ArtifactVersion;
 
     pub const DEFAULT_N_SLEDS: usize = 3;
 

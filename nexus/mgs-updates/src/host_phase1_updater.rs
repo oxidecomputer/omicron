@@ -149,7 +149,7 @@ use slog::Logger;
 use slog::debug;
 use slog_error_chain::InlineErrorChain;
 use std::time::Duration;
-use tufaceous_artifact::ArtifactHash;
+use tufaceous_artifact_v2::ArtifactHash;
 
 // Hashing the current phase 1 contents on the SP is an asynchronous operation:
 // we request a hash and then poll until the hashing completes. We have to pick

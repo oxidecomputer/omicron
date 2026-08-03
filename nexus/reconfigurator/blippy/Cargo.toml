@@ -12,7 +12,7 @@ sled-agent-types.workspace = true
 omicron-common.workspace = true
 omicron-uuid-kinds.workspace = true
 omicron-workspace-hack.workspace = true
-tufaceous-artifact.workspace = true
+tufaceous-artifact-v2.workspace = true
 
 [dev-dependencies]
 ipnet.workspace = true

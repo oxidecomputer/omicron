@@ -33,7 +33,7 @@ tokio.workspace = true
 tokio-stream.workspace = true
 tokio-util.workspace = true
 trust-quorum-types.workspace = true
-tufaceous-artifact.workspace = true
+tufaceous-artifact-v2.workspace = true
 uuid.workspace = true
 
 omicron-workspace-hack.workspace = true

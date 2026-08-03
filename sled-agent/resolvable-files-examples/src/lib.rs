@@ -27,7 +27,7 @@ use sled_agent_types::resolvable_files::{
     InstallMetadataReadError, ManifestHashError, OmicronManifestArtifactResult,
     OmicronManifestArtifactsResult,
 };
-use tufaceous_artifact::ArtifactHash;
+use tufaceous_artifact_v2::ArtifactHash;
 
 pub struct OverridePaths {
     pub install_dataset: Utf8PathBuf,

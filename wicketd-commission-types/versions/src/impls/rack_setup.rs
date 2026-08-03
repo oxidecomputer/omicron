@@ -6,17 +6,18 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::str::FromStr;
 
-use omicron_common::api::external::Name;
+use omicron_common::address::{IpRange, IpVersion};
+use omicron_common::api::external::{Error, Name};
 use sled_agent_types_versions::latest::early_networking::{
     BgpPeerConfig, ImportExportPolicy, SwitchSlot,
 };
 use sled_agent_types_versions::v30::early_networking::UplinkAddressConfig;
 
 use crate::latest::rack_setup::{
-    BgpAuthKeyId, ManualPortConfig, UplinkAddress, UplinkIpNet,
-    UserSpecifiedBgpPeerConfig, UserSpecifiedImportExportPolicy,
-    UserSpecifiedPortConfig, UserSpecifiedRackNetworkConfig,
-    UserSpecifiedUplinkAddressConfig,
+    BgpAuthKeyId, ManualPortConfig, ServiceIpPoolConfig, ServiceIpPoolError,
+    UplinkAddress, UplinkIpNet, UserSpecifiedBgpPeerConfig,
+    UserSpecifiedImportExportPolicy, UserSpecifiedPortConfig,
+    UserSpecifiedRackNetworkConfig, UserSpecifiedUplinkAddressConfig,
 };
 
 impl UserSpecifiedRackNetworkConfig {
@@ -173,6 +174,30 @@ impl From<UserSpecifiedImportExportPolicy> for ImportExportPolicy {
                 ImportExportPolicy::Allow(list)
             }
         }
+    }
+}
+
+impl ServiceIpPoolConfig {
+    /// The ranges belonging to this pool.
+    ///
+    /// Guaranteed to be non-empty and all of the same IP version.
+    pub fn ranges(&self) -> &[IpRange] {
+        &self.ranges
+    }
+
+    /// The IP version of this pool, derived from its ranges.
+    pub fn ip_version(&self) -> IpVersion {
+        // Safety: the constructor guarantees at least one range, and that all
+        // ranges share an IP version.
+        self.ranges[0].version()
+    }
+}
+
+impl From<ServiceIpPoolError> for omicron_common::api::external::Error {
+    fn from(value: ServiceIpPoolError) -> Self {
+        Error::internal_error(format!(
+            "error constructing service IP pool config: {value}"
+        ))
     }
 }
 

@@ -297,9 +297,10 @@ where
                 })?;
         }
         Err(err) => {
+            let err_string = InlineErrorChain::new(&err).to_string();
             tokio::fs::write(
                 path.join(format!("{command}_err.txt")),
-                err.to_string(),
+                err_string,
             )
             .await?;
         }
@@ -377,11 +378,9 @@ async fn save_zone_log_zip_or_error(
             }
         }
         Err(err) => {
-            tokio::fs::write(
-                path.join(format!("{zone}.logs.err")),
-                err.to_string(),
-            )
-            .await?;
+            let err_string = InlineErrorChain::new(&err).to_string();
+            tokio::fs::write(path.join(format!("{zone}.logs.err")), err_string)
+                .await?;
         }
     };
 

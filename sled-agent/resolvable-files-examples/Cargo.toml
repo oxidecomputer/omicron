@@ -18,4 +18,4 @@ serde_json.workspace = true
 sha2.workspace = true
 sled-agent-types.workspace = true
 sled-storage.workspace = true
-tufaceous-artifact.workspace = true
+tufaceous-artifact-v2.workspace = true

@@ -97,7 +97,6 @@ tabled.workspace = true
 textwrap.workspace = true
 tokio = { workspace = true, features = ["full"] }
 trust-quorum-types.workspace = true
-tufaceous-artifact.workspace = true
 unicode-width.workspace = true
 oxide-update-engine-types.workspace = true
 oxide-update-engine-display.workspace = true

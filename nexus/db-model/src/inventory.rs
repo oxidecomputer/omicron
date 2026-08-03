@@ -121,7 +121,7 @@ use std::collections::BTreeSet;
 use std::net::{IpAddr, SocketAddrV6};
 use std::time::Duration;
 use thiserror::Error;
-use tufaceous_artifact::ArtifactHash as ExternalArtifactHash;
+use tufaceous_artifact_v2::ArtifactHash as ExternalArtifactHash;
 use uuid::Uuid;
 
 // See [`nexus_types::inventory::PowerState`].
