@@ -2,16 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-// `proptest_full_reconciliation()` is currently commented out, because it's
-// regularly hitting a bug in mgd:
-// <https://github.com/oxidecomputer/maghemite/issues/867>. This is causing
-// pretty frequent test flake failures in omicron's CI
-// (<https://github.com/oxidecomputer/omicron/issues/10959>). To avoid needing
-// to comment out a bunch of imports and helper functions, we're adding these
-// `allow`s; they should be removed and the test restored once a fix for
-// maghemite#867 is pulled into omicron.
-#![allow(dead_code, unused_imports)]
-
 use super::*;
 use assert_matches::assert_matches;
 use gateway_messages::SpPort;
@@ -588,8 +578,14 @@ async fn run_one_proptest_input(
 
 // DISABLED TEMPORARILY.
 //
-// See the note at the top of this module.
-/*
+// `proptest_full_reconciliation()` is regularly hitting a bug in mgd:
+// <https://github.com/oxidecomputer/maghemite/issues/867>. This is causing
+// pretty frequent test flake failures in omicron's CI
+// (<https://github.com/oxidecomputer/omicron/issues/10959>), so `#[ignore]`
+// this test.
+//
+// This should be removed once a fix for maghemite#867 is pulled into omicron.
+#[ignore]
 #[tokio::test(flavor = "multi_thread")]
 async fn proptest_full_reconciliation() {
     let logctx =
@@ -625,4 +621,3 @@ async fn proptest_full_reconciliation() {
     mgsctx.teardown().await;
     logctx.cleanup_successful();
 }
-*/
