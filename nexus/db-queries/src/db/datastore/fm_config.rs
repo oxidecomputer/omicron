@@ -323,7 +323,7 @@ mod tests {
         let read = datastore.fm_config_get_latest(opctx).await.unwrap();
         assert_eq!(read, None);
 
-        // Inserting version 2 should fail: no overrides exist yet, so the
+        // Inserting version 2 should fail. No overrides exist yet, so the
         // first must be version 1.
         let mut config = FmConfigParam {
             version: NonZeroU32::new(2).unwrap(),
@@ -335,25 +335,31 @@ mod tests {
             },
         };
         assert!(
-            datastore
-                .fm_config_insert_latest_version(opctx, config.clone())
-                .await
-                .unwrap_err()
-                .to_string()
-                .contains("version 2 is not the most recent")
+            dbg!(
+                datastore
+                    .fm_config_insert_latest_version(
+                        opctx,
+                        dbg!(&config).clone()
+                    )
+                    .await
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("2 is not the most recent")
         );
 
         // Inserting version 1 should work.
         config.version = NonZeroU32::new(1).unwrap();
-        datastore
-            .fm_config_insert_latest_version(opctx, config.clone())
-            .await
-            .expect("inserting version 1 should succeed");
+
+        dbg!(
+            datastore
+                .fm_config_insert_latest_version(opctx, dbg!(&config).clone())
+                .await
+        )
+        .expect("inserting version 1 should succeed");
 
         // Getting the latest config should now return the version 1 override.
-        let read = datastore
-            .fm_config_get_latest(opctx)
-            .await
+        let read = dbg!(datastore.fm_config_get_latest(opctx).await)
             .unwrap()
             .expect("an override was inserted");
         let FmConfigSource::Override { version, ref comment, .. } = read.source
@@ -372,12 +378,17 @@ mod tests {
         config.config.sitrep_limit = NonZeroU32::new(100).unwrap();
         config.config.history_pruning_threshold = NonZeroU32::new(100).unwrap();
         assert!(
-            datastore
-                .fm_config_insert_latest_version(opctx, config.clone())
-                .await
-                .unwrap_err()
-                .to_string()
-                .contains("must be less than the total sitrep limit")
+            dbg!(
+                datastore
+                    .fm_config_insert_latest_version(
+                        opctx,
+                        dbg!(&config).clone()
+                    )
+                    .await
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("must be less than the total sitrep limit")
         );
 
         // An empty comment is also rejected on the insert path.
@@ -385,26 +396,31 @@ mod tests {
         config.config.history_pruning_threshold = NonZeroU32::new(400).unwrap();
         config.comment = String::new();
         assert!(
-            datastore
-                .fm_config_insert_latest_version(opctx, config.clone())
-                .await
-                .unwrap_err()
-                .to_string()
-                .contains("a non-empty comment is required")
+            dbg!(
+                datastore
+                    .fm_config_insert_latest_version(
+                        opctx,
+                        dbg!(&config).clone()
+                    )
+                    .await
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("a non-empty comment is required")
         );
 
         // Inserting version 2 with a valid config should work.
         config.comment = "second override".to_string();
         config.config.analysis_enabled = false;
-        datastore
-            .fm_config_insert_latest_version(opctx, config)
-            .await
-            .expect("inserting version 2 should succeed");
+        dbg!(
+            datastore
+                .fm_config_insert_latest_version(opctx, dbg!(config))
+                .await
+        )
+        .expect("inserting version 2 should succeed");
 
         // Getting the latest config should return the version 2 override.
-        let read = datastore
-            .fm_config_get_latest(opctx)
-            .await
+        let read = dbg!(datastore.fm_config_get_latest(opctx).await)
             .unwrap()
             .expect("an override was inserted");
         let FmConfigSource::Override { version, ref comment, .. } = read.source
