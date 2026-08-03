@@ -15,7 +15,6 @@ use camino::Utf8Path;
 use futures::FutureExt;
 use futures::StreamExt;
 use futures::future::Future;
-use futures::stream::FuturesUnordered;
 use nexus_db_model::Sled;
 use nexus_networking;
 use nexus_types::identity::Asset;
@@ -24,6 +23,10 @@ use slog::info;
 use slog_error_chain::InlineErrorChain;
 use tokio::io::AsyncWriteExt;
 use tokio_util::sync::CancellationToken;
+
+/// The maximum number of concurrent zone-log downloads from a single
+/// sled-agent.
+const MAX_CONCURRENT_ZONE_LOG_DOWNLOADS: usize = 10;
 
 pub async fn spawn_query_all_sleds(
     collection: &BundleCollection,
@@ -127,8 +130,8 @@ async fn collect_data_from_sled(
 
     // Each helper function handles its own cancellation internally:
     // HTTP requests are eagerly cancelled via select!, while filesystem
-    // writes complete cooperatively. This means the FuturesUnordered
-    // streams drain quickly on cancellation without dropping in-flight
+    // writes complete cooperatively. This means the buffered streams
+    // below drain quickly on cancellation without dropping in-flight
     // file writes.
 
     // NB: As new sled-diagnostic commands are added they should
@@ -231,10 +234,15 @@ async fn collect_data_from_sled(
         result = sled_client.support_logs() => result?.into_inner(),
     };
 
-    // For each zone we concurrently fire off a request to its
-    // sled-agent to collect its logs in a zip file and write the
-    // result to the support bundle.
-    let mut log_futs: FuturesUnordered<_> = zones
+    // For each zone we fire off a request to its sled-agent to collect
+    // its logs in a zip file and write the result to the support
+    // bundle.
+    //
+    // The number of zones on a sled is unbounded (it grows with every
+    // zone that has ever had logs on the sled), and each request makes
+    // the sled-agent take ZFS snapshots and assemble a zip file before
+    // it can respond, so we cap the number of in-flight requests.
+    let log_futs: Vec<_> = zones
         .iter()
         .map(|zone| {
             save_zone_log_zip_or_error(
@@ -246,6 +254,8 @@ async fn collect_data_from_sled(
             )
         })
         .collect();
+    let mut log_futs = futures::stream::iter(log_futs)
+        .buffer_unordered(MAX_CONCURRENT_ZONE_LOG_DOWNLOADS);
 
     while let Some(log_collection_result) = log_futs.next().await {
         // We log any errors saving the zip file to disk and
