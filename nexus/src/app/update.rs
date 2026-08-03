@@ -1433,6 +1433,49 @@ mod test {
     }
 
     #[nexus_test(server = crate::Server)]
+    async fn test_contact_support_services_errors_only(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        let nexus = &cptestctx.server.server_context().nexus;
+        let opctx = fake_opctx(cptestctx);
+        let services = SvcsEnabledNotOnlineResult::SvcsEnabledNotOnline(
+            SvcsEnabledNotOnline {
+                services: vec![],
+                errors: vec!["failed to read service status".to_string()],
+                time_of_status: Utc::now(),
+            },
+        );
+        insert_fake_collection(cptestctx, &opctx, healthy_zpools(), services)
+            .await;
+        let inventory = Arc::new(
+            nexus
+                .datastore()
+                .inventory_get_latest_collection(&opctx)
+                .await
+                .unwrap()
+                .unwrap(),
+        );
+        let version = fake_target_version();
+        let blueprint =
+            fake_blueprint(&cptestctx.logctx.log, &version, Utc::now(), false);
+
+        // There are errors gathering service status, so contact support should
+        // be true even though no individual service is listed.
+        assert!(
+            nexus
+                .contact_support(
+                    &opctx,
+                    inventory,
+                    blueprint,
+                    Some(&version),
+                    empty_internal_update_status(),
+                )
+                .await
+                .unwrap()
+        );
+    }
+
+    #[nexus_test(server = crate::Server)]
     async fn test_contact_support_unhealthy_zpools_and_services(
         cptestctx: &ControlPlaneTestContext,
     ) {
@@ -2185,6 +2228,55 @@ mod test {
         // There are no unhealthy services that we know of, but there was a
         // problem running the command to retrieve them. The error should be
         // part of the update status problems.
+        assert_eq!(checks.problems(), expected);
+
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn test_problems_unhealthy_services_errors_only() {
+        let logctx =
+            test_setup_log("test_problems_unhealthy_services_errors_only");
+        let blueprint = fake_blueprint(
+            &logctx.log,
+            &fake_target_version(),
+            Utc::now(),
+            false,
+        );
+        let sled_id = sled_id();
+
+        let svcs_result = SvcsEnabledNotOnlineResult::SvcsEnabledNotOnline(
+            SvcsEnabledNotOnline {
+                services: vec![],
+                errors: vec!["failed to read service status".to_string()],
+                time_of_status: Utc::now(),
+            },
+        );
+
+        let collection = fake_collection_with_ids(
+            sled_id,
+            healthy_zpools(),
+            svcs_result.clone(),
+        );
+
+        let checks = UpdateContactSupportChecksInput {
+            inventory: Arc::new(collection),
+            stuck_sagas: Ok(vec![]),
+            blueprint,
+            current_target_version: Some(fake_target_version()),
+            internal_update_status: empty_internal_update_status(),
+        };
+
+        let expected = UpdateStatusProblems {
+            enabled_smf_services_not_online_by_sled: BTreeMap::from([(
+                sled_id,
+                svcs_result,
+            )]),
+            ..Default::default()
+        };
+
+        // The sled reported errors while gathering service status. The errors
+        // alone should still count as a problem.
         assert_eq!(checks.problems(), expected);
 
         logctx.cleanup_successful();
