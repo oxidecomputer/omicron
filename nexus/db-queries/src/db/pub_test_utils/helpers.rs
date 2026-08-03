@@ -631,11 +631,14 @@ fn make_test_repo(version: u32) -> TufRepoDescription {
     TufRepoDescription {
         artifacts: ArtifactSet::from([Artifact {
             version: artifact_version,
-            tags: BTreeMap::new(),
+            tags: BTreeMap::from([(
+                "kind".to_string(),
+                "cool-blob".to_string(),
+            )]),
             hash,
             length: 0,
         }]),
-        metadata: BTreeMap::new(),
+        metadata: BTreeMap::from([("repo".to_string(), "yes".to_string())]),
         system_version,
         hash,
         file_name: String::new(),

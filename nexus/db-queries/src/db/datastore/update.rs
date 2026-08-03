@@ -1231,6 +1231,25 @@ mod test {
     use std::collections::BTreeSet;
 
     #[tokio::test]
+    async fn test_tuf_repo_get_by_id() {
+        let logctx = dev::test_setup_log("test_tuf_repo_get_by_id");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let repo_id = insert_test_tuf_repo(opctx, datastore, 1).await;
+        let repo = datastore
+            .tuf_repo_get_by_id(opctx, repo_id)
+            .await
+            .expect("getting TUF repo");
+        assert_eq!(repo_id, repo.repo.id());
+        // Per `make_test_repo` we should have one artifact with one tag, and
+        // one metadata field on the repo.
+        assert_eq!(repo.artifacts.len(), 1);
+        assert_eq!(repo.artifacts[0].tags.len(), 1);
+        assert_eq!(repo.metadata.len(), 1);
+    }
+
+    #[tokio::test]
     async fn test_repo_mark_pruned() {
         let logctx = dev::test_setup_log("test_repo_mark_pruned");
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
