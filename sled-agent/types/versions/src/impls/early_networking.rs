@@ -5,7 +5,6 @@
 //! Implementations for early networking types.
 
 use crate::latest::early_networking::BgpPeerConfig;
-use crate::latest::early_networking::EmptyUplinkPortsError;
 use crate::latest::early_networking::InvalidIpAddrError;
 use crate::latest::early_networking::LinkFec;
 use crate::latest::early_networking::LinkSpeed;
@@ -28,8 +27,6 @@ use ipnetwork::IpNetwork;
 use oxnet::IpNet;
 use oxnet::IpNetParseError;
 use oxnet::Ipv6Net;
-use schemars::JsonSchema;
-use serde::Deserialize;
 use std::fmt;
 use std::net::AddrParseError;
 use std::net::IpAddr;
@@ -732,38 +729,6 @@ impl<'a> IntoIterator for &'a UplinkPorts {
 
     fn into_iter(self) -> Self::IntoIter {
         self.0.iter()
-    }
-}
-
-impl<'de> Deserialize<'de> for UplinkPorts {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let ports = Vec::<PortConfig>::deserialize(deserializer)?;
-        UplinkPorts::new(ports).map_err(|EmptyUplinkPortsError| {
-            serde::de::Error::invalid_length(0, &"at least one uplink port")
-        })
-    }
-}
-
-impl JsonSchema for UplinkPorts {
-    fn schema_name() -> String {
-        "UplinkPorts".to_string()
-    }
-
-    fn json_schema(
-        generator: &mut schemars::r#gen::SchemaGenerator,
-    ) -> schemars::schema::Schema {
-        schemars::schema::Schema::Object(schemars::schema::SchemaObject {
-            instance_type: Some(schemars::schema::InstanceType::Array.into()),
-            array: Some(Box::new(schemars::schema::ArrayValidation {
-                items: Some(generator.subschema_for::<PortConfig>().into()),
-                min_items: Some(1),
-                ..Default::default()
-            })),
-            ..Default::default()
-        })
     }
 }
 
