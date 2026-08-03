@@ -5,6 +5,7 @@
 use std::collections::BTreeMap;
 
 use super::{Control, OverviewPane, RackSetupPane, StatefulList, UpdatePane};
+use crate::state::switch_slot_number;
 use crate::ui::defaults::colors::*;
 use crate::ui::defaults::style;
 use crate::ui::widgets::Fade;
@@ -15,7 +16,7 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, List, ListItem, Paragraph};
 use slog::{Logger, o};
-use wicketd_client::types::GetLocationResponse;
+use wicketd_commission_types::inventory::LocationInfo;
 
 /// The [`MainScreen`] is the primary UI element of the terminal, covers the
 /// entire terminal window/buffer and is visible for all interactions except
@@ -194,7 +195,7 @@ impl MainScreen {
         frame: &mut Frame<'_>,
         rect: Rect,
     ) {
-        let location_spans = location_spans(&state.wicketd_location);
+        let location_spans = location_spans(state.wicketd_location.as_ref());
         let wicketd_spans = state.service_status.wicketd_liveness().to_spans();
         let mgs_spans = state.service_status.mgs_liveness().to_spans();
         let xcvr_spans = state.service_status.transceiver_liveness().to_spans();
@@ -230,37 +231,44 @@ impl MainScreen {
     }
 }
 
-fn location_spans(location: &GetLocationResponse) -> Vec<Span<'static>> {
-    // We reuse `style::connected()` and `style::delayed()` in these spans to
+fn location_spans(location: Option<&LocationInfo>) -> Vec<Span<'static>> {
+    let (sled, switch) = match location {
+        Some(LocationInfo {
+            switch_slot,
+            // The switch baseboard is not rendered here because switch_slot
+            // already uniquely identifies the switch.
+            switch_baseboard: _,
+            sled_baseboard,
+            sled_id,
+        }) => {
+            let sled =
+                sled_id.as_ref().map(|id| id.slot.to_string()).or_else(|| {
+                    sled_baseboard
+                        .as_ref()
+                        .map(|baseboard| baseboard.serial_number.clone())
+                });
+            (sled, Some(switch_slot_number(*switch_slot).to_string()))
+        }
+        None => (None, None),
+    };
+
+    vec![
+        location_span("Sled", sled),
+        Span::styled("/", style::divider()),
+        location_span("Switch", switch),
+    ]
+}
+
+fn location_span(component: &str, label: Option<String>) -> Span<'static> {
+    // We reuse `style::connected()` and `style::delayed()` in this span to
     // match the wicketd/mgs connection statuses that follow us in the status
     // bar.
-    let mut spans = Vec::new();
-    if let Some(id) = location.sled_id.as_ref() {
-        spans.push(Span::styled(
-            format!("Sled {}", id.slot),
-            style::connected(),
-        ));
-    } else {
-        spans.push(Span::styled(
-            format!("Sled {}", location.sled_baseboard_id.serial_number),
-            style::connected(),
-        ));
-    };
-    spans.push(Span::styled("/", style::divider()));
-    if let Some(id) = location.switch_id.as_ref() {
-        spans.push(Span::styled(
-            format!("Switch {}", id.slot),
-            style::connected(),
-        ));
-    } else if let Some(baseboard) = location.switch_baseboard.as_ref() {
-        spans.push(Span::styled(
-            format!("Switch {}", baseboard.identifier()),
-            style::connected(),
-        ));
-    } else {
-        spans.push(Span::styled("Switch UNKNOWN", style::delayed()));
-    };
-    spans
+    match label {
+        Some(label) => {
+            Span::styled(format!("{component} {label}"), style::connected())
+        }
+        None => Span::styled(format!("{component} UNKNOWN"), style::delayed()),
+    }
 }
 
 /// The mechanism for selecting panes

@@ -12,8 +12,8 @@ use futures::future::BoxFuture;
 use iddqd::IdOrdMap;
 use nexus_db_model::DbMetadataNexusState;
 use nexus_db_model::PhysicalDiskPolicy;
+use nexus_db_model::SagaExecState;
 use nexus_db_model::SagaReasonAbandoned;
-use nexus_db_model::SagaState;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use nexus_db_queries::db::DataStore;
@@ -444,20 +444,9 @@ impl FmAnalysis {
         let mut observed = IdOrdMap::new();
         for saga in sagas {
             let saga_state = match saga.saga_state {
-                SagaState::Running => ObservedSagaState::Running,
-                SagaState::Unwinding => ObservedSagaState::Unwinding,
-                SagaState::Abandoned => {
-                    // `SagaSummary` is validated at load against the saga
-                    // table's CHECK constraints: an abandoned summary always
-                    // carries its metadata.
-                    let metadata =
-                        saga.abandon_metadata.with_context(|| {
-                            format!(
-                                "abandoned saga {} has no abandonment \
-                                 metadata",
-                                saga.id.0,
-                            )
-                        })?;
+                SagaExecState::Running => ObservedSagaState::Running,
+                SagaExecState::Unwinding => ObservedSagaState::Unwinding,
+                SagaExecState::Abandoned(metadata) => {
                     ObservedSagaState::Abandoned(SagaAbandonInfo {
                         time: metadata.time,
                         reason: match metadata.reason {
@@ -472,7 +461,7 @@ impl FmAnalysis {
                     })
                 }
                 // The query filters to unfinished states; defend anyway.
-                SagaState::Done => continue,
+                SagaExecState::Done => continue,
             };
             let current_sec = saga
                 .current_sec

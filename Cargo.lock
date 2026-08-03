@@ -677,7 +677,7 @@ dependencies = [
 [[package]]
 name = "bhyve_api"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=979b72896bc39a876c98fb32fe706da37a4fc408#979b72896bc39a876c98fb32fe706da37a4fc408"
+source = "git+https://github.com/oxidecomputer/propolis?rev=046f74302e2ea09a75b0a6810645d42c7df6644a#046f74302e2ea09a75b0a6810645d42c7df6644a"
 dependencies = [
  "bhyve_api_sys",
  "libc",
@@ -687,7 +687,7 @@ dependencies = [
 [[package]]
 name = "bhyve_api_sys"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=979b72896bc39a876c98fb32fe706da37a4fc408#979b72896bc39a876c98fb32fe706da37a4fc408"
+source = "git+https://github.com/oxidecomputer/propolis?rev=046f74302e2ea09a75b0a6810645d42c7df6644a#046f74302e2ea09a75b0a6810645d42c7df6644a"
 dependencies = [
  "libc",
  "strum 0.26.3",
@@ -963,7 +963,7 @@ dependencies = [
  "sled-agent-types",
  "sled-hardware-types",
  "strum 0.27.2",
- "thiserror 2.0.18",
+ "wicketd-commission-types",
 ]
 
 [[package]]
@@ -2188,7 +2188,7 @@ dependencies = [
 [[package]]
 name = "crucible-agent-client"
 version = "0.0.1"
-source = "git+https://github.com/oxidecomputer/crucible?rev=2bfe090eb5318ec8c467157018db2429d4df535b#2bfe090eb5318ec8c467157018db2429d4df535b"
+source = "git+https://github.com/oxidecomputer/crucible?rev=ad8a31742adc45e925e63443a5b43c8e30604022#ad8a31742adc45e925e63443a5b43c8e30604022"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2204,7 +2204,7 @@ dependencies = [
 [[package]]
 name = "crucible-client-types"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/crucible?rev=2bfe090eb5318ec8c467157018db2429d4df535b#2bfe090eb5318ec8c467157018db2429d4df535b"
+source = "git+https://github.com/oxidecomputer/crucible?rev=ad8a31742adc45e925e63443a5b43c8e30604022#ad8a31742adc45e925e63443a5b43c8e30604022"
 dependencies = [
  "base64 0.22.1",
  "crucible-workspace-hack",
@@ -2217,7 +2217,7 @@ dependencies = [
 [[package]]
 name = "crucible-common"
 version = "0.0.1"
-source = "git+https://github.com/oxidecomputer/crucible?rev=2bfe090eb5318ec8c467157018db2429d4df535b#2bfe090eb5318ec8c467157018db2429d4df535b"
+source = "git+https://github.com/oxidecomputer/crucible?rev=ad8a31742adc45e925e63443a5b43c8e30604022#ad8a31742adc45e925e63443a5b43c8e30604022"
 dependencies = [
  "anyhow",
  "atty",
@@ -2247,7 +2247,7 @@ dependencies = [
 [[package]]
 name = "crucible-pantry-client"
 version = "0.0.1"
-source = "git+https://github.com/oxidecomputer/crucible?rev=2bfe090eb5318ec8c467157018db2429d4df535b#2bfe090eb5318ec8c467157018db2429d4df535b"
+source = "git+https://github.com/oxidecomputer/crucible?rev=ad8a31742adc45e925e63443a5b43c8e30604022#ad8a31742adc45e925e63443a5b43c8e30604022"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2264,7 +2264,7 @@ dependencies = [
 [[package]]
 name = "crucible-smf"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/crucible?rev=2bfe090eb5318ec8c467157018db2429d4df535b#2bfe090eb5318ec8c467157018db2429d4df535b"
+source = "git+https://github.com/oxidecomputer/crucible?rev=ad8a31742adc45e925e63443a5b43c8e30604022#ad8a31742adc45e925e63443a5b43c8e30604022"
 dependencies = [
  "crucible-workspace-hack",
  "libc",
@@ -4453,7 +4453,7 @@ dependencies = [
  "serde",
  "test-strategy",
  "thiserror 2.0.18",
- "tufaceous-artifact 0.1.0",
+ "tufaceous-artifact 0.2.0",
  "uuid",
 ]
 
@@ -5821,6 +5821,7 @@ dependencies = [
  "clap",
  "daft",
  "display-error-chain",
+ "flate2",
  "futures",
  "hex",
  "hex-literal 0.4.1",
@@ -5854,12 +5855,12 @@ dependencies = [
  "slog-error-chain",
  "slog-term",
  "smf 0.2.3",
+ "tar",
  "test-strategy",
  "thiserror 2.0.18",
  "tokio",
  "tokio-stream",
- "tufaceous-artifact 0.1.0",
- "tufaceous-lib",
+ "tufaceous-artifact 0.2.0",
 ]
 
 [[package]]
@@ -5878,7 +5879,7 @@ dependencies = [
  "schemars 0.8.22",
  "serde",
  "slog",
- "tufaceous-artifact 0.1.0",
+ "tufaceous-artifact 0.2.0",
  "uuid",
 ]
 
@@ -6051,7 +6052,7 @@ dependencies = [
  "slog-error-chain",
  "test-strategy",
  "thiserror 2.0.18",
- "tufaceous-artifact 0.1.0",
+ "tufaceous-artifact 0.2.0",
 ]
 
 [[package]]
@@ -6179,25 +6180,37 @@ checksum = "92ecc6618181def0457392ccd0ee51198e065e016d1d527a7ac1b6dc7c1f09d2"
 
 [[package]]
 name = "jiff"
-version = "0.2.21"
+version = "0.2.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b3e3d65f018c6ae946ab16e80944b97096ed73c35b221d1c478a6c81d8f57940"
+checksum = "e184d09547b80eb7e20d141ba2fb1fbac843ca53f4cf1b31210adc4c1adc6e16"
 dependencies = [
+ "defmt 1.0.1",
+ "jiff-core",
  "jiff-static",
  "jiff-tzdb-platform",
  "log",
  "portable-atomic",
  "portable-atomic-util",
  "serde_core",
- "windows-sys 0.61.2",
+ "windows-link",
+]
+
+[[package]]
+name = "jiff-core"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7feca88439efe53da3754500c1851dedf3cb36c524dd5cf8225cc0794de95d09"
+dependencies = [
+ "defmt 1.0.1",
 ]
 
 [[package]]
 name = "jiff-static"
-version = "0.2.21"
+version = "0.2.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a17c2b211d863c7fde02cbea8a3c1a439b98e109286554f2860bdded7ff83818"
+checksum = "323da076b7a6faf914dc677cb05a4b907742ff7375c8322c9e7f5061e5e0e9de"
 dependencies = [
+ "jiff-core",
  "proc-macro2",
  "quote",
  "syn 2.0.117",
@@ -8279,7 +8292,7 @@ dependencies = [
  "textwrap 0.16.2",
  "thiserror 2.0.18",
  "tokio",
- "tough",
+ "tough 0.22.0",
  "trust-quorum-protocol",
  "trust-quorum-types",
  "tufaceous-artifact 0.1.0",
@@ -8320,7 +8333,7 @@ dependencies = [
  "slog-error-chain",
  "strum 0.27.2",
  "thiserror 2.0.18",
- "tough",
+ "tough 0.22.0",
  "tufaceous-artifact 0.1.0",
  "url",
  "uuid",
@@ -8675,6 +8688,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "olpc-cjson"
+version = "0.1.4"
+source = "git+https://github.com/oxidecomputer/tough?branch=oxide%2Fdevelop#56967c9651efcffd7326198f04fc388c4f0f92b9"
+dependencies = [
+ "serde",
+ "serde_json",
+ "unicode-normalization",
+]
+
+[[package]]
 name = "omicron-certificates"
 version = "0.1.0"
 dependencies = [
@@ -8849,6 +8872,7 @@ dependencies = [
  "tokio",
  "toml 0.8.23",
  "tufaceous-artifact 0.1.0",
+ "tufaceous-artifact 0.2.0",
  "uuid",
 ]
 
@@ -9004,7 +9028,7 @@ dependencies = [
  "tokio-stream",
  "tokio-tungstenite 0.23.1",
  "toml 0.8.23",
- "tufaceous-artifact 0.1.0",
+ "tufaceous-artifact 0.2.0",
  "uuid",
  "zip 4.6.1",
 ]
@@ -9273,7 +9297,7 @@ dependencies = [
  "tokio",
  "tokio-postgres",
  "tokio-util",
- "tough",
+ "tough 0.22.0",
  "transient-dns-server",
  "trust-quorum-types",
  "tufaceous 0.1.0",
@@ -9817,7 +9841,6 @@ dependencies = [
  "aws-lc-sys",
  "base16ct 0.2.0",
  "base64 0.22.1",
- "base64ct",
  "bitflags 1.3.2",
  "bitflags 2.11.0",
  "bstr",
@@ -9885,6 +9908,7 @@ dependencies = [
  "ipnet",
  "ipnetwork",
  "itertools 0.13.0",
+ "jiff",
  "lalrpop-util",
  "lazy_static",
  "libc",
@@ -9903,7 +9927,6 @@ dependencies = [
  "once_cell",
  "openapiv3",
  "peg-runtime",
- "pem-rfc7468 0.7.0",
  "percent-encoding",
  "petgraph 0.6.5",
  "petgraph 0.8.3",
@@ -9961,8 +9984,9 @@ dependencies = [
  "toml_edit 0.19.15",
  "toml_edit 0.22.27",
  "toml_parser",
- "tough",
+ "tough 0.22.0",
  "tracing",
+ "tufaceous-artifact 0.2.0",
  "typenum",
  "url",
  "usdt 0.6.0",
@@ -11820,7 +11844,7 @@ dependencies = [
 [[package]]
 name = "propolis-api-types-versions"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=979b72896bc39a876c98fb32fe706da37a4fc408#979b72896bc39a876c98fb32fe706da37a4fc408"
+source = "git+https://github.com/oxidecomputer/propolis?rev=046f74302e2ea09a75b0a6810645d42c7df6644a#046f74302e2ea09a75b0a6810645d42c7df6644a"
 dependencies = [
  "crucible-client-types",
  "propolis_types",
@@ -11833,7 +11857,7 @@ dependencies = [
 [[package]]
 name = "propolis-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=979b72896bc39a876c98fb32fe706da37a4fc408#979b72896bc39a876c98fb32fe706da37a4fc408"
+source = "git+https://github.com/oxidecomputer/propolis?rev=046f74302e2ea09a75b0a6810645d42c7df6644a#046f74302e2ea09a75b0a6810645d42c7df6644a"
 dependencies = [
  "async-trait",
  "base64 0.21.7",
@@ -11857,10 +11881,9 @@ dependencies = [
 [[package]]
 name = "propolis-mock-server"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=979b72896bc39a876c98fb32fe706da37a4fc408#979b72896bc39a876c98fb32fe706da37a4fc408"
+source = "git+https://github.com/oxidecomputer/propolis?rev=046f74302e2ea09a75b0a6810645d42c7df6644a#046f74302e2ea09a75b0a6810645d42c7df6644a"
 dependencies = [
  "anyhow",
- "atty",
  "base64 0.21.7",
  "clap",
  "dropshot",
@@ -11890,7 +11913,7 @@ dependencies = [
 [[package]]
 name = "propolis_api_types"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=979b72896bc39a876c98fb32fe706da37a4fc408#979b72896bc39a876c98fb32fe706da37a4fc408"
+source = "git+https://github.com/oxidecomputer/propolis?rev=046f74302e2ea09a75b0a6810645d42c7df6644a#046f74302e2ea09a75b0a6810645d42c7df6644a"
 dependencies = [
  "crucible-client-types",
  "propolis-api-types-versions",
@@ -11899,7 +11922,7 @@ dependencies = [
 [[package]]
 name = "propolis_types"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=979b72896bc39a876c98fb32fe706da37a4fc408#979b72896bc39a876c98fb32fe706da37a4fc408"
+source = "git+https://github.com/oxidecomputer/propolis?rev=046f74302e2ea09a75b0a6810645d42c7df6644a#046f74302e2ea09a75b0a6810645d42c7df6644a"
 dependencies = [
  "schemars 0.8.22",
  "serde",
@@ -12000,9 +12023,9 @@ dependencies = [
 
 [[package]]
 name = "quinn"
-version = "0.11.9"
+version = "0.11.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b9e20a958963c291dc322d98411f541009df2ced7b5a4f2bd52337638cfccf20"
+checksum = "0c1a41e437b6bbd489372cd4971de128e85c855f56c57f283d20ff016cf7c0a8"
 dependencies = [
  "bytes",
  "cfg_aliases 0.2.1",
@@ -12011,7 +12034,7 @@ dependencies = [
  "quinn-udp",
  "rustc-hash",
  "rustls",
- "socket2 0.6.3",
+ "socket2 0.5.10",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -16037,10 +16060,43 @@ dependencies = [
  "globset",
  "hex",
  "log",
- "olpc-cjson",
+ "olpc-cjson 0.1.4 (registry+https://github.com/rust-lang/crates.io-index)",
  "pem",
  "percent-encoding",
  "reqwest 0.12.28",
+ "rustls",
+ "serde",
+ "serde_json",
+ "serde_plain",
+ "snafu",
+ "tempfile",
+ "tokio",
+ "tokio-util",
+ "typed-path",
+ "untrusted 0.7.1",
+ "url",
+ "walkdir",
+]
+
+[[package]]
+name = "tough"
+version = "0.24.0"
+source = "git+https://github.com/oxidecomputer/tough?branch=oxide%2Fdevelop#56967c9651efcffd7326198f04fc388c4f0f92b9"
+dependencies = [
+ "async-recursion",
+ "async-trait",
+ "aws-lc-rs",
+ "bytes",
+ "dyn-clone",
+ "futures",
+ "futures-core",
+ "globset",
+ "hex",
+ "jiff",
+ "log",
+ "olpc-cjson 0.1.4 (git+https://github.com/oxidecomputer/tough?branch=oxide%2Fdevelop)",
+ "pem",
+ "percent-encoding",
  "rustls",
  "serde",
  "serde_json",
@@ -16468,7 +16524,7 @@ dependencies = [
 [[package]]
 name = "tufaceous"
 version = "0.2.0"
-source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#de59b9508e99da8fc39a70d29e4d69300325b220"
+source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#38730b689596098c61c2c683fe4848712f2e40da"
 dependencies = [
  "atomicwrites",
  "aws-lc-rs",
@@ -16483,6 +16539,7 @@ dependencies = [
  "futures-util",
  "hex",
  "hubtools 0.4.7 (git+https://github.com/oxidecomputer/hubtools.git?rev=2b1ef9b38d75563ea800baa3b17327eec17b1b7a)",
+ "jiff",
  "rats-corim 0.1.0 (git+https://github.com/oxidecomputer/rats-corim.git?rev=f0d5d5168d3d31487a56df32c676b0c6240bcc6b)",
  "rawzip",
  "semver 1.0.28",
@@ -16493,7 +16550,7 @@ dependencies = [
  "tar",
  "thiserror 2.0.18",
  "tokio",
- "tough",
+ "tough 0.24.0",
  "tufaceous-artifact 0.2.0",
  "tufaceous-brand-metadata 0.2.0",
  "url",
@@ -16519,13 +16576,16 @@ dependencies = [
 [[package]]
 name = "tufaceous-artifact"
 version = "0.2.0"
-source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#de59b9508e99da8fc39a70d29e4d69300325b220"
+source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#38730b689596098c61c2c683fe4848712f2e40da"
 dependencies = [
  "byte-wrapper",
  "daft",
  "hubtools 0.4.7 (git+https://github.com/oxidecomputer/hubtools.git?rev=2b1ef9b38d75563ea800baa3b17327eec17b1b7a)",
+ "proptest",
+ "schemars 0.8.22",
  "serde",
  "serde_json",
+ "test-strategy",
  "thiserror 2.0.18",
 ]
 
@@ -16544,7 +16604,7 @@ dependencies = [
 [[package]]
 name = "tufaceous-brand-metadata"
 version = "0.2.0"
-source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#de59b9508e99da8fc39a70d29e4d69300325b220"
+source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#38730b689596098c61c2c683fe4848712f2e40da"
 dependencies = [
  "serde",
  "serde_json",
@@ -16587,7 +16647,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "toml 0.8.23",
- "tough",
+ "tough 0.22.0",
  "tufaceous-artifact 0.1.0",
  "tufaceous-brand-metadata 0.1.0",
  "url",
@@ -16886,7 +16946,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tokio-util",
- "tough",
+ "tough 0.22.0",
  "tufaceous 0.1.0",
  "tufaceous-artifact 0.1.0",
  "tufaceous-brand-metadata 0.1.0",
@@ -17488,11 +17548,12 @@ dependencies = [
  "toml 0.8.23",
  "toml_edit 0.22.27",
  "transceiver-controller 0.1.1 (git+https://github.com/oxidecomputer/transceiver-control)",
- "tufaceous-artifact 0.1.0",
+ "tufaceous-artifact 0.2.0",
  "tui-tree-widget",
  "unicode-width 0.1.14",
  "wicket-common",
  "wicketd-client",
+ "wicketd-commission-client",
  "wicketd-commission-types",
  "zeroize",
 ]
@@ -17526,7 +17587,7 @@ dependencies = [
  "tokio",
  "toml 0.8.23",
  "transceiver-controller 0.1.1 (git+https://github.com/oxidecomputer/transceiver-control)",
- "tufaceous-artifact 0.1.0",
+ "tufaceous-artifact 0.2.0",
  "wicketd-commission-types",
 ]
 
@@ -17566,6 +17627,7 @@ dependencies = [
  "bytes",
  "camino",
  "camino-tempfile",
+ "chrono",
  "clap",
  "debug-ignore",
  "display-error-chain",
@@ -17585,7 +17647,6 @@ dependencies = [
  "hickory-resolver 0.25.2",
  "http",
  "http-body-util",
- "hubtools 0.4.7 (git+https://github.com/oxidecomputer/hubtools.git?rev=2b1ef9b38d75563ea800baa3b17327eec17b1b7a)",
  "hyper",
  "iddqd",
  "illumos-utils",
@@ -17596,6 +17657,7 @@ dependencies = [
  "internal-dns-resolver",
  "internal-dns-types",
  "itertools 0.14.0",
+ "lpc55_areas",
  "maplit",
  "omicron-certificates",
  "omicron-common",
@@ -17634,12 +17696,10 @@ dependencies = [
  "tokio-stream",
  "tokio-util",
  "toml 0.8.23",
- "tough",
+ "tough 0.22.0",
  "transceiver-controller 0.1.1 (git+https://github.com/oxidecomputer/transceiver-control)",
- "tufaceous 0.1.0",
- "tufaceous-artifact 0.1.0",
- "tufaceous-lib",
- "update-common",
+ "tufaceous 0.2.0",
+ "tufaceous-artifact 0.2.0",
  "uuid",
  "wicket",
  "wicket-common",
@@ -17667,7 +17727,6 @@ dependencies = [
  "serde",
  "sled-hardware-types",
  "slog",
- "tufaceous-artifact 0.1.0",
  "wicket-common",
  "wicketd-commission-types",
 ]
@@ -17754,6 +17813,7 @@ dependencies = [
  "sled-hardware-types",
  "slog-error-chain",
  "test-strategy",
+ "thiserror 2.0.18",
  "toml 0.8.23",
  "uuid",
 ]

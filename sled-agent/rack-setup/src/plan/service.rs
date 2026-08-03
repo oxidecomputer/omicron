@@ -1488,13 +1488,26 @@ mod tests {
             )
             .unwrap();
 
-        let config = Config {
+        let config =
+            config_with_service_pools(service_ip_pools, dns_ips.to_vec());
+
+        (dns_ips.to_vec(), config)
+    }
+
+    // Build a `Config` with the given service IP pools and external DNS IPs,
+    // filling in placeholder values for the fields these service-plan tests
+    // don't exercise.
+    fn config_with_service_pools(
+        service_ip_pools: IdOrdMap<ServiceIpPoolConfig>,
+        external_dns_ips: Vec<IpAddr>,
+    ) -> Config {
+        Config {
             trust_quorum_peers: None,
             bootstrap_discovery: BootstrapAddressDiscovery::OnlyOurs,
             ntp_servers: Vec::new(),
             dns_servers: Vec::new(),
             service_ip_pools,
-            external_dns_ips: dns_ips.to_vec(),
+            external_dns_ips,
             external_dns_zone_name: "".to_string(),
             external_certificates: Vec::new(),
             recovery_silo: RecoverySiloConfig {
@@ -1522,9 +1535,7 @@ mod tests {
             },
             allowed_source_ips: AllowedSourceIps::Any,
             external_jumbo_frames_opt_in_enabled: false,
-        };
-
-        (dns_ips.to_vec(), config)
+        }
     }
 
     fn test_sled_info() -> SledInfo {
@@ -1621,6 +1632,68 @@ mod tests {
             internal_service_ips.push(ip.to_string());
         }
         assert_eq!(internal_service_ips, expected_internal_service_ips);
+    }
+
+    // Ensure that we correctly generate addresses for the external service
+    // zones when we only have a v6 pool to draw from.
+    #[test]
+    fn service_port_builder_v6_only() {
+        use omicron_common::address::DNS_OPTE_IPV6_SUBNET;
+        use omicron_common::address::NEXUS_OPTE_IPV6_SUBNET;
+        use omicron_common::address::NTP_OPTE_IPV6_SUBNET;
+
+        let ip = |string: &str| -> IpAddr { string.parse().unwrap() };
+
+        // A single v6 pool of four addresses. The first is used for external
+        // DNS; the rest are available for other services.
+        let dns_ips = vec![ip("fd00::20")];
+        let mut service_ip_pools = IdOrdMap::new();
+        service_ip_pools
+            .insert_unique(
+                ServiceIpPoolConfig::new(
+                    "ipv6-service-pool".parse().unwrap(),
+                    String::new(),
+                    vec![
+                        IpRange::try_from((ip("fd00::20"), ip("fd00::23")))
+                            .unwrap(),
+                    ],
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        let config = config_with_service_pools(service_ip_pools, dns_ips);
+
+        let mut svp = ServicePortBuilder::new(&config);
+
+        // External DNS: v6 external IP on a v6 OPTE NIC.
+        let (dns_nic, dns_ip) =
+            svp.next_dns(OmicronZoneUuid::new_v4()).expect("got external DNS");
+        assert!(dns_ip.is_ipv6());
+        assert!(dns_nic.ip_config.is_ipv6_only());
+        assert_eq!(
+            dns_nic.ip_config.ipv6_subnet(),
+            Some(&*DNS_OPTE_IPV6_SUBNET)
+        );
+
+        // Nexus: v6 external IP on a v6 OPTE NIC.
+        let (nexus_nic, nexus_ip) =
+            svp.next_nexus(OmicronZoneUuid::new_v4()).expect("got Nexus");
+        assert!(nexus_ip.is_ipv6());
+        assert!(nexus_nic.ip_config.is_ipv6_only());
+        assert_eq!(
+            nexus_nic.ip_config.ipv6_subnet(),
+            Some(&*NEXUS_OPTE_IPV6_SUBNET),
+        );
+
+        // Boundary NTP: v6 SNAT external IP on a v6 OPTE NIC.
+        let (ntp_nic, snat_cfg) =
+            svp.next_snat(OmicronZoneUuid::new_v4()).expect("got boundary NTP");
+        assert!(snat_cfg.ip.is_ipv6());
+        assert!(ntp_nic.ip_config.is_ipv6_only());
+        assert_eq!(
+            ntp_nic.ip_config.ipv6_subnet(),
+            Some(&*NTP_OPTE_IPV6_SUBNET),
+        );
     }
 
     #[test]

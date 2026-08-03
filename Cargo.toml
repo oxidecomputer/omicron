@@ -489,11 +489,11 @@ crossterm = { version = "0.29.0", features = ["event-stream"] }
 # NOTE: if you change the pinned revision of the `crucible` dependencies, you
 # must also update the references in package-manifest.toml to match the new
 # revision.
-crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "2bfe090eb5318ec8c467157018db2429d4df535b" }
-crucible-pantry-client = { git = "https://github.com/oxidecomputer/crucible", rev = "2bfe090eb5318ec8c467157018db2429d4df535b" }
-crucible-smf = { git = "https://github.com/oxidecomputer/crucible", rev = "2bfe090eb5318ec8c467157018db2429d4df535b" }
-crucible-common = { git = "https://github.com/oxidecomputer/crucible", rev = "2bfe090eb5318ec8c467157018db2429d4df535b" }
-crucible-client-types = { git = "https://github.com/oxidecomputer/crucible", rev = "2bfe090eb5318ec8c467157018db2429d4df535b" }
+crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "ad8a31742adc45e925e63443a5b43c8e30604022" }
+crucible-pantry-client = { git = "https://github.com/oxidecomputer/crucible", rev = "ad8a31742adc45e925e63443a5b43c8e30604022" }
+crucible-smf = { git = "https://github.com/oxidecomputer/crucible", rev = "ad8a31742adc45e925e63443a5b43c8e30604022" }
+crucible-common = { git = "https://github.com/oxidecomputer/crucible", rev = "ad8a31742adc45e925e63443a5b43c8e30604022" }
+crucible-client-types = { git = "https://github.com/oxidecomputer/crucible", rev = "ad8a31742adc45e925e63443a5b43c8e30604022" }
 # NOTE: See above!
 csv = "1.3.1"
 curve25519-dalek = "4"
@@ -616,6 +616,7 @@ linear-map = "1.2.0"
 live-tests-macros = { path = "live-tests/macros" }
 lldpd_client = { git = "https://github.com/oxidecomputer/lldp", rev = "54b266174d4de9628bca9c97b0db176e16f12154", package = "lldpd-client" }
 lldp_protocol = { git = "https://github.com/oxidecomputer/lldp", rev = "54b266174d4de9628bca9c97b0db176e16f12154", package = "protocol" }
+lpc55_areas = { git = "https://github.com/oxidecomputer/lpc55_support" }
 omicron-deployment-graph = { path = "dev-tools/omicron-deployment-graph" }
 macaddr = { version = "1.0.1", features = ["serde_std"] }
 maplit = "1.0.2"
@@ -747,11 +748,11 @@ progenitor-extras = "0.2.0"
 # NOTE: if you change the pinned revision of the `bhyve_api` and propolis
 # dependencies, you must also update the references in package-manifest.toml to
 # match the new revision.
-bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "979b72896bc39a876c98fb32fe706da37a4fc408" }
-propolis-api-types-versions = { git = "https://github.com/oxidecomputer/propolis", rev = "979b72896bc39a876c98fb32fe706da37a4fc408" }
-propolis_api_types = { git = "https://github.com/oxidecomputer/propolis", rev = "979b72896bc39a876c98fb32fe706da37a4fc408" }
-propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "979b72896bc39a876c98fb32fe706da37a4fc408" }
-propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "979b72896bc39a876c98fb32fe706da37a4fc408" }
+bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "046f74302e2ea09a75b0a6810645d42c7df6644a" }
+propolis-api-types-versions = { git = "https://github.com/oxidecomputer/propolis", rev = "046f74302e2ea09a75b0a6810645d42c7df6644a" }
+propolis_api_types = { git = "https://github.com/oxidecomputer/propolis", rev = "046f74302e2ea09a75b0a6810645d42c7df6644a" }
+propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "046f74302e2ea09a75b0a6810645d42c7df6644a" }
+propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "046f74302e2ea09a75b0a6810645d42c7df6644a" }
 # NOTE: see above!
 proptest = "1.11.0"
 qorb = "0.4.1"
@@ -882,7 +883,7 @@ tufaceous-artifact = { git = "https://github.com/oxidecomputer/tufaceous", branc
 tufaceous-brand-metadata = { git = "https://github.com/oxidecomputer/tufaceous", branch = "v1" }
 tufaceous-lib = { git = "https://github.com/oxidecomputer/tufaceous", branch = "v1" }
 tufaceous-v2 = { git = "https://github.com/oxidecomputer/tufaceous", branch = "main", package = "tufaceous" }
-tufaceous-artifact-v2 = { git = "https://github.com/oxidecomputer/tufaceous", branch = "main", package = "tufaceous-artifact" }
+tufaceous-artifact-v2 = { git = "https://github.com/oxidecomputer/tufaceous", branch = "main", package = "tufaceous-artifact", features = ["proptest", "schemars"] }
 tui-tree-widget = "0.23.1"
 typed-rng = { path = "typed-rng" }
 typify = "0.3.0"

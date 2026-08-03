@@ -54,10 +54,11 @@ oxide-update-engine-types.workspace = true
 oxide-update-engine-display.workspace = true
 wicket-common.workspace = true
 wicketd-client.workspace = true
+wicketd-commission-client.workspace = true
 wicketd-commission-types.workspace = true
 omicron-workspace-hack.workspace = true
 semver.workspace = true
-tufaceous-artifact.workspace = true
+tufaceous-artifact-v2.workspace = true
 slog-error-chain.workspace = true
 
 [dev-dependencies]

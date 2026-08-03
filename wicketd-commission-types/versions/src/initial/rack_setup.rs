@@ -734,9 +734,6 @@ impl RackOperationKind {
     /// The well-known kind for a rack initialization operation.
     pub const INITIALIZE: Self = Self(Cow::Borrowed("initialize"));
 
-    /// The well-known kind for a rack reset operation.
-    pub const RESET: Self = Self(Cow::Borrowed("reset"));
-
     /// Returns the operation kind as a string.
     pub fn as_str(&self) -> &str {
         &self.0

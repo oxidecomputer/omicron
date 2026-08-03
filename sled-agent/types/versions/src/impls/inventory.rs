@@ -586,6 +586,11 @@ impl SvcsEnabledNotOnline {
     pub fn new_fake() -> Self {
         Self { services: vec![], errors: vec![], time_of_status: Utc::now() }
     }
+
+    pub fn is_empty(&self) -> bool {
+        let SvcsEnabledNotOnline { services, errors, time_of_status: _ } = self;
+        services.is_empty() && errors.is_empty()
+    }
 }
 
 /// Display helper for [`OmicronFileSourceResolverInventory`].
