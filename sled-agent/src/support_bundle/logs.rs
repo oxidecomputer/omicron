@@ -72,10 +72,15 @@ impl<'a> SupportBundleLogs<'a> {
 
     /// For a given zone and its services create a zip file of all logs
     /// found in that zone and stream it out via an `HttpResponse`.
+    ///
+    /// Rotated logs are limited to `window` (by file mtime, inclusive) and,
+    /// when a cap is supplied, to at most `max_rotated` files; the current
+    /// log of each service is always included.
     pub async fn get_logs_for_zone<Z>(
         &self,
         zone: Z,
-        max_rotated: usize,
+        max_rotated: Option<usize>,
+        window: sled_diagnostics::LogTimeWindow,
     ) -> Result<http::Response<dropshot::Body>, Error>
     where
         Z: Into<String>,
@@ -88,7 +93,9 @@ impl<'a> SupportBundleLogs<'a> {
 
         let zip_file = {
             let handle = sled_diagnostics::LogsHandle::new(log);
-            match handle.get_zone_logs(&zone, max_rotated, &mut tempfile).await
+            match handle
+                .get_zone_logs(&zone, max_rotated, window, &mut tempfile)
+                .await
             {
                 Ok(_) => Ok(tempfile),
                 Err(e) => Err(e),

@@ -1477,7 +1477,11 @@ impl SledAgentApi for SledAgentImpl {
         sa.latencies()
             .instrument_dropshot_handler(&request_context, async {
                 sa.as_support_bundle_logs()
-                    .get_logs_for_zone(zone, max_rotated)
+                    .get_logs_for_zone(
+                        zone,
+                        Some(max_rotated),
+                        sled_diagnostics::LogTimeWindow::default(),
+                    )
                     .await
                     .map_err(HttpError::from)
             })
