@@ -20,7 +20,7 @@ use sled_hardware_types::BaseboardId;
 use slog_error_chain::InlineErrorChain;
 use sp_sim::SimulatedSp;
 use std::time::Duration;
-use tufaceous_artifact::ArtifactHash;
+use tufaceous_artifact_v2::ArtifactHash;
 
 /// Emulates sled agent inventory (which reports the contents of both "phase 2"
 /// slots) for a bunch of sleds

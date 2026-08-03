@@ -32,7 +32,7 @@ use slog::{debug, error};
 use std::net::SocketAddrV6;
 use std::time::Duration;
 use strum::IntoEnumIterator;
-use tufaceous_artifact::ArtifactHash;
+use tufaceous_artifact_v2::ArtifactHash;
 
 /// connection and request timeout used for Sled Agent HTTP client
 const SLED_AGENT_TIMEOUT: Duration = Duration::from_secs(60);

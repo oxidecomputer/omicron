@@ -43,7 +43,7 @@ use tokio::io::AsyncReadExt;
 use tokio::io::AsyncSeekExt;
 use tokio::io::SeekFrom;
 use tokio_util::sync::CancellationToken;
-use tufaceous_artifact::ArtifactHash;
+use tufaceous_artifact_v2::ArtifactHash;
 
 /// We use "/var/tmp" to use Nexus' filesystem for temporary storage,
 /// rather than "/tmp", which would keep this collected data in-memory.

@@ -1989,7 +1989,7 @@ dependencies = [
  "omicron-workspace-hack",
  "serde_json",
  "sha2 0.10.9",
- "tufaceous-artifact 0.1.0",
+ "tufaceous-artifact 0.2.0",
  "uuid",
 ]
 
@@ -4316,7 +4316,7 @@ dependencies = [
  "termios",
  "tokio",
  "tokio-tungstenite 0.23.1",
- "tufaceous-artifact 0.1.0",
+ "tufaceous-artifact 0.2.0",
  "uuid",
 ]
 
@@ -7402,7 +7402,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "trust-quorum-protocol",
- "tufaceous-artifact 0.1.0",
+ "tufaceous-artifact 0.2.0",
  "uuid",
 ]
 
@@ -7500,7 +7500,7 @@ dependencies = [
  "tokio",
  "trust-quorum-protocol",
  "trust-quorum-types",
- "tufaceous-artifact 0.1.0",
+ "tufaceous-artifact 0.2.0",
  "url",
  "usdt 0.5.0",
  "uuid",
@@ -7564,7 +7564,6 @@ dependencies = [
  "serde_json",
  "slog-error-chain",
  "trust-quorum-types",
- "tufaceous-artifact 0.1.0",
  "uuid",
 ]
 
@@ -7660,7 +7659,7 @@ dependencies = [
  "swrite",
  "thiserror 2.0.18",
  "tokio",
- "tufaceous-artifact 0.1.0",
+ "tufaceous-artifact 0.2.0",
  "typed-rng",
  "uuid",
 ]
@@ -7794,7 +7793,7 @@ dependencies = [
  "tokio-stream",
  "tokio-util",
  "trust-quorum-types",
- "tufaceous-artifact 0.1.0",
+ "tufaceous-artifact 0.2.0",
  "uuid",
 ]
 
@@ -7838,7 +7837,7 @@ dependencies = [
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "sled-agent-types",
- "tufaceous-artifact 0.1.0",
+ "tufaceous-artifact 0.2.0",
 ]
 
 [[package]]
@@ -7985,11 +7984,9 @@ dependencies = [
  "tokio",
  "toml 0.8.23",
  "transient-dns-server",
- "tufaceous 0.1.0",
- "tufaceous-artifact 0.1.0",
- "tufaceous-lib",
+ "tufaceous 0.2.0",
+ "tufaceous-artifact 0.2.0",
  "typed-rng",
- "update-common",
  "uuid",
 ]
 
@@ -8062,7 +8059,7 @@ dependencies = [
  "swrite",
  "sync-ptr",
  "thiserror 2.0.18",
- "tufaceous-artifact 0.1.0",
+ "tufaceous-artifact 0.2.0",
  "typed-rng",
  "uuid",
 ]
@@ -8293,7 +8290,7 @@ dependencies = [
  "tough 0.22.0",
  "trust-quorum-protocol",
  "trust-quorum-types",
- "tufaceous-artifact 0.1.0",
+ "tufaceous-artifact 0.2.0",
  "unicode-width 0.1.14",
  "url",
  "uuid",
@@ -8332,7 +8329,7 @@ dependencies = [
  "strum 0.27.2",
  "thiserror 2.0.18",
  "tough 0.22.0",
- "tufaceous-artifact 0.1.0",
+ "tufaceous-artifact 0.2.0",
  "url",
  "uuid",
 ]
@@ -8869,7 +8866,6 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "toml 0.8.23",
- "tufaceous-artifact 0.1.0",
  "tufaceous-artifact 0.2.0",
  "uuid",
 ]
@@ -9295,13 +9291,10 @@ dependencies = [
  "tokio",
  "tokio-postgres",
  "tokio-util",
- "tough 0.22.0",
  "transient-dns-server",
  "trust-quorum-types",
- "tufaceous 0.1.0",
- "tufaceous-artifact 0.1.0",
- "tufaceous-lib",
- "update-common",
+ "tufaceous 0.2.0",
+ "tufaceous-artifact 0.2.0",
  "url",
  "usdt 0.5.0",
  "uuid",
@@ -9446,7 +9439,6 @@ dependencies = [
  "textwrap 0.16.2",
  "tokio",
  "trust-quorum-types",
- "tufaceous-artifact 0.1.0",
  "unicode-width 0.1.14",
  "url",
  "uuid",
@@ -9614,6 +9606,7 @@ dependencies = [
  "bytes",
  "camino",
  "clap",
+ "display-error-chain",
  "dropshot",
  "futures",
  "libc",
@@ -9627,8 +9620,8 @@ dependencies = [
  "slog-error-chain",
  "tokio",
  "tokio-util",
- "tufaceous-artifact 0.1.0",
- "update-common",
+ "tufaceous 0.2.0",
+ "tufaceous-artifact 0.2.0",
 ]
 
 [[package]]
@@ -9761,8 +9754,8 @@ dependencies = [
  "trust-quorum",
  "trust-quorum-protocol",
  "trust-quorum-types",
- "tufaceous-artifact 0.1.0",
- "tufaceous-brand-metadata 0.1.0",
+ "tufaceous-artifact 0.2.0",
+ "tufaceous-brand-metadata 0.2.0",
  "usdt 0.5.0",
  "uuid",
  "walkdir",
@@ -12380,6 +12373,7 @@ dependencies = [
  "omicron-test-utils",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
+ "oxide-tokio-rt",
  "pq-sys",
  "semver 1.0.28",
  "serde",
@@ -12393,10 +12387,8 @@ dependencies = [
  "tabled 0.15.0",
  "tokio",
  "toml 0.8.23",
- "tufaceous 0.1.0",
- "tufaceous-artifact 0.1.0",
- "tufaceous-lib",
- "update-common",
+ "tufaceous 0.2.0",
+ "tufaceous-artifact 0.2.0",
  "uuid",
 ]
 
@@ -12427,7 +12419,7 @@ dependencies = [
  "slog",
  "swrite",
  "tokio",
- "tufaceous-artifact 0.1.0",
+ "tufaceous-artifact 0.2.0",
 ]
 
 [[package]]
@@ -12598,7 +12590,7 @@ dependencies = [
  "omicron-workspace-hack",
  "schemars 0.8.22",
  "serde",
- "tufaceous-artifact 0.1.0",
+ "tufaceous-artifact 0.2.0",
 ]
 
 [[package]]
@@ -14015,7 +14007,6 @@ dependencies = [
  "slog-error-chain",
  "static_assertions",
  "trust-quorum-types",
- "tufaceous-artifact 0.1.0",
  "uuid",
  "x509-cert",
 ]
@@ -14099,7 +14090,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "trust-quorum-types",
- "tufaceous-artifact 0.1.0",
+ "tufaceous-artifact 0.2.0",
  "xshell",
  "zone",
 ]
@@ -14250,7 +14241,7 @@ dependencies = [
  "slog",
  "slog-error-chain",
  "thiserror 2.0.18",
- "tufaceous-artifact 0.1.0",
+ "tufaceous-artifact 0.2.0",
 ]
 
 [[package]]
@@ -14267,7 +14258,7 @@ dependencies = [
  "sha2 0.10.9",
  "sled-agent-types",
  "sled-storage",
- "tufaceous-artifact 0.1.0",
+ "tufaceous-artifact 0.2.0",
 ]
 
 [[package]]
@@ -14337,7 +14328,7 @@ dependencies = [
  "swrite",
  "test-strategy",
  "thiserror 2.0.18",
- "tufaceous-artifact 0.1.0",
+ "tufaceous-artifact 0.2.0",
  "uuid",
 ]
 
@@ -14381,7 +14372,7 @@ dependencies = [
  "thiserror 2.0.18",
  "toml 0.8.23",
  "trust-quorum-types-versions",
- "tufaceous-artifact 0.1.0",
+ "tufaceous-artifact 0.2.0",
  "uuid",
 ]
 
@@ -15170,7 +15161,6 @@ dependencies = [
  "slog-error-chain",
  "tokio",
  "tokio-util",
- "tufaceous-artifact 0.1.0",
  "uuid",
  "zip 4.6.1",
 ]
@@ -16937,7 +16927,9 @@ dependencies = [
  "omicron-test-utils",
  "omicron-workspace-hack",
  "rand 0.9.2",
+ "schemars 0.8.22",
  "semver 1.0.28",
+ "serde",
  "sha2 0.10.9",
  "slog",
  "tar",

@@ -34,7 +34,7 @@ use sled_agent_types_versions::latest::inventory::{
 use std::collections::HashMap;
 use strum::IntoEnumIterator;
 use tabled::Tabled;
-use tufaceous_artifact::ArtifactHash;
+use tufaceous_artifact_v2::ArtifactHash;
 use uuid::Uuid;
 
 use crate::inventory::{
