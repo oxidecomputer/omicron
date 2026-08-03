@@ -325,9 +325,17 @@ async fn save_zone_log_zip_or_error(
     // this can turn into a collection parameter.
     const DEFAULT_MAX_ROTATED_LOGS: u32 = 5;
 
+    // Query parameters are supplied in alphabetical order, which is why
+    // "end time" comes before "start time".
+    let (end_time, start_time) = (None, None);
     let download_result = tokio::select! {
         _ = cancellation_token.cancelled() => return Ok(()),
-        result = client.support_logs_download(zone, DEFAULT_MAX_ROTATED_LOGS) => result,
+        result = client.support_logs_download(
+            zone,
+            end_time,
+            Some(DEFAULT_MAX_ROTATED_LOGS),
+            start_time,
+        ) => result,
     };
 
     match download_result {

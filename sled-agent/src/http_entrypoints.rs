@@ -1472,15 +1472,21 @@ impl SledAgentApi for SledAgentImpl {
         let sa = request_context.context();
         let SledDiagnosticsLogsDownloadPathParam { zone } =
             path_params.into_inner();
-        let SledDiagnosticsLogsDownloadQueryParam { max_rotated } =
-            query_params.into_inner();
+        let SledDiagnosticsLogsDownloadQueryParam {
+            max_rotated,
+            start_time,
+            end_time,
+        } = query_params.into_inner();
         sa.latencies()
             .instrument_dropshot_handler(&request_context, async {
                 sa.as_support_bundle_logs()
                     .get_logs_for_zone(
                         zone,
-                        Some(max_rotated),
-                        sled_diagnostics::LogTimeWindow::default(),
+                        max_rotated,
+                        sled_diagnostics::LogTimeWindow {
+                            start: start_time,
+                            end: end_time,
+                        },
                     )
                     .await
                     .map_err(HttpError::from)
