@@ -347,8 +347,9 @@ impl SagaExecState {
     ///   - The saga is not in abandoned state and none of the three metadata
     ///     columns are populated.
     ///
-    /// Takes individual columns rather than a `SagaRow` so that types
-    /// selecting a subset of the table's columns can use the same validation.
+    /// Takes individual columns rather than a `SagaRow` for two reasons. First,
+    /// `SagaRow` is private. Second, types selecting a subset of the table's
+    /// columns can use the same validation.
     pub fn try_from_columns(
         id: SagaId,
         saga_state: SagaState,
@@ -433,8 +434,8 @@ impl From<steno::SagaCachedState> for SagaExecState {
 /// insertion.
 ///
 /// Compared to [`SagaRow`], the three abandon metadata columns are bundled
-/// into a the saga_state field as part of the `SagaExecState::Abandoned()`
-/// variant so invalid state/metadata combinations can't be represented.
+/// into the `saga_state` field as part of the [`SagaExecState::Abandoned`]
+/// variant, so invalid state/metadata combinations can't be represented.
 /// Reads from the database go through `TryFrom<SagaRow>`, which rejects rows
 /// whose metadata is inconsistent with `saga_state` with an
 /// [`Error::InternalError`].
