@@ -24,9 +24,10 @@ use slog_error_chain::InlineErrorChain;
 use tokio::io::AsyncWriteExt;
 use tokio_util::sync::CancellationToken;
 
-/// The maximum number of concurrent zone-log downloads from a single
-/// sled-agent.
-const MAX_CONCURRENT_ZONE_LOG_DOWNLOADS: usize = 10;
+/// The maximum number of concurrent requests to a single sled-agent
+/// from one sled-data collection step, applied independently to the
+/// diagnostics-command fan-out and to zone-log downloads.
+const MAX_CONCURRENT_SLED_AGENT_REQUESTS: usize = 10;
 
 pub async fn spawn_query_all_sleds(
     collection: &BundleCollection,
@@ -210,11 +211,10 @@ async fn collect_data_from_sled(
         )
         .boxed(),
     ])
-    // Currently we execute up to 10 commands concurrently which
-    // might be doing their own concurrent work, for example
-    // collectiong `pstack` output of every Oxide process that is
-    // found on a sled.
-    .buffer_unordered(10);
+    // Commands executing concurrently might be doing their own
+    // concurrent work on the sled, for example collecting `pstack`
+    // output of every Oxide process that is found on a sled.
+    .buffer_unordered(MAX_CONCURRENT_SLED_AGENT_REQUESTS);
 
     while let Some(result) = diag_cmds.next().await {
         // Log that we failed to write the diag command output to a
@@ -242,20 +242,20 @@ async fn collect_data_from_sled(
     // zone that has ever had logs on the sled), and each request makes
     // the sled-agent take ZFS snapshots and assemble a zip file before
     // it can respond, so we cap the number of in-flight requests.
-    let log_futs: Vec<_> = zones
-        .iter()
-        .map(|zone| {
+    let sled_client = &sled_client;
+    let sled_path = &sled_path;
+    let mut log_futs = futures::stream::iter(zones)
+        .map(|zone| async move {
             save_zone_log_zip_or_error(
                 log,
-                &sled_client,
-                zone,
-                &sled_path,
+                sled_client,
+                &zone,
+                sled_path,
                 cancellation_token,
             )
+            .await
         })
-        .collect();
-    let mut log_futs = futures::stream::iter(log_futs)
-        .buffer_unordered(MAX_CONCURRENT_ZONE_LOG_DOWNLOADS);
+        .buffer_unordered(MAX_CONCURRENT_SLED_AGENT_REQUESTS);
 
     while let Some(log_collection_result) = log_futs.next().await {
         // We log any errors saving the zip file to disk and
