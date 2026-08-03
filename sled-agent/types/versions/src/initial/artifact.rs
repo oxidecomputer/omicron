@@ -13,7 +13,7 @@ use schemars::{
     schema::{ArrayValidation, InstanceType, Schema, SchemaObject},
 };
 use serde::{Deserialize, Serialize};
-use tufaceous_artifact_v2::ArtifactHash;
+use tufaceous_artifact::ArtifactHash;
 
 /// Path parameters for Artifact requests.
 #[derive(Deserialize, JsonSchema)]

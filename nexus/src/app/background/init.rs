@@ -168,7 +168,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio::sync::watch;
-use tufaceous_v2::Repository;
+use tufaceous::Repository;
 
 /// Internal state for communication between Nexus and background tasks.
 ///

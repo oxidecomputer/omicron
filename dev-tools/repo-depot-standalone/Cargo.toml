@@ -27,8 +27,8 @@ slog.workspace = true
 slog-error-chain.workspace = true
 tokio = { workspace = true, features = [ "full" ] }
 tokio-util.workspace = true
-tufaceous-artifact-v2.workspace = true
-tufaceous-v2.workspace = true
+tufaceous.workspace = true
+tufaceous-artifact.workspace = true
 
 [[bin]]
 name = "repo-depot-standalone"

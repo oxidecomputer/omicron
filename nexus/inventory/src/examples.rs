@@ -88,7 +88,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
 use strum::IntoEnumIterator;
-use tufaceous_artifact_v2::ArtifactHash;
+use tufaceous_artifact::ArtifactHash;
 use uuid::Uuid;
 
 /// Returns an example Collection used for testing

@@ -7,8 +7,8 @@ use std::collections::BTreeMap;
 use semver::Version;
 use serde::Deserialize;
 use serde::Serialize;
-use tufaceous_artifact_v2::ArtifactHash;
-use tufaceous_artifact_v2::ArtifactSet;
+use tufaceous_artifact::ArtifactHash;
+use tufaceous_artifact::ArtifactSet;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TufRepoDescription {

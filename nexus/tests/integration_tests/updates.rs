@@ -28,8 +28,8 @@ use semver::Version;
 use serde::Deserialize;
 use std::collections::HashSet;
 use std::fmt::Debug;
-use tufaceous_artifact_v2::{Artifact, ArtifactSet, KnownArtifactTags, SpTags};
-use tufaceous_v2::edit::{Ed25519Key, RepositoryEditor, Root};
+use tufaceous::edit::{Ed25519Key, RepositoryEditor, Root};
+use tufaceous_artifact::{Artifact, ArtifactSet, KnownArtifactTags, SpTags};
 
 use crate::integration_tests::target_release::set_target_release_for_mupdate_recovery_with_expected_status;
 

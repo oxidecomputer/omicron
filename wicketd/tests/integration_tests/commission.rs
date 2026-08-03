@@ -16,7 +16,7 @@ use iddqd::{IdOrdMap, id_ord_map};
 use omicron_test_utils::dev::poll::{CondCheckError, wait_for_condition};
 use semver::Version;
 use sp_sim::ROT_STAGING_DEVEL_SIGN;
-use tufaceous_v2::edit::RepositoryEditor;
+use tufaceous::edit::RepositoryEditor;
 use wicket_common::example::ExampleRackSetupData;
 use wicket_common::rack_setup::CurrentRssUserConfigInsensitive;
 use wicketd_commission_types::rack_setup::PutRssUserConfigInsensitive;

@@ -18,7 +18,7 @@ use sp_sim::GimletPowerState;
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
 use tokio::sync::watch;
-use tufaceous_artifact_v2::ArtifactHash;
+use tufaceous_artifact::ArtifactHash;
 
 /// Current state of a fake sled-agent.
 #[derive(Debug)]

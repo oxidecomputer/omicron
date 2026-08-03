@@ -41,7 +41,7 @@ use omicron_uuid_kinds::{GenericUuid, TufRepoUuid};
 use semver::Version;
 use sled_agent_types::artifact::ArtifactConfig;
 use swrite::{SWrite, swrite};
-use tufaceous_artifact_v2::{Artifact, ArtifactSet};
+use tufaceous_artifact::{Artifact, ArtifactSet};
 use uuid::Uuid;
 
 async fn artifacts_for_repo(

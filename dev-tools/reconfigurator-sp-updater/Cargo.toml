@@ -30,7 +30,7 @@ sled-hardware-types.workspace = true
 slog.workspace = true
 swrite.workspace = true
 tokio = { workspace = true, features = ["full"] }
-tufaceous-artifact-v2.workspace = true
+tufaceous-artifact.workspace = true
 omicron-workspace-hack.workspace = true
 
 [[bin]]

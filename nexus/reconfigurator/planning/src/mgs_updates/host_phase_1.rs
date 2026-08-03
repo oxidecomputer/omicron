@@ -27,13 +27,13 @@ use slog::debug;
 use slog::error;
 use std::collections::BTreeMap;
 use std::sync::Arc;
-use tufaceous_artifact_v2::Artifact;
-use tufaceous_artifact_v2::ArtifactHash;
-use tufaceous_artifact_v2::OsBoard;
-use tufaceous_artifact_v2::OsPhase1Tags;
-use tufaceous_artifact_v2::OsPhase2Tags;
-use tufaceous_artifact_v2::OsVariant;
-use tufaceous_artifact_v2::artifact_set::GetError;
+use tufaceous_artifact::Artifact;
+use tufaceous_artifact::ArtifactHash;
+use tufaceous_artifact::OsBoard;
+use tufaceous_artifact::OsPhase1Tags;
+use tufaceous_artifact::OsPhase2Tags;
+use tufaceous_artifact::OsVariant;
+use tufaceous_artifact::artifact_set::GetError;
 
 /// Describes a set of blueprint changes to the desired host phase 2 contents
 /// for a number of sleds

@@ -53,17 +53,17 @@ use omicron_uuid_kinds::VnicUuid;
 use semver::Version;
 use sled_agent_types::inventory::SledRole;
 use sled_agent_types::inventory::ZoneKind;
-use tufaceous_artifact_v2::ArtifactHash;
-use tufaceous_artifact_v2::ArtifactSet;
-use tufaceous_artifact_v2::ArtifactVersion;
-use tufaceous_artifact_v2::KnownArtifactTags;
-use tufaceous_artifact_v2::OsBoard;
-use tufaceous_artifact_v2::OsPhase1Tags;
-use tufaceous_artifact_v2::OsPhase2Tags;
-use tufaceous_artifact_v2::OsVariant;
-use tufaceous_artifact_v2::RotSlot;
-use tufaceous_artifact_v2::RotTags;
-use tufaceous_v2::edit::ArtifactSetExt;
+use tufaceous::edit::ArtifactSetExt;
+use tufaceous_artifact::ArtifactHash;
+use tufaceous_artifact::ArtifactSet;
+use tufaceous_artifact::ArtifactVersion;
+use tufaceous_artifact::KnownArtifactTags;
+use tufaceous_artifact::OsBoard;
+use tufaceous_artifact::OsPhase1Tags;
+use tufaceous_artifact::OsPhase2Tags;
+use tufaceous_artifact::OsVariant;
+use tufaceous_artifact::RotSlot;
+use tufaceous_artifact::RotTags;
 use typed_rng::TypedUuidRng;
 
 /// Stateful PRNG for generating simulated systems.

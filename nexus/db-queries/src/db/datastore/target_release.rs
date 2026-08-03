@@ -289,7 +289,7 @@ mod test {
     use sha2::Sha256;
     use slog_error_chain::InlineErrorChain;
     use std::collections::BTreeMap;
-    use tufaceous_artifact_v2::{
+    use tufaceous_artifact::{
         Artifact, ArtifactHash, ArtifactSet, ArtifactVersion,
     };
 

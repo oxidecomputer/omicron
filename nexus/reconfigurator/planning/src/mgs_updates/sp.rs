@@ -19,10 +19,10 @@ use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::Collection;
 use nexus_types::tuf_repo::TufRepoDescription;
 use slog::debug;
-use tufaceous_artifact_v2::ArtifactVersion;
-use tufaceous_artifact_v2::KnownArtifactTags;
-use tufaceous_artifact_v2::SpTags;
-use tufaceous_artifact_v2::artifact_set::GetError;
+use tufaceous_artifact::ArtifactVersion;
+use tufaceous_artifact::KnownArtifactTags;
+use tufaceous_artifact::SpTags;
+use tufaceous_artifact::artifact_set::GetError;
 
 /// Compares a configured SP update with information from inventory and
 /// determines the current status of the update.  See `MgsUpdateStatus`.

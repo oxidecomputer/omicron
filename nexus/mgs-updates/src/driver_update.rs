@@ -787,7 +787,7 @@ mod test {
     use sled_hardware_types::BaseboardId;
     use slog_error_chain::InlineErrorChain;
     use std::time::Duration;
-    use tufaceous_artifact_v2::ArtifactHash;
+    use tufaceous_artifact::ArtifactHash;
 
     /// Tests several happy-path cases of updating an SP
     #[tokio::test]

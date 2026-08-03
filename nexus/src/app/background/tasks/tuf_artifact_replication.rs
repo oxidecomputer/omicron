@@ -15,10 +15,9 @@
 //!
 //! This background task is responsible for getting locally-stored artifacts
 //! onto sleds, and ensuring all sleds have copies of all artifacts.
-//! `Nexus::updates_put_repository` sends the [`tufaceous_v2::Repository`]
-//! object to this task via an [`mpsc`] channel and activates it. Once enough
-//! sleds have a copy of each artifact in an `Repository`, the local copy is
-//! removed.
+//! `Nexus::updates_put_repository` sends the [`tufaceous::Repository`] object
+//! to this task via an [`mpsc`] channel and activates it. Once enough sleds
+//! have a copy of each artifact in an `Repository`, the local copy is removed.
 //!
 //! # Task flow
 //!
@@ -86,8 +85,8 @@ use sled_agent_types::artifact::ArtifactConfig;
 use slog_error_chain::InlineErrorChain;
 use tokio::sync::mpsc::error::TryRecvError;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore, mpsc};
-use tufaceous_artifact_v2::ArtifactHash;
-use tufaceous_v2::{Repository, TargetStream};
+use tufaceous::{Repository, TargetStream};
+use tufaceous_artifact::ArtifactHash;
 
 use crate::app::background::BackgroundTask;
 
@@ -124,13 +123,13 @@ struct ArtifactPresence {
 /// equivalent to a wrapper struct.
 #[derive(Debug, Clone)]
 enum ArtifactHandle {
-    Extracted(tufaceous_v2::ArtifactHandle),
+    Extracted(tufaceous::ArtifactHandle),
     #[cfg(test)]
     Fake,
 }
 
 impl ArtifactHandle {
-    async fn stream(&self) -> Result<TargetStream, tufaceous_v2::error::Error> {
+    async fn stream(&self) -> Result<TargetStream, tufaceous::error::Error> {
         match self {
             ArtifactHandle::Extracted(handle) => handle.stream().await,
             #[cfg(test)]

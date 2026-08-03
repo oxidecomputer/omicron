@@ -32,7 +32,7 @@ use ratatui::widgets::{
     Row, Table,
 };
 use slog::{Logger, info, o};
-use tufaceous_artifact_v2::{
+use tufaceous_artifact::{
     ArtifactVersion, KnownArtifactTags, OsPhase2Tags, OsVariant,
     RotBootloaderTags, RotKeyTableHash, RotTags,
 };

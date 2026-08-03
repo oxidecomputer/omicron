@@ -156,7 +156,7 @@ mod tests {
         OmicronResolvableFileLocation, OmicronResolvableFileSource,
         RAMDISK_IMAGE_PATH, ZoneImageLocationError,
     };
-    use tufaceous_artifact_v2::ArtifactHash;
+    use tufaceous_artifact::ArtifactHash;
 
     /// Test source resolver behavior when the zone manifest is missing.
     #[test]
