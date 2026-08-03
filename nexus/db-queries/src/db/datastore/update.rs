@@ -1247,6 +1247,9 @@ mod test {
         assert_eq!(repo.artifacts.len(), 1);
         assert_eq!(repo.artifacts[0].tags.len(), 1);
         assert_eq!(repo.metadata.len(), 1);
+
+        db.terminate().await;
+        logctx.cleanup_successful();
     }
 
     #[tokio::test]
