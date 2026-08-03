@@ -177,7 +177,6 @@ members = [
     "trust-quorum/types",
     "trust-quorum/types/versions",
     "typed-rng",
-    "update-common",
     "uuid-kinds",
     "wicket-common",
     "wicket-dbg",
@@ -372,7 +371,6 @@ default-members = [
     "trust-quorum/types/versions",
     "test-utils",
     "typed-rng",
-    "update-common",
     "uuid-kinds",
     "wicket-common",
     "wicket-dbg",
@@ -878,10 +876,6 @@ tough = { version = "0.22.0" }
 transceiver-controller = { git = "https://github.com/oxidecomputer/transceiver-control", features = [ "api-traits" ] }
 transient-dns-server = { path = "dns-server/transient" }
 trybuild = "1.0.106"
-tufaceous-v1 = { git = "https://github.com/oxidecomputer/tufaceous", branch = "v1", package = "tufaceous" }
-tufaceous-artifact-v1 = { git = "https://github.com/oxidecomputer/tufaceous", branch = "v1", package = "tufaceous-artifact", features = ["proptest", "schemars"] }
-tufaceous-brand-metadata-v1 = { git = "https://github.com/oxidecomputer/tufaceous", branch = "v1", package = "tufaceous-brand-metadata" }
-tufaceous-lib-v1 = { git = "https://github.com/oxidecomputer/tufaceous", branch = "v1", package = "tufaceous-lib" }
 tufaceous = { git = "https://github.com/oxidecomputer/tufaceous", branch = "main" }
 tufaceous-artifact = { git = "https://github.com/oxidecomputer/tufaceous", branch = "main", features = ["proptest", "schemars"] }
 tufaceous-brand-metadata = { git = "https://github.com/oxidecomputer/tufaceous", branch = "main" }
@@ -889,7 +883,6 @@ tui-tree-widget = "0.23.1"
 typed-rng = { path = "typed-rng" }
 typify = "0.3.0"
 unicode-width = "0.1.13"
-update-common = { path = "update-common" }
 url = "2.5.4"
 usdt = "0.5.0"
 uuid = { version = "1.17.0", features = ["serde", "v4"] }
