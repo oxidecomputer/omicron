@@ -11,12 +11,13 @@ use dropshot::ConfigDropshot;
 use dropshot::ConfigLogging;
 use nexus_types::deployment::ReconfiguratorConfig;
 use omicron_common::address::Ipv6Subnet;
-pub use omicron_common::address::MAX_VPC_IPV4_SUBNET_PREFIX;
-pub use omicron_common::address::MIN_VPC_IPV4_SUBNET_PREFIX;
+pub use omicron_common::address::MAX_VPC_IPV4_SUBNET_PREFIX_LENGTH;
+pub use omicron_common::address::MIN_VPC_IPV4_SUBNET_PREFIX_LENGTH;
 use omicron_common::address::NEXUS_TECHPORT_EXTERNAL_PORT;
 pub use omicron_common::address::NUM_INITIAL_RESERVED_IP_ADDRESSES;
-use omicron_common::address::RACK_PREFIX;
+use omicron_common::address::RACK_PREFIX_LENGTH;
 use omicron_uuid_kinds::OmicronZoneUuid;
+use omicron_uuid_kinds::RackUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_with::DisplayFromStr;
@@ -29,7 +30,6 @@ use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::num::NonZeroU32;
 use std::time::Duration;
-use uuid::Uuid;
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct NexusConfig {
@@ -142,7 +142,7 @@ pub enum InternalDns {
     /// Nexus should infer the DNS server addresses from this subnet.
     ///
     /// This is a more common usage for production.
-    FromSubnet { subnet: Ipv6Subnet<RACK_PREFIX> },
+    FromSubnet { subnet: Ipv6Subnet<RACK_PREFIX_LENGTH> },
     /// Nexus should use precisely the following address.
     ///
     /// This is less desirable in production, but can give value
@@ -155,7 +155,7 @@ pub struct DeploymentConfig {
     /// Uuid of the Nexus instance
     pub id: OmicronZoneUuid,
     /// Uuid of the Rack where Nexus is executing.
-    pub rack_id: Uuid,
+    pub rack_id: RackUuid,
     /// Port on which the "techport external" dropshot server should listen.
     /// This dropshot server copies _most_ of its config from
     /// `dropshot_external` (so that it matches TLS, etc.), but builds its
@@ -282,6 +282,33 @@ struct UnvalidatedTunables {
     load_timeout: Option<std::time::Duration>,
 }
 
+/// Whether HTTP clients for external services permit requests to loopback
+/// addresses.
+///
+/// This is an enum rather than a `bool`, so that if you want to turn on the
+/// test-only config, you have to type the string "yes_for_test_purposes_only"
+/// in the config file so you know what you're doing.
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    Deserialize,
+    Eq,
+    JsonSchema,
+    PartialEq,
+    Serialize,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum TreatLoopbackAsExternal {
+    /// Loopback addresses are considered "external". This must only be used
+    /// in test environments.
+    YesForTestPurposesOnly,
+    /// Loopback addresses are rejected (the default).
+    #[default]
+    No,
+}
+
 /// Configuration for HTTP clients to external services.
 #[derive(
     Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema,
@@ -291,6 +318,15 @@ pub struct ExternalHttpClientConfig {
     /// specified interface name.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub interface: Option<String>,
+    /// Whether external HTTP clients are permitted to make requests to
+    /// loopback addresses (and names in the special-use "localhost." zone).
+    ///
+    /// External HTTP clients normally refuse to make requests to any address
+    /// that isn't external to the rack, including loopback addresses. Test
+    /// environments, however, run their "external" servers on localhost, so
+    /// the test suite needs a way to turn that off.
+    #[serde(default)]
+    pub treat_loopback_as_external: TreatLoopbackAsExternal,
 }
 
 /// Tunable configuration parameters, intended for use in test environments or
@@ -335,7 +371,8 @@ impl Tunables {
                 as u8,
             )
             .expect("Invalid absolute maximum IPv4 subnet prefix");
-        if prefix >= MIN_VPC_IPV4_SUBNET_PREFIX && prefix <= absolute_max {
+        if prefix >= MIN_VPC_IPV4_SUBNET_PREFIX_LENGTH && prefix <= absolute_max
+        {
             Ok(())
         } else {
             Err(InvalidTunable {
@@ -352,7 +389,7 @@ impl Tunables {
 impl Default for Tunables {
     fn default() -> Self {
         Tunables {
-            max_vpc_ipv4_subnet_prefix: MAX_VPC_IPV4_SUBNET_PREFIX,
+            max_vpc_ipv4_subnet_prefix: MAX_VPC_IPV4_SUBNET_PREFIX_LENGTH,
             load_timeout: None,
         }
     }
@@ -1009,6 +1046,10 @@ pub struct FmTasksConfig {
     #[serde_as(as = "DurationSeconds<u64>")]
     pub sitrep_gc_period_secs: Duration,
     /// period (in seconds) for periodic activations of the background task that
+    /// prunes the oldest entries from the fault management sitrep history
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub sitrep_history_prune_period_secs: Duration,
+    /// period (in seconds) for periodic activations of the background task that
     /// updates externally-visible database tables to match the current situation
     /// report.
     #[serde_as(as = "DurationSeconds<u64>")]
@@ -1028,6 +1069,11 @@ impl Default for FmTasksConfig {
             // time the current sitrep changes, and activating it more
             // frequently won't make things more responsive.
             sitrep_gc_period_secs: Duration::from_secs(600),
+            // This need not be activated very frequently, as it's triggered
+            // whenever a new sitrep is committed and by the analysis task when
+            // nearing capacity limits, so periodic activation is only a
+            // backstop.
+            sitrep_history_prune_period_secs: Duration::from_secs(600),
             // This, too, is activated whenever a new sitrep is loaded, so we
             // need not set the periodic activation interval too high.
             rendezvous_period_secs: Duration::from_secs(300),
@@ -1145,8 +1191,9 @@ mod test {
     use super::*;
 
     use nexus_types::deployment::PlannerConfig;
+    use nexus_types::deployment::ReconfiguratorDisruptionPolicy;
     use omicron_common::address::{
-        CLICKHOUSE_TCP_PORT, Ipv6Subnet, RACK_PREFIX,
+        CLICKHOUSE_TCP_PORT, Ipv6Subnet, RACK_PREFIX_LENGTH,
     };
 
     use camino::{Utf8Path, Utf8PathBuf};
@@ -1264,6 +1311,7 @@ mod test {
             external_dns_servers = [ "1.1.1.1", "9.9.9.9" ]
             [deployment.external_http_clients]
             interface = "opte0"
+            treat_loopback_as_external = "yes_for_test_purposes_only"
             [deployment.dropshot_external]
             bind_address = "10.1.2.3:4567"
             default_request_body_max_bytes = 1024
@@ -1287,6 +1335,7 @@ mod test {
             [initial_reconfigurator_config]
             planner_enabled = true
             tuf_repo_pruner_enabled = false
+            disruption_policy = "terminate"
             [background_tasks]
             dns_internal.period_secs_config = 1
             dns_internal.period_secs_servers = 2
@@ -1345,6 +1394,7 @@ mod test {
             sp_ereport_ingester.period_secs = 47
             fm.sitrep_load_period_secs = 48
             fm.sitrep_gc_period_secs = 49
+            fm.sitrep_history_prune_period_secs = 53
             probe_distributor.period_secs = 50
             multicast_reconciler.period_secs = 60
             fm.rendezvous_period_secs = 51
@@ -1401,7 +1451,7 @@ mod test {
                         ..Default::default()
                     },
                     internal_dns: InternalDns::FromSubnet {
-                        subnet: Ipv6Subnet::<RACK_PREFIX>::new(
+                        subnet: Ipv6Subnet::<RACK_PREFIX_LENGTH>::new(
                             Ipv6Addr::LOCALHOST
                         )
                     },
@@ -1412,6 +1462,7 @@ mod test {
                     ],
                     external_http_clients: ExternalHttpClientConfig {
                         interface: Some("opte0".to_string()),
+                        treat_loopback_as_external: TreatLoopbackAsExternal::YesForTestPurposesOnly,
                     },
                 },
                 pkg: PackageConfig {
@@ -1467,6 +1518,7 @@ mod test {
                         planner_enabled: true,
                         planner_config: PlannerConfig::default(),
                         tuf_repo_pruner_enabled: false,
+                        disruption_policy: ReconfiguratorDisruptionPolicy::Terminate,
                     }),
                     background_tasks: BackgroundTaskConfig {
                         dns_internal: DnsTasksConfig {
@@ -1615,6 +1667,8 @@ mod test {
                             analysis_period_secs: Duration::from_secs(52),
                             sitrep_load_period_secs: Duration::from_secs(48),
                             sitrep_gc_period_secs: Duration::from_secs(49),
+                            sitrep_history_prune_period_secs:
+                                Duration::from_secs(53),
                             rendezvous_period_secs: Duration::from_secs(51),
                         },
                         probe_distributor: ProbeDistributorConfig {
@@ -1750,6 +1804,7 @@ mod test {
             sp_ereport_ingester.period_secs = 44
             fm.sitrep_load_period_secs = 45
             fm.sitrep_gc_period_secs = 46
+            fm.sitrep_history_prune_period_secs = 50
             probe_distributor.period_secs = 47
             fm.rendezvous_period_secs = 48
             fm.analysis_period_secs = 49

@@ -19,6 +19,8 @@ use omicron_common::api::external::{
     CreateResult, DataPageParams, DeleteResult, Error, ListResultVec,
     LookupResult, Name, NameOrId, UpdateResult,
 };
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::RackUuid;
 use sled_agent_types::early_networking::RouterPeerType;
 use sled_agent_types::early_networking::SwitchSlot;
 use std::sync::Arc;
@@ -56,7 +58,6 @@ impl super::Nexus {
         }
     }
 
-    // TODO: more validation wanted
     fn switch_port_settings_validate(
         params: &networking::SwitchPortSettingsCreate,
     ) -> CreateResult<()> {
@@ -64,7 +65,7 @@ impl super::Nexus {
             for p in x.peers.iter() {
                 if let Some(ref key) = p.md5_auth_key {
                     let peer_id = match p.addr {
-                        RouterPeerType::Numbered { ip } => {
+                        RouterPeerType::Numbered { ip, .. } => {
                             format!("peer {ip}")
                         }
                         RouterPeerType::Unnumbered { .. } => {
@@ -90,6 +91,21 @@ impl super::Nexus {
                                 ),
                             ));
                         }
+                    }
+                }
+                if let RouterPeerType::Numbered {
+                    ip,
+                    src_addr: Some(src_addr),
+                } = p.addr
+                {
+                    if src_addr.is_ipv4() != ip.is_ipv4() {
+                        return Err(Error::invalid_value(
+                            "src_addr",
+                            format!(
+                                "src_addr {src_addr} and peer address {ip} \
+                                must have the same address family"
+                            ),
+                        ));
                     }
                 }
             }
@@ -218,7 +234,7 @@ impl super::Nexus {
             .db_datastore
             .switch_port_get_id(
                 opctx,
-                selector.rack_id,
+                RackUuid::from_untyped_uuid(selector.rack_id),
                 selector.switch_slot,
                 port.clone().into(),
             )
@@ -259,7 +275,7 @@ impl super::Nexus {
             .db_datastore
             .switch_port_get_id(
                 opctx,
-                params.rack_id,
+                RackUuid::from_untyped_uuid(params.rack_id),
                 params.switch_slot,
                 port.clone().into(),
             )

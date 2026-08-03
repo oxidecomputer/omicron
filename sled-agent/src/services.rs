@@ -58,16 +58,18 @@ use internal_dns_resolver::Resolver;
 use internal_dns_types::names::BOUNDARY_NTP_DNS_NAME;
 use internal_dns_types::names::DNS_ZONE;
 use nexus_config::{ConfigDropshotWithTls, DeploymentConfig};
-use omicron_common::address::AZ_PREFIX;
+use omicron_common::address::AZ_PREFIX_LENGTH;
+use omicron_common::address::BOOTSTRAP_AGENT_LOCKSTEP_PORT;
 use omicron_common::address::ConcreteIp;
 use omicron_common::address::DENDRITE_PORT;
 use omicron_common::address::LLDP_PORT;
 use omicron_common::address::MAX_PORT;
 use omicron_common::address::MGS_PORT;
 use omicron_common::address::NTP_ADMIN_PORT;
-use omicron_common::address::RACK_PREFIX;
-use omicron_common::address::SLED_PREFIX;
+use omicron_common::address::RACK_PREFIX_LENGTH;
+use omicron_common::address::SLED_PREFIX_LENGTH;
 use omicron_common::address::TFPORTD_PORT;
+use omicron_common::address::WICKETD_COMMISSION_PORT;
 use omicron_common::address::WICKETD_NEXUS_PROXY_PORT;
 use omicron_common::address::WICKETD_PORT;
 use omicron_common::address::{BOOTSTRAP_ARTIFACT_PORT, COCKROACH_ADMIN_PORT};
@@ -84,6 +86,7 @@ use omicron_common::backoff::{
 use omicron_common::disk::{DatasetKind, DatasetName};
 use omicron_ddm_admin_client::DdmError;
 use omicron_uuid_kinds::OmicronZoneUuid;
+use omicron_uuid_kinds::RackUuid;
 use sled_agent_early_networking::{EarlyNetworkSetup, EarlyNetworkSetupError};
 use sled_agent_resolvable_files::{
     ZoneImageSourceResolver, ramdisk_file_source,
@@ -96,13 +99,11 @@ use sled_agent_types::inventory::{
 use sled_agent_types::resolvable_files::{
     MupdateOverrideReadError, PreparedOmicronZone,
 };
-use sled_agent_types::sled::SWITCH_ZONE_BASEBOARD_FILE;
 use sled_agent_types::sled::ThisSledSwitchZoneUnderlayIpAddr;
 use sled_agent_types::system_networking::SystemNetworkingConfig;
 use sled_agent_types::uplink::HostPortConfig;
 use sled_hardware::DendriteAsic;
 use sled_hardware::SledMode;
-use sled_hardware::is_oxide_sled;
 use sled_hardware::underlay;
 use sled_hardware_types::Baseboard;
 use slog::Logger;
@@ -601,6 +602,15 @@ enum SwitchZoneState {
 /// Manages miscellaneous Sled-local services.
 pub struct ServiceManagerInner {
     log: Logger,
+    // The bootstrap IP of the global zone. It's used for services such as trust
+    // quorum and the bootstrap-agent-lockstep server and is reported by DDMD as
+    // a peer address.
+    global_zone_bootstrap_ip: Ipv6Addr,
+    // This is the link-local bootstrap address of the global zone. It's only
+    // reachable over the direct link and is used solely for DDM routing on the
+    // bootstrap network. It is not reported by DDMD as a peer address as it
+    // is not reachable remotely except by it's directly connected peer on the
+    // same link.
     global_zone_bootstrap_link_local_address: Ipv6Addr,
     switch_zone: Mutex<SwitchZoneState>,
     sled_mode: SledMode,
@@ -625,7 +635,7 @@ pub(crate) struct SledAgentInfo {
     pub(crate) resolver: Resolver,
     pub(crate) underlay_address: Ipv6Addr,
     pub(crate) local_switch_zone_ip: ThisSledSwitchZoneUnderlayIpAddr,
-    pub(crate) rack_id: Uuid,
+    pub(crate) rack_id: RackUuid,
     pub(crate) network_config_rx: watch::Receiver<SystemNetworkingConfig>,
     pub(crate) metrics_queue: MetricsRequestQueue,
 }
@@ -780,6 +790,8 @@ impl ServiceManager {
         Self {
             inner: Arc::new(ServiceManagerInner {
                 log: log.clone(),
+                global_zone_bootstrap_ip: bootstrap_networking
+                    .global_zone_bootstrap_ip,
                 global_zone_bootstrap_link_local_address: bootstrap_networking
                     .global_zone_bootstrap_link_local_ip,
                 // TODO(https://github.com/oxidecomputer/omicron/issues/725):
@@ -950,7 +962,7 @@ impl ServiceManager {
     // Derive two unique techport /64 prefixes from the bootstrap address.
     fn bootstrap_addr_to_techport_prefixes(
         addr: &Ipv6Addr,
-    ) -> [Ipv6Subnet<SLED_PREFIX>; 2] {
+    ) -> [Ipv6Subnet<SLED_PREFIX_LENGTH>; 2] {
         // Generate two unique prefixes from the bootstrap address, by
         // incrementing the second octet. This assumes that the bootstrap
         // address starts with `fdb0`, and so we end up with `fdb1` and `fdb2`.
@@ -972,10 +984,6 @@ impl ServiceManager {
     ) -> Result<Vec<(Link, bool)>, Error> {
         let mut links: Vec<(Link, bool)> = Vec::new();
 
-        let is_oxide_sled = is_oxide_sled().map_err(|e| {
-            Error::Underlay(underlay::Error::SystemDetection(e))
-        })?;
-
         for svc_details in zone_args.switch_zone_services() {
             match &svc_details {
                 SwitchService::Tfport { pkt_source, asic: _ } => {
@@ -995,7 +1003,7 @@ impl ServiceManager {
                             links.push((link, false));
                         }
                         Err(_) => {
-                            if is_oxide_sled {
+                            if self.inner.sidecar_revision.is_physical() {
                                 return Err(Error::MissingDevice {
                                     device: pkt_source.to_string(),
                                 });
@@ -1177,6 +1185,17 @@ impl ServiceManager {
                 dhcp_config: DhcpCfg::default(),
                 // Services do not use attached subnets, only instances.
                 attached_subnets: vec![],
+                // TODO(RFD 689): plumb the fleet-wide jumbo-frames opt-in
+                // (`system_networking_settings.external_jumbo_frames_opt_in_enabled`)
+                // through blueprints / reconfigurator-execution to this point
+                // so that external-facing service zones (Nexus, ExternalDns,
+                // BoundaryNtp) are brought up with `EXTERNAL_JUMBO_FRAMES_MTU`
+                // when the operator has enabled the opt-in.
+                //
+                // For now, services always use the default MTU. The
+                // per-instance jumbo opt-in (the primary user-facing feature
+                // from RFD 689) is fully wired through `instance_ensure_registered`.
+                mtu: None,
             })
             .map_err(|err| Error::ServicePortCreation {
                 service: zone_kind,
@@ -2088,10 +2107,11 @@ impl ServiceManager {
                     &[*address.ip()],
                 )?;
 
-                let rack_net =
-                    Ipv6Subnet::<RACK_PREFIX>::new(info.underlay_address)
-                        .net()
-                        .to_string();
+                let rack_net = Ipv6Subnet::<RACK_PREFIX_LENGTH>::new(
+                    info.underlay_address,
+                )
+                .net()
+                .to_string();
 
                 let dns_install_service = Self::dns_install(
                     info,
@@ -2184,10 +2204,11 @@ impl ServiceManager {
                     &[*address.ip()],
                 )?;
 
-                let rack_net =
-                    Ipv6Subnet::<RACK_PREFIX>::new(info.underlay_address)
-                        .net()
-                        .to_string();
+                let rack_net = Ipv6Subnet::<RACK_PREFIX_LENGTH>::new(
+                    info.underlay_address,
+                )
+                .net()
+                .to_string();
 
                 let dns_install_service = Self::dns_install(info, None, None)?;
 
@@ -2407,7 +2428,7 @@ impl ServiceManager {
                             default_handler_task_mode:
                                 HandlerTaskMode::Detached,
                             log_headers: vec![],
-                            compression: dropshot::CompressionConfig::None,
+                            compression: dropshot::CompressionConfig::Gzip,
                         },
                     },
                     dropshot_internal: dropshot::ConfigDropshot {
@@ -2428,7 +2449,7 @@ impl ServiceManager {
                         compression: dropshot::CompressionConfig::None,
                     },
                     internal_dns: nexus_config::InternalDns::FromSubnet {
-                        subnet: Ipv6Subnet::<RACK_PREFIX>::new(
+                        subnet: Ipv6Subnet::<RACK_PREFIX_LENGTH>::new(
                             info.underlay_address,
                         ),
                     },
@@ -2439,6 +2460,8 @@ impl ServiceManager {
                     external_http_clients:
                         nexus_config::ExternalHttpClientConfig {
                             interface: Some(opte_iface_name.to_string()),
+                            treat_loopback_as_external:
+                                nexus_config::TreatLoopbackAsExternal::No,
                         },
                 };
 
@@ -2547,6 +2570,8 @@ impl ServiceManager {
                 rev.front_port_count, rev.rear_port_count
             ),
         };
+
+        let real_sidecar = self.inner.sidecar_revision.is_physical();
 
         // Define all services in the switch zone
         let mut mgs_service = ServiceBuilder::new("oxide/mgs");
@@ -2667,6 +2692,11 @@ impl ServiceManager {
                         &format!("[::1]:{WICKETD_PORT}"),
                     )
                     .add_property(
+                        "commission-address",
+                        "astring",
+                        &format!("[::1]:{WICKETD_COMMISSION_PORT}"),
+                    )
+                    .add_property(
                         "artifact-address",
                         "astring",
                         &format!(
@@ -2674,14 +2704,28 @@ impl ServiceManager {
                         ),
                     )
                     .add_property(
-                        "baseboard-file",
+                        "baseboard-part",
                         "astring",
-                        SWITCH_ZONE_BASEBOARD_FILE,
+                        baseboard.model(),
+                    )
+                    .add_property(
+                        "baseboard-serial",
+                        "astring",
+                        baseboard.identifier(),
                     )
                     .add_property(
                         "mgs-address",
                         "astring",
                         &format!("[::1]:{MGS_PORT}"),
+                    )
+                    .add_property(
+                        "bootstrap-agent-lockstep-address",
+                        "astring",
+                        &SocketAddr::new(
+                            IpAddr::V6(self.inner.global_zone_bootstrap_ip),
+                            BOOTSTRAP_AGENT_LOCKSTEP_PORT,
+                        )
+                        .to_string(),
                     )
                     // We intentionally bind `nexus-proxy-address` to
                     // `::` so wicketd will serve this on all
@@ -2695,8 +2739,9 @@ impl ServiceManager {
                     );
 
                     if let Some(i) = info {
-                        let rack_subnet =
-                            Ipv6Subnet::<AZ_PREFIX>::new(i.underlay_address);
+                        let rack_subnet = Ipv6Subnet::<AZ_PREFIX_LENGTH>::new(
+                            i.underlay_address,
+                        );
 
                         wicketd_config = wicketd_config.add_property(
                             "rack-subnet",
@@ -2709,15 +2754,6 @@ impl ServiceManager {
                         ServiceInstanceBuilder::new("default")
                             .add_property_group(wicketd_config),
                     );
-
-                    let baseboard_info = serde_json::to_string(&baseboard)?;
-
-                    switch_zone_setup_config =
-                        switch_zone_setup_config.clone().add_property(
-                            "baseboard_info",
-                            "astring",
-                            &baseboard_info,
-                        );
                 }
                 SwitchService::Dendrite { asic } => {
                     info!(self.inner.log, "Setting up dendrite service");
@@ -2737,7 +2773,7 @@ impl ServiceManager {
                         );
                         if *address != Ipv6Addr::LOCALHOST {
                             let az_prefix =
-                                Ipv6Subnet::<AZ_PREFIX>::new(*address);
+                                Ipv6Subnet::<AZ_PREFIX_LENGTH>::new(*address);
                             for addr in Resolver::servers_from_subnet(az_prefix)
                             {
                                 dendrite_config = dendrite_config.add_property(
@@ -2868,11 +2904,7 @@ impl ServiceManager {
                         );
                     }
 
-                    let is_oxide_sled = is_oxide_sled().map_err(|e| {
-                        Error::Underlay(underlay::Error::SystemDetection(e))
-                    })?;
-
-                    if is_oxide_sled {
+                    if real_sidecar {
                         // Collect the prefixes for each techport.
                         let nameaddr = bootstrap_name_and_address.as_ref();
                         let techport_prefixes = match nameaddr {
@@ -2901,7 +2933,7 @@ impl ServiceManager {
                         }
                     };
 
-                    if is_oxide_sled
+                    if real_sidecar
                         || asic == &DendriteAsic::SoftNpuPropolisDevice
                         || asic == &DendriteAsic::TofinoAsic
                     {
@@ -2950,7 +2982,6 @@ impl ServiceManager {
                                     model,
                                 );
                         }
-                        Baseboard::Unknown => {}
                     }
 
                     for address in addresses {
@@ -3014,7 +3045,7 @@ impl ServiceManager {
                     for address in addresses {
                         if *address != Ipv6Addr::LOCALHOST {
                             let az_prefix =
-                                Ipv6Subnet::<AZ_PREFIX>::new(*address);
+                                Ipv6Subnet::<AZ_PREFIX_LENGTH>::new(*address);
                             for addr in Resolver::servers_from_subnet(az_prefix)
                             {
                                 mgd_config = mgd_config.add_property(
@@ -3056,7 +3087,7 @@ impl ServiceManager {
                     for address in addresses {
                         if *address != Ipv6Addr::LOCALHOST {
                             let az_prefix =
-                                Ipv6Subnet::<AZ_PREFIX>::new(*address);
+                                Ipv6Subnet::<AZ_PREFIX_LENGTH>::new(*address);
                             for addr in Resolver::servers_from_subnet(az_prefix)
                             {
                                 mg_ddm_config = mg_ddm_config.add_property(
@@ -3069,12 +3100,7 @@ impl ServiceManager {
                         }
                     }
 
-                    let is_oxide_sled = is_oxide_sled().map_err(|e| {
-                        Error::Underlay(underlay::Error::SystemDetection(e))
-                    })?;
-
-                    let maghemite_interfaces: Vec<AddrObject> = if is_oxide_sled
-                    {
+                    let maghemite_interfaces: Vec<_> = if real_sidecar {
                         (0..32)
                             .map(|i| {
                                 // See the `tfport_name` function
@@ -3118,7 +3144,7 @@ impl ServiceManager {
                         );
                     }
 
-                    if is_oxide_sled {
+                    if real_sidecar {
                         mg_ddm_config = mg_ddm_config
                             .add_property("dpd_host", "astring", "[::1]")
                             .add_property(
@@ -3481,7 +3507,14 @@ impl ServiceManager {
         let usmfh = SmfHelper::new(&zone, &SwitchService::Uplink);
         let lsmfh = SmfHelper::new(
             &zone,
-            &SwitchService::Lldpd { baseboard: Baseboard::Unknown },
+            &SwitchService::Lldpd {
+                // TODO: Why is this unknown here?
+                // This method seems to only get called from an HTTP handler.
+                baseboard: Baseboard::new_pc(
+                    "unknown".to_string(),
+                    "unknown".to_string(),
+                ),
+            },
         );
 
         // We want to delete all the properties in the `uplinks` group, but we
@@ -3786,7 +3819,9 @@ impl ServiceManager {
                                 )?;
                                 if *address != Ipv6Addr::LOCALHOST {
                                     let az_prefix =
-                                        Ipv6Subnet::<AZ_PREFIX>::new(*address);
+                                        Ipv6Subnet::<AZ_PREFIX_LENGTH>::new(
+                                            *address,
+                                        );
                                     for addr in
                                         Resolver::servers_from_subnet(az_prefix)
                                     {
@@ -3807,7 +3842,9 @@ impl ServiceManager {
                         SwitchService::Wicketd { .. } => {
                             if let Some(&address) = first_address {
                                 let rack_subnet =
-                                    Ipv6Subnet::<AZ_PREFIX>::new(address);
+                                    Ipv6Subnet::<AZ_PREFIX_LENGTH>::new(
+                                        address,
+                                    );
 
                                 info!(
                                     self.inner.log, "configuring wicketd";
@@ -3920,7 +3957,9 @@ impl ServiceManager {
                             for address in &request.addresses {
                                 if *address != Ipv6Addr::LOCALHOST {
                                     let az_prefix =
-                                        Ipv6Subnet::<AZ_PREFIX>::new(*address);
+                                        Ipv6Subnet::<AZ_PREFIX_LENGTH>::new(
+                                            *address,
+                                        );
                                     for addr in
                                         Resolver::servers_from_subnet(az_prefix)
                                     {
@@ -3967,7 +4006,9 @@ impl ServiceManager {
                             for address in &request.addresses {
                                 if *address != Ipv6Addr::LOCALHOST {
                                     let az_prefix =
-                                        Ipv6Subnet::<AZ_PREFIX>::new(*address);
+                                        Ipv6Subnet::<AZ_PREFIX_LENGTH>::new(
+                                            *address,
+                                        );
                                     for addr in
                                         Resolver::servers_from_subnet(az_prefix)
                                     {

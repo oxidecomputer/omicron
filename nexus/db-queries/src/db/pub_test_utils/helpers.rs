@@ -7,6 +7,9 @@
 use crate::authz;
 use crate::context::OpContext;
 use crate::db::DataStore;
+use crate::db::datastore::SERVICE_IPV4_POOL_NAME;
+use crate::db::datastore::SERVICE_IPV6_POOL_NAME;
+use crate::db::datastore::ServiceIpPool;
 use nexus_db_lookup::LookupPath;
 
 use anyhow::Result;
@@ -20,6 +23,8 @@ use nexus_db_model::Image;
 use nexus_db_model::Instance;
 use nexus_db_model::InstanceRuntimeState;
 use nexus_db_model::InstanceState;
+use nexus_db_model::IpPool;
+use nexus_db_model::IpPoolAssignment;
 use nexus_db_model::Project;
 use nexus_db_model::ProjectImage;
 use nexus_db_model::ProjectImageIdentity;
@@ -44,6 +49,7 @@ use omicron_common::update::ArtifactId;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::PropolisUuid;
+use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::TufRepoUuid;
 use omicron_uuid_kinds::VolumeUuid;
@@ -156,7 +162,7 @@ pub struct SledUpdateBuilder {
     sled_id: SledUuid,
     addr: SocketAddrV6,
     repo_depot_port: u16,
-    rack_id: Uuid,
+    rack_id: RackUuid,
     sled_hardware: SledSystemHardwareBuilder,
 }
 
@@ -166,7 +172,7 @@ impl Default for SledUpdateBuilder {
             sled_id: SledUuid::new_v4(),
             addr: SocketAddrV6::new(Ipv6Addr::LOCALHOST, 0, 0, 0),
             repo_depot_port: 0,
-            rack_id: Uuid::new_v4(),
+            rack_id: RackUuid::new_v4(),
             sled_hardware: SledSystemHardwareBuilder::default(),
         }
     }
@@ -192,7 +198,7 @@ impl SledUpdateBuilder {
         self
     }
 
-    pub fn rack_id(&mut self, rack_id: Uuid) -> &mut Self {
+    pub fn rack_id(&mut self, rack_id: RackUuid) -> &mut Self {
         self.rack_id = rack_id;
         self
     }
@@ -253,6 +259,7 @@ pub async fn create_stopped_instance_record(
             auto_restart_policy: Default::default(),
             anti_affinity_groups: Vec::new(),
             multicast_groups: Vec::new(),
+            enable_jumbo_frames: false,
         },
     );
 
@@ -299,7 +306,7 @@ pub async fn create_affinity_group(
     db: &DataStore,
     authz_project: &authz::Project,
     group_name: &'static str,
-    policy: external::AffinityPolicy,
+    policy: affinity::AffinityPolicy,
 ) -> AffinityGroup {
     db.affinity_group_create(
         &opctx,
@@ -312,7 +319,7 @@ pub async fn create_affinity_group(
                     description: "desc".to_string(),
                 },
                 policy,
-                failure_domain: external::FailureDomain::Sled,
+                failure_domain: affinity::FailureDomain::Sled,
             },
         ),
     )
@@ -343,7 +350,7 @@ pub async fn create_anti_affinity_group(
     db: &DataStore,
     authz_project: &authz::Project,
     group_name: &'static str,
-    policy: external::AffinityPolicy,
+    policy: affinity::AffinityPolicy,
 ) -> AntiAffinityGroup {
     db.anti_affinity_group_create(
         &opctx,
@@ -356,7 +363,7 @@ pub async fn create_anti_affinity_group(
                     description: "desc".to_string(),
                 },
                 policy,
-                failure_domain: external::FailureDomain::Sled,
+                failure_domain: affinity::FailureDomain::Sled,
             },
         ),
     )
@@ -641,4 +648,52 @@ fn make_test_repo(version: u32) -> TufRepoDescription {
             sign: None,
         }],
     }
+}
+
+/// Create a system-service IP pool of the given IP version, using the built-in
+/// service pool name and description, and return it.
+///
+/// Tests that need a system-service IP pool to exist (for example, to allocate
+/// service external IPs or NICs) should call this first.
+///
+/// This is idempotent: if the pool already exists, it is looked up and returned
+/// rather than recreated.
+pub async fn create_service_ip_pool(
+    opctx: &OpContext,
+    datastore: &DataStore,
+    version: external::IpVersion,
+) -> ServiceIpPool {
+    let (name, description) = match version {
+        external::IpVersion::V4 => {
+            (SERVICE_IPV4_POOL_NAME, "IPv4 IP Pool for Oxide Services")
+        }
+        external::IpVersion::V6 => {
+            (SERVICE_IPV6_POOL_NAME, "IPv6 IP Pool for Oxide Services")
+        }
+    };
+    let name: external::Name = name.parse().expect("valid service pool name");
+    let pool = IpPool::new(
+        &external::IdentityMetadataCreateParams {
+            name: name.clone(),
+            description: description.to_string(),
+        },
+        version.into(),
+        IpPoolAssignment::SystemServices,
+    );
+    let db_pool = match datastore.ip_pool_create(opctx, pool).await {
+        Ok(db_pool) => db_pool,
+        Err(external::Error::ObjectAlreadyExists { .. }) => {
+            let (_authz_pool, db_pool) = LookupPath::new(opctx, datastore)
+                .ip_pool_name(&nexus_db_model::Name(name))
+                .fetch()
+                .await
+                .expect("existing service IP pool");
+            db_pool
+        }
+        Err(e) => panic!("failed to create service IP pool: {e}"),
+    };
+    let id = db_pool.id();
+    let authz_pool =
+        authz::IpPool::new(authz::FLEET, id, external::LookupType::ById(id));
+    ServiceIpPool { authz_pool, db_pool }
 }

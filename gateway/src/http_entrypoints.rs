@@ -2,8 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-// Copyright 2022 Oxide Computer Company
-
 //! HTTP entrypoint functions for the gateway service
 
 use crate::ServerContext;
@@ -71,7 +69,7 @@ use std::io::Cursor;
 use std::num::NonZeroU8;
 use std::str;
 use std::sync::Arc;
-use tufaceous_artifact::ArtifactHash;
+use tufaceous_artifact_v2::ArtifactHash;
 
 // TODO
 // The gateway service will get asynchronous notifications both from directly

@@ -53,8 +53,8 @@ use nexus_types::internal_api::views::UpdateStatus;
 use nexus_types::internal_api::views::to_list;
 use nexus_types::trust_quorum::TrustQuorumConfig;
 use nexus_types_versions::latest::headers::RangeRequest;
+use nexus_types_versions::latest::instance::Instance;
 use omicron_common::api::external::Error;
-use omicron_common::api::external::Instance;
 use omicron_common::api::external::http_pagination::PaginatedById;
 use omicron_common::api::external::http_pagination::PaginatedByTimeAndId;
 use omicron_common::api::external::http_pagination::ScanById;
@@ -96,7 +96,7 @@ impl NexusLockstepApi for NexusLockstepApiImpl {
         nexus
             .rack_initialize(
                 &opctx,
-                path.rack_id,
+                RackUuid::from_untyped_uuid(path.rack_id),
                 request,
                 true, // blueprint_execution_enabled
             )

@@ -271,6 +271,7 @@ table! {
         vlan_id -> Nullable<Int4>,
         id -> Uuid,
         router_lifetime -> Int4,
+        src_addr -> Nullable<Inet>,
     }
 }
 
@@ -318,28 +319,6 @@ table! {
         shaper -> Nullable<Text>,
         checker -> Nullable<Text>,
         max_paths -> Int2,
-    }
-}
-
-table! {
-    bgp_peer_view (switch_slot, port_name) {
-        switch_slot -> crate::enums::SwitchSlotEnum,
-        port_name -> Text,
-        addr -> Nullable<Inet>,
-        hold_time -> Int8,
-        idle_hold_time -> Int8,
-        delay_open -> Int8,
-        connect_retry -> Int8,
-        keepalive -> Int8,
-        remote_asn -> Nullable<Int8>,
-        min_ttl -> Nullable<Int2>,
-        md5_auth_key -> Nullable<Text>,
-        multi_exit_discriminator -> Nullable<Int8>,
-        local_pref -> Nullable<Int8>,
-        enforce_first_as -> Bool,
-        vlan_id -> Nullable<Int4>,
-        router_lifetime -> Int4,
-        asn -> Int8,
     }
 }
 
@@ -467,6 +446,7 @@ table! {
         boot_disk_id -> Nullable<Uuid>,
         intended_state -> crate::enums::InstanceIntendedStateEnum,
         cpu_platform -> Nullable<crate::enums::InstanceCpuPlatformEnum>,
+        enable_jumbo_frames -> Bool,
     }
 }
 
@@ -596,6 +576,13 @@ table! {
 }
 
 table! {
+    system_networking_settings(singleton) {
+        singleton -> Bool,
+        external_jumbo_frames_opt_in_enabled -> Bool,
+    }
+}
+
+table! {
     network_interface (id) {
         id -> Uuid,
         name -> Text,
@@ -672,8 +659,8 @@ table! {
         time_deleted -> Nullable<Timestamptz>,
         rcgen -> Int8,
         ip_version -> crate::enums::IpVersionEnum,
-        reservation_type -> crate::enums::IpPoolReservationTypeEnum,
         pool_type -> crate::enums::IpPoolTypeEnum,
+        assignment -> crate::enums::IpPoolAssignmentEnum,
     }
 }
 
@@ -1014,6 +1001,9 @@ table! {
         current_sec -> Nullable<Uuid>,
         adopt_generation -> Int8,
         adopt_time -> Timestamptz,
+        abandon_time -> Nullable<Timestamptz>,
+        abandon_reason -> Nullable<crate::enums::SagaAbandonReasonEnum>,
+        abandon_comment -> Nullable<Text>,
     }
 }
 
@@ -1103,6 +1093,7 @@ table! {
         rss_ram -> Int8,
         reservoir_ram -> Int8,
         instance_id -> Nullable<Uuid>,
+        state -> crate::enums::SledResourceVmmStateEnum,
     }
 }
 
@@ -1807,6 +1798,39 @@ table! {
 }
 
 table! {
+    inv_fmd_status (inv_collection_id, sled_id) {
+        inv_collection_id -> Uuid,
+        sled_id -> Uuid,
+        error_kind -> Nullable<crate::enums::FmdInventoryErrorKindEnum>,
+        error_message -> Nullable<Text>,
+    }
+}
+
+table! {
+    inv_fmd_host_case (inv_collection_id, sled_id, case_id) {
+        inv_collection_id -> Uuid,
+        sled_id -> Uuid,
+        case_id -> Uuid,
+        code -> Text,
+        url -> Text,
+        event -> Nullable<Jsonb>,
+    }
+}
+
+table! {
+    inv_fmd_resource (inv_collection_id, sled_id, resource_id) {
+        inv_collection_id -> Uuid,
+        sled_id -> Uuid,
+        resource_id -> Uuid,
+        fmri -> Text,
+        case_id -> Uuid,
+        faulty -> Bool,
+        unusable -> Bool,
+        invisible -> Bool,
+    }
+}
+
+table! {
     inv_sled_agent (inv_collection_id, sled_id) {
         inv_collection_id -> Uuid,
         time_collected -> Timestamptz,
@@ -2164,6 +2188,7 @@ table! {
         planner_enabled -> Bool,
         time_modified -> Timestamptz,
         tuf_repo_pruner_enabled -> Bool,
+        disruption_policy -> crate::enums::ReconfiguratorDisruptionPolicyEnum,
     }
 }
 
@@ -2894,6 +2919,7 @@ table! {
         time_dispatched -> Nullable<Timestamptz>,
         num_dispatched -> Int8,
         case_id -> Nullable<Uuid>,
+        alert_version -> Int8,
     }
 }
 
@@ -2929,6 +2955,7 @@ table! {
         response_duration -> Nullable<Interval>,
         time_created -> Timestamptz,
         deliverator_id -> Uuid,
+        unreachable_reason -> Nullable<Text>,
     }
 }
 
@@ -2958,6 +2985,18 @@ table! {
         slot -> Nullable<Int4>,
 
         marked_seen_in -> Nullable<Uuid>,
+    }
+}
+
+table! {
+    ereporter_restart (id) {
+        id -> Uuid,
+        time_first_seen -> Timestamptz,
+        reporter -> crate::enums::EreporterTypeEnum,
+        slot_type -> crate::enums::SpTypeEnum,
+        slot -> Nullable<Int4>,
+        rack_id -> Uuid,
+        time_latest_ereport_received -> Timestamptz,
     }
 }
 
@@ -3153,6 +3192,8 @@ table! {
         creator_id -> Uuid,
         comment -> Text,
         next_inv_min_time_started -> Timestamptz,
+        alert_generation -> Int8,
+        support_bundle_generation -> Int8,
     }
 }
 
@@ -3167,6 +3208,17 @@ table! {
 }
 
 allow_tables_to_appear_in_same_query!(fm_sitrep, fm_sitrep_history);
+
+table! {
+    fm_sitrep_analysis_report (sitrep_id) {
+        sitrep_id -> Uuid,
+        git_commit -> Text,
+        input_report -> Jsonb,
+        analysis_report -> Jsonb,
+    }
+}
+
+allow_tables_to_appear_in_same_query!(fm_sitrep_analysis_report, fm_sitrep);
 
 table! {
     disk_type_local_storage (disk_id) {
@@ -3244,6 +3296,22 @@ table! {
 }
 
 table! {
+    fm_fact_physical_disk (sitrep_id, id) {
+        id -> Uuid,
+        sitrep_id -> Uuid,
+        case_id -> Uuid,
+        created_sitrep_id -> Uuid,
+        comment -> Text,
+        physical_disk_id -> Uuid,
+        kind -> crate::enums::FmFactPhysicalDiskKindEnum,
+        zpool_id -> Nullable<Uuid>,
+        last_seen_health -> Nullable<crate::enums::InvZpoolHealthEnum>,
+        observed_in_inv -> Nullable<Uuid>,
+        time_observed -> Nullable<Timestamptz>,
+    }
+}
+
+table! {
     fm_ereport_in_case (sitrep_id, id) {
         id -> Uuid,
         restart_id -> Uuid,
@@ -3258,6 +3326,8 @@ table! {
 
 allow_tables_to_appear_in_same_query!(fm_ereport_in_case, ereport);
 allow_tables_to_appear_in_same_query!(fm_sitrep, fm_case);
+allow_tables_to_appear_in_same_query!(fm_sitrep, fm_fact_physical_disk);
+allow_tables_to_appear_in_same_query!(fm_case, fm_fact_physical_disk);
 
 table! {
     fm_alert_request (sitrep_id, id) {
@@ -3268,6 +3338,7 @@ table! {
         alert_class -> crate::enums::AlertClassEnum,
         payload -> Jsonb,
         comment -> Text,
+        alert_version -> Int8,
     }
 }
 
@@ -3321,6 +3392,23 @@ allow_tables_to_appear_in_same_query!(
     fm_support_bundle_request_data_selection_host_info,
     fm_support_bundle_request_data_selection_ereports,
 );
+
+table! {
+    rendezvous_alert_created (alert_id) {
+        alert_id -> Uuid,
+        created_at_generation -> Int8,
+    }
+}
+
+joinable!(rendezvous_alert_created -> alert (alert_id));
+allow_tables_to_appear_in_same_query!(alert, rendezvous_alert_created);
+
+table! {
+    rendezvous_support_bundle_created (support_bundle_id) {
+        support_bundle_id -> Uuid,
+        created_at_generation -> Int8,
+    }
+}
 
 table! {
     trust_quorum_configuration (rack_id, epoch) {

@@ -35,9 +35,11 @@ use nexus_types::deployment::PendingMgsUpdates;
 use nexus_types::deployment::ReconfiguratorConfigParam;
 
 use omicron_common::address::MGS_PORT;
+use omicron_common::address::UnderlaySubnets;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Error;
 use omicron_uuid_kinds::OmicronZoneUuid;
+use omicron_uuid_kinds::RackUuid;
 use oximeter_producer::Server as ProducerServer;
 use sagas::common_storage::PooledPantryClient;
 use sagas::common_storage::make_pantry_connection_pool;
@@ -66,10 +68,11 @@ pub(crate) mod background;
 mod bfd;
 mod bgp;
 mod certificate;
-mod crucible;
+pub mod crucible;
 mod deployment;
 mod device_auth;
 mod disk;
+pub(crate) mod external_client;
 mod external_dns;
 pub(crate) mod external_endpoints;
 mod external_ip;
@@ -105,6 +108,7 @@ pub(crate) mod support_bundles;
 mod switch;
 mod switch_interface;
 mod switch_port;
+mod system_networking;
 pub mod test_interfaces;
 mod trust_quorum;
 mod update;
@@ -186,7 +190,7 @@ pub struct Nexus {
     id: OmicronZoneUuid,
 
     /// uuid for this rack
-    rack_id: Uuid,
+    rack_id: RackUuid,
 
     /// general server log
     log: Logger,
@@ -224,17 +228,7 @@ pub struct Nexus {
     ///
     /// (This does not need to be in an `Arc` because `reqwest::Client` uses
     /// `Arc` internally.)
-    ///
-    /// Currently unused because all `new_with_client` call sites use
-    /// `reqwest012_client` for cross-repo dependencies that are still on
-    /// reqwest 0.12. This field will be used again once rev pins are updated.
-    #[allow(dead_code)]
     reqwest_client: reqwest::Client,
-
-    /// `reqwest012::Client` for cross-repo dependencies where the rev-pinned
-    /// dependency is still on reqwest 0.12. Remove once all rev pins are
-    /// updated.
-    reqwest012_client: reqwest012::Client,
 
     /// Client to the timeseries database.
     timeseries_client: oximeter_db::Client,
@@ -244,7 +238,7 @@ pub struct Nexus {
     /// This lives on the Nexus struct as we would like to use the same client
     /// pool for the webhook deliverator background task and the webhook probe
     /// API.
-    webhook_delivery_client: reqwest::Client,
+    webhook_delivery_client: external_client::ExternalHttpClient,
 
     /// The tunable parameters from a configuration file
     tunables: Tunables,
@@ -324,6 +318,11 @@ pub struct Nexus {
 
     /// state of overall Nexus quiesce activity
     quiesce: NexusQuiesceHandle,
+
+    /// the underlay subnets (rack and AZ), set once they have been loaded, or
+    /// once the rack has been initialized (if RSS has not already finished when
+    /// this Nexus process starts).
+    underlay_subnets: Arc<OnceLock<UnderlaySubnets>>,
 }
 
 impl Nexus {
@@ -333,7 +332,7 @@ impl Nexus {
     // TODO-polish revisit rack metadata
     #[allow(clippy::too_many_arguments)]
     pub(crate) async fn new_with_id(
-        rack_id: Uuid,
+        rack_id: RackUuid,
         log: Logger,
         resolver: internal_dns_resolver::Resolver,
         qorb_resolver: internal_dns_resolver::QorbResolver,
@@ -437,14 +436,6 @@ impl Nexus {
             .build()
             .map_err(|e| InlineErrorChain::new(&e).to_string())?;
 
-        // reqwest 0.12 client for cross-repo dependencies still on reqwest
-        // 0.12. Remove once all rev pins are updated.
-        let reqwest012_client = reqwest012::ClientBuilder::new()
-            .connect_timeout(std::time::Duration::from_secs(15))
-            .timeout(std::time::Duration::from_secs(15))
-            .build()
-            .map_err(|e| InlineErrorChain::new(&e).to_string())?;
-
         // Client to the ClickHouse database.
         let timeseries_client = match &config.pkg.timeseries_db.address {
             None => {
@@ -488,30 +479,38 @@ impl Nexus {
             background_tasks_internal,
         ) = background::BackgroundTasksInitializer::new();
 
+        let underlay_subnets = Arc::new(OnceLock::new());
+        // The IP policy is shared by the external DNS resolver (which applies
+        // it to resolved addresses) and any `ExternalHttpClient` (which
+        // applies it to IP literals in URLs).
+        let external_ip_policy = external_client::ExternalIpPolicy::new(
+            underlay_subnets.clone(),
+            config.deployment.external_http_clients.treat_loopback_as_external,
+        );
         let external_resolver = {
             if config.deployment.external_dns_servers.is_empty() {
                 return Err("expected at least 1 external DNS server".into());
             }
+
             Arc::new(external_dns::Resolver::new(
                 &config.deployment.external_dns_servers,
+                external_ip_policy,
             ))
         };
 
-        let webhook_delivery_client = {
-            // The webhook delivery HTTP client will send requests to endpoints
-            // external to the rack, so apply the configuration for external
-            // HTTP clients.
-            let builder = external_http_client_builder(
-                &config.deployment.external_http_clients,
-                &external_resolver,
-            );
-            webhook::delivery_client(builder).map_err(|e| {
-                format!(
-                    "failed to build webhook delivery client: {}",
-                    InlineErrorChain::new(&e)
-                )
-            })?
-        };
+        // The webhook delivery HTTP client will send requests to endpoints
+        // external to the rack, so apply the configuration for external
+        // HTTP clients.
+        let webhook_delivery_client = webhook::delivery_client(
+            &config.deployment.external_http_clients,
+            &external_resolver,
+        )
+        .map_err(|e| {
+            format!(
+                "failed to build webhook delivery client: {}",
+                InlineErrorChain::new(&e)
+            )
+        })?;
 
         let mut mgs_resolver =
             qorb_resolver.for_service(ServiceName::ManagementGatewayService);
@@ -549,7 +548,6 @@ impl Nexus {
             producer_server: std::sync::Mutex::new(None),
             populate_status,
             reqwest_client,
-            reqwest012_client,
             timeseries_client,
             webhook_delivery_client,
             tunables: config.pkg.tunables.clone(),
@@ -599,6 +597,7 @@ impl Nexus {
             update_status: UpdateStatusHandle::new(blueprint_load_rx),
             quiesce,
             sitrep_load_rx,
+            underlay_subnets,
         };
 
         // TODO-cleanup all the extra Arcs here seems wrong
@@ -713,7 +712,7 @@ impl Nexus {
     }
 
     /// Return the rack ID for this Nexus instance.
-    pub fn rack_id(&self) -> Uuid {
+    pub fn rack_id(&self) -> RackUuid {
         self.rack_id
     }
 
@@ -1172,7 +1171,7 @@ impl Nexus {
 
     pub(crate) async fn lldpd_clients(
         &self,
-        rack_id: Uuid,
+        rack_id: RackUuid,
     ) -> Result<HashMap<SwitchSlot, lldpd_client::Client>, String> {
         let resolver = self.resolver();
         lldpd_clients(resolver, rack_id, &self.log).await
@@ -1324,8 +1323,7 @@ pub(crate) async fn dpd_clients(
 /// of SwitchSlot -> Zone Underlay Address, we omit an entry for that client.
 pub(crate) async fn lldpd_clients(
     resolver: &internal_dns_resolver::Resolver,
-    // TODO: https://github.com/oxidecomputer/omicron/issues/1276
-    _rack_id: Uuid,
+    _rack_id: RackUuid,
     log: &slog::Logger,
 ) -> Result<HashMap<SwitchSlot, lldpd_client::Client>, String> {
     let lldpd_socketaddrs = match resolver
@@ -1510,29 +1508,4 @@ async fn map_switch_zone_addrs(
     );
 
     switch_zone_addrs
-}
-
-/// Begin configuring an external HTTP client, returning a
-/// `reqwest::ClientBuilder`.
-pub(crate) fn external_http_client_builder(
-    config: &nexus_config::ExternalHttpClientConfig,
-    resolver: &Arc<external_dns::Resolver>,
-) -> reqwest::ClientBuilder {
-    let mut builder = reqwest::ClientBuilder::new();
-
-    builder = builder.dns_resolver(resolver.clone());
-
-    // If we are configured to only bind external TCP connections on a specific interface, do so.
-    #[cfg(any(
-        target_os = "linux",
-        target_os = "macos",
-        target_os = "illumos",
-    ))]
-    {
-        if let Some(ref interface) = config.interface {
-            builder = builder.interface(interface);
-        }
-    }
-
-    builder
 }

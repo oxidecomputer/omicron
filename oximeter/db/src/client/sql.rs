@@ -16,8 +16,6 @@
 //! small datasets. It's less helpful on real deployments, where the size of
 //! data makes this approach prohibitive.
 
-// Copyright 2024 Oxide Computer Company
-
 use crate::Error;
 use crate::client::Client;
 use crate::sql::QueryResult;

@@ -44,7 +44,7 @@ impl OmicronDevApp {
     async fn exec(&self) -> Result<(), anyhow::Error> {
         match &self.command {
             OmicronDevCmd::RunAll(args) => args.exec().await,
-            OmicronDevCmd::RunMultiple(args) => args.exec().await,
+            OmicronDevCmd::JBOR(args) => args.exec().await,
         }
     }
 }
@@ -54,7 +54,7 @@ enum OmicronDevCmd {
     /// Run a full simulated control plane
     RunAll(RunAllArgs),
     /// Run multiple simulated control planes
-    RunMultiple(RunMultipleArgs),
+    JBOR(JborArgs),
 }
 
 #[derive(Clone, Debug, Args)]
@@ -144,7 +144,7 @@ impl RunAllArgs {
         );
         println!(
             "omicron-dev: cockroachdb directory:  {}",
-            cptestctx.database.temp_dir().display()
+            cptestctx.database.temp_dir()
         );
         println!(
             "omicron-dev: clickhouse native addr: {}",
@@ -191,7 +191,8 @@ impl RunAllArgs {
         for (location, dendrite) in cptestctx.dendrite.read().unwrap().iter() {
             println!(
                 "omicron-dev: dendrite:               http://[::1]:{} ({:?})",
-                dendrite.port, location,
+                dendrite.port(),
+                location,
             );
         }
         for (location, lldpd) in &cptestctx.lldpd {
@@ -258,7 +259,7 @@ fn make_neighbor(
         asn: local_asn,
         name,
         group: "omicron-dev".to_string(),
-        host: peer_addr.to_string(),
+        host: peer_addr,
         hold_time: 6000,
         keepalive: 2000,
         connect_retry: 3000,
@@ -269,11 +270,11 @@ fn make_neighbor(
         enforce_first_as: false,
         deterministic_collision_resolution: true,
         communities: vec![],
-        ipv4_unicast: Some(mg_admin_client::types::Ipv4UnicastConfig {
+        ipv4_unicast: Some(mg_api_types::bgp::config::Ipv4UnicastConfig {
             import_policy:
-                mg_admin_client::types::ImportExportPolicy4::NoFiltering,
+                mg_api_types::bgp::policy::ImportExportPolicy4::NoFiltering,
             export_policy:
-                mg_admin_client::types::ImportExportPolicy4::NoFiltering,
+                mg_api_types::bgp::policy::ImportExportPolicy4::NoFiltering,
             nexthop: None,
         }),
         ipv6_unicast: None,
@@ -318,7 +319,7 @@ async fn setup_bgp_peering(
             );
 
             rack_client
-                .create_router(&mg_admin_client::types::Router {
+                .create_router(&mg_api_types::bgp::config::Router {
                     asn: rack_asn,
                     id: rack_id,
                     graceful_shutdown: false,
@@ -418,9 +419,12 @@ struct RackCount(u8);
 impl std::str::FromStr for RackCount {
     type Err = String;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let n: u8 = s.parse().map_err(|e| format!("invalid rack count: {e}"))?;
+        let n: u8 =
+            s.parse().map_err(|e| format!("invalid rack count: {e}"))?;
         if n < 1 || n > 100 {
-            return Err(format!("rack count must be between 1 and 100, got {n}"));
+            return Err(format!(
+                "rack count must be between 1 and 100, got {n}"
+            ));
         }
         Ok(RackCount(n))
     }
@@ -442,7 +446,8 @@ struct PeerRouterCount(u8);
 impl std::str::FromStr for PeerRouterCount {
     type Err = String;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let n: u8 = s.parse().map_err(|e| format!("invalid peer router count: {e}"))?;
+        let n: u8 =
+            s.parse().map_err(|e| format!("invalid peer router count: {e}"))?;
         if n > 100 {
             return Err(format!(
                 "peer router count must be between 0 and 100, got {n}"
@@ -459,7 +464,7 @@ impl std::fmt::Display for PeerRouterCount {
 }
 
 #[derive(Clone, Debug, Args)]
-struct RunMultipleArgs {
+struct JborArgs {
     /// Override the gateway server configuration file.
     #[clap(long, default_value = DEFAULT_SP_SIM_CONFIG)]
     gateway_config: Utf8PathBuf,
@@ -474,13 +479,13 @@ struct RunMultipleArgs {
     peer_routers: PeerRouterCount,
 }
 
-impl Configurable for RunMultipleArgs {
+impl Configurable for JborArgs {
     fn nexus_config(&self) -> &Utf8PathBuf {
         &self.nexus_config
     }
 }
 
-impl RunMultipleArgs {
+impl JborArgs {
     async fn exec(&self) -> Result<(), anyhow::Error> {
         let decorator = slog_term::TermDecorator::new().build();
         let drain = slog_term::FullFormat::new(decorator).build().fuse();
@@ -538,15 +543,11 @@ impl RunMultipleArgs {
             );
 
             println!(
-                "peer router {n}: mgd bgp-dispatcher:     tcp {}",
-                mgd_bgp_addr
+                "peer router {n}: mgd bgp-dispatcher:     tcp {mgd_bgp_addr}",
             );
 
             if let Some(dir) = &mgd.data_dir {
-                println!(
-                    "peer router {n} tmp dir:                 {}",
-                    dir.display()
-                );
+                println!("peer router {n} tmp dir:                 {dir}",);
             }
 
             let api_socket_addr =
@@ -563,7 +564,7 @@ impl RunMultipleArgs {
                 ),
             );
 
-            let router = mg_admin_client::types::Router {
+            let router = mg_api_types::bgp::config::Router {
                 asn: 65100 + u32::from(n),
                 id: 65100 + u32::from(n),
                 graceful_shutdown: true,
@@ -657,7 +658,7 @@ impl RunMultipleArgs {
             );
             println!(
                 "omicron-dev: cockroachdb directory:  {}",
-                cptestctx.database.temp_dir().display()
+                cptestctx.database.temp_dir()
             );
             println!(
                 "omicron-dev: clickhouse native addr: {}",
@@ -706,7 +707,8 @@ impl RunMultipleArgs {
             {
                 println!(
                     "omicron-dev: dendrite:               http://[::1]:{} ({:?})",
-                    dendrite.port, location,
+                    dendrite.port(),
+                    location,
                 );
             }
             for (location, lldpd) in &cptestctx.lldpd {
@@ -729,8 +731,7 @@ impl RunMultipleArgs {
                 if let Some(dir) = &mgd.data_dir {
                     println!(
                         "omicron-dev: mgd tmp dir:            {} ({:?})",
-                        dir.display(),
-                        location,
+                        dir, location,
                     );
                 }
             }

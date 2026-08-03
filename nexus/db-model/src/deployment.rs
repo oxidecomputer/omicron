@@ -60,7 +60,7 @@ use nexus_types::deployment::{
     OmicronZoneExternalSnatIp,
 };
 use omicron_common::address::Ipv6Subnet;
-use omicron_common::address::SLED_PREFIX;
+use omicron_common::address::SLED_PREFIX_LENGTH;
 use omicron_common::disk::DiskIdentity;
 use omicron_common::zpool_name::ZpoolName;
 use omicron_uuid_kinds::{
@@ -259,7 +259,7 @@ pub struct BpSledMetadata {
 }
 
 impl BpSledMetadata {
-    pub fn subnet(&self) -> anyhow::Result<Ipv6Subnet<SLED_PREFIX>> {
+    pub fn subnet(&self) -> anyhow::Result<Ipv6Subnet<SLED_PREFIX_LENGTH>> {
         let subnet = match self.subnet {
             IpNetwork::V4(subnet) => bail!(
                 "invalid subnet for sled {}: {subnet} (should be Ipv6)",
@@ -1681,14 +1681,8 @@ impl DebugLogBlueprintPlanning {
         // `debug_blob`, because we don't want anyone to attempt to parse it. It
         // should only be useful to humans, potentially via omdb, and they (and
         // omdb) can duplicate these fields to understand it.
-        let git_commit = if env!("VERGEN_GIT_DIRTY") == "true" {
-            concat!(env!("VERGEN_GIT_SHA"), "-dirty")
-        } else {
-            env!("VERGEN_GIT_SHA")
-        };
-
         let debug_blob = serde_json::json!({
-            "git-commit": git_commit,
+            "git-commit": omicron_git_version::GitVersion::current(),
             "report": report,
         });
 

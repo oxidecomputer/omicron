@@ -22,6 +22,7 @@ libc.workspace = true
 loopback-ip-mgr.workspace = true
 sled-agent-types.workspace = true
 mg-admin-client.workspace = true
+mg-api-types.workspace = true
 nexus-config.workspace = true
 nexus-test-interface.workspace = true
 nexus-test-utils = { workspace = true, features = ["omicron-dev"] }

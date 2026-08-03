@@ -38,6 +38,13 @@ internal_services_ip_pool_ranges = []
 # Confirm this list contains all expected sleds before continuing!
 bootstrap_sleds = []
 
+# When true, end users may opt in to jumbo frames (8500 byte MTU) on the primary
+# interface of an instance, and control plane services with external-facing OPTE
+# NICs are brought up with an 8500 byte MTU. Operators can also toggle this at
+# runtime via the Nexus `/v1/system/networking/settings` endpoint after rack
+# initialization.
+external_jumbo_frames_opt_in_enabled = false
+
 # Allowlist of source IPs that can make requests to user-facing services.
 #
 # Use the key:
@@ -148,6 +155,9 @@ infra_ip_last = ""
         # (optional). Defaults to allowing all prefixes. Use an empty list to
         # indicate that no prefixes are allowed.
         # allowed_export = []
+
+        # The source address to use for the BGP session (optional).
+        # src_addr = ""
 
         # Associate a VLAN ID with this BGP session (optional).
         # vlan_id = 0

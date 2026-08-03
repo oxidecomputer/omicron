@@ -13,6 +13,7 @@ use diesel::sql_types;
 use nexus_db_model::SledCpuFamily;
 use nexus_db_schema::enums::AffinityPolicyEnum;
 use nexus_db_schema::enums::SledCpuFamilyEnum;
+use nexus_db_schema::enums::SledResourceVmmStateEnum;
 use nonempty::NonEmpty;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::GenericUuid;
@@ -832,23 +833,46 @@ pub fn sled_insert_resource_query(
     }
 
     // Finally, perform the INSERT if it's still valid.
-    query.sql("
-        INSERT INTO sled_resource_vmm (id, sled_id, hardware_threads, rss_ram, reservoir_ram, instance_id)
+    query
+        .sql(
+            "
+        INSERT INTO sled_resource_vmm (
+          id,
+          sled_id,
+          hardware_threads,
+          rss_ram,
+          reservoir_ram,
+          instance_id,
+          state
+        )
         SELECT
-            ").param().sql(",
-            ").param().sql(",
-            ").param().sql(",
-            ").param().sql(",
-            ").param().sql(",
-            ").param().sql("
+            ",
+        )
+        .param()
+        .sql(",")
+        .param()
+        .sql(",")
+        .param()
+        .sql(",")
+        .param()
+        .sql(",")
+        .param()
+        .sql(",")
+        .param()
+        .sql(",")
+        .param()
+        .sql(
+            "
         WHERE EXISTS(SELECT 1 FROM insert_valid)
-    ")
-    .bind::<sql_types::Uuid, _>(resource.id.into_untyped_uuid())
-    .bind::<sql_types::Uuid, _>(resource.sled_id.into_untyped_uuid())
-    .bind::<sql_types::BigInt, _>(resource.resources.hardware_threads)
-    .bind::<sql_types::BigInt, _>(resource.resources.rss_ram)
-    .bind::<sql_types::BigInt, _>(resource.resources.reservoir_ram)
-    .bind::<sql_types::Uuid, _>(instance_id);
+    ",
+        )
+        .bind::<sql_types::Uuid, _>(resource.id.into_untyped_uuid())
+        .bind::<sql_types::Uuid, _>(resource.sled_id.into_untyped_uuid())
+        .bind::<sql_types::BigInt, _>(resource.resources.hardware_threads)
+        .bind::<sql_types::BigInt, _>(resource.resources.rss_ram)
+        .bind::<sql_types::BigInt, _>(resource.resources.reservoir_ram)
+        .bind::<sql_types::Uuid, _>(instance_id)
+        .bind::<SledResourceVmmStateEnum, _>(resource.state);
 
     query.query()
 }
@@ -856,6 +880,7 @@ pub fn sled_insert_resource_query(
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::db::datastore::sled::SledReservationReason;
     use crate::db::explain::ExplainableAsync;
     use crate::db::model;
     use crate::db::pub_test_utils::TestDatabase;
@@ -950,6 +975,7 @@ mod test {
                     external::ByteCount::from_gibibytes_u32(0),
                 ),
             ),
+            SledReservationReason::Start.into(),
         );
 
         // with no local storage
@@ -1022,6 +1048,7 @@ mod test {
                     external::ByteCount::from_gibibytes_u32(0),
                 ),
             ),
+            SledReservationReason::Start.into(),
         );
 
         let query = sled_insert_resource_query(

@@ -10,11 +10,12 @@ use crate::latest::instance::VmmSpec;
 use crate::latest::instance::VmmState;
 use crate::latest::instance::VmmStateRequested;
 use crate::latest::inventory::SourceNatConfig;
-use propolis_api_types::instance_spec::{
-    Component, SpecKey,
+use propolis_api_types::instance_spec::SpecKey;
+use propolis_api_types_versions::latest::{
     components::backends::{
         CrucibleStorageBackend, FileStorageBackend, VirtioNetworkBackend,
     },
+    instance_spec::Component,
 };
 use std::collections::BTreeSet;
 use std::net::Ipv4Addr;
@@ -44,21 +45,6 @@ impl VmmStateRequested {
             VmmStateRequested::Running => "running",
             VmmStateRequested::Stopped => "stopped",
             VmmStateRequested::Reboot => "reboot",
-        }
-    }
-}
-
-impl From<VmmState> for omicron_common::api::external::InstanceState {
-    fn from(state: VmmState) -> Self {
-        match state {
-            VmmState::Starting => Self::Starting,
-            VmmState::Running => Self::Running,
-            VmmState::Stopping => Self::Stopping,
-            VmmState::Stopped => Self::Stopped,
-            VmmState::Rebooting => Self::Rebooting,
-            VmmState::Migrating => Self::Migrating,
-            VmmState::Failed => Self::Failed,
-            VmmState::Destroyed => Self::Destroyed,
         }
     }
 }

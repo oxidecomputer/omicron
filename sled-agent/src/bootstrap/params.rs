@@ -29,9 +29,9 @@ mod tests {
     use std::net::Ipv6Addr;
 
     use omicron_common::address::Ipv6Subnet;
+    use omicron_uuid_kinds::RackUuid;
     use omicron_uuid_kinds::SledUuid;
     use sled_agent_types::sled::StartSledAgentRequestBody;
-    use uuid::Uuid;
 
     use super::*;
 
@@ -45,7 +45,7 @@ mod tests {
                     schema_version: 1,
                     body: StartSledAgentRequestBody {
                         id: SledUuid::new_v4(),
-                        rack_id: Uuid::new_v4(),
+                        rack_id: RackUuid::new_v4(),
                         use_trust_quorum: false,
                         is_lrtq_learner: false,
                         subnet: Ipv6Subnet::new(Ipv6Addr::LOCALHOST),

@@ -2,12 +2,14 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use internal_dns_types::config::HostSwitchZonePorts;
+use omicron_common::address::DDMD_PORT;
 use omicron_common::address::DENDRITE_PORT;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::LLDP_PORT;
 use omicron_common::address::MGD_PORT;
 use omicron_common::address::MGS_PORT;
-use omicron_common::address::SLED_PREFIX;
+use omicron_common::address::SLED_PREFIX_LENGTH;
 use omicron_common::address::get_switch_zone_address;
 use omicron_uuid_kinds::SledUuid;
 use std::collections::BTreeMap;
@@ -30,6 +32,8 @@ pub struct Overridables {
     pub mgs_ports: BTreeMap<SledUuid, u16>,
     /// map: sled id -> TCP port on which that sled's MGD is listening
     pub mgd_ports: BTreeMap<SledUuid, u16>,
+    /// map: sled id -> TCP port on which that sled's DDM is listening
+    pub ddm_ports: BTreeMap<SledUuid, u16>,
     /// map: sled id -> IP address of the sled's switch zone
     pub switch_zone_ips: BTreeMap<SledUuid, Ipv6Addr>,
     /// map: sled id -> TCP port on which that sled's LLDP is listening
@@ -80,6 +84,33 @@ impl Overridables {
         self.lldpd_ports.get(&sled_id).copied().unwrap_or(LLDP_PORT)
     }
 
+    /// Specify the TCP port on which this sled's DDM is listening
+    pub fn override_ddm_port(&mut self, sled_id: SledUuid, port: u16) {
+        self.ddm_ports.insert(sled_id, port);
+    }
+
+    /// Returns the TCP port on which this sled's DDM is listening
+    pub fn ddm_port(&self, sled_id: SledUuid) -> u16 {
+        self.ddm_ports.get(&sled_id).copied().unwrap_or(DDMD_PORT)
+    }
+
+    /// Returns the per-switch-zone service ports for this sled.
+    ///
+    /// Bundles the four switch-zone admin ports into a single
+    /// [`HostSwitchZonePorts`] so callers cannot swap fields by accident.
+    pub fn host_switch_zone_ports(
+        &self,
+        sled_id: SledUuid,
+    ) -> HostSwitchZonePorts {
+        HostSwitchZonePorts {
+            dendrite: self.dendrite_port(sled_id),
+            mgs: self.mgs_port(sled_id),
+            mgd: self.mgd_port(sled_id),
+            ddm: self.ddm_port(sled_id),
+            lldp: self.lldpd_port(sled_id),
+        }
+    }
+
     /// Specify the IP address of this switch zone
     pub fn override_switch_zone_ip(
         &mut self,
@@ -93,7 +124,7 @@ impl Overridables {
     pub fn switch_zone_ip(
         &self,
         sled_id: SledUuid,
-        sled_subnet: Ipv6Subnet<SLED_PREFIX>,
+        sled_subnet: Ipv6Subnet<SLED_PREFIX_LENGTH>,
     ) -> Ipv6Addr {
         self.switch_zone_ips
             .get(&sled_id)

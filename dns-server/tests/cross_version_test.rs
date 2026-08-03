@@ -73,7 +73,7 @@ mod v1_client {
         assert!(our_zones.len() <= 1);
         let zone_records = if let Some(our_zone) = our_zones.into_iter().next()
         {
-            our_zone.records.into_iter().chain(records.into_iter()).collect()
+            our_zone.records.into_iter().chain(records).collect()
         } else {
             records
         };
@@ -300,7 +300,7 @@ async fn dns_records_create(
 
     assert!(our_zones.len() <= 1);
     let zone_records = if let Some(our_zone) = our_zones.into_iter().next() {
-        our_zone.records.into_iter().chain(records.into_iter()).collect()
+        our_zone.records.into_iter().chain(records).collect()
     } else {
         records
     };

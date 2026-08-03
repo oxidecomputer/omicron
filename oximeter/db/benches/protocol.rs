@@ -4,8 +4,6 @@
 
 //! Benchmark comparing the native protocol to JSON-over-HTTP.
 
-// Copyright 2024 Oxide Computer Company
-
 use criterion::BenchmarkId;
 use criterion::Criterion;
 use criterion::{criterion_group, criterion_main};

@@ -72,17 +72,21 @@ pub mod early_networking {
     pub use crate::v20::early_networking::RouterLifetimeConfig;
     pub use crate::v20::early_networking::RouterLifetimeConfigError;
 
-    pub use crate::v30::early_networking::BgpPeerConfig;
     pub use crate::v30::early_networking::InvalidIpAddrError;
-    pub use crate::v30::early_networking::PortConfig;
-    pub use crate::v30::early_networking::RackNetworkConfig;
     pub use crate::v30::early_networking::RouterPeerIpAddr;
     pub use crate::v30::early_networking::RouterPeerIpAddrError;
-    pub use crate::v30::early_networking::RouterPeerType;
     pub use crate::v30::early_networking::UplinkAddress;
     pub use crate::v30::early_networking::UplinkAddressConfig;
     pub use crate::v30::early_networking::UplinkIpNet;
     pub use crate::v30::early_networking::UplinkIpNetError;
+
+    pub use crate::v45::early_networking::AddressFamilyConfigError;
+    pub use crate::v45::early_networking::BgpPeerConfig;
+    pub use crate::v45::early_networking::EmptyUplinkPortsError;
+    pub use crate::v45::early_networking::PortConfig;
+    pub use crate::v45::early_networking::RackNetworkConfig;
+    pub use crate::v45::early_networking::RouterPeerType;
+    pub use crate::v45::early_networking::UplinkPorts;
 }
 
 pub mod firewall_rules {
@@ -111,15 +115,15 @@ pub mod instance {
     pub use crate::v7::instance::InstanceMulticastBody;
     pub use crate::v7::instance::InstanceMulticastMembership;
 
-    pub use crate::v29::instance::VmmSpec;
-
     pub use crate::v31::instance::ResolvedVpcFirewallRule;
     pub use crate::v32::instance::ExternalIpConfig;
     pub use crate::v32::instance::ExternalIps;
     pub use crate::v32::instance::ExternalIpv4Config;
     pub use crate::v32::instance::ExternalIpv6Config;
-    pub use crate::v32::instance::InstanceEnsureBody;
-    pub use crate::v32::instance::InstanceSledLocalConfig;
+    pub use crate::v41::instance::InstanceSledLocalConfig;
+
+    pub use crate::v44::instance::InstanceEnsureBody;
+    pub use crate::v44::instance::VmmSpec;
 }
 
 pub mod inventory {
@@ -189,8 +193,12 @@ pub mod inventory {
     pub use crate::v40::inventory::FmdInventoryError;
     pub use crate::v40::inventory::FmdInventoryErrorKind;
     pub use crate::v40::inventory::FmdResource;
-    pub use crate::v40::inventory::Inventory;
+    pub use crate::v43::inventory::Inventory;
 
+    pub use crate::impls::inventory::FmdHostCaseDisplay;
+    pub use crate::impls::inventory::FmdInventoryDisplay;
+    pub use crate::impls::inventory::FmdInventoryResultDisplay;
+    pub use crate::impls::inventory::FmdResourceDisplay;
     pub use crate::impls::inventory::ManifestBootInventoryDisplay;
     pub use crate::impls::inventory::ManifestInventoryDisplay;
     pub use crate::impls::inventory::ManifestNonBootInventoryDisplay;
@@ -223,9 +231,9 @@ pub mod rot {
 }
 
 pub mod sled {
-    pub use crate::v1::sled::AddSledRequest;
-    pub use crate::v1::sled::StartSledAgentRequest;
-    pub use crate::v1::sled::StartSledAgentRequestBody;
+    pub use crate::v42::sled::AddSledRequest;
+    pub use crate::v42::sled::StartSledAgentRequest;
+    pub use crate::v42::sled::StartSledAgentRequestBody;
 }
 
 pub mod support_bundle {
@@ -246,8 +254,9 @@ pub mod system_networking {
     pub use crate::v33::system_networking::ServiceZoneNatKind;
 
     pub use crate::v39::system_networking::BlueprintExternalNetworkingConfig;
-    pub use crate::v39::system_networking::SystemNetworkingConfig;
-    pub use crate::v39::system_networking::WriteNetworkConfigRequest;
+
+    pub use crate::v45::system_networking::SystemNetworkingConfig;
+    pub use crate::v45::system_networking::WriteNetworkConfigRequest;
 }
 
 pub mod trust_quorum {

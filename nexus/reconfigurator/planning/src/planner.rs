@@ -1366,16 +1366,10 @@ impl<'a> Planner<'a> {
                 self.input.target_internal_dns_zone_count()
             }
             DiscretionaryOmicronZone::ExternalDns => {
-                // TODO-cleanup: When external DNS addresses are
-                // in the policy, this can use the input, too.
-                //
                 // The target number of external DNS zones is exactly equal to
                 // the number of distinct external DNS IPs we're supposed to
                 // service.
-                self.input
-                    .parent_blueprint()
-                    .all_external_dns_external_ips()
-                    .len()
+                self.input.external_ip_policy().external_dns_ips().len()
             }
             DiscretionaryOmicronZone::Nexus => {
                 self.input.target_nexus_zone_count()
@@ -1452,6 +1446,10 @@ impl<'a> Planner<'a> {
                         sled_id,
                         image,
                         external_ip,
+                        &self
+                            .input
+                            .external_service_networking_policy()
+                            .upstream_ntp_config(),
                     )?
                 }
                 DiscretionaryOmicronZone::Clickhouse => {
@@ -1496,6 +1494,10 @@ impl<'a> Planner<'a> {
                         image,
                         external_ip,
                         nexus_generation,
+                        &self
+                            .input
+                            .external_service_networking_policy()
+                            .operator_nexus_config(),
                     )?
                 }
                 DiscretionaryOmicronZone::Oximeter => {

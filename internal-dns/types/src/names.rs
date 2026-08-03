@@ -75,6 +75,7 @@ pub enum ServiceName {
     BoundaryNtp,
     InternalNtp,
     Mgd,
+    Ddm,
     Lldpd,
 }
 
@@ -117,6 +118,7 @@ impl ServiceName {
             ServiceName::BoundaryNtp => "boundary-ntp",
             ServiceName::InternalNtp => "internal-ntp",
             ServiceName::Mgd => "mgd",
+            ServiceName::Ddm => "ddm",
             ServiceName::Lldpd => "lldpd",
         }
     }
@@ -147,7 +149,8 @@ impl ServiceName {
             | ServiceName::BoundaryNtp
             | ServiceName::InternalNtp
             | ServiceName::Lldpd
-            | ServiceName::Mgd => {
+            | ServiceName::Mgd
+            | ServiceName::Ddm => {
                 format!("_{}._tcp", self.service_kind())
             }
             ServiceName::SledAgent(id) => {

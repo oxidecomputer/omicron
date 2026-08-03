@@ -24,10 +24,10 @@ progenitor::generate_api!(
     },
     replace = {
         Duration = std::time::Duration,
-        EventReportForGenericSpec = update_engine::events::EventReport<update_engine::NestedSpec>,
+        EventReportForGenericSpec = oxide_update_engine_types::events::EventReport<oxide_update_engine_types::spec::GenericSpec>,
         M2Slot = omicron_common::disk::M2Slot,
-        ProgressEventForGenericSpec = update_engine::events::ProgressEvent<update_engine::NestedSpec>,
-        StepEventForGenericSpec = update_engine::events::StepEvent<update_engine::NestedSpec>,
+        ProgressEventForGenericSpec = oxide_update_engine_types::events::ProgressEvent<oxide_update_engine_types::spec::GenericSpec>,
+        StepEventForGenericSpec = oxide_update_engine_types::events::StepEvent<oxide_update_engine_types::spec::GenericSpec>,
     }
 );
 

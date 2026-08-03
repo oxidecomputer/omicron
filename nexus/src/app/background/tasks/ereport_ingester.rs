@@ -24,6 +24,7 @@ use nexus_types::internal_api::background::SpEreportIngesterStatus;
 use nexus_types::internal_api::background::SpEreporterStatus;
 use omicron_uuid_kinds::EreporterRestartUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
+use omicron_uuid_kinds::RackUuid;
 use parallel_task_set::ParallelTaskSet;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
@@ -40,6 +41,7 @@ pub struct SpEreportIngester {
 struct Ingester {
     datastore: Arc<DataStore>,
     nexus_id: OmicronZoneUuid,
+    rack_id: RackUuid,
 }
 
 impl BackgroundTask for SpEreportIngester {
@@ -60,12 +62,13 @@ impl SpEreportIngester {
         datastore: Arc<DataStore>,
         resolver: internal_dns_resolver::Resolver,
         nexus_id: OmicronZoneUuid,
+        rack_id: RackUuid,
         fm_analysis: Activator,
         disabled: bool,
     ) -> Self {
         Self {
             resolver,
-            inner: Ingester { datastore, nexus_id },
+            inner: Ingester { datastore, nexus_id, rack_id },
             fm_analysis,
             disabled,
         }
@@ -75,7 +78,8 @@ impl SpEreportIngester {
         &mut self,
         opctx: &OpContext,
     ) -> SpEreportIngesterStatus {
-        use gateway_client::types::{SpIdentifier, SpIgnitionInfo};
+        use gateway_client::types::SpIgnitionInfo;
+        use gateway_types::component::SpIdentifier;
         use gateway_types::ignition::SpIgnition;
 
         let mut status = SpEreportIngesterStatus::default();
@@ -89,6 +93,12 @@ impl SpEreportIngester {
         }
         // Find MGS clients.
         // TODO(eliza): reuse the same client across activations; qorb, etc.
+        //
+        // TODO-multirack: eventually, we'll need a way to discover the MGS
+        // clients for *all* the racks in the cluster, along with the rack ID of
+        // the rack those clients will talk to. How this works has yet to be
+        // determined. See also the 'TODO-multirack' comment in the
+        // `mgs_requests()` function for where the rack ID would be used.
         let mgs_clients = match GatewayClient::resolve_all_gateways(
             &opctx.log,
             &self.resolver,
@@ -152,7 +162,7 @@ impl SpEreportIngester {
 
             status.sps_found += 1;
 
-            let SpIdentifier { type_, slot } = id;
+            let SpIdentifier { typ: type_, slot } = id;
             let sp_result = tasks
                 .spawn({
                     let opctx = opctx.child(BTreeMap::from([
@@ -281,17 +291,36 @@ impl Ingester {
             status.ereports_received += received;
 
             let db_ereports = reports.items.into_iter().map(|ereport| {
-                EreportData::from_sp_ereport(
-                    &opctx.log,
-                    restart_id,
-                    ereport,
-                    time_collected,
-                    self.nexus_id,
-                )
+                EreportData::from_sp_ereport(&opctx.log, restart_id, ereport)
             });
             let created = match self
                 .datastore
-                .ereports_insert(&opctx, reporter, db_ereports)
+                .ereports_insert(
+                    &opctx,
+                    restart_id,
+                    time_collected,
+                    self.nexus_id,
+                    // TODO-multirack: this argument to `ereports_insert` is
+                    // used to determine the rack ID of the SP that generated
+                    // this batch of ereports. Currently, using `self.rack_id`
+                    // (the rack ID of the Nexus instance ingesting the
+                    // ereports) is always correct, since this Nexus is only
+                    // ingesting ereports from SPs in its own rack. This will
+                    // not be the case if we begin ingesting ereports from SPs
+                    // in other racks.
+                    //
+                    // If this code changes to ingest ereports from the
+                    // management gateways in multiple racks, we'll need to
+                    // change this to pass the rack ID of the target rack, not
+                    // the one this Nexus lives in. Eventually, the rack ID will
+                    // become a property of the MGS clients that are passed into
+                    // this function: they'll have to become a type that says
+                    // "here are the clients for talking to the management
+                    // gateways in *that* rack, in particular".
+                    self.rack_id,
+                    reporter,
+                    db_ereports,
+                )
                 .await
             {
                 Ok((created, latest)) => {
@@ -415,7 +444,11 @@ mod tests {
     use super::*;
     use nexus_db_queries::db::pagination::Paginator;
     use nexus_test_utils_macros::nexus_test;
+    use omicron_common::api::external::Error;
+    use omicron_test_utils::dev::poll;
     use omicron_uuid_kinds::GenericUuid;
+    use std::collections::BTreeSet;
+    use std::time::Duration;
     use uuid::uuid;
 
     type ControlPlaneTestContext =
@@ -439,12 +472,11 @@ mod tests {
             datastore.clone(),
             nexus.internal_resolver.clone(),
             nexus.id(),
+            nexus.rack_id(),
             fm_analysis_activator.clone(),
             false,
         );
 
-        let mut analysis_activated =
-            tokio_test::task::spawn(fm_analysis_activator.activated());
         let activation1 = ingester.actually_activate(&opctx).await;
         assert!(
             activation1.errors.is_empty(),
@@ -459,10 +491,8 @@ mod tests {
             activation1.sps,
         );
         assert_eq!(activation1.sps_found, 4);
-        tokio_test::assert_ready!(
-            analysis_activated.poll(),
-            "fm analysis task should be activated"
-        );
+        fm_analysis_activator
+            .assert_activated("fm analysis task should be activated");
 
         for SpEreporterStatus { sp_type, slot, status, ignition_type: _ } in
             &activation1.sps
@@ -650,8 +680,6 @@ mod tests {
 
         // Activate the task again and assert that no new ereports were
         // ingested.
-        let mut analysis_activated =
-            tokio_test::task::spawn(fm_analysis_activator.activated());
         let activation2 = ingester.actually_activate(&opctx).await;
         assert!(
             activation2.errors.is_empty(),
@@ -659,10 +687,9 @@ mod tests {
             activation2.errors
         );
         dbg!(&activation2);
-        tokio_test::assert_pending!(
-            analysis_activated.poll(),
+        fm_analysis_activator.assert_not_activated(
             "fm analysis task should not be activated when no new ereports \
-             have been ingested"
+             have been ingested",
         );
         assert_eq!(
             activation2.sps_found, 4,
@@ -716,6 +743,277 @@ mod tests {
         .await;
     }
 
+    /// Regression test for the potential busy loop described in
+    /// [omicron#10738](https://github.com/oxidecomputer/omicron/issues/10738).
+    ///
+    /// This issue describes an issue that can occur when multiple Nexuses
+    /// ingest ereports from two different restarts of a given SP, where the
+    /// wall clock time at which the ereports from a later restart are inserted
+    /// into the database is *earlier* than the wall clock time at which
+    /// ereports from the current restart are inserted.
+    ///
+    /// > I think the `ingest_sp_ereports` function may be broken in this case:
+    /// > - Suppose an SP has `Restart ID = X`, Nexus A queries for ereports...
+    /// > - After the query starts, the SP restarts with `Restart ID = Y`,
+    /// >   Nexus B queries for ereports...
+    /// > - Suppose `Restart ID = Y` is the "steady-state" of the SP
+    /// >
+    /// > If the ereport insertion order is:
+    /// > - Nexus B inserts ereports for `Restart ID = Y` (at time T1)
+    /// > - Nexus A inserts ereports for `Restart ID = X` (at time T2 > T1)
+    /// > - Nexus A's request for ereports is still pending when Nexus B
+    /// >   inserts ereports for `Restart ID = Y`
+    /// >
+    /// > Then Nexus erroneously will think "Restart ID X > Y", which is untrue.
+    /// > This is possible because the timestamps we're collecting here are
+    /// > based on Nexus' wall-clock, which is queried after the request for
+    /// > ereports.
+    /// >
+    /// > I think in `ingest_sp_ereports` this could potentially cause Nexus to
+    /// > be stuck in a busy loop...
+    /// >
+    /// > - Nexus thinks restart ID = X is latest, so it sets up params with
+    /// >   restart ID = X
+    /// > - Nexus sends a request to the SP asking for ereports, the SP
+    /// >   responds "I'm restart ID = Y, here are my ereports"
+    /// > - If the SP doesn't have new ereports, then `ereports_insert` runs,
+    /// >   and inserts no new ereports -- so latest doesn't change (recall:
+    /// >   the original set of ereports for restart ID Y already got inserted
+    /// >   by Nexus B)
+    /// > - `ingest_sp_ereports` sets the new "params" value, but the in-DB
+    /// >   notion of latest is still from the now-dead restart ID X
+    /// > - Go to step (1). Turn the CPU into a space heater until more
+    /// >   ereports arrive from the SP
+    ///
+    /// Rather than racing two ingesters, this test constructs the racy outcome
+    /// directly. The test first asks the simulated SP for its current restart
+    /// ID and buffered ereports, and then inserts those ereports into the
+    /// database at T1, followed by ereports with a fabricated "previous"
+    /// restart ID at T2 > T1. This simulates a situation where one Nexus is
+    /// holding in memory a batch of ereports from the "earlier" restart in
+    /// memory and inserts them into the database at a wall-clock time later
+    /// than the ereports collected from the "current" restart.
+    #[nexus_test(server = crate::Server)]
+    async fn test_sp_ereport_ingestion_stale_restart_id(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        let nexus = &cptestctx.server.server_context().nexus;
+        let datastore = nexus.datastore();
+        let opctx = OpContext::for_tests(
+            cptestctx.logctx.log.clone(),
+            datastore.clone(),
+        );
+
+        // Sled 0's simulated SP.
+        let sp_type = nexus_types::inventory::SpType::Sled;
+        let sp_slot = 0;
+        let reporter =
+            nexus_types::fm::ereport::Reporter::Sp { sp_type, slot: sp_slot };
+        // A restart ID the SP has never heard of, standing in for the restart
+        // that preceded its current one.
+        let stale_restart_id = EreporterRestartUuid::from_untyped_uuid(uuid!(
+            "3e0e701d-79cc-4d1a-a742-e0410324b1de"
+        ));
+
+        let clients = poll::wait_for_condition(
+            || async {
+                let gateways = GatewayClient::resolve_all_gateways(
+                    &opctx.log,
+                    &nexus.internal_resolver,
+                )
+                .await
+                .map_err(|e| poll::CondCheckError::<Error>::NotYet {
+                    status: Some(e.to_string()),
+                })?
+                .collect::<Vec<_>>();
+                if gateways.is_empty() {
+                    return Err(poll::CondCheckError::<Error>::NotYet {
+                        status: Some("no gateways resolved".to_string()),
+                    });
+                }
+                Ok(gateways)
+            },
+            &Duration::from_millis(200),
+            &Duration::from_secs(60),
+        )
+        .await
+        .unwrap();
+
+        // Request all the ereports from the simulated SP and insert them into
+        // the database, as though we have already ingested them.
+        let ereport_types::Ereports { restart_id: current_restart_id, reports } =
+            clients
+                .first()
+                .expect("at least one MGS client should be resolved")
+                .client
+                .sp_ereports_ingest(
+                    &sp_type,
+                    sp_slot,
+                    None,
+                    // Request the maximum possible limit to ensure all ereports
+                    // that the SP simulator would possibly return are included.
+                    std::num::NonZeroU32::new(255).unwrap(),
+                    &EreporterRestartUuid::nil(),
+                    None,
+                )
+                .await
+                .expect("probing the SP's ereports via MGS should succeed")
+                .into_inner();
+        let current_restart_ereports = reports.items;
+        assert!(
+            !current_restart_ereports.is_empty(),
+            "/!\\ TEST IS BROKEN! /!\\\n\
+            this test requires the simulated SP to have ereports; if the \
+             configuration for the SP simulator has changed to have no \
+             ereports, this test cannot reproduce the bug! please change the \
+             config file back!",
+        );
+        assert_ne!(current_restart_id, stale_restart_id);
+
+        // "Nexus B" ingested the SP's entire current buffer a little while
+        // ago...
+        let time_current = Utc::now() - chrono::TimeDelta::seconds(10);
+        // ...and "Nexus A" inserted ereports from the SP's previous
+        // incarnation afterwards, because it queried the SP before the
+        // restart but timestamped the ereports with its own wall clock at
+        // insertion time.
+        let time_stale = Utc::now();
+        let rack_id = nexus.rack_id();
+
+        // Insert the ereports previously collected by "Nexus B" from the
+        // current restart. Imagine that this is actually a previous iteration
+        // of the ereport ingester loop. It isn't actually, but the behavior
+        // will be the same, and we cannot easily pause the loop mid-execution.
+        datastore
+            .ereports_insert(
+                &opctx,
+                current_restart_id,
+                time_current,
+                nexus.id(),
+                rack_id,
+                reporter,
+                current_restart_ereports.iter().map(|ereport| {
+                    EreportData::from_sp_ereport(
+                        &opctx.log,
+                        current_restart_id,
+                        ereport.clone(),
+                    )
+                }),
+            )
+            .await
+            .expect("ereports should be inserted");
+
+        // Now, imagine that Nexus A finally wakes up, with a batch of ereports
+        // from the SP's *previous* restart still in memory, and inserts them
+        // into the database at a wall-clock time after when Nexus B inserted
+        // ereports from the current restart.
+        let stale_restart_enas = BTreeSet::from_iter(Some(Ena::from(1)));
+        datastore
+            .ereports_insert(
+                &opctx,
+                stale_restart_id,
+                time_stale,
+                OmicronZoneUuid::new_v4(),
+                rack_id,
+                reporter,
+                vec![(
+                    Ena::from(1),
+                    EreportData {
+                        // these don't matter...
+                        serial_number: None,
+                        part_number: None,
+                        // since it's ENA 1, let's imagine it's a loss report
+                        class: Some("ereport.data_loss.possible".to_string()),
+                        report: serde_json::json!({"lost": null}),
+                    },
+                )],
+            )
+            .await
+            .expect(
+                "ereports from simulated previous restart should be inserted",
+            );
+
+        let ingester = Ingester {
+            datastore: datastore.clone(),
+            nexus_id: nexus.id(),
+            rack_id: nexus.rack_id(),
+        };
+
+        // Generously longer than a terminating ingestion pass (a couple of
+        // HTTP requests and a handful of database queries) could ever take.
+        const TIMEOUT: std::time::Duration = Duration::from_secs(60);
+        let status = tokio::time::timeout(
+            TIMEOUT,
+            ingester.ingest_sp_ereports(
+                opctx.child(BTreeMap::new()),
+                &clients,
+                sp_type,
+                sp_slot,
+            ),
+        )
+        .await
+        .unwrap_or_else(|_| {
+            panic!(
+                "ingest_sp_ereports did not terminate within {TIMEOUT:?}; it \
+                 is busy-looping, re-requesting ereports with the stale \
+                 restart ID {stale_restart_id:?} while the SP keeps \
+                 responding with already-ingested ereports from restart \
+                 {current_restart_id:?} (omicron#10738)",
+            )
+        });
+
+        // Make sure that the test reproduced the conditions necessary for the
+        // bug, and did not pass incorrectly.
+        //
+        // First, the ingestion request should not have inserted any new ENAs
+        // into the database, as doing so would have made the current ENA
+        // "latest" again.
+        let expected_current_restart_enas = current_restart_ereports
+            .iter()
+            .map(|e| e.ena)
+            .collect::<BTreeSet<_>>();
+        let db_current_restart_enas =
+            restart_ereports_fetch(datastore, &opctx, current_restart_id)
+                .await
+                .keys()
+                .copied()
+                .collect::<BTreeSet<_>>();
+        assert_eq!(
+            db_current_restart_enas, expected_current_restart_enas,
+            "/!\\ TEST IS BROKEN! /!\\\n\
+            the ingestion attempt should not have created any new ENAs from \
+            the current restart ID that were not previously in the database. \
+            if it has, this test has 'passed' without reproducing the \
+            conditions necessary for the bug to occur! this probably means \
+            that the SP simulator has somehow produced additional ereports \
+            when it was not asked to, which should not happen!",
+        );
+        // Second, the expected ereports from the "previous" restart must exist.
+        let db_stale_restart_enas =
+            restart_ereports_fetch(datastore, &opctx, stale_restart_id)
+                .await
+                .keys()
+                .copied()
+                .collect::<BTreeSet<_>>();
+        assert_eq!(
+            db_stale_restart_enas, stale_restart_enas,
+            "/!\\ TEST IS BROKEN! /!\\\n\
+            ENAs from the 'stale' previous restart are somehow missing from \
+            the database. this test has 'passed' without reproducing the \
+            conditions necessary for the bug to occur!",
+        );
+        // An MGS request error would also (spuriously) break the loop; fail
+        // loudly rather than passing without having exercised the scenario.
+        assert_eq!(
+            &status.errors,
+            &Vec::<String>::new(),
+            "/!\\ TEST IS BROKEN! /!\\\n\
+            MGS unexpectedly returned an error in response to an ereport \
+            ingestion request! this test has 'passed' without reproducing the \
+            conditions necessary for the bug to occur!",
+        );
+    }
+
     struct ExpectedReporter {
         serial: &'static str,
         part: &'static str,
@@ -761,17 +1059,16 @@ mod tests {
         }
     }
 
-    async fn check_sp_ereports_exist(
+    async fn restart_ereports_fetch(
         datastore: &DataStore,
         opctx: &OpContext,
         restart_id: EreporterRestartUuid,
-        expected_ereports: &[ExpectedEreport],
-    ) {
+    ) -> BTreeMap<Ena, nexus_db_model::Ereport> {
         let mut paginator = Paginator::new(
             std::num::NonZeroU32::new(100).unwrap(),
             dropshot::PaginationOrder::Ascending,
         );
-        let mut found_ereports = BTreeMap::new();
+        let mut ereports = BTreeMap::new();
         while let Some(p) = paginator.next() {
             let batch = datastore
                 .ereport_list_by_restart(
@@ -782,12 +1079,23 @@ mod tests {
                 .await
                 .expect("should be able to query for ereports");
             paginator = p.found_batch(&batch, &|ereport| ereport.ena);
-            found_ereports.extend(
+            ereports.extend(
                 batch
                     .into_iter()
                     .map(|ereport| (Ena::from(ereport.ena), ereport)),
             );
         }
+        ereports
+    }
+
+    async fn check_sp_ereports_exist(
+        datastore: &DataStore,
+        opctx: &OpContext,
+        restart_id: EreporterRestartUuid,
+        expected_ereports: &[ExpectedEreport],
+    ) {
+        let found_ereports =
+            restart_ereports_fetch(datastore, opctx, restart_id).await;
         assert_eq!(
             expected_ereports.len(),
             found_ereports.len(),

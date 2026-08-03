@@ -8,7 +8,7 @@ use omicron_uuid_kinds::MupdateUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
-use tufaceous_artifact::ArtifactHash;
+use tufaceous_artifact_v2::ArtifactHash;
 use uuid::Uuid;
 
 /// The error type returned by the `sp_component_reset()` MGS endpoint.
@@ -97,7 +97,13 @@ pub struct UpdatePreparationProgress {
 #[serde(rename_all = "snake_case")]
 pub struct InstallinatorImageId {
     pub update_id: MupdateUuid,
+
+    // Tufaceous v2 introduces a new JSON schema for `ArtifactHash` that is
+    // wire-compatible but perceived as different by drift. Continue using the
+    // old schema in this API version.
+    #[schemars(schema_with = "ArtifactHash::v1_json_schema")]
     pub host_phase_2: ArtifactHash,
+    #[schemars(schema_with = "ArtifactHash::v1_json_schema")]
     pub control_plane: ArtifactHash,
 }
 
@@ -116,6 +122,10 @@ pub enum HostPhase2Progress {
 /// Identity of a host phase2 recovery image.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct HostPhase2RecoveryImageId {
+    // Tufaceous v2 introduces a new JSON schema for `ArtifactHash` that is
+    // wire-compatible but perceived as different by drift. Continue using the
+    // old schema in this API version.
+    #[schemars(schema_with = "ArtifactHash::v1_json_schema")]
     pub sha256_hash: ArtifactHash,
 }
 

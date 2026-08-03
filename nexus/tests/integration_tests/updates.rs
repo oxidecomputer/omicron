@@ -39,8 +39,6 @@ use tufaceous_lib::assemble::{ArtifactManifest, OmicronRepoAssembler};
 use tufaceous_lib::assemble::{DeserializedManifest, ManifestTweak};
 
 use crate::integration_tests::target_release::set_target_release_for_mupdate_recovery;
-use omicron_test_utils::dev::poll::CondCheckError;
-use omicron_test_utils::dev::poll::wait_for_condition;
 
 const TRUST_ROOTS_URL: &str = "/v1/system/update/trust-roots";
 
@@ -173,25 +171,6 @@ impl TestRepo {
         self.0.close().unwrap();
         request
     }
-}
-
-async fn wait_for_inventory(cptestctx: &ControlPlaneTestContext) {
-    let log = cptestctx.logctx.log.new(o!());
-    let datastore = cptestctx.server.server_context().nexus.datastore();
-    let opctx = OpContext::for_tests(log, datastore.clone());
-    wait_for_condition(
-        || async {
-            datastore
-                .inventory_get_latest_collection(&opctx)
-                .await
-                .expect("failed to get inventory collection")
-                .ok_or(CondCheckError::<()>::NotYet)
-        },
-        &std::time::Duration::from_millis(100),
-        &std::time::Duration::from_secs(30),
-    )
-    .await
-    .expect("no inventory collection available");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -743,9 +722,14 @@ async fn test_update_status() -> Result<()> {
     let logctx = &cptestctx.logctx;
 
     // During high contention the inventory might not be ready yet, which will
-    // cause the call to /v1/system/update/status to 500. We thus query the
-    // database to make sure we have an inventory before proceeding.
-    wait_for_inventory(&cptestctx).await;
+    // cause the call to /v1/system/update/status to 500. Ensure the inventory
+    // watch channel is populated. (Do not query the database directly, since
+    // update status uses the watch channel.)
+    cptestctx
+        .wait_for_at_least_one_inventory_collection(
+            std::time::Duration::from_secs(60),
+        )
+        .await;
 
     // initial status
     let status: update::UpdateStatus =
@@ -818,6 +802,16 @@ async fn test_update_status() -> Result<()> {
     let counts = status.components_by_release_version;
     assert_eq!(counts.get("install dataset").unwrap(), &7);
     assert_eq!(counts.get("unknown").unwrap(), &11);
+
+    // `set_target_release_for_mupdate_recovery` only updates the target_release
+    // row, but the blueprint stays in its initial
+    // `WaitingForMupdateToBeCleared` state. This state is not treated as an
+    // update in progress, so `contact_support()` runs the full health checks
+    // instead of skipping them due to an "update in-progress".
+    //
+    // The task that checks for enabled not online SMF services isn't running on
+    // a simulated system; the contact_support field should be true
+    assert!(status.contact_support, "should need to contact support");
 
     cptestctx.teardown().await;
     Ok(())
@@ -1083,9 +1077,14 @@ async fn test_request_without_api_version(cptestctx: &ControlPlaneTestContext) {
         ClientTestContext::new(server_addr, cptestctx.logctx.log.clone());
 
     // During high contention the inventory might not be ready yet, which will
-    // cause the call to /v1/system/update/status to 500. We thus query the
-    // database to make sure we have an inventory before proceeding.
-    wait_for_inventory(cptestctx).await;
+    // cause the call to /v1/system/update/status to 500. Ensure the inventory
+    // watch channel is populated. (Do not query the database directly, since
+    // update status uses the watch channel.)
+    cptestctx
+        .wait_for_at_least_one_inventory_collection(
+            std::time::Duration::from_secs(60),
+        )
+        .await;
 
     let req_builder = RequestBuilder::new(
         &test_cx,

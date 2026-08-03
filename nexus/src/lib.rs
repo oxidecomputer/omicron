@@ -17,6 +17,8 @@ mod lockstep_api;
 mod populate;
 mod saga_interface;
 
+use crate::internal_api::params::ServiceIpPoolConfig;
+use crate::internal_api::params::ServiceIpPoolError;
 pub use app::Nexus;
 pub use app::test_interfaces::TestInterfaces;
 use async_bb8_diesel::AsyncRunQueryDsl;
@@ -24,6 +26,7 @@ use context::ApiContext;
 use context::ServerContext;
 use dropshot::ConfigDropshot;
 use external_api::http_entrypoints::external_api;
+use iddqd::IdOrdMap;
 use internal_api::http_entrypoints::internal_api;
 use lockstep_api::http_entrypoints::lockstep_api;
 use nexus_config::NexusConfig;
@@ -49,8 +52,10 @@ use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::DatasetUuid;
 use oximeter::types::ProducerRegistry;
 use oximeter_producer::Server as ProducerServer;
+use sled_agent_types::early_networking::PortConfig;
 use sled_agent_types::early_networking::RackNetworkConfig;
 use sled_agent_types::early_networking::SwitchSlot;
+use sled_agent_types::early_networking::UplinkPorts;
 use sled_hardware_types::BaseboardId;
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
@@ -406,7 +411,7 @@ impl nexus_test_interface::NexusServer for Server {
         // completely uninterested in switch port interaction), we'll insert a
         // single qsfp0 for each switch to the db directly.
         for which_switch in SwitchSlot::iter() {
-            datastore
+            match datastore
                 .switch_port_create(
                     &opctx,
                     config.deployment.rack_id,
@@ -414,7 +419,15 @@ impl nexus_test_interface::NexusServer for Server {
                     nexus_db_model::Name("qsfp0".parse().unwrap()),
                 )
                 .await
-                .expect("inserted qsfp0");
+            {
+                // We're racing with the background task - it may have already
+                // contacted dpd and inserted qsfp0. That's fine.
+                Ok(_) | Err(Error::ObjectAlreadyExists { .. }) => (),
+                Err(err) => panic!(
+                    "failed to insert qsfp0 for {which_switch:?}: {}",
+                    InlineErrorChain::new(&err)
+                ),
+            }
         }
 
         // Allocation of initial external IP addresses is a little funny.  In
@@ -423,22 +436,53 @@ impl nexus_test_interface::NexusServer for Server {
         // provides information about the external IP pool ranges available for
         // system services.  But here, we fake up IP pool ranges based on the
         // external addresses of services that we start or mock.
-        let internal_services_ip_pool_ranges = blueprint
-            .in_service_zones()
-            .filter_map(|(_, zc)| match &zc.zone_type {
-                BlueprintZoneType::BoundaryNtp(
-                    blueprint_zone_type::BoundaryNtp { external_ip, .. },
-                ) => Some(IpRange::from(external_ip.snat_cfg.ip)),
-                BlueprintZoneType::ExternalDns(
-                    blueprint_zone_type::ExternalDns { dns_address, .. },
-                ) => Some(IpRange::from(dns_address.addr.ip())),
-                BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
-                    external_ip,
-                    ..
-                }) => Some(IpRange::from(external_ip.ip)),
-                _ => None,
-            })
-            .collect();
+        let (ipv4_service_ranges, ipv6_service_ranges): (Vec<_>, Vec<_>) =
+            blueprint
+                .in_service_zones()
+                .filter_map(|(_, zc)| match &zc.zone_type {
+                    BlueprintZoneType::BoundaryNtp(
+                        blueprint_zone_type::BoundaryNtp {
+                            external_ip, ..
+                        },
+                    ) => Some(IpRange::from(external_ip.snat_cfg.ip)),
+                    BlueprintZoneType::ExternalDns(
+                        blueprint_zone_type::ExternalDns {
+                            dns_address, ..
+                        },
+                    ) => Some(IpRange::from(dns_address.addr.ip())),
+                    BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
+                        external_ip,
+                        ..
+                    }) => Some(IpRange::from(external_ip.ip)),
+                    _ => None,
+                })
+                .partition(|r| r.is_ipv4());
+
+        // Create configuration from the _non-empty_ ranges. The
+        // `ServiceIpPoolConfig` validates there's at least one range.
+        let mut service_ip_pools = IdOrdMap::new();
+        match ServiceIpPoolConfig::new(
+            "ipv4-service-pool".parse().unwrap(),
+            String::new(),
+            ipv4_service_ranges,
+        ) {
+            Ok(p) => service_ip_pools.insert_unique(p).unwrap(),
+            Err(ServiceIpPoolError::EmptyRanges) => {}
+            Err(ServiceIpPoolError::MixedIpVersions) => {
+                unreachable!("partitioned above")
+            }
+        }
+        match ServiceIpPoolConfig::new(
+            "ipv6-service-pool".parse().unwrap(),
+            String::new(),
+            ipv6_service_ranges,
+        ) {
+            Ok(p) => service_ip_pools.insert_unique(p).unwrap(),
+            Err(ServiceIpPoolError::EmptyRanges) => {}
+            Err(ServiceIpPoolError::MixedIpVersions) => {
+                unreachable!("partitioned above")
+            }
+        }
 
         internal_server
             .apictx
@@ -452,7 +496,7 @@ impl nexus_test_interface::NexusServer for Server {
                     physical_disks,
                     zpools,
                     crucible_datasets,
-                    internal_services_ip_pool_ranges,
+                    service_ip_pools,
                     certs,
                     internal_dns_zone_config,
                     external_dns_zone_name: external_dns_zone_name.to_owned(),
@@ -467,11 +511,17 @@ impl nexus_test_interface::NexusServer for Server {
                         infra_ip_last: std::net::IpAddr::V4(
                             Ipv4Addr::UNSPECIFIED,
                         ),
-                        ports: Vec::new(),
+                        // `UplinkPorts` must be non-empty; this test harness
+                        // doesn't exercise uplinks, so use a placeholder port.
+                        ports: UplinkPorts::new(vec![
+                            PortConfig::empty_for_tests("qsfp0"),
+                        ])
+                        .expect("placeholder port list is non-empty"),
                         bgp: Vec::new(),
                         bfd: Vec::new(),
                     },
                     allowed_source_ips: AllowedSourceIps::Any,
+                    external_jumbo_frames_opt_in_enabled: false,
                     // Insert a fake trust quorum config such that existing
                     // sleds will never be present.
                     //

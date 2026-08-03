@@ -2,10 +2,13 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use std::error::Error as _;
+use std::fmt::Write;
 use std::sync::Arc;
 
 use anyhow::Context;
 use anyhow::Result;
+use anyhow::ensure;
 use camino::Utf8PathBuf;
 use chrono::Duration;
 use chrono::Timelike;
@@ -14,10 +17,7 @@ use fs_err::tokio as fs;
 use fs_err::tokio::File;
 use omicron_zone_package::config::Config;
 use semver::Version;
-use sha2::Digest;
-use sha2::Sha256;
 use slog::Logger;
-use tokio::io::AsyncReadExt;
 use tufaceous_artifact::ArtifactHash;
 use tufaceous_artifact::ArtifactVersion;
 use tufaceous_artifact::KnownArtifactKind;
@@ -28,6 +28,7 @@ use tufaceous_lib::assemble::DeserializedArtifactSource;
 use tufaceous_lib::assemble::DeserializedControlPlaneZoneSource;
 use tufaceous_lib::assemble::DeserializedManifest;
 use tufaceous_lib::assemble::OmicronRepoAssembler;
+use tufaceous_v2::RepositoryLoader;
 use update_common::artifacts::{
     ArtifactsWithPlan, ControlPlaneZonesMode, VerificationMode,
 };
@@ -38,7 +39,11 @@ pub(crate) async fn build_tuf_repo(
     version: Version,
     package_manifest: Arc<Config>,
     extra_manifest: Option<Utf8PathBuf>,
+    threads: usize,
 ) -> Result<()> {
+    let repo_path = output_dir.join("repo.zip");
+    let sha256_path = output_dir.join("repo.zip.sha256.txt");
+
     // We currently go about this somewhat strangely; the old release
     // engineering process produced a Tufaceous manifest, and (the now very many
     // copies of) the TUF repo download-and-unpack script we use expects to be
@@ -67,47 +72,6 @@ pub(crate) async fn build_tuf_repo(
     for (kind, artifacts) in hubris_production.artifacts {
         manifest.artifacts.entry(kind).or_default().extend(artifacts);
     }
-
-    let mut measurement_corpus = vec![];
-
-    let mut read_dir = fs::read_dir(
-        output_dir.join("hubris-staging").join("measurement_corpus"),
-    )
-    .await
-    .context("failed to read `hubris-staging/measurement_corpus`")?;
-
-    while let Some(entry) = read_dir.next_entry().await? {
-        let corim = rats_corim::Corim::from_file(entry.path())?;
-
-        measurement_corpus.push(DeserializedArtifactData {
-            name: format!("staging-{}", corim.id),
-            version: ArtifactVersion::new(corim.get_version()?.clone())?,
-            source: DeserializedArtifactSource::File {
-                path: Utf8PathBuf::from_path_buf(entry.path()).unwrap(),
-            },
-        });
-    }
-
-    let mut read_dir = fs::read_dir(
-        output_dir.join("hubris-production").join("measurement_corpus"),
-    )
-    .await
-    .context("failed to read `hubris-production/measurement_corpus`")?;
-
-    while let Some(entry) = read_dir.next_entry().await? {
-        let corim = rats_corim::Corim::from_file(entry.path())?;
-        measurement_corpus.push(DeserializedArtifactData {
-            name: format!("production-{}", corim.id),
-            version: ArtifactVersion::new(corim.get_version()?.clone())?,
-            source: DeserializedArtifactSource::File {
-                path: Utf8PathBuf::from_path_buf(entry.path()).unwrap(),
-            },
-        });
-    }
-
-    manifest
-        .artifacts
-        .insert(KnownArtifactKind::MeasurementCorpus, measurement_corpus);
 
     if let Some(path) = extra_manifest {
         let m = DeserializedManifest::from_path(&path)
@@ -186,59 +150,54 @@ pub(crate) async fn build_tuf_repo(
         keys,
         expiry,
         true,
-        output_dir.join("repo.zip"),
+        repo_path.clone(),
     )
     .build()
     .await?;
-    // Generate the checksum file.
-    let mut hasher = Sha256::new();
-    let mut buf = [0; 8192];
-    let mut file = File::open(output_dir.join("repo.zip")).await?;
-    loop {
-        let n = file.read(&mut buf).await?;
-        if n == 0 {
-            break;
+
+    // Load and check the repository with Tufaceous v2
+    let repo = RepositoryLoader::new()
+        .v1_compatibility(true)
+        .unsafe_blindly_trust_repo()
+        .compute_archive_sha256(true)
+        .load_zip_path(repo_path.clone(), &logger)
+        .await?;
+    let sha256 =
+        *repo.archive_sha256().context("archive sha256 was not calculated")?;
+    fs::write(sha256_path, format!("{}\n", hex::encode(sha256))).await?;
+
+    repo.verify_targets(threads).await?;
+
+    let mut problems = String::new();
+    for problem in repo.check_problems().await? {
+        write!(&mut problems, "\n- {problem}")?;
+        let mut source = problem.source();
+        while let Some(s) = source {
+            write!(&mut problems, ": {s}")?;
+            source = s.source();
         }
-        hasher.update(&buf[..n]);
     }
-    fs::write(
-        output_dir.join("repo.zip.sha256.txt"),
-        format!("{}\n", hex::encode(&hasher.finalize())),
-    )
-    .await?;
+    ensure!(problems.is_empty(), "found compatibility problems:{problems}",);
 
     // Check that we haven't stepped on any rakes by attempting to generate a
     // plan from the zip
-    let zip_bytes = std::fs::File::open(&output_dir.join("repo.zip"))
-        .context("error opening archive.zip")?;
-    let repo_hash = ArtifactHash([0u8; 32]);
-    let _ = ArtifactsWithPlan::from_zip(
-        zip_bytes,
-        None,
-        repo_hash,
-        ControlPlaneZonesMode::Split,
-        VerificationMode::BlindlyTrustAnything,
-        &logger,
-    )
-    .await
-    .with_context(|| {
-        "error reading generated TUF repo (split control plane)".to_string()
-    })?;
-
-    let zip_bytes = std::fs::File::open(&output_dir.join("repo.zip"))
-        .context("error opening archive.zip")?;
-    let _ = ArtifactsWithPlan::from_zip(
-        zip_bytes,
-        None,
-        repo_hash,
-        ControlPlaneZonesMode::Composite,
-        VerificationMode::BlindlyTrustAnything,
-        &logger,
-    )
-    .await
-    .with_context(|| {
-        "error reading generated TUF repo (composite control plane)".to_string()
-    })?;
+    for mode in [ControlPlaneZonesMode::Split, ControlPlaneZonesMode::Composite]
+    {
+        let file = File::open(&repo_path).await?.into_std().await;
+        let repo_hash = ArtifactHash(sha256);
+        let _ = ArtifactsWithPlan::from_zip(
+            file,
+            None,
+            repo_hash,
+            mode,
+            VerificationMode::BlindlyTrustAnything,
+            &logger,
+        )
+        .await
+        .with_context(|| {
+            format!("error reading generated TUF repo ({mode:?} control plane)")
+        })?;
+    }
 
     Ok(())
 }

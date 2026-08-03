@@ -104,6 +104,8 @@ impl std::str::FromStr for AlertDeliveryState {
 }
 
 impl AlertDeliveryTrigger {
+    pub const ALL: &[Self] = <Self as strum::VariantArray>::VARIANTS;
+
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::Alert => "alert",
@@ -125,7 +127,7 @@ impl std::str::FromStr for AlertDeliveryTrigger {
         static EXPECTED_ONE_OF: LazyLock<String> =
             LazyLock::new(expected_one_of::<AlertDeliveryTrigger>);
 
-        for &v in <Self as strum::VariantArray>::VARIANTS {
+        for &v in Self::ALL {
             if s.trim().eq_ignore_ascii_case(v.as_str()) {
                 return Ok(v);
             }

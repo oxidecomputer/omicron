@@ -1,8 +1,11 @@
 #!/bin/bash
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
 #:
 #: name = "helios / deploy"
 #: variety = "basic"
-#: target = "lab-3.0-opte-0.40"
+#: target = "lab-3.0-opte-0.41"
 #: output_rules = [
 #:  "%/var/svc/log/oxide-*.log*",
 #:  "%/zone/oxz_*/root/var/svc/log/oxide-*.log*",
@@ -297,11 +300,9 @@ EXTERNAL_DNS_DOMAIN="$(sed -n 's/external_dns_zone_name = "\(.*\)"/\1/p' pkg/con
 sed -i~ "
 	/^external_dns_ips/c\\
 external_dns_ips = [ \"$DNS_IP1\", \"$DNS_IP2\" ]
-	/^\\[\\[internal_services_ip_pool_ranges/,/^\$/ {
-		/^first/c\\
-first = \"$SERVICE_IP_POOL_START\"
-		/^last/c\\
-last = \"$SERVICE_IP_POOL_END\"
+	/^\\[\\[service_ip_pools/,/^\$/ {
+		/^ranges =/c\\
+ranges = \\[ { first = \"$SERVICE_IP_POOL_START\", last = \"$SERVICE_IP_POOL_END\" } \\]
 	}
 	/^infra_ip_first/c\\
 infra_ip_first = \"$UPLINK_IP\"

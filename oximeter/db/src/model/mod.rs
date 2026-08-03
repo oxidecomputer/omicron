@@ -4,8 +4,6 @@
 
 //! Models for timeseries data in ClickHouse
 
-// Copyright 2024 Oxide Computer Company
-
 pub mod columns;
 pub mod fields;
 pub mod from_block;

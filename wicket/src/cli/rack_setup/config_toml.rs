@@ -5,16 +5,13 @@
 //! Support for the TOML file we give to and accept from clients for setting
 //! (most of) the rack setup configuration.
 
-use omicron_common::address::IpRange;
-use omicron_common::api::external::AllowedSourceIps;
+use iddqd::IdOrdMap;
 use serde::Serialize;
 use sled_agent_types::early_networking::BgpConfig;
 use sled_agent_types::early_networking::LldpPortConfig;
 use sled_agent_types::early_networking::RouteConfig;
-use sled_agent_types::early_networking::UplinkAddress;
-use sled_hardware_types::Baseboard;
+use sled_hardware_types::BaseboardId;
 use std::borrow::Cow;
-use std::collections::BTreeSet;
 use std::fmt;
 use toml_edit::Array;
 use toml_edit::ArrayOfTables;
@@ -27,11 +24,15 @@ use toml_edit::Value;
 use wicket_common::inventory::SpType;
 use wicket_common::rack_setup::BootstrapSledDescription;
 use wicket_common::rack_setup::CurrentRssUserConfigInsensitive;
-use wicket_common::rack_setup::UserSpecifiedBgpPeerConfig;
-use wicket_common::rack_setup::UserSpecifiedImportExportPolicy;
-use wicket_common::rack_setup::UserSpecifiedPortConfig;
-use wicket_common::rack_setup::UserSpecifiedRackNetworkConfig;
-use wicket_common::rack_setup::UserSpecifiedUplinkAddressConfig;
+use wicketd_commission_types::rack_setup::AllowedSourceIps;
+use wicketd_commission_types::rack_setup::IpRange;
+use wicketd_commission_types::rack_setup::ManualPortConfig;
+use wicketd_commission_types::rack_setup::UplinkAddress;
+use wicketd_commission_types::rack_setup::UserSpecifiedBgpPeerConfig;
+use wicketd_commission_types::rack_setup::UserSpecifiedImportExportPolicy;
+use wicketd_commission_types::rack_setup::UserSpecifiedPortConfig;
+use wicketd_commission_types::rack_setup::UserSpecifiedRackNetworkConfig;
+use wicketd_commission_types::rack_setup::UserSpecifiedUplinkAddressConfig;
 
 static TEMPLATE: &str = include_str!("config_template.toml");
 
@@ -107,6 +108,13 @@ impl TomlTemplate {
             config.allowed_source_ips.as_ref(),
         );
 
+        *doc.get_mut("external_jumbo_frames_opt_in_enabled")
+            .unwrap()
+            .as_value_mut()
+            .unwrap() = Value::Boolean(Formatted::new(
+            config.external_jumbo_frames_opt_in_enabled,
+        ));
+
         *doc.get_mut("bootstrap_sleds").unwrap().as_array_mut().unwrap() =
             build_sleds_array(&config.bootstrap_sleds);
 
@@ -180,27 +188,16 @@ fn format_multiline_array(array: &mut Array) {
     array.set_trailing("\n");
 }
 
-fn build_sleds_array(sleds: &BTreeSet<BootstrapSledDescription>) -> Array {
+fn build_sleds_array(sleds: &IdOrdMap<BootstrapSledDescription>) -> Array {
     // Helper function to build the comment attached to a given sled.
     fn sled_comment(sled: &BootstrapSledDescription, end: &str) -> String {
         let ip = sled
             .bootstrap_ip
             .map(|ip| Cow::from(format!("{ip}")))
             .unwrap_or_else(|| Cow::from("IP address UNKNOWN"));
-        match &sled.baseboard {
-            Baseboard::Gimlet { identifier, model, revision } => {
-                format!(
-                    " # {identifier} (model {model} revision {revision}, {ip})\
-                     {end}"
-                )
-            }
-            Baseboard::Unknown => {
-                format!(" # UNKNOWN SLED ({ip}){end}")
-            }
-            Baseboard::Pc { identifier, model } => {
-                format!(" # NON-OXIDE {identifier} (model {model}, {ip}){end}")
-            }
-        }
+
+        let BaseboardId { serial_number, part_number } = &sled.baseboard_id;
+        format!(" # {serial_number} (model {part_number}, {ip}){end}")
     }
 
     let mut array = Array::new();
@@ -208,7 +205,7 @@ fn build_sleds_array(sleds: &BTreeSet<BootstrapSledDescription>) -> Array {
 
     for sled in sleds {
         // We should never get a non-sled from wicketd; if we do, filter it out.
-        if sled.id.type_ != SpType::Sled {
+        if sled.id.typ != SpType::Sled {
             continue;
         }
 
@@ -339,7 +336,19 @@ fn populate_network_table(
 #[must_use]
 fn populate_uplink_table(cfg: &UserSpecifiedPortConfig) -> Table {
     // This style ensures that if a new field is added, this fails loudly.
-    let UserSpecifiedPortConfig {
+    let manual_port_config = match cfg {
+        UserSpecifiedPortConfig::Manual(manual) => manual,
+        UserSpecifiedPortConfig::DdmAutoPortConfig => {
+            // A DDM-auto port is encoded as an empty table (the comment is
+            // operator-facing).
+            let mut uplink = Table::new();
+            uplink.decor_mut().set_prefix(
+                "\n# This port is configured automatically via DDM.\n",
+            );
+            return uplink;
+        }
+    };
+    let ManualPortConfig {
         routes,
         addresses,
         uplink_port_speed,
@@ -348,7 +357,7 @@ fn populate_uplink_table(cfg: &UserSpecifiedPortConfig) -> Table {
         bgp_peers,
         lldp,
         tx_eq,
-    } = cfg;
+    } = manual_port_config;
 
     let mut uplink = Table::new();
 
@@ -426,6 +435,7 @@ fn populate_uplink_table(cfg: &UserSpecifiedPortConfig) -> Table {
             enforce_first_as,
             allowed_import,
             allowed_export,
+            src_addr,
             vlan_id,
             router_lifetime,
         } = p;
@@ -511,6 +521,11 @@ fn populate_uplink_table(cfg: &UserSpecifiedPortConfig) -> Table {
                 out.push(string_value(x.to_string()));
             }
             peer.insert("allowed_export", Item::Value(Value::Array(out)));
+        }
+
+        // src_addr
+        if let Some(x) = src_addr {
+            peer.insert("src_addr", string_item(&x.to_string()));
         }
 
         //vlan
@@ -649,9 +664,8 @@ fn bool_item(b: bool) -> Item {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use wicket_common::{
-        example::ExampleRackSetupData, rack_setup::PutRssUserConfigInsensitive,
-    };
+    use wicket_common::example::ExampleRackSetupData;
+    use wicketd_commission_types::rack_setup::PutRssUserConfigInsensitive;
 
     #[test]
     fn round_trip_nonempty_config() {

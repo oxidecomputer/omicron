@@ -110,6 +110,7 @@ use super::tasks::external_endpoints;
 use super::tasks::fm_analysis::{self, FmAnalysis};
 use super::tasks::fm_rendezvous::FmRendezvous;
 use super::tasks::fm_sitrep_gc;
+use super::tasks::fm_sitrep_history_pruner;
 use super::tasks::fm_sitrep_load;
 use super::tasks::fm_sitrep_load::CurrentSitrep;
 use super::tasks::instance_reincarnation;
@@ -146,6 +147,7 @@ use super::tasks::vpc_routes;
 use super::tasks::webhook_deliverator;
 use crate::Nexus;
 use crate::app::background::tasks::populate_switch_ports;
+use crate::app::external_client::ExternalHttpClient;
 use crate::app::oximeter::PRODUCER_LEASE_DURATION;
 use crate::app::quiesce::NexusQuiesceHandle;
 use crate::app::saga::StartSaga;
@@ -160,13 +162,13 @@ use nexus_types::deployment::PendingMgsUpdates;
 
 use nexus_types::inventory::Collection;
 use omicron_uuid_kinds::OmicronZoneUuid;
+use omicron_uuid_kinds::RackUuid;
 use oximeter::types::ProducerRegistry;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio::sync::watch;
 use update_common::artifacts::ArtifactsWithPlan;
-use uuid::Uuid;
 
 /// Internal state for communication between Nexus and background tasks.
 ///
@@ -272,6 +274,7 @@ impl BackgroundTasksInitializer {
             task_fm_analysis: Activator::new(),
             task_fm_sitrep_loader: Activator::new(),
             task_fm_sitrep_gc: Activator::new(),
+            task_fm_sitrep_history_pruner: Activator::new(),
             task_fm_rendezvous: Activator::new(),
             task_probe_distributor: Activator::new(),
             task_multicast_reconciler: Activator::new(),
@@ -366,6 +369,7 @@ impl BackgroundTasksInitializer {
             task_fm_analysis,
             task_fm_sitrep_loader,
             task_fm_sitrep_gc,
+            task_fm_sitrep_history_pruner,
             task_fm_rendezvous,
             task_probe_distributor,
             task_multicast_reconciler,
@@ -588,6 +592,7 @@ impl BackgroundTasksInitializer {
             reconfigurator_config_watcher.clone(),
             inventory_load_watcher.clone(),
             rx_blueprint.clone(),
+            nexus_id,
         );
         let rx_planner = blueprint_planner.watcher();
         driver.register(TaskDefinition {
@@ -1118,6 +1123,7 @@ impl BackgroundTasksInitializer {
                 datastore.clone(),
                 resolver.clone(),
                 nexus_id,
+                rack_id,
                 task_fm_analysis.clone(),
                 config.sp_ereport_ingester.disable,
             )),
@@ -1151,6 +1157,7 @@ impl BackgroundTasksInitializer {
                 inventory_loader: task_inventory_loader.clone(),
                 sitrep_loader: task_fm_sitrep_loader.clone(),
                 sitrep_gc: task_fm_sitrep_gc.clone(),
+                sitrep_history_pruner: task_fm_sitrep_history_pruner.clone(),
             },
             nexus_id,
             config.fm.analysis_enabled,
@@ -1180,6 +1187,7 @@ impl BackgroundTasksInitializer {
                 sitrep_watcher.clone(),
                 task_alert_dispatcher.clone(),
                 task_support_bundle_collector.clone(),
+                task_fm_sitrep_loader.clone(),
                 nexus_id,
             )),
             opctx: opctx.child(BTreeMap::new()),
@@ -1188,9 +1196,28 @@ impl BackgroundTasksInitializer {
         });
 
         driver.register(TaskDefinition {
+            name: "fm_sitrep_history_pruner",
+            description:
+                "maintains the configured limit on the fault management sitrep \
+                 history table by deleting the oldest entries",
+            period: config.fm.sitrep_history_prune_period_secs,
+            task_impl: Box::new(
+                fm_sitrep_history_pruner::SitrepHistoryPruner::new(
+                    datastore.clone(),
+                    // The pruner pokes the GC task whenever it orphans some
+                    // sitreps for it to delete.
+                    task_fm_sitrep_gc.clone(),
+                ),
+            ),
+            opctx: opctx.child(BTreeMap::new()),
+            watchers: vec![],
+            activator: task_fm_sitrep_history_pruner,
+        });
+
+        driver.register(TaskDefinition {
             name: "fm_sitrep_gc",
             description: "garbage collects fault management situation reports",
-            period: config.fm.sitrep_load_period_secs,
+            period: config.fm.sitrep_gc_period_secs,
             task_impl: Box::new(fm_sitrep_gc::SitrepGc::new(datastore.clone())),
             opctx: opctx.child(BTreeMap::new()),
             watchers: vec![Box::new(sitrep_watcher)],
@@ -1315,7 +1342,7 @@ pub struct BackgroundTasksData {
     /// whether multicast functionality is enabled (or not)
     pub multicast_enabled: bool,
     /// rack identifier
-    pub rack_id: Uuid,
+    pub rack_id: RackUuid,
     /// nexus identifier
     pub nexus_id: OmicronZoneUuid,
     /// internal DNS DNS resolver, used when tasks need to contact other
@@ -1331,11 +1358,11 @@ pub struct BackgroundTasksData {
     pub tuf_artifact_replication_rx: mpsc::Receiver<ArtifactsWithPlan>,
     /// Channel for exposing the latest loaded blueprint
     pub blueprint_load_tx: watch::Sender<Option<LoadedTargetBlueprint>>,
-    /// `reqwest::Client` for webhook delivery requests.
+    /// [`ExternalHttpClient`] for webhook delivery requests.
     ///
     /// This is shared with the external API as it's also used when sending
     /// webhook liveness probe requests from the API.
-    pub webhook_delivery_client: reqwest::Client,
+    pub webhook_delivery_client: ExternalHttpClient,
     /// Channel for configuring pending MGS updates
     pub mgs_updates_tx: watch::Sender<PendingMgsUpdates>,
     /// handle for controlling Nexus quiesce
@@ -1428,6 +1455,7 @@ fn init_dns(
 pub mod test {
     use crate::app::saga::SagaCompletionFuture;
     use crate::app::saga::StartSaga;
+    use camino_tempfile::Utf8TempDir;
     use dropshot::HandlerTaskMode;
     use futures::FutureExt;
     use internal_dns_types::names::ServiceName;
@@ -1445,7 +1473,6 @@ pub mod test {
     use std::sync::atomic::AtomicU64;
     use std::sync::atomic::Ordering;
     use std::time::Duration;
-    use tempfile::TempDir;
     use uuid::Uuid;
 
     /// Used by various tests of tasks that kick off sagas
@@ -1564,14 +1591,10 @@ pub mod test {
         // new service ought to do that for us.
         let log = &cptestctx.logctx.log;
         let storage_path =
-            TempDir::new().expect("Failed to create temporary directory");
+            Utf8TempDir::new().expect("Failed to create temporary directory");
         let config_store = dns_server::storage::Config {
             keep_old_generations: 3,
-            storage_path: storage_path
-                .path()
-                .to_string_lossy()
-                .into_owned()
-                .into(),
+            storage_path: storage_path.path().to_owned(),
         };
         let store = dns_server::storage::Store::new(
             log.new(o!("component" => "DnsStore")),
@@ -1723,7 +1746,7 @@ pub mod test {
                         if config.generation == generation {
                             Ok(())
                         } else {
-                            Err(poll::CondCheckError::NotYet)
+                            Err(poll::CondCheckError::NotYet { status: None })
                         }
                     }
                 }

@@ -626,7 +626,7 @@ async fn test_login_redirect_multiple_silos(
                     name: idp_name.parse().unwrap(),
                     description: format!(
                         "silo {:?} idp {:?}",
-                        &silo.identity.name, idp_name
+                        silo.identity.name, idp_name
                     ),
                 },
 
@@ -648,7 +648,7 @@ async fn test_login_redirect_multiple_silos(
             };
             let idp_create_url = format!(
                 "/v1/system/identity-providers/saml?silo={}",
-                &silo.identity.name
+                silo.identity.name
             );
             let _: identity_provider::SamlIdentityProvider =
                 object_create(client, &idp_create_url, &idp_params).await;
@@ -751,7 +751,7 @@ async fn test_login_redirect_multiple_silos(
                     eprintln!("wait for nexus update: {:?}", error);
                     if error.is_connect() {
                         // DNS may not have been updated yet.
-                        return Err(CondCheckError::NotYet);
+                        return Err(CondCheckError::NotYet { status: None });
                     }
 
                     return Err(CondCheckError::Failed(error));
@@ -761,7 +761,7 @@ async fn test_login_redirect_multiple_silos(
             eprintln!("wait for nexus update: status {:?}", response.status());
             if response.status() == http::StatusCode::BAD_REQUEST {
                 // Nexus may not have updated its endpoint configuration yet.
-                return Err(CondCheckError::NotYet);
+                return Err(CondCheckError::NotYet { status: None });
             }
 
             // For any other response, we'll proceed.  It may be wrong, but the
@@ -779,7 +779,7 @@ async fn test_login_redirect_multiple_silos(
     assert_eq!(
         make_request(&reqwest_client, cptestctx.silo_name.as_str(), port, None)
             .await,
-        Redirect::Location(format!("/login/{}/local", &cptestctx.silo_name,)),
+        Redirect::Location(format!("/login/{}/local", cptestctx.silo_name,)),
     );
 
     // same thing, but with state param in URL
@@ -793,7 +793,7 @@ async fn test_login_redirect_multiple_silos(
         .await,
         Redirect::Location(format!(
             "/login/{}/local?redirect_uri=%2Fabc%2Fdef",
-            &cptestctx.silo_name,
+            cptestctx.silo_name,
         )),
     );
 
@@ -891,7 +891,9 @@ async fn test_login_redirect_multiple_silos(
             )
             .await
             {
-                Redirect::Location(_) => Err(CondCheckError::NotYet),
+                Redirect::Location(_) => {
+                    Err(CondCheckError::NotYet { status: None })
+                }
                 Redirect::Error(message) => Ok(message),
             }
         },
