@@ -54,31 +54,13 @@ pub struct FmConfigParam {
 
 impl FmConfigParam {
     pub fn validate(&self) -> Result<(), Error> {
-        // Technically, the comment is not actually part of the `FmConfig`
-        // struct, but this conversion is where we validate everything else, so
-        // check that the comment is valid here.
-        if self.comment.is_empty() {
-            return Err(Error::invalid_value(
-                "comment",
-                "a non-empty comment is required when overriding the fault \
-                 management config",
-            ));
-        }
         if self.comment.trim().is_empty() {
             return Err(Error::invalid_value(
                 "comment",
-                "you sneaky bastard! you thought you could trick me by \
-                 leaving a comment that was entirely whitespace, but I already \
-                 thought of that. you're going to have to at least type the \
-                 letter 'a' or a period or something.",
+                "when overriding the fault management configuration, \
+                 please provide a non-empty, non-whitespace comment, for the \
+                 benefit of future operators",
             ));
-        }
-        if self.comment == "a"
-            || self.comment == "."
-            || self.comment == "something"
-        {
-            // Humor is an Oxide value.
-            return Err(Error::invalid_value("comment", "very clever."));
         }
 
         self.config.validate()
