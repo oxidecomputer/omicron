@@ -13,6 +13,7 @@ use anyhow::Context as _;
 use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
 use iddqd::id_upcast;
+use iddqd::{BiHashItem, BiHashMap, bi_upcast};
 use omicron_common::address::AZ_PREFIX_LENGTH;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::RACK_PREFIX_LENGTH;
@@ -25,6 +26,7 @@ use omicron_common::api::internal::nexus::Certificate;
 use omicron_uuid_kinds::MultirackJoinUuid;
 use omicron_uuid_kinds::RackInitUuid;
 use omicron_uuid_kinds::RackUuid;
+use omicron_uuid_kinds::SledUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sled_agent_types::early_networking::RackNetworkConfig;
@@ -456,6 +458,61 @@ pub struct CommitState {
     pub transient_errors: BTreeMap<BaseboardId, String>,
 }
 
+/// Status information for a given sled agent
+#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+pub struct SledAgentInfo {
+    pub baseboard_id: BaseboardId,
+    pub sled_id: SledUuid,
+    pub sled_subnet: Ipv6Subnet<SLED_PREFIX_LENGTH>,
+    pub started: bool,
+    pub fatal_error: Option<String>,
+}
+
+impl BiHashItem for SledAgentInfo {
+    type K1<'a> = &'a BaseboardId;
+    type K2<'a> = &'a SledUuid;
+
+    fn key1(&self) -> Self::K1<'_> {
+        &self.baseboard_id
+    }
+
+    fn key2(&self) -> Self::K2<'_> {
+        &self.sled_id
+    }
+
+    bi_upcast!();
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+pub struct StartSledAgentsStatus {
+    pub sleds: BiHashMap<SledAgentInfo>,
+}
+
+impl StartSledAgentsStatus {
+    pub fn new(req: MultirackJoinRequest) -> Self {
+        let rack_subnet = Ipv6Subnet::<RACK_PREFIX_LENGTH>::new(
+            req.rack_network_config.rack_subnet.addr(),
+        );
+        let sleds = req
+            .trust_quorum_peers
+            .into_iter()
+            .enumerate()
+            .map(|(idx, baseboard_id)| SledAgentInfo {
+                baseboard_id,
+                sled_id: SledUuid::new_v4(),
+                sled_subnet: get_64_subnet(
+                    rack_subnet,
+                    u8::try_from(idx + 1).expect("too many sleds"),
+                ),
+                started: false,
+                fatal_error: None,
+            })
+            .collect();
+
+        StartSledAgentsStatus { sleds }
+    }
+}
+
 /// The current state of the `MultirackJoinService` as retrieved from the
 /// `output_rx` watch channel.
 #[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
@@ -467,6 +524,7 @@ pub enum MultirackJoinServiceState {
     TrustQuorumReconfigure(TqReconfigureMsg),
     TrustQuorumPreparing(CoordinatorStatus),
     TrustQuorumCommitting(CommitState),
+    StartSledAgents(StartSledAgentsStatus),
     Completed,
     Failed { message: String },
     InvalidMembershipSize { message: String },
