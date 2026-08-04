@@ -1302,12 +1302,12 @@ pub struct BpOmicronZoneNic {
     ipv4: Option<IpNetwork>,
     #[diesel(column_name = subnet)]
     ipv4_subnet: Option<IpNetwork>,
-    ipv6: Option<IpNetwork>,
-    ipv6_subnet: Option<IpNetwork>,
     mac: MacAddr,
     vni: SqlU32,
     is_primary: bool,
     slot: SqlU8,
+    ipv6: Option<IpNetwork>,
+    ipv6_subnet: Option<IpNetwork>,
 }
 
 impl BpOmicronZoneNic {
