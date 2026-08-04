@@ -35,6 +35,7 @@ use nexus_db_schema::schema::ereporter_restart::dsl as restart_dsl;
 use nexus_types::fm::ereport as fm;
 use nexus_types::fm::ereport::EreportFilters;
 use nexus_types::fm::ereport::EreportId;
+use nexus_types::support_bundle::BundleTimeRange;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
@@ -93,11 +94,13 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         filters: &EreportFilters,
+        time_range: Option<&BundleTimeRange>,
         pagparams: &DataPageParams<'_, (Uuid, DbEna)>,
     ) -> ListResultVec<Ereport> {
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
 
-        let query = Self::ereport_fetch_matching_query(filters, pagparams);
+        let query =
+            Self::ereport_fetch_matching_query(filters, time_range, pagparams);
         query
             .load_async(&*self.pool_connection_authorized(opctx).await?)
             .await
@@ -106,6 +109,7 @@ impl DataStore {
 
     fn ereport_fetch_matching_query(
         filters: &EreportFilters,
+        time_range: Option<&BundleTimeRange>,
         pagparams: &DataPageParams<'_, (Uuid, DbEna)>,
     ) -> impl RunnableQuery<Ereport> + use<> {
         let mut query = paginated_multicolumn(
@@ -116,11 +120,11 @@ impl DataStore {
         .filter(dsl::time_deleted.is_null())
         .select(Ereport::as_select());
 
-        if let Some(start) = filters.start_time() {
+        if let Some(start) = time_range.and_then(|r| r.start) {
             query = query.filter(dsl::time_collected.ge(start));
         }
 
-        if let Some(end) = filters.end_time() {
+        if let Some(end) = time_range.and_then(|r| r.end) {
             query = query.filter(dsl::time_collected.le(end));
         }
 
@@ -750,6 +754,7 @@ mod tests {
         explain_fetch_matching_query(
             "explain_ereport_fetch_matching_default",
             EreportFilters::default(),
+            None,
         )
         .await
     }
@@ -759,6 +764,7 @@ mod tests {
         explain_fetch_matching_query(
             "explain_ereport_fetch_matching_only_serials",
             EreportFilters::new().with_serials(["BRM6900420", "BRM5555555"]),
+            None,
         )
         .await
     }
@@ -773,6 +779,7 @@ mod tests {
                     "my.cool.ereport",
                     "hw.frobulator.fault.frobulation_failed",
                 ]),
+            None,
         )
         .await
     }
@@ -781,9 +788,11 @@ mod tests {
     async fn explain_ereport_fetch_matching_only_time() {
         explain_fetch_matching_query(
             "explain_ereport_fetch_matching_only_time",
-            EreportFilters::new()
-                .with_end_time(chrono::Utc::now())
-                .expect("no start time set"),
+            EreportFilters::new(),
+            Some(BundleTimeRange {
+                start: None,
+                end: Some(chrono::Utc::now()),
+            }),
         )
         .await
     }
@@ -791,11 +800,12 @@ mod tests {
     #[tokio::test]
     async fn explain_ereport_fetch_matching_time_and_serials() {
         explain_fetch_matching_query(
-            "explain_ereport_fetch_matching_only_time",
-            EreportFilters::new()
-                .with_serials(["BRM6900420", "BRM5555555"])
-                .with_end_time(chrono::Utc::now())
-                .expect("no start time set"),
+            "explain_ereport_fetch_matching_time_and_serials",
+            EreportFilters::new().with_serials(["BRM6900420", "BRM5555555"]),
+            Some(BundleTimeRange {
+                start: None,
+                end: Some(chrono::Utc::now()),
+            }),
         )
         .await
     }
@@ -803,6 +813,7 @@ mod tests {
     async fn explain_fetch_matching_query(
         test_name: &str,
         filters: EreportFilters,
+        time_range: Option<BundleTimeRange>,
     ) {
         let logctx = dev::test_setup_log(test_name);
         let db = TestDatabase::new_with_pool(&logctx.log).await;
@@ -815,9 +826,13 @@ mod tests {
             limit: NonZeroU32::new(100).unwrap(),
         };
         eprintln!("--- filters: {filters:#?}\n");
+        eprintln!("--- time range: {time_range:#?}\n");
 
-        let query =
-            DataStore::ereport_fetch_matching_query(&filters, &pagparams);
+        let query = DataStore::ereport_fetch_matching_query(
+            &filters,
+            time_range.as_ref(),
+            &pagparams,
+        );
 
         let explanation = query
             .explain_async(&conn)
@@ -1170,7 +1185,12 @@ mod tests {
         };
 
         let found_default = datastore
-            .ereport_fetch_matching(opctx, &Default::default(), &pagparams)
+            .ereport_fetch_matching(
+                opctx,
+                &Default::default(),
+                None,
+                &pagparams,
+            )
             .await
             .expect("fetch matching with default filters should succeed");
         check_results(dbg!(found_default), &id, collector_id, &ereport);
@@ -1178,9 +1198,11 @@ mod tests {
         let found_by_time_range = datastore
             .ereport_fetch_matching(
                 opctx,
-                &EreportFilters::new()
-                    .with_start_time(time_collected - Duration::from_secs(600))
-                    .expect("no end time set"),
+                &EreportFilters::new(),
+                Some(&BundleTimeRange {
+                    start: Some(time_collected - Duration::from_secs(600)),
+                    end: None,
+                }),
                 &pagparams,
             )
             .await
@@ -1191,6 +1213,7 @@ mod tests {
             .ereport_fetch_matching(
                 opctx,
                 &EreportFilters::new().with_serials(["my cool serial"]),
+                None,
                 &pagparams,
             )
             .await
@@ -1201,6 +1224,7 @@ mod tests {
             .ereport_fetch_matching(
                 opctx,
                 &EreportFilters::new().with_classes(["my cool ereport"]),
+                None,
                 &pagparams,
             )
             .await

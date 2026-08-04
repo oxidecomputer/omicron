@@ -2755,7 +2755,8 @@ mod tests {
                 })
                 .unwrap();
             // A request with a nontrivial data_selection, including
-            // HostInfo(Specific) and ereport time filters.
+            // HostInfo(Specific), ereport filters, and a bundle-wide
+            // time range.
             {
                 use nexus_types::fm::ereport::EreportFilters;
                 use nexus_types::support_bundle::*;
@@ -2767,12 +2768,12 @@ mod tests {
                         omicron_uuid_kinds::SledUuid::new_v4(),
                     ])
                     .with_ereports(
-                        EreportFilters::new()
-                            .with_start_time(now - chrono::Duration::hours(1))
-                            .unwrap()
-                            .with_end_time(now)
-                            .unwrap(),
-                    );
+                        EreportFilters::new().with_serials(["FAKE-SERIAL-01"]),
+                    )
+                    .with_time_range(BundleTimeRange {
+                        start: Some(now - chrono::Duration::hours(1)),
+                        end: Some(now),
+                    });
                 support_bundles_requested
                     .insert_unique(fm::case::SupportBundleRequest {
                         id: SupportBundleUuid::new_v4(),
@@ -3023,8 +3024,8 @@ mod tests {
                 comment: String::new(),
             })
             .unwrap();
-        // A request with HostInfo(Specific) and Ereports with time-range
-        // filters, plus SpDumps.
+        // A request with HostInfo(Specific), Ereports with serial and class
+        // filters, SpDumps, and a bundle-wide time range.
         {
             use nexus_types::fm::ereport::EreportFilters;
             use nexus_types::support_bundle::*;
@@ -3036,13 +3037,13 @@ mod tests {
                 .with_specific_sleds([sled1, sled2])
                 .with_ereports(
                     EreportFilters::new()
-                        .with_start_time(now - chrono::Duration::hours(2))
-                        .unwrap()
-                        .with_end_time(now)
-                        .unwrap()
                         .with_serials(["BRM42"])
                         .with_classes(["ereport.io"]),
-                );
+                )
+                .with_time_range(BundleTimeRange {
+                    start: Some(now - chrono::Duration::hours(2)),
+                    end: Some(now),
+                });
             support_bundles_requested
                 .insert_unique(fm::case::SupportBundleRequest {
                     id: SupportBundleUuid::new_v4(),

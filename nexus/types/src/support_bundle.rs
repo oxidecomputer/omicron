@@ -142,14 +142,7 @@ impl BundleDataSelection {
             .with_all_sleds()
             .with_sled_cubby_info()
             .with_sp_dumps()
-            .with_ereports(
-                EreportFilters::new()
-                    .with_start_time(
-                        omicron_common::now_db_precision()
-                            - chrono::Days::new(7),
-                    )
-                    .expect("no end time set, cannot fail"),
-            )
+            .with_ereports(EreportFilters::new())
             .with_time_range(BundleTimeRange {
                 start: Some(
                     omicron_common::now_db_precision() - chrono::Days::new(7),

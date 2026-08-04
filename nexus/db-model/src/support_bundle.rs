@@ -14,7 +14,7 @@ use nexus_db_schema::schema::{
 
 use chrono::{DateTime, Utc};
 use nexus_types::external_api::support_bundle as support_bundle_types;
-use nexus_types::fm::ereport::{EreportFilters, EreportFiltersParams};
+use nexus_types::fm::ereport::EreportFilters;
 use nexus_types::internal_api::views as internal_views;
 use nexus_types::support_bundle::BundleData;
 use nexus_types::support_bundle::BundleTimeRange;
@@ -218,8 +218,6 @@ impl From<HostInfo> for BundleData {
 #[diesel(table_name = support_bundle_data_selection_ereports)]
 pub struct Ereports {
     pub bundle_id: DbTypedUuid<SupportBundleKind>,
-    pub start_time: Option<DateTime<Utc>>,
-    pub end_time: Option<DateTime<Utc>>,
     pub only_serials: Vec<String>,
     pub only_classes: Vec<String>,
 }
@@ -231,33 +229,20 @@ impl Ereports {
     ) -> Self {
         Ereports {
             bundle_id: bundle_id.into(),
-            start_time: filters.start_time(),
-            end_time: filters.end_time(),
             only_serials: filters.only_serials().to_vec(),
             only_classes: filters.only_classes().to_vec(),
         }
     }
 }
 
-impl TryFrom<Ereports> for BundleData {
-    type Error = omicron_common::api::external::Error;
-
-    fn try_from(row: Ereports) -> Result<Self, Self::Error> {
-        let Ereports {
-            bundle_id: _,
-            start_time,
-            end_time,
-            only_serials,
-            only_classes,
-        } = row;
-        EreportFiltersParams {
-            start_time,
-            end_time,
-            only_serials,
-            only_classes,
-        }
-        .try_into()
-        .map(BundleData::Ereports)
+impl From<Ereports> for BundleData {
+    fn from(row: Ereports) -> Self {
+        let Ereports { bundle_id: _, only_serials, only_classes } = row;
+        BundleData::Ereports(
+            EreportFilters::new()
+                .with_serials(only_serials)
+                .with_classes(only_classes),
+        )
     }
 }
 
@@ -326,7 +311,7 @@ impl TryFrom<BundleDataSelection>
             selection.insert(host_info.into());
         }
         if let Some(ereports) = row.ereports {
-            selection.insert(ereports.try_into()?);
+            selection.insert(ereports.into());
         }
         selection.set_time_range(row.time_range.map(Into::into));
         Ok(selection)

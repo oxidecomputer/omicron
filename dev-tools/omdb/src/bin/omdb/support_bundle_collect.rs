@@ -29,6 +29,7 @@ use nexus_db_queries::db::DataStore;
 use nexus_types::fm::ereport::EreportFilters;
 use nexus_types::support_bundle::BundleDataCategory;
 use nexus_types::support_bundle::BundleDataSelection;
+use nexus_types::support_bundle::BundleTimeRange;
 use omicron_uuid_kinds::SupportBundleUuid;
 use std::io::Write;
 use std::sync::Arc;
@@ -94,17 +95,17 @@ impl CollectArgs {
                 BundleDataCategory::HostInfo => sel.with_all_sleds(),
                 BundleDataCategory::SledCubbyInfo => sel.with_sled_cubby_info(),
                 BundleDataCategory::SpDumps => sel.with_sp_dumps(),
-                BundleDataCategory::Ereports => sel.with_ereports(
-                    EreportFilters::new()
-                        .with_start_time(
-                            omicron_common::now_db_precision()
-                                - chrono::Days::new(7),
-                        )
-                        .expect("no end time set, cannot fail"),
-                ),
+                BundleDataCategory::Ereports => {
+                    sel.with_ereports(EreportFilters::new())
+                }
             };
         }
-        sel
+        sel.with_time_range(BundleTimeRange {
+            start: Some(
+                omicron_common::now_db_precision() - chrono::Days::new(7),
+            ),
+            end: None,
+        })
     }
 }
 

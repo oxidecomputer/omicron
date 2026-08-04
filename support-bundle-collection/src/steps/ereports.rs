@@ -7,45 +7,40 @@
 use crate::collection::BundleCollection;
 use crate::step::CollectionStepOutput;
 use nexus_types::fm::ereport::EreportFilters;
+use nexus_types::support_bundle::BundleTimeRange;
 
 use anyhow::Context;
 use camino::Utf8Path;
 use camino::Utf8PathBuf;
 use dropshot::PaginationOrder;
-use nexus_db_queries::context::OpContext;
-use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::datastore;
 use nexus_db_queries::db::pagination::Paginator;
 use nexus_types::fm::Ereport;
 use nexus_types::internal_api::background::SupportBundleEreportStatus;
 use omicron_uuid_kinds::GenericUuid;
-use slog::Logger;
 use slog::debug;
 use slog::info;
 use slog::warn;
 use slog_error_chain::InlineErrorChain;
-use std::sync::Arc;
 
 pub async fn collect(
     collection: &BundleCollection,
     dir: &Utf8Path,
 ) -> anyhow::Result<CollectionStepOutput> {
-    let (log, opctx, datastore) =
-        (collection.log(), collection.opctx(), collection.datastore());
+    let log = collection.log();
     let ereport_filters = collection.data_selection().ereport_filters();
 
     let Some(ereport_filters) = ereport_filters else {
         debug!(log, "Support bundle: ereports not requested");
         return Ok(CollectionStepOutput::Skipped);
     };
+    let time_range = collection.data_selection().time_range().cloned();
     let ereports_dir = dir.join("ereports");
     let mut status = SupportBundleEreportStatus::default();
     if let Err(err) = save_ereports(
         collection,
-        log,
-        opctx,
-        datastore,
         ereport_filters.clone(),
+        time_range,
         ereports_dir,
         &mut status,
     )
@@ -74,13 +69,13 @@ pub async fn collect(
 // DB queries are eagerly cancelled via `select!`.
 async fn save_ereports(
     collection: &BundleCollection,
-    log: &Logger,
-    opctx: &OpContext,
-    datastore: &Arc<DataStore>,
     filters: EreportFilters,
+    time_range: Option<BundleTimeRange>,
     dir: Utf8PathBuf,
     status: &mut SupportBundleEreportStatus,
 ) -> anyhow::Result<()> {
+    let (log, opctx, datastore) =
+        (collection.log(), collection.opctx(), collection.datastore());
     let mut paginator =
         Paginator::new(datastore::SQL_BATCH_SIZE, PaginationOrder::Ascending);
     while let Some(p) = paginator.next() {
@@ -88,7 +83,7 @@ async fn save_ereports(
         let ereports = tokio::select! {
             _ = collection.cancelled() => return Ok(()),
             result = datastore.ereport_fetch_matching(
-                &opctx, &filters, &pagparams
+                &opctx, &filters, time_range.as_ref(), &pagparams
             ) => {
                 result.map_err(|e| {
                     e.internal_context("failed to query for ereports")
