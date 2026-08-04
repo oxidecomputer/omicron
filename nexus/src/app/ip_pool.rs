@@ -541,7 +541,7 @@ impl super::Nexus {
     // support for more than one service pool per IP version and can't express
     // which they mean. So at this point, we require exactly one, and return an
     // error if that's not the case. This can only really happen if the client
-    // is using mixed API versions: a new one to create  second pool, and the
+    // is using mixed API versions: a new one to create a second pool, and the
     // old one to manipulate them. That should be really unlikely, but also
     // point the user to the new API version if they do happen to land here.
     async fn ip_pool_service_single(
@@ -559,12 +559,10 @@ impl super::Nexus {
             )
             .await?;
         if pools.len() > 1 {
-            return Err(Error::invalid_request(format!(
+            return Err(Error::invalid_request(
                 "more than one system-service IP pool of the requested IP \
-                 version exists; use the /v1/system/ip-pools API (added in \
-                 API version {}) to manage service IP pools",
-                nexus_external_api::VERSION_ADD_SYSTEM_IP_POOL_APIS,
-            )));
+                 version exists; update the client to manage these pools",
+            ));
         }
         let pool = pools.pop().ok_or_else(|| {
             Error::non_resourcetype_not_found(
