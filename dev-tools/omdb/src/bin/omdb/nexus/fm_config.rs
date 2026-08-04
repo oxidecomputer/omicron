@@ -31,7 +31,7 @@ pub struct FmConfigArgs {
 enum Commands {
     /// Show the current fault management configuration.
     ///
-    /// This is an alias for `omdb nexus fm config show current`.
+    /// This is an alias for `omdb nexus fm-config show current`.
     Current(ShowOptions),
 
     /// Show a configuration at a given version
@@ -39,6 +39,8 @@ enum Commands {
 
     /// Show the system-defined default values for all config settings, as of
     /// the current Oxide system software version.
+    ///
+    /// This is an alias for `omdb nexus fm-config show default`.
     ShowDefaults(ShowOptions),
 
     /// Override one or more config option(s), creating a new version.
