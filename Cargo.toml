@@ -607,7 +607,7 @@ ispf = { git = "https://github.com/oxidecomputer/ispf" }
 jiff = "0.2.15"
 key-manager = { path = "key-manager" }
 key-manager-types = { path = "key-manager/types" }
-kstat-rs = "0.2.4"
+kstat-rs = "0.2.5"
 libc = "0.2.174"
 linkme = "0.3"
 libipcc = { git = "https://github.com/oxidecomputer/ipcc-rs", rev = "524eb8f125003dff50b9703900c6b323f00f9e1b" }

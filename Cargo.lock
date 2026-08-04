@@ -6365,9 +6365,9 @@ dependencies = [
 
 [[package]]
 name = "kstat-rs"
-version = "0.2.4"
+version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "27964e4632377753acb0898ce6f28770d50cbca1339200ae63d700cff97b5c2b"
+checksum = "52d0786643a0b49f595bd1fc81e1c1aa7bad8555bc820c6892f4d28cb20cf210"
 dependencies = [
  "libc",
  "thiserror 1.0.69",
@@ -9899,6 +9899,7 @@ dependencies = [
  "ipnet",
  "ipnetwork",
  "itertools 0.13.0",
+ "itertools 0.15.0",
  "jiff",
  "lalrpop-util",
  "lazy_static",
@@ -11121,7 +11122,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9cd31dcfdbbd7431a807ef4df6edd6473228e94d5c805e8cf671227a21bad068"
 dependencies = [
  "anyhow",
- "itertools 0.14.0",
+ "itertools 0.15.0",
  "proc-macro2",
  "quote",
  "rand 0.8.6",
@@ -12025,7 +12026,7 @@ dependencies = [
  "quinn-udp",
  "rustc-hash",
  "rustls",
- "socket2 0.5.10",
+ "socket2 0.6.3",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -14706,7 +14707,7 @@ version = "0.8.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c1c97747dbf44bb1ca44a561ece23508e99cb592e862f22222dcf42f51d1e451"
 dependencies = [
- "heck 0.4.1",
+ "heck 0.5.0",
  "proc-macro2",
  "quote",
  "syn 2.0.117",
