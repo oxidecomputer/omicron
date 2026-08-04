@@ -3342,6 +3342,19 @@ CREATE TABLE IF NOT EXISTS omicron.public.support_bundle_data_selection_ereports
     CHECK (start_time IS NULL OR end_time IS NULL OR start_time <= end_time)
 );
 
+-- Bundle-wide time range applied to time-bounded categories (host-info logs
+-- and ereports) at collection time. Row existence indicates a range was set.
+CREATE TABLE IF NOT EXISTS omicron.public.support_bundle_data_selection_time_range (
+    bundle_id UUID NOT NULL,
+    start_time TIMESTAMPTZ,
+    end_time TIMESTAMPTZ,
+
+    PRIMARY KEY (bundle_id),
+    CONSTRAINT start_before_end CHECK (
+        start_time IS NULL OR end_time IS NULL OR start_time <= end_time
+    )
+);
+
 /*******************************************************************/
 
 /*
@@ -8205,6 +8218,20 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_support_bundle_request_data_selecti
     CHECK (start_time IS NULL OR end_time IS NULL OR start_time <= end_time)
 );
 
+-- Bundle-wide time range applied to time-bounded categories (host-info logs
+-- and ereports) at collection time. Row existence indicates a range was set.
+CREATE TABLE IF NOT EXISTS omicron.public.fm_support_bundle_request_data_selection_time_range (
+    sitrep_id UUID NOT NULL,
+    request_id UUID NOT NULL,
+    start_time TIMESTAMPTZ,
+    end_time TIMESTAMPTZ,
+
+    PRIMARY KEY (sitrep_id, request_id),
+    CONSTRAINT start_before_end CHECK (
+        start_time IS NULL OR end_time IS NULL OR start_time <= end_time
+    )
+);
+
 -- Marker written by `SitrepGuardedInsert` atomically with a corresponding
 -- alert row when FM rendezvous successfully creates an alert. This serves as
 -- a guard against resurrection: if the alert is deleted after its initial
@@ -9079,7 +9106,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '280.0.0', NULL)
+    (TRUE, NOW(), NOW(), '281.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

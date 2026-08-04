@@ -1656,10 +1656,19 @@ table! {
     }
 }
 
+table! {
+    support_bundle_data_selection_time_range (bundle_id) {
+        bundle_id -> Uuid,
+        start_time -> Nullable<Timestamptz>,
+        end_time -> Nullable<Timestamptz>,
+    }
+}
+
 allow_tables_to_appear_in_same_query!(
     support_bundle_data_selection_flags,
     support_bundle_data_selection_host_info,
     support_bundle_data_selection_ereports,
+    support_bundle_data_selection_time_range,
 );
 
 /* hardware inventory */
@@ -3413,10 +3422,20 @@ table! {
     }
 }
 
+table! {
+    fm_support_bundle_request_data_selection_time_range (sitrep_id, request_id) {
+        sitrep_id -> Uuid,
+        request_id -> Uuid,
+        start_time -> Nullable<Timestamptz>,
+        end_time -> Nullable<Timestamptz>,
+    }
+}
+
 allow_tables_to_appear_in_same_query!(
     fm_support_bundle_request_data_selection_flags,
     fm_support_bundle_request_data_selection_host_info,
     fm_support_bundle_request_data_selection_ereports,
+    fm_support_bundle_request_data_selection_time_range,
 );
 
 table! {

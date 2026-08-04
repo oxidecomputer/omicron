@@ -130,6 +130,7 @@ sitrep_child_tables! {
     SupportBundleRequestDataSelectionFlags => { table: "fm_support_bundle_request_data_selection_flags" },
     SupportBundleRequestDataSelectionHostInfo => { table: "fm_support_bundle_request_data_selection_host_info" },
     SupportBundleRequestDataSelectionEreports => { table: "fm_support_bundle_request_data_selection_ereports" },
+    SupportBundleRequestDataSelectionTimeRange => { table: "fm_support_bundle_request_data_selection_time_range" },
     SupportBundleRequest => { table: "fm_support_bundle_request" },
     Case => { table: "fm_case" },
     FmFactPhysicalDisk => { table: "fm_fact_physical_disk" },
@@ -681,6 +682,7 @@ impl DataStore {
         use nexus_db_schema::schema::fm_support_bundle_request_data_selection_ereports::dsl as ereports_dsl;
         use nexus_db_schema::schema::fm_support_bundle_request_data_selection_flags::dsl as flags_dsl;
         use nexus_db_schema::schema::fm_support_bundle_request_data_selection_host_info::dsl as host_info_dsl;
+        use nexus_db_schema::schema::fm_support_bundle_request_data_selection_time_range::dsl as time_range_dsl;
 
         let sitrep_uuid = id.into_untyped_uuid();
         let mut selections =
@@ -704,6 +706,11 @@ impl DataStore {
                 ereports_dsl::fm_support_bundle_request_data_selection_ereports
                     .on(ereports_dsl::sitrep_id.eq(flags_dsl::sitrep_id)
                         .and(ereports_dsl::request_id.eq(flags_dsl::request_id))),
+            )
+            .left_join(
+                time_range_dsl::fm_support_bundle_request_data_selection_time_range
+                    .on(time_range_dsl::sitrep_id.eq(flags_dsl::sitrep_id)
+                        .and(time_range_dsl::request_id.eq(flags_dsl::request_id))),
             )
             .select(DbBundleDataSelection::as_select())
             .load_async(conn)
@@ -1011,11 +1018,12 @@ impl DataStore {
         requests: Vec<model::fm::SupportBundleRequest>,
         data_selections: Vec<(SupportBundleUuid, BundleDataSelection)>,
     ) -> Result<(), InsertSitrepError> {
-        use model::fm::{DataSelectionFlags, Ereports, HostInfo};
+        use model::fm::{DataSelectionFlags, Ereports, HostInfo, TimeRange};
         use nexus_db_schema::schema::fm_support_bundle_request::dsl as support_bundle_req_dsl;
         use nexus_db_schema::schema::fm_support_bundle_request_data_selection_ereports::dsl as ereports_dsl;
         use nexus_db_schema::schema::fm_support_bundle_request_data_selection_flags::dsl as flags_dsl;
         use nexus_db_schema::schema::fm_support_bundle_request_data_selection_host_info::dsl as host_info_dsl;
+        use nexus_db_schema::schema::fm_support_bundle_request_data_selection_time_range::dsl as time_range_dsl;
 
         if !requests.is_empty() {
             diesel::insert_into(
@@ -1034,6 +1042,7 @@ impl DataStore {
         let mut flags_rows = Vec::new();
         let mut host_info_rows = Vec::new();
         let mut ereports_rows = Vec::new();
+        let mut time_range_rows = Vec::new();
 
         for (req_id, data_selection) in data_selections {
             flags_rows.push(DataSelectionFlags::from_sitrep(
@@ -1041,6 +1050,10 @@ impl DataStore {
                 req_id,
                 &data_selection,
             ));
+            if let Some(range) = data_selection.time_range() {
+                time_range_rows
+                    .push(TimeRange::from_sitrep(sitrep_id, req_id, range));
+            }
             for data in data_selection {
                 match data {
                     BundleData::Reconfigurator
@@ -1094,6 +1107,18 @@ impl DataStore {
             .map_err(|e| {
                 public_error_from_diesel(e, ErrorHandler::Server)
                     .internal_context("failed to insert sb_req_ereports rows")
+            })?;
+        }
+        if !time_range_rows.is_empty() {
+            diesel::insert_into(
+                time_range_dsl::fm_support_bundle_request_data_selection_time_range,
+            )
+            .values(time_range_rows)
+            .execute_async(conn)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(e, ErrorHandler::Server)
+                    .internal_context("failed to insert sb_req_time_range rows")
             })?;
         }
 

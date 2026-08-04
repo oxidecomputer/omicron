@@ -8,6 +8,8 @@
 //! They are shared between the support bundle collector and FM case types.
 
 use crate::fm::ereport::EreportFilters;
+use chrono::DateTime;
+use chrono::Utc;
 use itertools::Itertools;
 use omicron_uuid_kinds::SledUuid;
 use serde::{Deserialize, Serialize};
@@ -99,24 +101,41 @@ impl fmt::Display for DisplayBundleData<'_> {
     }
 }
 
+/// Inclusive time bound applied bundle-wide to time-bounded categories
+/// (currently host-info logs and ereports).
+///
+/// `None` on either side means unbounded on that side. When both bounds are
+/// set, `start <= end` is expected; persistence enforces this with a
+/// database CHECK constraint.
+#[derive(Debug, Clone, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub struct BundleTimeRange {
+    pub start: Option<DateTime<Utc>>,
+    pub end: Option<DateTime<Utc>>,
+}
+
 /// A collection of bundle data specifications.
 ///
 /// This wrapper ensures that categories and data always match - you can't
 /// insert (BundleDataCategory::Reconfigurator, BundleData::SpDumps)
 /// because each BundleData determines its own category.
-#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
+///
+/// `time_range`, when set, bounds every time-bounded category's collection
+/// (host-info logs and ereports). Stored as one field here rather than
+/// copied into per-category filters.
+#[derive(Debug, Clone, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct BundleDataSelection {
     data: HashMap<BundleDataCategory, BundleData>,
+    time_range: Option<BundleTimeRange>,
 }
 
 impl BundleDataSelection {
     /// Creates an empty selection with no data categories.
     pub fn new() -> Self {
-        Self { data: HashMap::new() }
+        Self::default()
     }
 
     /// Returns a selection containing all default data categories
-    /// (i.e. "collect everything").
+    /// (i.e. "collect everything") with a bundle-wide 7-day time window.
     pub fn all() -> Self {
         Self::new()
             .with_reconfigurator()
@@ -131,6 +150,12 @@ impl BundleDataSelection {
                     )
                     .expect("no end time set, cannot fail"),
             )
+            .with_time_range(BundleTimeRange {
+                start: Some(
+                    omicron_common::now_db_precision() - chrono::Days::new(7),
+                ),
+                end: None,
+            })
     }
 
     /// Adds reconfigurator state collection.
@@ -174,10 +199,23 @@ impl BundleDataSelection {
         self
     }
 
+    /// Sets the bundle-wide time range. Affects every time-bounded category
+    /// (host-info logs and ereports) at collection time.
+    pub fn with_time_range(mut self, range: BundleTimeRange) -> Self {
+        self.time_range = Some(range);
+        self
+    }
+
     /// Inserts a [`BundleData`] value. If a value with the same category
     /// already exists, the last write wins.
     pub fn insert(&mut self, bundle_data: BundleData) {
         self.data.insert(bundle_data.category(), bundle_data);
+    }
+
+    /// Sets the bundle-wide time range in place (used by code paths that
+    /// build the selection incrementally, e.g. database read paths).
+    pub fn set_time_range(&mut self, range: Option<BundleTimeRange>) {
+        self.time_range = range;
     }
 
     /// Returns `true` if reconfigurator state should be collected.
@@ -211,6 +249,12 @@ impl BundleDataSelection {
             Some(BundleData::Ereports(filters)) => Some(filters),
             _ => None,
         }
+    }
+
+    /// Returns the bundle-wide time range, if any was set. Applies to every
+    /// time-bounded category at collection time.
+    pub fn time_range(&self) -> Option<&BundleTimeRange> {
+        self.time_range.as_ref()
     }
 }
 
@@ -270,12 +314,6 @@ impl fmt::Display for DisplayBundleDataSelection<'_> {
     }
 }
 
-impl Default for BundleDataSelection {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 /// The set of sleds to include. This can either be all sleds, or a set of
 /// specific sleds.
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
@@ -321,13 +359,50 @@ pub(crate) mod test_utils {
     use super::*;
     use proptest::prelude::*;
 
+    fn arb_datetime() -> impl Strategy<Value = DateTime<Utc>> {
+        // Span the full representable range of `DateTime<Utc>` so
+        // round-trip tests exercise far-past and far-future times,
+        // not just a hand-picked window that drifts out of date.
+        let min = DateTime::<Utc>::MIN_UTC.timestamp();
+        let max = DateTime::<Utc>::MAX_UTC.timestamp();
+        (min..=max).prop_map(|secs| DateTime::from_timestamp(secs, 0).unwrap())
+    }
+
+    impl Arbitrary for BundleTimeRange {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
+            // Generated bounds are ordered (start <= end when both are
+            // set) so arbitrary selections satisfy the database CHECK
+            // constraint when round-tripped through persistence tests.
+            (prop::option::of(arb_datetime()), prop::option::of(arb_datetime()))
+                .prop_map(|(a, b)| match (a, b) {
+                    (Some(a), Some(b)) => BundleTimeRange {
+                        start: Some(a.min(b)),
+                        end: Some(a.max(b)),
+                    },
+                    (start, end) => BundleTimeRange { start, end },
+                })
+                .boxed()
+        }
+    }
+
     impl Arbitrary for BundleDataSelection {
         type Parameters = ();
         type Strategy = BoxedStrategy<Self>;
 
         fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
-            prop::collection::vec(any::<BundleData>(), 0..=5)
-                .prop_map(|data| data.into_iter().collect())
+            (
+                prop::collection::vec(any::<BundleData>(), 0..=5),
+                prop::option::of(any::<BundleTimeRange>()),
+            )
+                .prop_map(|(data, time_range)| {
+                    let mut sel: BundleDataSelection =
+                        data.into_iter().collect();
+                    sel.set_time_range(time_range);
+                    sel
+                })
                 .boxed()
         }
     }
