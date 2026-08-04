@@ -756,7 +756,10 @@ async fn opte_interface_set_up(
     )
     .await
     .with_context(|| {
-        format!("failed to ensure default route via gateway {gateway}")
+        format!(
+            "failed to ensure default route on interface {interface} via \
+            gateway {gateway}"
+        )
     })?;
 
     Ok(())

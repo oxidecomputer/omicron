@@ -68,9 +68,17 @@ impl Route {
         }
         // Add the desired route if it doesn't already exist
         let mut cmd = Command::new(PFEXEC);
-        let mut cmd =
-            cmd.args(&[ROUTE, "-n", "get", inet, destination, inet, &gw]);
-        cmd = cmd.args(&["-ifp", datalink]);
+        let cmd = cmd.args(&[
+            ROUTE,
+            "-n",
+            "get",
+            inet,
+            destination,
+            inet,
+            &gw,
+            "-ifp",
+            datalink,
+        ]);
 
         let out = cmd.output().await.map_err(|err| {
             ExecutionError::ExecutionStart {
@@ -85,9 +93,16 @@ impl Route {
             // When that is the case, we'll add the route.
             Some(ESRCH) => {
                 let mut cmd = Command::new(PFEXEC);
-                let mut cmd =
-                    cmd.args(&[ROUTE, "add", inet, destination, inet, &gw]);
-                cmd = cmd.args(&["-ifp", datalink]);
+                let cmd = cmd.args(&[
+                    ROUTE,
+                    "add",
+                    inet,
+                    destination,
+                    inet,
+                    &gw,
+                    "-ifp",
+                    datalink,
+                ]);
                 execute_async(cmd).await?;
             }
             Some(_) | None => {
