@@ -273,6 +273,14 @@ pub async fn realize_blueprint(
         nexus_id,
     );
 
+    // TODO-K: Is this the right place or should it be below reassignment?
+    register_abandon_orphan_sagas_step(
+        &engine.for_component(ExecutionComponent::OmicronZones),
+        &opctx,
+        datastore,
+        blueprint,
+    );
+
     let reassign_saga_output = register_reassign_sagas_step(
         &engine.for_component(ExecutionComponent::OmicronZones),
         &opctx,
@@ -639,6 +647,26 @@ fn register_deploy_clickhouse_single_node_step<'a>(
             async move |_cx| {
                 let res =
                     clickhouse::deploy_single_node(opctx, blueprint).await;
+                Ok(map_err_to_step_warning(res))
+            },
+        )
+        .register();
+}
+
+fn register_abandon_orphan_sagas_step<'a>(
+    registrar: &ComponentRegistrar<'_, 'a>,
+    opctx: &'a OpContext,
+    datastore: &'a DataStore,
+    blueprint: &'a Blueprint,
+) {
+    registrar
+        .new_step(
+            ExecutionStepId::Cleanup,
+            "Abandon orphan sagas",
+            async move |_cx| {
+                let res =
+                    sagas::abandon_orphan_sagas(opctx, datastore, blueprint)
+                        .await;
                 Ok(map_err_to_step_warning(res))
             },
         )

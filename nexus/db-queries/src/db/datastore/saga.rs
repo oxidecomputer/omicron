@@ -393,6 +393,47 @@ impl DataStore {
         .await
         .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
+
+    /// Abandons all unfinished sagas currently assigned to any of the SECs in
+    /// `sec_ids`.
+    ///
+    /// **Warning:** This is destructive. An abandoned saga will never be
+    /// recovered or resumed, so any partial work it did (including a partial
+    /// unwind) is left in place. Only call this for sagas whose current SEC is
+    /// known to be permanently gone and can never be reassigned.
+    pub async fn sagas_abandon_sec(
+        &self,
+        opctx: &OpContext,
+        sec_ids: &[db::saga_types::SecId],
+        reason: SagaReasonAbandoned,
+        comment: String,
+    ) -> Result<usize, Error> {
+        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
+
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        use nexus_db_schema::schema::saga::dsl;
+        diesel::update(
+            dsl::saga
+                .filter(dsl::current_sec.is_not_null())
+                .filter(
+                    dsl::current_sec.eq_any(
+                        sec_ids.into_iter().cloned().collect::<Vec<_>>(),
+                    ),
+                )
+                // TODO-K: Change the enum name here or use another one?
+                .filter(
+                    dsl::saga_state
+                        .eq_any(SagaState::RECOVERY_CANDIDATE_STATES),
+                ),
+        )
+        .set::<SagaStateDbFields>(
+            NewSagaState::Abandoned { reason, comment }.into(),
+        )
+        .execute_async(&*conn)
+        .await
+        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
 }
 
 #[cfg(test)]

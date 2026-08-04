@@ -98,6 +98,83 @@ fn find_expunged_same_generation(
         .collect())
 }
 
+pub(crate) async fn abandon_orphan_sagas(
+    opctx: &OpContext,
+    datastore: &DataStore,
+    blueprint: &Blueprint,
+    // TODO-K: Use external API error?
+) -> Result<(), anyhow::Error> {
+    let log = &opctx.log;
+
+    // TODO-K: clean up and extract some of the logic into a separate fn
+
+    // Oldest generation of all in-service Nexuses
+    //
+    // We chose the oldest of the live generations for a few reasons. During
+    // Nexus handover there is a possibility that there will be more than one
+    // generation of Nexuses in-service, and the target blueprint could become
+    // stale before this code executes. We are conservative and only take sagas
+    // that are strictly older than this generation and could never be
+    // reassigned.
+    let Some(oldest_live_generation) = blueprint
+        .in_service_nexus_zones()
+        .map(|(_, _, nexus)| nexus.nexus_generation)
+        .min()
+    else {
+        return Ok(());
+    };
+    debug!(
+        log,
+        "abandon orphan sagas: retrieved oldest in-service Nexus generation";
+        "oldest_in_service_generation" => %oldest_live_generation,
+    );
+
+    // TODO-K: Add more logs
+
+    // SEC ids of expunged and ready_for_cleanup Nexus zones whose generation is
+    // strictly older than the oldest still-running Nexus generation.
+    let orphan_sec_ids: Vec<SecId> = blueprint
+        .expunged_nexus_zones_ready_for_cleanup(
+            // TODO-K: Create a new reason here
+            BlueprintExpungedZoneAccessReason::NexusSagaReassignment,
+        )
+        .filter_map(|(_sled_id, config, nexus)| {
+            (nexus.nexus_generation < oldest_live_generation)
+                .then_some(SecId(config.id.into_untyped_uuid()))
+        })
+        .collect();
+
+    // TODO-K: Put a comment here
+    let result = datastore
+        .sagas_abandon_sec(
+            opctx,
+            &orphan_sec_ids,
+            nexus_db_model::SagaReasonAbandoned::Unrecoverable,
+            "blah blah".to_string(),
+        )
+        .await;
+
+    match result {
+        Ok(count) => {
+            info!(log, "abandoned orphan sagas";
+                "nexus_zone_ids" => ?orphan_sec_ids,
+                "count" => count,
+            );
+
+            Ok(())
+        }
+        Err(error) => {
+            warn!(log, "failed to re-assign sagas";
+                "nexus_zone_ids" => ?orphan_sec_ids,
+                &error,
+            );
+
+            // TODO-K: Decide if I want anyhow error or not as the return value
+            Err(error.into())
+        }
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
