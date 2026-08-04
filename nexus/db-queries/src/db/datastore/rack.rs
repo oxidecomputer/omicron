@@ -1070,8 +1070,6 @@ impl DataStore {
 mod test {
     use super::*;
     use crate::db::datastore::Discoverability;
-    use crate::db::datastore::SERVICE_IPV4_POOL_NAME;
-    use crate::db::datastore::SERVICE_IPV6_POOL_NAME;
     use crate::db::model::ExternalIp;
     use crate::db::model::IpKind;
     use crate::db::model::IpPoolRange;
@@ -1593,7 +1591,7 @@ mod test {
                     blueprint: blueprint.clone(),
                     service_ip_pools: IdOrdMap::from_iter_unique([
                         service_pool_config(
-                            SERVICE_IPV4_POOL_NAME,
+                            "oxide-service-pool-v4",
                             vec![service_ip_pool_range],
                         ),
                     ])
@@ -1667,7 +1665,7 @@ mod test {
             .await
             .unwrap();
         let svc_pool = &svc_pools.first().expect("v4 service ip pool").db_pool;
-        assert_eq!(svc_pool.name().as_str(), SERVICE_IPV4_POOL_NAME);
+        assert_eq!(svc_pool.name().as_str(), "oxide-service-pool-v4");
 
         let observed_ip_pool_ranges = get_all_ip_pool_ranges(&datastore).await;
         assert_eq!(observed_ip_pool_ranges.len(), 1);
@@ -1791,7 +1789,7 @@ mod test {
                     datasets: vec![],
                     service_ip_pools: IdOrdMap::from_iter_unique([
                         service_pool_config(
-                            SERVICE_IPV4_POOL_NAME,
+                            "oxide-service-pool-v4",
                             vec![service_ip_pool_range],
                         ),
                     ])
@@ -1874,7 +1872,7 @@ mod test {
             .await
             .unwrap();
         let svc_pool = &svc_pools.first().expect("v4 service ip pool").db_pool;
-        assert_eq!(svc_pool.name().as_str(), SERVICE_IPV4_POOL_NAME);
+        assert_eq!(svc_pool.name().as_str(), "oxide-service-pool-v4");
 
         let observed_ip_pool_ranges = get_all_ip_pool_ranges(&datastore).await;
         assert_eq!(observed_ip_pool_ranges.len(), 1);
@@ -2000,7 +1998,7 @@ mod test {
                     datasets: datasets.clone(),
                     service_ip_pools: IdOrdMap::from_iter_unique([
                         service_pool_config(
-                            SERVICE_IPV6_POOL_NAME,
+                            "oxide-service-pool-v6",
                             vec![service_ip_pool_range],
                         ),
                     ])
@@ -2071,7 +2069,7 @@ mod test {
             .await
             .unwrap();
         let svc_pool = &svc_pools.first().expect("v6 service ip pool").db_pool;
-        assert_eq!(svc_pool.name().as_str(), SERVICE_IPV6_POOL_NAME);
+        assert_eq!(svc_pool.name().as_str(), "oxide-service-pool-v6");
 
         let observed_ip_pool_ranges = get_all_ip_pool_ranges(&datastore).await;
         assert_eq!(observed_ip_pool_ranges.len(), 1);
@@ -2176,7 +2174,7 @@ mod test {
                     blueprint: blueprint.clone(),
                     service_ip_pools: IdOrdMap::from_iter_unique([
                         service_pool_config(
-                            SERVICE_IPV4_POOL_NAME,
+                            "oxide-service-pool-v4",
                             vec![service_ip_pool_range],
                         ),
                     ])
@@ -2257,7 +2255,7 @@ mod test {
                     blueprint: blueprint.clone(),
                     service_ip_pools: IdOrdMap::from_iter_unique([
                         service_pool_config(
-                            SERVICE_IPV4_POOL_NAME,
+                            "oxide-service-pool-v4",
                             vec![service_ip_pool_range],
                         ),
                     ])

@@ -4412,9 +4412,13 @@ mod tests {
             // Create (idempotently) the service pool of the appropriate version
             // for each range. We only need at most two (one V4, one V6), but our
             // example system doesn't have many ranges so this should be fine.
-            let service_pool =
-                create_service_ip_pool(&opctx, datastore, pool_range.version())
-                    .await;
+            let service_pool = create_service_ip_pool(
+                &opctx,
+                datastore,
+                "oxide-service-pool-v4",
+                pool_range.version(),
+            )
+            .await;
             datastore
                 .ip_pool_add_range(
                     &opctx,
@@ -4501,6 +4505,7 @@ mod tests {
         let service_pool = create_service_ip_pool(
             &opctx,
             datastore,
+            "oxide-service-pool-v4",
             omicron_common::api::external::IpVersion::V4,
         )
         .await;
