@@ -230,7 +230,7 @@ async fn test_omdb_success_cases() {
     //    consumable ereports, so every post-load analysis is a no-op.)
     // 6. `fm_rendezvous` runs against the loaded sitrep, so its status shows
     //    the executed operations rather than "no FM situation report loaded".
-    // 5. `fm_sitrep_history_pruner` runs, determines we have not reached the
+    // 7. `fm_sitrep_history_pruner` runs, determines we have not reached the
     //    sitrep history limit, and does nothing. However, this task's status
     //    will print the count of sitrep history entries currently in the
     //    database, so activating it explicitly *after* analysis has committed

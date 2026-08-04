@@ -44,7 +44,7 @@ enum Commands {
 #[derive(Debug, Clone, Args)]
 struct ShowArgs {
     /// The config version to show
-    #[clap(value_name = "UUID|VERSION|current")]
+    #[clap(value_name = "VERSION|current")]
     version: VersionOrCurrent,
 
     #[clap(flatten)]
@@ -114,31 +114,27 @@ impl ConfigOpts {
     fn update_if_modified(
         &self,
         current: &FmConfigView,
-        comment: &String,
+        comment: &str,
     ) -> anyhow::Result<Option<FmConfigParam>> {
         let new = self.update(&current.config);
-        (&new != &current.config)
-            .then(|| {
-                let version = match current.source {
-                    FmConfigSource::Default => NonZeroU32::new(1).unwrap(),
-                    FmConfigSource::Override { version, .. } => {
-                        version.checked_add(1).ok_or_else(|| {
-                            anyhow::anyhow!(
-                                "cannot update the FM config, as the maximum \
+        if new == current.config {
+            return Ok(None);
+        }
+        let version = match current.source {
+            FmConfigSource::Default => NonZeroU32::new(1).unwrap(),
+            FmConfigSource::Override { version, .. } => {
+                version.checked_add(1).ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "cannot update the FM config, as the maximum \
                                  number of versions has been reached",
-                            )
-                        })?
-                    }
-                };
-                let param = FmConfigParam {
-                    version,
-                    comment: comment.clone(),
-                    config: new,
-                };
-                param.validate()?;
-                Ok(param)
-            })
-            .transpose()
+                    )
+                })?
+            }
+        };
+        let param =
+            FmConfigParam { version, comment: comment.to_owned(), config: new };
+        param.validate()?;
+        Ok(Some(param))
     }
 }
 
