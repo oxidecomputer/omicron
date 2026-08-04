@@ -301,12 +301,7 @@ impl FmConfigSource {
                     } => {
                         writeln!(
                             f,
-                            "{:>indent$}{SOURCE:<WIDTH$} override",
-                            ""
-                        )?;
-                        writeln!(
-                            f,
-                            "{:>indent$}{VERSION:<WIDTH$} {version}",
+                            "{:>indent$}{SOURCE:<WIDTH$} version {version}",
                             ""
                         )?;
                         writeln!(
@@ -567,7 +562,6 @@ impl FmConfig {
 }
 
 const SOURCE: &str = "source:";
-const VERSION: &str = "  version:";
 const TIME_MODIFIED: &str = "  modified at:";
 const COMMENT: &str = "  comment:";
 const ANALYSIS_ENABLED: &str = "analysis enabled:";
@@ -575,7 +569,6 @@ const SITREP_LIMIT: &str = "sitrep limit:";
 const HISTORY_PRUNING_THRESHOLD: &str = "history pruning threshold:";
 const WIDTH: usize = const_max_len(&[
     SOURCE,
-    VERSION,
     TIME_MODIFIED,
     COMMENT,
     ANALYSIS_ENABLED,

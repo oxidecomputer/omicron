@@ -16,6 +16,7 @@ use nexus_types::fm::FmConfigSource;
 use nexus_types::fm::FmConfigView;
 use nexus_types::fm::config::Setting;
 use nexus_types::fm::config::settings;
+use std::fmt;
 use std::num::NonZeroU32;
 use std::num::ParseIntError;
 use std::str::FromStr;
@@ -36,18 +37,43 @@ enum Commands {
     /// Show a configuration at a given version
     Show(ShowArgs),
 
+    /// Show the system-defined default values for all config settings, as of
+    /// the current Oxide system software version.
+    ShowDefaults(ShowOptions),
+
     /// Override one or more config option(s), creating a new version.
     ///
-    /// Any values which are not provided are carried forwards from the current
-    /// version (or the default, if no overrides exist).
+    /// The flags listed under 'Config Options' provide values for settings in
+    /// the fault-management config. Any number of these flags may be provided
+    /// to set multiple config values. If a flag is *not* provided, the previous
+    /// value of that setting (which may be an override from an earlier config
+    /// version or the system-defined default) is preserved.
+    ///
+    /// A value of 'default' may also be provided for any flag. This will
+    /// explicitly restore that setting to its system-provided default value.
+    /// Note that default values may change in new Oxide system software
+    /// releases. Therefore, there is a semantic difference between an override
+    /// that explicitly sets a config option to a value that *happens* to be the
+    /// default, and restoring the default value through this mechanism: if the
+    /// default value changes in a new system software version, the override
+    /// will remain the same, while the restored default will use the value
+    /// defined by the current software version.
+    ///
+    /// Use the `omdb nexus fm-config show-defaults` command to view the default
+    /// values for all config options.
     Set(SetArgs),
 }
 
 #[derive(Debug, Clone, Args)]
 struct ShowArgs {
     /// The config version to show
-    #[clap(value_name = "VERSION|current")]
-    version: VersionOrCurrent,
+    ///
+    /// A value of 'current' or 'latest' selects the currently active config
+    /// version, while a value of 'default' displays the default values as
+    /// defined by the current Oxide system software release. An integer version
+    /// will select that config version if it exists.
+    #[clap(value_name = "VERSION|current|default")]
+    version: ConfigSelector,
 
     #[clap(flatten)]
     opts: ShowOptions,
@@ -67,7 +93,8 @@ struct SetArgs {
     /// Note that comments are mandatory and may not be empty.
     #[clap(long)]
     comment: String,
-    #[clap(flatten)]
+
+    #[clap(flatten, next_help_heading = "Config Options")]
     config: ConfigOpts,
 }
 
@@ -81,18 +108,31 @@ struct ConfigOpts {
     /// If the number of sitreps in the database, including orphaned sitreps,
     /// reaches or exceeds this limit, fault management analysis will not
     /// produce new sitreps until some are deleted.
+    ///
+    /// This must be a non-zero integer, or 'default'. If it is set to
+    /// 'default', any previous override will be removed, and the system will
+    /// revert this setting to the default value.
     #[clap(long, action = ArgAction::Set)]
     sitrep_limit: Option<Setting<settings::SitrepLimit>>,
 
     /// Sets the number of sitreps in the history table after which the oldest
     /// sitreps will be removed from the history.
     ///
-    /// This must be less than the total sitrep limit.
+    /// This must be a non-zero integer, or 'default'. If it is set to
+    /// 'default', any previous override will be removed, and the system will
+    /// revert this setting to the default value.
+    ///
+    /// If an integer value is provided, it must be less than the total sitrep
+    /// limit.
     #[clap(long, action = ArgAction::Set)]
     history_pruning_threshold:
         Option<Setting<settings::HistoryPruningThreshold>>,
 
     /// BREAK GLASS IN CASE OF EMERGENCY: COMPLETELY DISABLE FM ANALYSIS
+    ///
+    /// This must be a boolean ('true' or 'false'), or 'default'. If it is set to
+    /// 'default', any previous override will be removed, and the system will
+    /// revert this setting to the default value.
     #[clap(long, action = ArgAction::Set)]
     analysis_enabled: Option<Setting<settings::AnalysisEnabled>>,
 }
@@ -128,8 +168,8 @@ impl ConfigOpts {
             FmConfigSource::Override { version, .. } => {
                 version.checked_add(1).ok_or_else(|| {
                     anyhow::anyhow!(
-                        "cannot update the FM config, as the maximum \
-                                 number of versions has been reached",
+                        "cannot update the FM config, as the maximum number of \
+                         versions has been reached",
                     )
                 })?
             }
@@ -142,21 +182,41 @@ impl ConfigOpts {
 }
 
 #[derive(Debug, Clone, Copy)]
-enum VersionOrCurrent {
+enum ConfigSelector {
+    Default,
     Current,
     Version(NonZeroU32),
 }
 
-impl FromStr for VersionOrCurrent {
+impl FromStr for ConfigSelector {
     type Err = ParseIntError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s.eq_ignore_ascii_case("default") {
+            return Ok(Self::Default);
+        }
         if s.eq_ignore_ascii_case("current") || s.eq_ignore_ascii_case("latest")
         {
             return Ok(Self::Current);
         }
         let version = s.trim_start_matches(['v', 'V']).parse()?;
         Ok(Self::Version(version))
+    }
+}
+
+impl fmt::Display for ConfigSelector {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Default => {
+                f.write_str("fault management configuration defaults")
+            }
+            Self::Current => {
+                f.write_str("current fault management configuration")
+            }
+            Self::Version(v) => {
+                write!(f, "fault management configuration v{v}")
+            }
+        }
     }
 }
 
@@ -167,10 +227,13 @@ pub async fn cmd_nexus_fm_config(
 ) -> Result<(), anyhow::Error> {
     match &args.command {
         Commands::Current(opts) => {
-            show_config(client, VersionOrCurrent::Current, opts).await
+            show_config(client, ConfigSelector::Current, opts).await
         }
         Commands::Show(ShowArgs { version, opts }) => {
             show_config(client, *version, opts).await
+        }
+        Commands::ShowDefaults(opts) => {
+            show_config(client, ConfigSelector::Default, opts).await
         }
         Commands::Set(args) => {
             let token = omdb.check_allow_destructive()?;
@@ -181,24 +244,23 @@ pub async fn cmd_nexus_fm_config(
 
 async fn show_config(
     client: &nexus_lockstep_client::Client,
-    version: VersionOrCurrent,
+    selector: ConfigSelector,
     opts: &ShowOptions,
 ) -> Result<(), anyhow::Error> {
-    let rsp = match version {
-        VersionOrCurrent::Current => client.fm_config_show_current().await?,
-        VersionOrCurrent::Version(version) => {
-            client.fm_config_show_version(version.get()).await?
+    let config = match selector {
+        ConfigSelector::Current => {
+            client.fm_config_show_current().await?.into_inner()
         }
+        ConfigSelector::Version(version) => {
+            client.fm_config_show_version(version.get()).await?.into_inner()
+        }
+        ConfigSelector::Default => FmConfigView::default(),
     };
 
-    let config = rsp.into_inner();
     if opts.json {
         serde_json::to_writer_pretty(std::io::stdout().lock(), &config)?;
     } else {
-        println!(
-            "fault management configuration:\n{}",
-            config.display_multiline(2)
-        );
+        println!("{selector}:\n{}", config.display_multiline(2));
     }
 
     Ok(())

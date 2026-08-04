@@ -2435,7 +2435,7 @@ EXECUTING COMMAND: omdb ["nexus", "fm-config", "show", "current"]
 termination: Exited(0)
 ---------------------------------------------
 stdout:
-fault management configuration:
+current fault management configuration:
   source:                    default
   analysis enabled:          true (default)
   sitrep limit:              2500 (default)
@@ -2462,9 +2462,8 @@ EXECUTING COMMAND: omdb ["nexus", "fm-config", "current"]
 termination: Exited(0)
 ---------------------------------------------
 stdout:
-fault management configuration:
-  source:                    override
-    version:                 1
+current fault management configuration:
+  source:                    version 1
     modified at:             <REDACTED_TIMESTAMP>
     comment:                
       I am altering the config. Pray I do not alter it further.
@@ -2493,9 +2492,8 @@ EXECUTING COMMAND: omdb ["nexus", "fm-config", "current"]
 termination: Exited(0)
 ---------------------------------------------
 stdout:
-fault management configuration:
-  source:                    override
-    version:                 2
+current fault management configuration:
+  source:                    version 2
     modified at:             <REDACTED_TIMESTAMP>
     comment:                
       oops i altered it further
@@ -2511,9 +2509,8 @@ EXECUTING COMMAND: omdb ["nexus", "fm-config", "show", "v1"]
 termination: Exited(0)
 ---------------------------------------------
 stdout:
-fault management configuration:
-  source:                    override
-    version:                 1
+fault management configuration v1:
+  source:                    version 1
     modified at:             <REDACTED_TIMESTAMP>
     comment:                
       I am altering the config. Pray I do not alter it further.
