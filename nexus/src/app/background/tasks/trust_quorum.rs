@@ -113,7 +113,7 @@ impl TrustQuorumManager {
 
         let mut statuses = vec![];
         let mut errors = vec![];
-        outputs.extend(workers.join_all().await);
+        outputs.extend(workers.join_remaining().await);
         for (rack_id, epoch, res) in outputs {
             // Propagate panics: we don't cancel the worker tasks, so this
             // can only fail if the task itself already panicked.

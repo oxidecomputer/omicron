@@ -7324,7 +7324,7 @@ async fn cmd_db_validate_artifact_replication(
         }
     }
     let mut rows = Vec::new();
-    outputs.extend(task_set.join_all().await);
+    outputs.extend(task_set.join_remaining().await);
     for (sled, sled_config_result) in outputs {
         let state = match sled_config_result {
             Ok(sled_config) => {

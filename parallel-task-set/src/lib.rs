@@ -128,7 +128,7 @@ impl<T: 'static + Send> ParallelTaskSet<T> {
     /// # Panics
     ///
     /// This method panics any of the tasks return a JoinError
-    pub async fn join_all(self) -> Vec<T> {
+    pub async fn join_remaining(self) -> Vec<T> {
         self.set.join_all().await
     }
 }
@@ -189,7 +189,7 @@ mod test {
             }
         }
 
-        let watermarks = set.join_all().await;
+        let watermarks = set.join_remaining().await;
         for watermark in watermarks {
             check_watermark(watermark);
         }
