@@ -15,23 +15,20 @@
 
 #[macro_use]
 extern crate slog;
-use bootstrap_agent_lockstep_types::MultirackJoinRequest;
-use iddqd::{BiHashItem, BiHashMap, bi_upcast};
+use bootstrap_agent_lockstep_types::{
+    CommitState, MultirackJoinRequest, MultirackJoinServiceState,
+    SledAgentInfo, StartSledAgentsStatus,
+};
 use nexus_types::trust_quorum::TrustQuorumConfig;
 use omicron_common::address::BOOTSTRAP_AGENT_RACK_INIT_PORT;
-use omicron_common::address::Ipv6Subnet;
-use omicron_common::address::RACK_PREFIX_LENGTH;
-use omicron_common::address::SLED_PREFIX_LENGTH;
-use omicron_common::address::get_64_subnet;
-use omicron_uuid_kinds::{RackUuid, SledUuid};
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
+use omicron_uuid_kinds::RackUuid;
 use sled_agent_bootstrap_common::sprockets::{
     SprocketsClient, SprocketsClientError,
 };
 use sled_agent_bootstrap_common::{RssContext, RunRssError};
-use sled_agent_types::sled::StartSledAgentRequest;
-use sled_agent_types::sled::StartSledAgentRequestBody;
+use sled_agent_types::sled::{
+    StartSledAgentRequest, StartSledAgentRequestBody,
+};
 use sled_hardware_types::BaseboardId;
 use slog::{Logger, error, info};
 use slog_error_chain::{InlineErrorChain, SlogInlineError};
@@ -48,9 +45,7 @@ use tokio::{
 };
 use trust_quorum::{NodeApiError, ProxyError};
 use trust_quorum_types::{
-    messages::ReconfigureMsg as TqReconfigureMsg,
-    status::CoordinatorStatus,
-    types::{Epoch, Threshold},
+    messages::ReconfigureMsg as TqReconfigureMsg, types::Epoch,
 };
 
 const INITIAL_TRUST_QUORUM_EPOCH: Epoch = Epoch(1);
@@ -106,124 +101,6 @@ impl From<RunRssError> for MultirackJoinServiceError {
     }
 }
 
-/// The state of the commit phase of the trust quorum protocol
-#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
-pub struct CommitState {
-    rack_id: RackUuid,
-    members: BTreeSet<BaseboardId>,
-    epoch: Epoch,
-    last_committed_epoch: Option<Epoch>,
-    threshold: Threshold,
-    commit_crash_tolerance: u8,
-    acked: BTreeSet<BaseboardId>,
-    fatal_errors: BTreeMap<BaseboardId, String>,
-    transient_errors: BTreeMap<BaseboardId, String>,
-}
-
-/// All the information required to start a sled agent remotely over a sprockets
-/// channel.
-struct StartSledAgentInfo {
-    baseboard_id: BaseboardId,
-    bootstrap_ip: Ipv6Addr,
-    req: StartSledAgentRequest,
-}
-
-/// Status information for a given sled agent
-#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
-pub struct SledAgentInfo {
-    pub baseboard_id: BaseboardId,
-    pub sled_id: SledUuid,
-    pub sled_subnet: Ipv6Subnet<SLED_PREFIX_LENGTH>,
-    pub started: bool,
-    pub fatal_error: Option<String>,
-}
-
-impl SledAgentInfo {
-    fn to_start_sled_agent_info(
-        &self,
-        rack_id: RackUuid,
-        bootstrap_ip: Ipv6Addr,
-    ) -> StartSledAgentInfo {
-        StartSledAgentInfo {
-            baseboard_id: self.baseboard_id.clone(),
-            bootstrap_ip,
-            req: StartSledAgentRequest {
-                generation: 0,
-                schema_version: 1,
-                body: StartSledAgentRequestBody {
-                    id: self.sled_id,
-                    subnet: self.sled_subnet,
-                    use_trust_quorum: true,
-                    is_lrtq_learner: false,
-                    rack_id,
-                },
-            },
-        }
-    }
-}
-
-impl BiHashItem for SledAgentInfo {
-    type K1<'a> = &'a BaseboardId;
-    type K2<'a> = &'a SledUuid;
-
-    fn key1(&self) -> Self::K1<'_> {
-        &self.baseboard_id
-    }
-
-    fn key2(&self) -> Self::K2<'_> {
-        &self.sled_id
-    }
-
-    bi_upcast!();
-}
-
-#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
-pub struct StartSledAgentsStatus {
-    pub sleds: BiHashMap<SledAgentInfo>,
-}
-
-impl StartSledAgentsStatus {
-    pub fn new(req: MultirackJoinRequest) -> Self {
-        let rack_subnet = Ipv6Subnet::<RACK_PREFIX_LENGTH>::new(
-            req.rack_network_config.rack_subnet.addr(),
-        );
-        let sleds = req
-            .trust_quorum_peers
-            .into_iter()
-            .enumerate()
-            .map(|(idx, baseboard_id)| SledAgentInfo {
-                baseboard_id,
-                sled_id: SledUuid::new_v4(),
-                sled_subnet: get_64_subnet(
-                    rack_subnet,
-                    u8::try_from(idx + 1).expect("too many sleds"),
-                ),
-                started: false,
-                fatal_error: None,
-            })
-            .collect();
-
-        StartSledAgentsStatus { sleds }
-    }
-}
-
-/// The current state of the `MultirackJoinService` as retrieved from the
-/// `output_rx` watch channel.
-#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
-#[serde(rename_all = "snake_case", tag = "state")]
-pub enum MultirackJoinServiceState {
-    Uninitialized,
-    Requested,
-    Starting,
-    TrustQuorumReconfigure(TqReconfigureMsg),
-    TrustQuorumPreparing(CoordinatorStatus),
-    TrustQuorumCommitting(CommitState),
-    StartSledAgents(StartSledAgentsStatus),
-    Completed,
-    Failed { message: String },
-    TaskPanicked,
-}
-
 // The value returned from `MultirackJoinServiceTask::tq_prepare`
 enum TqPrepareResult {
     Prepared,
@@ -241,6 +118,38 @@ enum TqCommitResult {
         new_epoch: Epoch,
         just_committed_epoch: Epoch,
     },
+}
+
+/// All the information required to start a sled agent remotely over a sprockets
+/// channel.
+struct StartSledAgentInfo {
+    baseboard_id: BaseboardId,
+    bootstrap_ip: Ipv6Addr,
+    req: StartSledAgentRequest,
+}
+
+impl StartSledAgentInfo {
+    fn new(
+        rack_id: RackUuid,
+        bootstrap_ip: Ipv6Addr,
+        info: SledAgentInfo,
+    ) -> Self {
+        StartSledAgentInfo {
+            baseboard_id: info.baseboard_id.clone(),
+            bootstrap_ip,
+            req: StartSledAgentRequest {
+                generation: 0,
+                schema_version: 1,
+                body: StartSledAgentRequestBody {
+                    id: info.sled_id,
+                    subnet: info.sled_subnet,
+                    use_trust_quorum: true,
+                    is_lrtq_learner: false,
+                    rack_id,
+                },
+            },
+        }
+    }
 }
 
 /// The interface to the Multirack Join Service.
@@ -347,13 +256,13 @@ impl MultirackJoinServiceTask {
 
         // Attempt to start all our sled agents in parallel
         let mut set = JoinSet::new();
-        for sled in status.sleds.iter().cloned() {
+        for info in status.sleds.iter().cloned() {
             // Unwrap is safe, because we constructed both bootstrap_ips and
             // status from trust_quorum_peers.
-            let bootstrap_ip = *bootstrap_ips.get(&sled.baseboard_id).unwrap();
+            let bootstrap_ip = *bootstrap_ips.get(&info.baseboard_id).unwrap();
             self.spawn_start_sled_agent_task(
                 &mut set,
-                sled.to_start_sled_agent_info(rack_id, bootstrap_ip),
+                StartSledAgentInfo::new(rack_id, bootstrap_ip, info),
             );
         }
 

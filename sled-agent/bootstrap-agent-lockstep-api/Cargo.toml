@@ -12,4 +12,3 @@ dropshot.workspace = true
 bootstrap-agent-lockstep-types.workspace = true
 omicron-uuid-kinds.workspace = true
 omicron-workspace-hack.workspace = true
-sled-agent-multirack-join.workspace = true
