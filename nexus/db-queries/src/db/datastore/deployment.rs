@@ -3134,14 +3134,19 @@ mod tests {
     use nexus_types::deployment::BlueprintHostPhase2DesiredContents;
     use nexus_types::deployment::BlueprintHostPhase2DesiredSlots;
     use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
+    use nexus_types::deployment::BlueprintZoneConfig;
+    use nexus_types::deployment::BlueprintZoneDisposition;
     use nexus_types::deployment::BlueprintZoneImageSource;
+    use nexus_types::deployment::BlueprintZoneType;
     use nexus_types::deployment::ExpectedActiveRotSlot;
+    use nexus_types::deployment::OmicronZoneExternalFloatingIp;
     use nexus_types::deployment::PendingMgsUpdate;
     use nexus_types::deployment::PlanningInput;
     use nexus_types::deployment::SledDetails;
     use nexus_types::deployment::SledDisk;
     use nexus_types::deployment::SledFilter;
     use nexus_types::deployment::SledResources;
+    use nexus_types::deployment::blueprint_zone_type;
     use nexus_types::external_api::physical_disk::{
         PhysicalDiskPolicy, PhysicalDiskState,
     };
@@ -3150,17 +3155,25 @@ mod tests {
     use nexus_types::tuf_repo::TufRepoDescription;
     use omicron_common::address::IpRange;
     use omicron_common::address::Ipv6Subnet;
+    use omicron_common::api::external::Vni;
+    use omicron_common::api::internal::shared::PrivateIpConfig;
+    use omicron_common::api::internal::shared::PrivateIpv4Config;
+    use omicron_common::api::internal::shared::PrivateIpv6Config;
     use omicron_common::disk::DiskIdentity;
     use omicron_common::disk::M2Slot;
+    use omicron_common::zpool_name::ZpoolName;
     use omicron_test_utils::dev;
     use omicron_test_utils::dev::poll::CondCheckError;
     use omicron_test_utils::dev::poll::wait_for_condition;
+    use omicron_uuid_kinds::ExternalIpUuid;
     use omicron_uuid_kinds::OmicronZoneUuid;
     use omicron_uuid_kinds::PhysicalDiskUuid;
     use omicron_uuid_kinds::SledUuid;
     use omicron_uuid_kinds::ZpoolUuid;
     use pretty_assertions::assert_eq;
     use rand::Rng;
+    use sled_agent_types::inventory::NetworkInterface;
+    use sled_agent_types::inventory::NetworkInterfaceKind;
     use std::collections::BTreeMap;
     use std::collections::BTreeSet;
     use std::mem;
@@ -3177,6 +3190,7 @@ mod tests {
     use tufaceous_artifact::OsPhase2Tags;
     use tufaceous_artifact::OsVariant;
     use tufaceous_artifact::ZoneTags;
+    use uuid::Uuid;
 
     #[derive(Default)]
     pub struct NetworkResourceControlFlow {
@@ -5151,5 +5165,135 @@ mod tests {
 
         db.terminate().await;
         logctx.cleanup_successful();
+    }
+
+    // Roundtrip an Omicron zone NIC through the database. This exercises
+    // the columns and constraints that ensure we can handle single- and
+    // dual-stack NICs.
+    async fn round_trip_zone_nic_through_blueprint_db(
+        test_name: &'static str,
+        ip_config: PrivateIpConfig,
+    ) {
+        let logctx = dev::test_setup_log(test_name);
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let datastore = db.datastore();
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+
+        let zone_id = OmicronZoneUuid::new_v4();
+        let nic = NetworkInterface {
+            id: Uuid::new_v4(),
+            kind: NetworkInterfaceKind::Service {
+                id: zone_id.into_untyped_uuid(),
+            },
+            name: "test-service-nic".parse().unwrap(),
+            ip_config,
+            mac: "a8:40:25:ff:00:01".parse().unwrap(),
+            vni: Vni::try_from(100).unwrap(),
+            primary: true,
+            slot: 0,
+        };
+        let zone = BlueprintZoneConfig {
+            disposition: BlueprintZoneDisposition::InService,
+            id: zone_id,
+            filesystem_pool: ZpoolName::new_external(ZpoolUuid::new_v4()),
+            zone_type: BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
+                internal_address: "[::1]:12345".parse().unwrap(),
+                lockstep_port: 12346,
+                external_ip: OmicronZoneExternalFloatingIp {
+                    id: ExternalIpUuid::new_v4(),
+                    ip: "192.0.2.1".parse().unwrap(),
+                },
+                nic: nic.clone(),
+                external_tls: false,
+                external_dns_servers: Vec::new(),
+                nexus_generation: Generation::new(),
+            }),
+            image_source: BlueprintZoneImageSource::InstallDataset,
+        };
+
+        let blueprint_id = BlueprintUuid::new_v4();
+        let row = BpOmicronZoneNic::new(blueprint_id, &zone)
+            .expect("built blueprint NIC row")
+            .expect("zone has a service NIC");
+
+        {
+            use nexus_db_schema::schema::bp_omicron_zone_nic::dsl;
+            diesel::insert_into(dsl::bp_omicron_zone_nic)
+                .values(row)
+                .execute_async(&*conn)
+                .await
+                .expect("inserted blueprint zone NIC");
+        }
+        let read: BpOmicronZoneNic = {
+            use nexus_db_schema::schema::bp_omicron_zone_nic::dsl;
+            dsl::bp_omicron_zone_nic
+                .filter(dsl::blueprint_id.eq(to_db_typed_uuid(blueprint_id)))
+                .filter(dsl::id.eq(nic.id))
+                .select(BpOmicronZoneNic::as_select())
+                .first_async(&*conn)
+                .await
+                .expect("read back blueprint zone NIC")
+        };
+
+        // The persisted row rebuilds the exact NIC we started with.
+        let round_tripped =
+            read.into_network_interface_for_zone(zone_id).unwrap();
+        assert_eq!(nic, round_tripped);
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_bp_zone_nic_dual_stack_round_trips_through_db() {
+        let ip_config = PrivateIpConfig::DualStack {
+            v4: PrivateIpv4Config::new(
+                "172.30.2.5".parse().unwrap(),
+                "172.30.2.0/24".parse().unwrap(),
+            )
+            .unwrap(),
+            v6: PrivateIpv6Config::new(
+                "fd00:1122:3344:100::5".parse().unwrap(),
+                "fd00:1122:3344:100::/64".parse().unwrap(),
+            )
+            .unwrap(),
+        };
+        round_trip_zone_nic_through_blueprint_db(
+            "test_bp_zone_nic_dual_stack_round_trips_through_db",
+            ip_config,
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_bp_zone_nic_ipv6_only_round_trips_through_db() {
+        let ip_config = PrivateIpConfig::V6(
+            PrivateIpv6Config::new(
+                "fd00:1122:3344:100::5".parse().unwrap(),
+                "fd00:1122:3344:100::/64".parse().unwrap(),
+            )
+            .unwrap(),
+        );
+        round_trip_zone_nic_through_blueprint_db(
+            "test_bp_zone_nic_ipv6_only_round_trips_through_db",
+            ip_config,
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_bp_zone_nic_ipv4_only_round_trips_through_db() {
+        let ip_config = PrivateIpConfig::V4(
+            PrivateIpv4Config::new(
+                "172.30.2.5".parse().unwrap(),
+                "172.30.2.0/24".parse().unwrap(),
+            )
+            .unwrap(),
+        );
+        round_trip_zone_nic_through_blueprint_db(
+            "test_bp_zone_nic_ipv4_only_round_trips_through_db",
+            ip_config,
+        )
+        .await;
     }
 }
