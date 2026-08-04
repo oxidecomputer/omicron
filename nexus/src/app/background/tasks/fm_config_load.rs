@@ -27,13 +27,13 @@ use tokio::sync::watch;
 pub struct FmConfigLoader {
     datastore: Arc<DataStore>,
     tx: watch::Sender<Option<FmConfigView>>,
-    time_updated: DateTime<Utc>,
+    time_loaded: DateTime<Utc>,
 }
 
 impl FmConfigLoader {
     pub fn new(datastore: Arc<DataStore>) -> Self {
         let (tx, _rx) = watch::channel(None);
-        Self { datastore, tx, time_updated: Utc::now() }
+        Self { datastore, tx, time_loaded: Utc::now() }
     }
 
     pub fn watcher(&self) -> watch::Receiver<Option<FmConfigView>> {
@@ -59,7 +59,7 @@ impl FmConfigLoader {
             }
         });
         if updated {
-            self.time_updated = time_loaded;
+            self.time_loaded = time_loaded;
             info!(
                 opctx.log,
                 "loaded new FM config";
@@ -72,7 +72,7 @@ impl FmConfigLoader {
                 "source" => %config.source,
             );
         }
-        Status::Loaded { config, updated, time_updated: self.time_updated }
+        Status::Loaded { config, updated, time_loaded: self.time_loaded }
     }
 }
 
@@ -125,7 +125,7 @@ mod test {
 
         let status = task.activate(&opctx).await;
         let status = serde_json::from_value::<Status>(status).unwrap();
-        let Status::Loaded { config, updated, time_updated } = status else {
+        let Status::Loaded { config, updated, time_loaded } = status else {
             panic!("expected Status::Loaded, got: {status:?}");
         };
         assert!(updated);
@@ -138,7 +138,7 @@ mod test {
         let status = serde_json::from_value::<Status>(status).unwrap();
         assert_eq!(
             status,
-            Status::Loaded { config: initial, updated: false, time_updated }
+            Status::Loaded { config: initial, updated: false, time_loaded }
         );
         assert!(!rx.has_changed().unwrap());
 

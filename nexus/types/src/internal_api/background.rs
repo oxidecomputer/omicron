@@ -904,7 +904,7 @@ pub enum FmConfigLoadStatus {
         /// The current configuration.
         config: crate::fm::FmConfigView,
         /// The time at which the current config was loaded.
-        time_updated: DateTime<Utc>,
+        time_loaded: DateTime<Utc>,
         /// Whether the config was updated in this activation.
         updated: bool,
     },

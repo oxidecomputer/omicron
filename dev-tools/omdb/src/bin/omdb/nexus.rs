@@ -3705,14 +3705,14 @@ fn print_task_fm_config_loader(details: &serde_json::Value) {
         Ok(FmConfigLoadStatus::Error(error)) => {
             println!("    task did not complete successfully: {error}");
         }
-        Ok(FmConfigLoadStatus::Loaded { config, updated, time_updated }) => {
-            const TIME_UPDATED: &str = "config last updated at:";
-            const UPDATED: &str = "  updated by this activation:";
-            const WIDTH: usize = const_max_len(&[TIME_UPDATED, UPDATED]) + 1;
+        Ok(FmConfigLoadStatus::Loaded { config, updated, time_loaded }) => {
+            const TIME_LOADED: &str = "config last loaded at:";
+            const UPDATED: &str = "  loaded by this activation:";
+            const WIDTH: usize = const_max_len(&[TIME_LOADED, UPDATED]) + 1;
 
             println!(
-                "    {TIME_UPDATED:<WIDTH$}{}",
-                humantime::format_rfc3339_millis(time_updated.into()),
+                "    {TIME_LOADED:<WIDTH$}{}",
+                humantime::format_rfc3339_millis(time_loaded.into()),
             );
             println!("    {UPDATED:<WIDTH$}{updated}");
             println!("    current config:");
