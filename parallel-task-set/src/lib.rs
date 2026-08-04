@@ -61,9 +61,15 @@ impl<T: 'static + Send> ParallelTaskSet<T> {
         Self { semaphore, set }
     }
 
-    /// Spawn the provided `next_future`, potentially waiting until a previously
-    /// spawned task completes if the `ParallelTaskSet` is at its concurrency
-    /// limit, and returning the previously spawned task's output.
+    /// Spawn the provided `next_future`, potentially returning the output of a
+    /// previously-spawned task.
+    ///
+    /// If this `ParallelTaskSet` is at its `max_parallelism`, this method will
+    /// first wait until a previously-spawned task is complete, so that no more
+    /// than `max_parallelism` tasks are active. If this occurs, this method
+    /// will return that task's output. Otherwise, if waiting for an existing
+    /// task is not necessary, this method returns `None`, even if some tasks
+    /// are ready.
     ///
     /// Note that, *unlike* [`join_next()`], this method returning `None` does
     /// NOT indicate that the set is empty, just that it was not necessary to
