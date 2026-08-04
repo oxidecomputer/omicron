@@ -25,7 +25,7 @@ use std::{
     fs::File,
     io::{self, Read},
 };
-use tufaceous_artifact_v2::ArtifactHash;
+use tufaceous_artifact::ArtifactHash;
 
 use crate::{
     AllInstallMetadataFiles, InstallMetadata, InstallMetadataNonBootInfo,

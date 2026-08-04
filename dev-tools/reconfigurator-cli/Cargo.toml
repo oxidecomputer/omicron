@@ -46,8 +46,8 @@ swrite.workspace = true
 tabled.workspace = true
 tokio.workspace = true
 toml.workspace = true
-tufaceous-artifact-v2.workspace = true
-tufaceous-v2.workspace = true
+tufaceous.workspace = true
+tufaceous-artifact.workspace = true
 uuid.workspace = true
 omicron-workspace-hack.workspace = true
 

@@ -45,7 +45,7 @@ use std::collections::BTreeSet;
 use std::hash::Hash;
 use std::sync::Arc;
 use thiserror::Error;
-use tufaceous_artifact_v2::ArtifactHash;
+use tufaceous_artifact::ArtifactHash;
 use typed_rng::TypedUuidRng;
 
 /// Describes an operational error encountered during the collection process

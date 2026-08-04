@@ -9,8 +9,8 @@ use nexus_types::deployment::TargetReleaseDescription;
 use nexus_types::tuf_repo::TufRepoDescription;
 use std::collections::BTreeSet;
 use thiserror::Error;
-use tufaceous_artifact_v2::ArtifactHash;
-use tufaceous_artifact_v2::KnownArtifactTags;
+use tufaceous_artifact::ArtifactHash;
+use tufaceous_artifact::KnownArtifactTags;
 
 #[derive(Debug, Error)]
 pub(crate) enum MeasurementPlanError {

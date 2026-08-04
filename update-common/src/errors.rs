@@ -8,7 +8,7 @@ use camino::Utf8PathBuf;
 use display_error_chain::DisplayErrorChain;
 use dropshot::HttpError;
 use thiserror::Error;
-use tufaceous_artifact::{
+use tufaceous_artifact_v1::{
     ArtifactHashId, ArtifactKind, ArtifactVersion, KnownArtifactKind,
 };
 

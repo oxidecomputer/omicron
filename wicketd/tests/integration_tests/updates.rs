@@ -34,8 +34,8 @@ use sled_agent_resolvable_files::ZoneImageSourceResolver;
 use sled_agent_types::resolvable_files::MupdateOverrideNonBootResult;
 use sled_storage::config::MountConfig;
 use tokio::sync::oneshot;
-use tufaceous_artifact_v2::KnownArtifactTags;
-use tufaceous_v2::{Repository, edit::RepositoryEditor};
+use tufaceous::{Repository, edit::RepositoryEditor};
+use tufaceous_artifact::KnownArtifactTags;
 use wicket::OutputKind;
 use wicket_common::{
     inventory::{SpIdentifier, SpType},

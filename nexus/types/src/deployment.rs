@@ -74,10 +74,10 @@ use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
 use std::sync::Arc;
 use strum::EnumIter;
-use tufaceous_artifact_v2::Artifact;
-use tufaceous_artifact_v2::ArtifactHash;
-use tufaceous_artifact_v2::ArtifactVersion;
-use tufaceous_artifact_v2::ArtifactVersionError;
+use tufaceous_artifact::Artifact;
+use tufaceous_artifact::ArtifactHash;
+use tufaceous_artifact::ArtifactVersion;
+use tufaceous_artifact::ArtifactVersionError;
 
 mod blueprint_diff;
 mod blueprint_display;

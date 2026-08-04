@@ -39,7 +39,7 @@ use tokio::{
     fs::File,
     io::{AsyncWrite, AsyncWriteExt},
 };
-use tufaceous_artifact_v2::ArtifactHash;
+use tufaceous_artifact::ArtifactHash;
 
 use crate::{async_temp_file::AsyncNamedTempFile, hardware::Hardware};
 

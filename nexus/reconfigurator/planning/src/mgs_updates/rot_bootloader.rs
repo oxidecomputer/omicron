@@ -19,11 +19,11 @@ use nexus_types::tuf_repo::TufRepoDescription;
 use sled_hardware_types::BaseboardId;
 use slog::debug;
 use std::sync::Arc;
-use tufaceous_artifact_v2::ArtifactVersion;
-use tufaceous_artifact_v2::KnownArtifactTags;
-use tufaceous_artifact_v2::RotBootloaderTags;
-use tufaceous_artifact_v2::RotKeyTableHash;
-use tufaceous_artifact_v2::artifact_set::GetError;
+use tufaceous_artifact::ArtifactVersion;
+use tufaceous_artifact::KnownArtifactTags;
+use tufaceous_artifact::RotBootloaderTags;
+use tufaceous_artifact::RotKeyTableHash;
+use tufaceous_artifact::artifact_set::GetError;
 
 /// Compares a configured RoT bootloader update with information from inventory
 /// and determines the current status of the update.  See `MgsUpdateStatus`.

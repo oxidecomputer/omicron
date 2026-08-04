@@ -17,7 +17,7 @@ use omicron_common::api::external::Generation;
 use omicron_common::disk::{DatasetKind, DatasetName, M2Slot};
 use omicron_common::update::OmicronInstallManifestSource;
 use omicron_uuid_kinds::MupdateUuid;
-use tufaceous_artifact_v2::ArtifactHash;
+use tufaceous_artifact::ArtifactHash;
 
 use crate::latest::inventory::{
     BootImageHeader, BootPartitionContents, BootPartitionDetails,

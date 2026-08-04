@@ -39,7 +39,7 @@ use serde::{Deserialize, Serialize};
 // depend on sled-hardware-types.
 pub use sled_hardware_types::SledCpuFamily;
 use strum::EnumIter;
-use tufaceous_artifact_v2::ArtifactHash;
+use tufaceous_artifact::ArtifactHash;
 use uuid::Uuid;
 
 use crate::impls::inventory::SourceNatConfigError;

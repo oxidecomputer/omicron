@@ -19,9 +19,9 @@ use std::sync::Arc;
 use tokio::io::AsyncRead;
 use tokio::io::AsyncWriteExt;
 use tokio_util::io::ReaderStream;
-use tufaceous_artifact::ArtifactHash;
-use tufaceous_artifact::ArtifactHashId;
-use tufaceous_artifact::ArtifactKind;
+use tufaceous_artifact_v1::ArtifactHash;
+use tufaceous_artifact_v1::ArtifactHashId;
+use tufaceous_artifact_v1::ArtifactKind;
 
 /// Handle to the data of an extracted artifact.
 ///

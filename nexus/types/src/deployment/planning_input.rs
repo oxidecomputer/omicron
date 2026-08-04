@@ -58,7 +58,7 @@ use std::net::IpAddr;
 use std::sync::Arc;
 use strum::Display;
 use strum::IntoEnumIterator;
-use tufaceous_artifact_v2::ZoneTags;
+use tufaceous_artifact::ZoneTags;
 
 /// Amount of time we're willing to let an MGS-managed update sit in an
 /// "impossible preconditions" state waiting for it to settle.
@@ -1647,7 +1647,7 @@ impl TargetReleaseDescription {
 )]
 pub struct TufRepoContentsError {
     zone_kind: ZoneKind,
-    source: tufaceous_artifact_v2::artifact_set::GetError,
+    source: tufaceous_artifact::artifact_set::GetError,
 }
 
 /// Where oximeter should read from

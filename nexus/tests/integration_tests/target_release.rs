@@ -33,13 +33,13 @@ use omicron_uuid_kinds::{BlueprintUuid, GenericUuid};
 use semver::Version;
 use std::sync::Arc;
 use std::time::Duration;
-use tufaceous_artifact_v2::Artifact;
-use tufaceous_artifact_v2::ArtifactSet;
-use tufaceous_artifact_v2::ArtifactVersion;
-use tufaceous_artifact_v2::KnownArtifactTags;
-use tufaceous_artifact_v2::OsPhase2Tags;
-use tufaceous_artifact_v2::OsVariant;
-use tufaceous_v2::edit::RepositoryEditor;
+use tufaceous::edit::RepositoryEditor;
+use tufaceous_artifact::Artifact;
+use tufaceous_artifact::ArtifactSet;
+use tufaceous_artifact::ArtifactVersion;
+use tufaceous_artifact::KnownArtifactTags;
+use tufaceous_artifact::OsPhase2Tags;
+use tufaceous_artifact::OsVariant;
 
 use crate::integration_tests::updates::TestTrustRoot;
 

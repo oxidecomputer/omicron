@@ -1330,7 +1330,7 @@ mod tests {
     use std::collections::VecDeque;
     use std::net::Ipv6Addr;
     use std::sync::Mutex;
-    use tufaceous_artifact_v2::ArtifactHash;
+    use tufaceous_artifact::ArtifactHash;
 
     // Helper to construct a `RunningZone` even on non-illumos systems.
     struct FakeZoneBuilder {

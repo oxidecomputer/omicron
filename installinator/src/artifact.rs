@@ -12,7 +12,7 @@ use installinator_common::EventReport;
 use ipcc::{InstallinatorImageId, Ipcc};
 use omicron_uuid_kinds::MupdateUuid;
 use tokio::sync::mpsc;
-use tufaceous_artifact_v2::ArtifactHash;
+use tufaceous_artifact::ArtifactHash;
 
 use crate::{errors::HttpError, fetch::FetchReceiver};
 

@@ -3182,14 +3182,14 @@ mod tests {
     use std::sync::atomic::AtomicBool;
     use std::sync::atomic::Ordering;
     use std::time::Duration;
-    use tufaceous_artifact_v2::Artifact;
-    use tufaceous_artifact_v2::ArtifactHash;
-    use tufaceous_artifact_v2::ArtifactSet;
-    use tufaceous_artifact_v2::ArtifactVersion;
-    use tufaceous_artifact_v2::KnownArtifactTags;
-    use tufaceous_artifact_v2::OsPhase2Tags;
-    use tufaceous_artifact_v2::OsVariant;
-    use tufaceous_artifact_v2::ZoneTags;
+    use tufaceous_artifact::Artifact;
+    use tufaceous_artifact::ArtifactHash;
+    use tufaceous_artifact::ArtifactSet;
+    use tufaceous_artifact::ArtifactVersion;
+    use tufaceous_artifact::KnownArtifactTags;
+    use tufaceous_artifact::OsPhase2Tags;
+    use tufaceous_artifact::OsVariant;
+    use tufaceous_artifact::ZoneTags;
     use uuid::Uuid;
 
     #[derive(Default)]

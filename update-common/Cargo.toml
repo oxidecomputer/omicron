@@ -28,17 +28,17 @@ thiserror.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
 tough.workspace = true
-tufaceous-lib.workspace = true
+tufaceous-lib-v1.workspace = true
 omicron-workspace-hack.workspace = true
-tufaceous-brand-metadata.workspace = true
+tufaceous-brand-metadata-v1.workspace = true
 tar.workspace = true
 flate2.workspace = true
 fs-err = { workspace = true, features = ["tokio"] }
 semver.workspace = true
-tufaceous-artifact.workspace = true
+tufaceous-artifact-v1.workspace = true
 
 [dev-dependencies]
 clap.workspace = true
 omicron-test-utils.workspace = true
 rand.workspace = true
-tufaceous.workspace = true
+tufaceous-v1.workspace = true

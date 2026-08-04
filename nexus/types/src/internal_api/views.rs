@@ -47,14 +47,14 @@ use std::time::Duration;
 use std::time::Instant;
 use steno::SagaResultErr;
 use steno::UndoActionError;
-use tufaceous_artifact_v2::Artifact;
-use tufaceous_artifact_v2::ArtifactHash;
-use tufaceous_artifact_v2::ArtifactSet;
-use tufaceous_artifact_v2::KnownArtifactTags;
-use tufaceous_artifact_v2::RotBootloaderTags;
-use tufaceous_artifact_v2::RotKeyTableHash;
-use tufaceous_artifact_v2::RotTags;
-use tufaceous_artifact_v2::SpTags;
+use tufaceous_artifact::Artifact;
+use tufaceous_artifact::ArtifactHash;
+use tufaceous_artifact::ArtifactSet;
+use tufaceous_artifact::KnownArtifactTags;
+use tufaceous_artifact::RotBootloaderTags;
+use tufaceous_artifact::RotKeyTableHash;
+use tufaceous_artifact::RotTags;
+use tufaceous_artifact::SpTags;
 use uuid::Uuid;
 
 pub async fn to_list<T, U>(object_stream: ObjectStream<T>) -> Vec<U>
@@ -915,13 +915,13 @@ impl MgsDrivenUpdateStatusBuilder<'_> {
             CabooseWhich::RotSlotA => RotTags {
                 rot_board: caboose.board.clone(),
                 rot_rkth: caboose.sign.clone().map(RotKeyTableHash),
-                rot_slot: tufaceous_artifact_v2::RotSlot::A,
+                rot_slot: tufaceous_artifact::RotSlot::A,
             }
             .into(),
             CabooseWhich::RotSlotB => RotTags {
                 rot_board: caboose.board.clone(),
                 rot_rkth: caboose.sign.clone().map(RotKeyTableHash),
-                rot_slot: tufaceous_artifact_v2::RotSlot::B,
+                rot_slot: tufaceous_artifact::RotSlot::B,
             }
             .into(),
             CabooseWhich::Stage0 | CabooseWhich::Stage0Next => {
@@ -1270,7 +1270,7 @@ mod test {
     use std::collections::VecDeque;
     use std::sync::Arc;
     use std::time::Instant;
-    use tufaceous_artifact_v2::ArtifactHash;
+    use tufaceous_artifact::ArtifactHash;
 
     #[test]
     fn test_can_serialize_mgs_updates() {

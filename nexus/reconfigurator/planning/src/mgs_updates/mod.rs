@@ -35,8 +35,8 @@ use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeSet;
 use std::sync::Arc;
 use thiserror::Error;
-use tufaceous_artifact_v2::ArtifactVersion;
-use tufaceous_artifact_v2::ArtifactVersionError;
+use tufaceous_artifact::ArtifactVersion;
+use tufaceous_artifact::ArtifactVersionError;
 
 pub(crate) use host_phase_1::PendingHostPhase2Changes;
 

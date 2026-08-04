@@ -10,10 +10,10 @@ use schemars::JsonSchema;
 use semver::Version;
 use serde::Deserialize;
 use serde::Serialize;
-use tufaceous_artifact::Artifact;
-use tufaceous_artifact::ArtifactHash;
-use tufaceous_artifact::ArtifactKind;
-use tufaceous_artifact::ArtifactVersion;
+use tufaceous_artifact_v1::Artifact;
+use tufaceous_artifact_v1::ArtifactHash;
+use tufaceous_artifact_v1::ArtifactKind;
+use tufaceous_artifact_v1::ArtifactVersion;
 
 /// A description of an uploaded TUF repository.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]

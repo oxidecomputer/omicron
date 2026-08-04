@@ -79,11 +79,11 @@ use std::str::FromStr;
 use std::sync::Arc;
 use swrite::{SWrite, swrite, swriteln};
 use tabled::Tabled;
-use tufaceous_artifact_v2::ArtifactHash;
-use tufaceous_artifact_v2::ArtifactVersion;
-use tufaceous_artifact_v2::ArtifactVersionError;
-use tufaceous_v2::RepositoryLoader;
-use tufaceous_v2::edit::RepositoryEditor;
+use tufaceous::RepositoryLoader;
+use tufaceous::edit::RepositoryEditor;
+use tufaceous_artifact::ArtifactHash;
+use tufaceous_artifact::ArtifactVersion;
+use tufaceous_artifact::ArtifactVersionError;
 
 mod log_capture;
 pub mod test_utils;

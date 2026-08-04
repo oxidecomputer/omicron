@@ -54,7 +54,7 @@ use std::collections::BTreeSet;
 use std::net::SocketAddrV6;
 use std::sync::Arc;
 use strum::EnumIter;
-use tufaceous_artifact_v2::ArtifactHash;
+use tufaceous_artifact::ArtifactHash;
 
 mod display;
 
@@ -324,7 +324,7 @@ impl Collection {
             .filter_map(|sled_agent| {
                 match &sled_agent.smf_services_enabled_not_online {
                     SvcsEnabledNotOnlineResult::SvcsEnabledNotOnline(svcs)
-                        if svcs.services.is_empty() =>
+                        if svcs.is_empty() =>
                     {
                         None
                     }

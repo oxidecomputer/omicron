@@ -30,7 +30,7 @@ use omicron_uuid_kinds::ZpoolUuid;
 use semver::Version;
 use sled_agent_types::inventory::ZpoolHealth;
 use std::sync::LazyLock;
-use tufaceous_v2::edit::RepositoryEditor;
+use tufaceous::edit::RepositoryEditor;
 
 type DiskTest<'a> =
     nexus_test_utils::resource_helpers::DiskTest<'a, omicron_nexus::Server>;

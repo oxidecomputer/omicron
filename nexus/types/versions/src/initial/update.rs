@@ -11,7 +11,7 @@ use semver::Version;
 use serde::{Deserialize, Deserializer, Serialize, de::Error as _};
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
-use tufaceous_artifact_v2::ArtifactHash;
+use tufaceous_artifact::ArtifactHash;
 use uuid::Uuid;
 
 /// Wrapper type for TUF root roles to prevent misuse.

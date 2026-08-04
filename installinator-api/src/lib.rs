@@ -22,7 +22,7 @@ use oxide_update_engine_types::events::EventReport;
 use oxide_update_engine_types::spec::GenericSpec;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use tufaceous_artifact_v2::ArtifactHash;
+use tufaceous_artifact::ArtifactHash;
 
 api_versions!([
     // Do not create new versions of this client-side versioned API.

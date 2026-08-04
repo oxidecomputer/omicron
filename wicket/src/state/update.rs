@@ -20,7 +20,7 @@ use serde::{Deserialize, Serialize};
 use slog::Logger;
 use std::collections::BTreeMap;
 use std::fmt::Display;
-use tufaceous_artifact_v2::{ArtifactVersion, KnownArtifactTags};
+use tufaceous_artifact::{ArtifactVersion, KnownArtifactTags};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RackUpdateState {

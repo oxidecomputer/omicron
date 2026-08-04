@@ -48,20 +48,20 @@ use sled_hardware_types::GIMLET_SLED_MODEL;
 use sled_hardware_types::OxideSled;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
-use tufaceous_artifact_v2::Artifact;
-use tufaceous_artifact_v2::ArtifactHash;
-use tufaceous_artifact_v2::ArtifactSet;
-use tufaceous_artifact_v2::ArtifactVersion;
-use tufaceous_artifact_v2::KnownArtifactTags;
-use tufaceous_artifact_v2::OsBoard;
-use tufaceous_artifact_v2::OsPhase1Tags;
-use tufaceous_artifact_v2::OsPhase2Tags;
-use tufaceous_artifact_v2::OsVariant;
-use tufaceous_artifact_v2::RotBootloaderTags;
-use tufaceous_artifact_v2::RotKeyTableHash;
-use tufaceous_artifact_v2::RotTags;
-use tufaceous_artifact_v2::SpTags;
-use tufaceous_artifact_v2::ZoneTags;
+use tufaceous_artifact::Artifact;
+use tufaceous_artifact::ArtifactHash;
+use tufaceous_artifact::ArtifactSet;
+use tufaceous_artifact::ArtifactVersion;
+use tufaceous_artifact::KnownArtifactTags;
+use tufaceous_artifact::OsBoard;
+use tufaceous_artifact::OsPhase1Tags;
+use tufaceous_artifact::OsPhase2Tags;
+use tufaceous_artifact::OsVariant;
+use tufaceous_artifact::RotBootloaderTags;
+use tufaceous_artifact::RotKeyTableHash;
+use tufaceous_artifact::RotTags;
+use tufaceous_artifact::SpTags;
+use tufaceous_artifact::ZoneTags;
 
 use crate::mgs_updates::PendingHostPhase2Changes;
 
@@ -390,7 +390,7 @@ impl TestBoards {
                 RotTags {
                     rot_board: String::from("oxide-rot-1"),
                     rot_rkth: Some(RotKeyTableHash(ROT_SIGN_GIMLET.into())),
-                    rot_slot: tufaceous_artifact_v2::RotSlot::A,
+                    rot_slot: tufaceous_artifact::RotSlot::A,
                 }
                 .into(),
                 ARTIFACT_HASH_ROT_GIMLET_A,
@@ -399,7 +399,7 @@ impl TestBoards {
                 RotTags {
                     rot_board: String::from("oxide-rot-1"),
                     rot_rkth: Some(RotKeyTableHash(ROT_SIGN_GIMLET.into())),
-                    rot_slot: tufaceous_artifact_v2::RotSlot::B,
+                    rot_slot: tufaceous_artifact::RotSlot::B,
                 }
                 .into(),
                 ARTIFACT_HASH_ROT_GIMLET_B,
@@ -408,7 +408,7 @@ impl TestBoards {
                 RotTags {
                     rot_board: String::from("oxide-rot-1"),
                     rot_rkth: Some(RotKeyTableHash(ROT_SIGN_COSMO.into())),
-                    rot_slot: tufaceous_artifact_v2::RotSlot::A,
+                    rot_slot: tufaceous_artifact::RotSlot::A,
                 }
                 .into(),
                 ARTIFACT_HASH_ROT_COSMO_A,
@@ -417,7 +417,7 @@ impl TestBoards {
                 RotTags {
                     rot_board: String::from("oxide-rot-1"),
                     rot_rkth: Some(RotKeyTableHash(ROT_SIGN_COSMO.into())),
-                    rot_slot: tufaceous_artifact_v2::RotSlot::B,
+                    rot_slot: tufaceous_artifact::RotSlot::B,
                 }
                 .into(),
                 ARTIFACT_HASH_ROT_COSMO_B,
@@ -426,7 +426,7 @@ impl TestBoards {
                 RotTags {
                     rot_board: String::from("oxide-rot-1"),
                     rot_rkth: Some(RotKeyTableHash(ROT_SIGN_PSC.into())),
-                    rot_slot: tufaceous_artifact_v2::RotSlot::A,
+                    rot_slot: tufaceous_artifact::RotSlot::A,
                 }
                 .into(),
                 ARTIFACT_HASH_ROT_PSC_A,
@@ -435,7 +435,7 @@ impl TestBoards {
                 RotTags {
                     rot_board: String::from("oxide-rot-1"),
                     rot_rkth: Some(RotKeyTableHash(ROT_SIGN_PSC.into())),
-                    rot_slot: tufaceous_artifact_v2::RotSlot::B,
+                    rot_slot: tufaceous_artifact::RotSlot::B,
                 }
                 .into(),
                 ARTIFACT_HASH_ROT_PSC_B,
@@ -444,7 +444,7 @@ impl TestBoards {
                 RotTags {
                     rot_board: String::from("oxide-rot-1"),
                     rot_rkth: Some(RotKeyTableHash(ROT_SIGN_SWITCH.into())),
-                    rot_slot: tufaceous_artifact_v2::RotSlot::A,
+                    rot_slot: tufaceous_artifact::RotSlot::A,
                 }
                 .into(),
                 ARTIFACT_HASH_ROT_SWITCH_A,
@@ -453,7 +453,7 @@ impl TestBoards {
                 RotTags {
                     rot_board: String::from("oxide-rot-1"),
                     rot_rkth: Some(RotKeyTableHash(ROT_SIGN_SWITCH.into())),
-                    rot_slot: tufaceous_artifact_v2::RotSlot::B,
+                    rot_slot: tufaceous_artifact::RotSlot::B,
                 }
                 .into(),
                 ARTIFACT_HASH_ROT_SWITCH_B,
