@@ -137,3 +137,147 @@ impl backend::Connector for DieselPgConnector {
         })
     }
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use omicron_test_utils::dev;
+    use std::ffi::CString;
+    use std::os::fd::FromRawFd;
+    use std::time::Duration;
+
+    const KEEPALIVE_ARGS: &[(&str, &str)] = &[
+        ("sslmode", "disable"),
+        ("keepalives", "1"),
+        ("keepalives_idle", "10"),
+        ("keepalives_interval", "10"),
+        ("keepalives_count", "12"),
+    ];
+
+    // Regression test for oxidecomputer/omicron#10668. Nexus once held a
+    // dead CockroachDB connection for 45+ minutes because libpq's
+    // keepalive settings were left at their slow defaults. This checks
+    // that our connection URL carries the new keepalive settings. It only
+    // checks the string, not whether the OS applies them; see
+    // `connection_actually_gets_tcp_keepalive_settings` below for that.
+    #[test]
+    fn to_url_includes_keepalive_args() {
+        let log = slog::Logger::root(slog::Discard, slog::o!());
+        let connector = DieselPgConnector::new(
+            &log,
+            DieselPgConnectorArgs {
+                user: "root",
+                db: "omicron",
+                args: KEEPALIVE_ARGS.to_vec(),
+            },
+        );
+        let addr: std::net::SocketAddr = "127.0.0.1:5432".parse().unwrap();
+        let url = connector.to_url(addr).expect("failed to build URL");
+
+        assert!(url.contains("sslmode=disable"));
+        assert!(url.contains("keepalives=1"));
+        assert!(url.contains("keepalives_idle=10"));
+        assert!(url.contains("keepalives_interval=10"));
+        assert!(url.contains("keepalives_count=12"));
+    }
+
+    // Opens a real connection to a real (test) CockroachDB with our exact
+    // connection args, then reads back the TCP socket's real kernel
+    // keepalive settings.
+    //
+    // Diesel's `PgConnection` hides the underlying socket, so we can't
+    // inspect our own connector's connection directly. Instead we open a
+    // second, plain libpq connection with the same connection string and
+    // inspect that one. libpq is what actually sets these options via
+    // `setsockopt`, so this checks real behavior either way.
+    //
+    // This works on Linux, macOS, and illumos (production) with no
+    // platform-specific code. `socket2`'s `keepalive_time` /
+    // `keepalive_interval` / `keepalive_retries` already handle each OS's
+    // different option names. For example, macOS reports `TCP_KEEPIDLE`
+    // as `TCP_KEEPALIVE`. illumos has its own older `TCP_KEEPALIVE_THRESHOLD`,
+    // but also supports the same `TCP_KEEPIDLE`/`TCP_KEEPINTVL`/`TCP_KEEPCNT`
+    // names Linux uses. That's what libpq sets, and what this test reads
+    // back.
+    #[tokio::test]
+    async fn connection_actually_gets_tcp_keepalive_settings() {
+        let logctx = dev::test_setup_log(
+            "connection_actually_gets_tcp_keepalive_settings",
+        );
+        let mut db =
+            crate::db::pub_test_utils::crdb::test_setup_database(&logctx.log)
+                .await;
+
+        let connector = DieselPgConnector::new(
+            &logctx.log,
+            DieselPgConnectorArgs {
+                user: "root",
+                db: "omicron",
+                args: KEEPALIVE_ARGS.to_vec(),
+            },
+        );
+        let url = connector
+            .to_url(db.pg_config().address())
+            .expect("failed to build URL");
+
+        // `PQconnectdb` and friends are blocking calls; libpq has no
+        // async story of its own; this is exactly what `spawn_blocking`
+        // is for.
+        let (raw_fd, connected) = tokio::task::spawn_blocking(move || {
+            let c_url = CString::new(url).expect("URL had an embedded NUL");
+            // Safety: `PQconnectdb` is libpq's ordinary synchronous
+            // connect call. We own the returned `PGconn` and are
+            // responsible for passing it to `PQfinish`, which we do
+            // below on every path.
+            let conn = unsafe { pq_sys::PQconnectdb(c_url.as_ptr()) };
+            let connected =
+                unsafe { pq_sys::PQstatus(conn) } == pq_sys::CONNECTION_OK;
+            let dup_fd = connected.then(|| {
+                // Safety: `PQsocket` only reads a field off the
+                // connection; it doesn't transfer ownership of the fd.
+                // We `dup` it so that `socket2::Socket`'s `Drop` (which
+                // closes what it owns) can't close libpq's copy out from
+                // under it. libpq closes its own fd normally when we call
+                // `PQfinish` below.
+                let raw = unsafe { pq_sys::PQsocket(conn) };
+                unsafe { libc::dup(raw) }
+            });
+            // Safety: `conn` is a valid, owned `PGconn` (or null, which
+            // `PQfinish` accepts and ignores).
+            unsafe { pq_sys::PQfinish(conn) };
+            (dup_fd, connected)
+        })
+        .await
+        .expect("blocking task panicked");
+
+        assert!(connected, "failed to connect to test CockroachDB");
+        let fd = raw_fd.expect("connected but didn't capture a socket fd");
+
+        // Safety: `fd` came from `libc::dup` just above; we exclusively
+        // own this copy and nothing else will read, write, or close it.
+        let socket = unsafe { socket2::Socket::from_raw_fd(fd) };
+
+        assert!(
+            socket.keepalive().expect("failed to read SO_KEEPALIVE"),
+            "expected SO_KEEPALIVE to be enabled"
+        );
+        assert_eq!(
+            socket.keepalive_time().expect("failed to read TCP_KEEPIDLE"),
+            Duration::from_secs(10),
+            "keepalives_idle=10 should set a 10 second idle time",
+        );
+        assert_eq!(
+            socket.keepalive_interval().expect("failed to read TCP_KEEPINTVL"),
+            Duration::from_secs(10),
+            "keepalives_interval=10 should set a 10 second probe interval",
+        );
+        assert_eq!(
+            socket.keepalive_retries().expect("failed to read TCP_KEEPCNT"),
+            12,
+            "keepalives_count=12 should set 12 allowed probe failures",
+        );
+
+        db.cleanup().await.expect("failed to clean up test database");
+        logctx.cleanup_successful();
+    }
+}
