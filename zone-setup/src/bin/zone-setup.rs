@@ -752,7 +752,7 @@ async fn opte_interface_set_up(
     );
     Route::ensure_default_route_with_gateway(
         Gateway::Ipv4(gateway),
-        Some(interface.as_str()),
+        interface.as_str(),
     )
     .await
     .with_context(|| {

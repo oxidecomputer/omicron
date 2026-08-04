@@ -28,7 +28,7 @@ pub enum Gateway {
 impl Route {
     pub async fn ensure_default_route_with_gateway(
         gateway: Gateway,
-        datalink: Option<&str>,
+        datalink: &str,
     ) -> Result<(), ExecutionError> {
         Self::ensure_route_with_gateway("default", gateway, datalink).await
     }
@@ -44,7 +44,7 @@ impl Route {
         Self::ensure_route_with_gateway(
             &underlay_az.to_string(),
             gateway,
-            Some(datalink),
+            datalink,
         )
         .await
     }
@@ -52,7 +52,7 @@ impl Route {
     async fn ensure_route_with_gateway(
         destination: &str,
         gateway: Gateway,
-        datalink: Option<&str>,
+        datalink: &str,
     ) -> Result<(), ExecutionError> {
         let inet;
         let gw;
@@ -70,9 +70,7 @@ impl Route {
         let mut cmd = Command::new(PFEXEC);
         let mut cmd =
             cmd.args(&[ROUTE, "-n", "get", inet, destination, inet, &gw]);
-        if let Some(datalink) = datalink {
-            cmd = cmd.args(&["-ifp", datalink]);
-        }
+        cmd = cmd.args(&["-ifp", datalink]);
 
         let out = cmd.output().await.map_err(|err| {
             ExecutionError::ExecutionStart {
@@ -89,9 +87,7 @@ impl Route {
                 let mut cmd = Command::new(PFEXEC);
                 let mut cmd =
                     cmd.args(&[ROUTE, "add", inet, destination, inet, &gw]);
-                if let Some(datalink) = datalink {
-                    cmd = cmd.args(&["-ifp", datalink]);
-                }
+                cmd = cmd.args(&["-ifp", datalink]);
                 execute_async(cmd).await?;
             }
             Some(_) | None => {
