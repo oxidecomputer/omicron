@@ -12,6 +12,12 @@ use nexus_types::fm;
 use omicron_common::api::external::Error;
 use std::num::NonZeroU32;
 
+/// Database representation of a fault management configuration override.
+///
+/// Each row in the `fm_config` table is an override of the system-defined
+/// default configuration. Values representing the actual config settings are
+/// nullable, with a NULL value indicating that the default for that setting
+/// should be used.
 #[derive(Queryable, Clone, Debug, Selectable, Insertable)]
 #[diesel(table_name = fm_config)]
 pub struct FmConfig {

@@ -69,6 +69,32 @@ impl FmConfigParam {
     }
 }
 
+/// A single configuration setting that is either explicitly overridden to  or
+/// inherits the system-defined default.
+///
+/// This is generic over a `V: `[`SettingValue`] type parameter, which
+/// represents a particular config setting. This trait defines both the type of
+/// the actual configuration value *and* the value of its default.
+/// Implementations of this trait for each field in [`FmConfig`] are defined in
+/// the [`settings`] module using the `define_setting!` macro. This may seem a
+/// bit more complex than just having a [`Default`] implementation for
+/// [`FmConfig`]. However, it is designed to allow us to define the default
+/// value for each setting in a single place, rather than having to keep them in
+/// sync between cases where *some* settings are the defaults and others are
+/// overridden, and cases where the entire config is the default because no
+/// overrides exist.
+///
+/// [`Self::Default`] and [`Self::Override`] have different semantics even when
+/// an overridden value *happens* to be equal to the default value for that
+/// setting. This is because the default value for a given setting may change
+/// across multiple Oxide system software releases. Just because the *current*
+/// default for the sitrep limit is 2500 (for example) does not mean that we
+/// will not change this default value in the future. Therefore, it is necessary
+/// to represent that a particular config setting is explicitly set to "whatever
+/// the default value in the current release happens to be", rather than being
+/// set to a concrete value that is equal to the current default. In the
+/// database, this is represented using `NULL`s to indicate the default value
+/// (which is why [`Setting::into_override`] and the `From<Option>` impl exist).
 #[derive(Default, Serialize, Deserialize)]
 #[serde(tag = "source", content = "value")]
 #[serde(rename = "snake_case")]
@@ -78,6 +104,11 @@ pub enum Setting<V: SettingValue> {
     Default,
 }
 
+/// Defines a particular configuration setting (a field on the [`FmConfig`]
+/// struct). This trait provides both the type of that setting ([`Self::Value`])
+/// and its default value ([`Self::DEFAULT`]), for use with the [`Setting`] type
+///
+/// Implementations of this trait are defined using the `define_setting!` macro.
 pub trait SettingValue {
     type Value: Serialize
         + DeserializeOwned
@@ -107,6 +138,14 @@ impl<V: SettingValue> Setting<V> {
         Self::Override(value)
     }
 
+    /// If this setting is overridden, applies `f` to the override value and
+    /// returns `Some`. Otherwise, if this setting is the default, returns
+    /// `None`.
+    ///
+    /// This both converts overridden settings into `Option`s and transforms the
+    /// override value in one method. This is primarily intended for use in
+    /// converting a `FmConfig` to its database model, in cases where a value
+    /// must also be converted to a database model friendly type.
     pub fn map_override<T>(self, f: impl FnOnce(V::Value) -> T) -> Option<T> {
         match self {
             Self::Override(val) => Some(f(val)),
@@ -114,10 +153,17 @@ impl<V: SettingValue> Setting<V> {
         }
     }
 
+    /// Converts this setting into an `Option`al override value, such as when
+    /// converting `Setting`s to their database model representation.
+    ///
+    /// If transformation of the value of the override is also required, see
+    /// [`Self::map_override`].
     pub fn into_override(self) -> Option<V::Value> {
         self.map_override(core::convert::identity)
     }
 
+    /// Optionally borrows the value of the override, if this setting is
+    /// overridden.
     pub fn as_override(&self) -> Option<&V::Value> {
         match self {
             Self::Override(v) => Some(v),
@@ -125,6 +171,11 @@ impl<V: SettingValue> Setting<V> {
         }
     }
 
+    /// Returns the concrete value of this configuration setting.
+    ///
+    /// This is intended for use by consumers of the config setting, and returns
+    /// the override if the setting is overridden, or the default value if it is
+    /// not.
     pub fn value(self) -> V::Value {
         match self {
             Self::Override(v) => v,
@@ -333,7 +384,7 @@ impl fmt::Display for FmConfigSource {
         match self {
             Self::Default => write!(f, "default"),
             Self::Override { version, .. } => {
-                write!(f, "override (v{version})")
+                write!(f, "v{version}")
             }
         }
     }
