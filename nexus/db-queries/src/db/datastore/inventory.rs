@@ -5,6 +5,7 @@
 use super::DataStore;
 use crate::authz;
 use crate::context::OpContext;
+use crate::db::datastore::DbConnection;
 use crate::db::pagination::{Paginator, paginated, paginated_multicolumn};
 use crate::db::queries::ALLOW_FULL_TABLE_SCAN_SQL;
 use anyhow::Context;
@@ -23,6 +24,7 @@ use diesel::PgExpressionMethods;
 use diesel::QueryDsl;
 use diesel::Table;
 use diesel::expression::SelectableHelper;
+use diesel::result::Error as DieselError;
 use diesel::sql_types::Nullable;
 use futures::FutureExt;
 use futures::future::BoxFuture;
@@ -104,7 +106,6 @@ use omicron_common::api::external::Error;
 use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
-use omicron_common::bail_unless;
 use omicron_common::disk::M2Slot;
 use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::DatasetUuid;
@@ -135,6 +136,67 @@ use std::collections::BTreeSet;
 use std::num::NonZeroU32;
 use std::sync::Arc;
 use uuid::Uuid;
+
+/// Error type for the private
+/// [`DataStore::inventory_collection_read_batched_on_connection()`] method.
+///
+/// Reading an inventory is complex, and can fail for a few different reasons
+/// (described by the variants of this enum). We convert this type to a public
+/// [`Error`] before returning out of this module.
+#[derive(Debug)]
+enum InventoryReadError {
+    /// Standard database execution errors.
+    DbError(DieselError),
+
+    /// `BadDbRead` is used for any "illegal state" errors, where we expect to
+    /// convert data read from the db back to a valid Rust type and cannot.
+    /// These should be impossible: they indicate we've messed up some CHECK
+    /// constraints somewhere or a similar problem.
+    BadDbRead(String),
+
+    /// `UnexpectedState` is used for mismatches between tables, where data
+    /// loaded from one table implies the insert should have added associated
+    /// data in another table, but that associated data isn't there. This has
+    /// two common causes that we can't 100% tell apart:
+    ///
+    /// * The collection was deleted while we were reading (in particular:
+    ///   in between the reads of two tables that contain related data).
+    /// * Either this method or the insert method is buggy, and the
+    ///   collection can't be loaded until one or the other is fixed.
+    ///   (This comes up during development sometimes, but should be rare
+    ///   in production.)
+    ///
+    /// If we encounter one of these data mismatches, we'll always return an
+    /// error. To attempt to decide which case we're in, we'll must check
+    /// whether the top-level metadata row for the collection with ID `id` still
+    /// exists: if it doesn't, we assume we're in the "deleted while reading"
+    /// case and return a `NotFound` error; otherwise, we assume we're in the
+    /// "buggy code" case and return an internal error.
+    UnexpectedState(String),
+
+    /// The collection was definitively pruned while it was being read.
+    ///
+    /// This error is returned when we know the collection existed when we
+    /// started reading it and know the collection did not exist when we got to
+    /// the end of reading it.
+    DeletedWhileBeingRead,
+}
+
+impl From<DieselError> for InventoryReadError {
+    fn from(err: DieselError) -> Self {
+        Self::DbError(err)
+    }
+}
+
+impl InventoryReadError {
+    fn bad_db_read(s: impl Into<String>) -> Self {
+        Self::BadDbRead(s.into())
+    }
+
+    fn unexpected_state(s: impl Into<String>) -> Self {
+        Self::UnexpectedState(s.into())
+    }
+}
 
 /// "limit" used in SQL queries that paginate through all SPs, RoTs, sleds,
 /// omicron zones, etc.
@@ -2235,7 +2297,8 @@ impl DataStore {
         // transaction for simplicity.  Similar considerations apply.  We could
         // break it up if these transactions become too big.  But we'd need a
         // way to stop other clients from discovering a collection after we
-        // start removing it (see: inventory_collection_read_batched, which
+        // start removing it (see:
+        // inventory_collection_read_batched_on_connection, which
         // reads the inventory non-transactionally) and we'd also need to make
         // sure we didn't leak a collection if we crash while deleting it.
         let conn = self.pool_connection_authorized(opctx).await?;
@@ -2866,16 +2929,146 @@ impl DataStore {
             return Ok(None);
         };
 
-        Ok(Some(self.inventory_collection_read(opctx, collection_id).await?))
+        // Reading an inventory collection non-transactionally is inherently
+        // racy: the collection could be pruned while we're reading it. If the
+        // collection ID we just loaded isn't found, check for a newer one.
+        //
+        // We only retry once: we don't want some kind of pathological inventory
+        // churn to cause this method to go into an infinite loop, and we expect
+        // inventory collections to be inserted/pruned on the order of minutes,
+        // which means a single retry should be fine in practice.
+        let err = match self
+            .inventory_collection_read(opctx, collection_id)
+            .await
+        {
+            Ok(collection) => return Ok(Some(collection)),
+            Err(err @ Error::NotFound { .. }) => {
+                // Check and see if there's a newer collection than the one we
+                // believed was the latest.
+                let Some(new_collection_id) =
+                    self.inventory_get_latest_collection_id(opctx).await?
+                else {
+                    // This should be impossible: we did have a latest inventory
+                    // collection ID, but now don't? Return the error we got
+                    // from our prior read attempt.
+                    error!(
+                        opctx.log,
+                        "failed to find any latest collection ID after failing \
+                         to read previous latest collection";
+                        "prev-collection-id" => %collection_id,
+                        "prev-collection-err" => InlineErrorChain::new(&err),
+                    );
+                    return Err(Error::internal_error(format!(
+                        "no latest collection ID after failing to read a \
+                         former latest collection with ID {collection_id}"
+                    )));
+                };
+
+                if new_collection_id == collection_id {
+                    // No newer collection - handle the error as-is.
+                    err
+                } else {
+                    // There is a newer collection - try to read it instead.
+                    // This is our singular retry.
+                    match self
+                        .inventory_collection_read(opctx, new_collection_id)
+                        .await
+                    {
+                        Ok(collection) => return Ok(Some(collection)),
+                        Err(err) => err,
+                    }
+                }
+            }
+
+            // Handle any other error as-is.
+            Err(err) => err,
+        };
+
+        // `inventory_collection_read()` can return a `NotFound` error, but we
+        // never expect to return a `NotFound` from _this_ method. If the latest
+        // collection was pruned while we were reading it, we should have read
+        // the new latest inventory in our singular retry above; the only way to
+        // have a `NotFound` here is if that retry also failed with `NotFound`
+        // (or more unusually, we got a `NotFound` error while reading a
+        // collection that appears to still be the latest!). Convert `NotFound`
+        // to internal errors.
+        match err {
+            Error::NotFound { message } => {
+                error!(
+                    opctx.log,
+                    "unexpected NotFound error while reading latest \
+                     inventory collection";
+                    "context" => message.internal_context(),
+                );
+                return Err(Error::internal_error(format!(
+                    "latest inventory collection not found: {}",
+                    message.internal_context()
+                )));
+            }
+            _ => Err(err),
+        }
     }
 
-    /// Attempt to read the current collection
+    /// Attempt to read the a specific collection
     pub async fn inventory_collection_read(
         &self,
         opctx: &OpContext,
         id: CollectionUuid,
     ) -> Result<Collection, Error> {
-        self.inventory_collection_read_batched(opctx, id, SQL_BATCH_SIZE).await
+        let conn = self.pool_connection_authorized(opctx).await?;
+        match self
+            .inventory_collection_read_batched_on_connection(
+                &conn,
+                id,
+                SQL_BATCH_SIZE,
+            )
+            .await
+        {
+            Ok(collection) => Ok(collection),
+            Err(InventoryReadError::DbError(err)) => {
+                Err(public_error_from_diesel(err, ErrorHandler::Server))
+            }
+            Err(InventoryReadError::BadDbRead(message)) => {
+                Err(Error::internal_error(message))
+            }
+            Err(InventoryReadError::UnexpectedState(message)) => {
+                // See the comments on `InventoryReadError::UnexpectedState`:
+                // we've read a torn / invalid inventory collection, and the
+                // most likely cause of this is that it was deleted while we
+                // were reading it. To confirm this, check whether the metadata
+                // row for the collection still exists; if it doesn't, this
+                // collection has been deleted.
+                let err =
+                    match DataStore::inventory_collection_read_metadata_on_conn(
+                        &conn, id,
+                    )
+                    .await
+                    {
+                        Ok(Some(_)) => {
+                            // The collection exists but is invalid in some way:
+                            // turn this into an internal error.
+                            Error::internal_error(message)
+                        }
+                        Ok(None) => {
+                            // The collection doesn't exist anymore - ignore the
+                            // message describing what mismatch we found and
+                            // just return `NotFound`.
+                            Error::non_resourcetype_not_found(format!(
+                                "inventory collection not found: {id}"
+                            ))
+                        }
+                        Err(err) => {
+                            public_error_from_diesel(err, ErrorHandler::Server)
+                        }
+                    };
+                Err(err)
+            }
+            Err(InventoryReadError::DeletedWhileBeingRead) => {
+                Err(Error::non_resourcetype_not_found(format!(
+                    "inventory collection not found: {id}"
+                )))
+            }
+        }
     }
 
     /// Attempt to read the current collection with the provided batch size.
@@ -2890,13 +3083,12 @@ impl DataStore {
     /// [`Self::inventory_get_latest_collection`] and
     /// [`Self::inventory_collection_read`], so that we can test with smaller
     /// batch sizes.
-    async fn inventory_collection_read_batched(
+    async fn inventory_collection_read_batched_on_connection(
         &self,
-        opctx: &OpContext,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
         id: CollectionUuid,
         batch_size: NonZeroU32,
-    ) -> Result<Collection, Error> {
-        let conn = self.pool_connection_authorized(opctx).await?;
+    ) -> Result<Collection, InventoryReadError> {
         let db_id = to_db_typed_uuid(id);
 
         let errors: Vec<String> = {
@@ -2915,11 +3107,8 @@ impl DataStore {
                 .filter(dsl::inv_collection_id.eq(db_id))
                 .order_by(dsl::idx)
                 .select(InvCollectionError::as_select())
-                .load_async(&*conn)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                })?;
+                .load_async(conn)
+                .await?;
                 paginator =
                     p.found_batch(&batch, &|row: &InvCollectionError| row.idx);
                 errors.extend(batch.into_iter().map(|e| e.message));
@@ -2944,11 +3133,8 @@ impl DataStore {
                 )
                 .filter(dsl::inv_collection_id.eq(db_id))
                 .select(InvServiceProcessor::as_select())
-                .load_async(&*conn)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                })?;
+                .load_async(conn)
+                .await?;
                 paginator = p.found_batch(&batch, &|row| row.hw_baseboard_id);
                 sps.extend(batch.into_iter().map(|row| {
                     let baseboard_id = row.hw_baseboard_id;
@@ -2978,11 +3164,8 @@ impl DataStore {
                 )
                 .filter(dsl::inv_collection_id.eq(db_id))
                 .select(InvRootOfTrust::as_select())
-                .load_async(&*conn)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                })?;
+                .load_async(conn)
+                .await?;
                 paginator = p.found_batch(&batch, &|row| row.hw_baseboard_id);
                 rots.extend(batch.into_iter().map(|rot_row| {
                     let baseboard_id = rot_row.hw_baseboard_id;
@@ -3012,11 +3195,8 @@ impl DataStore {
                 )
                 .filter(dsl::inv_collection_id.eq(db_id))
                 .select(InvSledAgent::as_select())
-                .load_async(&*conn)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                })?;
+                .load_async(conn)
+                .await?;
                 paginator = p.found_batch(&batch, &|row| row.sled_id);
                 rows.extend(batch);
             }
@@ -3047,11 +3227,8 @@ impl DataStore {
                 )
                 .filter(dsl::inv_collection_id.eq(db_id))
                 .select(InvNvmeDiskFirmware::as_select())
-                .load_async(&*conn)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                })?;
+                .load_async(conn)
+                .await?;
                 paginator =
                     p.found_batch(&batch, &|row| (row.sled_id(), row.slot()));
                 for firmware in batch {
@@ -3092,11 +3269,8 @@ impl DataStore {
                 )
                 .filter(dsl::inv_collection_id.eq(db_id))
                 .select(InvPhysicalDisk::as_select())
-                .load_async(&*conn)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                })?;
+                .load_async(conn)
+                .await?;
                 paginator =
                     p.found_batch(&batch, &|row| (row.sled_id, row.slot));
                 for disk in batch {
@@ -3141,11 +3315,8 @@ impl DataStore {
                 )
                 .filter(dsl::inv_collection_id.eq(db_id))
                 .select(InvZpool::as_select())
-                .load_async(&*conn)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                })?;
+                .load_async(conn)
+                .await?;
                 paginator = p.found_batch(&batch, &|row| (row.sled_id, row.id));
                 for zpool in batch {
                     zpools
@@ -3175,11 +3346,8 @@ impl DataStore {
                 )
                 .filter(dsl::inv_collection_id.eq(db_id))
                 .select(InvDataset::as_select())
-                .load_async(&*conn)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                })?;
+                .load_async(conn)
+                .await?;
                 paginator = p.found_batch(&batch, &|row| {
                     (row.sled_id, row.name.clone())
                 });
@@ -3212,11 +3380,8 @@ impl DataStore {
                 )
                 .filter(dsl::inv_collection_id.eq(db_id))
                 .select(InvSvcEnabledNotOnline::as_select())
-                .load_async(&*conn)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                })?;
+                .load_async(conn)
+                .await?;
                 paginator = p.found_batch(&batch, &|row| (row.sled_id, row.id));
                 for svc in batch {
                     svcs.entry(svc.sled_id.into()).or_default().push(svc);
@@ -3245,11 +3410,8 @@ impl DataStore {
                     )
                     .filter(dsl::inv_collection_id.eq(db_id))
                     .select(InvSvcEnabledNotOnlineService::as_select())
-                    .load_async(&*conn)
-                    .await
-                    .map_err(|e| {
-                        public_error_from_diesel(e, ErrorHandler::Server)
-                    })?;
+                    .load_async(conn)
+                    .await?;
                 paginator = p.found_batch(&batch, &|row| (row.sled_id, row.id));
                 for svc in batch {
                     svcs.entry(svc.sled_id.into()).or_default().push(svc);
@@ -3280,11 +3442,8 @@ impl DataStore {
                     )
                     .filter(dsl::inv_collection_id.eq(db_id))
                     .select(InvSvcEnabledNotOnlineParseError::as_select())
-                    .load_async(&*conn)
-                    .await
-                    .map_err(|e| {
-                        public_error_from_diesel(e, ErrorHandler::Server)
-                    })?;
+                    .load_async(conn)
+                    .await?;
                 paginator = p.found_batch(&batch, &|row| (row.sled_id, row.id));
                 for svc in batch {
                     svcs.entry(svc.sled_id.into()).or_default().push(svc);
@@ -3319,11 +3478,8 @@ impl DataStore {
                 )
                 .filter(dsl::id.eq_any(baseboard_id_ids.clone()))
                 .select(HwBaseboardId::as_select())
-                .load_async(&*conn)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                })?;
+                .load_async(conn)
+                .await?;
                 paginator = p.found_batch(&batch, &|row| row.id);
                 bbs.extend(
                     batch
@@ -3337,31 +3493,28 @@ impl DataStore {
 
         // Having those, we can replace the keys in the maps above with
         // references to the actual baseboard rather than the uuid.
-        let sps = sps
+        let Ok(sps) = sps
             .into_iter()
             .map(|(id, sp)| {
-                baseboards_by_id.get(&id).map(|bb| (bb.clone(), sp)).ok_or_else(
-                    || {
-                        Error::internal_error(
-                            "missing baseboard that we should have fetched",
-                        )
-                    },
-                )
+                baseboards_by_id.get(&id).map(|bb| (bb.clone(), sp)).ok_or(())
             })
-            .collect::<Result<BTreeMap<_, _>, _>>()?;
-        let rots = rots
+            .collect::<Result<BTreeMap<_, _>, ()>>()
+        else {
+            return Err(InventoryReadError::unexpected_state(
+                "missing baseboard that we should have fetched",
+            ));
+        };
+        let Ok(rots) = rots
             .into_iter()
             .map(|(id, rot)| {
-                baseboards_by_id
-                    .get(&id)
-                    .map(|bb| (bb.clone(), rot))
-                    .ok_or_else(|| {
-                        Error::internal_error(
-                            "missing baseboard that we should have fetched",
-                        )
-                    })
+                baseboards_by_id.get(&id).map(|bb| (bb.clone(), rot)).ok_or(())
             })
-            .collect::<Result<BTreeMap<_, _>, _>>()?;
+            .collect::<Result<BTreeMap<_, _>, ()>>()
+        else {
+            return Err(InventoryReadError::unexpected_state(
+                "missing baseboard that we should have fetched",
+            ));
+        };
 
         // Fetch the host phase 1 active slots found.
         let host_phase_1_active_slots = {
@@ -3381,20 +3534,16 @@ impl DataStore {
                 )
                 .filter(dsl::inv_collection_id.eq(db_id))
                 .select(InvHostPhase1ActiveSlot::as_select())
-                .load_async(&*conn)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                })?;
+                .load_async(conn)
+                .await?;
                 paginator = p.found_batch(&batch, &|row| row.hw_baseboard_id);
                 for row in batch {
-                    let bb = baseboards_by_id
-                        .get(&row.hw_baseboard_id)
-                        .ok_or_else(|| {
-                            Error::internal_error(
-                                "missing baseboard that we should have fetched",
-                            )
-                        })?;
+                    let Some(bb) = baseboards_by_id.get(&row.hw_baseboard_id)
+                    else {
+                        return Err(InventoryReadError::unexpected_state(
+                            "missing baseboard that we should have fetched",
+                        ));
+                    };
                     slots.insert(Arc::clone(bb), row.into());
                 }
             }
@@ -3420,11 +3569,8 @@ impl DataStore {
                 )
                 .filter(dsl::inv_collection_id.eq(db_id))
                 .select(InvHostPhase1FlashHash::as_select())
-                .load_async(&*conn)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                })?;
+                .load_async(conn)
+                .await?;
                 paginator = p.found_batch(&batch, &|row| {
                     (row.hw_baseboard_id, row.slot)
                 });
@@ -3441,12 +3587,11 @@ impl DataStore {
                 .entry(slot)
                 .or_insert_with(BTreeMap::new);
             let Some(bb) = baseboards_by_id.get(&p.hw_baseboard_id) else {
-                let msg = format!(
+                return Err(InventoryReadError::unexpected_state(format!(
                     "unknown baseboard found in \
                      inv_host_phase_1_flash_hash: {}",
                     p.hw_baseboard_id
-                );
-                return Err(Error::internal_error(&msg));
+                )));
             };
 
             let previous = by_baseboard.insert(
@@ -3458,12 +3603,13 @@ impl DataStore {
                     hash: *p.hash,
                 },
             );
-            bail_unless!(
-                previous.is_none(),
-                "duplicate host phase 1 flash hash found: {:?} baseboard {:?}",
-                p.slot,
-                p.hw_baseboard_id
-            );
+            if previous.is_some() {
+                return Err(InventoryReadError::bad_db_read(format!(
+                    "duplicate host phase 1 flash hash found: \
+                     {:?} baseboard {:?}",
+                    p.slot, p.hw_baseboard_id
+                )));
+            }
         }
 
         // Fetch records of cabooses found.
@@ -3484,11 +3630,8 @@ impl DataStore {
                 )
                 .filter(dsl::inv_collection_id.eq(db_id))
                 .select(InvCaboose::as_select())
-                .load_async(&*conn)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                })?;
+                .load_async(conn)
+                .await?;
                 paginator = p.found_batch(&batch, &|row| {
                     (row.hw_baseboard_id, row.which)
                 });
@@ -3518,11 +3661,8 @@ impl DataStore {
                     paginated(dsl::sw_caboose, dsl::id, &p.current_pagparams())
                         .filter(dsl::id.eq_any(sw_caboose_ids.clone()))
                         .select(SwCaboose::as_select())
-                        .load_async(&*conn)
-                        .await
-                        .map_err(|e| {
-                            public_error_from_diesel(e, ErrorHandler::Server)
-                        })?;
+                        .load_async(conn)
+                        .await?;
                 paginator = p.found_batch(&batch, &|row| row.id);
                 cabooses.extend(batch.into_iter().map(|sw_caboose_row| {
                     (
@@ -3544,18 +3684,16 @@ impl DataStore {
                 .entry(nexus_types::inventory::CabooseWhich::from(c.which))
                 .or_insert_with(BTreeMap::new);
             let Some(bb) = baseboards_by_id.get(&c.hw_baseboard_id) else {
-                let msg = format!(
+                return Err(InventoryReadError::unexpected_state(format!(
                     "unknown baseboard found in inv_caboose: {}",
                     c.hw_baseboard_id
-                );
-                return Err(Error::internal_error(&msg));
+                )));
             };
             let Some(sw_caboose) = cabooses_by_id.get(&c.sw_caboose_id) else {
-                let msg = format!(
+                return Err(InventoryReadError::unexpected_state(format!(
                     "unknown caboose found in inv_caboose: {}",
                     c.sw_caboose_id
-                );
-                return Err(Error::internal_error(&msg));
+                )));
             };
 
             let previous = by_baseboard.insert(
@@ -3566,12 +3704,12 @@ impl DataStore {
                     caboose: sw_caboose.clone(),
                 },
             );
-            bail_unless!(
-                previous.is_none(),
-                "duplicate caboose found: {:?} baseboard {:?}",
-                c.which,
-                c.hw_baseboard_id
-            );
+            if previous.is_some() {
+                return Err(InventoryReadError::bad_db_read(format!(
+                    "duplicate caboose found: {:?} baseboard {:?}",
+                    c.which, c.hw_baseboard_id
+                )));
+            }
         }
 
         // Fetch records of RoT pages found.
@@ -3592,11 +3730,8 @@ impl DataStore {
                 )
                 .filter(dsl::inv_collection_id.eq(db_id))
                 .select(InvRotPage::as_select())
-                .load_async(&*conn)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                })?;
+                .load_async(conn)
+                .await?;
                 paginator = p.found_batch(&batch, &|row| {
                     (row.hw_baseboard_id, row.which)
                 });
@@ -3629,11 +3764,8 @@ impl DataStore {
                 )
                 .filter(dsl::id.eq_any(sw_rot_page_ids.clone()))
                 .select(SwRotPage::as_select())
-                .load_async(&*conn)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                })?;
+                .load_async(conn)
+                .await?;
                 paginator = p.found_batch(&batch, &|row| row.id);
                 rot_pages.extend(batch.into_iter().map(|sw_rot_page_row| {
                     (
@@ -3655,20 +3787,18 @@ impl DataStore {
                 .entry(nexus_types::inventory::RotPageWhich::from(p.which))
                 .or_insert_with(BTreeMap::new);
             let Some(bb) = baseboards_by_id.get(&p.hw_baseboard_id) else {
-                let msg = format!(
+                return Err(InventoryReadError::unexpected_state(format!(
                     "unknown baseboard found in inv_root_of_trust_page: {}",
                     p.hw_baseboard_id
-                );
-                return Err(Error::internal_error(&msg));
+                )));
             };
             let Some(sw_rot_page) =
                 rot_pages_by_id.get(&p.sw_root_of_trust_page_id)
             else {
-                let msg = format!(
+                return Err(InventoryReadError::unexpected_state(format!(
                     "unknown rot page found in inv_root_of_trust_page: {}",
                     p.sw_root_of_trust_page_id
-                );
-                return Err(Error::internal_error(&msg));
+                )));
             };
 
             let previous = by_baseboard.insert(
@@ -3679,12 +3809,12 @@ impl DataStore {
                     page: sw_rot_page.clone(),
                 },
             );
-            bail_unless!(
-                previous.is_none(),
-                "duplicate rot page found: {:?} baseboard {:?}",
-                p.which,
-                p.hw_baseboard_id
-            );
+            if previous.is_some() {
+                return Err(InventoryReadError::bad_db_read(format!(
+                    "duplicate rot page found: {:?} baseboard {:?}",
+                    p.which, p.hw_baseboard_id
+                )));
+            }
         }
 
         // Now read the `OmicronSledConfig`s.
@@ -3716,11 +3846,8 @@ impl DataStore {
                 )
                 .filter(dsl::inv_collection_id.eq(db_id))
                 .select(InvOmicronSledConfig::as_select())
-                .load_async(&*conn)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                })?;
+                .load_async(conn)
+                .await?;
                 paginator = p.found_batch(&batch, &|row| row.id);
                 for sled_config in batch {
                     configs
@@ -3739,7 +3866,7 @@ impl DataStore {
                             },
                         })
                         .map_err(|e| {
-                            Error::internal_error(&format!(
+                            InventoryReadError::bad_db_read(format!(
                                 "duplicate omicron sled config ID found, but \
                                  database guarantees uniqueness: {}",
                                 InlineErrorChain::new(&e),
@@ -3772,11 +3899,8 @@ impl DataStore {
                 )
                 .filter(dsl::inv_collection_id.eq(db_id))
                 .select(InvOmicronSledConfigZoneNic::as_select())
-                .load_async(&*conn)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                })?;
+                .load_async(conn)
+                .await?;
                 paginator = p.found_batch(&batch, &|row| row.id);
                 nics.extend(batch.into_iter().map(|found_zone_nic| {
                     (
@@ -3807,11 +3931,8 @@ impl DataStore {
                 )
                 .filter(dsl::inv_collection_id.eq(db_id))
                 .select(InvOmicronSledConfigZone::as_select())
-                .load_async(&*conn)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                })?;
+                .load_async(conn)
+                .await?;
                 paginator = p.found_batch(&batch, &|row| row.id);
                 zones.extend(batch);
             }
@@ -3819,35 +3940,27 @@ impl DataStore {
             zones
         };
         for z in omicron_zones_list {
-            let nic_row = z
+            let nic_row = match z
                 .nic_id
-                .map(|id| {
-                    // This error means that we found a row in
-                    // inv_omicron_sled_config_zone that references a NIC by id
-                    // but there's no corresponding row in
-                    // inv_omicron_sled_config_zone with that id.  This should
-                    // be impossible and reflects either a bug or database
-                    // corruption.
-                    omicron_zone_nics.remove(&(z.sled_config_id, id)).ok_or_else(|| {
-                        Error::internal_error(&format!(
-                            "zone {:?}: expected to find NIC {:?}, but didn't",
-                            z.id, z.nic_id
-                        ))
-                    })
-                })
-                .transpose()?;
-            let mut config_with_id = omicron_sled_configs
-                .get_mut(&z.sled_config_id)
-                .ok_or_else(|| {
-                    // This error means that we found a row in
-                    // inv_omicron_sled_config_zone with no associated record in
-                    // inv_sled_omicron_config. This should be impossible and
-                    // reflects either a bug or database corruption.
-                    Error::internal_error(&format!(
-                        "zone {:?}: unknown config ID: {:?}",
-                        z.id, z.sled_config_id
-                    ))
-                })?;
+                .map(|id| omicron_zone_nics.remove(&(z.sled_config_id, id)))
+            {
+                Some(Some(nic)) => Some(nic),
+                None => None,
+                Some(None) => {
+                    return Err(InventoryReadError::unexpected_state(format!(
+                        "zone {:?}: expected to find NIC {:?}, but didn't",
+                        z.id, z.nic_id
+                    )));
+                }
+            };
+            let Some(mut config_with_id) =
+                omicron_sled_configs.get_mut(&z.sled_config_id)
+            else {
+                return Err(InventoryReadError::unexpected_state(format!(
+                    "zone {:?}: unknown config ID: {:?}",
+                    z.id, z.sled_config_id
+                )));
+            };
             let zone_id = z.id;
             let zone = z
                 .into_omicron_zone_config(nic_row)
@@ -3855,16 +3968,19 @@ impl DataStore {
                     format!("zone {:?}: parse from database", zone_id)
                 })
                 .map_err(|e| {
-                    Error::internal_error(&format!("{:#}", e.to_string()))
+                    InventoryReadError::bad_db_read(
+                        InlineErrorChain::new(&*e).to_string(),
+                    )
                 })?;
             config_with_id.config.zones.insert_overwrite(zone);
         }
 
-        bail_unless!(
-            omicron_zone_nics.is_empty(),
-            "found extra Omicron zone NICs: {:?}",
-            omicron_zone_nics.keys()
-        );
+        if !omicron_zone_nics.is_empty() {
+            return Err(InventoryReadError::unexpected_state(format!(
+                "found extra Omicron zone NICs: {:?}",
+                omicron_zone_nics.keys()
+            )));
+        }
 
         // Now load the datasets from all configs.
         {
@@ -3882,25 +3998,26 @@ impl DataStore {
                 )
                 .filter(dsl::inv_collection_id.eq(db_id))
                 .select(InvOmicronSledConfigDataset::as_select())
-                .load_async(&*conn)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                })?;
+                .load_async(conn)
+                .await?;
                 paginator = p.found_batch(&batch, &|row| row.id);
 
                 for row in batch {
-                    let mut config_with_id = omicron_sled_configs
-                        .get_mut(&row.sled_config_id)
-                        .ok_or_else(|| {
-                            Error::internal_error(&format!(
+                    let Some(mut config_with_id) =
+                        omicron_sled_configs.get_mut(&row.sled_config_id)
+                    else {
+                        return Err(InventoryReadError::unexpected_state(
+                            format!(
                                 "dataset config {:?}: unknown config ID: {:?}",
                                 row.id, row.sled_config_id
-                            ))
-                        })?;
+                            ),
+                        ));
+                    };
                     config_with_id.config.datasets.insert_overwrite(
-                        row.try_into().map_err(|e| {
-                            Error::internal_error(&format!("{e:#}"))
+                        row.try_into().map_err(|e: anyhow::Error| {
+                            InventoryReadError::bad_db_read(
+                                InlineErrorChain::new(&*e).to_string(),
+                            )
                         })?,
                     );
                 }
@@ -3923,22 +4040,21 @@ impl DataStore {
                 )
                 .filter(dsl::inv_collection_id.eq(db_id))
                 .select(InvOmicronSledConfigDisk::as_select())
-                .load_async(&*conn)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                })?;
+                .load_async(conn)
+                .await?;
                 paginator = p.found_batch(&batch, &|row| row.id);
 
                 for row in batch {
-                    let mut config_with_id = omicron_sled_configs
-                        .get_mut(&row.sled_config_id)
-                        .ok_or_else(|| {
-                            Error::internal_error(&format!(
+                    let Some(mut config_with_id) =
+                        omicron_sled_configs.get_mut(&row.sled_config_id)
+                    else {
+                        return Err(InventoryReadError::unexpected_state(
+                            format!(
                                 "disk config {:?}: unknown config ID: {:?}",
                                 row.id, row.sled_config_id
-                            ))
-                        })?;
+                            ),
+                        ));
+                    };
                     config_with_id.config.disks.insert_overwrite(row.into());
                 }
             }
@@ -3963,11 +4079,8 @@ impl DataStore {
                 )
                 .filter(dsl::inv_collection_id.eq(db_id))
                 .select(InvSledConfigReconciler::as_select())
-                .load_async(&*conn)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                })?;
+                .load_async(conn)
+                .await?;
                 paginator = p.found_batch(&batch, &|row| row.sled_id);
 
                 for row in batch {
@@ -3998,11 +4111,8 @@ impl DataStore {
                 )
                 .filter(dsl::inv_collection_id.eq(db_id))
                 .select(InvSledBootPartition::as_select())
-                .load_async(&*conn)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                })?;
+                .load_async(conn)
+                .await?;
                 paginator = p.found_batch(&batch, &|row| {
                     (row.sled_id, row.boot_disk_slot)
                 });
@@ -4011,7 +4121,9 @@ impl DataStore {
                     let sled_map =
                         results.entry(row.sled_id.into()).or_default();
                     let slot = row.slot().map_err(|err| {
-                        Error::internal_error(&format!("{err:#}"))
+                        InventoryReadError::bad_db_read(
+                            InlineErrorChain::new(&*err).to_string(),
+                        )
                     })?;
                     sled_map.insert(slot, row);
                 }
@@ -4042,11 +4154,8 @@ impl DataStore {
                 )
                 .filter(dsl::inv_collection_id.eq(db_id))
                 .select(InvLastReconciliationDiskResult::as_select())
-                .load_async(&*conn)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                })?;
+                .load_async(conn)
+                .await?;
                 paginator = p.found_batch(&batch, &|row| row.disk_id);
 
                 for row in batch {
@@ -4081,11 +4190,8 @@ impl DataStore {
                 )
                 .filter(dsl::inv_collection_id.eq(db_id))
                 .select(InvLastReconciliationDatasetResult::as_select())
-                .load_async(&*conn)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                })?;
+                .load_async(conn)
+                .await?;
                 paginator = p.found_batch(&batch, &|row| row.dataset_id);
 
                 for row in batch {
@@ -4117,21 +4223,20 @@ impl DataStore {
             let rows = dsl::inv_last_reconciliation_orphaned_dataset
                 .filter(dsl::inv_collection_id.eq(db_id))
                 .select(InvLastReconciliationOrphanedDataset::as_select())
-                .load_async(&*conn)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                })?;
+                .load_async(conn)
+                .await?;
 
             for row in rows {
                 orphaned
                     .entry(row.sled_id.into())
                     .or_default()
-                    .insert_unique(row.try_into()?)
+                    .insert_unique(row.try_into().map_err(|e| {
+                        InventoryReadError::bad_db_read(
+                            InlineErrorChain::new(&e).to_string(),
+                        )
+                    })?)
                     .map_err(|err| {
-                        // We should never get duplicates: the table's primary
-                        // key is the dataset name (same as the IdOrdMap)
-                        Error::internal_error(&format!(
+                        InventoryReadError::bad_db_read(format!(
                             "unexpected duplicate orphaned dataset: {}",
                             InlineErrorChain::new(&err)
                         ))
@@ -4160,11 +4265,8 @@ impl DataStore {
             let rows = dsl::inv_single_measurements
                 .filter(dsl::inv_collection_id.eq(db_id))
                 .select(InvSingleMeasurements::as_select())
-                .load_async(&*conn)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                })?;
+                .load_async(conn)
+                .await?;
 
             for row in rows {
                 measurements
@@ -4172,9 +4274,7 @@ impl DataStore {
                     .or_default()
                     .insert_unique(row.into())
                     .map_err(|err| {
-                        // We should never get duplicates: the table's primary
-                        // key is the path
-                        Error::internal_error(&format!(
+                        InventoryReadError::bad_db_read(format!(
                             "unexpected duplicate path: {}",
                             InlineErrorChain::new(&err)
                         ))
@@ -4195,18 +4295,15 @@ impl DataStore {
             let rows = dsl::inv_fmd_status
                 .filter(dsl::inv_collection_id.eq(db_id))
                 .select(InvFmdStatus::as_select())
-                .load_async(&*conn)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                })?;
+                .load_async(conn)
+                .await?;
             rows.into_iter()
                 .map(|row| {
                     let err = match (row.error_kind, row.error_message) {
                         (Some(kind), Some(message)) => Some((kind, message)),
                         (None, None) => None,
                         _ => {
-                            return Err(Error::internal_error(
+                            return Err(InventoryReadError::bad_db_read(
                                 "inv_fmd_status row violates \
                                  error_kind_and_message_together CHECK \
                                  constraint: exactly one of (error_kind, \
@@ -4227,11 +4324,8 @@ impl DataStore {
             let rows = dsl::inv_fmd_host_case
                 .filter(dsl::inv_collection_id.eq(db_id))
                 .select(InvFmdHostCase::as_select())
-                .load_async(&*conn)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                })?;
+                .load_async(conn)
+                .await?;
             let mut by_sled: BTreeMap<
                 SledUuid,
                 IdOrdMap<sled_agent_types::inventory::FmdHostCase>,
@@ -4242,11 +4336,11 @@ impl DataStore {
                     .entry(sled_id)
                     .or_default()
                     .insert_unique(row.into())
-                    .map_err(|err| Error::InternalError {
-                    internal_message: format!(
+                    .map_err(|err| {
+                    InventoryReadError::bad_db_read(format!(
                         "unexpected duplicate FMD case: {}",
                         InlineErrorChain::new(&err)
-                    ),
+                    ))
                 })?;
             }
             by_sled
@@ -4260,11 +4354,8 @@ impl DataStore {
             let rows = dsl::inv_fmd_resource
                 .filter(dsl::inv_collection_id.eq(db_id))
                 .select(InvFmdResource::as_select())
-                .load_async(&*conn)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                })?;
+                .load_async(conn)
+                .await?;
             let mut by_sled: BTreeMap<
                 SledUuid,
                 IdOrdMap<sled_agent_types::inventory::FmdResource>,
@@ -4275,11 +4366,11 @@ impl DataStore {
                     .entry(sled_id)
                     .or_default()
                     .insert_unique(row.into())
-                    .map_err(|err| Error::InternalError {
-                    internal_message: format!(
+                    .map_err(|err| {
+                    InventoryReadError::bad_db_read(format!(
                         "unexpected duplicate FMD resource: {}",
                         InlineErrorChain::new(&err)
-                    ),
+                    ))
                 })?;
             }
             by_sled
@@ -4307,11 +4398,8 @@ impl DataStore {
                 )
                 .filter(dsl::inv_collection_id.eq(db_id))
                 .select(InvLastReconciliationZoneResult::as_select())
-                .load_async(&*conn)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                })?;
+                .load_async(conn)
+                .await?;
                 paginator = p.found_batch(&batch, &|row| row.zone_id);
 
                 for row in batch {
@@ -4345,11 +4433,8 @@ impl DataStore {
                 )
                 .filter(dsl::inv_collection_id.eq(db_id))
                 .select(InvZoneManifestMeasurement::as_select())
-                .load_async(&*conn)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                })?;
+                .load_async(conn)
+                .await?;
                 paginator = p.found_batch(&batch, &|row| {
                     (row.sled_id, row.measurement_file_name.clone())
                 });
@@ -4387,11 +4472,8 @@ impl DataStore {
                 )
                 .filter(dsl::inv_collection_id.eq(db_id))
                 .select(InvZoneManifestZone::as_select())
-                .load_async(&*conn)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                })?;
+                .load_async(conn)
+                .await?;
                 paginator = p.found_batch(&batch, &|row| {
                     (row.sled_id, row.zone_file_name.clone())
                 });
@@ -4402,7 +4484,9 @@ impl DataStore {
                         .or_default()
                         .insert_unique(row.try_into().map_err(
                             |e: anyhow::Error| {
-                                Error::internal_error(&e.to_string())
+                                InventoryReadError::bad_db_read(
+                                    InlineErrorChain::new(&*e).to_string(),
+                                )
                             },
                         )?)
                         .expect("database ensures the row is unique");
@@ -4433,11 +4517,8 @@ impl DataStore {
                 )
                 .filter(dsl::inv_collection_id.eq(db_id))
                 .select(InvZoneManifestNonBoot::as_select())
-                .load_async(&*conn)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                })?;
+                .load_async(conn)
+                .await?;
                 paginator = p.found_batch(&batch, &|row| {
                     (row.sled_id, row.non_boot_zpool_id)
                 });
@@ -4474,11 +4555,8 @@ impl DataStore {
                 )
                 .filter(dsl::inv_collection_id.eq(db_id))
                 .select(InvMeasurementManifestNonBoot::as_select())
-                .load_async(&*conn)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                })?;
+                .load_async(conn)
+                .await?;
                 paginator = p.found_batch(&batch, &|row| {
                     (row.sled_id, row.non_boot_zpool_id)
                 });
@@ -4516,11 +4594,8 @@ impl DataStore {
                 )
                 .filter(dsl::inv_collection_id.eq(db_id))
                 .select(InvMupdateOverrideNonBoot::as_select())
-                .load_async(&*conn)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                })?;
+                .load_async(conn)
+                .await?;
                 paginator = p.found_batch(&batch, &|row| {
                     (row.sled_id, row.non_boot_zpool_id)
                 });
@@ -4552,17 +4627,16 @@ impl DataStore {
                 )
                 .filter(dsl::inv_collection_id.eq(db_id))
                 .select(InvClickhouseKeeperMembership::as_select())
-                .load_async(&*conn)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                })?;
+                .load_async(conn)
+                .await?;
                 paginator = p.found_batch(&batch, &|row| row.queried_keeper_id);
                 for membership in batch.into_iter() {
                     memberships.insert(
                         ClickhouseKeeperClusterMembership::try_from(membership)
                             .map_err(|e| {
-                                Error::internal_error(&format!("{e:#}",))
+                                InventoryReadError::bad_db_read(
+                                    InlineErrorChain::new(&*e).to_string(),
+                                )
                             })?,
                     );
                 }
@@ -4578,23 +4652,22 @@ impl DataStore {
                 dsl::inv_cockroachdb_status
                     .filter(dsl::inv_collection_id.eq(db_id))
                     .select(InvCockroachStatus::as_select())
-                    .load_async(&*conn)
-                    .await
-                    .map_err(|e| {
-                        public_error_from_diesel(e, ErrorHandler::Server)
-                    })?;
+                    .load_async(conn)
+                    .await?;
 
             status_records
                 .into_iter()
                 .map(|record| {
                     let node_id = CockroachNodeId::new(record.node_id.clone());
                     let status: nexus_types::inventory::CockroachStatus =
-                        record.try_into().map_err(|e| {
-                            Error::internal_error(&format!("{e:#}"))
+                        record.try_into().map_err(|e: anyhow::Error| {
+                            InventoryReadError::bad_db_read(
+                                InlineErrorChain::new(&*e).to_string(),
+                            )
                         })?;
-                    Ok((node_id, status))
+                    Ok::<_, InventoryReadError>((node_id, status))
                 })
-                .collect::<Result<BTreeMap<_, _>, Error>>()?
+                .collect::<Result<BTreeMap<_, _>, _>>()?
         };
 
         // Load TimeSync statuses
@@ -4604,11 +4677,8 @@ impl DataStore {
             let records: Vec<InvNtpTimesync> = dsl::inv_ntp_timesync
                 .filter(dsl::inv_collection_id.eq(db_id))
                 .select(InvNtpTimesync::as_select())
-                .load_async(&*conn)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                })?;
+                .load_async(conn)
+                .await?;
 
             records
                 .into_iter()
@@ -4625,11 +4695,8 @@ impl DataStore {
             let records: Vec<InvInternalDns> = dsl::inv_internal_dns
                 .filter(dsl::inv_collection_id.eq(db_id))
                 .select(InvInternalDns::as_select())
-                .load_async(&*conn)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                })?;
+                .load_async(conn)
+                .await?;
 
             records
                 .into_iter()
@@ -4643,33 +4710,34 @@ impl DataStore {
         let mut sled_agents = IdOrdMap::new();
         for s in sled_agent_rows {
             let sled_id = SledUuid::from(s.sled_id);
-            let baseboard_id = s
+            let baseboard_id = match s
                 .hw_baseboard_id
-                .map(|id| {
-                    baseboards_by_id.get(&id).cloned().ok_or_else(|| {
-                        Error::internal_error(
-                            "missing baseboard that we should have fetched",
-                        )
-                    })
-                })
-                .transpose()?;
+                .map(|id| baseboards_by_id.get(&id).cloned())
+            {
+                Some(Some(baseboard_id)) => Some(baseboard_id),
+                None => None,
+                Some(None) => {
+                    return Err(InventoryReadError::unexpected_state(
+                        "missing baseboard that we should have fetched",
+                    ));
+                }
+            };
 
             // Convert all the sled config foreign keys back into fully realized
             // `OmicronSledConfig`s. We have to clone these: the same
             // `OmicronSledConfig` may be referenced up to three times by this
             // sled.
-            let ledgered_sled_config = s
-                .ledgered_sled_config
-                .map(|id| {
-                    omicron_sled_configs.get(&id).as_ref()
-                    .map(|c| c.config.clone())
-                        .ok_or_else(|| {
-                        Error::internal_error(
-                            "missing sled config that we should have fetched",
-                        )
-                    })
-                })
-                .transpose()?;
+            let ledgered_sled_config = match s.ledgered_sled_config.map(|id| {
+                omicron_sled_configs.get(&id).as_ref().map(|c| c.config.clone())
+            }) {
+                Some(Some(config)) => Some(config),
+                None => None,
+                Some(None) => {
+                    return Err(InventoryReadError::unexpected_state(
+                        "missing sled config that we should have fetched",
+                    ));
+                }
+            };
             let reconciler_status = s
                 .reconciler_status
                 .to_status(|config_id| {
@@ -4678,26 +4746,31 @@ impl DataStore {
                         .as_ref()
                         .map(|c| c.config.clone())
                 })
-                .map_err(|e| Error::internal_error(&format!("{e:#}")))?;
-            let last_reconciliation = sled_config_reconcilers
+                .map_err(|e| {
+                    InventoryReadError::bad_db_read(
+                        InlineErrorChain::new(&*e).to_string(),
+                    )
+                })?;
+            let last_reconciliation = match sled_config_reconcilers
                 .remove(&sled_id)
-                .map(|reconciler| {
-                    let last_reconciled_config = omicron_sled_configs
+            {
+                Some(reconciler) => {
+                    let Some(last_reconciled_config) = omicron_sled_configs
                         .get(&reconciler.last_reconciled_config)
                         .as_ref()
-                        .ok_or_else(|| {
-                            Error::internal_error(
-                                "missing sled config that we \
-                                 should have fetched",
-                            )
-                        })?
-                        .config
-                        .clone();
+                        .map(|c| c.config.clone())
+                    else {
+                        return Err(InventoryReadError::unexpected_state(
+                            "missing sled config that we should have fetched",
+                        ));
+                    };
 
                     let boot_partitions = {
                         let boot_disk =
                             reconciler.boot_disk().map_err(|err| {
-                                Error::internal_error(&format!("{err:#}"))
+                                InventoryReadError::bad_db_read(
+                                    InlineErrorChain::new(&*err).to_string(),
+                                )
                             })?;
 
                         // Helper to convert our nullable error column into
@@ -4713,22 +4786,37 @@ impl DataStore {
                                 .map(|details| {
                                     Ok(BootPartitionDetails::from(details))
                                 })
-                                .ok_or_else(|| {
-                                    Error::internal_error(
-                                        "missing boot partition details that \
-                                         we should have fetched",
-                                    )
-                                }),
+                                .ok_or(()),
                         };
 
-                        let slot_a = slot_details(
+                        let slot_a = match slot_details(
                             reconciler.boot_partition_a_error,
                             M2Slot::A,
-                        )?;
-                        let slot_b = slot_details(
+                        ) {
+                            Ok(slot) => slot,
+                            Err(()) => {
+                                return Err(
+                                    InventoryReadError::unexpected_state(
+                                        "missing boot partition details that \
+                                     we should have fetched",
+                                    ),
+                                );
+                            }
+                        };
+                        let slot_b = match slot_details(
                             reconciler.boot_partition_b_error,
                             M2Slot::B,
-                        )?;
+                        ) {
+                            Ok(slot) => slot,
+                            Err(()) => {
+                                return Err(
+                                    InventoryReadError::unexpected_state(
+                                        "missing boot partition details that \
+                                     we should have fetched",
+                                    ),
+                                );
+                            }
+                        };
 
                         BootPartitionContents { boot_disk, slot_a, slot_b }
                     };
@@ -4736,11 +4824,13 @@ impl DataStore {
                     let remove_mupdate_override = reconciler
                         .remove_mupdate_override
                         .into_inventory()
-                        .map_err(|err| {
-                            Error::internal_error(&format!("{err:#}"))
+                        .map_err(|err: anyhow::Error| {
+                            InventoryReadError::bad_db_read(
+                                InlineErrorChain::new(&*err).to_string(),
+                            )
                         })?;
 
-                    Ok::<_, Error>(ConfigReconcilerInventory {
+                    Some(ConfigReconcilerInventory {
                         last_reconciled_config,
                         external_disks: last_reconciliation_disk_results
                             .remove(&sled_id)
@@ -4758,8 +4848,9 @@ impl DataStore {
                         boot_partitions,
                         remove_mupdate_override,
                     })
-                })
-                .transpose()?;
+                }
+                None => None,
+            };
 
             let file_source_resolver = s
                 .file_source_resolver
@@ -4771,7 +4862,7 @@ impl DataStore {
                     mupdate_override_non_boot_by_sled_id.remove(&sled_id),
                 )
                 .map_err(|e| {
-                    Error::internal_error(&format!(
+                    InventoryReadError::bad_db_read(format!(
                         "failed to create zone image resolver inventory \
                          for sled {sled_id}: {}",
                         InlineErrorChain::new(e.as_ref()),
@@ -4901,11 +4992,12 @@ impl DataStore {
 
         // Check that we consumed all the reconciliation results we found in
         // this collection.
-        bail_unless!(
-            sled_config_reconcilers.is_empty(),
-            "found extra sled config reconcilers: {:?}",
-            sled_config_reconcilers.keys(),
-        );
+        if !sled_config_reconcilers.is_empty() {
+            return Err(InventoryReadError::unexpected_state(format!(
+                "found extra sled config reconcilers: {:?}",
+                sled_config_reconcilers.keys(),
+            )));
+        }
         {
             // `sled_boot_partition_details` is a map of maps; we don't prune
             // the outermost map, but they should all be empty.
@@ -4920,57 +5012,67 @@ impl DataStore {
                         }
                     })
                     .collect::<Vec<_>>();
-            bail_unless!(
-                sleds_with_leftover_boot_partitions.is_empty(),
-                "found extra sled boot partition details: {:?}",
-                sleds_with_leftover_boot_partitions,
-            );
+            if !sleds_with_leftover_boot_partitions.is_empty() {
+                return Err(InventoryReadError::unexpected_state(format!(
+                    "found extra sled boot partition details: {:?}",
+                    sleds_with_leftover_boot_partitions,
+                )));
+            }
         }
-        bail_unless!(
-            last_reconciliation_disk_results.is_empty(),
-            "found extra config reconciliation disk results: {:?}",
-            last_reconciliation_disk_results.keys()
-        );
-        bail_unless!(
-            last_reconciliation_dataset_results.is_empty(),
-            "found extra config reconciliation dataset results: {:?}",
-            last_reconciliation_dataset_results.keys()
-        );
-        bail_unless!(
-            last_reconciliation_zone_results.is_empty(),
-            "found extra config reconciliation zone results: {:?}",
-            last_reconciliation_zone_results.keys()
-        );
-        bail_unless!(
-            zone_manifest_artifacts_by_sled_id.is_empty(),
-            "found extra zone manifest artifacts: {:?}",
-            zone_manifest_artifacts_by_sled_id.keys()
-        );
-        bail_unless!(
-            zone_manifest_non_boot_by_sled_id.is_empty(),
-            "found extra zone manifest non-boot entries: {:?}",
-            zone_manifest_non_boot_by_sled_id.keys()
-        );
-        bail_unless!(
-            mupdate_override_non_boot_by_sled_id.is_empty(),
-            "found extra mupdate override non-boot entries: {:?}",
-            mupdate_override_non_boot_by_sled_id.keys()
-        );
-        bail_unless!(
-            svcs_enabled_not_online_by_sled.is_empty(),
-            "found extra svcs enabled not online entries: {:?}",
-            svcs_enabled_not_online_by_sled.keys()
-        );
-        bail_unless!(
-            svcs_enabled_not_online_services_by_sled.is_empty(),
-            "found extra svcs enabled not online services entries: {:?}",
-            svcs_enabled_not_online_services_by_sled.keys()
-        );
-        bail_unless!(
-            svcs_enabled_not_online_errors_by_sled.is_empty(),
-            "found extra svcs enabled not online entries: {:?}",
-            svcs_enabled_not_online_errors_by_sled.keys()
-        );
+        if !last_reconciliation_disk_results.is_empty() {
+            return Err(InventoryReadError::unexpected_state(format!(
+                "found extra config reconciliation disk results: {:?}",
+                last_reconciliation_disk_results.keys()
+            )));
+        }
+        if !last_reconciliation_dataset_results.is_empty() {
+            return Err(InventoryReadError::unexpected_state(format!(
+                "found extra config reconciliation dataset results: {:?}",
+                last_reconciliation_dataset_results.keys()
+            )));
+        }
+        if !last_reconciliation_zone_results.is_empty() {
+            return Err(InventoryReadError::unexpected_state(format!(
+                "found extra config reconciliation zone results: {:?}",
+                last_reconciliation_zone_results.keys()
+            )));
+        }
+        if !zone_manifest_artifacts_by_sled_id.is_empty() {
+            return Err(InventoryReadError::unexpected_state(format!(
+                "found extra zone manifest artifacts: {:?}",
+                zone_manifest_artifacts_by_sled_id.keys()
+            )));
+        }
+        if !zone_manifest_non_boot_by_sled_id.is_empty() {
+            return Err(InventoryReadError::unexpected_state(format!(
+                "found extra zone manifest non-boot entries: {:?}",
+                zone_manifest_non_boot_by_sled_id.keys()
+            )));
+        }
+        if !mupdate_override_non_boot_by_sled_id.is_empty() {
+            return Err(InventoryReadError::unexpected_state(format!(
+                "found extra mupdate override non-boot entries: {:?}",
+                mupdate_override_non_boot_by_sled_id.keys()
+            )));
+        }
+        if !svcs_enabled_not_online_by_sled.is_empty() {
+            return Err(InventoryReadError::unexpected_state(format!(
+                "found extra svcs enabled not online entries: {:?}",
+                svcs_enabled_not_online_by_sled.keys()
+            )));
+        }
+        if !svcs_enabled_not_online_services_by_sled.is_empty() {
+            return Err(InventoryReadError::unexpected_state(format!(
+                "found extra svcs enabled not online services entries: {:?}",
+                svcs_enabled_not_online_services_by_sled.keys()
+            )));
+        }
+        if !svcs_enabled_not_online_errors_by_sled.is_empty() {
+            return Err(InventoryReadError::unexpected_state(format!(
+                "found extra svcs enabled not online entries: {:?}",
+                svcs_enabled_not_online_errors_by_sled.keys()
+            )));
+        }
 
         // Read the top-level collection metadata last. We do this at the end
         // (rather than the beginning) so that if a concurrent delete operation
@@ -4983,19 +5085,12 @@ impl DataStore {
         // this read succeeds, we know the collection exists and hasn't been
         // deleted.
         let (time_started, time_done, collector) = {
-            use nexus_db_schema::schema::inv_collection::dsl;
-
-            let collections = dsl::inv_collection
-                .filter(dsl::id.eq(db_id))
-                .limit(2)
-                .select(InvCollection::as_select())
-                .load_async(&*conn)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                })?;
-            bail_unless!(collections.len() == 1);
-            let collection = collections.into_iter().next().unwrap();
+            let Some(collection) =
+                Self::inventory_collection_read_metadata_on_conn(&conn, id)
+                    .await?
+            else {
+                return Err(InventoryReadError::DeletedWhileBeingRead);
+            };
             (
                 collection.time_started,
                 collection.time_done,
@@ -5024,6 +5119,20 @@ impl DataStore {
             ntp_timesync,
             internal_dns_generation_status,
         })
+    }
+
+    async fn inventory_collection_read_metadata_on_conn(
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        id: CollectionUuid,
+    ) -> Result<Option<InvCollection>, DieselError> {
+        use nexus_db_schema::schema::inv_collection::dsl;
+
+        dsl::inv_collection
+            .filter(dsl::id.eq(to_db_typed_uuid(id)))
+            .select(InvCollection::as_select())
+            .get_result_async(conn)
+            .await
+            .optional()
     }
 
     pub async fn inventory_collections_latest(
@@ -5394,6 +5503,7 @@ mod test {
     use crate::db::pub_test_utils::TestDatabase;
     use crate::db::raw_query_builder::{QueryBuilder, TrustedStr};
     use anyhow::{Context, bail};
+    use assert_matches::assert_matches;
     use async_bb8_diesel::AsyncConnection;
     use async_bb8_diesel::AsyncRunQueryDsl;
     use async_bb8_diesel::AsyncSimpleConnection;
@@ -5558,8 +5668,8 @@ mod test {
         // ensures that we correctly handle queries over the batch size, without
         // having to actually read 1000s of records.
         let batched_read = datastore
-            .inventory_collection_read_batched(
-                &opctx,
+            .inventory_collection_read_batched_on_connection(
+                &conn,
                 collection2.id,
                 NonZeroU32::new(1).unwrap(),
             )
@@ -5848,10 +5958,11 @@ mod test {
         );
 
         // If we try to fetch a pruned collection, we should get nothing.
-        let _ = datastore
+        let err = datastore
             .inventory_collection_read(&opctx, collection4.id)
             .await
             .expect_err("unexpectedly read pruned collection");
+        assert_matches!(err, Error::NotFound { .. });
 
         // But we should still be able to fetch the collections that do exist.
         let collection_read = datastore
@@ -6435,10 +6546,10 @@ mod test {
 
     // Test that concurrent read and delete operations on inventory collections
     // do not result in torn reads. With the fix for issue #9594,
-    // inventory_collection_read_batched checks for the top-level collection
-    // record at the END of reading, so if a concurrent delete has started
-    // (which deletes the top-level record first), the read will fail rather
-    // than returning partial data.
+    // inventory_collection_read_batched_on_connection checks for the top-level
+    // collection record at the END of reading, so if a concurrent delete has
+    // started (which deletes the top-level record first), the read will fail
+    // rather than returning partial data.
     //
     // This test spawns concurrent readers and a deleter to exercise the race
     // condition. Readers should either get the complete original collection
@@ -6523,10 +6634,10 @@ mod test {
                                 let _ = tx.send(());
                             }
                         }
-                        Err(_) => {
+                        Err(err) => {
                             // Errors are expected after deletion - the
-                            // collection no longer exists. The specific error
-                            // varies depending on which query fails first.
+                            // collection no longer exists.
+                            assert_matches!(err, Error::NotFound { .. });
                             error_count.fetch_add(1, Ordering::Relaxed);
                         }
                     }
