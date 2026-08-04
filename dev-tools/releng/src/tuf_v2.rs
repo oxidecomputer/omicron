@@ -12,8 +12,8 @@ use fs_err::tokio as fs;
 use semver::Version;
 use slog::Logger;
 use tokio::sync::{mpsc, oneshot};
-use tufaceous_artifact_v2::{OsVariant, RotSlot};
-use tufaceous_v2::{RepositoryLoader, edit::RepositoryEditor};
+use tufaceous::{RepositoryLoader, edit::RepositoryEditor};
+use tufaceous_artifact::{OsVariant, RotSlot};
 
 pub(crate) async fn build_tuf_repo(
     logger: Logger,

@@ -849,6 +849,7 @@ mod tests {
             let service_pool = create_service_ip_pool(
                 opctx,
                 datastore,
+                "oxide-service-pool-v4",
                 omicron_common::api::external::IpVersion::V4,
             )
             .await;

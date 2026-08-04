@@ -247,31 +247,6 @@
         }
       }
     },
-    "/location": {
-      "get": {
-        "summary": "Report the identity of the sled and switch we're currently running on /",
-        "description": "connected to.",
-        "operationId": "get_location",
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/GetLocationResponse"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
     "/preflight/uplink": {
       "get": {
         "summary": "Get the report for the most recent (or still running) preflight uplink",
@@ -898,47 +873,35 @@
           "media_lane_count"
         ]
       },
-      "ArtifactHashId": {
-        "description": "A hash-based identifier for an artifact or deployment unit: the kind and hash.",
-        "type": "object",
-        "properties": {
-          "hash": {
-            "description": "The hash of the artifact.",
-            "type": "string",
-            "format": "hex string (32 bytes)"
-          },
-          "kind": {
-            "description": "The kind of artifact this is.",
-            "type": "string"
-          }
-        },
-        "required": [
-          "hash",
-          "kind"
-        ]
-      },
       "ArtifactId": {
-        "description": "An identifier for an artifact.",
+        "description": "The identifying components of an [`Artifact`], sent over the wire from wicketd to the wicket client to show versions of artifacts we will be updating to.",
         "type": "object",
         "properties": {
-          "kind": {
-            "description": "The kind of artifact this is.",
-            "type": "string"
-          },
-          "name": {
-            "description": "The artifact's name.",
-            "type": "string"
+          "tags": {
+            "description": "The Tufaceous tags used to select the artifact.",
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
           },
           "version": {
-            "description": "The artifact's version.",
-            "type": "string"
+            "description": "The artifact's version string.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ArtifactVersion"
+              }
+            ]
           }
         },
         "required": [
-          "kind",
-          "name",
+          "tags",
           "version"
         ]
+      },
+      "ArtifactVersion": {
+        "description": "An artifact version.\n\nThis is a freeform identifier with some basic validation. It may be the serialized form of a semver version, or a custom identifier that uses the same character set as a semver, plus `_`.\n\nThe exact pattern accepted is `^[a-zA-Z0-9._+-]{1,63}$`.\n\n# Ord implementation\n\n`ArtifactVersion`s are not intended to be sorted, just compared for equality. `ArtifactVersion` implements `Ord` only for storage within sorted collections.",
+        "type": "string",
+        "pattern": "^[a-zA-Z0-9._+-]{1,63}$"
       },
       "Aux1Monitor": {
         "description": "The first auxlliary CMIS monitor.",
@@ -1090,61 +1053,6 @@
           }
         }
       },
-      "Baseboard": {
-        "description": "Describes properties that should uniquely identify a Gimlet.",
-        "oneOf": [
-          {
-            "type": "object",
-            "properties": {
-              "identifier": {
-                "type": "string"
-              },
-              "model": {
-                "type": "string"
-              },
-              "revision": {
-                "type": "integer",
-                "format": "uint32",
-                "minimum": 0
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "gimlet"
-                ]
-              }
-            },
-            "required": [
-              "identifier",
-              "model",
-              "revision",
-              "type"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "identifier": {
-                "type": "string"
-              },
-              "model": {
-                "type": "string"
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "pc"
-                ]
-              }
-            },
-            "required": [
-              "identifier",
-              "model",
-              "type"
-            ]
-          }
-        ]
-      },
       "BaseboardId": {
         "description": "A representation of a Baseboard ID as used in the inventory subsystem.\n\nThis type is essentially the same as a `Baseboard` except it doesn't have a revision or HW type (Gimlet, PC, Unknown).",
         "type": "object",
@@ -1211,8 +1119,15 @@
               },
               "sha256": {
                 "description": "A SHA-256 digest of the key.",
+                "x-rust-type": {
+                  "crate": "byte-wrapper",
+                  "path": "byte_wrapper::HexArray::<32>",
+                  "version": "0.1.0"
+                },
                 "type": "string",
-                "format": "hex string (32 bytes)"
+                "pattern": "^[0-9a-fA-F]{64}$",
+                "minLength": 64,
+                "maxLength": 64
               }
             },
             "required": [
@@ -1721,12 +1636,6 @@
             "default": false,
             "type": "boolean"
           },
-          "internal_services_ip_pool_ranges": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/IpRange"
-            }
-          },
           "ntp_servers": {
             "type": "array",
             "items": {
@@ -1740,6 +1649,24 @@
                 "$ref": "#/components/schemas/UserSpecifiedRackNetworkConfig"
               }
             ]
+          },
+          "service_ip_pools": {
+            "title": "IdOrdMap",
+            "x-rust-type": {
+              "crate": "iddqd",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/ServiceIpPoolConfig"
+                }
+              ],
+              "path": "iddqd::IdOrdMap",
+              "version": "*"
+            },
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ServiceIpPoolConfig"
+            },
+            "uniqueItems": true
           }
         },
         "required": [
@@ -1747,8 +1674,8 @@
           "dns_servers",
           "external_dns_ips",
           "external_dns_zone_name",
-          "internal_services_ip_pool_ranges",
-          "ntp_servers"
+          "ntp_servers",
+          "service_ip_pools"
         ]
       },
       "CurrentRssUserConfigSensitive": {
@@ -1994,10 +1921,10 @@
         "type": "object",
         "properties": {
           "artifacts": {
-            "description": "Map of artifacts we ingested from the most-recently-uploaded TUF repository to a list of artifacts we're serving over the bootstrap network. In some cases the list of artifacts being served will have length 1 (when we're serving the artifact directly); in other cases the artifact in the TUF repo contains multiple nested artifacts inside it (e.g., RoT artifacts contain both A and B images), and we serve the list of extracted artifacts but not the original combination.\n\nConceptually, this is a `BTreeMap<ArtifactId, Vec<ArtifactHashId>>`, but JSON requires string keys for maps, so we give back a vec of pairs instead.",
+            "description": "List of artifacts we ingested from the most-recently-uploaded TUF repository.",
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/InstallableArtifacts"
+              "$ref": "#/components/schemas/ArtifactId"
             }
           },
           "event_reports": {
@@ -2121,77 +2048,6 @@
               "type"
             ]
           }
-        ]
-      },
-      "GetLocationResponse": {
-        "description": "All the fields of this response are optional, because it's possible we don't know any of them (yet) if MGS has not yet finished discovering its location or (ever) if we're running in a dev environment that doesn't support MGS-location / baseboard mapping.",
-        "type": "object",
-        "properties": {
-          "sled_baseboard_id": {
-            "description": "The baseboard of our sled (where wicketd is running).",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/BaseboardId"
-              }
-            ]
-          },
-          "sled_id": {
-            "nullable": true,
-            "description": "The identity of our sled (where wicketd is running).",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/SpIdentifier"
-              }
-            ]
-          },
-          "switch_baseboard": {
-            "nullable": true,
-            "description": "The baseboard of the switch our sled is physically connected to.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Baseboard"
-              }
-            ]
-          },
-          "switch_id": {
-            "nullable": true,
-            "description": "The identity of the switch our sled is physically connected to.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/SpIdentifier"
-              }
-            ]
-          }
-        },
-        "required": [
-          "sled_baseboard_id"
-        ]
-      },
-      "InstallableArtifacts": {
-        "type": "object",
-        "properties": {
-          "artifact_id": {
-            "$ref": "#/components/schemas/ArtifactId"
-          },
-          "installable": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/ArtifactHashId"
-            }
-          },
-          "sign": {
-            "nullable": true,
-            "type": "array",
-            "items": {
-              "type": "integer",
-              "format": "uint8",
-              "minimum": 0
-            }
-          }
-        },
-        "required": [
-          "artifact_id",
-          "installable"
         ]
       },
       "IpNet": {
@@ -3638,7 +3494,7 @@
         ]
       },
       "PutRssUserConfigInsensitive": {
-        "description": "The portion of the RSS configuration that can be posted in one shot.\n\nIt is provided by the operator uploading a TOML file. Sensitive values (certificates, the recovery password hash, and BGP authentication keys) are set separately.",
+        "description": "The portion of the RSS configuration that can be posted in one shot.\n\nIt is provided by the operator uploading a TOML file. Sensitive values (certificates, the recovery password hash, and BGP authentication keys) are set separately.\n\nThis version replaces the flat `internal_services_ip_pool_ranges` of the initial version with fully-specified [`service_ip_pools`], letting operators name and describe each pool.\n\n[`service_ip_pools`]: Self::service_ip_pools",
         "type": "object",
         "properties": {
           "allowed_source_ips": {
@@ -3684,13 +3540,6 @@
             "default": false,
             "type": "boolean"
           },
-          "internal_services_ip_pool_ranges": {
-            "description": "Ranges of the service IP pool which may be used for internal services.",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/IpRange"
-            }
-          },
           "ntp_servers": {
             "description": "The external NTP server addresses.",
             "type": "array",
@@ -3705,6 +3554,25 @@
                 "$ref": "#/components/schemas/UserSpecifiedRackNetworkConfig"
               }
             ]
+          },
+          "service_ip_pools": {
+            "title": "IdOrdMap",
+            "description": "The service IP pools which may be used for internal services.",
+            "x-rust-type": {
+              "crate": "iddqd",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/ServiceIpPoolConfig"
+                }
+              ],
+              "path": "iddqd::IdOrdMap",
+              "version": "*"
+            },
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ServiceIpPoolConfig"
+            },
+            "uniqueItems": true
           }
         },
         "required": [
@@ -3713,11 +3581,10 @@
           "dns_servers",
           "external_dns_ips",
           "external_dns_zone_name",
-          "internal_services_ip_pool_ranges",
           "ntp_servers",
-          "rack_network_config"
-        ],
-        "additionalProperties": false
+          "rack_network_config",
+          "service_ip_pools"
+        ]
       },
       "RackInitUuid": {
         "x-rust-type": {
@@ -4407,6 +4274,36 @@
               "status"
             ]
           }
+        ]
+      },
+      "ServiceIpPoolConfig": {
+        "description": "Full details of a system-service IP pool, provided at rack setup (RSS).",
+        "type": "object",
+        "properties": {
+          "description": {
+            "description": "Description of the IP Pool",
+            "type": "string"
+          },
+          "name": {
+            "description": "Name of the IP Pool",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          },
+          "ranges": {
+            "description": "List of IP address ranges in the pool.\n\nThere is guaranteed to be at least one range, and all ranges are of the same IP version.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/IpRange"
+            }
+          }
+        },
+        "required": [
+          "description",
+          "name",
+          "ranges"
         ]
       },
       "SetBgpAuthKeyStatus": {

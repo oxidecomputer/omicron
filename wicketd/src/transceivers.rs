@@ -4,7 +4,6 @@
 
 //! Fetching transceiver state from the SP.
 
-use gateway_types::component::SpIdentifier;
 use iddqd::{IdOrdItem, IdOrdMap, id_ord_map, id_upcast};
 use sled_agent_types::early_networking::SwitchSlot;
 use slog::{Logger, debug, error};
@@ -21,7 +20,7 @@ use transceiver_controller::{
     ConfigBuilder, Controller, Error, ModuleId, ModuleResult,
 };
 use transceiver_controller::{SpRequest, message::ExtendedStatus};
-use wicket_common::inventory::{SpType, Transceiver};
+use wicket_common::inventory::Transceiver;
 
 /// Type alias for a map of all transceivers on each switch.
 pub type TransceiverMap = IdOrdMap<SwitchTransceivers>;
@@ -85,22 +84,9 @@ pub struct Handle {
 
 impl Handle {
     /// Notify the transceiver manager that we've learned our switch slot.
-    ///
-    /// # Panics
-    ///
-    /// This panics if called with an `SpIdentifier` that doesn't have an
-    /// `SpType::Switch`.
-    pub(crate) fn set_local_switch_id(&self, switch: SpIdentifier) {
-        let SpIdentifier { slot, typ: SpType::Switch } = switch else {
-            panic!("Should only be called with SpType::Switch");
-        };
-        let slot = match slot {
-            0 => SwitchSlot::Switch0,
-            1 => SwitchSlot::Switch1,
-            _ => unreachable!(),
-        };
+    pub(crate) fn set_local_switch_id(&self, switch_slot: SwitchSlot) {
         self.switch_slot_tx
-            .send(Some(slot))
+            .send(Some(switch_slot))
             .expect("Should always have a receiver");
     }
 
