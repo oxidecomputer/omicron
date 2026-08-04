@@ -78,10 +78,20 @@ struct CollectArgs {
     /// Defaults to all categories.
     #[clap(long, value_enum)]
     include: Vec<BundleDataCategory>,
+
+    /// Only collect time-bounded data (zone logs, ereports) newer than
+    /// this age, e.g. "2days" or "12h 30m". Defaults to 7 days.
+    #[clap(long, value_parser = humantime::parse_duration)]
+    since: Option<std::time::Duration>,
+
+    /// Only collect time-bounded data (zone logs, ereports) older than
+    /// this age, e.g. "1h". Must be a smaller age than --since.
+    #[clap(long, value_parser = humantime::parse_duration)]
+    until: Option<std::time::Duration>,
 }
 
 impl CollectArgs {
-    fn data_selection(&self) -> BundleDataSelection {
+    fn data_selection(&self) -> anyhow::Result<BundleDataSelection> {
         let categories: &[BundleDataCategory] = if self.include.is_empty() {
             BundleDataCategory::value_variants()
         } else {
@@ -100,12 +110,23 @@ impl CollectArgs {
                 }
             };
         }
-        sel.with_time_range(BundleTimeRange {
-            start: Some(
-                omicron_common::now_db_precision() - chrono::Days::new(7),
-            ),
-            end: None,
-        })
+
+        // Both flags are ages relative to now: --since is the oldest data
+        // to include (the window's start), --until the newest (its end).
+        let now = omicron_common::now_db_precision();
+        let start = match self.since {
+            Some(age) => now - age,
+            None => now - chrono::Days::new(7),
+        };
+        let end = self.until.map(|age| now - age);
+        if let Some(end) = end {
+            anyhow::ensure!(
+                start <= end,
+                "--since ({start}) must be an older point in time than \
+                 --until ({end})",
+            );
+        }
+        Ok(sel.with_time_range(BundleTimeRange { start: Some(start), end }))
     }
 }
 
@@ -157,7 +178,7 @@ impl CollectArgs {
             resolver,
             bundle_log,
             opctx,
-            self.data_selection(),
+            self.data_selection()?,
             bundle,
         ));
 
