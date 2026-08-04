@@ -13,6 +13,7 @@ use http::method::Method;
 use nexus_db_model::SupportBundleState as DbSupportBundleState;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db::datastore::SupportBundleCreateParams;
 use nexus_lockstep_client::types::LastResult;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
@@ -25,7 +26,10 @@ use nexus_types::internal_api::background::SupportBundleCleanupReport;
 use nexus_types::internal_api::background::SupportBundleCollectionStep;
 use nexus_types::internal_api::background::SupportBundleCollectionStepStatus;
 use nexus_types::internal_api::background::SupportBundleEreportStatus;
+use nexus_types::support_bundle::BundleDataSelection;
+use nexus_types::support_bundle::BundleTimeRange;
 use omicron_common::api::external::LookupType;
+use omicron_sled_agent::sim::SimLogEntry;
 use omicron_uuid_kinds::SupportBundleUuid;
 use serde::Deserialize;
 use std::io::Cursor;
@@ -617,6 +621,134 @@ async fn test_support_bundle_lifecycle(cptestctx: &ControlPlaneTestContext) {
     );
     assert_eq!(second_bundle.reason_for_creation, "Created by external API");
     assert_eq!(second_bundle.state, SupportBundleState::Collecting);
+}
+
+// Test that the bundle-wide time range bounds which zone logs are collected
+// from a sled.
+#[nexus_test]
+async fn test_support_bundle_zone_log_time_range(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let _disk_test =
+        DiskTestBuilder::new(&cptestctx).with_zpool_count(1).build().await;
+
+    let nexus = &cptestctx.server.server_context().nexus;
+    let datastore = nexus.datastore();
+    let opctx =
+        OpContext::for_tests(cptestctx.logctx.log.clone(), datastore.clone());
+
+    // Inject synthetic zone logs into the first simulated sled-agent at
+    // three ages: 30 minutes, 6 hours, and 30 days.
+    const ZONE: &str = "oxz_fake_test_zone";
+    let now = chrono::Utc::now();
+    let sled_agent = cptestctx.sled_agents[0].sled_agent();
+    for (filename, age) in [
+        ("fake-svc.log.30-minutes-old", chrono::Duration::minutes(30)),
+        ("fake-svc.log.6-hours-old", chrono::Duration::hours(6)),
+        ("fake-svc.log.30-days-old", chrono::Duration::days(30)),
+    ] {
+        sled_agent.insert_support_log(
+            ZONE,
+            SimLogEntry {
+                filename: filename.to_string(),
+                contents: b"totally fake log data".to_vec(),
+                mtime: now - age,
+            },
+        );
+    }
+
+    // Creates a bundle with the given window, collects it, and returns the
+    // names of the collected zone-log files.
+    async fn collect_zone_logs_with_range(
+        cptestctx: &ControlPlaneTestContext,
+        client: &ClientTestContext,
+        opctx: &OpContext,
+        range: BundleTimeRange,
+    ) -> Vec<String> {
+        let nexus = &cptestctx.server.server_context().nexus;
+        let bundle = nexus
+            .datastore()
+            .support_bundle_create(
+                opctx,
+                SupportBundleCreateParams {
+                    reason: "Testing zone-log time-range filtering",
+                    nexus_id: nexus.id(),
+                    user_comment: None,
+                    data_selection: BundleDataSelection::new()
+                        .with_all_sleds()
+                        .with_time_range(range),
+                },
+            )
+            .await
+            .expect("Couldn't allocate a support bundle");
+
+        let output =
+            activate_bundle_collection_background_task(&cptestctx).await;
+        assert_eq!(output.collection_err, None);
+        let report = output.collection_report.as_ref().expect("Missing report");
+        assert_eq!(report.collection.bundle, bundle.id.into());
+        assert!(report.activated_in_db_ok);
+
+        let contents = bundle_download(client, bundle.id.into()).await.unwrap();
+        let archive = ZipArchive::new(Cursor::new(&contents)).unwrap();
+        let log_prefix = format!("logs/{ZONE}/");
+        let logs = archive
+            .file_names()
+            .filter(|name| name.contains(&log_prefix) && !name.ends_with('/'))
+            .map(String::from)
+            .collect();
+
+        // Delete the bundle (and run the cleanup pass) so the next
+        // collection has a free debug dataset to land on.
+        bundle_delete(client, bundle.id.into()).await.unwrap();
+        let output =
+            activate_bundle_collection_background_task(&cptestctx).await;
+        assert_eq!(output.cleanup_err, None);
+
+        logs
+    }
+
+    // A 24-hour window includes the 30-minute and 6-hour logs, but not the
+    // 30-day log.
+    let logs = collect_zone_logs_with_range(
+        &cptestctx,
+        client,
+        &opctx,
+        BundleTimeRange {
+            start: Some(now - chrono::Duration::hours(24)),
+            end: None,
+        },
+    )
+    .await;
+    assert_eq!(logs.len(), 2, "expected 2 in-window logs, got: {logs:?}");
+    assert!(logs.iter().any(|l| l.ends_with("fake-svc.log.30-minutes-old")));
+    assert!(logs.iter().any(|l| l.ends_with("fake-svc.log.6-hours-old")));
+
+    // A window that ends a day ago includes only the 30-day log, exercising
+    // the end bound.
+    let logs = collect_zone_logs_with_range(
+        &cptestctx,
+        client,
+        &opctx,
+        BundleTimeRange {
+            start: Some(now - chrono::Duration::days(60)),
+            end: Some(now - chrono::Duration::days(1)),
+        },
+    )
+    .await;
+    assert_eq!(logs.len(), 1, "expected 1 in-window log, got: {logs:?}");
+    assert!(logs.iter().any(|l| l.ends_with("fake-svc.log.30-days-old")));
+
+    // An unbounded window includes everything.
+    let logs = collect_zone_logs_with_range(
+        &cptestctx,
+        client,
+        &opctx,
+        BundleTimeRange { start: None, end: None },
+    )
+    .await;
+    assert_eq!(logs.len(), 3, "expected all 3 logs, got: {logs:?}");
 }
 
 // Test range requests on a bundle
