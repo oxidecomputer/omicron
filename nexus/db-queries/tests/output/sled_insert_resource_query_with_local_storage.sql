@@ -171,13 +171,14 @@ WITH
                 WHERE
                   rendezvous_local_storage_unencrypted_dataset.id = $16
               )
+            AND (SELECT time_deleted IS NULL AND attach_instance_id = $17 FROM disk WHERE id = $18)
             AND (
                 SELECT
                   sum(
                     crucible_dataset.size_used
                     + COALESCE(rendezvous_local_storage_dataset.size_used, 0)
                     + COALESCE(rendezvous_local_storage_unencrypted_dataset.size_used, 0)
-                    + $17
+                    + $19
                   )
                 FROM
                   crucible_dataset
@@ -189,7 +190,7 @@ WITH
                       = rendezvous_local_storage_unencrypted_dataset.pool_id
                       AND rendezvous_local_storage_unencrypted_dataset.time_tombstoned IS NULL
                 WHERE
-                  crucible_dataset.time_deleted IS NULL AND crucible_dataset.pool_id = $18
+                  crucible_dataset.time_deleted IS NULL AND crucible_dataset.pool_id = $20
                 GROUP BY
                   crucible_dataset.pool_id
               )
@@ -200,13 +201,13 @@ WITH
                     FROM
                       inv_zpool
                     WHERE
-                      inv_zpool.id = $19
+                      inv_zpool.id = $21
                     ORDER BY
                       inv_zpool.time_collected DESC
                     LIMIT
                       1
                   )
-                  - (SELECT control_plane_storage_buffer FROM zpool WHERE id = $20)
+                  - (SELECT control_plane_storage_buffer FROM zpool WHERE id = $22)
                 )
             AND (
                 SELECT
@@ -219,7 +220,7 @@ WITH
                   JOIN sled ON zpool.sled_id = sled.id
                   JOIN physical_disk ON zpool.physical_disk_id = physical_disk.id
                 WHERE
-                  zpool.id = $21
+                  zpool.id = $23
               )
             AND (
                 SELECT
@@ -227,8 +228,9 @@ WITH
                 FROM
                   rendezvous_local_storage_unencrypted_dataset
                 WHERE
-                  rendezvous_local_storage_unencrypted_dataset.id = $22
+                  rendezvous_local_storage_unencrypted_dataset.id = $24
               )
+            AND (SELECT time_deleted IS NULL AND attach_instance_id = $25 FROM disk WHERE id = $26)
           )
     ),
   updated_local_storage_disk_records
@@ -237,9 +239,9 @@ WITH
         disk_type_local_storage
       SET
         local_storage_unencrypted_dataset_allocation_id
-          = CASE disk_id WHEN $23 THEN $24 WHEN $25 THEN $26 END
+          = CASE disk_id WHEN $27 THEN $28 WHEN $29 THEN $30 END
       WHERE
-        disk_id IN ($27, $28) AND EXISTS(SELECT 1 FROM insert_valid)
+        disk_id IN ($31, $32) AND EXISTS(SELECT 1 FROM insert_valid)
       RETURNING
         *
     ),
@@ -258,7 +260,7 @@ WITH
             dataset_size
           )
       SELECT
-        $29, now(), NULL, $30, $31, $32, $33
+        $33, now(), NULL, $34, $35, $36, $37
       WHERE
         EXISTS(SELECT 1 FROM insert_valid)
       RETURNING
@@ -279,7 +281,7 @@ WITH
             dataset_size
           )
       SELECT
-        $34, now(), NULL, $35, $36, $37, $38
+        $38, now(), NULL, $39, $40, $41, $42
       WHERE
         EXISTS(SELECT 1 FROM insert_valid)
       RETURNING
@@ -290,9 +292,9 @@ WITH
       UPDATE
         rendezvous_local_storage_unencrypted_dataset
       SET
-        size_used = size_used + CASE pool_id WHEN $39 THEN $40 WHEN $41 THEN $42 END
+        size_used = size_used + CASE pool_id WHEN $43 THEN $44 WHEN $45 THEN $46 END
       WHERE
-        pool_id IN ($43, $44) AND time_tombstoned IS NULL AND EXISTS(SELECT 1 FROM insert_valid)
+        pool_id IN ($47, $48) AND time_tombstoned IS NULL AND EXISTS(SELECT 1 FROM insert_valid)
       RETURNING
         *
     )
@@ -300,6 +302,6 @@ INSERT
 INTO
   sled_resource_vmm (id, sled_id, hardware_threads, rss_ram, reservoir_ram, instance_id, state)
 SELECT
-  $45, $46, $47, $48, $49, $50, $51
+  $49, $50, $51, $52, $53, $54, $55
 WHERE
   EXISTS(SELECT 1 FROM insert_valid)

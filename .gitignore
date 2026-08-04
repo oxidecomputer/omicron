@@ -19,4 +19,3 @@ tags
 connectivity-report.json
 *.local
 .DS_Store
-tools/check_mcast_drift.sh

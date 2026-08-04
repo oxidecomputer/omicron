@@ -47,9 +47,7 @@ thiserror.workspace = true
 tokio.workspace = true
 tufaceous.workspace = true
 tufaceous-artifact.workspace = true
-tufaceous-lib.workspace = true
 typed-rng.workspace = true
-update-common.workspace = true
 uuid.workspace = true
 
 omicron-workspace-hack.workspace = true

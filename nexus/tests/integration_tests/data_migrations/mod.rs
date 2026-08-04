@@ -48,6 +48,7 @@ mod positive_quotas;
 mod rename_default_igw_ip_pool;
 mod route_config_rib_priority;
 mod sled_resource_vmm_state;
+mod tufaceous_v2;
 mod vpc_firewall_icmp;
 mod zone_image_resolver_inventory;
 
@@ -100,6 +101,7 @@ pub(crate) fn get_migration_checks() -> BTreeMap<Version, DataMigrationFns> {
     register!(ereporter_restart_order_v2);
     register!(ereporter_restart_rack_id);
     register!(ereporter_restart_latest_ereport);
+    register!(tufaceous_v2);
 
     map
 }

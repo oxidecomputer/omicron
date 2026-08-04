@@ -81,8 +81,8 @@ pub struct IpPoolAssignParam {
 /// or Source-Specific Multicast (SSM), but not both. Mixing ASM and SSM
 /// ranges in the same pool is not allowed.
 ///
-/// ASM: IPv4 addresses outside 232.0.0.0/8, IPv6 addresses with flag field != 3
-/// SSM: IPv4 addresses in 232.0.0.0/8, IPv6 addresses with flag field = 3
+/// ASM: IPv4 addresses outside 232.0.0.0/8, IPv6 addresses outside ff3x::/32
+/// SSM: IPv4 addresses in 232.0.0.0/8, IPv6 addresses within ff3x::/32
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct IpPoolCreate {
     #[serde(flatten)]

@@ -17,6 +17,7 @@ use nexus_db_queries::context::OpContext;
 use nexus_lockstep_client::types::BlueprintTargetSet;
 use nexus_test_interface::NexusServer;
 use nexus_test_utils::ControlPlaneTestContext;
+use nexus_test_utils::background::run_blueprint_loader;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::TestResponse;
 use nexus_test_utils::http_testing::{NexusRequest, RequestBuilder};
@@ -26,24 +27,29 @@ use nexus_types::deployment::BlueprintHostPhase2DesiredContents;
 use nexus_types::deployment::BlueprintZoneImageSource;
 use nexus_types::external_api::update;
 use nexus_types::external_api::update::SetTargetReleaseParams;
+use omicron_test_utils::dev::poll::CondCheckError;
+use omicron_test_utils::dev::poll::wait_for_condition;
 use omicron_uuid_kinds::{BlueprintUuid, GenericUuid};
 use semver::Version;
 use std::sync::Arc;
 use std::time::Duration;
-use tufaceous_artifact::ArtifactKind;
-use tufaceous_artifact::{ArtifactVersion, KnownArtifactKind};
-use tufaceous_lib::assemble::ManifestTweak;
+use tufaceous::edit::RepositoryEditor;
+use tufaceous_artifact::Artifact;
+use tufaceous_artifact::ArtifactSet;
+use tufaceous_artifact::ArtifactVersion;
+use tufaceous_artifact::KnownArtifactTags;
+use tufaceous_artifact::OsPhase2Tags;
+use tufaceous_artifact::OsVariant;
 
 use crate::integration_tests::updates::TestTrustRoot;
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[tokio::test]
 async fn get_set_target_release() -> Result<()> {
     let ctx =
         nexus_test_utils::ControlPlaneBuilder::new("get_set_target_release")
             .start::<omicron_nexus::Server>()
             .await;
     let client = &ctx.external_client;
-    let logctx = &ctx.logctx;
 
     // Interacting with the target release fails until an inventory collection
     // is loaded, so wait for that before running the test.
@@ -76,7 +82,7 @@ async fn get_set_target_release() -> Result<()> {
         let before = Utc::now();
         let system_version = Version::new(1, 0, 0);
         let response: update::TufRepoUpload = trust_root
-            .assemble_repo(&logctx.log, &[])
+            .assemble_repo(RepositoryEditor::fake(system_version.clone())?)
             .await?
             .into_upload_request(client, StatusCode::OK)
             .execute()
@@ -105,19 +111,11 @@ async fn get_set_target_release() -> Result<()> {
     // Fake completing an update to 1.0.0.
     install_target_blueprint_with_update_complete(&ctx, &version_1_0_0).await?;
 
-    // Adding a repo with non-semver artifact versions should be ok, too.
     {
         let before = Utc::now();
         let system_version = Version::new(2, 0, 0);
-        let tweaks = &[
-            ManifestTweak::SystemVersion(system_version.clone()),
-            ManifestTweak::ArtifactVersion {
-                kind: KnownArtifactKind::SwitchRotBootloader,
-                version: ArtifactVersion::new("non-semver-2").unwrap(),
-            },
-        ];
         let response: update::TufRepoUpload = trust_root
-            .assemble_repo(&logctx.log, tweaks)
+            .assemble_repo(RepositoryEditor::fake(system_version.clone())?)
             .await?
             .into_upload_request(client, StatusCode::OK)
             .execute()
@@ -177,6 +175,157 @@ async fn get_set_target_release() -> Result<()> {
     Ok(())
 }
 
+/// Regression test for <https://github.com/oxidecomputer/omicron/issues/10917>:
+/// update recovery must be allowed when all components have been no-op
+/// converted to artifacts matching the current release, AND the proposed new
+/// version matches the current release, AND the blueprint's minimum target
+/// release generation is higher than the current target release generation.
+#[tokio::test]
+async fn mupdate_recovery_after_noop_conversion() -> Result<()> {
+    let ctx = nexus_test_utils::ControlPlaneBuilder::new(
+        "mupdate_recovery_after_noop_conversion",
+    )
+    .start::<omicron_nexus::Server>()
+    .await;
+    let client = &ctx.external_client;
+
+    // Interacting with the target release fails until an inventory collection
+    // is loaded, so wait for that before running the test.
+    ctx.wait_for_at_least_one_inventory_collection(Duration::from_secs(60))
+        .await;
+
+    // Upload a trust root and a fake 1.0.0 TUF repo.
+    let trust_root = TestTrustRoot::generate().await?;
+    trust_root.to_upload_request(client, StatusCode::CREATED).execute().await?;
+    let version_1_0_0 = Version::new(1, 0, 0);
+    let response: update::TufRepoUpload = trust_root
+        .assemble_repo(RepositoryEditor::fake(version_1_0_0.clone())?)
+        .await?
+        .into_upload_request(client, StatusCode::OK)
+        .execute()
+        .await?
+        .parsed_body()?;
+    assert_eq!(version_1_0_0, response.repo.system_version);
+
+    // Set the initial target release.
+    set_target_release_for_update_with_expected_status(
+        client,
+        &version_1_0_0,
+        StatusCode::NO_CONTENT,
+    )
+    .await?;
+
+    // Install a target blueprint matching the issue-10917 state: all sources
+    // are artifacts of the current target release (no mupdate evidence), but
+    // the minimum target release generation is ahead of the current target
+    // release generation.
+    install_target_blueprint_simulating_mupdate_to_current_release(
+        &ctx,
+        &version_1_0_0,
+    )
+    .await?;
+
+    // The update status endpoint should report the system as suspended. Its
+    // view of the blueprint comes from the blueprint loader background task,
+    // so activate it first.
+    run_blueprint_loader(&ctx.lockstep_client).await;
+    wait_for_condition(
+        || async {
+            let status: update::UpdateStatus =
+                object_get(client, "/v1/system/update/status").await;
+            if status.suspended {
+                Ok(())
+            } else {
+                Err(CondCheckError::<anyhow::Error>::NotYet {
+                    status: Some(
+                        "update status does not report suspended".to_string(),
+                    ),
+                })
+            }
+        },
+        &Duration::from_millis(250),
+        &Duration::from_secs(30),
+    )
+    .await
+    .context("waiting for update status to report suspended")?;
+
+    // Recovery to a version that doesn't match the blueprint's sources must be
+    // rejected, and the error should name both versions.
+    let version_2_0_0 = Version::new(2, 0, 0);
+    let response =
+        set_target_release_for_mupdate_recovery_with_expected_status(
+            client,
+            &version_2_0_0,
+            StatusCode::BAD_REQUEST,
+        )
+        .await?;
+    let err = response.parsed_body::<HttpErrorResponseBody>().unwrap();
+    for needle in [
+        "mupdate recovery required",
+        "components deployed on sled",
+        "2.0.0",
+        "1.0.0",
+    ] {
+        assert!(
+            err.message.contains(needle),
+            "expected error message to contain {needle:?}: {}",
+            err.message
+        );
+    }
+
+    // Recovery to the version matching the blueprint's sources must succeed.
+    set_target_release_for_mupdate_recovery_with_expected_status(
+        client,
+        &version_1_0_0,
+        StatusCode::NO_CONTENT,
+    )
+    .await?;
+
+    // The target release generation has now caught up to the blueprint's
+    // minimum, so the system is no longer suspended...
+    {
+        let update::UpdateStatus {
+            // fields we can meaningfully check
+            target_release,
+            suspended,
+
+            // `contact_support` will be true for reasons not related to what
+            // we're testing (e.g., it won't be able to get SMF service
+            // information from sled-agent, so will be true)
+            contact_support: _,
+
+            // we installed a custom blueprint, then performed recovery, but
+            // didn't wait for reconfigurator to go through planning / no-op
+            // recovery etc., nor could we without greater sled-agent testing
+            // fidelity, so ignore this map
+            components_by_release_version: _,
+
+            // not relevant to the test
+            time_last_step_planned: _,
+        } = object_get(client, "/v1/system/update/status").await;
+        assert_eq!(target_release.0.unwrap().version, version_1_0_0);
+        assert!(!suspended, "should not be suspended after recovery");
+    }
+
+    // ...and further recovery attempts must be rejected.
+    let response =
+        set_target_release_for_mupdate_recovery_with_expected_status(
+            client,
+            &version_1_0_0,
+            StatusCode::BAD_REQUEST,
+        )
+        .await?;
+    let err = response.parsed_body::<HttpErrorResponseBody>().unwrap();
+    assert!(
+        err.message.contains("no evidence a mupdate has occurred"),
+        "unexpected error message: {}",
+        err.message
+    );
+
+    ctx.teardown().await;
+    Ok(())
+}
+
 /// Create a `Blueprint` with all host OS and zone image sources set to match
 /// artifacts from the TUF repo with the given `system_version`.
 ///
@@ -186,6 +335,36 @@ async fn get_set_target_release() -> Result<()> {
 pub async fn install_target_blueprint_with_update_complete<N: NexusServer>(
     ctx: &ControlPlaneTestContext<N>,
     system_version: &Version,
+) -> Result<(), anyhow::Error> {
+    install_target_blueprint(ctx, system_version, false).await
+}
+
+/// Create a `Blueprint` with all host OS and zone image sources set to match
+/// artifacts from the TUF repo with the given `system_version`, and with a
+/// `target_release_minimum_generation` ahead of the current target release
+/// generation.
+///
+/// This emulates the state described in
+/// <https://github.com/oxidecomputer/omicron/issues/10917>: a sled was
+/// mupdated to the current target release, so the planner bumped the
+/// blueprint's minimum target release generation (pausing further update
+/// actions) and then no-op converted the mupdated sled's sources back to
+/// artifacts from the current target release, leaving no other evidence of
+/// the mupdate in the blueprint. A TUF repo matching `system_version` must
+/// already exist in the database, and a target release must already be set.
+pub async fn install_target_blueprint_simulating_mupdate_to_current_release<
+    N: NexusServer,
+>(
+    ctx: &ControlPlaneTestContext<N>,
+    system_version: &Version,
+) -> Result<(), anyhow::Error> {
+    install_target_blueprint(ctx, system_version, true).await
+}
+
+async fn install_target_blueprint<N: NexusServer>(
+    ctx: &ControlPlaneTestContext<N>,
+    system_version: &Version,
+    bump_min_target_release_generation: bool,
 ) -> Result<(), anyhow::Error> {
     let lockstep_client = ctx.lockstep_client();
     let datastore = ctx.server.datastore();
@@ -204,32 +383,27 @@ pub async fn install_target_blueprint_with_update_complete<N: NexusServer>(
         .with_context(|| {
             format!("getting TUF repo with version {system_version}")
         })?;
-    let tuf_repo_artifacts =
-        datastore.tuf_list_repo_artifacts(&opctx, tuf_repo.id()).await?;
+    let tuf_repo_artifacts = datastore
+        .tuf_list_repo_artifacts(&opctx, tuf_repo.id())
+        .await?
+        .into_iter()
+        .map(Artifact::from)
+        .collect::<ArtifactSet>();
 
     // Get the hashes of host phase 2 and some zone. (We don't have to match up
     // particular zone kinds; we can use one zone artifact for all zones. This
     // seems a little fishy, but we rely on the planner to do the right thing.)
     let host_phase_2_artifact_hash = tuf_repo_artifacts
-        .iter()
-        .find_map(|a| {
-            if a.kind == ArtifactKind::HOST_PHASE_2.as_str() {
-                Some(a.sha256)
-            } else {
-                None
-            }
-        })
-        .context("no host phase 2 artifact in TUF repo")?;
+        .get_only(&KnownArtifactTags::OsPhase2(OsPhase2Tags {
+            os_variant: OsVariant::Host,
+        }))
+        .context("no host phase 2 artifact in TUF repo")?
+        .hash;
     let zone_artifact_hash = tuf_repo_artifacts
-        .iter()
-        .find_map(|a| {
-            if a.kind == KnownArtifactKind::Zone.to_string() {
-                Some(a.sha256)
-            } else {
-                None
-            }
-        })
-        .context("no zone artifact in TUF repo")?;
+        .filter_tags(|tags| matches!(tags, KnownArtifactTags::Zone(_)))
+        .next()
+        .context("no zone artifact in TUF repo")?
+        .hash;
 
     // Get the current blueprint.
     let target_id =
@@ -244,10 +418,10 @@ pub async fn install_target_blueprint_with_update_complete<N: NexusServer>(
     blueprint.parent_blueprint_id = Some(blueprint.id);
     blueprint.id = BlueprintUuid::new_v4();
     blueprint.time_created = Utc::now();
-    blueprint.creator = "get_set_target_release test".to_string();
-    blueprint.comment = "manual update to 1.0.0".to_string();
+    blueprint.creator = "target_release.rs test helper".to_string();
+    blueprint.comment = format!("manual update to {system_version}");
 
-    // Modify all the OS and zone sources to point to the 1.0.0 TUF repo.
+    // Modify all the OS and zone sources to point to this TUF repo.
     let bp_artifact_version = BlueprintArtifactVersion::Available {
         version: ArtifactVersion::new(system_version.to_string()).unwrap(),
     };
@@ -258,15 +432,27 @@ pub async fn install_target_blueprint_with_update_complete<N: NexusServer>(
         sled.host_phase_2.slot_a =
             BlueprintHostPhase2DesiredContents::Artifact {
                 version: bp_artifact_version.clone(),
-                hash: *host_phase_2_artifact_hash,
+                hash: host_phase_2_artifact_hash,
             };
 
         for mut zone in sled.zones.iter_mut() {
             zone.image_source = BlueprintZoneImageSource::Artifact {
                 version: bp_artifact_version.clone(),
-                hash: *zone_artifact_hash,
+                hash: zone_artifact_hash,
             };
         }
+    }
+
+    // If requested, set the blueprint's minimum target release generation to
+    // one past the current target release generation, mirroring what the
+    // planner does when it detects a mupdate.
+    if bump_min_target_release_generation {
+        let current_target_release = datastore
+            .target_release_get_current(&opctx)
+            .await
+            .context("getting current target release")?;
+        blueprint.target_release_minimum_generation =
+            (*current_target_release.generation).next();
     }
 
     // Import this blueprint and make it the new target, reflecting a
@@ -303,10 +489,11 @@ pub async fn set_target_release_for_update_with_expected_status(
     .await
 }
 
-pub async fn set_target_release_for_mupdate_recovery(
+pub async fn set_target_release_for_mupdate_recovery_with_expected_status(
     client: &ClientTestContext,
     system_version: &Version,
-) -> Result<(), anyhow::Error> {
+    expected_status: StatusCode,
+) -> Result<TestResponse, anyhow::Error> {
     NexusRequest::new(
         RequestBuilder::new(
             client,
@@ -316,10 +503,9 @@ pub async fn set_target_release_for_mupdate_recovery(
         .body(Some(&SetTargetReleaseParams {
             system_version: system_version.clone(),
         }))
-        .expect_status(Some(StatusCode::NO_CONTENT)),
+        .expect_status(Some(expected_status)),
     )
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
     .await
-    .map(|_| ())
 }
