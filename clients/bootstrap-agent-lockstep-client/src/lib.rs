@@ -41,6 +41,8 @@ progenitor::generate_api!(
         RouterLifetimeConfig = sled_agent_types::early_networking::RouterLifetimeConfig,
         RssStep = bootstrap_agent_lockstep_types::RssStep,
         ServiceIpPoolConfig = bootstrap_agent_lockstep_types::ServiceIpPoolConfig,
+        SledAgentInfo = bootstrap_agent_lockstep_types::SledAgentInfo,
+        StartSledAgentStatus = bootstrap_agent_lockstep_types::StartSledAgentStatus,
         SwitchSlot = sled_agent_types::early_networking::SwitchSlot,
         TxEqConfig = sled_agent_types::early_networking::TxEqConfig,
         UplinkAddressConfig = sled_agent_types::early_networking::UplinkAddressConfig,

@@ -834,6 +834,18 @@
           "last"
         ]
       },
+      "Ipv6Subnet": {
+        "description": "Wraps an [`Ipv6Net`] with a compile-time prefix length.",
+        "type": "object",
+        "properties": {
+          "net": {
+            "$ref": "#/components/schemas/Ipv6Net"
+          }
+        },
+        "required": [
+          "net"
+        ]
+      },
       "LinkFec": {
         "description": "The forward error correction mode of a link.",
         "oneOf": [
@@ -1208,6 +1220,39 @@
               "state",
               "threshold",
               "transient_errors"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "sleds": {
+                "title": "BiHashMap",
+                "x-rust-type": {
+                  "crate": "iddqd",
+                  "parameters": [
+                    {
+                      "$ref": "#/components/schemas/SledAgentInfo"
+                    }
+                  ],
+                  "path": "iddqd::BiHashMap",
+                  "version": "*"
+                },
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/SledAgentInfo"
+                },
+                "uniqueItems": true
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "start_sled_agents"
+                ]
+              }
+            },
+            "required": [
+              "sleds",
+              "state"
             ]
           },
           {
@@ -2136,6 +2181,43 @@
           "name",
           "ranges"
         ]
+      },
+      "SledAgentInfo": {
+        "description": "Status information for a given sled agent",
+        "type": "object",
+        "properties": {
+          "baseboard_id": {
+            "$ref": "#/components/schemas/BaseboardId"
+          },
+          "fatal_error": {
+            "nullable": true,
+            "type": "string"
+          },
+          "sled_id": {
+            "$ref": "#/components/schemas/SledUuid"
+          },
+          "sled_subnet": {
+            "$ref": "#/components/schemas/Ipv6Subnet"
+          },
+          "started": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "baseboard_id",
+          "sled_id",
+          "sled_subnet",
+          "started"
+        ]
+      },
+      "SledUuid": {
+        "x-rust-type": {
+          "crate": "omicron-uuid-kinds",
+          "path": "omicron_uuid_kinds::SledUuid",
+          "version": "*"
+        },
+        "type": "string",
+        "format": "uuid"
       },
       "SwitchSlot": {
         "description": "Identifies switch physical location",

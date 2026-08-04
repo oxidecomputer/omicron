@@ -6,6 +6,7 @@
 
 use crate::bootstrap::rss_handle::run_rss;
 use bootstrap_agent_lockstep_types::MultirackJoinRequest;
+use bootstrap_agent_lockstep_types::MultirackJoinServiceState;
 use bootstrap_agent_lockstep_types::RackOperationStatus;
 use bootstrap_agent_lockstep_types::RssStep;
 use dropshot::HttpError;
@@ -14,7 +15,6 @@ use omicron_uuid_kinds::RackInitUuid;
 use sled_agent_bootstrap_common::RssContext;
 use sled_agent_multirack_join::MultirackJoinServiceError;
 use sled_agent_multirack_join::MultirackJoinServiceHandle;
-use sled_agent_multirack_join::MultirackJoinServiceState;
 use sled_agent_rack_setup::RackInitializeRequestParams;
 use sled_agent_rack_setup::SetupServiceError;
 use slog_error_chain::InlineErrorChain;
