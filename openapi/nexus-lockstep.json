@@ -3402,6 +3402,43 @@
           }
         ]
       },
+      "BooleanSetting": {
+        "description": "A single configuration setting that is either explicitly overridden to  or inherits the system-defined default.\n\nThis is generic over a `V: `[`SettingValue`] type parameter, which represents a particular config setting. This trait defines both the type of the actual configuration value *and* the value of its default. Implementations of this trait for each field in [`FmConfig`] are defined in the [`settings`] module using the `define_setting!` macro. This may seem a bit more complex than just having a [`Default`] implementation for [`FmConfig`]. However, it is designed to allow us to define the default value for each setting in a single place, rather than having to keep them in sync between cases where *some* settings are the defaults and others are overridden, and cases where the entire config is the default because no overrides exist.\n\n[`Self::Default`] and [`Self::Override`] have different semantics even when an overridden value *happens* to be equal to the default value for that setting. This is because the default value for a given setting may change across multiple Oxide system software releases. Just because the *current* default for the sitrep limit is 2500 (for example) does not mean that we will not change this default value in the future. Therefore, it is necessary to represent that a particular config setting is explicitly set to \"whatever the default value in the current release happens to be\", rather than being set to a concrete value that is equal to the current default. In the database, this is represented using `NULL`s to indicate the default value (which is why [`Setting::into_override`] and the `From<Option>` impl exist).",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "source": {
+                "type": "string",
+                "enum": [
+                  "override"
+                ]
+              },
+              "value": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "source",
+              "value"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "source": {
+                "type": "string",
+                "enum": [
+                  "default"
+                ]
+              }
+            },
+            "required": [
+              "source"
+            ]
+          }
+        ]
+      },
       "ByteCount": {
         "description": "Byte count to express memory or storage capacity.",
         "type": "integer",
@@ -5081,19 +5118,27 @@
         "properties": {
           "analysis_enabled": {
             "description": "BREAK GLASS TO COMPLETELY DISABLE FM ANALYSIS",
-            "type": "boolean"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/BooleanSetting"
+              }
+            ]
           },
           "history_pruning_threshold": {
             "description": "The maximum number of sitreps committed to the `fm_sitrep_history` table. If the number of sitreps exceeds this threshold, the `fm_sitrep_history_pruner` background task will remove the oldest entries from the history.",
-            "type": "integer",
-            "format": "uint32",
-            "minimum": 1
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/NonZeroU32Setting"
+              }
+            ]
           },
           "sitrep_limit": {
             "description": "The maximum number of sitreps to keep in the database.\n\nIf the number of sitreps exceeds this limit, the FM analysis background task will not produce a new sitrep until old ones are deleted.\n\nThis limit applies to both committed sitreps in the history *and* orphaned sitreps left behind when multiple Nexuses race to commit a sitrep.",
-            "type": "integer",
-            "format": "uint32",
-            "minimum": 1
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/NonZeroU32Setting"
+              }
+            ]
           }
         },
         "required": [
@@ -6351,6 +6396,45 @@
       "NodeName": {
         "description": "Unique name for a saga [`Node`]\n\nEach node requires a string name that's unique within its DAG.  The name is used to identify its output.  Nodes that depend on a given node (either directly or indirectly) can access the node's output using its name.",
         "type": "string"
+      },
+      "NonZeroU32Setting": {
+        "description": "A single configuration setting that is either explicitly overridden to  or inherits the system-defined default.\n\nThis is generic over a `V: `[`SettingValue`] type parameter, which represents a particular config setting. This trait defines both the type of the actual configuration value *and* the value of its default. Implementations of this trait for each field in [`FmConfig`] are defined in the [`settings`] module using the `define_setting!` macro. This may seem a bit more complex than just having a [`Default`] implementation for [`FmConfig`]. However, it is designed to allow us to define the default value for each setting in a single place, rather than having to keep them in sync between cases where *some* settings are the defaults and others are overridden, and cases where the entire config is the default because no overrides exist.\n\n[`Self::Default`] and [`Self::Override`] have different semantics even when an overridden value *happens* to be equal to the default value for that setting. This is because the default value for a given setting may change across multiple Oxide system software releases. Just because the *current* default for the sitrep limit is 2500 (for example) does not mean that we will not change this default value in the future. Therefore, it is necessary to represent that a particular config setting is explicitly set to \"whatever the default value in the current release happens to be\", rather than being set to a concrete value that is equal to the current default. In the database, this is represented using `NULL`s to indicate the default value (which is why [`Setting::into_override`] and the `From<Option>` impl exist).",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "source": {
+                "type": "string",
+                "enum": [
+                  "override"
+                ]
+              },
+              "value": {
+                "type": "integer",
+                "format": "uint32",
+                "minimum": 1
+              }
+            },
+            "required": [
+              "source",
+              "value"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "source": {
+                "type": "string",
+                "enum": [
+                  "default"
+                ]
+              }
+            },
+            "required": [
+              "source"
+            ]
+          }
+        ]
       },
       "OmicronZoneDataset": {
         "description": "Describes a persistent ZFS dataset associated with an Omicron zone",

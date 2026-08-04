@@ -95,9 +95,10 @@ impl FmConfigParam {
 /// set to a concrete value that is equal to the current default. In the
 /// database, this is represented using `NULL`s to indicate the default value
 /// (which is why [`Setting::into_override`] and the `From<Option>` impl exist).
-#[derive(Default, Serialize, Deserialize)]
+#[derive(Default, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "source", content = "value")]
-#[serde(rename = "snake_case")]
+#[schemars(rename = "{V}Setting")]
+#[serde(rename_all = "snake_case")]
 pub enum Setting<V: SettingValue> {
     Override(V::Value),
     #[default]
@@ -252,18 +253,6 @@ impl<V: SettingValue> Clone for Setting<V> {
 }
 
 impl<V: SettingValue> Copy for Setting<V> where V::Value: Copy {}
-
-impl<V: SettingValue> JsonSchema for Setting<V> {
-    fn schema_name() -> String {
-        <V::Value>::schema_name()
-    }
-
-    fn json_schema(
-        generator: &mut schemars::SchemaGenerator,
-    ) -> schemars::schema::Schema {
-        <V::Value>::json_schema(generator)
-    }
-}
 
 /// A view of the current fault management configuration.
 #[derive(
@@ -448,6 +437,25 @@ pub mod settings {
             impl SettingValue for $Name {
                 type Value = $Type;
                 const DEFAULT: Self::Value = { $default_value };
+            }
+            impl JsonSchema for $Name {
+                fn schema_name() -> String {
+                    <$Type>::schema_name()
+                }
+
+                fn is_referenceable() -> bool {
+                    <$Type>::is_referenceable()
+                }
+
+                fn schema_id() -> std::borrow::Cow<'static, str> {
+                    <$Type>::schema_id()
+                }
+
+                fn json_schema(
+                    generator: &mut schemars::SchemaGenerator,
+                ) -> schemars::schema::Schema {
+                    <$Type>::json_schema(generator)
+                }
             }
         };
     }
