@@ -76,10 +76,10 @@ declare_saga_actions! {
 
 // vpc create saga: definition
 
-/// Identical to [SagaVpcCreate::make_saga_dag], but using types
-/// to identify that parameters do not need to be supplied as input.
+/// Builds the VPC create DAG, optionally omitting its default subnet.
 pub fn create_dag(
     mut builder: steno::DagBuilder,
+    create_default_subnet: bool,
 ) -> Result<steno::Dag, super::SagaInitError> {
     builder.append(Node::action(
         "vpc_id",
@@ -101,16 +101,18 @@ pub fn create_dag(
         "GenerateDefaultV6RouteId",
         ACTION_GENERATE_ID.as_ref(),
     ));
-    builder.append(Node::action(
-        "subnet_route_id",
-        "GenerateSubnetRouteId",
-        ACTION_GENERATE_ID.as_ref(),
-    ));
-    builder.append(Node::action(
-        "default_subnet_id",
-        "GenerateDefaultSubnetId",
-        ACTION_GENERATE_ID.as_ref(),
-    ));
+    if create_default_subnet {
+        builder.append(Node::action(
+            "subnet_route_id",
+            "GenerateSubnetRouteId",
+            ACTION_GENERATE_ID.as_ref(),
+        ));
+        builder.append(Node::action(
+            "default_subnet_id",
+            "GenerateDefaultSubnetId",
+            ACTION_GENERATE_ID.as_ref(),
+        ));
+    }
     builder.append(Node::action(
         "default_internet_gateway_id",
         "GenerateDefaultInternetGatewayId",
@@ -120,8 +122,10 @@ pub fn create_dag(
     builder.append(vpc_create_router_action());
     builder.append(vpc_create_v4_route_action());
     builder.append(vpc_create_v6_route_action());
-    builder.append(vpc_create_subnet_action());
-    builder.append(vpc_create_subnet_route_action());
+    if create_default_subnet {
+        builder.append(vpc_create_subnet_action());
+        builder.append(vpc_create_subnet_route_action());
+    }
     builder.append(vpc_update_firewall_action());
     builder.append(vpc_create_gateway_action());
     builder.append(vpc_notify_sleds_action());
@@ -143,7 +147,7 @@ impl NexusSaga for SagaVpcCreate {
         _params: &Self::Params,
         builder: steno::DagBuilder,
     ) -> Result<steno::Dag, super::SagaInitError> {
-        create_dag(builder)
+        create_dag(builder, true)
     }
 }
 

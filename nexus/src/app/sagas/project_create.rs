@@ -57,7 +57,18 @@ impl NexusSaga for SagaProjectCreate {
     ) -> Result<steno::Dag, super::SagaInitError> {
         builder.append(project_create_record_action());
 
-        if !params.project_create.skip_default_vpc {
+        let create_default_subnet = match &params.project_create.defaults {
+            None => Some(true),
+            Some(project_defaults) => {
+                project_defaults.first().map(|default| match default {
+                    project::ProjectDefault::Vpc(vpc_defaults) => {
+                        vpc_defaults.contains(&project::VpcDefault::Subnet)
+                    }
+                })
+            }
+        };
+
+        if let Some(create_default_subnet) = create_default_subnet {
             builder.append(project_create_vpc_params_action());
 
             let subsaga_builder = steno::DagBuilder::new(steno::SagaName::new(
@@ -65,7 +76,10 @@ impl NexusSaga for SagaProjectCreate {
             ));
             builder.append(steno::Node::subsaga(
                 "vpc",
-                sagas::vpc_create::create_dag(subsaga_builder)?,
+                sagas::vpc_create::create_dag(
+                    subsaga_builder,
+                    create_default_subnet,
+                )?,
                 "vpc_create_params",
             ));
         }
@@ -178,13 +192,13 @@ mod test {
 
     // Helper for creating project create parameters
     fn new_test_params(opctx: &OpContext, authz_silo: authz::Silo) -> Params {
-        new_test_params_with_options(opctx, authz_silo, false)
+        new_test_params_with_defaults(opctx, authz_silo, None)
     }
 
-    fn new_test_params_with_options(
+    fn new_test_params_with_defaults(
         opctx: &OpContext,
         authz_silo: authz::Silo,
-        skip_default_vpc: bool,
+        defaults: Option<Vec<project::ProjectDefault>>,
     ) -> Params {
         Params {
             serialized_authn: Serialized::for_opctx(opctx),
@@ -193,7 +207,7 @@ mod test {
                     name: "my-project".parse().unwrap(),
                     description: "My Project".to_string(),
                 },
-                skip_default_vpc,
+                defaults,
             },
             authz_silo,
         }
@@ -320,7 +334,7 @@ mod test {
     }
 
     #[nexus_test(server = crate::Server)]
-    async fn test_skip_default_vpc_creates_no_vpc(
+    async fn test_empty_defaults_creates_no_vpc(
         cptestctx: &ControlPlaneTestContext,
     ) {
         let nexus = &cptestctx.server.server_context().nexus;
@@ -329,11 +343,14 @@ mod test {
         // Before running the test, confirm we have no records of any projects.
         verify_clean_slate(datastore).await;
 
-        // Build the saga DAG with skip_default_vpc = true.
+        // Build the saga DAG with no defaults selected.
         let opctx = test_opctx(&cptestctx);
         let authz_silo = opctx.authn.silo_required().unwrap();
-        let params =
-            new_test_params_with_options(&opctx, authz_silo.clone(), true);
+        let params = new_test_params_with_defaults(
+            &opctx,
+            authz_silo.clone(),
+            Some(Vec::new()),
+        );
         let saga_output = nexus
             .sagas
             .saga_execute::<SagaProjectCreate>(params)
@@ -366,9 +383,66 @@ mod test {
 
         assert!(
             vpcs.is_empty(),
-            "expected no VPCs for project with skip_default_vpc=true, \
+            "expected no VPCs for project with no defaults, \
              found: {:?}",
             vpcs.iter().map(|v| v.name()).collect::<Vec<_>>()
         );
+    }
+
+    #[nexus_test(server = crate::Server)]
+    async fn test_vpc_default_without_subnet(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        let nexus = &cptestctx.server.server_context().nexus;
+        let datastore = nexus.datastore();
+
+        verify_clean_slate(datastore).await;
+
+        let opctx = test_opctx(&cptestctx);
+        let authz_silo = opctx.authn.silo_required().unwrap();
+        let params = new_test_params_with_defaults(
+            &opctx,
+            authz_silo,
+            Some(vec![project::ProjectDefault::Vpc(Vec::new())]),
+        );
+        let saga_output = nexus
+            .sagas
+            .saga_execute::<SagaProjectCreate>(params)
+            .await
+            .unwrap();
+
+        let (authz_project, _) = saga_output
+            .lookup_node_output::<(authz::Project, db::model::Project)>(
+                "project",
+            )
+            .unwrap();
+
+        use async_bb8_diesel::AsyncRunQueryDsl;
+        use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
+        use nexus_db_queries::db::model::{Vpc, VpcSubnet};
+        use nexus_db_schema::schema::vpc::dsl as vpc_dsl;
+        use nexus_db_schema::schema::vpc_subnet::dsl as subnet_dsl;
+
+        let vpcs = vpc_dsl::vpc
+            .filter(vpc_dsl::project_id.eq(authz_project.id()))
+            .filter(vpc_dsl::time_deleted.is_null())
+            .select(Vpc::as_select())
+            .load_async::<Vpc>(
+                &*datastore.pool_connection_for_tests().await.unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(vpcs.len(), 1, "expected one default VPC");
+
+        let subnets = subnet_dsl::vpc_subnet
+            .filter(subnet_dsl::vpc_id.eq(vpcs[0].id()))
+            .filter(subnet_dsl::time_deleted.is_null())
+            .select(VpcSubnet::as_select())
+            .load_async::<VpcSubnet>(
+                &*datastore.pool_connection_for_tests().await.unwrap(),
+            )
+            .await
+            .unwrap();
+        assert!(subnets.is_empty(), "expected no default subnet");
     }
 }

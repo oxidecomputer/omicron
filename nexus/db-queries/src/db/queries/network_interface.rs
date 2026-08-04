@@ -2130,7 +2130,7 @@ mod tests {
                         name: "project".parse().unwrap(),
                         description: "desc".to_string(),
                     },
-                    skip_default_vpc: false,
+                    defaults: None,
                 },
             );
             let (.., project) =

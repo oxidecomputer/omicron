@@ -434,7 +434,7 @@ async fn test_vpc_create_attaches_all_default_pools_to_igw(
                 name: "test-project".parse().unwrap(),
                 description: "".to_string(),
             },
-            skip_default_vpc: false,
+            defaults: None,
         },
     )
     .authn_as(AuthnMode::SiloUser(user.id))
@@ -576,7 +576,7 @@ async fn test_vpc_create_attaches_only_ipv4_default_pool_to_igw(
                 name: "test-project".parse().unwrap(),
                 description: "".to_string(),
             },
-            skip_default_vpc: false,
+            defaults: None,
         },
     )
     .authn_as(AuthnMode::SiloUser(user.id))

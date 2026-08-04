@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ "$(uname -s)" == "Linux" ]] \
+    && ! command -v xmlsec1-config >/dev/null 2>&1; then
+    sudo apt-get update
+    sudo apt-get install -y \
+        libclang-dev \
+        libpq-dev \
+        libsqlite3-dev \
+        libxmlsec1-dev \
+        libxmlsec1-openssl \
+        pkg-config \
+        xmlsec1
+fi
+
+if ! command -v rustup >/dev/null 2>&1 \
+    && [[ ! -x "$HOME/.cargo/bin/rustup" ]]; then
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+        | sh -s -- -y --profile minimal --default-toolchain none
+fi
+
+source "$HOME/.cargo/env"
+toolchain="$(sed -n 's/^channel = "\(.*\)"/\1/p' rust-toolchain.toml)"
+rustup toolchain install "$toolchain" --profile default

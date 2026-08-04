@@ -370,6 +370,8 @@ pub mod project {
     pub use crate::v2025_11_20_00::project::ProjectUpdate;
 
     pub use crate::v2026_08_04_00::project::ProjectCreate;
+    pub use crate::v2026_08_04_00::project::ProjectDefault;
+    pub use crate::v2026_08_04_00::project::VpcDefault;
 }
 
 pub mod saml {

@@ -2383,7 +2383,7 @@ mod tests {
                             name: "my-project".parse().unwrap(),
                             description: String::new(),
                         },
-                        skip_default_vpc: false,
+                        defaults: None,
                     },
                 ),
             )
@@ -4173,7 +4173,7 @@ mod tests {
                             name: "my-project".parse().unwrap(),
                             description: String::new(),
                         },
-                        skip_default_vpc: false,
+                        defaults: None,
                     },
                 ),
             )
@@ -4644,7 +4644,7 @@ mod tests {
                             name: "my-project".parse().unwrap(),
                             description: String::new(),
                         },
-                        skip_default_vpc: false,
+                        defaults: None,
                     },
                 ),
             )
@@ -4770,7 +4770,7 @@ mod tests {
                             name: "my-project".parse().unwrap(),
                             description: String::new(),
                         },
-                        skip_default_vpc: false,
+                        defaults: None,
                     },
                 ),
             )

@@ -86,7 +86,7 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyy_mm_dd_nn, IDENT),
-    (2026_08_04_00, SKIP_DEFAULT_VPC),
+    (2026_08_04_00, PROJECT_CREATE_DEFAULTS),
     (2026_07_31_00, SET_TARGET_RELEASE_UPDATE_RECOVERY_DOCS),
     (2026_07_28_00, INTERNET_GATEWAY_CASCADE_DOCS),
     (2026_06_11_00, ADD_SYSTEM_IP_POOL_APIS),
@@ -1148,7 +1148,7 @@ pub trait NexusExternalApi {
         method = POST,
         path = "/v1/projects",
         tags = ["projects"],
-        versions = VERSION_SKIP_DEFAULT_VPC..,
+        versions = VERSION_PROJECT_CREATE_DEFAULTS..,
     }]
     async fn project_create(
         rqctx: RequestContext<Self::Context>,
@@ -1161,7 +1161,7 @@ pub trait NexusExternalApi {
         path = "/v1/projects",
         tags = ["projects"],
         operation_id = "project_create",
-        versions = ..VERSION_SKIP_DEFAULT_VPC,
+        versions = ..VERSION_PROJECT_CREATE_DEFAULTS,
     }]
     async fn project_create_v2025_11_20_00(
         rqctx: RequestContext<Self::Context>,

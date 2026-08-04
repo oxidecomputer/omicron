@@ -317,7 +317,7 @@ pub static DEMO_PROJECT_CREATE: LazyLock<project::ProjectCreate> =
             name: DEMO_PROJECT_NAME.clone(),
             description: String::from(""),
         },
-        skip_default_vpc: false,
+        defaults: None,
     });
 
 // VPC used for testing

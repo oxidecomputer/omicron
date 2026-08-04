@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "2026073100.0.0"
+    "version": "2026080400.0.0"
   },
   "paths": {
     "/device/auth": {
@@ -26362,6 +26362,14 @@
         "description": "Create-time parameters for a `Project`",
         "type": "object",
         "properties": {
+          "defaults": {
+            "nullable": true,
+            "description": "Default resources to create.\n\nIf omitted, all default resources are created. An empty list creates no default resources.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProjectDefault"
+            }
+          },
           "description": {
             "type": "string"
           },
@@ -26372,6 +26380,27 @@
         "required": [
           "description",
           "name"
+        ]
+      },
+      "ProjectDefault": {
+        "description": "A default resource that can be created with a project.",
+        "oneOf": [
+          {
+            "description": "The default VPC and the selected defaults within it.",
+            "type": "object",
+            "properties": {
+              "vpc": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/VpcDefault"
+                }
+              }
+            },
+            "required": [
+              "vpc"
+            ],
+            "additionalProperties": false
+          }
         ]
       },
       "ProjectResultsPage": {
@@ -30774,6 +30803,13 @@
           "description",
           "dns_name",
           "name"
+        ]
+      },
+      "VpcDefault": {
+        "description": "A default resource that can be created within a VPC.",
+        "type": "string",
+        "enum": [
+          "subnet"
         ]
       },
       "VpcFirewallIcmpFilter": {
