@@ -659,16 +659,10 @@ fn make_test_repo(version: u32) -> TufRepoDescription {
 pub async fn create_service_ip_pool(
     opctx: &OpContext,
     datastore: &DataStore,
+    name: &str,
     version: external::IpVersion,
 ) -> ServiceIpPool {
-    let (name, description) = match version {
-        external::IpVersion::V4 => {
-            ("oxide-service-pool-v4", "IPv4 IP Pool for Oxide Services")
-        }
-        external::IpVersion::V6 => {
-            ("oxide-service-pool-v6", "IPv6 IP Pool for Oxide Services")
-        }
-    };
+    let description = format!("IP{version} IP Pool for Oxide Services");
     let name: external::Name = name.parse().expect("valid service pool name");
     let pool = IpPool::new(
         &external::IdentityMetadataCreateParams {

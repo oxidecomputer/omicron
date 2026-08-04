@@ -756,14 +756,10 @@ mod tests {
 
         // Create a second IPv4 system-service pool. The deprecated path can no
         // longer disambiguate, so it fails rather than guessing.
-        //
-        // NOTE: The `create_service_ip_pool` helper names its pool
-        // "oxide-service-pool-v4", distinct from the test context's
-        // "ipv4-service-pool". Also assert we really do end up with two pools,
-        // to ensure the test fails the way we expect.
         create_service_ip_pool(
             &opctx,
             datastore,
+            "oxide-service-pool-v4",
             omicron_common::api::external::IpVersion::V4,
         )
         .await;

@@ -2903,8 +2903,20 @@ mod test {
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
         // Create the v4 and v6 system-service pools the loop expects to find.
-        create_service_ip_pool(opctx, datastore, IpVersion::V4.into()).await;
-        create_service_ip_pool(opctx, datastore, IpVersion::V6.into()).await;
+        create_service_ip_pool(
+            opctx,
+            datastore,
+            "oxide-service-pool-v4",
+            IpVersion::V4.into(),
+        )
+        .await;
+        create_service_ip_pool(
+            opctx,
+            datastore,
+            "oxide-service-pool-v6",
+            IpVersion::V6.into(),
+        )
+        .await;
 
         for version in [IpVersion::V4, IpVersion::V6] {
             // confirm system services pools are identified correctly
@@ -5693,12 +5705,20 @@ mod test {
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
         // Create the v4 and v6 system-service pools we exercise below.
-        let ipv4 =
-            create_service_ip_pool(opctx, datastore, IpVersion::V4.into())
-                .await;
-        let ipv6 =
-            create_service_ip_pool(opctx, datastore, IpVersion::V6.into())
-                .await;
+        let ipv4 = create_service_ip_pool(
+            opctx,
+            datastore,
+            "oxide-service-pool-v4",
+            IpVersion::V4.into(),
+        )
+        .await;
+        let ipv6 = create_service_ip_pool(
+            opctx,
+            datastore,
+            "oxide-service-pool-v6",
+            IpVersion::V6.into(),
+        )
+        .await;
 
         // We should be able to delete one of these.
         let _ = datastore
@@ -5766,12 +5786,20 @@ mod test {
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
         // Create the v4 and v6 system-service pools we exercise below.
-        let ipv4 =
-            create_service_ip_pool(opctx, datastore, IpVersion::V4.into())
-                .await;
-        let ipv6 =
-            create_service_ip_pool(opctx, datastore, IpVersion::V6.into())
-                .await;
+        let ipv4 = create_service_ip_pool(
+            opctx,
+            datastore,
+            "oxide-service-pool-v4",
+            IpVersion::V4.into(),
+        )
+        .await;
+        let ipv6 = create_service_ip_pool(
+            opctx,
+            datastore,
+            "oxide-service-pool-v6",
+            IpVersion::V6.into(),
+        )
+        .await;
 
         // We should be able to assign one of these for silo use.
         let _ = datastore
@@ -5851,10 +5879,20 @@ mod test {
         // Create the v4 system-service pool, add a range, allocate an external
         // IP. Also create a v6 pool so that reassigning the v4 pool for silo
         // use is allowed at the end (more than one system-service pool remains).
-        let ipv4 =
-            create_service_ip_pool(opctx, datastore, IpVersion::V4.into())
-                .await;
-        create_service_ip_pool(opctx, datastore, IpVersion::V6.into()).await;
+        let ipv4 = create_service_ip_pool(
+            opctx,
+            datastore,
+            "oxide-service-pool-v4",
+            IpVersion::V4.into(),
+        )
+        .await;
+        create_service_ip_pool(
+            opctx,
+            datastore,
+            "oxide-service-pool-v6",
+            IpVersion::V6.into(),
+        )
+        .await;
         let ip_range = IpRange::V4(Ipv4Range {
             first: Ipv4Addr::new(1, 1, 1, 1),
             last: Ipv4Addr::new(1, 1, 1, 10),

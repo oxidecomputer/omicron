@@ -1452,9 +1452,13 @@ mod tests {
 
         // A system-service IP pool must exist for listing service IPs to
         // authorize against.
-        let service_pool =
-            create_service_ip_pool(opctx, &datastore, external::IpVersion::V4)
-                .await;
+        let service_pool = create_service_ip_pool(
+            opctx,
+            &datastore,
+            "oxide-service-pool-v4",
+            external::IpVersion::V4,
+        )
+        .await;
 
         // No IPs, to start
         let ips = read_all_service_ips(&datastore, opctx).await;
@@ -1550,9 +1554,13 @@ mod tests {
         // Set up an service IP pool range with one IP in it.
         let ip = Ipv4Addr::new(10, 0, 0, 1);
         let ip_range = IpRange::try_from((ip, ip)).unwrap();
-        let service_pool =
-            create_service_ip_pool(opctx, &datastore, external::IpVersion::V4)
-                .await;
+        let service_pool = create_service_ip_pool(
+            opctx,
+            &datastore,
+            "oxide-service-pool-v4",
+            external::IpVersion::V4,
+        )
+        .await;
         datastore
             .ip_pool_add_range(
                 opctx,
