@@ -361,7 +361,15 @@ impl fmt::Display for FmConfigSource {
 /// These rules are checked by the [`Self::validate`] method, which is called
 /// prior to accepting a config update.
 #[derive(
-    Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema,
+    Copy,
+    Clone,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    JsonSchema,
 )]
 pub struct FmConfig {
     /// BREAK GLASS TO COMPLETELY DISABLE FM ANALYSIS
@@ -589,12 +597,12 @@ mod tests {
             version: V1,
             comment: "test config".to_string(),
             config: FmConfig {
-                analysis_enabled: SettingValue::new(true),
-                sitrep_limit: SettingValue::new(
+                analysis_enabled: Setting::new(true),
+                sitrep_limit: Setting::new(
                     NonZeroU32::new(sitrep_limit)
                         .expect("test sitrep_limit must be nonzero"),
                 ),
-                history_pruning_threshold: SettingValue::new(
+                history_pruning_threshold: Setting::new(
                     NonZeroU32::new(history_pruning_threshold).expect(
                         "test history_pruning_threshold must be nonzero",
                     ),

@@ -102,7 +102,7 @@ mod test {
     use super::*;
     use crate::app::background::BackgroundTask;
     use nexus_db_queries::db::pub_test_utils::TestDatabase;
-    use nexus_types::fm::{FmConfig, FmConfigParam, FmConfigSource};
+    use nexus_types::fm::{FmConfig, FmConfigParam, FmConfigSource, Setting};
     use omicron_test_utils::dev;
     use std::num::NonZeroU32;
 
@@ -147,9 +147,11 @@ mod test {
             version: NonZeroU32::new(1).unwrap(),
             comment: "test override".to_string(),
             config: FmConfig {
-                analysis_enabled: true,
-                sitrep_limit: NonZeroU32::new(500).unwrap(),
-                history_pruning_threshold: NonZeroU32::new(400).unwrap(),
+                analysis_enabled: Setting::new(true),
+                sitrep_limit: Setting::new(NonZeroU32::new(500).unwrap()),
+                history_pruning_threshold: Setting::new(
+                    NonZeroU32::new(400).unwrap(),
+                ),
             },
         };
         datastore
@@ -167,9 +169,9 @@ mod test {
             panic!("expected an override source, got {:?}", loaded.source);
         };
         assert_eq!(version.get(), 1);
-        assert!(loaded.config.analysis_enabled);
-        assert_eq!(loaded.config.sitrep_limit.get(), 500);
-        assert_eq!(loaded.config.history_pruning_threshold.get(), 400);
+        assert!(loaded.config.analysis_enabled.value());
+        assert_eq!(loaded.config.sitrep_limit.value().get(), 500);
+        assert_eq!(loaded.config.history_pruning_threshold.value().get(), 400);
         assert!(rx.has_changed().unwrap());
         assert_eq!(*rx.borrow_and_update(), Some(loaded));
 

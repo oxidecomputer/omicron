@@ -85,7 +85,7 @@ impl TryFrom<FmConfig> for fm::FmConfigView {
             history_pruning_threshold: nz!(history_pruning_threshold)?.into(),
         };
         config.validate()?;
-        let version = NonZeroU32::new(version.into()).ok_or_else(|| { Error::invalid_value("version", format!("the fm_config row has version 0, which should have violated a CHECK constraint!"))})?;
+        let version = NonZeroU32::new(version.into()).ok_or_else(|| { Error::invalid_value("version", "the fm_config row has version 0, which should have violated a CHECK constraint!")})?;
         let source =
             fm::FmConfigSource::Override { version, time_modified, comment };
 

@@ -1851,10 +1851,10 @@ termination: Exited(0)
 stdout:
 Show a configuration at a given version
 
-Usage: omdb nexus fm-config show [OPTIONS] <UUID|VERSION|current>
+Usage: omdb nexus fm-config show [OPTIONS] <VERSION|current>
 
 Arguments:
-  <UUID|VERSION|current>  The config version to show
+  <VERSION|current>  The config version to show
 
 Options:
       --json                   If set, output the config in JSON rather than pretty-printing it
@@ -1910,8 +1910,6 @@ Options:
 
       --analysis-enabled <ANALYSIS_ENABLED>
           BREAK GLASS IN CASE OF EMERGENCY: COMPLETELY DISABLE FM ANALYSIS
-          
-          [possible values: true, false]
 
       --color <COLOR>
           Color output

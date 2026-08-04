@@ -91,7 +91,7 @@ impl DataStore {
         // This rejects invalid configs with client errors, rather than relying
         // on the corresponding CHECK constraints on the `fm_config` table,
         // whose violations would surface as opaque internal errors.
-        let config = db::model::fm::FmConfig::try_from(config)?;
+        let config = db::model::fm::FmConfig::new(config)?;
         let version = config.version;
 
         Self::insert_latest_version_query(config)
@@ -256,6 +256,7 @@ mod tests {
     use crate::db::raw_query_builder::expectorate_query_contents;
     use nexus_types::fm::FmConfig;
     use nexus_types::fm::FmConfigSource;
+    use nexus_types::fm::config::Setting;
     use omicron_test_utils::dev;
     use std::num::NonZeroU32;
 
@@ -329,9 +330,11 @@ mod tests {
             version: NonZeroU32::new(2).unwrap(),
             comment: "first override".to_string(),
             config: FmConfig {
-                analysis_enabled: true,
-                sitrep_limit: NonZeroU32::new(5).unwrap(),
-                history_pruning_threshold: NonZeroU32::new(4).unwrap(),
+                analysis_enabled: Setting::new(true),
+                sitrep_limit: Setting::new(NonZeroU32::new(5).unwrap()),
+                history_pruning_threshold: Setting::new(
+                    NonZeroU32::new(4).unwrap(),
+                ),
             },
         };
         assert!(
@@ -368,15 +371,17 @@ mod tests {
         };
         assert_eq!(version.get(), 1);
         assert_eq!(comment, "first override");
-        assert_eq!(read.config.sitrep_limit.get(), 5);
-        assert_eq!(read.config.history_pruning_threshold.get(), 4);
+        assert_eq!(read.config.sitrep_limit.value().get(), 5);
+        assert_eq!(read.config.history_pruning_threshold.value().get(), 4);
 
         // An invalid config is rejected with an invalid value error.
         // (Validation is tested exhaustively in `nexus-types`; this just
         // checks that invalid configs are rejected on the insert path.)
         config.version = NonZeroU32::new(2).unwrap();
-        config.config.sitrep_limit = NonZeroU32::new(100).unwrap();
-        config.config.history_pruning_threshold = NonZeroU32::new(100).unwrap();
+        config.config.sitrep_limit =
+            Setting::new(NonZeroU32::new(100).unwrap());
+        config.config.history_pruning_threshold =
+            Setting::new(NonZeroU32::new(100).unwrap());
         assert!(
             dbg!(
                 datastore
@@ -392,8 +397,10 @@ mod tests {
         );
 
         // An empty comment is also rejected on the insert path.
-        config.config.sitrep_limit = NonZeroU32::new(500).unwrap();
-        config.config.history_pruning_threshold = NonZeroU32::new(400).unwrap();
+        config.config.sitrep_limit =
+            Setting::new(NonZeroU32::new(500).unwrap());
+        config.config.history_pruning_threshold =
+            Setting::new(NonZeroU32::new(400).unwrap());
         config.comment = String::new();
         assert!(
             dbg!(
@@ -406,12 +413,12 @@ mod tests {
             )
             .unwrap_err()
             .to_string()
-            .contains("a non-empty comment is required")
+            .contains("non-empty, non-whitespace comment")
         );
 
         // Inserting version 2 with a valid config should work.
         config.comment = "second override".to_string();
-        config.config.analysis_enabled = false;
+        config.config.analysis_enabled = Setting::new(false);
         dbg!(
             datastore
                 .fm_config_insert_latest_version(opctx, dbg!(config))
@@ -429,9 +436,9 @@ mod tests {
         };
         assert_eq!(version.get(), 2);
         assert_eq!(comment, "second override");
-        assert!(!read.config.analysis_enabled);
-        assert_eq!(read.config.sitrep_limit.get(), 500);
-        assert_eq!(read.config.history_pruning_threshold.get(), 400);
+        assert!(!read.config.analysis_enabled.value());
+        assert_eq!(read.config.sitrep_limit.value().get(), 500);
+        assert_eq!(read.config.history_pruning_threshold.value().get(), 400);
 
         db.terminate().await;
         logctx.cleanup_successful();

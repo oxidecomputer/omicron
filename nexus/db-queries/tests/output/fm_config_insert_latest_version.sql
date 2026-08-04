@@ -19,10 +19,10 @@ WITH
           (
             version,
             comment,
+            time_modified,
             analysis_enabled,
             sitrep_limit,
-            history_pruning_threshold,
-            time_modified
+            history_pruning_threshold
           )
       VALUES
         ($4, $5, $6, $7, $8, $9)

@@ -88,7 +88,7 @@ impl SitrepHistoryPruner {
         let Some(cfg) = cfg else {
             return Status::WaitingForConfig;
         };
-        let thresh = cfg.history_pruning_threshold;
+        let thresh = cfg.history_pruning_threshold.value();
         let mut pruned = status::SitrepsPruned::default();
         let params =
             HistoryPruningParams { limit: thresh, batch_size: self.batch_size };
@@ -194,6 +194,7 @@ mod tests {
     use super::*;
     use nexus_db_queries::db::pub_test_utils::TestDatabase;
     use nexus_db_queries::db::pub_test_utils::fm::SitrepModel;
+    use nexus_types::fm::Setting;
     use omicron_test_utils::dev;
 
     /// Returns a config watch receiver carrying an FM config with the given
@@ -208,13 +209,14 @@ mod tests {
         history_pruning_threshold: u32,
     ) -> watch::Receiver<Option<FmConfigView>> {
         let config = nexus_types::fm::FmConfig {
-            analysis_enabled: true,
-            history_pruning_threshold: NonZeroU32::new(
-                history_pruning_threshold,
-            )
-            .expect("test pruning thresholds must be nonzero"),
-            sitrep_limit: NonZeroU32::new(history_pruning_threshold + 1)
-                .unwrap(),
+            analysis_enabled: Setting::new(true),
+            history_pruning_threshold: Setting::new(
+                NonZeroU32::new(history_pruning_threshold)
+                    .expect("test pruning thresholds must be nonzero"),
+            ),
+            sitrep_limit: Setting::new(
+                NonZeroU32::new(history_pruning_threshold + 1).unwrap(),
+            ),
         };
         let view = FmConfigView { config, source: Default::default() };
         // The sender is dropped here; watch receivers continue to yield the
@@ -378,8 +380,8 @@ mod tests {
             task.cfg.borrow().as_ref().map(|view| view.config),
             "the status should report the config used for pruning",
         );
-        let expected =
-            model.simulate_history_pruning(cfg.history_pruning_threshold);
+        let expected = model
+            .simulate_history_pruning(cfg.history_pruning_threshold.value());
         assert_eq!(
             pruned.total, expected.sitreps_pruned,
             "the number of history entries pruned should match the model's \

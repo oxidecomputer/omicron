@@ -152,7 +152,7 @@ impl FmAnalysis {
             // inside the borrow of the current config view because we would
             // like to be able to log the details of the config override that
             // has turned us off...
-            if !cfg_view.config.analysis_enabled {
+            if !cfg_view.config.analysis_enabled.value() {
                 match cfg_view.source {
                     FmConfigSource::Default => {
                         slog::error!(
@@ -714,7 +714,7 @@ impl FmAnalysis {
         cfg: &FmConfig,
         warnings: &mut Vec<String>,
     ) -> Result<status::SitrepCapacity, status::AnalysisOutcome> {
-        let limit = cfg.sitrep_limit;
+        let limit = cfg.sitrep_limit.value();
         let count = match self
             .datastore
             .fm_sitrep_check_limit_reached(&opctx, u64::from(limit.get()))
@@ -807,6 +807,7 @@ mod tests {
     use nexus_types::alert::AlertClass;
     use nexus_types::fm::Case;
     use nexus_types::fm::DiagnosisEngineKind;
+    use nexus_types::fm::Setting;
     use nexus_types::fm::Sitrep;
     use nexus_types::fm::SitrepMetadata;
     use nexus_types::fm::SitrepVersion;
@@ -833,9 +834,9 @@ mod tests {
             "test configs must uphold the threshold < limit invariant"
         );
         let config = nexus_types::fm::FmConfig {
-            analysis_enabled: true,
-            sitrep_limit,
-            history_pruning_threshold,
+            analysis_enabled: Setting::new(true),
+            sitrep_limit: Setting::new(sitrep_limit),
+            history_pruning_threshold: Setting::new(history_pruning_threshold),
         };
         FmConfigView { config, source: Default::default() }
     }
