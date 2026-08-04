@@ -89,6 +89,7 @@ impl TrustQuorumManager {
 
         // For each rack, do the work
         let mut workers = ParallelTaskSet::new();
+        let mut outputs = Vec::new();
         for (rack_id, epoch) in epochs_by_rack_id {
             let log = log.clone();
             let opctx = opctx.child(BTreeMap::from([
@@ -96,7 +97,7 @@ impl TrustQuorumManager {
                 ("epoch".into(), epoch.to_string()),
             ]));
             let datastore = self.datastore.clone();
-            workers
+            if let Some(output) = workers
                 .spawn(async move {
                     let res = drive_reconfiguration(
                         log, opctx, datastore, rack_id, epoch,
@@ -104,12 +105,16 @@ impl TrustQuorumManager {
                     .await;
                     (rack_id, epoch, res)
                 })
-                .await;
+                .await
+            {
+                outputs.push(output);
+            }
         }
 
         let mut statuses = vec![];
         let mut errors = vec![];
-        while let Some((rack_id, epoch, res)) = workers.join_next().await {
+        outputs.extend(workers.join_all().await);
+        for (rack_id, epoch, res) in outputs {
             // Propagate panics: we don't cancel the worker tasks, so this
             // can only fail if the task itself already panicked.
             match res {

@@ -63,7 +63,7 @@ impl<T: 'static + Send> ParallelTaskSet<T> {
 
     /// Spawn the provided `next_future`, potentially waiting until a previously
     /// spawned task completes if the `ParallelTaskSet` is at its concurrency
-    /// limit.
+    /// limit, and returning the previously spawned task's output.
     ///
     /// Note that, *unlike* [`join_next()`], this method returning `None` does
     /// NOT indicate that the set is empty, just that it was not necessary to
@@ -73,6 +73,8 @@ impl<T: 'static + Send> ParallelTaskSet<T> {
     /// once all tasks have been spawned.
     ///
     /// [`join_next()`]: Self::join_next
+    #[must_use = "ParallelTaskSet::spawn returns a task output once \
+        `max_parallelism` tasks are spawned"]
     pub async fn spawn<F>(&mut self, future: F) -> Option<T>
     where
         F: Future<Output = T> + Send + 'static,
@@ -111,7 +113,11 @@ impl<T: 'static + Send> ParallelTaskSet<T> {
         self.set.join_next().await.map(|r| r.expect("Failed to join task"))
     }
 
-    /// Wait for all commands to execute and return their output.
+    /// Wait for all remaining tasks to complete and return their output.
+    ///
+    /// Note that, unlike [`JoinSet`], this **cannot** be used to collect all of
+    /// the output at once, because [`spawn`][Self::spawn] will return outputs
+    /// once `max_parallelism` tasks are added to the set.
     ///
     /// # Panics
     ///
