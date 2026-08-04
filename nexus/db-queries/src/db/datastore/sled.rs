@@ -701,13 +701,13 @@ impl<'a> CompleteLocalStorageAllocationLists<'a> {
         // no longer does, and it is not removed from the candidate list, this
         // iterator's search will still add a mapping of that allocation to it,
         // only to be pruned by the incomplete_allocation_list pruning step
-        // above after the insert CTE does not create any rows.
+        // above after the insert CTE does not create any rows. Without this
+        // step, the iterator will continue adding invalid allocations to the
+        // queue instead of bailing out of this branch of the search tree.
         //
         // The original list was created based on an old snapshot of zpool
         // information. Based on the updated zpool information passed into this
-        // function, prune each allocation's candidate dataset list. This will
-        // reduce the combations that will never work but get added to the queue
-        // anyway.
+        // function, prune each allocation's candidate dataset list.
 
         let mut candidate_datasets_removed = 0;
 
