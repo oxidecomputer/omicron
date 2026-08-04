@@ -35,7 +35,8 @@ pub struct DiskTypeLocalStorage {
 
 impl DiskTypeLocalStorage {
     /// Creates a new `DiskTypeLocalStorage`. Returns Err if the computed
-    /// required dataset overhead does not fit in a `ByteCount`.
+    /// required dataset overhead does not fit in a `ByteCount`, or if the
+    /// requested size plus the required overhead does not fit in a `ByteCount`.
     pub fn new(
         disk_id: Uuid,
         size: external::ByteCount,
