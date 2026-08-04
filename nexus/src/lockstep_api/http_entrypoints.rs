@@ -1173,16 +1173,16 @@ impl NexusLockstepApi for NexusLockstepApiImpl {
             let datastore = &apictx.nexus.datastore();
             let opctx =
                 crate::context::op_context_for_internal_api(&rqctx).await;
-            let config = datastore
-                .fm_config_get_latest(&opctx)
-                .await?
+            let config = match datastore.fm_config_get_latest(&opctx).await? {
+                Some(db_config) => FmConfigView::try_from(db_config)?,
                 // If no config overrides exist in the database, we are using
                 // the default, so just return it. The `FmConfigSource` value
                 // will clearly indicate it's a default rather than a DB
                 // override, and the caller wants to see the current config...so
                 // this will indicate that it's the default in a nicer way than
                 // just 404ing here.
-                .unwrap_or_default();
+                None => FmConfigView::default(),
+            };
 
             Ok(HttpResponseOk(config))
         };
@@ -1209,11 +1209,12 @@ impl NexusLockstepApi for NexusLockstepApiImpl {
                              than  zero",
                     )
                 })?;
-            let config = datastore
+            let db_config = datastore
                 .fm_config_get(&opctx, version)
                 .await?
                 .ok_or_else(|| {
                     Error::non_resourcetype_not_found(format!("no fault management config override version v{version} exists"))})?;
+            let config = FmConfigView::try_from(db_config)?;
             Ok(HttpResponseOk(config))
         };
         apictx

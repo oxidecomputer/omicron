@@ -3697,28 +3697,42 @@ fn print_task_fm_analysis(details: &serde_json::Value, colored: bool) {
 }
 
 fn print_task_fm_config_loader(details: &serde_json::Value) {
-    match serde_json::from_value::<FmConfigLoadStatus>(details.clone()) {
-        Err(error) => eprintln!(
-            "warning: failed to interpret task details: {:?}: {:?}",
-            error, details
-        ),
-        Ok(FmConfigLoadStatus::Error(error)) => {
-            println!("    task did not complete successfully: {error}");
-        }
-        Ok(FmConfigLoadStatus::Loaded { config, updated, time_loaded }) => {
-            const TIME_LOADED: &str = "config last loaded at:";
-            const UPDATED: &str = "  loaded by this activation:";
-            const WIDTH: usize = const_max_len(&[TIME_LOADED, UPDATED]) + 1;
+    use nexus_types::internal_api::background::CurrentFmConfig;
+    let current_config =
+        match serde_json::from_value::<FmConfigLoadStatus>(details.clone()) {
+            Err(error) => {
+                eprintln!(
+                    "warning: failed to interpret task details: {:?}: {:?}",
+                    error, details
+                );
+                return;
+            }
+            Ok(FmConfigLoadStatus::Error(error)) => {
+                println!("    task did not complete successfully: {error}");
+                return;
+            }
+            Ok(FmConfigLoadStatus::LatestConfigInvalid { error, fallback }) => {
+                println!(
+                    "/!\\ the latest FM config override in the database is \
+                 invalid: {error}"
+                );
+                fallback
+            }
+            Ok(FmConfigLoadStatus::Loaded(config)) => config,
+        };
 
-            println!(
-                "    {TIME_LOADED:<WIDTH$}{}",
-                humantime::format_rfc3339_millis(time_loaded.into()),
-            );
-            println!("    {UPDATED:<WIDTH$}{updated}");
-            println!("    current config:");
-            print!("{}", config.display_multiline(6));
-        }
-    };
+    let CurrentFmConfig { time_loaded, updated, config } = current_config;
+
+    const TIME_LOADED: &str = "config last loaded at:";
+    const UPDATED: &str = "  loaded by this activation:";
+    const WIDTH: usize = const_max_len(&[TIME_LOADED, UPDATED]) + 1;
+    println!(
+        "    {TIME_LOADED:<WIDTH$}{}",
+        humantime::format_rfc3339_millis(time_loaded.into()),
+    );
+    println!("    {UPDATED:<WIDTH$}{updated}");
+    println!("    current config:");
+    print!("{}", config.display_multiline(6));
 }
 
 fn print_task_fm_sitrep_loader(details: &serde_json::Value) {

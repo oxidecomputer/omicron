@@ -27,7 +27,6 @@ use nexus_db_lookup::DbConnection;
 use nexus_db_model::SqlU32;
 use nexus_db_schema::schema::fm_config::dsl;
 use nexus_types::fm::FmConfigParam;
-use nexus_types::fm::FmConfigView;
 use omicron_common::api::external::Error;
 use std::num::NonZeroU32;
 
@@ -41,18 +40,16 @@ impl DataStore {
     pub async fn fm_config_get_latest(
         &self,
         opctx: &OpContext,
-    ) -> Result<Option<FmConfigView>, Error> {
+    ) -> Result<Option<db::model::fm::FmConfig>, Error> {
         opctx.authorize(authz::Action::Read, &authz::FM_CONFIG).await?;
         let conn = self.pool_connection_authorized(opctx).await?;
 
-        let latest = dsl::fm_config
+        dsl::fm_config
             .order_by(dsl::version.desc())
             .first_async::<db::model::fm::FmConfig>(&*conn)
             .await
             .optional()
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
-
-        latest.map(TryInto::try_into).transpose()
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     /// Read the FM configuration override at a specific version, or `None` if
@@ -61,18 +58,16 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         version: NonZeroU32,
-    ) -> Result<Option<FmConfigView>, Error> {
+    ) -> Result<Option<db::model::fm::FmConfig>, Error> {
         opctx.authorize(authz::Action::Read, &authz::FM_CONFIG).await?;
         let conn = self.pool_connection_authorized(opctx).await?;
 
-        let config = dsl::fm_config
+        dsl::fm_config
             .filter(dsl::version.eq(SqlU32::new(version.get())))
             .first_async::<db::model::fm::FmConfig>(&*conn)
             .await
             .optional()
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
-
-        config.map(TryInto::try_into).transpose()
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     /// Insert a new version of the FM configuration override in the database.
@@ -256,6 +251,7 @@ mod tests {
     use crate::db::raw_query_builder::expectorate_query_contents;
     use nexus_types::fm::FmConfig;
     use nexus_types::fm::FmConfigSource;
+    use nexus_types::fm::FmConfigView;
     use nexus_types::fm::config::Setting;
     use omicron_test_utils::dev;
     use std::num::NonZeroU32;
@@ -322,7 +318,7 @@ mod tests {
 
         // With no override rows in the table, there is no config to read.
         let read = datastore.fm_config_get_latest(opctx).await.unwrap();
-        assert_eq!(read, None);
+        assert!(read.is_none(), "got {read:?}");
 
         // Inserting version 2 should fail. No overrides exist yet, so the
         // first must be version 1.
@@ -365,6 +361,7 @@ mod tests {
         let read = dbg!(datastore.fm_config_get_latest(opctx).await)
             .unwrap()
             .expect("an override was inserted");
+        let read = FmConfigView::try_from(read).unwrap();
         let FmConfigSource::Override { version, ref comment, .. } = read.source
         else {
             panic!("expected an override source, got {:?}", read.source);
@@ -430,6 +427,7 @@ mod tests {
         let read = dbg!(datastore.fm_config_get_latest(opctx).await)
             .unwrap()
             .expect("an override was inserted");
+        let read = FmConfigView::try_from(read).unwrap();
         let FmConfigSource::Override { version, ref comment, .. } = read.source
         else {
             panic!("expected an override source, got {:?}", read.source);

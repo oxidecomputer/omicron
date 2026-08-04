@@ -12,6 +12,7 @@ use futures::future::BoxFuture;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_types::fm::FmConfigView;
+use nexus_types::internal_api::background::CurrentFmConfig;
 use nexus_types::internal_api::background::FmConfigLoadStatus as Status;
 use serde_json::json;
 use slog_error_chain::InlineErrorChain;
@@ -41,14 +42,80 @@ impl FmConfigLoader {
     }
 
     async fn load(&mut self, opctx: &OpContext) -> Status {
-        let config = match self.datastore.fm_config_get_latest(opctx).await {
-            Ok(config) => config.unwrap_or_default(),
-            Err(err) => {
-                let error = InlineErrorChain::new(&err);
-                slog::error!(opctx.log, "failed to load FM config"; &error);
-                return Status::Error(error.to_string());
+        let latest_db_config =
+            match self.datastore.fm_config_get_latest(opctx).await {
+                Ok(c) => c,
+                Err(e) => {
+                    let error = InlineErrorChain::new(&e);
+                    slog::error!(opctx.log, "failed to load FM config"; &error);
+                    return Status::Error(error.to_string());
+                }
+            };
+
+        // Determine the config to make current.
+        let config = match latest_db_config.map(FmConfigView::try_from) {
+            // Valid config
+            Some(Ok(cfg)) => cfg,
+            // No config overrides in the DB, use the default.
+            None => FmConfigView::default(),
+            // The database contains a config override that was so invalid that
+            // we could not convert it into the domain type! What should we do
+            // with this? Well, if we just bail out and don't update the config,
+            // and it was previously `None`, we might leave the FM subsystem
+            // completely stuck. This is bad. Instead, if there is currently a
+            // config loaded, we will just use that, and if there is not, we
+            // will fall back to the default.
+            Some(Err(e)) => {
+                let error = InlineErrorChain::new(&e);
+                let fallback = if let Some(ref current) = *self.tx.borrow() {
+                    slog::warn!(
+                        opctx.log,
+                        "the latest FM config override in the database is \
+                         invalid and cannot be used, continuing with the most \
+                         recently loaded config";
+                         "current_source" => %current.source,
+                         &error,
+                    );
+                    CurrentFmConfig {
+                        config: current.clone(),
+                        updated: false,
+                        time_loaded: self.time_loaded,
+                    }
+                } else {
+                    slog::warn!(
+                        opctx.log,
+                        "the latest FM config override in the database is \
+                         invalid and could not be used, falling back to the \
+                         defaults";
+                        &error,
+                    );
+                    self.update_if_changed(FmConfigView::default())
+                };
+                return Status::LatestConfigInvalid {
+                    error: error.to_string(),
+                    fallback,
+                };
             }
         };
+
+        let current = self.update_if_changed(config);
+        if current.updated {
+            info!(
+                opctx.log,
+                "loaded new FM config";
+                "source" => %current.config.source,
+            );
+        } else {
+            debug!(
+                opctx.log,
+                "FM config has not changed";
+                "source" => %current.config.source,
+            );
+        }
+        Status::Loaded(current)
+    }
+
+    fn update_if_changed(&mut self, config: FmConfigView) -> CurrentFmConfig {
         let time_loaded = Utc::now();
         let updated = self.tx.send_if_modified(|current| {
             if current.as_ref() != Some(&config) {
@@ -58,21 +125,12 @@ impl FmConfigLoader {
                 false
             }
         });
+
         if updated {
             self.time_loaded = time_loaded;
-            info!(
-                opctx.log,
-                "loaded new FM config";
-                "source" => %config.source,
-            );
-        } else {
-            debug!(
-                opctx.log,
-                "FM config has not changed";
-                "source" => %config.source,
-            );
         }
-        Status::Loaded { config, updated, time_loaded: self.time_loaded }
+
+        CurrentFmConfig { config, time_loaded: self.time_loaded, updated }
     }
 }
 
@@ -125,7 +183,9 @@ mod test {
 
         let status = task.activate(&opctx).await;
         let status = serde_json::from_value::<Status>(status).unwrap();
-        let Status::Loaded { config, updated, time_loaded } = status else {
+        let Status::Loaded(CurrentFmConfig { config, updated, time_loaded }) =
+            status
+        else {
             panic!("expected Status::Loaded, got: {status:?}");
         };
         assert!(updated);
@@ -138,7 +198,11 @@ mod test {
         let status = serde_json::from_value::<Status>(status).unwrap();
         assert_eq!(
             status,
-            Status::Loaded { config: initial, updated: false, time_loaded }
+            Status::Loaded(CurrentFmConfig {
+                config: initial,
+                updated: false,
+                time_loaded
+            })
         );
         assert!(!rx.has_changed().unwrap());
 
@@ -161,7 +225,11 @@ mod test {
 
         let status = task.activate(&opctx).await;
         let status = serde_json::from_value::<Status>(status).unwrap();
-        let Status::Loaded { config: loaded, updated: true, .. } = status
+        let Status::Loaded(CurrentFmConfig {
+            config: loaded,
+            updated: true,
+            ..
+        }) = status
         else {
             panic!("expected updated Status::Loaded, got {status:?}");
         };

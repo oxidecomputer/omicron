@@ -896,18 +896,30 @@ pub struct EreporterStatus {
 /// The status of a `fm_config_loader` background task activation.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub enum FmConfigLoadStatus {
-    /// An error occurred.
+    /// An error occurred querying the database.
     Error(String),
 
-    /// A fault management configuration was loaded (as of `time_loaded`).
-    Loaded {
-        /// The current configuration.
-        config: crate::fm::FmConfigView,
-        /// The time at which the current config was loaded.
-        time_loaded: DateTime<Utc>,
-        /// Whether the config was updated in this activation.
-        updated: bool,
+    /// The latest config override in the database could not be converted to
+    /// the domain type. The previously loaded config (or the default, if no
+    /// config was previously loaded) is still in effect.
+    LatestConfigInvalid {
+        /// What's wrong with it?
+        error: String,
+        fallback: CurrentFmConfig,
     },
+
+    /// A fault management configuration was loaded (as of `time_loaded`).
+    Loaded(CurrentFmConfig),
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct CurrentFmConfig {
+    /// The current configuration.
+    pub config: crate::fm::FmConfigView,
+    /// The time at which the current config was loaded.
+    pub time_loaded: DateTime<Utc>,
+    /// Whether the config was updated in this activation.
+    pub updated: bool,
 }
 
 /// The status of a `fm_sitrep_loader` background task activation.

@@ -54,6 +54,11 @@ impl FmConfig {
     }
 }
 
+/// Note: this conversion does *not* re-run config validation rules, as they may
+/// change across software versions, and we want to respect older configs if
+/// they have already been written to CRDB, rather than failing to load them and
+/// leaving FM blocked indefinitely. Instead, we only perform the validation
+/// necessary to construct the domain type (i.e. checking `NonZeroU32`s).
 impl TryFrom<FmConfig> for fm::FmConfigView {
     type Error = Error;
 
@@ -90,7 +95,6 @@ impl TryFrom<FmConfig> for fm::FmConfigView {
             sitrep_limit: nz!(sitrep_limit)?.into(),
             history_pruning_threshold: nz!(history_pruning_threshold)?.into(),
         };
-        config.validate()?;
         let version = NonZeroU32::new(version.into()).ok_or_else(|| {
             Error::invalid_value(
                 "version",
