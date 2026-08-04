@@ -9076,6 +9076,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.trust_quorum_member (
 -- If no overrides are set, this table is empty and the system uses the default
 -- configuration. Otherwise, the row in this table with the highest `version` is
 -- selected and used as the active configuration.
+--
+-- All values that represent config settings (i.e. every column except for
+-- `version` and `comment`) are nullable. If they are NULL, the system will use
+-- the default value defined in the current software version for that setting.
 CREATE TABLE IF NOT EXISTS omicron.public.fm_config (
     -- The version number of the configuration.
     --
@@ -9084,8 +9088,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_config (
     version INT8 PRIMARY KEY,
     -- A comment describing why this override was created.
     comment TEXT NOT NULL,
+    -- The time at which this config version was created.
+    time_modified TIMESTAMPTZ NOT NULL,
     -- BREAK GLASS TO COMPLETELY DISABLE FAULT MANAGEMENT ANALYSIS
-    analysis_enabled BOOL NOT NULL,
+    analysis_enabled BOOL,
     -- The maximum number of sitreps to keep in the database.
     --
     -- If the number of records in the `omicron.public.fm_sitrep` table
@@ -9093,15 +9099,13 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_config (
     -- yet to be garbage-collected) exceeds this limit, the FM analysis
     -- background task will not produce a new sitrep until old ones are
     -- deleted.
-    sitrep_limit INT8 NOT NULL,
+    sitrep_limit INT8,
     -- The number of entries in the `omicron.public.fm_sitrep_history` table at
     -- which the `fm_sitrep_history_pruner` background task will begin deleting
     -- the oldest sitreps from the history.
     --
     -- This must be less than `sitrep_limit`, and must be at least 2.
-    history_pruning_threshold INT8 NOT NULL,
-    -- The time at which this config version was created.
-    time_modified TIMESTAMPTZ NOT NULL,
+    history_pruning_threshold INT8,
 
     CONSTRAINT versions_are_positive CHECK (version > 0),
 
@@ -9111,17 +9115,21 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_config (
     -- SOMETHING if you really don't want to say anything... :)
     CONSTRAINT comment_required CHECK (comment != '' AND comment != ' '),
 
-    CONSTRAINT min_sitrep_limit CHECK (sitrep_limit >= 5),
-    CONSTRAINT max_sitrep_limit CHECK (sitrep_limit <= 5000),
-
-    CONSTRAINT min_history_pruning_threshold CHECK (
-        history_pruning_threshold >= 2
+    CONSTRAINT sitrep_limit_validity CHECK (
+        sitrep_limit IS NULL OR (
+            sitrep_limit >= 5 AND
+            sitrep_limit <= 5000
+        )
     ),
-    CONSTRAINT max_history_pruning_threshold CHECK (
-        history_pruning_threshold <= 5000
+    CONSTRAINT history_pruning_threshold_validity CHECK (
+        history_pruning_threshold IS NULL OR (
+            history_pruning_threshold <= 5000 AND
+            history_pruning_threshold >= 2
+        )
     ),
     CONSTRAINT history_limit_is_less_than_sirep_limit CHECK (
-        history_pruning_threshold < sitrep_limit
+        (history_pruning_threshold IS NULL OR sitrep_limit IS NULL) OR
+            history_pruning_threshold < sitrep_limit
     )
 );
 

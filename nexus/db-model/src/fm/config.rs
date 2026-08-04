@@ -17,37 +17,33 @@ use std::num::NonZeroU32;
 pub struct FmConfig {
     pub version: SqlU32,
     pub comment: String,
-    pub analysis_enabled: bool,
-    pub sitrep_limit: SqlU32,
-    pub history_pruning_threshold: SqlU32,
     pub time_modified: DateTime<Utc>,
+    pub analysis_enabled: Option<bool>,
+    pub sitrep_limit: Option<SqlU32>,
+    pub history_pruning_threshold: Option<SqlU32>,
 }
 
-impl TryFrom<fm::FmConfigParam> for FmConfig {
-    type Error = Error;
-
-    fn try_from(param: fm::FmConfigParam) -> Result<Self, Self::Error> {
+impl FmConfig {
+    pub fn new(param: fm::FmConfigParam) -> Result<Self, Error> {
         param.validate()?;
-        // This `FmConfigParam` is destructured exhaustively so that if any
-        // fields are added to the `nexus_types` version, they must be handled
-        // here and included in the `db::model` type.
         let fm::FmConfigParam {
-            comment,
             version,
+            comment,
             config:
                 fm::FmConfig {
                     analysis_enabled,
-                    history_pruning_threshold,
                     sitrep_limit,
+                    history_pruning_threshold,
                 },
         } = param;
         Ok(Self {
             version: version.get().into(),
             comment,
-            analysis_enabled,
-            sitrep_limit: sitrep_limit.get().into(),
-            history_pruning_threshold: history_pruning_threshold.get().into(),
             time_modified: Utc::now(),
+            analysis_enabled: analysis_enabled.into_override(),
+            sitrep_limit: sitrep_limit.map_override(|v| v.get().into()),
+            history_pruning_threshold: history_pruning_threshold
+                .map_override(|v| v.get().into()),
         })
     }
 }
@@ -67,31 +63,31 @@ impl TryFrom<FmConfig> for fm::FmConfigView {
 
         macro_rules! nz {
             ($field: ident) => {{
-                let name = stringify!($field);
-                NonZeroU32::new($field.into()).ok_or_else(|| {
-                    Error::invalid_value(
-                        name,
-                        format!(
-                            "the fm_config row has {name} 0, which should \
-                                have violated a CHECK constraint!"
-                        ),
-                    )
-                })
+                $field.map(|value| {
+                    let name = stringify!($field);
+                    NonZeroU32::new(value.into()).ok_or_else(|| {
+                        Error::invalid_value(
+                            name,
+                            format!(
+                                "the fm_config row has {name} 0, which should \
+                                    have violated a CHECK constraint!"
+                            ),
+                        )
+                    })
+                }).transpose()
             }};
         }
 
         // Construct the domain type, and then validate it.
         let config = fm::FmConfig {
-            analysis_enabled,
-            sitrep_limit: nz!(sitrep_limit)?,
-            history_pruning_threshold: nz!(history_pruning_threshold)?,
+            analysis_enabled: analysis_enabled.into(),
+            sitrep_limit: nz!(sitrep_limit)?.into(),
+            history_pruning_threshold: nz!(history_pruning_threshold)?.into(),
         };
         config.validate()?;
-        let source = fm::FmConfigSource::Override {
-            version: nz!(version)?,
-            time_modified,
-            comment,
-        };
+        let version = NonZeroU32::new(version.into()).ok_or_else(|| { Error::invalid_value("version", format!("the fm_config row has version 0, which should have violated a CHECK constraint!"))})?;
+        let source =
+            fm::FmConfigSource::Override { version, time_modified, comment };
 
         Ok(Self { config, source })
     }

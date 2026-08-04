@@ -14,6 +14,8 @@ use nexus_types::fm::FmConfig;
 use nexus_types::fm::FmConfigParam;
 use nexus_types::fm::FmConfigSource;
 use nexus_types::fm::FmConfigView;
+use nexus_types::fm::config::Setting;
+use nexus_types::fm::config::settings;
 use std::num::NonZeroU32;
 use std::num::ParseIntError;
 use std::str::FromStr;
@@ -80,18 +82,19 @@ struct ConfigOpts {
     /// reaches or exceeds this limit, fault management analysis will not
     /// produce new sitreps until some are deleted.
     #[clap(long, action = ArgAction::Set)]
-    sitrep_limit: Option<NonZeroU32>,
+    sitrep_limit: Option<Setting<settings::SitrepLimit>>,
 
     /// Sets the number of sitreps in the history table after which the oldest
     /// sitreps will be removed from the history.
     ///
     /// This must be less than the total sitrep limit.
     #[clap(long, action = ArgAction::Set)]
-    history_pruning_threshold: Option<NonZeroU32>,
+    history_pruning_threshold:
+        Option<Setting<settings::HistoryPruningThreshold>>,
 
     /// BREAK GLASS IN CASE OF EMERGENCY: COMPLETELY DISABLE FM ANALYSIS
     #[clap(long, action = ArgAction::Set)]
-    analysis_enabled: Option<bool>,
+    analysis_enabled: Option<Setting<settings::AnalysisEnabled>>,
 }
 
 impl ConfigOpts {

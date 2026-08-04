@@ -265,9 +265,9 @@ mod tests {
         db::model::fm::FmConfig {
             version: SqlU32::new(1),
             comment: "my cool test config".to_string(),
-            analysis_enabled: true,
-            sitrep_limit: SqlU32::new(2500),
-            history_pruning_threshold: SqlU32::new(2000),
+            analysis_enabled: Some(true),
+            sitrep_limit: Some(SqlU32::new(2500)),
+            history_pruning_threshold: Some(SqlU32::new(2000)),
             time_modified: chrono::DateTime::UNIX_EPOCH,
         }
     }

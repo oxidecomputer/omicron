@@ -18,10 +18,12 @@
 use super::display::const_max_len;
 use std::fmt;
 use std::num::NonZeroU32;
+use std::str::FromStr;
 
 use chrono::{DateTime, Utc};
 use omicron_common::api::external::Error;
 use schemars::JsonSchema;
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
 /// Parameters to insert a new FM configuration override at a particular
@@ -64,6 +66,151 @@ impl FmConfigParam {
         }
 
         self.config.validate()
+    }
+}
+
+#[derive(Default, Serialize, Deserialize)]
+#[serde(tag = "source", content = "value")]
+#[serde(rename = "snake_case")]
+pub enum Setting<V: SettingValue> {
+    Override(V::Value),
+    #[default]
+    Default,
+}
+
+pub trait SettingValue {
+    type Value: Serialize
+        + DeserializeOwned
+        + JsonSchema
+        + Clone
+        + PartialEq
+        + Eq;
+    const DEFAULT: Self::Value;
+}
+
+impl<V: SettingValue> FromStr for Setting<V>
+where
+    V::Value: FromStr,
+{
+    type Err = <V::Value as FromStr>::Err;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s.trim().eq_ignore_ascii_case("default") {
+            return Ok(Self::Default);
+        }
+
+        s.parse::<V::Value>().map(Self::Override)
+    }
+}
+
+impl<V: SettingValue> Setting<V> {
+    pub fn new(value: V::Value) -> Self {
+        Self::Override(value)
+    }
+
+    pub fn map_override<T>(self, f: impl FnOnce(V::Value) -> T) -> Option<T> {
+        match self {
+            Self::Override(val) => Some(f(val)),
+            Self::Default => None,
+        }
+    }
+
+    pub fn into_override(self) -> Option<V::Value> {
+        self.map_override(core::convert::identity)
+    }
+
+    pub fn as_override(&self) -> Option<&V::Value> {
+        match self {
+            Self::Override(v) => Some(v),
+            Self::Default => None,
+        }
+    }
+
+    pub fn value(self) -> V::Value {
+        match self {
+            Self::Override(v) => v,
+            Self::Default => V::DEFAULT,
+        }
+    }
+}
+
+impl<V: SettingValue> From<Option<V::Value>> for Setting<V> {
+    fn from(value: Option<V::Value>) -> Self {
+        match value {
+            Some(v) => Self::Override(v),
+            None => Self::Default,
+        }
+    }
+}
+
+impl<V: SettingValue> fmt::Display for Setting<V>
+where
+    V::Value: fmt::Display,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Override(v) => {
+                write!(f, "{v} (overriden)")
+            }
+            Self::Default => {
+                write!(f, "{} (default)", V::DEFAULT)
+            }
+        }
+    }
+}
+
+impl<V: SettingValue> fmt::Debug for Setting<V>
+where
+    V::Value: fmt::Debug,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Default => {
+                f.debug_tuple("Setting::Default").field(&V::DEFAULT).finish()
+            }
+            Self::Override(v) => {
+                f.debug_tuple("Setting::Override").field(v).finish()
+            }
+        }
+    }
+}
+
+impl<V: SettingValue> PartialEq for Setting<V> {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Default, Self::Default) => true,
+            (Self::Override(this), Self::Override(that)) => this == that,
+            // NOTE: should we check if an override happens to be the same as
+            // the default value here? hm...no, because they have different
+            // intents! defaults are "floating" at the current software
+            // version's defined default, while overrides are *always* that
+            // value.
+            _ => false,
+        }
+    }
+}
+
+impl<V: SettingValue> Eq for Setting<V> {}
+
+impl<V: SettingValue> Clone for Setting<V> {
+    fn clone(&self) -> Self {
+        match self {
+            Self::Default => Self::Default,
+            Self::Override(v) => Self::Override(v.clone()),
+        }
+    }
+}
+
+impl<V: SettingValue> Copy for Setting<V> where V::Value: Copy {}
+
+impl<V: SettingValue> JsonSchema for Setting<V> {
+    fn schema_name() -> String {
+        <V::Value>::schema_name()
+    }
+
+    fn json_schema(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::schema::Schema {
+        <V::Value>::json_schema(generator)
     }
 }
 
@@ -214,11 +361,11 @@ impl fmt::Display for FmConfigSource {
 /// These rules are checked by the [`Self::validate`] method, which is called
 /// prior to accepting a config update.
 #[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema,
+    Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema,
 )]
 pub struct FmConfig {
     /// BREAK GLASS TO COMPLETELY DISABLE FM ANALYSIS
-    pub analysis_enabled: bool,
+    pub analysis_enabled: Setting<AnalysisEnabled>,
 
     /// The maximum number of sitreps to keep in the database.
     ///
@@ -228,13 +375,35 @@ pub struct FmConfig {
     /// This limit applies to both committed sitreps in the history *and*
     /// orphaned sitreps left behind when multiple Nexuses race to commit a
     /// sitrep.
-    pub sitrep_limit: NonZeroU32,
+    pub sitrep_limit: Setting<SitrepLimit>,
 
     /// The maximum number of sitreps committed to the `fm_sitrep_history`
     /// table. If the number of sitreps exceeds this threshold, the
     /// `fm_sitrep_history_pruner` background task will remove the oldest
     /// entries from the history.
-    pub history_pruning_threshold: NonZeroU32,
+    pub history_pruning_threshold: Setting<HistoryPruningThreshold>,
+}
+
+use self::settings::*;
+pub mod settings {
+    use super::*;
+
+    macro_rules! define_setting {
+        ($Name:ident: $Type:ty = $default_value:expr) => {
+            pub enum $Name {}
+            impl SettingValue for $Name {
+                type Value = $Type;
+                const DEFAULT: Self::Value = { $default_value };
+            }
+        };
+    }
+
+    define_setting! { AnalysisEnabled: bool = true }
+    define_setting! { SitrepLimit: NonZeroU32 = FmConfig::DEFAULT_SITREP_LIMIT }
+    define_setting! {
+        HistoryPruningThreshold: NonZeroU32 =
+            FmConfig::DEFAULT_HISTORY_PRUNING_THRESHOLD
+    }
 }
 
 impl FmConfig {
@@ -358,41 +527,34 @@ impl FmConfig {
             Ok(())
         }
 
+        let sitrep_limit = self.sitrep_limit.value();
+        let history_pruning_threshold = self.history_pruning_threshold.value();
+
         check_limit(
-            self.sitrep_limit,
+            sitrep_limit,
             "sitrep_limit",
             Self::MIN_SITREP_LIMIT,
             Self::MAX_LIMIT,
         )?;
         check_limit(
-            self.history_pruning_threshold,
+            history_pruning_threshold,
             "history_pruning_threshold",
             Self::MIN_HISTORY_PRUNING_THRESHOLD,
             Self::MAX_LIMIT,
         )?;
 
-        if self.history_pruning_threshold >= self.sitrep_limit {
+        if history_pruning_threshold >= sitrep_limit {
             return Err(Error::invalid_value(
                 "history_pruning_threshold",
                 format!(
-                    "sitrep history pruning threshold ({})  must be less than \
-                     the total sitrep limit ({})",
-                    self.history_pruning_threshold, self.sitrep_limit,
+                    "sitrep history pruning threshold \
+                     ({history_pruning_threshold})  must be less than the \
+                     total sitrep limit ({sitrep_limit})",
                 ),
             ));
         }
 
         Ok(())
-    }
-}
-
-impl Default for FmConfig {
-    fn default() -> Self {
-        Self {
-            analysis_enabled: true,
-            sitrep_limit: Self::DEFAULT_SITREP_LIMIT,
-            history_pruning_threshold: Self::DEFAULT_HISTORY_PRUNING_THRESHOLD,
-        }
     }
 }
 
@@ -427,13 +589,16 @@ mod tests {
             version: V1,
             comment: "test config".to_string(),
             config: FmConfig {
-                analysis_enabled: true,
-                sitrep_limit: NonZeroU32::new(sitrep_limit)
-                    .expect("test sitrep_limit must be nonzero"),
-                history_pruning_threshold: NonZeroU32::new(
-                    history_pruning_threshold,
-                )
-                .expect("test history_pruning_threshold must be nonzero"),
+                analysis_enabled: SettingValue::new(true),
+                sitrep_limit: SettingValue::new(
+                    NonZeroU32::new(sitrep_limit)
+                        .expect("test sitrep_limit must be nonzero"),
+                ),
+                history_pruning_threshold: SettingValue::new(
+                    NonZeroU32::new(history_pruning_threshold).expect(
+                        "test history_pruning_threshold must be nonzero",
+                    ),
+                ),
             },
         }
     }

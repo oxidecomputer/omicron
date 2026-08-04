@@ -3208,10 +3208,10 @@ table! {
     fm_config (version) {
         version -> Int8,
         comment -> Text,
-        analysis_enabled -> Bool,
-        sitrep_limit -> Int8,
-        history_pruning_threshold -> Int8,
         time_modified -> Timestamptz,
+        analysis_enabled -> Nullable<Bool>,
+        sitrep_limit -> Nullable<Int8>,
+        history_pruning_threshold -> Nullable<Int8>,
     }
 }
 
