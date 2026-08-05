@@ -58,6 +58,7 @@ use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_uuid_kinds::DatasetUuid;
+use omicron_uuid_kinds::DiskUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::PropolisUuid;
@@ -353,7 +354,8 @@ fn pick_sled_reservation_target(
 /// A local storage disk that needs a dataset allocation.
 #[derive(Debug, Clone)]
 struct LocalStorageRequest {
-    disk_id: Uuid,
+    /// The virtual disk requiring the allocation
+    disk_id: DiskUuid,
 
     /// Disk size plus required dataset overhead, in bytes
     required_dataset_size: i64,
@@ -389,7 +391,7 @@ enum LocalStorageUnsatisfiable {
     /// largest headroom, this pair did not fit. No assignment of these
     /// requests to these pools exists.
     RequestDoesNotFit {
-        disk_id: Uuid,
+        disk_id: DiskUuid,
         required_dataset_size: i64,
         pool_id: ZpoolUuid,
         headroom: i64,
@@ -521,7 +523,7 @@ fn choose_local_storage_allocations(
         .iter()
         .filter(|disk| disk.local_storage_dataset_allocation.is_none())
         .map(|disk| LocalStorageRequest {
-            disk_id: disk.id(),
+            disk_id: DiskUuid::from_untyped_uuid(disk.id()),
             required_dataset_size: disk.required_dataset_size(),
         })
         .collect();
@@ -625,7 +627,7 @@ mod local_storage_pairing_test {
 
     fn request(disk_id: u128, size: i64) -> LocalStorageRequest {
         LocalStorageRequest {
-            disk_id: Uuid::from_u128(disk_id),
+            disk_id: DiskUuid::from_untyped_uuid(Uuid::from_u128(disk_id)),
             required_dataset_size: size,
         }
     }
@@ -747,22 +749,22 @@ mod local_storage_pairing_test {
         )
         .unwrap();
 
-        let pairs: Vec<(Uuid, ZpoolUuid)> =
+        let pairs: Vec<(DiskUuid, ZpoolUuid)> =
             allocations.iter().map(|a| (a.disk_id, a.pool_id)).collect();
 
         assert_eq!(
             pairs,
             vec![
                 (
-                    Uuid::from_u128(1),
+                    DiskUuid::from_untyped_uuid(Uuid::from_u128(1)),
                     ZpoolUuid::from_untyped_uuid(Uuid::from_u128(1))
                 ),
                 (
-                    Uuid::from_u128(2),
+                    DiskUuid::from_untyped_uuid(Uuid::from_u128(2)),
                     ZpoolUuid::from_untyped_uuid(Uuid::from_u128(2))
                 ),
                 (
-                    Uuid::from_u128(3),
+                    DiskUuid::from_untyped_uuid(Uuid::from_u128(3)),
                     ZpoolUuid::from_untyped_uuid(Uuid::from_u128(3))
                 ),
             ],
@@ -852,7 +854,10 @@ mod local_storage_pairing_test {
         // Only the unallocated disk gets an allocation, and it lands on the
         // pool the existing allocation does not use.
         assert_eq!(allocations.len(), 1);
-        assert_eq!(allocations[0].disk_id, unallocated_disk_id);
+        assert_eq!(
+            allocations[0].disk_id.into_untyped_uuid(),
+            unallocated_disk_id,
+        );
         assert_eq!(allocations[0].pool_id, pool_b);
     }
 
@@ -910,7 +915,7 @@ mod local_storage_pairing_test {
 
                     prop_assert_eq!(allocations.len(), request_sizes.len());
 
-                    let disk_ids: HashSet<Uuid> =
+                    let disk_ids: HashSet<DiskUuid> =
                         allocations.iter().map(|a| a.disk_id).collect();
                     prop_assert_eq!(disk_ids.len(), allocations.len());
 
