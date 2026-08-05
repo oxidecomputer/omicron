@@ -3410,29 +3410,30 @@ pub struct InvOmicronSledConfigZoneNic {
     pub sled_config_id: DbTypedUuid<OmicronSledConfigKind>,
     pub id: Uuid,
     name: Name,
-    ip: IpNetwork,
+    // The `ipv4`/`ipv4_subnet` fields map to the `ip`/`subnet` columns, which
+    // predate dual-stack support: CRDB can't idempotently rename columns, so we
+    // keep the original names rather than rename them to `ipv4`/`ipv4_subnet`.
+    #[diesel(column_name = ip)]
+    ipv4: Option<IpNetwork>,
+    #[diesel(column_name = subnet)]
+    ipv4_subnet: Option<IpNetwork>,
     mac: MacAddr,
-    subnet: IpNetwork,
     vni: SqlU32,
     is_primary: bool,
     slot: SqlU8,
+    ipv6: Option<IpNetwork>,
+    ipv6_subnet: Option<IpNetwork>,
 }
 
 impl From<InvOmicronSledConfigZoneNic> for OmicronZoneNic {
     fn from(value: InvOmicronSledConfigZoneNic) -> Self {
-        // TODO(#9315): Inventory doesn't store dual-stack zone NICs yet, so
-        // exactly one of the IP address families in the output will be filled.
-        let (ipv4, ipv4_subnet, ipv6, ipv6_subnet) = match value.ip.ip() {
-            IpAddr::V4(_) => (Some(value.ip), Some(value.subnet), None, None),
-            IpAddr::V6(_) => (None, None, Some(value.ip), Some(value.subnet)),
-        };
         OmicronZoneNic {
             id: value.id,
             name: value.name,
-            ipv4,
-            ipv4_subnet,
-            ipv6,
-            ipv6_subnet,
+            ipv4: value.ipv4,
+            ipv4_subnet: value.ipv4_subnet,
+            ipv6: value.ipv6,
+            ipv6_subnet: value.ipv6_subnet,
             mac: value.mac,
             vni: value.vni,
             is_primary: value.is_primary,
@@ -3451,28 +3452,16 @@ impl InvOmicronSledConfigZoneNic {
             return Ok(None);
         };
         let nic = OmicronZoneNic::new(zone.id, nic)?;
-        // TODO(#9315): inventory doesn't store dual-stack zone NICs yet. Until
-        // it does, collapse the shared representation back to a single IP
-        // family, failing if the NIC is dual-stack.
-        let (ip, subnet) =
-            match (nic.ipv4, nic.ipv4_subnet, nic.ipv6, nic.ipv6_subnet) {
-                (Some(ip), Some(subnet), None, None) => (ip, subnet),
-                (None, None, Some(ip), Some(subnet)) => (ip, subnet),
-                _ => bail!(
-                    "Dual-stack zone NIC inventory is not yet supported \
-                    (nic_id={}); see \
-                    https://github.com/oxidecomputer/omicron/issues/9315",
-                    nic.id,
-                ),
-            };
         Ok(Some(Self {
             inv_collection_id: inv_collection_id.into(),
             sled_config_id: sled_config_id.into(),
             id: nic.id,
             name: nic.name,
-            ip,
+            ipv4: nic.ipv4,
+            ipv4_subnet: nic.ipv4_subnet,
+            ipv6: nic.ipv6,
+            ipv6_subnet: nic.ipv6_subnet,
             mac: nic.mac,
-            subnet,
             vni: nic.vni,
             is_primary: nic.is_primary,
             slot: nic.slot,
@@ -3899,10 +3888,8 @@ mod test {
         )
     }
 
-    // A dual-stack service NIC cannot yet be represented in inventory (#9315),
-    // so check that `InvOmicronSledConfigZoneNic::new` fails when provided one.
     #[test]
-    fn dual_stack_zone_nic_is_rejected() {
+    fn dual_stack_zone_nic_round_trips_through_inventory() {
         let zone_id = OmicronZoneUuid::new_v4();
         let ip_config = PrivateIpConfig::DualStack {
             v4: PrivateIpv4Config::new(
@@ -3935,23 +3922,23 @@ mod test {
                 internal_address: "[::1]:12345".parse().unwrap(),
                 lockstep_port: 12346,
                 external_ip: "192.0.2.1".parse().unwrap(),
-                nic,
+                nic: nic.clone(),
                 external_tls: false,
                 external_dns_servers: vec![],
             },
             image_source: OmicronZoneImageSource::InstallDataset,
         };
 
-        let err = InvOmicronSledConfigZoneNic::new(
+        let row = InvOmicronSledConfigZoneNic::new(
             CollectionUuid::new_v4(),
             OmicronSledConfigUuid::new_v4(),
             &zone,
         )
-        .expect_err("dual-stack zone NIC must be rejected in inventory");
-        let msg = err.to_string();
-        assert!(
-            msg.contains("Dual-stack") && msg.contains("9315"),
-            "unexpected error: {msg}",
-        );
+        .expect("built inventory NIC row")
+        .expect("zone has a service NIC");
+        let round_tripped = row
+            .into_network_interface_for_zone(zone_id)
+            .expect("rebuilt NIC from inventory row");
+        assert_eq!(nic, round_tripped);
     }
 }
