@@ -274,9 +274,10 @@ impl super::Nexus {
                 //
                 // [1]: famously, these types of predictions are never wrong!
 
-                if params.size.to_bytes()
-                    > ByteCount::from_pebibytes_u32(10).to_bytes()
-                {
+                #[allow(non_upper_case_globals)]
+                const PiB: u64 = 1024u64.pow(5);
+
+                if params.size.to_bytes() > (10 * PiB) {
                     return Err(Error::invalid_value(
                         "size",
                         String::from("requested size over 10 PiB"),

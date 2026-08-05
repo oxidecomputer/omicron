@@ -131,7 +131,9 @@ async fn test_reject_creating_local_storage_disk(
                 },
 
                 // One day, we'll get to 100 PiB disks. Not today!
-                size: external::ByteCount::from_pebibytes_u32(100),
+                size: external::ByteCount::from_gibibytes_u32(
+                    100 * 1024 * 1024,
+                ),
 
                 disk_backend: DiskBackend::Local {},
             }))
@@ -160,7 +162,7 @@ async fn test_reject_creating_local_storage_disk(
                     description: String::from("chungus"),
                 },
 
-                size: external::ByteCount::from_tebibytes_u32(1),
+                size: external::ByteCount::from_gibibytes_u32(1024),
 
                 disk_backend: DiskBackend::Local {},
             }))
