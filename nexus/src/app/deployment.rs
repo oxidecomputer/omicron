@@ -1627,6 +1627,47 @@ mod tests {
             Err(TargetReleaseChangeError::NoMupdateRecoveryNeeded)
         );
 
+        // Modify the blueprint to emulate an illegal mupdate: set the
+        // components on _one_ sled to `different_version`, but leave the rest
+        // at `current_version`. The error we get back should describe this.
+        {
+            let (_, sled_config) = blueprint.sleds.iter_mut().next().unwrap();
+            sled_config.host_phase_2 = BlueprintHostPhase2DesiredSlots {
+                slot_a: make_os_artifact(&different_version),
+                slot_b: make_os_artifact(&different_version),
+            };
+            for mut zone_config in sled_config.zones.iter_mut() {
+                zone_config.image_source =
+                    make_zone_artifact(&different_version);
+            }
+        }
+        let expected_err =
+            TargetReleaseChangeError::MupdateRecoveryMixedVersions {
+                proposed_new_version: different_version.clone(),
+                versions_found: BTreeMap::from([(
+                    BlueprintArtifactVersion::Available {
+                        version: ArtifactVersion::new(
+                            current_version.to_string(),
+                        )
+                        .unwrap(),
+                    },
+                    blueprint
+                        .active_sled_configs()
+                        .skip(1) // skip the one we "mupdated"
+                        .map(|(sled_id, _)| sled_id)
+                        .collect(),
+                )]),
+            };
+        assert_eq!(
+            validate_can_set_target_release_for_mupdate_recovery(
+                &blueprint,
+                initial_target_release_generation,
+                &different_version,
+                log,
+            ),
+            Err(expected_err),
+        );
+
         logctx.cleanup_successful();
     }
 }
