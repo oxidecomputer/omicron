@@ -38,6 +38,7 @@ use slog::Logger;
 use slog::warn;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -430,13 +431,22 @@ enum TargetReleaseChangeError {
     #[error("no evidence a mupdate has occurred - recovery not needed")]
     NoMupdateRecoveryNeeded,
     #[error(
-        "mupdate recovery required, but specified version \
-         {proposed_new_version} does not match the version of \
-         components deployed on sled {sled_id} ({version_found})"
+        "mupdate recovery required, but found other versions in addititon to \
+         {proposed_new_version} (this is an invalid state that requires \
+         support intervention): {}",
+        display_versions_found(versions_found)
     )]
-    MupdateRecoveryToWrongVersion {
-        sled_id: SledUuid,
-        version_found: BlueprintArtifactVersion,
+    MupdateRecoveryMixedVersions {
+        versions_found: BTreeMap<BlueprintArtifactVersion, BTreeSet<SledUuid>>,
+        proposed_new_version: semver::Version,
+    },
+    #[error(
+        "mupdate recovery required, but specified version \
+         {proposed_new_version} was not found; {}",
+        display_versions_found(versions_found)
+    )]
+    MupdateRecoveryVersionNotFound {
+        versions_found: BTreeMap<BlueprintArtifactVersion, BTreeSet<SledUuid>>,
         proposed_new_version: semver::Version,
     },
     #[error(
@@ -460,6 +470,34 @@ enum TargetReleaseChangeError {
          is older than current target release version {current}"
     )]
     CannotDowngrade { current: semver::Version, proposed: semver::Version },
+    #[error(
+        "cannot determine whether setting the target release is possible: \
+        no sleds found in current blueprint (this is unexpected!)"
+    )]
+    NoSledsFound,
+}
+
+// Helper for the `#[error(..)]` strings on `TargetReleaseChangeError`.
+fn display_versions_found(
+    versions_found: &BTreeMap<BlueprintArtifactVersion, BTreeSet<SledUuid>>,
+) -> String {
+    match versions_found.len() {
+        0 => "found no versions (this is unexpected!)".to_string(),
+        1 => {
+            let (version, sleds) = versions_found.iter().next().unwrap();
+            format!("found version {version} on {} sleds", sleds.len())
+        }
+        n => {
+            let versions = versions_found
+                .iter()
+                .map(|(version, sleds)| {
+                    let plural = if sleds.len() > 1 { "s" } else { "" };
+                    format!("{version} ({} sled{plural})", sleds.len())
+                })
+                .collect::<Vec<_>>();
+            format!("found {n} versions: {}", versions.join(", "))
+        }
+    }
 }
 
 // Check whether we should allow an operator to change the current target
@@ -502,7 +540,7 @@ fn validate_can_set_target_release_for_mupdate_recovery(
         current_blueprint,
         proposed_new_version,
     ) {
-        BlueprintTargetReleaseStatus::AllComponentsMatchTargetRelease => {
+        BlueprintTargetReleaseStatus::AllComponentsMatch => {
             if min_target_release_gen_is_ahead_of_actual_target_release_gen {
                 // All components are on the proposed new version, but we need
                 // to allow recovery to catch up to the min target release
@@ -542,31 +580,69 @@ fn validate_can_set_target_release_for_mupdate_recovery(
             Ok(())
         }
         BlueprintTargetReleaseStatus::FoundDifferentVersion {
-            sled_id,
-            version_found,
+            found_version_to_check,
+            different_versions_found,
         } => {
-            // There are two obvious ways to get here:
+            // If we get here, that means the operator has requested a mupdate
+            // recovery to version N, but we found at least one component
+            // running some other version M. There are several possibilities
+            // here:
             //
-            // 1. No mupdate has happened, and the operator has called this
-            //    endpoint erroneously
-            // 2. A mupdate to the current target release has happened, but the
-            //    operator has called this endpoint with the wrong version
+            // 1. The operator called this endpoint erroneously: there was not a
+            //    mupdate at all, and version N doesn't match all the software
+            //    currently deployed on the rack, either because the rack is on
+            //    some other version M or because the rack is currently in the
+            //    middle of a live update between M and N (either direction).
+            // 2. The operator called this endpoint incorrectly: there was a
+            //    mupdate, but to version N, not version M.
+            // 3. The rack was mupdated in an invalid way. The only valid
+            //    mupdates are:
             //
-            // We'll key off of
-            // `min_target_release_gen_is_ahead_of_actual_target_release_gen` to
-            // try to guess which case we're in: if it does look like a mupdate
-            // has happened that needs to be recovered from, we'll return an
-            // error noting that we think we're in case 2. Otherwise, it looks
-            // like we're in case 1 and no mupdate recovery is needed.
+            //      * The entire rack is mupdated together to some new version.
+            //      * If the entire rack is running some version X, any sled(s)
+            //        can be mupdated to version X. (This is part of the "sled
+            //        add process, where we mupdate new sleds to a matching
+            //        version before adding them to the control plane.)
+            //
+            //   A couple invalid mupdates that could land us in this branch
+            //   are:
+            //
+            //      * The rack is currently undergoing a live update, and a
+            //        single sled was mupdated.
+            //      * The rack as a whole was running version M, but some strict
+            //        subset of sleds were mupdated to version N
+            //
+            //   In either of these cases, we're going to reject the operator's
+            //   request to recover, and there's nothing they can do about it
+            //   without getting support involved. But that's critical here: the
+            //   rack is in some invalid, unsupported state, and we don't know
+            //   whether it's safe to recover here without a person
+            //   investigating and (probably) correcting the situation.
             if min_target_release_gen_is_ahead_of_actual_target_release_gen {
-                Err(TargetReleaseChangeError::MupdateRecoveryToWrongVersion {
-                    sled_id,
-                    version_found,
-                    proposed_new_version: proposed_new_version.clone(),
-                })
+                // Min target release gen ahead of actual means we did detect a
+                // mupdate: we're in either case 2 or 3 above. If we found the
+                // version the operator requested, it we're in case 3 (a mupdate
+                // has occurred and some components are on version N, but not
+                // all); otherwise, we're in case 2 (a mupdate has occurred, but
+                // not to version N).
+                if found_version_to_check {
+                    Err(TargetReleaseChangeError::MupdateRecoveryMixedVersions {
+                        versions_found: different_versions_found,
+                        proposed_new_version: proposed_new_version.clone(),
+                    })
+                } else {
+                    Err(TargetReleaseChangeError::MupdateRecoveryVersionNotFound {
+                        versions_found: different_versions_found,
+                        proposed_new_version: proposed_new_version.clone(),
+                    })
+                }
             } else {
+                // We're in case 1: we haven't detected a mupdate at all.
                 Err(TargetReleaseChangeError::NoMupdateRecoveryNeeded)
             }
+        }
+        BlueprintTargetReleaseStatus::NoSledsFound => {
+            Err(TargetReleaseChangeError::NoSledsFound)
         }
     }
 }
@@ -633,19 +709,31 @@ fn validate_update_version_number_ordering(
 pub(super) enum BlueprintTargetReleaseStatus {
     /// All sled and zone configs match the specified target release version; no
     /// evidence of a mupdate.
-    AllComponentsMatchTargetRelease,
+    AllComponentsMatch,
+
     /// At least one sled or zone shows evidence of a mupdate that must be
     /// cleared.
     WaitingForMupdateToBeCleared {
         how: SledMupdateDetectedHow,
         sled_id: SledUuid,
     },
+
     /// At least one sled or zone is not on the specified target release
     /// version (and no mupdate evidence was found).
     FoundDifferentVersion {
-        sled_id: SledUuid,
-        version_found: BlueprintArtifactVersion,
+        /// Did we find the version we're looking for on at least one component?
+        found_version_to_check: bool,
+
+        /// Guaranteed non-empty map of other versions we found and which sleds
+        /// we found them on.
+        different_versions_found:
+            BTreeMap<BlueprintArtifactVersion, BTreeSet<SledUuid>>,
     },
+
+    /// No sleds were found in the current blueprint.
+    ///
+    /// This should be impossible.
+    NoSledsFound,
 }
 
 impl BlueprintTargetReleaseStatus {
@@ -657,7 +745,7 @@ impl BlueprintTargetReleaseStatus {
     //    `WaitingForMupdateToBeCleared { .. }` will be returned
     // 2. Otherwise, if we find any components at a version other than
     //    `version_to_check`, `FoundDifferentVersion { .. }` will be returned
-    // 3. Otherwise, `AllComponentsMatchTargetRelease` will be returned.
+    // 3. Otherwise, `AllComponentsMatch` will be returned.
     //
     // We don't attempt to check Hubris components:
     //
@@ -670,7 +758,11 @@ impl BlueprintTargetReleaseStatus {
         version_to_check: &semver::Version,
     ) -> Self {
         let mut found_mupdate = None;
-        let mut found_different_version = None;
+        let mut found_version_to_check = false;
+        let mut different_versions_found: BTreeMap<
+            BlueprintArtifactVersion,
+            BTreeSet<SledUuid>,
+        > = BTreeMap::new();
 
         // Blueprint artifact versions are stored as strings, not
         // `semver::Version`s. Here we're only looking at zone and OS versions,
@@ -685,11 +777,14 @@ impl BlueprintTargetReleaseStatus {
                     found_mupdate.get_or_insert((how, sled_id));
                 }
                 SledUpdateStatus::FoundDifferentVersion { os_version } => {
-                    found_different_version
-                        .get_or_insert((sled_id, os_version));
+                    different_versions_found
+                        .entry(os_version)
+                        .or_default()
+                        .insert(sled_id);
                 }
                 SledUpdateStatus::VersionMatches => {
                     // This sled is okay; move on to the next.
+                    found_version_to_check = true;
                 }
             }
         }
@@ -711,10 +806,13 @@ impl BlueprintTargetReleaseStatus {
                 BlueprintZoneImageSource::Artifact { version, .. } => {
                     match version {
                         BlueprintArtifactVersion::Available { version: v } => {
-                            if v.as_str() != version_to_check {
-                                found_different_version.get_or_insert_with(
-                                    || (sled_id, version.clone()),
-                                );
+                            if v.as_str() == version_to_check {
+                                found_version_to_check = true;
+                            } else {
+                                different_versions_found
+                                    .entry(version.clone())
+                                    .or_default()
+                                    .insert(sled_id);
                             }
                         }
                         // This shouldn't happen; it means we have an artifact
@@ -726,9 +824,10 @@ impl BlueprintTargetReleaseStatus {
                         // For now, record this as "not the version we're
                         // checking for".
                         BlueprintArtifactVersion::Unknown => {
-                            found_different_version.get_or_insert_with(|| {
-                                (sled_id, version.clone())
-                            });
+                            different_versions_found
+                                .entry(version.clone())
+                                .or_default()
+                                .insert(sled_id);
                         }
                     }
                 }
@@ -736,22 +835,25 @@ impl BlueprintTargetReleaseStatus {
         }
 
         // Prioritize "found a mupdate" > "found a wrong version" > "ok"
-        match (found_mupdate, found_different_version) {
-            (Some((how, sled_id)), _) => {
-                BlueprintTargetReleaseStatus::WaitingForMupdateToBeCleared {
-                    how,
-                    sled_id,
-                }
+        if let Some((how, sled_id)) = found_mupdate {
+            BlueprintTargetReleaseStatus::WaitingForMupdateToBeCleared {
+                how,
+                sled_id,
             }
-            (None, Some((sled_id, version_found))) => {
-                BlueprintTargetReleaseStatus::FoundDifferentVersion {
-                    sled_id,
-                    version_found,
-                }
+        } else if !different_versions_found.is_empty() {
+            BlueprintTargetReleaseStatus::FoundDifferentVersion {
+                found_version_to_check,
+                different_versions_found,
             }
-            (None, None) => {
-                BlueprintTargetReleaseStatus::AllComponentsMatchTargetRelease
-            }
+        } else if found_version_to_check {
+            BlueprintTargetReleaseStatus::AllComponentsMatch
+        } else {
+            // The loops above over the blueprint's active sleds / current zones
+            // always set one of the three previous values. The only way to land
+            // in this branch is if the loops didn't iterate at all, which means
+            // we have no active sleds in the blueprint. This should be
+            // impossible; we'll turn this into a 500 error on the way out.
+            BlueprintTargetReleaseStatus::NoSledsFound
         }
     }
 }
@@ -794,7 +896,7 @@ fn validate_can_set_target_release_for_update(
     ) {
         // When all components are on the current target release it means no
         // mupdate is detected
-        BlueprintTargetReleaseStatus::AllComponentsMatchTargetRelease => Ok(()),
+        BlueprintTargetReleaseStatus::AllComponentsMatch => Ok(()),
         BlueprintTargetReleaseStatus::WaitingForMupdateToBeCleared {
             how,
             sled_id,
@@ -808,16 +910,19 @@ fn validate_can_set_target_release_for_update(
             Err(TargetReleaseChangeError::WaitingForMupdateToBeCleared)
         }
         BlueprintTargetReleaseStatus::FoundDifferentVersion {
-            sled_id,
-            version_found,
+            found_version_to_check,
+            different_versions_found,
         } => {
             warn!(
                 log,
                 "cannot start update: previous update not complete";
-                "sled_id" => %sled_id,
-                "version_found" => %version_found,
+                "found_current_target_version" => found_version_to_check,
+                "other_versions_found" => ?different_versions_found,
             );
             Err(TargetReleaseChangeError::PreviousUpdateInProgress)
+        }
+        BlueprintTargetReleaseStatus::NoSledsFound => {
+            Err(TargetReleaseChangeError::NoSledsFound)
         }
     }
 }
@@ -1463,15 +1568,20 @@ mod tests {
         // showing evidence of a mupdate, so we only allow mupdate recovery to a
         // version that matches all configured component sources.
         let expected_err =
-            TargetReleaseChangeError::MupdateRecoveryToWrongVersion {
-                // Our checks always return the first sled with a problem, which
-                // in this case just means "the first sled".
-                sled_id: blueprint.active_sled_configs().next().unwrap().0,
+            TargetReleaseChangeError::MupdateRecoveryVersionNotFound {
                 proposed_new_version: different_version.clone(),
-                version_found: BlueprintArtifactVersion::Available {
-                    version: ArtifactVersion::new(current_version.to_string())
+                versions_found: BTreeMap::from([(
+                    BlueprintArtifactVersion::Available {
+                        version: ArtifactVersion::new(
+                            current_version.to_string(),
+                        )
                         .unwrap(),
-                },
+                    },
+                    blueprint
+                        .active_sled_configs()
+                        .map(|(sled_id, _)| sled_id)
+                        .collect(),
+                )]),
             };
         assert_eq!(
             validate_can_set_target_release_for_mupdate_recovery(
