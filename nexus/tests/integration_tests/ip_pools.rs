@@ -95,14 +95,12 @@ async fn test_ip_pool_basic_crud_impl(
     let ip_pool_ranges_url = format!("{}/ranges", ip_pool_url);
     let ip_pool_add_range_url = format!("{}/add", ip_pool_ranges_url);
 
-    // TODO-cleanup: Remove this when we remove the builtin system IP Pools
-    //
-    // See https://github.com/oxidecomputer/omicron/issues/8950.
+    // The `ControlPlaneTestContext` creates two system-service IP pools.
     let original_ip_pools = get_ip_pools(&client, Some(assignment)).await;
     let count = original_ip_pools.len();
     match assignment {
         IpPoolAssignment::SystemServices => {
-            assert_eq!(count, 2, "Expected 2 predefined services IP pools");
+            assert_eq!(count, 2, "Expected 2 service IP pools");
         }
         IpPoolAssignment::Silos => {
             assert_eq!(count, 0, "Expected empty list of IP pools");
@@ -740,9 +738,7 @@ async fn test_ip_pool_pagination(cptestctx: &ControlPlaneTestContext) {
     let base_url = "/v1/system/ip-pools";
     let first_page = objects_list_page_authz::<IpPool>(client, &base_url).await;
 
-    // we start out with two hardcoded system pools.
-    //
-    // TODO-cleanup: https://github.com/oxidecomputer/omicron/issues/8950.
+    // The `ControlPlaneTestContext` creates two system-service IP pools.
     assert_eq!(first_page.items.len(), 2);
 
     let mut pool_names = vec![];

@@ -74,7 +74,8 @@ use std::sync::Arc;
 use transient_dns_server::TransientDnsServer;
 use uuid::Uuid;
 
-// TODO(#8950) Remove or move these names somewhere common.
+// Well-known service IP pool names the simulated sled-agent creates, mirroring
+// what real rack setup produces.
 const SERVICE_POOL_IPV4_NAME: &str = "oxide-service-pool-v4";
 const SERVICE_POOL_IPV6_NAME: &str = "oxide-service-pool-v6";
 
