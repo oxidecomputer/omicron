@@ -65,7 +65,6 @@ use sled_agent_types::support_bundle::{
 use sled_agent_types::trust_quorum::{
     ProxyCommitRequest, ProxyPrepareAndCommitRequest, TrustQuorumNetworkConfig,
 };
-use sled_agent_types::uplink::SwitchPorts;
 use sled_agent_types::zone_bundle::{
     BundleUtilization, CleanupContext, CleanupContextUpdate, CleanupCount,
     CleanupPeriod, StorageLimit, ZoneBundleFilter, ZoneBundleId,
@@ -928,20 +927,6 @@ impl SledAgentApi for SledAgentImpl {
                 let vnics =
                     sa.list_virtual_nics().await.map_err(Error::from)?;
                 Ok(HttpResponseOk(vnics))
-            })
-            .await
-    }
-
-    async fn uplink_ensure(
-        rqctx: RequestContext<Self::Context>,
-        body: TypedBody<SwitchPorts>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        let sa = rqctx.context();
-        sa.latencies()
-            .instrument_dropshot_handler(&rqctx, async {
-                sa.ensure_scrimlet_host_ports(body.into_inner().uplinks)
-                    .await?;
-                Ok(HttpResponseUpdatedNoContent())
             })
             .await
     }

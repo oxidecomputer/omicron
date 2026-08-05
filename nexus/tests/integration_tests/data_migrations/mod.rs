@@ -45,6 +45,7 @@ mod inv_clear_mupdate_override;
 mod one_big_ereport_table;
 mod populate_db_metadata_nexus;
 mod positive_quotas;
+mod prune_service_nat_entries;
 mod rename_default_igw_ip_pool;
 mod route_config_rib_priority;
 mod sled_resource_vmm_state;
@@ -102,6 +103,7 @@ pub(crate) fn get_migration_checks() -> BTreeMap<Version, DataMigrationFns> {
     register!(ereporter_restart_rack_id);
     register!(ereporter_restart_latest_ereport);
     register!(tufaceous_v2);
+    register!(prune_service_nat_entries);
 
     map
 }

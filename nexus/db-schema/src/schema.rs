@@ -2177,12 +2177,17 @@ table! {
         sled_config_id -> Uuid,
         id -> Uuid,
         name -> Text,
-        ip -> Inet,
+        // NOTE: `ip` and `subnet` hold the IPv4 address and subnet, despite
+        // the names. We kept the original names because renaming columns is
+        // not idempotent in CRDB as of today.
+        ip -> Nullable<Inet>,
         mac -> Int8,
-        subnet -> Inet,
+        subnet -> Nullable<Inet>,
         vni -> Int8,
         is_primary -> Bool,
         slot -> Int2,
+        ipv6 -> Nullable<Inet>,
+        ipv6_subnet -> Nullable<Inet>,
     }
 }
 
