@@ -8800,4 +8800,201 @@ pub(in crate::db::datastore) mod test {
         db.terminate().await;
         logctx.cleanup_successful();
     }
+
+    // A local storage assignment computed from a zpool snapshot can go stale
+    // if a concurrent reservation consumes the chosen pool. The insert CTE
+    // must reject the stale assignment, and a reservation computed from a
+    // fresh snapshot must succeed on the remaining pool.
+    #[tokio::test]
+    async fn local_storage_allocation_stale_snapshot_retry() {
+        let logctx = dev::test_setup_log(
+            "local_storage_allocation_stale_snapshot_retry",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let config = LocalStorageTest {
+            // One sled with two U2s, where each U2 has room for exactly one
+            // 512 GiB disk: usable space is 1024 GiB - 250 GiB buffer, and
+            // each disk requires 512 GiB plus overhead.
+            sleds: vec![LocalStorageTestSled {
+                sled_id: SledUuid::new_v4(),
+                sled_serial: String::from("sled_0"),
+                u2s: (0..2)
+                    .map(|i| LocalStorageTestSledU2 {
+                        physical_disk_id: PhysicalDiskUuid::new_v4(),
+                        physical_disk_serial: format!("phys-{i}"),
+
+                        zpool_id: ZpoolUuid::new_v4(),
+                        control_plane_storage_buffer:
+                            external::ByteCount::from_gibibytes_u32(250),
+
+                        inventory_total_size:
+                            external::ByteCount::from_gibibytes_u32(1024),
+
+                        crucible_dataset_id: DatasetUuid::new_v4(),
+                        crucible_dataset_addr: format!(
+                            "[fd00:1122:3344:10{i}::1]:12345"
+                        )
+                        .parse()
+                        .unwrap(),
+
+                        local_storage_unencrypted_dataset_id:
+                            DatasetUuid::new_v4(),
+                    })
+                    .collect(),
+            }],
+            affinity_groups: vec![],
+            anti_affinity_groups: vec![],
+            // Three instances with one 512 GiB local storage disk each: only
+            // two can fit on this sled.
+            instances: ["one", "two", "three"]
+                .iter()
+                .map(|name| LocalStorageTestInstance {
+                    id: InstanceUuid::new_v4(),
+                    name: name.to_string(),
+                    affinity: None,
+                    ncpus: 2,
+                    memory: external::ByteCount::from_gibibytes_u32(16),
+                    disks: vec![LocalStorageTestInstanceDisk {
+                        id: Uuid::new_v4(),
+                        name: external::Name::try_from(format!("disk-{name}"))
+                            .unwrap(),
+                        size: external::ByteCount::from_gibibytes_u32(512),
+                    }],
+                })
+                .collect(),
+        };
+
+        setup_local_storage_allocation_test(&opctx, datastore, &config).await;
+
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+
+        // Compute an assignment for the second instance's disk. The chooser
+        // is deterministic, so this picks the same pool the first instance's
+        // reservation is about to consume.
+
+        let instance_two =
+            Instance::from_local_storage_test_instance(&config.instances[1]);
+
+        let instance_two_disks: Vec<LocalStorageDisk> = datastore
+            .instance_list_disks_on_conn(
+                &conn,
+                instance_two.id.into_untyped_uuid(),
+                &PaginatedBy::Name(DataPageParams {
+                    marker: None,
+                    direction: dropshot::PaginationOrder::Ascending,
+                    limit: std::num::NonZeroU32::new(MAX_DISKS_PER_INSTANCE)
+                        .unwrap(),
+                }),
+            )
+            .await
+            .unwrap()
+            .into_iter()
+            .filter_map(|disk| match disk {
+                db::datastore::Disk::LocalStorage(disk) => Some(disk),
+                db::datastore::Disk::Crucible(_) => None,
+            })
+            .collect();
+
+        let stale_allocations = {
+            let zpools_for_sled = DataStore::zpool_get_for_sled_reservation(
+                &conn,
+                &opctx,
+                config.sleds[0].sled_id,
+            )
+            .await
+            .unwrap();
+
+            choose_local_storage_allocations(
+                &zpools_for_sled,
+                &instance_two_disks,
+            )
+            .unwrap()
+        };
+
+        // Reserve the first instance; this consumes the pool the stale
+        // assignment chose.
+
+        {
+            let instance = Instance::from_local_storage_test_instance(
+                &config.instances[0],
+            );
+
+            datastore
+                .sled_reservation_create(
+                    &opctx,
+                    instance.id,
+                    PropolisUuid::new_v4(),
+                    instance.resources(),
+                    db::model::SledReservationConstraints::none(),
+                    SledReservationReason::Start,
+                )
+                .await
+                .unwrap();
+        }
+
+        // The insert CTE must reject the stale assignment: its pool no
+        // longer has room. This is the signal the reservation loop consumes
+        // before recomputing from a fresh snapshot.
+
+        let resource = SledResourceVmm::new(
+            PropolisUuid::new_v4(),
+            instance_two.id,
+            config.sleds[0].sled_id,
+            instance_two.resources(),
+            SledReservationReason::Start.into(),
+        );
+
+        let result = sled_insert_resource_query(
+            &resource,
+            &LocalStorageAllocationRequired::Yes {
+                allocations: stale_allocations,
+            },
+        )
+        .execute_async(&*conn)
+        .await;
+
+        assert_eq!(result, Ok(0));
+
+        // A full reservation for the second instance succeeds: recomputing
+        // from a fresh snapshot lands on the remaining pool.
+
+        datastore
+            .sled_reservation_create(
+                &opctx,
+                instance_two.id,
+                PropolisUuid::new_v4(),
+                instance_two.resources(),
+                db::model::SledReservationConstraints::none(),
+                SledReservationReason::Start,
+            )
+            .await
+            .unwrap();
+
+        // Both pools are now full, so a third reservation fails cleanly.
+
+        {
+            let instance = Instance::from_local_storage_test_instance(
+                &config.instances[2],
+            );
+
+            datastore
+                .sled_reservation_create(
+                    &opctx,
+                    instance.id,
+                    PropolisUuid::new_v4(),
+                    instance.resources(),
+                    db::model::SledReservationConstraints::none(),
+                    SledReservationReason::Start,
+                )
+                .await
+                .unwrap_err();
+        }
+
+        validate_local_storage_allocations(&datastore).await;
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
 }
