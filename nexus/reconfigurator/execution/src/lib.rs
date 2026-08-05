@@ -273,14 +273,6 @@ pub async fn realize_blueprint(
         nexus_id,
     );
 
-    // TODO-K: Is this the right place or should it be below reassignment?
-    register_abandon_orphan_sagas_step(
-        &engine.for_component(ExecutionComponent::OmicronZones),
-        &opctx,
-        datastore,
-        blueprint,
-    );
-
     let reassign_saga_output = register_reassign_sagas_step(
         &engine.for_component(ExecutionComponent::OmicronZones),
         &opctx,
@@ -288,6 +280,13 @@ pub async fn realize_blueprint(
         blueprint,
         nexus_id,
         saga_quiesce,
+    );
+
+    register_abandon_orphan_sagas_step(
+        &engine.for_component(ExecutionComponent::OmicronZones),
+        &opctx,
+        datastore,
+        blueprint,
     );
 
     register_cockroachdb_settings_step(
