@@ -9727,6 +9727,7 @@ dependencies = [
  "sled-agent-measurements",
  "sled-agent-rack-setup",
  "sled-agent-resolvable-files",
+ "sled-agent-scrimlet-reconcilers",
  "sled-agent-types",
  "sled-agent-types-versions",
  "sled-diagnostics",
@@ -14101,22 +14102,14 @@ name = "sled-agent-early-networking"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=cc0c307c617f2988aafdca4e3bd35ea178b64801)",
  "futures",
  "gateway-client",
- "http",
  "internal-dns-resolver",
  "internal-dns-types",
- "mg-admin-client",
- "mg-api-types",
  "omicron-common",
- "omicron-ddm-admin-client",
  "omicron-workspace-hack",
- "oxnet",
  "sled-agent-types",
  "slog",
- "slog-error-chain",
- "thiserror 2.0.18",
  "tokio",
 ]
 
