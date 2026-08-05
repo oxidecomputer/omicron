@@ -22,12 +22,10 @@ progenitor::generate_api!(
     patch = {
         CurrentRssUserConfig = { derives = [PartialEq] },
         CurrentRssUserConfigSensitive = { derives = [PartialEq, Eq, PartialOrd, Ord] },
-        GetLocationResponse = { derives = [PartialEq, Eq, PartialOrd, Ord] },
         ImageVersion = { derives = [PartialEq, Eq, PartialOrd, Ord]},
         RackInitId = { derives = [PartialEq, Eq, PartialOrd, Ord] },
         RackNetworkConfigV2 = { derives = [PartialEq, Eq, PartialOrd, Ord] },
         RackOperationStatus = { derives = [PartialEq, Eq, PartialOrd, Ord] },
-        RackResetId = { derives = [PartialEq, Eq, PartialOrd, Ord] },
         RotImageDetails = { derives = [PartialEq, Eq, PartialOrd, Ord]},
         UplinkConfig = { derives = [PartialEq, Eq, PartialOrd, Ord] },
     },

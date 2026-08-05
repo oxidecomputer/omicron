@@ -20,10 +20,11 @@ use nexus_types::external_api::alert::{
     AlertDelivery, AlertDeliveryAttempts, AlertDeliveryId, AlertDeliveryState,
     AlertDeliveryTrigger, AlertProbeResult, AlertReceiver, AlertSubscription,
     AlertSubscriptionCreate, AlertSubscriptionCreated, WebhookCreate,
-    WebhookDeliveryAttemptResult, WebhookReceiver, WebhookSecret,
-    WebhookSecretCreate, WebhookSecrets,
+    WebhookDeliveryAttemptResult, WebhookReceiver, WebhookReceiverUpdate,
+    WebhookSecret, WebhookSecretCreate, WebhookSecrets,
 };
 use omicron_common::api::external::IdentityMetadataCreateParams;
+use omicron_common::api::external::IdentityMetadataUpdateParams;
 use omicron_common::api::external::NameOrId;
 use omicron_uuid_kinds::AlertReceiverUuid;
 use omicron_uuid_kinds::AlertUuid;
@@ -453,6 +454,108 @@ async fn test_webhook_receiver_names_are_unique(
         dbg!(&error).message,
         "already exists: alert-receiver \"my-great-webhook\""
     );
+}
+
+#[nexus_test]
+async fn test_webhook_receiver_create_rejects_invalid_urls(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    let rack_subnet: ipnetwork::Ipv6Network =
+        nexus_test_utils::RACK_SUBNET.parse().unwrap();
+    let underlay_ip =
+        rack_subnet.nth(3).expect("3rd underlay addr should exist");
+    let underlay_url = format!("http://[{underlay_ip}]/im-underlay-lol");
+    let invalid_urls = [
+        &underlay_url,
+        // TODO(eliza): it would also be nice to test that URLs that don't
+        // *parse* are rejected, but because the API type uses a `Url` rather
+        // than a string, we can't use the actual API params type to construct
+        // an invalid request here. We'd have to make our own JSON to do that.
+    ];
+
+    for url in invalid_urls {
+        let error = resource_helpers::object_create_error(
+            &client,
+            WEBHOOK_RECEIVERS_BASE_PATH,
+            &WebhookCreate {
+                identity: my_great_webhook_identity(),
+                endpoint: dbg!(url).parse().expect("this should be a URL"),
+                secrets: vec![MY_COOL_SECRET.to_string()],
+                subscriptions: vec!["test.foo.bar".parse().unwrap()],
+            },
+            http::StatusCode::BAD_REQUEST,
+        )
+        .await;
+
+        assert!(
+            dbg!(&error)
+                .message
+                .starts_with("unsupported value for \"endpoint\"")
+        );
+    }
+}
+
+#[nexus_test]
+async fn test_webhook_receiver_update_rejects_invalid_urls(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let created_webhook = webhook_create(
+        &cptestctx,
+        &WebhookCreate {
+            identity: my_great_webhook_identity(),
+            endpoint: "https://example.com/this-url-is-okay"
+                .parse()
+                .expect("this should be a valid URL"),
+            secrets: vec![MY_COOL_SECRET.to_string()],
+            subscriptions: vec!["test.foo".parse().unwrap()],
+        },
+    )
+    .await;
+    dbg!(&created_webhook);
+
+    let rack_subnet: ipnetwork::Ipv6Network =
+        nexus_test_utils::RACK_SUBNET.parse().unwrap();
+    let underlay_ip =
+        rack_subnet.nth(3).expect("3rd underlay addr should exist");
+    let underlay_url = format!("http://[{underlay_ip}]/im-underlay-lol");
+    let invalid_urls = [
+        &underlay_url,
+        // TODO(eliza): it would also be nice to test that URLs that don't
+        // *parse* are rejected, but because the API type uses a `Url` rather
+        // than a string, we can't use the actual API params type to construct
+        // an invalid request here. We'd have to make our own JSON to do that.
+    ];
+
+    let rx_update_url = format!(
+        "{WEBHOOK_RECEIVERS_BASE_PATH}/{}",
+        created_webhook.identity.id
+    );
+    for url in invalid_urls {
+        let error = resource_helpers::object_put_error(
+            &client,
+            &rx_update_url,
+            &WebhookReceiverUpdate {
+                identity: IdentityMetadataUpdateParams {
+                    name: None,
+                    description: None,
+                },
+                endpoint: Some(
+                    dbg!(url).parse().expect("this should be a URL"),
+                ),
+            },
+            http::StatusCode::BAD_REQUEST,
+        )
+        .await;
+
+        assert!(
+            dbg!(&error)
+                .message
+                .starts_with("unsupported value for \"endpoint\"")
+        );
+    }
 }
 
 #[nexus_test]

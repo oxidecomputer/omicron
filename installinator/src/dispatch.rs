@@ -20,7 +20,7 @@ use oxide_update_engine::StepResult;
 use sha2::{Digest, Sha256};
 use sled_hardware::{DataLinks, is_oxide_sled};
 use slog::{Drain, error, warn};
-use tufaceous_artifact_v2::{
+use tufaceous_artifact::{
     ArtifactHash, InstallinatorArtifact, InstallinatorArtifactKind,
     InstallinatorDocument,
 };

@@ -5397,7 +5397,11 @@ mod test {
     use async_bb8_diesel::AsyncConnection;
     use async_bb8_diesel::AsyncRunQueryDsl;
     use async_bb8_diesel::AsyncSimpleConnection;
+    use diesel::ExpressionMethods;
     use diesel::QueryDsl;
+    use diesel::SelectableHelper;
+    use nexus_db_model::InvOmicronSledConfigZoneNic;
+    use nexus_db_model::to_db_typed_uuid;
     use nexus_db_schema::schema;
     use nexus_inventory::examples::Representative;
     use nexus_inventory::examples::representative;
@@ -5407,11 +5411,17 @@ mod test {
     use nexus_types::inventory::RotPageWhich;
     use nexus_types::inventory::SpType;
     use omicron_common::api::external::Error;
+    use omicron_common::api::external::Vni;
+    use omicron_common::api::internal::shared::PrivateIpConfig;
+    use omicron_common::api::internal::shared::PrivateIpv4Config;
+    use omicron_common::api::internal::shared::PrivateIpv6Config;
     use omicron_common::disk::DatasetKind;
     use omicron_common::disk::DatasetName;
     use omicron_common::disk::M2Slot;
     use omicron_common::zpool_name::ZpoolName;
     use omicron_test_utils::dev;
+    use omicron_uuid_kinds::GenericUuid;
+    use omicron_uuid_kinds::OmicronSledConfigUuid;
     use omicron_uuid_kinds::{
         CollectionUuid, DatasetUuid, OmicronZoneUuid, PhysicalDiskUuid,
         ZpoolUuid,
@@ -5419,6 +5429,10 @@ mod test {
     use pretty_assertions::assert_eq;
     use sled_agent_types::inventory::BootPartitionContents;
     use sled_agent_types::inventory::BootPartitionDetails;
+    use sled_agent_types::inventory::NetworkInterface;
+    use sled_agent_types::inventory::NetworkInterfaceKind;
+    use sled_agent_types::inventory::OmicronZoneConfig;
+    use sled_agent_types::inventory::OmicronZoneType;
     use sled_agent_types::inventory::OrphanedDataset;
     use sled_agent_types::inventory::{
         BootImageHeader, RemoveMupdateOverrideBootSuccessInventory,
@@ -5433,6 +5447,7 @@ mod test {
     use std::num::NonZeroU32;
     use std::time::Duration;
     use tufaceous_artifact::ArtifactHash;
+    use uuid::Uuid;
 
     struct CollectionCounts {
         baseboards: usize,
@@ -6587,5 +6602,138 @@ mod test {
 
         db.terminate().await;
         logctx.cleanup_successful();
+    }
+
+    // Write and then read a inventory NIC through the database with a given
+    // private IP configuration. This exercises the version-specific columns and
+    // checks, to ensure we can handle single- and dual-stack NICs.
+    async fn round_trip_zone_nic_through_inventory_db(
+        test_name: &'static str,
+        ip_config: PrivateIpConfig,
+    ) {
+        let logctx = dev::test_setup_log(test_name);
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let datastore = db.datastore();
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+
+        let zone_id = OmicronZoneUuid::new_v4();
+        let nic = NetworkInterface {
+            id: Uuid::new_v4(),
+            kind: NetworkInterfaceKind::Service {
+                id: zone_id.into_untyped_uuid(),
+            },
+            name: "test-service-nic".parse().unwrap(),
+            ip_config,
+            mac: "a8:40:25:ff:00:01".parse().unwrap(),
+            vni: Vni::try_from(100).unwrap(),
+            primary: true,
+            slot: 0,
+        };
+        let zone = OmicronZoneConfig {
+            id: zone_id,
+            filesystem_pool: None,
+            zone_type: OmicronZoneType::Nexus {
+                internal_address: "[::1]:12345".parse().unwrap(),
+                lockstep_port: 12346,
+                external_ip: "192.0.2.1".parse().unwrap(),
+                nic: nic.clone(),
+                external_tls: false,
+                external_dns_servers: vec![],
+            },
+            image_source: OmicronZoneImageSource::InstallDataset,
+        };
+
+        let collection_id = CollectionUuid::new_v4();
+        let sled_config_id = OmicronSledConfigUuid::new_v4();
+        let row = InvOmicronSledConfigZoneNic::new(
+            collection_id,
+            sled_config_id,
+            &zone,
+        )
+        .expect("built inventory NIC row")
+        .expect("zone has a service NIC");
+
+        {
+            use schema::inv_omicron_sled_config_zone_nic::dsl;
+            diesel::insert_into(dsl::inv_omicron_sled_config_zone_nic)
+                .values(row)
+                .execute_async(&*conn)
+                .await
+                .expect("inserted inventory zone NIC");
+        }
+        let read: InvOmicronSledConfigZoneNic = {
+            use schema::inv_omicron_sled_config_zone_nic::dsl;
+            dsl::inv_omicron_sled_config_zone_nic
+                .filter(
+                    dsl::inv_collection_id.eq(to_db_typed_uuid(collection_id)),
+                )
+                .filter(
+                    dsl::sled_config_id.eq(to_db_typed_uuid(sled_config_id)),
+                )
+                .filter(dsl::id.eq(nic.id))
+                .select(InvOmicronSledConfigZoneNic::as_select())
+                .first_async(&*conn)
+                .await
+                .expect("read back inventory zone NIC")
+        };
+        let round_tripped =
+            read.into_network_interface_for_zone(zone_id).unwrap();
+        assert_eq!(nic, round_tripped);
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_inv_zone_nic_dual_stack_round_trips_through_db() {
+        let ip_config = PrivateIpConfig::DualStack {
+            v4: PrivateIpv4Config::new(
+                "172.30.2.5".parse().unwrap(),
+                "172.30.2.0/24".parse().unwrap(),
+            )
+            .unwrap(),
+            v6: PrivateIpv6Config::new(
+                "fd00:1122:3344:100::5".parse().unwrap(),
+                "fd00:1122:3344:100::/64".parse().unwrap(),
+            )
+            .unwrap(),
+        };
+        round_trip_zone_nic_through_inventory_db(
+            "test_inv_zone_nic_dual_stack_round_trips_through_db",
+            ip_config,
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_inv_zone_nic_ipv6_only_round_trips_through_db() {
+        let ip_config = PrivateIpConfig::V6(
+            PrivateIpv6Config::new(
+                "fd00:1122:3344:100::5".parse().unwrap(),
+                "fd00:1122:3344:100::/64".parse().unwrap(),
+            )
+            .unwrap(),
+        );
+        round_trip_zone_nic_through_inventory_db(
+            "test_inv_zone_nic_ipv6_only_round_trips_through_db",
+            ip_config,
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_inv_zone_nic_ipv4_only_round_trips_through_db() {
+        let ip_config = PrivateIpConfig::V4(
+            PrivateIpv4Config::new(
+                "172.30.2.5".parse().unwrap(),
+                "172.30.2.0/24".parse().unwrap(),
+            )
+            .unwrap(),
+        );
+        round_trip_zone_nic_through_inventory_db(
+            "test_inv_zone_nic_ipv4_only_round_trips_through_db",
+            ip_config,
+        )
+        .await;
     }
 }

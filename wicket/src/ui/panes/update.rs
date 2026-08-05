@@ -32,7 +32,7 @@ use ratatui::widgets::{
     Row, Table,
 };
 use slog::{Logger, info, o};
-use tufaceous_artifact_v2::{
+use tufaceous_artifact::{
     ArtifactVersion, KnownArtifactTags, OsPhase2Tags, OsVariant,
     RotBootloaderTags, RotKeyTableHash, RotTags,
 };
@@ -968,7 +968,7 @@ impl UpdatePane {
             // Ignore update-related commands if we're on the sled or switch
             // where wicketd is running.
             Cmd::StartUpdate | Cmd::AbortUpdate | Cmd::ResetState
-                if state.selected_component_matches_wicked_location() =>
+                if state.selected_component_matches_wicketd_location() =>
             {
                 None
             }
@@ -1529,7 +1529,7 @@ impl UpdatePane {
                 frame.render_widget(paragraph, rect);
             }
             UpdateItemState::NotStarted
-                if state.selected_component_matches_wicked_location() =>
+                if state.selected_component_matches_wicketd_location() =>
             {
                 // No status bar, so make the main rect bigger.
                 let mut rect = self.status_view_main_rect;

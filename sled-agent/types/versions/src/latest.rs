@@ -114,15 +114,15 @@ pub mod instance {
     pub use crate::v7::instance::InstanceMulticastBody;
     pub use crate::v7::instance::InstanceMulticastMembership;
 
-    pub use crate::v29::instance::VmmSpec;
-
     pub use crate::v31::instance::ResolvedVpcFirewallRule;
     pub use crate::v32::instance::ExternalIpConfig;
     pub use crate::v32::instance::ExternalIps;
     pub use crate::v32::instance::ExternalIpv4Config;
     pub use crate::v32::instance::ExternalIpv6Config;
-    pub use crate::v41::instance::InstanceEnsureBody;
     pub use crate::v41::instance::InstanceSledLocalConfig;
+
+    pub use crate::v44::instance::InstanceEnsureBody;
+    pub use crate::v44::instance::VmmSpec;
 }
 
 pub mod inventory {
