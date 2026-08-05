@@ -853,6 +853,14 @@ pub enum BlueprintExpungedZoneAccessReason {
     /// remaining with the set of configuration.
     NexusExternalConfig,
 
+    /// Sagas assigneed to any expunged Nexus whose generation is older than the
+    /// oldest in-service Nexuses are considered orphaned and marked as
+    /// abandoned.
+    ///
+    /// The planner must not prune a Nexus zone if it still has any sagas
+    /// assigned to it.
+    NexusOrphanSagaAbandonment,
+
     /// Nexus needs to whether it itself should be quiescing. If the
     /// actively-running Nexus has been expunged (but not yet shut down), it
     /// should still be able to determine this!

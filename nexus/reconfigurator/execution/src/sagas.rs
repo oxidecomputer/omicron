@@ -4,6 +4,7 @@
 
 //! Re-assign sagas from expunged Nexus zones
 
+use nexus_db_model::SagaReasonAbandoned;
 use nexus_db_model::SecId;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
@@ -133,10 +134,13 @@ pub(crate) async fn abandon_orphan_sagas(
 
     // SEC ids of expunged and ready_for_cleanup Nexus zones whose generation is
     // strictly older than the oldest still-running Nexus generation.
+    //
+    // We source SEC ids strictly from the target blueprint as these are the
+    // only Nexuses we can confidently confirm the state of. Any Nexus not in
+    // the target blueprint is effectively ignored.
     let orphan_sec_ids: Vec<SecId> = blueprint
         .expunged_nexus_zones_ready_for_cleanup(
-            // TODO-K: Create a new reason here
-            BlueprintExpungedZoneAccessReason::NexusSagaReassignment,
+            BlueprintExpungedZoneAccessReason::NexusOrphanSagaAbandonment,
         )
         .filter_map(|(_sled_id, config, nexus)| {
             (nexus.nexus_generation < oldest_live_generation)
@@ -144,13 +148,15 @@ pub(crate) async fn abandon_orphan_sagas(
         })
         .collect();
 
-    // TODO-K: Put a comment here
+    // Orphans are abandoned
     let result = datastore
         .sagas_abandon_sec(
             opctx,
             &orphan_sec_ids,
-            nexus_db_model::SagaReasonAbandoned::Unrecoverable,
-            "blah blah".to_string(),
+            SagaReasonAbandoned::Unrecoverable,
+            "Orphan: current_sec Nexus is expunged and unreassignable \
+            (older than all in-service generations)"
+                .to_string(),
         )
         .await;
 
@@ -164,7 +170,7 @@ pub(crate) async fn abandon_orphan_sagas(
             Ok(())
         }
         Err(error) => {
-            warn!(log, "failed to re-assign sagas";
+            warn!(log, "failed to abandon orphan sagas";
                 "nexus_zone_ids" => ?orphan_sec_ids,
                 &error,
             );

@@ -421,10 +421,9 @@ impl DataStore {
                         sec_ids.into_iter().cloned().collect::<Vec<_>>(),
                     ),
                 )
-                // TODO-K: Change the enum name here or use another one?
                 .filter(
                     dsl::saga_state
-                        .eq_any(SagaState::RECOVERY_CANDIDATE_STATES),
+                        .eq_any(SagaState::ORPHAN_ABANDONMENT_CANDIDATE_STATES),
                 ),
         )
         .set::<SagaStateDbFields>(
