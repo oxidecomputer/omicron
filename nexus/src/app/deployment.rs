@@ -477,7 +477,8 @@ fn display_versions_found(
         0 => "found no versions (this is unexpected!)".to_string(),
         1 => {
             let (version, sleds) = versions_found.iter().next().unwrap();
-            format!("found version {version} on {} sleds", sleds.len())
+            let plural = if sleds.len() > 1 { "s" } else { "" };
+            format!("found {version} on {} sled{plural}", sleds.len())
         }
         n => {
             let versions = versions_found
