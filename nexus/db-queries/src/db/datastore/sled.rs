@@ -8825,7 +8825,7 @@ pub(in crate::db::datastore) mod test {
             CompleteLocalStorageAllocationLists::new(
                 &logctx.log,
                 config.sleds[0].sled_id,
-                config.instances[0].id,
+                config.instances[1].id,
                 zpools_for_sled,
                 &instance_2_local_storage_disks,
             )
@@ -8989,7 +8989,7 @@ pub(in crate::db::datastore) mod test {
             CompleteLocalStorageAllocationLists::new(
                 &logctx.log,
                 config.sleds[0].sled_id,
-                config.instances[0].id,
+                config.instances[1].id,
                 zpools_for_sled,
                 &instance_2_local_storage_disks,
             )
