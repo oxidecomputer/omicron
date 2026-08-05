@@ -52,7 +52,6 @@ use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
-use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::ResourceType;
@@ -69,9 +68,6 @@ use omicron_uuid_kinds::ZpoolUuid;
 use sled_hardware_types::BaseboardId;
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
-use std::cmp::Ordering;
-use std::collections::BinaryHeap;
-use std::collections::HashMap;
 use std::collections::HashSet;
 use std::fmt;
 use strum::IntoEnumIterator;
@@ -446,9 +442,6 @@ impl fmt::Display for LocalStorageUnsatisfiable {
 /// This pairing spreads the largest requests onto the pools with the most
 /// available space. Ties are broken by ascending disk id and ascending pool
 /// id, making the output deterministic apart from the minted allocation ids.
-// TODO: this attribute is removed when `sled_reservation_create` switches
-// over to this function.
-#[allow(dead_code)]
 fn pair_local_storage_requests_to_pools(
     mut requests: Vec<LocalStorageRequest>,
     mut pools: Vec<LocalStorageCandidatePool>,
@@ -520,9 +513,6 @@ fn pair_local_storage_requests_to_pools(
 /// The snapshot is only advisory. `sled_insert_resource_query` re-validates
 /// capacity and dataset/pool/sled/disk state atomically at insert time, and
 /// inserts nothing if any check fails.
-// TODO: this attribute is removed when `sled_reservation_create` switches
-// over to this function.
-#[allow(dead_code)]
 fn choose_local_storage_allocations(
     zpools_for_sled: &IdOrdMap<ZpoolGetForSledReservationResult>,
     local_storage_disks: &[LocalStorageDisk],
@@ -564,6 +554,64 @@ fn choose_local_storage_allocations(
         .collect();
 
     pair_local_storage_requests_to_pools(requests, pools)
+}
+
+/// How many times to attempt local storage allocation on a single sled
+/// before trying another sled. Each attempt computes an assignment from a
+/// fresh zpool snapshot, so a retry is only needed when a concurrent writer
+/// consumed the chosen pools between the snapshot and the insert; losing that
+/// race repeatedly is increasingly unlikely.
+///
+/// This bound is load-bearing, not just a tuning knob: the snapshot from
+/// `zpool_get_for_sled_reservation` does not count encrypted local storage
+/// dataset usage, while `sled_insert_resource_query`'s capacity check does.
+/// Those cannot diverge today (reservation bails out earlier if any disk has
+/// an encrypted allocation), but if they ever do, the deterministic chooser
+/// would recompute the same doomed assignment on every attempt, and only
+/// this bound would stop the loop.
+const LOCAL_STORAGE_ATTEMPTS_PER_SLED: usize = 4;
+
+/// Return true if any local storage disk still requiring an allocation has
+/// been deleted, or is no longer attached to the given instance.
+///
+/// `sled_insert_resource_query` checks this at insert time, so this query is
+/// not load-bearing for correctness: it exists to distinguish "the zpool
+/// snapshot went stale" from "this reservation can never succeed" when the
+/// insert CTE inserts zero rows.
+async fn any_request_disk_deleted_or_detached(
+    conn: &async_bb8_diesel::Connection<DbConnection>,
+    instance_id: InstanceUuid,
+    local_storage_disks: &[LocalStorageDisk],
+) -> LookupResult<bool> {
+    use nexus_db_schema::schema::disk::dsl;
+
+    let disk_ids: Vec<Uuid> = local_storage_disks
+        .iter()
+        .filter(|disk| disk.local_storage_dataset_allocation.is_none())
+        .map(|disk| disk.id())
+        .collect();
+
+    let expected = disk_ids.len();
+
+    let disks: Vec<db::model::Disk> = dsl::disk
+        .filter(dsl::id.eq_any(disk_ids))
+        .select(db::model::Disk::as_select())
+        .load_async(conn)
+        .await
+        .map_err(|e| {
+            public_error_from_diesel(e, ErrorHandler::Server)
+                .internal_context("selecting local storage disks failed")
+        })?;
+
+    // A missing row means the disk was hard deleted.
+    if disks.len() != expected {
+        return Ok(true);
+    }
+
+    Ok(disks.iter().any(|disk| {
+        disk.time_deleted().is_some()
+            || disk.attach_instance_id != Some(instance_id.into_untyped_uuid())
+    }))
 }
 
 #[cfg(test)]
@@ -895,450 +943,6 @@ mod local_storage_pairing_test {
                 }
             }
         }
-    }
-}
-
-/// A candidate dataset for a local storage allocation
-#[derive(Clone, Debug, Hash, PartialEq, Eq)]
-struct CandidateDataset {
-    rendezvous_local_storage_unencrypted_dataset_id: DatasetUuid,
-    pool_id: ZpoolUuid,
-    sled_id: SledUuid,
-}
-
-/// For a given local storage disk that has not been allocated, store all the
-/// candidate datasets that could fulfill that allocation.
-#[derive(Clone, Debug)]
-struct PossibleAllocationsForRequest<'a> {
-    request: &'a LocalStorageDisk,
-    candidate_datasets: HashSet<CandidateDataset>,
-}
-
-/// Store the intermediate search state during the search for all possible
-/// pairings of requests for local storage to datasets. This is ordered by how
-/// many pairings have been made so far to prioritize quickly finding a complete
-/// allocation.
-struct IncompleteAllocationList {
-    /// Requests for a local storage allocation that have been paired with a
-    /// dataset
-    allocations: Vec<LocalStorageAllocation>,
-
-    /// Remaining candidate datasets for non-paired allocation requests
-    candidates_left: HashSet<CandidateDataset>,
-
-    /// Which allocation request to consider next
-    request_index: usize,
-}
-
-impl PartialOrd for IncompleteAllocationList {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl Ord for IncompleteAllocationList {
-    fn cmp(&self, other: &Self) -> Ordering {
-        self.allocations.len().cmp(&other.allocations.len())
-    }
-}
-
-impl PartialEq for IncompleteAllocationList {
-    fn eq(&self, other: &Self) -> bool {
-        self.allocations.len() == other.allocations.len()
-    }
-}
-
-impl Eq for IncompleteAllocationList {}
-
-/// Store all the state required to iterate through possible mappings of local
-/// storage allocation requests to datasets.
-///
-/// Yield complete allocation lists as they're found, where complete means all
-/// allocations have been performed, because computing all possibilities up
-/// front is expensive.
-struct CompleteLocalStorageAllocationLists<'a> {
-    log: Logger,
-
-    sled_target: SledUuid,
-
-    instance_id: InstanceUuid,
-
-    /// All allocations that need to be performed
-    allocations_to_perform: Vec<PossibleAllocationsForRequest<'a>>,
-
-    /// A queue of incomplete allocation lists to search through, where
-    /// incomplete means there are still local storage disk to dataset
-    /// allocations to be performed. These are sorted by the number of
-    /// allocations made so far to prioritize yielding a valid allocation.
-    queue: BinaryHeap<IncompleteAllocationList>,
-}
-
-impl<'a> CompleteLocalStorageAllocationLists<'a> {
-    fn new(
-        log: &Logger,
-        sled_target: SledUuid,
-        instance_id: InstanceUuid,
-        mut zpools_for_sled: IdOrdMap<ZpoolGetForSledReservationResult>,
-        local_storage_disks: &'a [LocalStorageDisk],
-    ) -> Option<Self> {
-        let local_storage_allocation_required: Vec<&LocalStorageDisk> =
-            local_storage_disks
-                .iter()
-                .filter(|disk| disk.local_storage_dataset_allocation.is_none())
-                .collect();
-
-        // First, each request for local storage can possibly be satisfied by a
-        // number of zpools on the sled. Find this list of candidate zpools for
-        // each required local storage allocation.
-
-        // If there's an existing local storage allocation on a zpool
-        // (regardless of whether or not it's an encrypted or unencrypted
-        // allocation), remove that pool from the list of candidates. Local
-        // storage for the same Instance should not share any zpools.
-        let local_storage_zpools_used: HashSet<ZpoolUuid> = local_storage_disks
-            .iter()
-            .filter_map(|disk| {
-                disk.local_storage_dataset_allocation.as_ref().map(
-                    |allocation| {
-                        ZpoolUuid::from_untyped_uuid(
-                            allocation.pool_id().into_untyped_uuid(),
-                        )
-                    },
-                )
-            })
-            .collect();
-
-        // Do not allow multiple disks backed by local storage to use the same
-        // pool for the same instance.
-        zpools_for_sled.retain(|zpool_get_result| {
-            !local_storage_zpools_used.contains(&zpool_get_result.pool.id())
-        });
-
-        if local_storage_allocation_required.len() > zpools_for_sled.len() {
-            // Not enough zpools to satisfy the number of allocations required.
-            // Find another sled!
-            info!(
-                &log,
-                "sled {sled_target} does not have enough zpools to satisfy \
-                local storage allocations";
-                "zpools" => zpools_for_sled.len(),
-                "allocations" => local_storage_allocation_required.len(),
-            );
-
-            return None;
-        }
-
-        info!(&log, "filtered zpools for sled: {zpools_for_sled:?}");
-
-        let mut allocations_to_perform =
-            Vec::with_capacity(local_storage_allocation_required.len());
-
-        for request in &local_storage_allocation_required {
-            // Find all the zpools that could satisfy this local storage
-            // request. These will be filtered later.
-            let candidate_datasets: HashSet<CandidateDataset> = zpools_for_sled
-                .iter()
-                .filter(|zpool_get_result| {
-                    // The total request size for the local storage dataset
-                    // allocation is the disk size plus the required
-                    // overhead.
-                    let request_size: i64 = request.size().to_bytes() as i64
-                        + request.required_dataset_overhead().to_bytes() as i64;
-
-                    // Any zpool that has space for this local storage
-                    // dataset allocation is considered a candidate.
-                    zpool_get_result.has_room_for_allocation(request_size)
-                })
-                .map(|zpool_get_result| CandidateDataset {
-                    rendezvous_local_storage_unencrypted_dataset_id:
-                        zpool_get_result
-                            .rendezvous_local_storage_unencrypted_dataset_id,
-                    pool_id: zpool_get_result.pool.id(),
-                    sled_id: zpool_get_result.pool.sled_id(),
-                })
-                .collect();
-
-            if candidate_datasets.is_empty() {
-                // if there's no local storage datasets on this sled for this
-                // request's size, then try another sled.
-                info!(
-                    &log,
-                    "sled {sled_target} does not have any candidate datasets \
-                    with available space to satisfy local storage allocation";
-                    "request" => ?request,
-                );
-
-                return None;
-            }
-
-            allocations_to_perform.push(PossibleAllocationsForRequest {
-                request,
-                candidate_datasets,
-            });
-        }
-
-        // From the list of allocations to perform, and all the candidate local
-        // storage datasets that could fit those allocations, find a list of all
-        // valid request -> zpool mappings.
-        //
-        // Start from no allocations made yet, a list of allocations to perform
-        // (stored in `requests`), and all of the available zpools on the sled.
-
-        let mut queue = BinaryHeap::new();
-
-        queue.push(IncompleteAllocationList {
-            allocations: vec![],
-            candidates_left: zpools_for_sled
-                .iter()
-                .map(|zpool_get_result| CandidateDataset {
-                    rendezvous_local_storage_unencrypted_dataset_id:
-                        zpool_get_result
-                            .rendezvous_local_storage_unencrypted_dataset_id,
-                    pool_id: zpool_get_result.pool.id(),
-                    sled_id: zpool_get_result.pool.sled_id(),
-                })
-                .collect(),
-            request_index: 0,
-        });
-
-        Some(Self {
-            log: log.clone(),
-            sled_target,
-            instance_id,
-            allocations_to_perform,
-            queue,
-        })
-    }
-
-    /// Remove items from the queue if
-    ///
-    /// - the _current_ size usage for the pools now shows that there is not
-    ///   enough room.
-    ///
-    /// - any of the disks requiring an allocation were detached or deleted
-    pub async fn prune_invalidated_allocation_lists(
-        &mut self,
-        conn: &async_bb8_diesel::Connection<DbConnection>,
-        opctx: &OpContext,
-    ) -> LookupResult<()> {
-        // Between when the instance allocation was requested and now, any disk
-        // backed by local storage could have been detached and deleted. Check
-        // for that here, and prune the entire search space if this happened.
-
-        let disks: HashMap<Uuid, db::model::Disk> = {
-            use nexus_db_schema::schema::disk::dsl;
-
-            let disk_ids: Vec<Uuid> = self
-                .allocations_to_perform
-                .iter()
-                .map(|allocation| allocation.request.id())
-                .collect();
-
-            dsl::disk
-                .filter(dsl::id.eq_any(disk_ids))
-                .select(db::model::Disk::as_select())
-                .load_async(conn)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                        .internal_context("selecting multiple disks failed")
-                })?
-                .into_iter()
-                .map(|disk| (disk.id(), disk))
-                .collect()
-        };
-
-        for allocation in &self.allocations_to_perform {
-            let disk_id = allocation.request.id();
-
-            let Some(disk) = disks.get(&disk_id) else {
-                // Is it possible the disk has been hard-deleted somehow?
-                // Otherwise how would we land here, given that we just created
-                // the map!
-                return Err(Error::internal_error(&format!(
-                    "disk id {disk_id} not found in map"
-                )));
-            };
-
-            // Prune the entire space if the disk was deleted, or if the disk
-            // was detached.
-            if disk.time_deleted().is_some()
-                || disk.attach_instance_id
-                    != Some(self.instance_id.into_untyped_uuid())
-            {
-                self.queue.clear();
-                return Ok(());
-            }
-        }
-
-        // Prune incomplete allocations that are no longer valid.
-
-        let zpools_for_sled = DataStore::zpool_get_for_sled_reservation(
-            &conn,
-            opctx,
-            self.sled_target,
-        )
-        .await
-        .internal_context("zpool_get_for_sled_reservation failed")?;
-
-        self.queue.retain(|incomplete_allocation_list| {
-            // An incomplete allocation list has a set of local storage
-            // allocations that were matched to zpools with available space:
-            //
-            // | allocation -> zpool | allocation -> zpool | ...
-            //
-            // Check that each of of these is still valid: this iterator was
-            // constructed from a `ZpoolGetForSledReservationResult` that was
-            // taken previously, and other sled reservations (or crucible
-            // allocations!) may have consumed space that was previously free.
-            // If the sled reservation query was run for one of these
-            // allocations it would always fail.
-            //
-            // Do not retain an incomplete allocation list if any of the
-            // allocations are no longer valid. This also prunes the search
-            // space, as going any further would not make sense.
-
-            for allocation in &incomplete_allocation_list.allocations {
-                match zpools_for_sled.get(&allocation.pool_id) {
-                    Some(zpool_for_sled) => {
-                        // Zpool still exists and is still a valid target, does
-                        // it still have room?
-
-                        if !zpool_for_sled.has_room_for_allocation(
-                            allocation.required_dataset_size,
-                        ) {
-                            // Do not retain this incomplete list of
-                            // allocations: one of them is no longer valid.
-                            return false;
-                        }
-                    }
-
-                    None => {
-                        // Zpool doesn't exist anymore or it's no longer a valid
-                        // target (for example due to being marked
-                        // no_provision).
-                        return false;
-                    }
-                }
-            }
-
-            // by default, continue searching further
-            true
-        });
-
-        Ok(())
-    }
-}
-
-impl<'a> Iterator for CompleteLocalStorageAllocationLists<'a> {
-    type Item = NonEmpty<LocalStorageAllocation>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        // For each incomplete allocation list:
-        //
-        // - find the next request to allocate for
-        //
-        // - select a local storage dataset from the list of local storage
-        //   datasets that have not been used yet that could fulfill that
-        //   request
-        //
-        // - remove that selected local storage dataset from the list of
-        //   candidates
-        //
-        // - add that to the queue
-        //
-        // A list of allocations as complete if all requests have been matched
-        // with a local storage dataset.
-
-        while let Some(incomplete_allocation_list) = self.queue.pop() {
-            let IncompleteAllocationList {
-                allocations,
-                candidates_left,
-                request_index,
-            } = incomplete_allocation_list;
-
-            // If we have an allocation for each possible allocation, this one
-            // is complete.
-            if request_index == self.allocations_to_perform.len() {
-                let allocations_len = allocations.len();
-
-                match NonEmpty::from_vec(allocations) {
-                    Some(allocations) => {
-                        return Some(allocations);
-                    }
-
-                    None => {
-                        // There should be `request_index` entries in the
-                        // `allocations` vec, this is weird!
-                        error!(
-                            &self.log,
-                            "expected {request_index} in the \
-                            allocations vec, saw {allocations_len}",
-                        );
-                    }
-                }
-
-                continue;
-            }
-
-            // Try to allocate the Nth possible allocation
-            let request = &self.allocations_to_perform[request_index];
-
-            // Create a possible config based on the what datasets are
-            // left, and the candidate datasets for this request.
-            for candidate_dataset in &request.candidate_datasets {
-                if candidates_left.contains(candidate_dataset) {
-                    // This request could be satisfied by this dataset.
-                    // Select it and search further.
-
-                    let mut set_allocations = allocations.clone();
-                    set_allocations.push(LocalStorageAllocation {
-                        disk_id: request.request.id(),
-
-                        local_storage_unencrypted_dataset_allocation_id:
-                            DatasetUuid::new_v4(),
-
-                        required_dataset_size: {
-                            let request_size: i64 =
-                                request.request.size().to_bytes() as i64
-                                    + request
-                                        .request
-                                        .required_dataset_overhead()
-                                        .to_bytes()
-                                        as i64;
-                            request_size
-                        },
-
-                        local_storage_unencrypted_dataset_id: candidate_dataset
-                            .rendezvous_local_storage_unencrypted_dataset_id,
-
-                        pool_id: candidate_dataset.pool_id,
-
-                        sled_id: candidate_dataset.sled_id,
-                    });
-
-                    // Note by removing a candidate dataset from the list in
-                    // this way, this step mandates that a single local storage
-                    // dataset is not used for multiple local storage
-                    // allocations for a given instance.
-
-                    let mut set_candidates_left = candidates_left.clone();
-                    set_candidates_left.remove(candidate_dataset);
-
-                    self.queue.push(IncompleteAllocationList {
-                        allocations: set_allocations,
-                        candidates_left: set_candidates_left,
-                        request_index: request_index + 1,
-                    });
-                }
-
-                // Else there are no candidate datasets left for this request,
-                // and therefore the list of requests cannot be fulfilled by the
-                // current mapping of requests to datasets
-            }
-        }
-
-        None
     }
 }
 
@@ -1863,7 +1467,7 @@ impl DataStore {
         // In the uncontended case, however, we'll only iterate through this
         // loop once.
 
-        'sled_reservation: loop {
+        loop {
             // Pick a reservation target, given the constraints we previously
             // saw in the database.
             let sled_target = pick_sled_reservation_target(
@@ -1963,87 +1567,57 @@ impl DataStore {
                     }
                 };
             } else {
-                // If local storage allocation is required, match the requests
-                // with all the zpools of this sled that have available space.
-                // The `CompleteLocalStorageAllocationLists` iterator finds all
-                // possible configurations that would satisfy the requests for
-                // local storage and tries them all.
-
-                let zpools_for_sled =
-                    DataStore::zpool_get_for_sled_reservation(
-                        &conn,
-                        &opctx,
-                        sled_target,
-                    )
-                    .await?;
-
-                if zpools_for_sled.is_empty() {
-                    warn!(&log, "no zpools for {sled_target:?}?");
-
-                    sled_targets.remove(&sled_target);
-                    banned.remove(&sled_target);
-                    unpreferred.remove(&sled_target);
-                    preferred.remove(&sled_target);
-
-                    continue 'sled_reservation;
-                };
-
-                let mut complete_allocation_lists =
-                    match CompleteLocalStorageAllocationLists::new(
-                        &log,
-                        sled_target,
-                        instance_id,
-                        zpools_for_sled,
-                        &local_storage_disks,
-                    ) {
-                        Some(complete_allocation_lists) => {
-                            complete_allocation_lists
-                        }
-
-                        None => {
-                            // Cannot use this sled, as no complete allocation
-                            // lists exist: `new` will have logged why, so try
-                            // another sled.
-
-                            sled_targets.remove(&sled_target);
-                            banned.remove(&sled_target);
-                            unpreferred.remove(&sled_target);
-                            preferred.remove(&sled_target);
-
-                            continue 'sled_reservation;
-                        }
-                    };
-
-                // Search for each complete set of local storage allocations
-                // required, and attempt the sled insert resource query with
-                // that particular set.
-                //
-                // If the `complate_allocation_lists` iterator returns None,
-                // control will exit the `local_storage_allocation_search` loop,
-                // which will then try the next possible sled target. In the
-                // case where there were pre-existing local storage allocations
-                // there will _not_ be any more sleds to try and the user will
-                // see a capacity error.
-
-                'local_storage_allocation_search: loop {
-                    // If other concurrent sled reservations are not taken into
-                    // account, another sled reservation could allocate local
-                    // storage onto the same pools that this one considers
-                    // candidates, and then this iterator will return
-                    // allocations that will never work. Because the iterator
-                    // searches for _every_ possible combination, this will end
-                    // up searching for a long time. It's important to prune the
-                    // list that we're searching from!
-
-                    complete_allocation_lists
-                        .prune_invalidated_allocation_lists(&conn, &opctx)
+                // Local storage allocation is required. Choose an assignment
+                // of unallocated disks to distinct zpools from a fresh
+                // snapshot of the sled's zpools, then let the insert CTE
+                // re-validate everything atomically. If the CTE inserts zero
+                // rows, the snapshot went stale between the fetch and the
+                // insert (concurrent reservations, crucible allocations, or
+                // pool and dataset policy changes): take a new snapshot and
+                // try again, a bounded number of times, before moving to the
+                // next sled.
+                'attempts: for _ in 0..LOCAL_STORAGE_ATTEMPTS_PER_SLED {
+                    let zpools_for_sled =
+                        DataStore::zpool_get_for_sled_reservation(
+                            &conn,
+                            &opctx,
+                            sled_target,
+                        )
                         .await?;
 
-                    let Some(allocations) = complete_allocation_lists.next()
-                    else {
-                        // All done searching, nothing worked. Try another
-                        // sled!
-                        break 'local_storage_allocation_search;
+                    let allocations = match choose_local_storage_allocations(
+                        &zpools_for_sled,
+                        &local_storage_disks,
+                    ) {
+                        Ok(allocations) => allocations,
+
+                        Err(
+                            LocalStorageUnsatisfiable::NoAllocationsRequired,
+                        ) => {
+                            // This branch is only entered when at least one
+                            // disk needs an allocation.
+                            return Err(
+                                SledReservationTransactionError::Connection(
+                                    Error::internal_error(
+                                        "local storage allocation required, \
+                                        but no disks need an allocation",
+                                    ),
+                                ),
+                            );
+                        }
+
+                        Err(reason) => {
+                            // The greedy pairing failing means no assignment
+                            // exists on this sled with the current data. Try
+                            // another sled.
+                            info!(
+                                &log,
+                                "sled {sled_target} cannot satisfy local \
+                                storage allocations: {reason}",
+                            );
+
+                            break 'attempts;
+                        }
                     };
 
                     info!(
@@ -2071,11 +1645,36 @@ impl DataStore {
                                 return Ok(resource);
                             }
 
-                            // Ending up here without inserting any rows is
-                            // expected during concurrent reservations requiring
-                            // local storage allocations, but repeatedly ending
-                            // up here without pruning any allocations is likely
-                            // a bug.
+                            // Zero rows means one of the CTE's local storage
+                            // validity checks failed even though our snapshot
+                            // said everything fit (the sled-level checks all
+                            // raise sentinel errors instead). Either the
+                            // snapshot went stale, or a disk was deleted or
+                            // detached concurrently. In the latter case no
+                            // sled can ever satisfy this reservation, so fail
+                            // now instead of retrying here and on every other
+                            // sled.
+                            if any_request_disk_deleted_or_detached(
+                                &conn,
+                                instance_id,
+                                &local_storage_disks,
+                            )
+                            .await?
+                            {
+                                info!(
+                                    &log,
+                                    "local storage disk deleted or detached \
+                                    during reservation",
+                                );
+
+                                return Err(
+                                    SledReservationTransactionError::Reservation(
+                                        SledReservationError::NotFound,
+                                    ),
+                                );
+                            }
+
+                            // Stale snapshot: take a fresh one and recompute.
                         }
 
                         Err(diesel::result::Error::DatabaseError(
@@ -2100,32 +1699,15 @@ impl DataStore {
                                 &e,
                                 &SLED_INSERT_QUERY_SENTINELS,
                             ) {
-                                // Concurrent sled reservations could have
-                                // allocated enough hardware threads, RSS RAM,
-                                // and/or reservoir RAM that means this
-                                // sled_target is no longer valid.
-                                //
-                                // Alternatively, a concurrent reservation could
-                                // have allocated another instance to this sled
-                                // target which makes it invalid for this
-                                // instance we are trying to allocate due to
-                                // affinity / anti-affinity constraints.
-                                //
-                                // Both of these cases are not a problem when
-                                // _not_ performing local storage allocations:
-                                // in that branch, when the insert query returns
-                                // that it inserted 0 rows or returned an error
-                                // sentinel, another sled_target will be chosen
-                                // right away.
-                                //
-                                // If a sentinel is returned, the insert query
-                                // isn't succeeding for reasons other than the
-                                // available space for local storage. If we
-                                // don't bail out here, the loop will keep
-                                // searching through permutations of local
-                                // storage allocations to try. Bail out of the
-                                // search right away and pick another
-                                // sled_target.
+                                // Sentinels indicate a sled-level problem:
+                                // concurrent reservations could have consumed
+                                // enough hardware threads, RSS RAM, and/or
+                                // reservoir RAM that this sled_target is no
+                                // longer valid, or another instance landed
+                                // here and now violates affinity or
+                                // anti-affinity constraints. Recomputing the
+                                // local storage assignment cannot help; pick
+                                // another sled_target.
 
                                 let reason = sentinel_to_reason(sentinel);
                                 info!(
@@ -2134,7 +1716,7 @@ impl DataStore {
                                     "sentinel" => sentinel,
                                 );
 
-                                break 'local_storage_allocation_search;
+                                break 'attempts;
                             } else {
                                 // The query failed, return this as an error
                                 error!(
@@ -2150,6 +1732,10 @@ impl DataStore {
                         }
                     }
                 }
+
+                // Attempts exhausted or this sled cannot satisfy the
+                // allocations; fall through to remove this sled from the
+                // candidate set and try another.
             }
 
             sled_targets.remove(&sled_target);
@@ -2753,6 +2339,7 @@ pub(in crate::db::datastore) mod test {
     use predicates::{BoxPredicate, prelude::*};
     use sled_agent_types::inventory::ZpoolHealth;
     use std::collections::BTreeMap;
+    use std::collections::HashMap;
     use std::net::SocketAddrV6;
 
     #[tokio::test]
@@ -8942,6 +8529,25 @@ pub(in crate::db::datastore) mod test {
             })
             .collect();
 
+        // Choose allocations based on the stale disk list, as the reservation
+        // loop would have.
+
+        let allocations = {
+            let zpools_for_sled = DataStore::zpool_get_for_sled_reservation(
+                &conn,
+                &opctx,
+                config.sleds[0].sled_id,
+            )
+            .await
+            .unwrap();
+
+            choose_local_storage_allocations(
+                &zpools_for_sled,
+                &local_storage_disks,
+            )
+            .unwrap()
+        };
+
         // Set `time_deleted` on the first disk
 
         {
@@ -8957,35 +8563,38 @@ pub(in crate::db::datastore) mod test {
                 .unwrap();
         };
 
-        // Duplicate the loop logic that performs the allocation search.
+        // The insertion CTE must not create any records for allocations that
+        // reference a deleted disk.
 
-        let zpools_for_sled = DataStore::zpool_get_for_sled_reservation(
-            &conn,
-            &opctx,
+        let resource = SledResourceVmm::new(
+            PropolisUuid::new_v4(),
+            instance.id,
             config.sleds[0].sled_id,
-        )
-        .await
-        .unwrap();
+            instance.resources(),
+            SledReservationReason::Start.into(),
+        );
 
-        let mut complete_allocation_lists =
-            CompleteLocalStorageAllocationLists::new(
-                &logctx.log,
-                config.sleds[0].sled_id,
+        let result = sled_insert_resource_query(
+            &resource,
+            &LocalStorageAllocationRequired::Yes { allocations },
+        )
+        .execute_async(&*conn)
+        .await;
+
+        assert_eq!(result, Ok(0));
+
+        // The reservation loop treats zero inserted rows plus a deleted disk
+        // as a terminal failure; check the signal it uses.
+
+        assert!(
+            any_request_disk_deleted_or_detached(
+                &conn,
                 instance.id,
-                zpools_for_sled,
                 &local_storage_disks,
             )
-            .unwrap();
-
-        // After pruning, there should be no allocations left.to try: a disk was
-        // deleted, so the search should stop.
-
-        complete_allocation_lists
-            .prune_invalidated_allocation_lists(&conn, &opctx)
             .await
-            .unwrap();
-
-        assert!(complete_allocation_lists.next().is_none());
+            .unwrap()
+        );
 
         let allocation_records: Vec<_> = {
             let conn = datastore.pool_connection_for_tests().await.unwrap();
@@ -9127,32 +8736,24 @@ pub(in crate::db::datastore) mod test {
             SledReservationReason::Start.into(),
         );
 
-        // Duplicate the loop logic that performs the allocation search
+        // Choose allocations based on the disk list captured before the
+        // detach - what we're testing here is that the insertion CTE does not
+        // perform a reservation if the disk is detached.
 
-        let zpools_for_sled = DataStore::zpool_get_for_sled_reservation(
-            &conn,
-            &opctx,
-            config.sleds[0].sled_id,
-        )
-        .await
-        .unwrap();
-
-        let mut complete_allocation_lists =
-            CompleteLocalStorageAllocationLists::new(
-                &logctx.log,
+        let allocations = {
+            let zpools_for_sled = DataStore::zpool_get_for_sled_reservation(
+                &conn,
+                &opctx,
                 config.sleds[0].sled_id,
-                instance.id,
-                zpools_for_sled,
-                &local_storage_disks,
             )
+            .await
             .unwrap();
 
-        // Skip the pruning step, as that would prune the detached disk - what
-        // we're testing here is that the insertion CTE does not perform a
-        // reservation if the disk is detached.
-
-        let Some(allocations) = complete_allocation_lists.next() else {
-            panic!("no allocations returned!");
+            choose_local_storage_allocations(
+                &zpools_for_sled,
+                &local_storage_disks,
+            )
+            .unwrap()
         };
 
         let result = sled_insert_resource_query(
@@ -9165,6 +8766,19 @@ pub(in crate::db::datastore) mod test {
         // This should insert zero rows.
 
         assert_eq!(result, Ok(0));
+
+        // The reservation loop treats zero inserted rows plus a detached disk
+        // as a terminal failure; check the signal it uses.
+
+        assert!(
+            any_request_disk_deleted_or_detached(
+                &conn,
+                instance.id,
+                &local_storage_disks,
+            )
+            .await
+            .unwrap()
+        );
 
         let allocation_records: Vec<_> = {
             let conn = datastore.pool_connection_for_tests().await.unwrap();
