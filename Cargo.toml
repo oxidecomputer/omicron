@@ -440,7 +440,7 @@ assert_cmd = "2.0.17"
 async-bb8-diesel = "0.2"
 async-recursion = "1.1.1"
 async-trait = "0.1.89"
-attest-mock = { git = "https://github.com/oxidecomputer/dice-util", rev = "10952e8d9599b735b85d480af3560a11700e5b64" }
+attest-mock = { git = "https://github.com/oxidecomputer/dice-util", rev = "4a39ef08d81e5177edee0bddb1146032aa21074d" }
 atomicwrites = "0.4.4"
 authz-macros = { path = "nexus/authz-macros" }
 backoff = { version = "0.4.0", features = [ "tokio" ] }
@@ -838,8 +838,8 @@ slog-term = "2.9.1"
 smf = "0.2"
 socket2 = { version = "0.5", features = ["all"] }
 sp-sim = { path = "sp-sim" }
-sprockets-tls = { git = "https://github.com/oxidecomputer/sprockets.git", rev = "68a4b3bf819722f9f57a3f0c99e1393ed01ba392" }
-sprockets-tls-test-utils = { git = "https://github.com/oxidecomputer/sprockets.git", rev = "68a4b3bf819722f9f57a3f0c99e1393ed01ba392" }
+sprockets-tls = { git = "https://github.com/oxidecomputer/sprockets.git", rev = "a233079e04d9688454486c452b694587a28c5257" }
+sprockets-tls-test-utils = { git = "https://github.com/oxidecomputer/sprockets.git", rev = "a233079e04d9688454486c452b694587a28c5257" }
 sqlformat = "0.3.5"
 sqlparser = { version = "0.61.0", features = [ "visitor" ] }
 static_assertions = "1.1.0"
