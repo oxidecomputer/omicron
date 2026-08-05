@@ -80,11 +80,6 @@ impl ZpoolGetForSledReservationResult {
             - self.local_storage_usage
     }
 
-    /// Does this Zpool have room for additional bytes to be allocated to it?
-    pub fn has_room_for_allocation(&self, additional_size: i64) -> bool {
-        additional_size < self.headroom()
-    }
-
     /// Construct a result directly for tests; production code builds these
     /// only via `zpool_get_for_sled_reservation`.
     #[cfg(test)]

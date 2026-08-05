@@ -300,7 +300,7 @@ impl LocalStorageDisk {
         self.model().slot()
     }
 
-    pub fn required_dataset_overhead(&self) -> external::ByteCount {
+    fn required_dataset_overhead(&self) -> external::ByteCount {
         self.disk_type_local_storage.required_dataset_overhead()
     }
 
