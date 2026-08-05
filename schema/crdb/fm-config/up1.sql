@@ -3,7 +3,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_config (
     comment TEXT NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
     analysis_enabled BOOL,
-    sitrep_limit INT8L,
+    sitrep_limit INT8,
     history_pruning_threshold INT8,
 
     CONSTRAINT versions_are_positive CHECK (version > 0),
