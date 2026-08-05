@@ -69,7 +69,7 @@ impl FmConfigParam {
     }
 }
 
-/// A single configuration setting that is either explicitly overridden to  or
+/// A single configuration setting that is either explicitly overridden or
 /// inherits the system-defined default.
 ///
 /// This is generic over a `V: `[`SettingValue`] type parameter, which
