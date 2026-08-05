@@ -401,7 +401,7 @@ impl DataStore {
     /// recovered or resumed, so any partial work it did (including a partial
     /// unwind) is left in place. Only call this for sagas whose current SEC is
     /// known to be permanently gone and can never be reassigned.
-    pub async fn sagas_abandon_sec(
+    pub async fn sagas_abandon_orphans(
         &self,
         opctx: &OpContext,
         sec_ids: &[db::saga_types::SecId],
@@ -997,6 +997,162 @@ mod test {
             .await
             .expect("failed to re-assign sagas");
         assert_eq!(nreassigned, 0);
+
+        // Test cleanup
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_sagas_abandon_orphans() {
+        // Test setup
+        let logctx = dev::test_setup_log("test_sagas_abandon_orphans");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // Populate the database with a few different sagas: each SEC gets one
+        // saga in each of the running, unwinding, and done states.
+        //
+        // Then we'll pass *all* of the SECs through sagas_abandon_orphans()
+        // and check exactly which sagas were changed by this.
+        //
+        // This exercises:
+        // - that we abandon both running and unwinding sagas
+        // - that we do NOT touch any "done" sagas
+        let mut sagas_to_insert = Vec::new();
+        let sec_a = SecId(Uuid::new_v4());
+        let sec_b = SecId(Uuid::new_v4());
+        let sec_c = SecId(Uuid::new_v4());
+        let sec_d = SecId(Uuid::new_v4());
+        let all_sec_ids = [sec_a, sec_b, sec_c, sec_d];
+
+        for sec_id in all_sec_ids {
+            for state in [
+                steno::SagaCachedState::Running,
+                steno::SagaCachedState::Unwinding,
+                steno::SagaCachedState::Done,
+            ] {
+                let params = steno::SagaCreateParams {
+                    id: steno::SagaId(Uuid::new_v4()),
+                    name: steno::SagaName::new("test saga"),
+                    dag: serde_json::value::Value::Null,
+                    state,
+                };
+
+                sagas_to_insert
+                    .push(db::model::saga_types::Saga::new(sec_id, params));
+            }
+        }
+
+        // Running and unwinding sagas should be abandoned; done sagas should be
+        // left untouched. These two sets are complements, but we write out the
+        // conditions to double-check that we've got it right.
+        let sagas_affected: BTreeSet<_> = sagas_to_insert
+            .iter()
+            .filter_map(|saga| {
+                (saga.saga_state == SagaExecState::Running
+                    || saga.saga_state == SagaExecState::Unwinding)
+                    .then(|| saga.id)
+            })
+            .collect();
+        let sagas_unaffected: BTreeSet<_> = sagas_to_insert
+            .iter()
+            .filter_map(|saga| {
+                (saga.saga_state == SagaExecState::Done).then(|| saga.id)
+            })
+            .collect();
+
+        assert_eq!(sagas_affected.intersection(&sagas_unaffected).count(), 0);
+        assert_eq!(
+            sagas_affected.len() + sagas_unaffected.len(),
+            sagas_to_insert.len()
+        );
+
+        // Insert the sagas.
+        let count = {
+            use nexus_db_schema::schema::saga::dsl;
+            let conn = datastore.pool_connection_for_tests().await.unwrap();
+            diesel::insert_into(dsl::saga)
+                .values(sagas_to_insert.iter().collect::<Vec<_>>())
+                .execute_async(&*conn)
+                .await
+                .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+                .expect("successful insertion")
+        };
+        assert_eq!(count, sagas_affected.len() + sagas_unaffected.len());
+
+        // Abandon uncompleted sagas for all of the SECs.
+        let comment = "test abandonment".to_string();
+        let nabandoned = datastore
+            .sagas_abandon_orphans(
+                &opctx,
+                &all_sec_ids,
+                SagaReasonAbandoned::Unrecoverable,
+                comment.clone(),
+            )
+            .await
+            .expect("failed to abandon sagas");
+
+        // Fetch all the sagas and check their states.
+        #[allow(clippy::disallowed_methods)]
+        let all_sagas: Vec<_> = datastore
+            .pool_connection_for_tests()
+            .await
+            .unwrap()
+            .transaction_async(|conn| async move {
+                use nexus_db_schema::schema::saga::dsl;
+                conn.batch_execute_async(ALLOW_FULL_TABLE_SCAN_SQL).await?;
+                dsl::saga
+                    .select(Saga::as_select())
+                    .load_async::<Saga>(&conn)
+                    .await
+            })
+            .await
+            .unwrap();
+
+        // Bucket the sagas by their resulting state.
+        let mut running_ids = BTreeSet::new();
+        let mut unwinding_ids = BTreeSet::new();
+        let mut abandoned_ids = BTreeSet::new();
+        let mut done_ids = BTreeSet::new();
+        for saga in all_sagas {
+            match &saga.saga_state {
+                SagaExecState::Running => {
+                    running_ids.insert(saga.id);
+                }
+                SagaExecState::Unwinding => {
+                    unwinding_ids.insert(saga.id);
+                }
+                SagaExecState::Done => {
+                    done_ids.insert(saga.id);
+                }
+                SagaExecState::Abandoned(_) => {
+                    abandoned_ids.insert(saga.id);
+                }
+            }
+        }
+
+        // The abandoned sagas are exactly those that started out running or
+        // unwinding, and the done sagas are exactly those left untouched. No
+        // running or unwinding sagas should remain.
+        assert_eq!(abandoned_ids, sagas_affected);
+        assert_eq!(done_ids, sagas_unaffected);
+        assert!(running_ids.is_empty());
+        assert!(unwinding_ids.is_empty());
+        assert_eq!(nabandoned, sagas_affected.len());
+
+        // If we do it again, we should make no changes: the running/unwinding
+        // sagas are now abandoned, and abandoned sagas aren't touched.
+        let nabandoned = datastore
+            .sagas_abandon_orphans(
+                &opctx,
+                &all_sec_ids,
+                SagaReasonAbandoned::Unrecoverable,
+                comment,
+            )
+            .await
+            .expect("failed to abandon sagas");
+        assert_eq!(nabandoned, 0);
 
         // Test cleanup
         db.terminate().await;

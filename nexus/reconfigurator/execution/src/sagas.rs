@@ -150,7 +150,7 @@ pub(crate) async fn abandon_orphan_sagas(
 
     // Orphans are abandoned
     let result = datastore
-        .sagas_abandon_sec(
+        .sagas_abandon_orphans(
             opctx,
             &orphan_sec_ids,
             SagaReasonAbandoned::Unrecoverable,
