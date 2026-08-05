@@ -97,7 +97,7 @@ impl FmConfigParam {
 /// (which is why [`Setting::into_override`] and the `From<Option>` impl exist).
 #[derive(Default, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "source", content = "value")]
-#[schemars(rename = "{V}Setting")]
+#[schemars(rename = "FmConfig{V}Setting")]
 #[serde(rename_all = "snake_case")]
 pub enum Setting<V: SettingValue> {
     Override(V::Value),
