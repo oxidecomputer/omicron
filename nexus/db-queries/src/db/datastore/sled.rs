@@ -354,6 +354,550 @@ fn pick_sled_reservation_target(
     return Err(SledReservationError::NotFound);
 }
 
+/// A local storage disk that needs a dataset allocation.
+#[derive(Debug, Clone)]
+struct LocalStorageRequest {
+    disk_id: Uuid,
+
+    /// Disk size plus required dataset overhead, in bytes
+    required_dataset_size: i64,
+}
+
+/// A zpool on the target sled that is a valid target for a local storage
+/// allocation and is not already used by one of this instance's existing
+/// allocations.
+#[derive(Debug, Clone)]
+struct LocalStorageCandidatePool {
+    pool_id: ZpoolUuid,
+    sled_id: SledUuid,
+    rendezvous_local_storage_unencrypted_dataset_id: DatasetUuid,
+
+    /// Bytes available for new allocations, see
+    /// `ZpoolGetForSledReservationResult::headroom`
+    headroom: i64,
+}
+
+/// Why no complete set of local storage allocations could be chosen for a
+/// sled.
+#[derive(Debug)]
+enum LocalStorageUnsatisfiable {
+    /// No disks required an allocation. Callers are expected to check for
+    /// this case before choosing allocations.
+    NoAllocationsRequired,
+
+    /// There are more disks requiring an allocation than usable pools: each
+    /// disk needs a distinct pool.
+    NotEnoughPools { requests: usize, pools: usize },
+
+    /// After pairing the Nth largest request with the pool having the Nth
+    /// largest headroom, this pair did not fit. No assignment of these
+    /// requests to these pools exists.
+    RequestDoesNotFit {
+        disk_id: Uuid,
+        required_dataset_size: i64,
+        pool_id: ZpoolUuid,
+        headroom: i64,
+    },
+}
+
+impl fmt::Display for LocalStorageUnsatisfiable {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            LocalStorageUnsatisfiable::NoAllocationsRequired => {
+                write!(f, "no disks require a local storage allocation")
+            }
+
+            LocalStorageUnsatisfiable::NotEnoughPools { requests, pools } => {
+                write!(
+                    f,
+                    "{requests} disks require a local storage allocation, \
+                    but only {pools} pools are usable",
+                )
+            }
+
+            LocalStorageUnsatisfiable::RequestDoesNotFit {
+                disk_id,
+                required_dataset_size,
+                pool_id,
+                headroom,
+            } => {
+                write!(
+                    f,
+                    "disk {disk_id} requires {required_dataset_size} bytes, \
+                    but pool {pool_id} only has {headroom} bytes of headroom",
+                )
+            }
+        }
+    }
+}
+
+/// Pair each local storage request with a distinct pool, or report that no
+/// such pairing exists.
+///
+/// A pool fits a request if and only if `required_dataset_size < headroom`, a
+/// single scalar threshold, so pool eligibility is nested: any pool that fits
+/// a request also fits every smaller request. Sorting requests by size
+/// (descending) and pools by headroom (descending) and pairing them
+/// index-by-index therefore succeeds if and only if any valid assignment
+/// exists: in a valid assignment, the i largest requests occupy i distinct
+/// pools, each of which fits the i-th largest request, so the i pools with
+/// the most headroom must each fit it too.
+///
+/// This pairing spreads the largest requests onto the pools with the most
+/// available space. Ties are broken by ascending disk id and ascending pool
+/// id, making the output deterministic apart from the minted allocation ids.
+// TODO: this attribute is removed when `sled_reservation_create` switches
+// over to this function.
+#[allow(dead_code)]
+fn pair_local_storage_requests_to_pools(
+    mut requests: Vec<LocalStorageRequest>,
+    mut pools: Vec<LocalStorageCandidatePool>,
+) -> Result<NonEmpty<LocalStorageAllocation>, LocalStorageUnsatisfiable> {
+    if requests.is_empty() {
+        return Err(LocalStorageUnsatisfiable::NoAllocationsRequired);
+    }
+
+    // Each request requires a distinct pool.
+    if requests.len() > pools.len() {
+        return Err(LocalStorageUnsatisfiable::NotEnoughPools {
+            requests: requests.len(),
+            pools: pools.len(),
+        });
+    }
+
+    requests.sort_by(|a, b| {
+        b.required_dataset_size
+            .cmp(&a.required_dataset_size)
+            .then(a.disk_id.cmp(&b.disk_id))
+    });
+
+    pools.sort_by(|a, b| {
+        b.headroom.cmp(&a.headroom).then(a.pool_id.cmp(&b.pool_id))
+    });
+
+    let mut allocations = Vec::with_capacity(requests.len());
+
+    for (request, pool) in requests.iter().zip(pools.iter()) {
+        if request.required_dataset_size >= pool.headroom {
+            return Err(LocalStorageUnsatisfiable::RequestDoesNotFit {
+                disk_id: request.disk_id,
+                required_dataset_size: request.required_dataset_size,
+                pool_id: pool.pool_id,
+                headroom: pool.headroom,
+            });
+        }
+
+        allocations.push(LocalStorageAllocation {
+            disk_id: request.disk_id,
+
+            local_storage_unencrypted_dataset_allocation_id:
+                DatasetUuid::new_v4(),
+
+            required_dataset_size: request.required_dataset_size,
+
+            local_storage_unencrypted_dataset_id: pool
+                .rendezvous_local_storage_unencrypted_dataset_id,
+
+            pool_id: pool.pool_id,
+
+            sled_id: pool.sled_id,
+        });
+    }
+
+    // `requests` was checked non-empty above.
+    NonEmpty::from_vec(allocations)
+        .ok_or(LocalStorageUnsatisfiable::NoAllocationsRequired)
+}
+
+/// Choose a local storage allocation for every local storage disk of an
+/// instance that does not have one, against a snapshot of the target sled's
+/// zpools.
+///
+/// The returned allocations use distinct pools, and exclude any pool already
+/// used by one of the instance's existing local storage allocations: local
+/// storage for the same instance must not share zpools.
+///
+/// The snapshot is only advisory. `sled_insert_resource_query` re-validates
+/// capacity and dataset/pool/sled/disk state atomically at insert time, and
+/// inserts nothing if any check fails.
+// TODO: this attribute is removed when `sled_reservation_create` switches
+// over to this function.
+#[allow(dead_code)]
+fn choose_local_storage_allocations(
+    zpools_for_sled: &IdOrdMap<ZpoolGetForSledReservationResult>,
+    local_storage_disks: &[LocalStorageDisk],
+) -> Result<NonEmpty<LocalStorageAllocation>, LocalStorageUnsatisfiable> {
+    let requests: Vec<LocalStorageRequest> = local_storage_disks
+        .iter()
+        .filter(|disk| disk.local_storage_dataset_allocation.is_none())
+        .map(|disk| LocalStorageRequest {
+            disk_id: disk.id(),
+            required_dataset_size: disk.required_dataset_size(),
+        })
+        .collect();
+
+    // Pools that already hold a local storage allocation for this instance
+    // (encrypted or unencrypted) are not eligible for further allocations.
+    let used_pools: HashSet<ZpoolUuid> = local_storage_disks
+        .iter()
+        .filter_map(|disk| {
+            disk.local_storage_dataset_allocation.as_ref().map(|allocation| {
+                ZpoolUuid::from_untyped_uuid(
+                    allocation.pool_id().into_untyped_uuid(),
+                )
+            })
+        })
+        .collect();
+
+    let pools: Vec<LocalStorageCandidatePool> = zpools_for_sled
+        .iter()
+        .filter(|zpool_get_result| {
+            !used_pools.contains(&zpool_get_result.pool.id())
+        })
+        .map(|zpool_get_result| LocalStorageCandidatePool {
+            pool_id: zpool_get_result.pool.id(),
+            sled_id: zpool_get_result.pool.sled_id(),
+            rendezvous_local_storage_unencrypted_dataset_id: zpool_get_result
+                .rendezvous_local_storage_unencrypted_dataset_id,
+            headroom: zpool_get_result.headroom(),
+        })
+        .collect();
+
+    pair_local_storage_requests_to_pools(requests, pools)
+}
+
+#[cfg(test)]
+mod local_storage_pairing_test {
+    use super::*;
+
+    use nexus_types::external_api::disk;
+    use omicron_uuid_kinds::ExternalZpoolUuid;
+    use omicron_uuid_kinds::PhysicalDiskUuid;
+    use proptest::prelude::*;
+
+    fn request(disk_id: u128, size: i64) -> LocalStorageRequest {
+        LocalStorageRequest {
+            disk_id: Uuid::from_u128(disk_id),
+            required_dataset_size: size,
+        }
+    }
+
+    fn pool(pool_id: u128, headroom: i64) -> LocalStorageCandidatePool {
+        LocalStorageCandidatePool {
+            pool_id: ZpoolUuid::from_untyped_uuid(Uuid::from_u128(pool_id)),
+            sled_id: SledUuid::from_untyped_uuid(Uuid::from_u128(0x51ed)),
+            rendezvous_local_storage_unencrypted_dataset_id:
+                DatasetUuid::from_untyped_uuid(Uuid::from_u128(pool_id)),
+            headroom,
+        }
+    }
+
+    /// An allocation fits only if it is strictly smaller than the pool's
+    /// headroom, matching the comparison in `sled_insert_resource_query`.
+    #[test]
+    fn boundary_is_strict() {
+        let err = pair_local_storage_requests_to_pools(
+            vec![request(1, 100)],
+            vec![pool(1, 100)],
+        )
+        .unwrap_err();
+
+        assert!(matches!(
+            err,
+            LocalStorageUnsatisfiable::RequestDoesNotFit { .. }
+        ));
+
+        pair_local_storage_requests_to_pools(
+            vec![request(1, 99)],
+            vec![pool(1, 100)],
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn heterogeneous_sizes_spread_over_pools() {
+        let allocations = pair_local_storage_requests_to_pools(
+            vec![request(1, 100), request(2, 900), request(3, 500)],
+            vec![pool(1, 200), pool(2, 1000), pool(3, 600)],
+        )
+        .unwrap();
+
+        // Largest request lands on the pool with the most headroom.
+        let pairs: Vec<(i64, ZpoolUuid)> = allocations
+            .iter()
+            .map(|a| (a.required_dataset_size, a.pool_id))
+            .collect();
+
+        assert_eq!(
+            pairs,
+            vec![
+                (900, ZpoolUuid::from_untyped_uuid(Uuid::from_u128(2))),
+                (500, ZpoolUuid::from_untyped_uuid(Uuid::from_u128(3))),
+                (100, ZpoolUuid::from_untyped_uuid(Uuid::from_u128(1))),
+            ],
+        );
+    }
+
+    /// Total free space is not the criterion: each request needs one pool
+    /// that individually fits it.
+    #[test]
+    fn infeasible_despite_total_space() {
+        let err = pair_local_storage_requests_to_pools(
+            vec![request(1, 500), request(2, 500)],
+            vec![pool(1, 1200), pool(2, 300)],
+        )
+        .unwrap_err();
+
+        assert!(matches!(
+            err,
+            LocalStorageUnsatisfiable::RequestDoesNotFit { .. }
+        ));
+    }
+
+    #[test]
+    fn more_requests_than_pools() {
+        let err = pair_local_storage_requests_to_pools(
+            vec![request(1, 1), request(2, 1), request(3, 1)],
+            vec![pool(1, 100), pool(2, 100)],
+        )
+        .unwrap_err();
+
+        assert!(matches!(
+            err,
+            LocalStorageUnsatisfiable::NotEnoughPools { requests: 3, pools: 2 }
+        ));
+
+        let err =
+            pair_local_storage_requests_to_pools(vec![request(1, 1)], vec![])
+                .unwrap_err();
+
+        assert!(matches!(
+            err,
+            LocalStorageUnsatisfiable::NotEnoughPools { requests: 1, pools: 0 }
+        ));
+    }
+
+    #[test]
+    fn no_requests() {
+        let err =
+            pair_local_storage_requests_to_pools(vec![], vec![pool(1, 100)])
+                .unwrap_err();
+
+        assert!(matches!(
+            err,
+            LocalStorageUnsatisfiable::NoAllocationsRequired
+        ));
+    }
+
+    /// Equal sizes and equal headrooms pair deterministically: ascending
+    /// disk id onto ascending pool id.
+    #[test]
+    fn ties_are_deterministic() {
+        let allocations = pair_local_storage_requests_to_pools(
+            vec![request(3, 100), request(1, 100), request(2, 100)],
+            vec![pool(2, 500), pool(3, 500), pool(1, 500)],
+        )
+        .unwrap();
+
+        let pairs: Vec<(Uuid, ZpoolUuid)> =
+            allocations.iter().map(|a| (a.disk_id, a.pool_id)).collect();
+
+        assert_eq!(
+            pairs,
+            vec![
+                (
+                    Uuid::from_u128(1),
+                    ZpoolUuid::from_untyped_uuid(Uuid::from_u128(1))
+                ),
+                (
+                    Uuid::from_u128(2),
+                    ZpoolUuid::from_untyped_uuid(Uuid::from_u128(2))
+                ),
+                (
+                    Uuid::from_u128(3),
+                    ZpoolUuid::from_untyped_uuid(Uuid::from_u128(3))
+                ),
+            ],
+        );
+    }
+
+    fn local_storage_disk(disk_id: Uuid) -> LocalStorageDisk {
+        let size = external::ByteCount::from_gibibytes_u32(1);
+
+        let params = disk::DiskCreate {
+            identity: external::IdentityMetadataCreateParams {
+                name: format!("disk-{disk_id}").parse().unwrap(),
+                description: String::from("a local storage disk"),
+            },
+
+            disk_backend: disk::DiskBackend::Local {},
+
+            size,
+        };
+
+        LocalStorageDisk::new(
+            db::model::Disk::new(
+                disk_id,
+                Uuid::new_v4(),
+                &params,
+                db::model::BlockSize::AdvancedFormat,
+                db::model::DiskRuntimeState::new(),
+                db::model::DiskType::LocalStorage,
+            ),
+            db::model::DiskTypeLocalStorage::new(disk_id, size).unwrap(),
+        )
+    }
+
+    /// Disks that already have an allocation are not re-allocated, and the
+    /// pools those allocations use are not eligible for the remaining disks.
+    #[test]
+    fn existing_allocations_reserve_their_pool() {
+        let sled_id = SledUuid::new_v4();
+        let pool_a = ZpoolUuid::new_v4();
+        let pool_b = ZpoolUuid::new_v4();
+
+        let mut zpools_for_sled = IdOrdMap::new();
+        for pool_id in [pool_a, pool_b] {
+            zpools_for_sled
+                .insert_unique(ZpoolGetForSledReservationResult::new_for_test(
+                    db::model::Zpool::new(
+                        pool_id,
+                        sled_id,
+                        PhysicalDiskUuid::new_v4(),
+                        external::ByteCount::from_gibibytes_u32(0).into(),
+                    ),
+                    i64::from(u32::MAX),
+                    DatasetUuid::new_v4(),
+                    0,
+                    0,
+                ))
+                .unwrap();
+        }
+
+        let allocated_disk = {
+            let mut disk = local_storage_disk(Uuid::new_v4());
+            disk.local_storage_dataset_allocation =
+                Some(datastore::LocalStorageAllocation::Unencrypted(
+                    db::model::LocalStorageUnencryptedDatasetAllocation::new_for_tests_only(
+                        DatasetUuid::new_v4(),
+                        Utc::now(),
+                        DatasetUuid::new_v4(),
+                        ExternalZpoolUuid::from_untyped_uuid(
+                            pool_a.into_untyped_uuid(),
+                        ),
+                        sled_id,
+                        external::ByteCount::from_gibibytes_u32(1).into(),
+                    ),
+                ));
+            disk
+        };
+
+        let unallocated_disk = local_storage_disk(Uuid::new_v4());
+        let unallocated_disk_id = unallocated_disk.id();
+
+        let allocations = choose_local_storage_allocations(
+            &zpools_for_sled,
+            &[allocated_disk, unallocated_disk],
+        )
+        .unwrap();
+
+        // Only the unallocated disk gets an allocation, and it lands on the
+        // pool the existing allocation does not use.
+        assert_eq!(allocations.len(), 1);
+        assert_eq!(allocations[0].disk_id, unallocated_disk_id);
+        assert_eq!(allocations[0].pool_id, pool_b);
+    }
+
+    /// Backtracking search for any assignment of requests to distinct
+    /// fitting pools, used to check the greedy pairing against ground truth.
+    fn matching_exists(
+        requests: &[i64],
+        pools: &[i64],
+        used: &mut Vec<bool>,
+    ) -> bool {
+        let Some((first, rest)) = requests.split_first() else {
+            return true;
+        };
+
+        for (i, headroom) in pools.iter().enumerate() {
+            if !used[i] && first < headroom {
+                used[i] = true;
+                if matching_exists(rest, pools, used) {
+                    return true;
+                }
+                used[i] = false;
+            }
+        }
+
+        false
+    }
+
+    proptest! {
+        /// The greedy pairing succeeds exactly when some valid assignment
+        /// exists, and its output is well formed.
+        #[test]
+        fn greedy_matches_brute_force(
+            request_sizes in proptest::collection::vec(0..16i64, 1..=6),
+            pool_headrooms in proptest::collection::vec(0..16i64, 0..=8),
+        ) {
+            let requests: Vec<LocalStorageRequest> = request_sizes
+                .iter()
+                .enumerate()
+                .map(|(i, size)| request(i as u128 + 1, *size))
+                .collect();
+
+            let pools: Vec<LocalStorageCandidatePool> = pool_headrooms
+                .iter()
+                .enumerate()
+                .map(|(i, headroom)| pool(i as u128 + 1, *headroom))
+                .collect();
+
+            let mut used = vec![false; pool_headrooms.len()];
+            let expect_feasible = pool_headrooms.len() >= request_sizes.len()
+                && matching_exists(&request_sizes, &pool_headrooms, &mut used);
+
+            match pair_local_storage_requests_to_pools(requests, pools) {
+                Ok(allocations) => {
+                    prop_assert!(expect_feasible);
+
+                    prop_assert_eq!(allocations.len(), request_sizes.len());
+
+                    let disk_ids: HashSet<Uuid> =
+                        allocations.iter().map(|a| a.disk_id).collect();
+                    prop_assert_eq!(disk_ids.len(), allocations.len());
+
+                    let pool_ids: HashSet<ZpoolUuid> =
+                        allocations.iter().map(|a| a.pool_id).collect();
+                    prop_assert_eq!(pool_ids.len(), allocations.len());
+
+                    for allocation in &allocations {
+                        let headroom = pool_headrooms[usize::try_from(
+                            allocation
+                                .pool_id
+                                .into_untyped_uuid()
+                                .as_u128()
+                                - 1,
+                        )
+                        .unwrap()];
+
+                        prop_assert!(
+                            allocation.required_dataset_size < headroom
+                        );
+                    }
+                }
+
+                Err(reason) => {
+                    prop_assert!(
+                        !expect_feasible,
+                        "greedy failed ({reason}) but a valid assignment \
+                        exists",
+                    );
+                }
+            }
+        }
+    }
+}
+
 /// A candidate dataset for a local storage allocation
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
 struct CandidateDataset {

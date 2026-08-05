@@ -304,6 +304,16 @@ impl LocalStorageDisk {
         self.disk_type_local_storage.required_dataset_overhead()
     }
 
+    /// Size required for the disk's data plus overhead
+    pub fn required_dataset_size(&self) -> i64 {
+        // Both values are ByteCounts, so each fits in i64. The overhead is
+        // roughly 7% of the disk size (see DiskTypeLocalStorage::new), so the
+        // sum only approaches i64::MAX for disks of several EiB, far beyond
+        // what any zpool can hold.
+        self.size().to_bytes() as i64
+            + self.required_dataset_overhead().to_bytes() as i64
+    }
+
     /// Return the full path to the local storage zvol's device
     pub fn zvol_path(&self) -> Result<String, Error> {
         let Some(allocation) = &self.local_storage_dataset_allocation else {

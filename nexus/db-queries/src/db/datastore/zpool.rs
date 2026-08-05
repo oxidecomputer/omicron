@@ -64,19 +64,44 @@ pub struct ZpoolGetForSledReservationResult {
 }
 
 impl ZpoolGetForSledReservationResult {
-    /// Does this Zpool have room for additional bytes to be allocated to it?
-    pub fn has_room_for_allocation(&self, additional_size: i64) -> bool {
-        let new_size_used: i64 = self.crucible_dataset_usage
-            + self.local_storage_usage
-            + additional_size;
-
+    /// Bytes available for new allocations on this zpool: the last reported
+    /// inventory size, minus the control plane storage buffer, minus the
+    /// upper bound on existing usage. An allocation of `additional_size`
+    /// bytes fits if and only if `additional_size < self.headroom()`,
+    /// matching the strict comparison performed by
+    /// `sled_insert_resource_query`.
+    pub fn headroom(&self) -> i64 {
         let control_plane_storage_buffer: i64 =
             self.pool.control_plane_storage_buffer().into();
 
-        let adjusted_total_available: i64 =
-            self.last_inv_total_size - control_plane_storage_buffer;
+        self.last_inv_total_size
+            - control_plane_storage_buffer
+            - self.crucible_dataset_usage
+            - self.local_storage_usage
+    }
 
-        new_size_used < adjusted_total_available
+    /// Does this Zpool have room for additional bytes to be allocated to it?
+    pub fn has_room_for_allocation(&self, additional_size: i64) -> bool {
+        additional_size < self.headroom()
+    }
+
+    /// Construct a result directly for tests; production code builds these
+    /// only via `zpool_get_for_sled_reservation`.
+    #[cfg(test)]
+    pub(crate) fn new_for_test(
+        pool: Zpool,
+        last_inv_total_size: i64,
+        rendezvous_local_storage_unencrypted_dataset_id: DatasetUuid,
+        crucible_dataset_usage: i64,
+        local_storage_usage: i64,
+    ) -> Self {
+        Self {
+            pool,
+            last_inv_total_size,
+            rendezvous_local_storage_unencrypted_dataset_id,
+            crucible_dataset_usage,
+            local_storage_usage,
+        }
     }
 }
 
