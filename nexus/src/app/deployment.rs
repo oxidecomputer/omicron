@@ -375,7 +375,7 @@ impl super::Nexus {
                 // because the system is in an illegal state that required
                 // support intervention in the first place (mupdating a single
                 // sled in the middle of a live update).
-                let validation_result = match intent {
+                match intent {
                     SetTargetReleaseIntent::Update => {
                         let current_version = self
                             .datastore()
@@ -386,7 +386,7 @@ impl super::Nexus {
                             &current_version,
                             &new_system_version,
                             &self.log,
-                        )
+                        )?;
                     }
                     SetTargetReleaseIntent::RecoverFromMupdate => {
                         validate_can_set_target_release_for_mupdate_recovery(
@@ -394,17 +394,9 @@ impl super::Nexus {
                             *current_target_release.generation,
                             &new_system_version,
                             &self.log,
-                        )
+                        )?;
                     }
-                };
-
-                // Unpack the result and convert the error, if any.
-                let () = validation_result.map_err(|err| {
-                    Error::invalid_request(format!(
-                        "Target release cannot be changed: {}",
-                        InlineErrorChain::new(&err),
-                    ))
-                })?;
+                }
             }
         }
 
@@ -496,6 +488,39 @@ fn display_versions_found(
                 })
                 .collect::<Vec<_>>();
             format!("found {n} versions: {}", versions.join(", "))
+        }
+    }
+}
+
+impl From<TargetReleaseChangeError> for Error {
+    fn from(err: TargetReleaseChangeError) -> Self {
+        match err {
+            // Each of these variants indicates that the system is not currently
+            // in a state consistent with the request to change the target
+            // release in the requested way.
+            TargetReleaseChangeError::NoMupdateRecoveryNeeded
+            | TargetReleaseChangeError::MupdateRecoveryMixedVersions {
+                ..
+            }
+            | TargetReleaseChangeError::MupdateRecoveryVersionNotFound {
+                ..
+            }
+            | TargetReleaseChangeError::WaitingForMupdateToBeCleared
+            | TargetReleaseChangeError::PreviousUpdateInProgress
+            | TargetReleaseChangeError::UpdateToIdenticalVersion(_)
+            | TargetReleaseChangeError::CannotSkipScheduledRelease { .. }
+            | TargetReleaseChangeError::CannotDowngrade { .. } => {
+                Error::invalid_request(format!(
+                    "Target release cannot be changed: {}",
+                    InlineErrorChain::new(&err)
+                ))
+            }
+
+            // This should never happen, and if it does, it's not because the
+            // request was invalid in some way.
+            TargetReleaseChangeError::NoSledsFound => {
+                Error::internal_error(InlineErrorChain::new(&err).to_string())
+            }
         }
     }
 }
