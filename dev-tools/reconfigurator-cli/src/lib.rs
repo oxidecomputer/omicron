@@ -3689,7 +3689,7 @@ fn cmd_load(
                 },
             )?;
             let file = std::fs::File::open(&input_path)
-                .with_context(|| format!("open {:?}", &input_path))?;
+                .with_context(|| format!("open {:?}", input_path))?;
             let bufread = std::io::BufReader::new(file);
             let input = ReconfiguratorStateInput {
                 label: input_path.as_str().to_owned(),
