@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Re-assign sagas from expunged Nexus zones
+//! Handle sagas from expunged Nexus zones
 
 use nexus_db_model::SagaReasonAbandoned;
 use nexus_db_model::SecId;
@@ -100,12 +100,28 @@ fn find_expunged_same_generation(
         .collect())
 }
 
-// TODO-K: Add a comment here
+/// Abandon sagas that can never be reassigned.
+///
+/// Sagas are only ever reassigned to an in-service Nexus of the *same*
+/// generation (see [`reassign_sagas_from_expunged`]). So once a Nexus has been
+/// expunged and no in-service Nexus remains in its generation, any saga still
+/// assigned to it can never be adopted and would otherwise stay stuck forever.
+/// These sagas also never go through saga recovery, as each Nexus only attempts
+/// to recover sagas assigned to itself.
+///
+/// We abandon these, as there is no way to salvage them. Note that abandoning a
+/// saga does not unwind it: any partial work it has already done is left in
+/// place.
+///
+/// To be conservative, we only abandon sagas whose `current_sec` is an expunged
+/// (and ready-for-cleanup) Nexus zone in the target blueprint whose generation
+/// is strictly older than the oldest in-service Nexus generation. Any Nexus
+/// that isn't in the target blueprint is left untouched, since we can't
+/// confirm its state.
 pub(crate) async fn abandon_orphan_sagas(
     opctx: &OpContext,
     datastore: &DataStore,
     blueprint: &Blueprint,
-    // TODO-K: Use external API error?
 ) -> Result<(), anyhow::Error> {
     let log = &opctx.log;
 
@@ -145,7 +161,6 @@ pub(crate) async fn abandon_orphan_sagas(
                 &error,
             );
 
-            // TODO-K: Decide if I want anyhow error or not as the return value
             Err(error.into())
         }
     }
