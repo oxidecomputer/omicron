@@ -589,10 +589,15 @@ const LOCAL_STORAGE_ATTEMPTS_PER_SLED: usize = 4;
 /// Return true if any local storage disk still requiring an allocation has
 /// been deleted, or is no longer attached to the given instance.
 ///
-/// `sled_insert_resource_query` checks this at insert time, so this query is
-/// not load-bearing for correctness: it exists to distinguish "the zpool
-/// snapshot went stale" from "this reservation can never succeed" when the
-/// insert CTE inserts zero rows.
+/// The reservation loop calls this when the insert query inserted zero rows,
+/// to tell two situations apart: the zpool snapshot went stale (retry with a
+/// fresh one), or a disk in the request went away (no sled can ever satisfy
+/// this reservation, so fail now rather than retrying everywhere).
+///
+/// The two kinds of wrong answer are not symmetric. Wrongly returning true
+/// fails a reservation that could have succeeded. Wrongly returning false
+/// only wastes retries: the insert query rejects deleted and detached disks
+/// itself, so a bad allocation still cannot be written.
 async fn any_request_disk_deleted_or_detached(
     conn: &async_bb8_diesel::Connection<DbConnection>,
     instance_id: InstanceUuid,
