@@ -4,9 +4,10 @@
 
 //! HTTP entrypoint functions for the bootstrap agent's lockstep API.
 //!
-//! This API handles rack initialization and reset operations. It is a lockstep
-//! API, meaning the client and server are always deployed together and only
-//! need to support a single version.
+//! This API primarily handles rack initialization; it also provides some
+//! read-only detailed debugging information intended for consumption only by
+//! `omdb`. It is a lockstep API, meaning the client and server are always
+//! deployed together and only need to support a single version.
 
 use std::net::Ipv6Addr;
 

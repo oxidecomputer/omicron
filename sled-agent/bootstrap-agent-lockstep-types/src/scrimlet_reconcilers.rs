@@ -100,7 +100,8 @@ impl ReconcilerActivationReason {
 }
 
 /// Status of a completed-in-the-past reconciliation attempt.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[schemars(rename = "ReconciliationCompletedStatus{T}")]
 pub struct ReconciliationCompletedStatus<T> {
     /// Why the reconciliation attempt fired.
     pub activation_reason: ReconcilerActivationReason,
@@ -113,32 +114,6 @@ pub struct ReconciliationCompletedStatus<T> {
     pub activation_count: u64,
     /// Reconciler-specific status.
     pub status: T,
-}
-
-// shadow type for our manual JsonScema impl on the real
-// ReconciliationCompletedStatus
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-struct ReconciliationCompletedStatusShadow<T> {
-    activation_reason: ReconcilerActivationReason,
-    completed_at_time: DateTime<Utc>,
-    ran_for: Duration,
-    activation_count: u64,
-    status: T,
-}
-
-impl<T> JsonSchema for ReconciliationCompletedStatus<T>
-where
-    T: JsonSchema,
-{
-    fn schema_name() -> String {
-        format!("ReconciliationCompletedStatus{}", T::schema_name())
-    }
-
-    fn json_schema(
-        generator: &mut schemars::r#gen::SchemaGenerator,
-    ) -> schemars::schema::Schema {
-        ReconciliationCompletedStatusShadow::<T>::json_schema(generator)
-    }
 }
 
 impl<T> ReconciliationCompletedStatus<T> {
@@ -241,7 +216,8 @@ impl fmt::Display for ReconcilerCurrentStatusDisplay<'_> {
 }
 
 /// Status of a single scrimlet reconciler.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[schemars(rename = "ReconcilerStatus{T}")]
 pub struct ReconcilerStatus<T> {
     /// Status of the task at this moment.
     pub current_status: ReconcilerCurrentStatus,
@@ -249,32 +225,6 @@ pub struct ReconcilerStatus<T> {
     // Box the inner status to avoid clippy complaining about
     // `ScrimletReconcilersStatus::Running { ... }` being overly large.
     pub last_completion: Option<Box<ReconciliationCompletedStatus<T>>>,
-}
-
-// shadow type for our manual JsonScema impl on the real ReconcilerStatus
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-struct ReconcilerStatusShadow<T> {
-    /// Status of the task at this moment.
-    current_status: ReconcilerCurrentStatus,
-    /// Final status of the most recent activation of this task.
-    // Box the inner status to avoid clippy complaining about
-    // `ScrimletReconcilersStatus::Running { ... }` being overly large.
-    last_completion: Option<Box<ReconciliationCompletedStatus<T>>>,
-}
-
-impl<T> JsonSchema for ReconcilerStatus<T>
-where
-    T: JsonSchema,
-{
-    fn schema_name() -> String {
-        format!("ReconcilerStatus{}", T::schema_name())
-    }
-
-    fn json_schema(
-        generator: &mut schemars::r#gen::SchemaGenerator,
-    ) -> schemars::schema::Schema {
-        ReconcilerStatusShadow::<T>::json_schema(generator)
-    }
 }
 
 impl<T> ReconcilerStatus<T> {
@@ -393,17 +343,21 @@ impl fmt::Display for ScrimletReconcilersStatusDisplay<'_> {
                 mgd_reconciler,
                 uplinkd_reconciler,
             } => {
-                for (name, displayable) in [
+                let reconcilers = [
                     ("dpd", &dpd_reconciler.display() as &dyn fmt::Display),
                     ("mgd", &mgd_reconciler.display()),
                     ("lldpd", &lldpd_reconciler.display()),
                     ("uplinkd", &uplinkd_reconciler.display()),
-                ] {
+                ];
+                let mut reconcilers = reconcilers.iter().peekable();
+                while let Some((name, displayable)) = reconcilers.next() {
                     writeln!(f, "{name} reconciler:")?;
-                    writeln!(
-                        IndentWriter::new("    ", &mut f),
-                        "{displayable}"
-                    )?;
+                    let mut f = IndentWriter::new("    ", &mut f);
+                    if reconcilers.peek().is_some() {
+                        writeln!(f, "{displayable}")?;
+                    } else {
+                        write!(f, "{displayable}")?;
+                    }
                 }
                 Ok(())
             }

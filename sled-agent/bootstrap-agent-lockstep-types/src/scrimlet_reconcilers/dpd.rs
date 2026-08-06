@@ -66,54 +66,20 @@ impl fmt::Display for DpdPortReconcilerStatusDisplay<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.0 {
             DpdPortReconcilerStatus::FailedReadingCurrentSettings(err) => {
-                writeln!(f, "failed to read current dpd settings: {err}")
+                write!(f, "failed to read current dpd settings: {err}")
             }
             DpdPortReconcilerStatus::FailedGeneratingPlan(err) => {
-                writeln!(f, "failed to generate reconciliation plan: {err}")
+                write!(f, "failed to generate reconciliation plan: {err}")
             }
-            DpdPortReconcilerStatus::Success {
-                unchanged,
-                cleared,
-                applied,
-            } => {
-                writeln!(f, "reconciliation succeeded")?;
-                let mut f = IndentWriter::new("   ", f);
-                if !unchanged.is_empty() {
-                    writeln!(
-                        f,
-                        "ports unchanged: {}",
-                        unchanged
-                            .iter()
-                            .cloned()
-                            .collect::<Vec<_>>()
-                            .join(", ")
-                    )?;
-                }
-                if !cleared.is_empty() {
-                    writeln!(
-                        f,
-                        "ports cleared: {}",
-                        cleared.iter().cloned().collect::<Vec<_>>().join(", ")
-                    )?;
-                }
-                if !applied.is_empty() {
-                    writeln!(
-                        f,
-                        "ports applied: {}",
-                        applied.iter().cloned().collect::<Vec<_>>().join(", ")
-                    )?;
-                }
-                Ok(())
-            }
-            DpdPortReconcilerStatus::PartialSuccess {
+            DpdPortReconcilerStatus::Complete {
                 unchanged,
                 cleared,
                 clear_failures,
                 applied,
                 apply_failures,
             } => {
-                writeln!(f, "reconciliation FAILED")?;
-                let mut f = IndentWriter::new("   ", f);
+                writeln!(f, "reconciliation complete")?;
+                let mut f = IndentWriter::new("    ", f);
                 if !unchanged.is_empty() {
                     writeln!(
                         f,
@@ -151,14 +117,20 @@ impl fmt::Display for DpdPortReconcilerStatusDisplay<'_> {
                     }
                 }
                 if apply_failures.is_empty() {
-                    writeln!(f, "apply failures: none")?;
+                    write!(f, "apply failures: none")?;
                 } else {
                     writeln!(f, "apply failures:")?;
                     let mut f = IndentWriter::new("    ", &mut f);
-                    for DpdPortOperationFailure { port_id, error } in
-                        apply_failures
+                    let mut apply_failures = apply_failures.iter().peekable();
+                    while let Some(DpdPortOperationFailure { port_id, error }) =
+                        apply_failures.next()
                     {
-                        writeln!(f, "* {port_id}: {error}")?;
+                        let s = format_args!("* {port_id}: {error}");
+                        if apply_failures.peek().is_some() {
+                            writeln!(f, "{s}")?;
+                        } else {
+                            write!(f, "{s}")?;
+                        }
                     }
                 }
                 Ok(())
@@ -245,13 +217,16 @@ impl fmt::Display for DpdReconcilerStatusDisplay<'_> {
         let DpdReconcilerStatus { port_settings_status, nat_status } = self.0;
         writeln!(f, "port settings:")?;
         writeln!(
-            IndentWriter::new("   ", &mut f),
+            IndentWriter::new("    ", &mut f),
             "{}",
             port_settings_status.display()
         )?;
         writeln!(f, "NAT:")?;
-        writeln!(IndentWriter::new("   ", &mut f), "{}", nat_status.display())?;
-        Ok(())
+        write!(
+            IndentWriter::new("    ", &mut f),
+            "{}",
+            nat_status.display()
+        )
     }
 }
 
@@ -402,65 +377,26 @@ impl DpdNatReconcilerStatus {
 pub struct DpdNatReconcilerStatusDisplay<'a>(&'a DpdNatReconcilerStatus);
 
 impl fmt::Display for DpdNatReconcilerStatusDisplay<'_> {
-    fn fmt(&self, mut f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.0 {
             DpdNatReconcilerStatus::NoNatEntriesConfig => {
-                writeln!(f, "skipped: no NAT entries in bootstore")
+                write!(f, "skipped: no NAT entries in bootstore")
             }
             DpdNatReconcilerStatus::FailedReadingCurrentDpdNatEntries(err) => {
-                writeln!(f, "failed to read current dpd settings: {err}")
+                write!(f, "failed to read current dpd settings: {err}")
             }
             DpdNatReconcilerStatus::InvalidSystemNetworkingConfig(err) => {
-                writeln!(f, "bootstore config is INVALID: {err}")
+                write!(f, "bootstore config is INVALID: {err}")
             }
-            DpdNatReconcilerStatus::Success { unchanged, removed, created } => {
-                writeln!(f, "reconciliation succeeded")?;
-                if !unchanged.is_empty() {
-                    writeln!(
-                        f,
-                        "zones unchanged: {}",
-                        unchanged
-                            .iter()
-                            .map(|id| id.to_string())
-                            .collect::<Vec<_>>()
-                            .join(", ")
-                    )?;
-                }
-                if !removed.is_empty() {
-                    writeln!(
-                        f,
-                        "NAT entries removed: {}",
-                        removed
-                            .iter()
-                            .map(|entry| entry.display().to_string())
-                            .collect::<Vec<_>>()
-                            .join(", ")
-                    )?;
-                }
-                if !created.is_empty() {
-                    writeln!(
-                        f,
-                        "NAT entries created: {}",
-                        created
-                            .iter()
-                            .map(|(id, entry)| format!(
-                                "zone {id}: {}",
-                                entry.display()
-                            ))
-                            .collect::<Vec<_>>()
-                            .join(", ")
-                    )?;
-                }
-                Ok(())
-            }
-            DpdNatReconcilerStatus::PartialSuccess {
+            DpdNatReconcilerStatus::Complete {
                 unchanged,
                 removed,
                 remove_failures,
                 created,
                 create_failures,
             } => {
-                writeln!(f, "reconciliation FAILED")?;
+                writeln!(f, "reconciliation completed")?;
+                let mut f = IndentWriter::new("    ", f);
                 if !unchanged.is_empty() {
                     writeln!(
                         f,
@@ -511,20 +447,25 @@ impl fmt::Display for DpdNatReconcilerStatusDisplay<'_> {
                     }
                 }
                 if create_failures.is_empty() {
-                    writeln!(f, "create failures: none")?;
+                    write!(f, "create failures: none")?;
                 } else {
                     writeln!(f, "create failures:")?;
                     let mut f = IndentWriter::new("    ", &mut f);
-                    for (id, failure) in create_failures {
+                    let mut create_failures = create_failures.iter().peekable();
+                    while let Some((id, failure)) = create_failures.next() {
                         let DpdNatReconcilerStatusNatEntryFailure {
                             entry,
                             error,
                         } = failure;
-                        writeln!(
-                            f,
+                        let s = format_args!(
                             "* zone {id}, {}: {error}",
                             entry.display()
-                        )?;
+                        );
+                        if create_failures.peek().is_some() {
+                            writeln!(f, "{s}")?;
+                        } else {
+                            write!(f, "{s}")?;
+                        }
                     }
                 }
                 Ok(())
