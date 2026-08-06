@@ -574,16 +574,6 @@ fn choose_local_storage_allocations(
 /// before the insert runs. Retrying with a new snapshot handles that, and
 /// losing the race several times in a row takes increasingly bad luck, so a
 /// small number of attempts is enough.
-///
-/// The limit also protects against a subtler problem. The chooser always
-/// makes the same choice from the same snapshot, so if it ever considers a
-/// pool to have room when the insert query does not, retrying cannot help:
-/// every attempt proposes the same allocations and fails the same way. One
-/// such gap exists today: `zpool_get_for_sled_reservation` does not count
-/// encrypted local storage dataset usage, while the insert query does. That
-/// usage is always zero right now (nothing creates encrypted allocations,
-/// and reservation bails out earlier if a disk has one), but if that
-/// changes, this limit is what keeps the loop from spinning forever.
 const LOCAL_STORAGE_ATTEMPTS_PER_SLED: usize = 4;
 
 /// Return true if any local storage disk still requiring an allocation has
