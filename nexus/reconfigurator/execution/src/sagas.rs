@@ -687,38 +687,50 @@ mod test {
         };
         assert_eq!(loaded.len(), sagas_to_insert.len());
 
-        for saga in loaded {
-            if expected_newly_abandoned.contains(&saga.id) {
-                // `orphan_sec`'s running/unwinding sagas should now be
-                // abandoned as unrecoverable.
-                assert_eq!(
-                    state_summary(&saga.saga_state),
-                    (
-                        SagaState::Abandoned,
-                        Some((
-                            SagaReasonAbandoned::Unrecoverable,
-                            "orphan: current_sec Nexus is expunged and \
-                             unreassignable (older than all in-service \
-                             generations)"
-                                .to_string(),
-                        )),
-                    ),
-                    "saga {} should have been abandoned as unrecoverable, but \
-                     is {:?}",
-                    saga.id,
-                    saga.saga_state,
-                );
-            } else {
-                // Everything else must be exactly as we inserted it.
-                let initial = &initial_state[&saga.id];
-                assert_eq!(
-                    state_summary(&saga.saga_state),
-                    state_summary(initial),
-                    "saga {} (creator {:?}) should have been left untouched",
-                    saga.id,
-                    saga.creator,
-                );
-            }
+        // Split what we loaded into the sagas we expect to have been abandoned
+        // and the ones we expect to be untouched.
+        let expected_unchanged_count =
+            sagas_to_insert.len() - expected_newly_abandoned.len();
+
+        let (abandoned, unchanged): (Vec<Saga>, Vec<Saga>) = loaded
+            .into_iter()
+            .partition(|saga| expected_newly_abandoned.contains(&saga.id));
+
+        assert_eq!(abandoned.len(), expected_newly_abandoned.len());
+        assert_eq!(unchanged.len(), expected_unchanged_count);
+
+        // `orphan_sec`'s running/unwinding sagas should now be abandoned as
+        // unrecoverable.
+        for saga in abandoned {
+            assert_eq!(
+                state_summary(&saga.saga_state),
+                (
+                    SagaState::Abandoned,
+                    Some((
+                        SagaReasonAbandoned::Unrecoverable,
+                        "orphan: current_sec Nexus is expunged and \
+                         unreassignable (older than all in-service \
+                         generations)"
+                            .to_string(),
+                    )),
+                ),
+                "saga {} should have been abandoned as unrecoverable, but is \
+                 {:?}",
+                saga.id,
+                saga.saga_state,
+            );
+        }
+
+        // Every other saga must be exactly as we inserted it.
+        for saga in unchanged {
+            let initial = &initial_state[&saga.id];
+            assert_eq!(
+                state_summary(&saga.saga_state),
+                state_summary(initial),
+                "saga {} (creator {:?}) should have been left untouched",
+                saga.id,
+                saga.creator,
+            );
         }
 
         db.terminate().await;

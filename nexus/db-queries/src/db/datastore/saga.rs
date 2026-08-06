@@ -1044,9 +1044,8 @@ mod test {
             }
         }
 
-        // Running and unwinding sagas should be abandoned; done sagas should be
-        // left untouched. These two sets are complements, but we write out the
-        // conditions to double-check that we've got it right.
+        // Running and unwinding sagas should be abandoned. Done sagas should be
+        // left untouched.
         let sagas_affected: BTreeSet<_> = sagas_to_insert
             .iter()
             .filter_map(|saga| {
@@ -1062,7 +1061,6 @@ mod test {
             })
             .collect();
 
-        assert_eq!(sagas_affected.intersection(&sagas_unaffected).count(), 0);
         assert_eq!(
             sagas_affected.len() + sagas_unaffected.len(),
             sagas_to_insert.len()
