@@ -160,7 +160,7 @@ impl RunnerCore {
                 self.screen.draw(&self.state, &mut self.terminal)?;
             }
             Event::WicketdLocation(location) => {
-                self.state.wicketd_location = location;
+                self.state.wicketd_location = Some(location);
                 self.screen.draw(&self.state, &mut self.terminal)?;
             }
             Event::Shutdown => return Ok(true),
@@ -283,14 +283,22 @@ pub struct Runner {
 
 #[allow(clippy::new_without_default)]
 impl Runner {
-    pub fn new(log: slog::Logger, wicketd_addr: SocketAddrV6) -> Runner {
+    pub fn new(
+        log: slog::Logger,
+        wicketd_addr: SocketAddrV6,
+        commission_addr: SocketAddrV6,
+    ) -> Runner {
         let (events_tx, events_rx) = unbounded_channel();
         let tokio_rt = tokio::runtime::Builder::new_multi_thread()
             .enable_all()
             .build()
             .unwrap();
-        let (wicketd, wicketd_manager) =
-            WicketdManager::new(&log, events_tx.clone(), wicketd_addr);
+        let (wicketd, wicketd_manager) = WicketdManager::new(
+            &log,
+            events_tx.clone(),
+            wicketd_addr,
+            commission_addr,
+        );
         let core = RunnerCore::new(log);
         Runner {
             core,

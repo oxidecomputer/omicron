@@ -496,6 +496,7 @@ pub enum PlanningNoopImageSourceSkipZoneReason {
         error: String,
     },
     ArtifactNotInRepo {
+        #[schemars(schema_with = "ArtifactHash::v1_json_schema")]
         artifact_hash: ArtifactHash,
         zone_kind: String,
         file_name: String,
@@ -595,8 +596,12 @@ pub enum FailedRotBootloaderUpdateReason {
     #[error("version from caboose {caboose:?} could not be parsed: {err}")]
     FailedVersionParse { caboose: CabooseWhich, err: String },
     /// No artifact with the required conditions for the component was found
-    #[error("no matching artifact was found")]
-    NoMatchingArtifactFound,
+    #[error("no artifact matching {0} was found")]
+    NoMatchingArtifactFound(String),
+    /// Too many artifacts with the required conditions for the component were
+    /// found
+    #[error("too many artifacts matching {0} were found")]
+    TooManyMatchingArtifacts(String),
     /// The component's corresponding SP was not found in the inventory
     #[error("corresponding SP is not in inventory")]
     SpNotInInventory,
@@ -630,8 +635,12 @@ pub enum FailedRotUpdateReason {
     #[error("version from caboose {caboose:?} could not be parsed: {err}")]
     FailedVersionParse { caboose: CabooseWhich, err: String },
     /// No artifact with the required conditions for the component was found
-    #[error("no matching artifact was found")]
-    NoMatchingArtifactFound,
+    #[error("no artifact matching {0} was found")]
+    NoMatchingArtifactFound(String),
+    /// Too many artifacts with the required conditions for the component were
+    /// found
+    #[error("too many artifacts matching {0} were found")]
+    TooManyMatchingArtifacts(String),
     /// RoT state was not found in inventory
     #[error("rot state is not in inventory")]
     RotStateNotInInventory,
@@ -665,8 +674,12 @@ pub enum FailedSpUpdateReason {
     #[error("version from caboose {caboose:?} could not be parsed: {err}")]
     FailedVersionParse { caboose: CabooseWhich, err: String },
     /// No artifact with the required conditions for the component was found
-    #[error("no matching artifact was found")]
-    NoMatchingArtifactFound,
+    #[error("no artifact matching {0} was found")]
+    NoMatchingArtifactFound(String),
+    /// Too many artifacts with the required conditions for the component were
+    /// found
+    #[error("too many artifacts matching {0} were found")]
+    TooManyMatchingArtifacts(String),
     /// The component's corresponding SP was not found in the inventory
     #[error("corresponding SP is not in inventory")]
     SpNotInInventory,

@@ -29,19 +29,6 @@ dns_servers = [
     "2.2.2.2",
 ]
 
-# Ranges of the service IP pool which may be used for internal services.
-#
-# Elements of this list should be of the form:
-#
-#    { first = "first_ip", last = "last_ip" }
-#
-# where `last_ip` is equal to or higher than `first_ip`; e.g.,
-#
-#    { first = "172.20.26.1", last = "172.20.26.10" }
-internal_services_ip_pool_ranges = [
-    { first = "10.0.0.1", last = "10.0.0.5" },
-]
-
 # List of sleds to initialize.
 #
 # Confirm this list contains all expected sleds before continuing!
@@ -56,6 +43,24 @@ bootstrap_sleds = [
 # runtime via the Nexus `/v1/system/networking/settings` endpoint after rack
 # initialization.
 external_jumbo_frames_opt_in_enabled = false
+
+# The IP pools from which addresses are assigned to externally-facing services
+# (external DNS, Nexus, and boundary NTP).
+#
+# Specify one pool per `[[service_ip_pools]]` stanza; copy the stanza to define
+# more than one pool (e.g. an IPv4 pool and an IPv6 pool). All ranges within a
+# single pool must be of the same IP version. Each range has the form
+# `{ first = "first_ip", last = "last_ip" }`, where `last_ip` is equal to or
+# higher than `first_ip`. For example, a pool with two ranges:
+#
+#     ranges = [
+#         { first = "1.1.1.1", last = "1.1.1.10" },
+#         { first = "1.1.1.20", last = "1.1.1.30" },
+#     ]
+[[service_ip_pools]]
+name = "oxide-service-pool-v4"
+description = "IPv4 IP Pool for Oxide Services"
+ranges = [{ first = "10.0.0.1", last = "10.0.0.5" }]
 
 # Allowlist of source IPs that can make requests to user-facing services.
 #

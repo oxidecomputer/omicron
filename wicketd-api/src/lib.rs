@@ -11,18 +11,16 @@ use dropshot::RequestContext;
 use dropshot::StreamingBody;
 use dropshot::TypedBody;
 use gateway_client::types::IgnitionCommand;
-use omicron_common::update::ArtifactId;
 use omicron_uuid_kinds::RackInitUuid;
 use schemars::JsonSchema;
 use semver::Version;
 use serde::Deserialize;
 use serde::Serialize;
-use sled_hardware_types::Baseboard;
 use sled_hardware_types::BaseboardId;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::net::Ipv6Addr;
-use tufaceous_artifact::ArtifactHashId;
+use wicket_common::artifact::ArtifactId;
 use wicket_common::inventory::RackV1Inventory;
 use wicket_common::inventory::SpIdentifier;
 use wicket_common::inventory::SpType;
@@ -252,16 +250,6 @@ pub trait WicketdApi {
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<GetBaseboardResponse>, HttpError>;
 
-    /// Report the identity of the sled and switch we're currently running on /
-    /// connected to.
-    #[endpoint {
-        method = GET,
-        path = "/location",
-    }]
-    async fn get_location(
-        rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<GetLocationResponse>, HttpError>;
-
     /// An endpoint to start updating one or more sleds, switches and PSCs.
     #[endpoint {
         method = POST,
@@ -449,14 +437,6 @@ pub enum GetInventoryResponse {
     Unavailable,
 }
 
-#[derive(Clone, Debug, JsonSchema, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub struct InstallableArtifacts {
-    pub artifact_id: ArtifactId,
-    pub installable: Vec<ArtifactHashId>,
-    pub sign: Option<Vec<u8>>,
-}
-
 /// The response to a `get_artifacts` call: the system version, and the list of
 /// all artifacts currently held by wicketd.
 #[derive(Clone, Debug, JsonSchema, Serialize)]
@@ -464,18 +444,9 @@ pub struct InstallableArtifacts {
 pub struct GetArtifactsAndEventReportsResponse {
     pub system_version: Option<Version>,
 
-    /// Map of artifacts we ingested from the most-recently-uploaded TUF
-    /// repository to a list of artifacts we're serving over the bootstrap
-    /// network. In some cases the list of artifacts being served will have
-    /// length 1 (when we're serving the artifact directly); in other cases the
-    /// artifact in the TUF repo contains multiple nested artifacts inside it
-    /// (e.g., RoT artifacts contain both A and B images), and we serve the list
-    /// of extracted artifacts but not the original combination.
-    ///
-    /// Conceptually, this is a `BTreeMap<ArtifactId, Vec<ArtifactHashId>>`, but
-    /// JSON requires string keys for maps, so we give back a vec of pairs
-    /// instead.
-    pub artifacts: Vec<InstallableArtifacts>,
+    /// List of artifacts we ingested from the most-recently-uploaded TUF
+    /// repository.
+    pub artifacts: Vec<ArtifactId>,
 
     pub event_reports: BTreeMap<SpType, BTreeMap<u16, EventReport>>,
 }
@@ -502,23 +473,6 @@ pub struct ClearUpdateStateParams {
 #[serde(rename_all = "snake_case")]
 pub struct GetBaseboardResponse {
     pub baseboard: BaseboardId,
-}
-
-/// All the fields of this response are optional, because it's possible we don't
-/// know any of them (yet) if MGS has not yet finished discovering its location
-/// or (ever) if we're running in a dev environment that doesn't support
-/// MGS-location / baseboard mapping.
-#[derive(Clone, Debug, JsonSchema, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub struct GetLocationResponse {
-    /// The identity of our sled (where wicketd is running).
-    pub sled_id: Option<SpIdentifier>,
-    /// The baseboard of our sled (where wicketd is running).
-    pub sled_baseboard_id: BaseboardId,
-    /// The baseboard of the switch our sled is physically connected to.
-    pub switch_baseboard: Option<Baseboard>,
-    /// The identity of the switch our sled is physically connected to.
-    pub switch_id: Option<SpIdentifier>,
 }
 
 #[derive(Serialize, Deserialize, JsonSchema)]

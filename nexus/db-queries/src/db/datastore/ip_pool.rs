@@ -53,7 +53,7 @@ use nexus_db_schema::enums::IpKindEnum;
 use nexus_db_schema::enums::IpPoolAssignmentEnum;
 use nexus_types::silo::INTERNAL_SILO_ID;
 use omicron_common::address::IpRange;
-use omicron_common::address::{IPV4_SSM_SUBNET, IPV6_SSM_SUBNET};
+use omicron_common::address::{IPV4_SSM_SUBNET, is_ssm_address};
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
@@ -1941,7 +1941,7 @@ impl DataStore {
             }
             IpRange::V6(v6_range) => {
                 let first = v6_range.first_address();
-                IPV6_SSM_SUBNET.contains(first)
+                is_ssm_address(first.into())
             }
         };
 
@@ -1962,7 +1962,7 @@ impl DataStore {
         for existing_range in &existing_ranges {
             let existing_is_ssm = match &existing_range.first_address {
                 IpNetwork::V4(net) => IPV4_SSM_SUBNET.contains(net.network()),
-                IpNetwork::V6(net) => IPV6_SSM_SUBNET.contains(net.network()),
+                IpNetwork::V6(net) => is_ssm_address(net.network().into()),
             };
 
             // If we have a mix of ASM and SSM within this pool, reject
@@ -2009,7 +2009,7 @@ impl DataStore {
 
         let is_ssm = match range.first_address {
             IpNetwork::V4(net) => IPV4_SSM_SUBNET.contains(net.network()),
-            IpNetwork::V6(net) => IPV6_SSM_SUBNET.contains(net.network()),
+            IpNetwork::V6(net) => is_ssm_address(net.network().into()),
         };
 
         Ok(is_ssm)
@@ -2087,7 +2087,7 @@ impl DataStore {
         for (pool, range, _is_default) in pools {
             let is_ssm = match range.first_address {
                 IpNetwork::V4(net) => IPV4_SSM_SUBNET.contains(net.network()),
-                IpNetwork::V6(net) => IPV6_SSM_SUBNET.contains(net.network()),
+                IpNetwork::V6(net) => is_ssm_address(net.network().into()),
             };
 
             if is_ssm && seen_pool_ids.insert(pool.id()) {
@@ -2193,7 +2193,7 @@ impl DataStore {
         for (pool, range, _is_default) in pools {
             let is_ssm = match range.first_address {
                 IpNetwork::V4(net) => IPV4_SSM_SUBNET.contains(net.network()),
-                IpNetwork::V6(net) => IPV6_SSM_SUBNET.contains(net.network()),
+                IpNetwork::V6(net) => is_ssm_address(net.network().into()),
             };
 
             if !is_ssm && seen_pool_ids.insert(pool.id()) {

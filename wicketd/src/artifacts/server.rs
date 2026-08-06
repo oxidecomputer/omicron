@@ -13,6 +13,7 @@ use dropshot::Path;
 use dropshot::RequestContext;
 use dropshot::TypedBody;
 use futures::TryStreamExt;
+use installinator_api::GetArtifactPathParams;
 use installinator_api::InstallinatorApi;
 use installinator_api::body_to_artifact_response;
 use installinator_common::report::ReportQuery;
@@ -20,7 +21,6 @@ use oxide_update_engine_types::events::EventReport;
 use oxide_update_engine_types::spec::GenericSpec;
 use slog::Logger;
 use slog::error;
-use tufaceous_artifact::ArtifactHashId;
 
 use super::WicketdArtifactStore;
 
@@ -54,14 +54,15 @@ impl InstallinatorApi for WicketdInstallinatorApiImpl {
 
     async fn get_artifact_by_hash(
         rqctx: RequestContext<Self::Context>,
-        path: Path<ArtifactHashId>,
+        path: Path<GetArtifactPathParams>,
     ) -> Result<HttpResponseHeaders<HttpResponseOk<FreeformBody>>, HttpError>
     {
         let context = rqctx.context();
-        match context.store.get_by_hash(&path.into_inner()) {
-            Some(data_handle) => {
-                let size = data_handle.file_size() as u64;
-                let data_stream = match data_handle.reader_stream().await {
+        let hash = path.into_inner().hash;
+        match context.store.get_installinator_artifact(hash) {
+            Some(handle) => {
+                let size = handle.artifact().length;
+                let data_stream = match handle.stream().await {
                     Ok(stream) => stream,
                     Err(err) => {
                         error!(

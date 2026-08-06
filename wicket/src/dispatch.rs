@@ -10,7 +10,10 @@ use std::process::ExitCode;
 use anyhow::{Context, Result, bail};
 use camino::{Utf8Path, Utf8PathBuf};
 use clap::Parser;
-use omicron_common::{FileKv, address::WICKETD_PORT};
+use omicron_common::{
+    FileKv,
+    address::{WICKETD_COMMISSION_PORT, WICKETD_PORT},
+};
 use slog::Drain;
 
 use crate::{
@@ -21,6 +24,8 @@ use crate::{
 pub fn exec() -> Result<ExitCode> {
     let wicketd_addr =
         SocketAddrV6::new(Ipv6Addr::LOCALHOST, WICKETD_PORT, 0, 0);
+    let commission_addr =
+        SocketAddrV6::new(Ipv6Addr::LOCALHOST, WICKETD_COMMISSION_PORT, 0, 0);
 
     // SSH_ORIGINAL_COMMAND contains additional arguments, if any.
     match std::env::var("SSH_ORIGINAL_COMMAND") {
@@ -41,7 +46,7 @@ pub fn exec() -> Result<ExitCode> {
             // Do not expose log messages via standard error since they'll show up
             // on top of the TUI.
             let log = setup_log(&log_path()?, WithStderr::No)?;
-            Runner::new(log, wicketd_addr).run()?;
+            Runner::new(log, wicketd_addr, commission_addr).run()?;
             Ok(ExitCode::SUCCESS)
         }
     }
