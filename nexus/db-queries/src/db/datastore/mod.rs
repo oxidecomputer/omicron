@@ -96,6 +96,7 @@ mod ereport;
 mod external_ip;
 mod external_subnet;
 pub mod fm;
+mod fm_config;
 mod fm_rendezvous_gc;
 mod identity_provider;
 mod image;

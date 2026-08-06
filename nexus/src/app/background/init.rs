@@ -107,6 +107,7 @@ use super::tasks::dns_servers;
 use super::tasks::ereport_ingester;
 use super::tasks::external_endpoints;
 use super::tasks::fm_analysis::{self, FmAnalysis};
+use super::tasks::fm_config_load;
 use super::tasks::fm_rendezvous::FmRendezvous;
 use super::tasks::fm_sitrep_gc;
 use super::tasks::fm_sitrep_history_pruner;
@@ -268,6 +269,7 @@ impl BackgroundTasksInitializer {
             task_sp_ereport_ingester: Activator::new(),
             task_reconfigurator_config_loader: Activator::new(),
             task_fm_analysis: Activator::new(),
+            task_fm_config_loader: Activator::new(),
             task_fm_sitrep_loader: Activator::new(),
             task_fm_sitrep_gc: Activator::new(),
             task_fm_sitrep_history_pruner: Activator::new(),
@@ -361,6 +363,7 @@ impl BackgroundTasksInitializer {
             task_sp_ereport_ingester,
             task_reconfigurator_config_loader,
             task_fm_analysis,
+            task_fm_config_loader,
             task_fm_sitrep_loader,
             task_fm_sitrep_gc,
             task_fm_sitrep_history_pruner,
@@ -1096,6 +1099,21 @@ impl BackgroundTasksInitializer {
             activator: task_sp_ereport_ingester,
         });
 
+        // Background task: fault management config loader
+        let fm_config_loader =
+            fm_config_load::FmConfigLoader::new(datastore.clone());
+        let fm_config_watcher = fm_config_loader.watcher();
+        driver.register(TaskDefinition {
+            name: "fm_config_loader",
+            description: "loads the current fault management configuration \
+                 from the database",
+            period: config.fm.config_load_period_secs,
+            task_impl: Box::new(fm_config_loader),
+            opctx: opctx.child(BTreeMap::new()),
+            watchers: vec![],
+            activator: task_fm_config_loader,
+        });
+
         let sitrep_loader = fm_sitrep_load::SitrepLoader::new(
             datastore.clone(),
             args.sitrep_load_tx,
@@ -1117,6 +1135,7 @@ impl BackgroundTasksInitializer {
             datastore.clone(),
             sitrep_watcher.clone(),
             inventory_load_watcher.clone(),
+            fm_config_watcher.clone(),
             fm_analysis::Activators {
                 inventory_loader: task_inventory_loader.clone(),
                 sitrep_loader: task_fm_sitrep_loader.clone(),
@@ -1124,7 +1143,6 @@ impl BackgroundTasksInitializer {
                 sitrep_history_pruner: task_fm_sitrep_history_pruner.clone(),
             },
             nexus_id,
-            config.fm.analysis_enabled,
         );
         driver.register(TaskDefinition {
             name: "fm_analysis",
@@ -1136,6 +1154,7 @@ impl BackgroundTasksInitializer {
             watchers: vec![
                 Box::new(sitrep_watcher.clone()),
                 Box::new(inventory_load_watcher.clone()),
+                Box::new(fm_config_watcher.clone()),
             ],
             activator: task_fm_analysis,
         });
@@ -1171,10 +1190,13 @@ impl BackgroundTasksInitializer {
                     // The pruner pokes the GC task whenever it orphans some
                     // sitreps for it to delete.
                     task_fm_sitrep_gc.clone(),
+                    fm_config_watcher.clone(),
                 ),
             ),
             opctx: opctx.child(BTreeMap::new()),
-            watchers: vec![],
+            watchers: vec![
+                Box::new(fm_config_watcher),
+            ],
             activator: task_fm_sitrep_history_pruner,
         });
 
