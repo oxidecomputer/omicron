@@ -8255,6 +8255,7 @@ dependencies = [
  "newtype_derive",
  "nexus-types-versions",
  "omicron-common",
+ "omicron-git-version",
  "omicron-passwords",
  "omicron-test-utils",
  "omicron-uuid-kinds",

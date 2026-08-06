@@ -8,7 +8,9 @@
 use crate::DbTypedUuid;
 use anyhow::Context;
 use nexus_db_schema::schema::fm_sitrep_analysis_report;
-use nexus_types::fm::analysis_reports::{AnalysisReport, InputReport};
+use nexus_types::fm::analysis_reports::{
+    AnalysisReport, InputReport, UnparsedSitrepReport,
+};
 use omicron_uuid_kinds::SitrepKind;
 
 #[derive(Queryable, Insertable, Clone, Debug, Selectable)]
@@ -40,5 +42,23 @@ impl SitrepAnalysisReport {
         let git_commit = omicron_git_version::GitVersion::current().to_string();
 
         Ok(Self { sitrep_id, git_commit, input_report, analysis_report })
+    }
+}
+
+impl From<SitrepAnalysisReport> for UnparsedSitrepReport {
+    fn from(report: SitrepAnalysisReport) -> Self {
+        let SitrepAnalysisReport {
+            sitrep_id: _,
+            git_commit,
+            input_report,
+            analysis_report,
+        } = report;
+        Self {
+            git_commit: git_commit
+                .parse()
+                .expect("GitVersion::from_str is infallible"),
+            input_report,
+            analysis_report,
+        }
     }
 }

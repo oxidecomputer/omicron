@@ -10,6 +10,7 @@ use futures::FutureExt;
 use nexus_types::internal_api::background::SupportBundleCollectionStep;
 
 mod ereports;
+mod fm;
 mod host_info;
 mod metadata;
 mod reconfigurator;
