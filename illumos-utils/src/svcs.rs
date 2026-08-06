@@ -101,7 +101,9 @@ impl SvcsResult {
                         | SvcState::Disabled
                         | SvcState::Offline
                         | SvcState::Online
-                        | SvcState::Uninitialized => {
+                        | SvcState::Uninitialized
+                        | SvcState::InTransition
+                        | SvcState::Unrecognized => {
                             let fmri = if let Some(fmri) = svc.next() {
                                 fmri.to_string()
                             } else {
@@ -166,6 +168,9 @@ impl SvcsResult {
                     SvcState::Maintenance => {
                         SvcEnabledNotOnlineState::Maintenance
                     }
+                    SvcState::Unrecognized => {
+                        SvcEnabledNotOnlineState::Unrecognized
+                    }
                     // `legacy_run` is excluded here because this state doesn't
                     // really say anything about whether a service is running or
                     // not. It just states that this is a service that isn't
@@ -176,10 +181,16 @@ impl SvcsResult {
                     // returns, so we exclude it as well.
                     // More detail in
                     // https://github.com/oxidecomputer/omicron/issues/10316
+                    //
+                    // `InTransition` (or state with '*' appended as represented
+                    // in svcs)  is excluded because it is a momentary state
+                    // while a service moves between two states, not a stable
+                    // "enabled not online" condition worth reporting.
                     SvcState::Online
                     | SvcState::Uninitialized
                     | SvcState::Disabled
-                    | SvcState::LegacyRun => return None,
+                    | SvcState::LegacyRun
+                    | SvcState::InTransition => return None,
                 };
                 Some(SvcEnabledNotOnline {
                     fmri: svc.fmri,

@@ -1055,6 +1055,7 @@ impl From<SvcEnabledNotOnlineState> for SvcState {
             SvcEnabledNotOnlineState::Degraded => Self::Degraded,
             SvcEnabledNotOnlineState::Maintenance => Self::Maintenance,
             SvcEnabledNotOnlineState::Offline => Self::Offline,
+            SvcEnabledNotOnlineState::Unrecognized => Self::Unrecognized,
         }
     }
 }
@@ -1069,6 +1070,8 @@ impl fmt::Display for SvcState {
             SvcState::Maintenance => "maintenance",
             SvcState::Disabled => "disabled",
             SvcState::LegacyRun => "legacy_run",
+            SvcState::InTransition => "in_transition",
+            SvcState::Unrecognized => "unrecognized",
         };
 
         write!(f, "{state}")
@@ -1081,6 +1084,7 @@ impl fmt::Display for SvcEnabledNotOnlineState {
             SvcEnabledNotOnlineState::Offline => "offline",
             SvcEnabledNotOnlineState::Degraded => "degraded",
             SvcEnabledNotOnlineState::Maintenance => "maintenance",
+            SvcEnabledNotOnlineState::Unrecognized => "unrecognized",
         };
 
         write!(f, "{state}")
