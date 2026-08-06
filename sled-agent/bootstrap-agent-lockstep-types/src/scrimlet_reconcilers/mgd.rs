@@ -11,7 +11,7 @@ use std::collections::BTreeSet;
 use std::net::IpAddr;
 
 /// Description of a failure to perform some mgd operation on a BFD peer.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct MgdBfdOperationFailure {
     pub peer: IpAddr,
     pub error: String,
@@ -24,15 +24,8 @@ pub enum MgdBfdReconcilerStatus {
     /// BFD peers from mgd.
     FailedReadingBfdPeers(String),
 
-    /// Reconciliation completed successfully.
-    Success {
-        unchanged: BTreeSet<IpAddr>,
-        remove_success: Vec<IpAddr>,
-        add_success: Vec<IpAddr>,
-    },
-
-    /// Reconciliation completed but had at least one failure.
-    PartialSuccess {
+    /// Reconciliation completed.
+    Complete {
         unchanged: BTreeSet<IpAddr>,
         remove_success: Vec<IpAddr>,
         remove_failure: Vec<MgdBfdOperationFailure>,
@@ -52,19 +45,7 @@ impl slog::KV for MgdBfdReconcilerStatus {
             Self::FailedReadingBfdPeers(reason) => {
                 serializer.emit_str(skipped_key.into(), reason)
             }
-            Self::Success { unchanged, remove_success, add_success } => {
-                for (key, val) in [
-                    ("bfd-unchanged", unchanged.len()),
-                    ("bfd-successfully-removed", remove_success.len()),
-                    ("bfd-failed-to-remove", 0),
-                    ("bfd-successfully-added", add_success.len()),
-                    ("bfd-failed-to-add", 0),
-                ] {
-                    serializer.emit_usize(key.into(), val)?;
-                }
-                Ok(())
-            }
-            Self::PartialSuccess {
+            Self::Complete {
                 unchanged,
                 remove_success,
                 remove_failure,
