@@ -25,7 +25,7 @@ use sled_agent_types_versions::latest::multicast::{
 };
 use sled_agent_types_versions::{
     latest, v1, v4, v6, v7, v9, v10, v11, v12, v14, v16, v17, v18, v20, v22,
-    v24, v25, v26, v28, v29, v30, v31, v32, v33, v34, v37, v39, v40, v42,
+    v24, v25, v26, v28, v29, v30, v31, v32, v33, v34, v37, v39, v40, v41, v42,
 };
 use sled_diagnostics::SledDiagnosticsQueryOutput;
 use slog_error_chain::InlineErrorChain;
@@ -42,8 +42,9 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
-    (45, PROBE_MULTICAST_GROUPS),
-    (44, MCAST_M2P_FORWARDING),
+    (46, PROBE_MULTICAST_GROUPS),
+    (45, MCAST_M2P_FORWARDING),
+    (44, PROPOLIS_NVME_VWC),
     (43, INVENTORY_BASEBOARD_ID),
     (42, NON_EMPTY_UPLINK_PORTS),
     (41, ADD_INSTANCE_PRIMARY_NIC_MTU),
@@ -453,13 +454,27 @@ pub trait SledAgentApi {
         operation_id = "vmm_register",
         method = PUT,
         path = "/vmms/{propolis_id}",
-        versions = VERSION_ADD_INSTANCE_PRIMARY_NIC_MTU..
+        versions = VERSION_PROPOLIS_NVME_VWC..
     }]
     async fn vmm_register(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<latest::instance::VmmPathParam>,
         body: TypedBody<latest::instance::InstanceEnsureBody>,
     ) -> Result<HttpResponseOk<latest::instance::SledVmmState>, HttpError>;
+
+    #[endpoint {
+        operation_id = "vmm_register",
+        method = PUT,
+        path = "/vmms/{propolis_id}",
+        versions = VERSION_ADD_INSTANCE_PRIMARY_NIC_MTU..VERSION_PROPOLIS_NVME_VWC
+    }]
+    async fn vmm_register_v41(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::instance::VmmPathParam>,
+        body: TypedBody<v41::instance::InstanceEnsureBody>,
+    ) -> Result<HttpResponseOk<latest::instance::SledVmmState>, HttpError> {
+        Self::vmm_register(rqctx, path_params, body.map(Into::into)).await
+    }
 
     #[endpoint {
         operation_id = "vmm_register",
@@ -472,7 +487,7 @@ pub trait SledAgentApi {
         path_params: Path<latest::instance::VmmPathParam>,
         body: TypedBody<v32::instance::InstanceEnsureBody>,
     ) -> Result<HttpResponseOk<latest::instance::SledVmmState>, HttpError> {
-        Self::vmm_register(rqctx, path_params, body.map(Into::into)).await
+        Self::vmm_register_v41(rqctx, path_params, body.map(Into::into)).await
     }
 
     #[endpoint {

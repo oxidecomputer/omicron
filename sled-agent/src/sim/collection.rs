@@ -221,7 +221,12 @@ impl<S: Simulatable + 'static> SimCollection<S> {
     /// any further state changes for it.
     pub async fn sim_force_remove(&self, id: Uuid) {
         let mut objects = self.objects.lock().await;
-        let object = objects.remove(&id).unwrap();
+        // The object may already be gone if a poke completed its destroying
+        // transition before this call acquired the lock. In that case there
+        // is nothing left to do.
+        let Some(object) = objects.remove(&id) else {
+            return;
+        };
         if let Some(mut tx) = object.channel_tx {
             tx.close_channel();
         }

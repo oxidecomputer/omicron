@@ -7767,6 +7767,10 @@
               }
             ]
           },
+          "has_write_cache": {
+            "description": "Control if the NVMe disk reports the presence of a volatile write cache.\n\nThis generally should be configured in consideration of the storage backend for the NVMe device. \"true\" is a safe default, and was historically the only configurable value. If the storage backend will not lose data once writes are accepted, even in the face of unplanned crashes or power loss (or, if you really want to lie to guests), setting this to \"false\" can advise guests they may skip issuing flushes to the device.",
+            "type": "boolean"
+          },
           "pci_path": {
             "description": "The PCI bus/device/function at which this disk should be attached.",
             "allOf": [
@@ -7789,6 +7793,7 @@
         },
         "required": [
           "backend_id",
+          "has_write_cache",
           "pci_path",
           "serial_number"
         ],
@@ -8890,7 +8895,7 @@
         ]
       },
       "ProbeCreate": {
-        "description": "Parameters used to create a probe.\n\nExtends [`v10::probes::ProbeCreate`] with `multicast_groups` so the probe's OPTE port can be subscribed to multicast groups during probe zone provisioning.\n\nEmpty groups (the default) preserve pre-version behavior. Each entry carries a `group_ip` and an optional source filter (for SSM), matching the instance multicast join.",
+        "description": "Parameters used to create a probe.",
         "type": "object",
         "properties": {
           "external_ips": {
@@ -8915,14 +8920,6 @@
                 "$ref": "#/components/schemas/NetworkInterface"
               }
             ]
-          },
-          "multicast_groups": {
-            "description": "Multicast groups the probe's OPTE port should subscribe to.",
-            "default": [],
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/InstanceMulticastMembership"
-            }
           }
         },
         "required": [

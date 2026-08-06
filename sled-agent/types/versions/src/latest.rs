@@ -93,15 +93,15 @@ pub mod firewall_rules {
 }
 
 pub mod multicast {
-    pub use crate::v44::multicast::ClearMcast2Phys;
-    pub use crate::v44::multicast::ClearMcastForwarding;
-    pub use crate::v44::multicast::Mcast2PhysMapping;
-    pub use crate::v44::multicast::McastFilterMode;
-    pub use crate::v44::multicast::McastForwardingEntry;
-    pub use crate::v44::multicast::McastForwardingNextHop;
-    pub use crate::v44::multicast::McastReplication;
-    pub use crate::v44::multicast::McastSourceFilter;
-    pub use crate::v44::multicast::MulticastGroupCfg;
+    pub use crate::v45::multicast::ClearMcast2Phys;
+    pub use crate::v45::multicast::ClearMcastForwarding;
+    pub use crate::v45::multicast::Mcast2PhysMapping;
+    pub use crate::v45::multicast::McastFilterMode;
+    pub use crate::v45::multicast::McastForwardingEntry;
+    pub use crate::v45::multicast::McastForwardingNextHop;
+    pub use crate::v45::multicast::McastReplication;
+    pub use crate::v45::multicast::McastSourceFilter;
+    pub use crate::v45::multicast::MulticastGroupCfg;
 }
 
 pub mod instance {
@@ -126,15 +126,15 @@ pub mod instance {
     pub use crate::v7::instance::InstanceMulticastBody;
     pub use crate::v7::instance::InstanceMulticastMembership;
 
-    pub use crate::v29::instance::VmmSpec;
-
     pub use crate::v31::instance::ResolvedVpcFirewallRule;
     pub use crate::v32::instance::ExternalIpConfig;
     pub use crate::v32::instance::ExternalIps;
     pub use crate::v32::instance::ExternalIpv4Config;
     pub use crate::v32::instance::ExternalIpv6Config;
-    pub use crate::v41::instance::InstanceEnsureBody;
     pub use crate::v41::instance::InstanceSledLocalConfig;
+
+    pub use crate::v44::instance::InstanceEnsureBody;
+    pub use crate::v44::instance::VmmSpec;
 }
 
 pub mod inventory {
@@ -225,8 +225,8 @@ pub mod inventory {
 pub mod probes {
     pub use crate::v10::probes::ExternalIp;
     pub use crate::v10::probes::IpKind;
-    pub use crate::v45::probes::ProbeCreate;
-    pub use crate::v45::probes::ProbeSet;
+    pub use crate::v46::probes::ProbeCreate;
+    pub use crate::v46::probes::ProbeSet;
 }
 
 pub mod rot {
