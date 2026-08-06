@@ -703,20 +703,6 @@ task: "fm_analysis"
     =================================
     no changes from the current situation report (Some(..........<REDACTED_UUID>........... (sitrep)))
 
-    preparation report:
-      parent sitrep:        ..........<REDACTED_UUID>...........
-      inventory collection: ..........<REDACTED_UUID>...........
-      <FM_INPUT_INV_COMPARISON_REDACTED>
-      total known ereport restart IDs: 0
-      no new ereports since the parent sitrep
-      no cases copied forward
-
-      no in-service control plane disks
-
-    analysis report:
-      sitrep ID: ..........<REDACTED_UUID>...........
-      no analysis log
-      no cases changed in this analysis step
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
 
 task: "fm_config_loader"
@@ -1428,20 +1414,6 @@ task: "fm_analysis"
     =================================
     no changes from the current situation report (Some(..........<REDACTED_UUID>........... (sitrep)))
 
-    preparation report:
-      parent sitrep:        ..........<REDACTED_UUID>...........
-      inventory collection: ..........<REDACTED_UUID>...........
-      <FM_INPUT_INV_COMPARISON_REDACTED>
-      total known ereport restart IDs: 0
-      no new ereports since the parent sitrep
-      no cases copied forward
-
-      no in-service control plane disks
-
-    analysis report:
-      sitrep ID: ..........<REDACTED_UUID>...........
-      no analysis log
-      no cases changed in this analysis step
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
 
 task: "fm_config_loader"

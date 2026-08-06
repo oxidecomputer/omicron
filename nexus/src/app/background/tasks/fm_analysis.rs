@@ -1210,7 +1210,7 @@ mod tests {
             OmicronZoneUuid::new_v4(),
         );
 
-        let (input, prep, _report) = task
+        let (input, prep, report) = task
             .prepare_inputs(opctx, Some(parent), inv)
             .await
             .expect("input preparation should succeed");
@@ -1224,7 +1224,7 @@ mod tests {
         assert!(input.open_cases().contains_key(&open_case_id));
         assert_eq!(input.open_cases().len(), 1);
         assert_eq!(
-            prep.report.open_cases.keys().collect::<Vec<_>>(),
+            report.open_cases.keys().collect::<Vec<_>>(),
             vec![&open_case_id]
         );
 
@@ -1240,8 +1240,7 @@ mod tests {
         );
         // ...while the closed case with an unsatisfied alert request is
         // copied forward, with that request reported as outstanding.
-        let carried = prep
-            .report
+        let carried = report
             .closed_cases_copied_forward
             .get(&unsatisfied_case_id)
             .expect("unsatisfied closed case must be copied forward");
@@ -1250,7 +1249,7 @@ mod tests {
             BTreeSet::from([unsatisfied_alert_id])
         );
         assert!(carried.unmarked_ereports.is_empty());
-        assert_eq!(prep.report.closed_cases_copied_forward.len(), 1);
+        assert_eq!(report.closed_cases_copied_forward.len(), 1);
 
         db.terminate().await;
         logctx.cleanup_successful();
