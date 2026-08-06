@@ -41,7 +41,7 @@ use slog::warn;
 use slog_term::FullFormat;
 use slog_term::TermDecorator;
 use tokio::sync::Semaphore;
-use tufaceous_artifact_v2::OsVariant;
+use tufaceous_artifact::OsVariant;
 
 use crate::cmd::Command;
 use crate::job::Jobs;

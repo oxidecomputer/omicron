@@ -174,7 +174,13 @@ pub enum HostPhase2DesiredContents {
     /// Set the phase 2 slot to the given artifact.
     ///
     /// The artifact will come from an unpacked and distributed TUF repo.
-    Artifact { hash: ArtifactHash },
+    Artifact {
+        // Tufaceous v2 introduces a new JSON schema for `ArtifactHash` that is
+        // wire-compatible but perceived as different by drift. Continue using
+        // the old schema in this API version.
+        #[schemars(schema_with = "ArtifactHash::v1_json_schema")]
+        hash: ArtifactHash,
+    },
 }
 
 /// Describes the desired contents for both host phase 2 slots.
@@ -223,6 +229,10 @@ pub struct BootPartitionContents {
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]
 pub struct BootPartitionDetails {
     pub header: BootImageHeader,
+    // Tufaceous v2 introduces a new JSON schema for `ArtifactHash` that is
+    // wire-compatible but perceived as different by drift. Continue using the
+    // old schema in this API version.
+    #[schemars(schema_with = "ArtifactHash::v1_json_schema")]
     pub artifact_hash: ArtifactHash,
     pub artifact_size: usize,
 }
@@ -377,6 +387,10 @@ pub struct ZoneArtifactInventory {
     pub expected_size: u64,
 
     /// The expected digest of the file's contents.
+    // Tufaceous v2 introduces a new JSON schema for `ArtifactHash` that is
+    // wire-compatible but perceived as different by drift. Continue using the
+    // old schema in this API version.
+    #[schemars(schema_with = "ArtifactHash::v1_json_schema")]
     pub expected_hash: ArtifactHash,
 
     /// The status of the artifact.
@@ -540,7 +554,13 @@ pub enum OmicronZoneImageSource {
     ///
     /// This originates from TUF repos uploaded to Nexus which are then
     /// replicated out to all sleds.
-    Artifact { hash: ArtifactHash },
+    Artifact {
+        // Tufaceous v2 introduces a new JSON schema for `ArtifactHash` that is
+        // wire-compatible but perceived as different by drift. Continue using
+        // the old schema in this API version.
+        #[schemars(schema_with = "ArtifactHash::v1_json_schema")]
+        hash: ArtifactHash,
+    },
 }
 
 impl OmicronZoneImageSource {

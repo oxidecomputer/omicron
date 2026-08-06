@@ -576,6 +576,16 @@ async fn run_one_proptest_input(
     assert!(unnumbered_peers_to_create.is_empty());
 }
 
+// DISABLED TEMPORARILY.
+//
+// `proptest_full_reconciliation()` is regularly hitting a bug in mgd:
+// <https://github.com/oxidecomputer/maghemite/issues/867>. This is causing
+// pretty frequent test flake failures in omicron's CI
+// (<https://github.com/oxidecomputer/omicron/issues/10959>), so `#[ignore]`
+// this test.
+//
+// This should be removed once a fix for maghemite#867 is pulled into omicron.
+#[ignore]
 #[tokio::test(flavor = "multi_thread")]
 async fn proptest_full_reconciliation() {
     let logctx =

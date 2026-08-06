@@ -93,8 +93,10 @@ pub mod v41;
 pub mod v42;
 #[path = "inventory_baseboard_id/mod.rs"]
 pub mod v43;
-#[path = "mcast_m2p_forwarding/mod.rs"]
+#[path = "propolis_nvme_vwc/mod.rs"]
 pub mod v44;
+#[path = "mcast_m2p_forwarding/mod.rs"]
+pub mod v45;
 #[path = "add_probe_put_endpoint/mod.rs"]
 pub mod v6;
 #[path = "multicast_support/mod.rs"]

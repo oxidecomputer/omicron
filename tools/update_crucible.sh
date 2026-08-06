@@ -29,7 +29,6 @@ CRATES=(
   "crucible-agent-client"
   "crucible-pantry-client"
   "crucible-smf"
-  "crucible-common"
 )
 
 REPO="oxidecomputer/crucible"
