@@ -14,7 +14,7 @@
 
 mod cache;
 pub mod collection;
-pub mod perfetto;
+pub use perfetto_trace as perfetto;
 mod step;
 mod steps;
 pub mod zip;

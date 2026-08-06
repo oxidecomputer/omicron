@@ -30,6 +30,7 @@ nexus-types.workspace = true
 omicron-common.workspace = true
 omicron-uuid-kinds.workspace = true
 parallel-task-set.workspace = true
+perfetto-trace.workspace = true
 # See omicron-rpaths for more about the "pq-sys" dependency.
 pq-sys = "*"
 serde.workspace = true

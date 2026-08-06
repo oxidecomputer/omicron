@@ -144,6 +144,7 @@ members = [
     "package",
     "parallel-task-set",
     "passwords",
+    "perfetto-trace",
     "range-requests",
     "rpaths",
     "sled-agent",
@@ -339,6 +340,7 @@ default-members = [
     "package",
     "parallel-task-set",
     "passwords",
+    "perfetto-trace",
     "range-requests",
     "rpaths",
     "sled-agent",
@@ -728,6 +730,7 @@ partial-io = { version = "0.5.4", features = ["proptest1", "tokio1"] }
 parse-size = "1.1.0"
 paste = "1.0.15"
 percent-encoding = "2.3.1"
+perfetto-trace = { path = "perfetto-trace" }
 peg = "0.8.5"
 pem = "3.0"
 # petname's default features pull in clap for CLI parsing, which we don't need.
