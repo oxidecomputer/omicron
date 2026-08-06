@@ -1653,38 +1653,67 @@ impl DataStore {
 
         #[derive(Debug)]
         enum DeleteError {
-            IpPoolsExist,
-            IpAddressesExist,
+            RoutesExist,
         }
 
         self.transaction_retry_wrapper("vpc_delete_internet_gateway_no_cascade")
             .transaction(&conn, |conn| {
                 let err = err.clone();
                 async move {
+                    // Load gateway so we can get the vpc
+                    use nexus_db_schema::schema::internet_gateway::dsl as igw;
+                    let igw_info = igw::internet_gateway
+                        .filter(igw::time_deleted.is_null())
+                        .filter(igw::id.eq(authz_igw.id()))
+                        .select(InternetGateway::as_select())
+                        .first_async(&conn)
+                        .await?;
+
+                    // Get the vpc's routers
+                    use nexus_db_schema::schema::vpc_router::dsl as vr;
+                    let vpc_routers = vr::vpc_router
+                        .filter(vr::time_deleted.is_null())
+                        .filter(vr::vpc_id.eq(igw_info.vpc_id))
+                        .select(vr::id)
+                        .load_async::<Uuid>(&conn)
+                        .await?;
+
+                    // Check route associations
+                    use nexus_db_schema::schema::router_route::dsl as rr;
+                    let has_routes = rr::router_route
+                        .filter(rr::time_deleted.is_null())
+                        .filter(rr::vpc_router_id.eq_any(vpc_routers))
+                        .filter(rr::target.eq(format!("inetgw:{}", igw_info.name())))
+                        .select(rr::id)
+                        .first_async::<Uuid>(&conn)
+                        .await
+                        .optional()?
+                        .is_some();
+                    if has_routes {
+                        return Err(err.bail(DeleteError::RoutesExist));
+                    }
+
                     // Delete ip pool associations
                     use nexus_db_schema::schema::internet_gateway_ip_pool::dsl as pool;
-                    let count = pool::internet_gateway_ip_pool
+                    let now = Utc::now();
+                    diesel::update(pool::internet_gateway_ip_pool)
                         .filter(pool::time_deleted.is_null())
                         .filter(pool::internet_gateway_id.eq(authz_igw.id()))
-                        .count()
-                        .first_async::<i64>(&conn)
+                        .set(pool::time_deleted.eq(now))
+                        .execute_async(&conn)
                         .await?;
-                    if count > 0 {
-                        return Err(err.bail(DeleteError::IpPoolsExist));
-                    }
 
                     // Delete ip address associations
                     use nexus_db_schema::schema::internet_gateway_ip_address::dsl as addr;
-                    let count = addr::internet_gateway_ip_address
+                    let now = Utc::now();
+                    diesel::update(addr::internet_gateway_ip_address)
                         .filter(addr::time_deleted.is_null())
                         .filter(addr::internet_gateway_id.eq(authz_igw.id()))
-                        .count()
-                        .first_async::<i64>(&conn)
+                        .set(addr::time_deleted.eq(now))
+                        .execute_async(&conn)
                         .await?;
-                    if count > 0 {
-                        return Err(err.bail(DeleteError::IpAddressesExist));
-                    }
 
+                    // Delete internet gateway
                     use nexus_db_schema::schema::internet_gateway::dsl;
                     let now = Utc::now();
                     diesel::update(dsl::internet_gateway)
@@ -1701,8 +1730,7 @@ impl DataStore {
             .map_err(|e| {
                 if let Some(err) = err.take() {
                     match err {
-                        DeleteError::IpPoolsExist => Error::invalid_request("Ip pools referencing this gateway exist. To perform a cascading delete set the cascade option"),
-                        DeleteError::IpAddressesExist => Error::invalid_request("Ip addresses referencing this gateway exist. To perform a cascading delete set the cascade option"),
+                        DeleteError::RoutesExist => Error::invalid_request("Routes referencing this gateway exist. To perform a cascading delete set the cascade option"),
                     }
                 } else {
                     public_error_from_diesel(e, ErrorHandler::Server)

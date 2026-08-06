@@ -4,6 +4,7 @@
 
 use dropshot::{ResultsPage, test_util::ClientTestContext};
 use http::{Method, StatusCode};
+use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
 use nexus_test_utils::{
     http_testing::{AuthnMode, NexusRequest},
@@ -44,6 +45,7 @@ use omicron_common::{
         IdentityMetadataCreateParams, NameOrId, RouteDestination, RouteTarget,
     },
 };
+use uuid::Uuid;
 
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
@@ -107,7 +109,8 @@ async fn test_internet_gateway_basic_crud(ctx: &ControlPlaneTestContext) {
             .await;
     assert_eq!(igw_pools.len(), 1, "should now have one attached ip pool");
 
-    // ensure we cannot delete the IP gateway without cascading
+    // ensure we cannot delete the gateway without cascading while a route
+    // (created in test_setup) still targets it
     expect_igw_delete_fail(c, PROJECT_NAME, VPC_NAME, IGW_NAME, false).await;
 
     // ensure we cannot detach the igw ip pool without cascading
@@ -171,7 +174,11 @@ async fn test_internet_gateway_basic_crud(ctx: &ControlPlaneTestContext) {
         "should now have zero attached ip addresses"
     );
 
-    // delete internet gateay
+    // remove the route targeting this gateway so a non-cascading delete is
+    // permitted (a route referencing an igw blocks a no-cascade delete)
+    delete_route(c, PROJECT_NAME, VPC_NAME, ROUTER_NAME, ROUTE_NAME).await;
+
+    // delete internet gateway
     delete_internet_gateway(c, PROJECT_NAME, VPC_NAME, IGW_NAME, false).await;
     let igws = list_internet_gateways(c, PROJECT_NAME, VPC_NAME).await;
     assert_eq!(igws.len(), 1, "should now just have default gateway");
@@ -268,6 +275,77 @@ async fn test_internet_gateway_delete_cascade(ctx: &ControlPlaneTestContext) {
     expect_igw_pools_not_found(c, PROJECT_NAME, VPC_NAME, IGW_NAME).await;
     // looking for gateway addresses should return 404
     expect_igw_addresses_not_found(c, PROJECT_NAME, VPC_NAME, IGW_NAME).await;
+}
+
+// A non-cascading delete must fail when a route still targets the gateway,
+// rather than silently leaving a dangling route reference behind.
+#[nexus_test]
+async fn test_internet_gateway_delete_no_cascade_fails_with_routes(
+    ctx: &ControlPlaneTestContext,
+) {
+    let c = &ctx.external_client;
+    test_setup(c).await;
+
+    // test_setup already created a route targeting IGW_NAME; create the gateway
+    // it points at. Note the gateway has no ip pool / address attachments, so
+    // the only thing blocking a no-cascade delete is the route.
+    create_internet_gateway(c, PROJECT_NAME, VPC_NAME, IGW_NAME).await;
+
+    // a route references this gateway, so a non-cascading delete must fail
+    expect_igw_delete_fail(c, PROJECT_NAME, VPC_NAME, IGW_NAME, false).await;
+
+    // the gateway should still be there
+    let igws = list_internet_gateways(c, PROJECT_NAME, VPC_NAME).await;
+    assert_eq!(igws.len(), 2, "gateway should survive the failed delete");
+}
+
+// A non-cascading delete should succeed when no routes target the gateway, and
+// should soft-delete the gateway's ip pool / address attachments as it goes
+// rather than leave them dangling against a deleted gateway.
+#[nexus_test]
+async fn test_internet_gateway_delete_no_cascade_removes_associations(
+    ctx: &ControlPlaneTestContext,
+) {
+    let c = &ctx.external_client;
+    let datastore = ctx.server.server_context().nexus.datastore();
+    test_setup(c).await;
+
+    let gw = create_internet_gateway(c, PROJECT_NAME, VPC_NAME, IGW_NAME).await;
+    attach_ip_pool_to_igw(
+        c,
+        PROJECT_NAME,
+        VPC_NAME,
+        IGW_NAME,
+        IP_POOL_NAME,
+        IP_POOL_ATTACHMENT_NAME,
+    )
+    .await;
+    attach_ip_address_to_igw(
+        c,
+        PROJECT_NAME,
+        VPC_NAME,
+        IGW_NAME,
+        IP_ADDRESS_ATTACHMENT.parse().unwrap(),
+        IP_ADDRESS_ATTACHMENT_NAME,
+    )
+    .await;
+
+    // Remove the route test_setup created targeting this gateway so the
+    // non-cascading delete isn't blocked; it should then succeed and take the
+    // pool / address attachments with it.
+    delete_route(c, PROJECT_NAME, VPC_NAME, ROUTER_NAME, ROUTE_NAME).await;
+
+    delete_internet_gateway(c, PROJECT_NAME, VPC_NAME, IGW_NAME, false).await;
+
+    let igws = list_internet_gateways(c, PROJECT_NAME, VPC_NAME).await;
+    assert_eq!(igws.len(), 1, "should now just have default gateway");
+
+    // The external API can't see the attachments once the gateway is gone (the
+    // list endpoints 404 on the missing gateway before ever looking at the
+    // association rows), so a "not found" check here would pass even if the rows
+    // were merely orphaned. Check the datastore directly that no *live*
+    // association rows remain for this gateway id.
+    assert_no_live_igw_associations(datastore, gw.identity.id).await;
 }
 
 #[nexus_test]
@@ -735,6 +813,62 @@ async fn list_internet_gateway_ip_addresses(
     let out =
         objects_list_page_authz::<InternetGatewayIpAddress>(client, &url).await;
     out.items
+}
+
+// Assert, at the datastore layer, that no *live* ip pool / address association
+// rows remain for a (now deleted) internet gateway. The external API can't see
+// these once the gateway is gone, so this is the only way to distinguish
+// "soft-deleted along with the gateway" from "orphaned with time_deleted still
+// NULL".
+async fn assert_no_live_igw_associations(datastore: &DataStore, igw_id: Uuid) {
+    let conn = datastore.pool_connection_for_tests().await.unwrap();
+    use async_bb8_diesel::AsyncRunQueryDsl;
+    use diesel::ExpressionMethods;
+    use diesel::QueryDsl;
+
+    use nexus_db_schema::schema::internet_gateway_ip_pool::dsl as pool_dsl;
+    let live_pools: i64 = pool_dsl::internet_gateway_ip_pool
+        .filter(pool_dsl::internet_gateway_id.eq(igw_id))
+        .filter(pool_dsl::time_deleted.is_null())
+        .count()
+        .first_async::<i64>(&*conn)
+        .await
+        .unwrap();
+    assert_eq!(
+        live_pools, 0,
+        "ip pool associations should be soft-deleted along with the gateway",
+    );
+
+    use nexus_db_schema::schema::internet_gateway_ip_address::dsl as addr_dsl;
+    let live_addrs: i64 = addr_dsl::internet_gateway_ip_address
+        .filter(addr_dsl::internet_gateway_id.eq(igw_id))
+        .filter(addr_dsl::time_deleted.is_null())
+        .count()
+        .first_async::<i64>(&*conn)
+        .await
+        .unwrap();
+    assert_eq!(
+        live_addrs, 0,
+        "ip address associations should be soft-deleted along with the gateway",
+    );
+}
+
+async fn delete_route(
+    client: &ClientTestContext,
+    project_name: &str,
+    vpc_name: &str,
+    router_name: &str,
+    route_name: &str,
+) {
+    let url = format!(
+        "/v1/vpc-router-routes/{}?project={}&vpc={}&router={}",
+        route_name, project_name, vpc_name, router_name,
+    );
+    NexusRequest::object_delete(client, &url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap();
 }
 
 async fn expect_igw_not_found(
