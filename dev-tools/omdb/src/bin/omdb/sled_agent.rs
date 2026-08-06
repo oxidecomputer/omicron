@@ -426,6 +426,7 @@ fn print_trust_quorum_status(status: NodeStatus) {
     println!("proxied requests: {}", status.proxied_requests);
 }
 
+/// Runs `omdb sled-agent network-config reconciler-status`
 async fn cmd_network_config_reconciler_status(
     client: &bootstrap_agent_lockstep_client::Client,
 ) -> anyhow::Result<()> {

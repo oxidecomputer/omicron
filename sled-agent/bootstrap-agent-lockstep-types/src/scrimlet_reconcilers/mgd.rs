@@ -83,57 +83,16 @@ impl fmt::Display for MgdBfdReconcilerStatusDisplay<'_> {
     fn fmt(&self, mut f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.0 {
             MgdBfdReconcilerStatus::FailedReadingBfdPeers(err) => {
-                writeln!(f, "failed to read current bfd peers: {err}")
+                write!(f, "failed to read current bfd peers: {err}")
             }
-            MgdBfdReconcilerStatus::Success {
-                unchanged,
-                remove_success,
-                add_success,
-            } => {
-                writeln!(f, "reconciliation succeeded")?;
-                if !unchanged.is_empty() {
-                    writeln!(
-                        f,
-                        "peers unchanged: {}",
-                        unchanged
-                            .iter()
-                            .map(|ip| ip.to_string())
-                            .collect::<Vec<_>>()
-                            .join(", ")
-                    )?;
-                }
-                if !add_success.is_empty() {
-                    writeln!(
-                        f,
-                        "peers added: {}",
-                        add_success
-                            .iter()
-                            .map(|ip| ip.to_string())
-                            .collect::<Vec<_>>()
-                            .join(", ")
-                    )?;
-                }
-                if !remove_success.is_empty() {
-                    writeln!(
-                        f,
-                        "peers removed: {}",
-                        remove_success
-                            .iter()
-                            .map(|ip| ip.to_string())
-                            .collect::<Vec<_>>()
-                            .join(", ")
-                    )?;
-                }
-                Ok(())
-            }
-            MgdBfdReconcilerStatus::PartialSuccess {
+            MgdBfdReconcilerStatus::Complete {
                 unchanged,
                 remove_success,
                 remove_failure,
                 add_success,
                 add_failure,
             } => {
-                writeln!(f, "reconciliation FAILED")?;
+                writeln!(f, "reconciliation completed")?;
                 if !unchanged.is_empty() {
                     writeln!(
                         f,
@@ -178,12 +137,20 @@ impl fmt::Display for MgdBfdReconcilerStatusDisplay<'_> {
                     }
                 }
                 if add_failure.is_empty() {
-                    writeln!(f, "add failures: none")?;
+                    write!(f, "add failures: none")?;
                 } else {
                     writeln!(f, "add failures:")?;
                     let mut f = IndentWriter::new("    ", &mut f);
-                    for MgdBfdOperationFailure { peer, error } in add_failure {
-                        writeln!(f, "* {peer}: {error}")?;
+                    let mut add_failure = add_failure.iter().peekable();
+                    while let Some(MgdBfdOperationFailure { peer, error }) =
+                        add_failure.next()
+                    {
+                        let s = format_args!("* {peer}: {error}");
+                        if add_failure.peek().is_some() {
+                            writeln!(f, "{s}")?;
+                        } else {
+                            write!(f, "{s}")?;
+                        }
                     }
                 }
                 Ok(())
@@ -316,7 +283,7 @@ impl fmt::Display for MgdBgpReconcilerStatusOpCountDisplay<'_> {
             unnumbered_peers_updated,
             unnumbered_peers_created,
         } = self.0;
-        for (name, created, updated, deleted) in [
+        let lines = [
             ("routers", routers_created, routers_updated, routers_deleted),
             ("origin4", origin4_created, origin4_updated, origin4_deleted),
             ("origin6", origin6_created, origin6_updated, origin6_deleted),
@@ -334,12 +301,18 @@ impl fmt::Display for MgdBgpReconcilerStatusOpCountDisplay<'_> {
                 unnumbered_peers_updated,
                 unnumbered_peers_deleted,
             ),
-        ] {
-            writeln!(
-                f,
+        ];
+        let mut lines = lines.iter().peekable();
+        while let Some((name, created, updated, deleted)) = lines.next() {
+            let s = format_args!(
                 "{name} created / updated / deleted: \
                  {created} / {updated} / {deleted}"
-            )?;
+            );
+            if lines.peek().is_some() {
+                writeln!(f, "{s}")?;
+            } else {
+                write!(f, "{s}")?;
+            }
         }
         Ok(())
     }
@@ -411,32 +384,33 @@ impl fmt::Display for MgdBgpReconcilerStatusDisplay<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.0 {
             MgdBgpReconcilerStatus::FailedReadingBgpConfig(err) => {
-                writeln!(f, "failed to read current bgp config: {err}")
+                write!(f, "failed to read current bgp config: {err}")
             }
             MgdBgpReconcilerStatus::FailedGeneratingDesiredConfig(err) => {
-                writeln!(f, "failed to generate desired bgp config: {err}")
+                write!(f, "failed to generate desired bgp config: {err}")
             }
-            MgdBgpReconcilerStatus::Success {
-                counts,
-                did_change_max_paths,
-            } => {
-                writeln!(f, "reconciliation succeeded")?;
-                writeln!(f, "did change max paths: {did_change_max_paths}")?;
-                write!(f, "{}", counts.display())?;
-                Ok(())
-            }
-            MgdBgpReconcilerStatus::PartialSuccess {
+            MgdBgpReconcilerStatus::Complete {
                 counts,
                 did_change_max_paths,
                 errors,
             } => {
-                writeln!(f, "reconciliation FAILED")?;
+                writeln!(f, "reconciliation completed")?;
                 writeln!(f, "did change max paths: {did_change_max_paths}")?;
-                write!(f, "{}", counts.display())?;
-                writeln!(f, "errors:")?;
-                let mut f = IndentWriter::new("    ", f);
-                for err in errors {
-                    writeln!(f, "* {err}")?;
+                writeln!(f, "{}", counts.display())?;
+                if errors.is_empty() {
+                    write!(f, "errors: none")?;
+                } else {
+                    writeln!(f, "errors:")?;
+                    let mut f = IndentWriter::new("    ", f);
+                    let mut errors = errors.iter().peekable();
+                    while let Some(err) = errors.next() {
+                        let s = format_args!("* {err}");
+                        if errors.peek().is_some() {
+                            writeln!(f, "{s}")?;
+                        } else {
+                            write!(f, "{s}")?;
+                        }
+                    }
                 }
                 Ok(())
             }
@@ -547,38 +521,19 @@ impl fmt::Display for MgdStaticRouteReconcilerStatusDisplay<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.0 {
             MgdStaticRouteReconcilerStatus::FailedReadingStaticRoutes(err) => {
-                writeln!(f, "failed to read current static routes: {err}")
+                write!(f, "failed to read current static routes: {err}")
             }
             MgdStaticRouteReconcilerStatus::FailedGeneratingPlan(err) => {
-                writeln!(f, "failed to generate reconciliation plan: {err}")
+                write!(f, "failed to generate reconciliation plan: {err}")
             }
-            MgdStaticRouteReconcilerStatus::Success {
-                unchanged,
-                deleted_v4,
-                deleted_v6,
-                added_v4,
-                added_v6,
-            } => {
-                writeln!(f, "reconciliation succeeded")?;
-                writeln!(f, "routes unchanged: {unchanged}")?;
-                writeln!(
-                    f,
-                    "v4 routes deleted / added: {deleted_v4} / {added_v4}"
-                )?;
-                writeln!(
-                    f,
-                    "v6 routes deleted / added: {deleted_v6} / {added_v6}"
-                )?;
-                Ok(())
-            }
-            MgdStaticRouteReconcilerStatus::PartialSuccess {
+            MgdStaticRouteReconcilerStatus::Complete {
                 unchanged,
                 delete_v4_result,
                 delete_v6_result,
                 add_v4_result,
                 add_v6_result,
             } => {
-                writeln!(f, "reconciliation FAILED")?;
+                writeln!(f, "reconciliation completed")?;
                 writeln!(f, "routes unchanged: {unchanged}")?;
 
                 if let (Ok(deleted), Ok(added)) =
@@ -610,7 +565,7 @@ impl fmt::Display for MgdStaticRouteReconcilerStatusDisplay<'_> {
                 if let (Ok(deleted), Ok(added)) =
                     (delete_v6_result, add_v6_result)
                 {
-                    writeln!(
+                    write!(
                         f,
                         "v6 routes deleted / added: {deleted} / {added}"
                     )?;
@@ -625,10 +580,10 @@ impl fmt::Display for MgdStaticRouteReconcilerStatusDisplay<'_> {
                     }
                     match add_v6_result {
                         Ok(n) => {
-                            writeln!(f, "v6 routes added: {n}")?;
+                            write!(f, "v6 routes added: {n}")?;
                         }
                         Err(err) => {
-                            writeln!(f, "failed to add v6 routes: {err}")?;
+                            write!(f, "failed to add v6 routes: {err}")?;
                         }
                     }
                 }
@@ -693,11 +648,10 @@ impl fmt::Display for MgdReconcilerStatusDisplay<'_> {
             bgp_status.display()
         )?;
         writeln!(f, "BFD:")?;
-        writeln!(
+        write!(
             IndentWriter::new("    ", &mut f),
             "{}",
             bfd_status.display()
-        )?;
-        Ok(())
+        )
     }
 }

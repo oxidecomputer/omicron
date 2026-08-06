@@ -56,26 +56,33 @@ impl fmt::Display for UplinkdReconcilerStatusDisplay<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.0 {
             UplinkdReconcilerStatus::Failed(reason) => {
-                writeln!(f, "reconciliation failed: {reason}")
+                write!(f, "reconciliation failed: {reason}")
             }
             UplinkdReconcilerStatus::SkippedConfigUpToDate => {
-                writeln!(f, "reconciliation skipped: config is up to date")
+                write!(f, "reconciliation skipped: config is up to date")
             }
             UplinkdReconcilerStatus::Reconciled { ports } => {
-                if ports.is_empty() {
-                    writeln!(f, "reconciliation skipped: no ports")
-                } else {
-                    writeln!(
-                        f,
-                        "successfully reconciled {} ports:",
-                        ports.len()
-                    )?;
+                let plural = if ports.len() == 1 { "" } else { "s" };
+                write!(
+                    f,
+                    "successfully reconciled {} port{plural}",
+                    ports.len()
+                )?;
+
+                if !ports.is_empty() {
+                    writeln!(f, ":")?;
                     let mut w = IndentWriter::new("    ", f);
-                    for (port, values) in ports.iter() {
-                        writeln!(w, "* {port}: {}", values.join(", "))?;
+                    let mut ports = ports.iter().peekable();
+                    while let Some((port, values)) = ports.next() {
+                        let s = format_args!("* {port}: {}", values.join(", "));
+                        if ports.peek().is_some() {
+                            writeln!(w, "{s}")?;
+                        } else {
+                            write!(w, "{s}")?;
+                        }
                     }
-                    Ok(())
                 }
+                Ok(())
             }
         }
     }

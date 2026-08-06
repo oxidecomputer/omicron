@@ -653,61 +653,13 @@
             ]
           },
           {
-            "description": "Reconciliation completed successfully.",
+            "description": "Reconciliation completed.",
             "type": "object",
             "properties": {
               "status": {
                 "type": "string",
                 "enum": [
-                  "success"
-                ]
-              },
-              "value": {
-                "type": "object",
-                "properties": {
-                  "created": {
-                    "description": "Map of zone NAT entries created.",
-                    "type": "object",
-                    "additionalProperties": {
-                      "$ref": "#/components/schemas/DpdNatReconcilerStatusNatEntry"
-                    }
-                  },
-                  "removed": {
-                    "description": "List of NAT entries removed.",
-                    "type": "array",
-                    "items": {
-                      "$ref": "#/components/schemas/DpdNatReconcilerStatusNatEntry"
-                    }
-                  },
-                  "unchanged": {
-                    "description": "Set of zone IDs whose NAT entries were already correct in `dpd` and left unchanged.",
-                    "type": "array",
-                    "items": {
-                      "$ref": "#/components/schemas/OmicronZoneUuid"
-                    },
-                    "uniqueItems": true
-                  }
-                },
-                "required": [
-                  "created",
-                  "removed",
-                  "unchanged"
-                ]
-              }
-            },
-            "required": [
-              "status",
-              "value"
-            ]
-          },
-          {
-            "description": "Reconciliation completed but had at least one failure.",
-            "type": "object",
-            "properties": {
-              "status": {
-                "type": "string",
-                "enum": [
-                  "partial_success"
+                  "complete"
                 ]
               },
               "value": {
@@ -862,60 +814,13 @@
             ]
           },
           {
-            "description": "Reconciliation completed successfully.",
+            "description": "Reconciliation completed.",
             "type": "object",
             "properties": {
               "status": {
                 "type": "string",
                 "enum": [
-                  "success"
-                ]
-              },
-              "value": {
-                "type": "object",
-                "properties": {
-                  "applied": {
-                    "type": "array",
-                    "items": {
-                      "type": "string"
-                    },
-                    "uniqueItems": true
-                  },
-                  "cleared": {
-                    "type": "array",
-                    "items": {
-                      "type": "string"
-                    },
-                    "uniqueItems": true
-                  },
-                  "unchanged": {
-                    "type": "array",
-                    "items": {
-                      "type": "string"
-                    },
-                    "uniqueItems": true
-                  }
-                },
-                "required": [
-                  "applied",
-                  "cleared",
-                  "unchanged"
-                ]
-              }
-            },
-            "required": [
-              "status",
-              "value"
-            ]
-          },
-          {
-            "description": "Reconciliation completed but had at least one failure.",
-            "type": "object",
-            "properties": {
-              "status": {
-                "type": "string",
-                "enum": [
-                  "partial_success"
+                  "complete"
                 ]
               },
               "value": {
@@ -1425,7 +1330,7 @@
       "MgdBfdReconcilerStatus": {
         "oneOf": [
           {
-            "description": "Reconciliation was skipped because we couldn't fetch the current set of BFD peers from mgd.",
+            "description": "Reconciliation failed because we couldn't fetch the current set of BFD peers from mgd.",
             "type": "object",
             "properties": {
               "status": {
@@ -1444,61 +1349,13 @@
             ]
           },
           {
-            "description": "Reconciliation completed successfully.",
-            "type": "object",
-            "properties": {
-              "status": {
-                "type": "string",
-                "enum": [
-                  "success"
-                ]
-              },
-              "value": {
-                "type": "object",
-                "properties": {
-                  "add_success": {
-                    "type": "array",
-                    "items": {
-                      "type": "string",
-                      "format": "ip"
-                    }
-                  },
-                  "remove_success": {
-                    "type": "array",
-                    "items": {
-                      "type": "string",
-                      "format": "ip"
-                    }
-                  },
-                  "unchanged": {
-                    "type": "array",
-                    "items": {
-                      "type": "string",
-                      "format": "ip"
-                    },
-                    "uniqueItems": true
-                  }
-                },
-                "required": [
-                  "add_success",
-                  "remove_success",
-                  "unchanged"
-                ]
-              }
-            },
-            "required": [
-              "status",
-              "value"
-            ]
-          },
-          {
             "description": "Reconciliation completed.",
             "type": "object",
             "properties": {
               "status": {
                 "type": "string",
                 "enum": [
-                  "partial_success"
+                  "complete"
                 ]
               },
               "value": {
@@ -1558,7 +1415,7 @@
       "MgdBgpReconcilerStatus": {
         "oneOf": [
           {
-            "description": "Reconciliation was skipped because we couldn't fetch the current BGP configuration from MGD.",
+            "description": "Reconciliation failed because we couldn't fetch the current BGP configuration from MGD.",
             "type": "object",
             "properties": {
               "status": {
@@ -1577,7 +1434,7 @@
             ]
           },
           {
-            "description": "Reconciliation was skipped because we couldn't generate a desired config from the bootstore.\n\nThis should never happen - it indicates there's faulty data in the persisted config.",
+            "description": "Reconciliation failed because we couldn't generate a desired config from the bootstore.\n\nThis should never happen - it indicates there's faulty data in the persisted config.",
             "type": "object",
             "properties": {
               "status": {
@@ -1596,44 +1453,13 @@
             ]
           },
           {
-            "description": "Reconciliation completed successfully.\n\nmgd operations are performed in bulk, so each item here contains the count of items involved.",
+            "description": "Reconciliation completed.\n\nmgd operations are performed in bulk, so `counts` contains the number of items involved.",
             "type": "object",
             "properties": {
               "status": {
                 "type": "string",
                 "enum": [
-                  "success"
-                ]
-              },
-              "value": {
-                "type": "object",
-                "properties": {
-                  "counts": {
-                    "$ref": "#/components/schemas/MgdBgpReconcilerStatusOpCount"
-                  },
-                  "did_change_max_paths": {
-                    "type": "boolean"
-                  }
-                },
-                "required": [
-                  "counts",
-                  "did_change_max_paths"
-                ]
-              }
-            },
-            "required": [
-              "status",
-              "value"
-            ]
-          },
-          {
-            "description": "Reconciliation completed with at least one failure.\n\nmgd operations are performed in bulk, so each item here contains the count of items applied on success.",
-            "type": "object",
-            "properties": {
-              "status": {
-                "type": "string",
-                "enum": [
-                  "partial_success"
+                  "complete"
                 ]
               },
               "value": {
@@ -1821,7 +1647,7 @@
       "MgdStaticRouteReconcilerStatus": {
         "oneOf": [
           {
-            "description": "Reconciliation was skipped because we couldn't fetch the current set of static routes from MGD.",
+            "description": "Reconciliation failed because we couldn't fetch the current set of static routes from MGD.",
             "type": "object",
             "properties": {
               "status": {
@@ -1840,7 +1666,7 @@
             ]
           },
           {
-            "description": "Reconciliation was skipped because we couldn't determine a plan for changes to make.\n\nThis should never happen - it indicates there's some faulty data somewhere (either coming from mgd or in the rack network config).",
+            "description": "Reconciliation failed because we couldn't determine a plan for changes to make.\n\nThis should never happen - it indicates there's some faulty data somewhere (either coming from mgd or in the rack network config).",
             "type": "object",
             "properties": {
               "status": {
@@ -1859,66 +1685,13 @@
             ]
           },
           {
-            "description": "Reconciliation completed successfully.\n\nmgd operations are performed in bulk, so each item here contains the count of items involved.",
+            "description": "Reconciliation completed.\n\nmgd operations are performed in bulk, so each item here contains the count of items involved (on success) or the error associated with the bulk operation (on failure).",
             "type": "object",
             "properties": {
               "status": {
                 "type": "string",
                 "enum": [
-                  "success"
-                ]
-              },
-              "value": {
-                "type": "object",
-                "properties": {
-                  "added_v4": {
-                    "type": "integer",
-                    "format": "uint",
-                    "minimum": 0
-                  },
-                  "added_v6": {
-                    "type": "integer",
-                    "format": "uint",
-                    "minimum": 0
-                  },
-                  "deleted_v4": {
-                    "type": "integer",
-                    "format": "uint",
-                    "minimum": 0
-                  },
-                  "deleted_v6": {
-                    "type": "integer",
-                    "format": "uint",
-                    "minimum": 0
-                  },
-                  "unchanged": {
-                    "type": "integer",
-                    "format": "uint",
-                    "minimum": 0
-                  }
-                },
-                "required": [
-                  "added_v4",
-                  "added_v6",
-                  "deleted_v4",
-                  "deleted_v6",
-                  "unchanged"
-                ]
-              }
-            },
-            "required": [
-              "status",
-              "value"
-            ]
-          },
-          {
-            "description": "Reconciliation completed with at least one failure.\n\nmgd operations are performed in bulk, so each item here contains the count of items applied on success.",
-            "type": "object",
-            "properties": {
-              "status": {
-                "type": "string",
-                "enum": [
-                  "partial_success"
+                  "complete"
                 ]
               },
               "value": {
@@ -2614,15 +2387,27 @@
         ]
       },
       "ReconcilerRunningStatus": {
+        "description": "Status of a currently-running reconciliation attempt.",
         "type": "object",
         "properties": {
           "activation_reason": {
-            "$ref": "#/components/schemas/ReconcilerActivationReason"
+            "description": "Why the reconciliation attempt fired.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ReconcilerActivationReason"
+              }
+            ]
           },
           "running_for": {
-            "$ref": "#/components/schemas/Duration"
+            "description": "How long the attempt has been running.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Duration"
+              }
+            ]
           },
           "started_at_time": {
+            "description": "When the attempt started.",
             "type": "string",
             "format": "date-time"
           }
@@ -2734,25 +2519,43 @@
         ]
       },
       "ReconciliationCompletedStatusDpdReconcilerStatus": {
+        "description": "Status of a completed-in-the-past reconciliation attempt.",
         "type": "object",
         "properties": {
           "activation_count": {
+            "description": "The 0-based index of this reconciler's activation since the last time sled-agent started.",
             "type": "integer",
             "format": "uint64",
             "minimum": 0
           },
           "activation_reason": {
-            "$ref": "#/components/schemas/ReconcilerActivationReason"
+            "description": "Why the reconciliation attempt fired.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ReconcilerActivationReason"
+              }
+            ]
           },
           "completed_at_time": {
+            "description": "When the attempt completed.",
             "type": "string",
             "format": "date-time"
           },
           "ran_for": {
-            "$ref": "#/components/schemas/Duration"
+            "description": "How long the attempt ran.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Duration"
+              }
+            ]
           },
           "status": {
-            "$ref": "#/components/schemas/DpdReconcilerStatus"
+            "description": "Reconciler-specific status.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/DpdReconcilerStatus"
+              }
+            ]
           }
         },
         "required": [
@@ -2764,25 +2567,43 @@
         ]
       },
       "ReconciliationCompletedStatusLldpdReconcilerStatus": {
+        "description": "Status of a completed-in-the-past reconciliation attempt.",
         "type": "object",
         "properties": {
           "activation_count": {
+            "description": "The 0-based index of this reconciler's activation since the last time sled-agent started.",
             "type": "integer",
             "format": "uint64",
             "minimum": 0
           },
           "activation_reason": {
-            "$ref": "#/components/schemas/ReconcilerActivationReason"
+            "description": "Why the reconciliation attempt fired.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ReconcilerActivationReason"
+              }
+            ]
           },
           "completed_at_time": {
+            "description": "When the attempt completed.",
             "type": "string",
             "format": "date-time"
           },
           "ran_for": {
-            "$ref": "#/components/schemas/Duration"
+            "description": "How long the attempt ran.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Duration"
+              }
+            ]
           },
           "status": {
-            "$ref": "#/components/schemas/LldpdReconcilerStatus"
+            "description": "Reconciler-specific status.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/LldpdReconcilerStatus"
+              }
+            ]
           }
         },
         "required": [
@@ -2794,25 +2615,43 @@
         ]
       },
       "ReconciliationCompletedStatusMgdReconcilerStatus": {
+        "description": "Status of a completed-in-the-past reconciliation attempt.",
         "type": "object",
         "properties": {
           "activation_count": {
+            "description": "The 0-based index of this reconciler's activation since the last time sled-agent started.",
             "type": "integer",
             "format": "uint64",
             "minimum": 0
           },
           "activation_reason": {
-            "$ref": "#/components/schemas/ReconcilerActivationReason"
+            "description": "Why the reconciliation attempt fired.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ReconcilerActivationReason"
+              }
+            ]
           },
           "completed_at_time": {
+            "description": "When the attempt completed.",
             "type": "string",
             "format": "date-time"
           },
           "ran_for": {
-            "$ref": "#/components/schemas/Duration"
+            "description": "How long the attempt ran.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Duration"
+              }
+            ]
           },
           "status": {
-            "$ref": "#/components/schemas/MgdReconcilerStatus"
+            "description": "Reconciler-specific status.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/MgdReconcilerStatus"
+              }
+            ]
           }
         },
         "required": [
@@ -2824,25 +2663,43 @@
         ]
       },
       "ReconciliationCompletedStatusUplinkdReconcilerStatus": {
+        "description": "Status of a completed-in-the-past reconciliation attempt.",
         "type": "object",
         "properties": {
           "activation_count": {
+            "description": "The 0-based index of this reconciler's activation since the last time sled-agent started.",
             "type": "integer",
             "format": "uint64",
             "minimum": 0
           },
           "activation_reason": {
-            "$ref": "#/components/schemas/ReconcilerActivationReason"
+            "description": "Why the reconciliation attempt fired.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ReconcilerActivationReason"
+              }
+            ]
           },
           "completed_at_time": {
+            "description": "When the attempt completed.",
             "type": "string",
             "format": "date-time"
           },
           "ran_for": {
-            "$ref": "#/components/schemas/Duration"
+            "description": "How long the attempt ran.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Duration"
+              }
+            ]
           },
           "status": {
-            "$ref": "#/components/schemas/UplinkdReconcilerStatus"
+            "description": "Reconciler-specific status.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/UplinkdReconcilerStatus"
+              }
+            ]
           }
         },
         "required": [
