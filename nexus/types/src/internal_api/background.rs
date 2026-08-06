@@ -725,6 +725,23 @@ impl slog::KV for DatasetsRendezvousStats {
     }
 }
 
+/// The status of a successful `inventory_collection` background task
+/// activation.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+pub struct InventoryCollectionStatus {
+    pub collection_id: CollectionUuid,
+    pub time_started: DateTime<Utc>,
+    pub time_done: DateTime<Utc>,
+
+    /// Timing of the collection's phases and requests, in the Chrome Trace
+    /// Event format (load into <https://ui.perfetto.dev/>).
+    ///
+    /// Optional so that this type can also represent status reported by
+    /// versions of Nexus that did not record a trace.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trace: Option<perfetto_trace::Trace>,
+}
+
 /// The status of an `inventory_load` background task activation.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub enum InventoryLoadStatus {

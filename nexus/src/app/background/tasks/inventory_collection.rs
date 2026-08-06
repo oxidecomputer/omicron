@@ -15,9 +15,11 @@ use nexus_db_queries::db::DataStore;
 use nexus_inventory::InventoryError;
 use nexus_networking::GatewayClient;
 use nexus_types::deployment::SledFilter;
+use nexus_types::internal_api::background::InventoryCollectionStatus;
 use nexus_types::inventory::Collection;
 use omicron_cockroach_metrics::CockroachClusterAdminClient;
 use omicron_uuid_kinds::CollectionUuid;
+use perfetto_trace::TraceSpan;
 use serde_json::json;
 use slog::{debug, o, warn};
 use std::net::SocketAddr;
@@ -93,18 +95,21 @@ impl BackgroundTask for InventoryCollector {
                         "error" => message.clone());
                     json!({ "error": message })
                 }
-                Ok(collection) => {
+                Ok((collection, spans)) => {
                     debug!(opctx.log, "inventory collection complete";
                         "collection_id" => collection.id.to_string(),
                         "time_started" => collection.time_started.to_string(),
                     );
-                    let json = json!({
-                        "collection_id": collection.id.to_string(),
-                        "time_started": collection.time_started.to_string(),
-                        "time_done": collection.time_done.to_string()
-                    });
+                    let status = InventoryCollectionStatus {
+                        collection_id: collection.id,
+                        time_started: collection.time_started,
+                        time_done: collection.time_done,
+                        trace: Some(perfetto_trace::assemble(spans)),
+                    };
                     self.tx.send_replace(Some(collection.id));
-                    json
+                    serde_json::to_value(status).unwrap_or_else(
+                        |error| json!({ "error": error.to_string() }),
+                    )
                 }
             }
         }
@@ -120,7 +125,7 @@ async fn inventory_activate(
     nkeep: u32,
     disabled: bool,
     cockroach_admin_client: &CockroachClusterAdminClient,
-) -> Result<Collection, anyhow::Error> {
+) -> Result<(Collection, Vec<TraceSpan>), anyhow::Error> {
     // If we're disabled, don't do anything.  (This switch is only intended for
     // unforeseen production emergencies.)
     ensure!(!disabled, "disabled by explicit configuration");
@@ -211,7 +216,7 @@ async fn inventory_activate(
         &sled_enum,
         opctx.log.clone(),
     );
-    let collection =
+    let (collection, spans) =
         inventory.collect_all().await.context("collecting inventory")?;
 
     // Write it to the database.
@@ -220,7 +225,7 @@ async fn inventory_activate(
         .await
         .context("saving inventory to database")?;
 
-    Ok(collection)
+    Ok((collection, spans))
 }
 
 /// Determine which sleds to inventory based on what's in the database
@@ -269,6 +274,7 @@ mod test {
     use nexus_inventory::SledAgentEnumerator;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::identity::Asset;
+    use nexus_types::internal_api::background::InventoryCollectionStatus;
     use omicron_common::api::external::ByteCount;
     use omicron_common::api::external::LookupType;
     use omicron_uuid_kinds::CollectionUuid;
@@ -313,7 +319,16 @@ mod test {
         let nkeep = usize::try_from(nkeep).unwrap();
         let mut all_our_collection_ids = Vec::new();
         for i in 0..20 {
-            let _ = task.activate(&opctx).await;
+            let value = task.activate(&opctx).await;
+
+            // The status should include a timing trace with at least one
+            // event per collection phase.
+            let status: InventoryCollectionStatus =
+                serde_json::from_value(value)
+                    .expect("failed to parse activation status");
+            let trace = status.trace.expect("status should include a trace");
+            assert!(trace.trace_events.len() >= 6);
+
             let collections = datastore.inventory_collections().await.unwrap();
 
             // Nexus is creating inventory collections concurrently with us,

@@ -1,0 +1,14 @@
+[package]
+name = "perfetto-trace"
+version = "0.1.0"
+edition.workspace = true
+license = "MPL-2.0"
+
+[dependencies]
+chrono.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+omicron-workspace-hack.workspace = true
+
+[lints]
+workspace = true

@@ -9,11 +9,13 @@ use crate::builder::CollectionBuilder;
 use crate::builder::InventoryError;
 use anyhow::Context;
 use anyhow::anyhow;
+use chrono::Utc;
 use clickhouse_admin_keeper_client::ClientInfo as _;
 use clickhouse_admin_types::keeper::ClickhouseKeeperClusterMembership;
 use gateway_client::types::GetCfpaParams;
 use gateway_client::types::RotCfpaSlot;
 use gateway_messages::SpComponent;
+use gateway_types::component::SpIdentifier;
 use itertools::Itertools;
 use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::Collection;
@@ -27,6 +29,8 @@ use omicron_common::address::NTP_ADMIN_PORT;
 use omicron_common::disk::M2Slot;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use parallel_task_set::ParallelTaskSet;
+use perfetto_trace::TraceSpan;
+use perfetto_trace::timed;
 use sled_agent_types::inventory::Inventory;
 use sled_agent_types::inventory::OmicronZoneType;
 use sled_agent_types::inventory::ZoneKind;
@@ -52,6 +56,7 @@ pub struct Collector<'a> {
     cockroach_admin_client: &'a CockroachClusterAdminClient,
     sled_agent_lister: &'a (dyn SledAgentEnumerator + Send + Sync),
     in_progress: CollectionBuilder,
+    spans: Vec<TraceSpan>,
 }
 
 impl<'a> Collector<'a> {
@@ -70,6 +75,7 @@ impl<'a> Collector<'a> {
             cockroach_admin_client,
             sled_agent_lister,
             in_progress: CollectionBuilder::new(creator),
+            spans: Vec::new(),
         }
     }
 
@@ -80,7 +86,13 @@ impl<'a> Collector<'a> {
     /// components.  This can take a while and produce any number of errors.
     /// Such errors generally don't cause this function to fail.  Rather, the
     /// returned `Collection` keeps track of these errors.
-    pub async fn collect_all(mut self) -> Result<Collection, anyhow::Error> {
+    ///
+    /// Also returns a set of timing spans covering each phase of the
+    /// collection and each request made within the concurrent phases,
+    /// suitable for assembling into a trace with `perfetto_trace::assemble`.
+    pub async fn collect_all(
+        mut self,
+    ) -> Result<(Collection, Vec<TraceSpan>), anyhow::Error> {
         // Most of the phases below fan requests out to their targets with
         // bounded concurrency (MAX_CONCURRENT_INVENTORY_REQUESTS) and then
         // merge the results into the in-progress collection on this task.
@@ -95,26 +107,53 @@ impl<'a> Collector<'a> {
 
         debug!(&self.log, "begin collection");
 
+        let start = Utc::now();
         self.collect_all_mgs().await;
+        self.spans.push(TraceSpan::since("mgs", "phase", start));
+
+        let start = Utc::now();
         self.collect_all_sled_agents().await;
+        self.spans.push(TraceSpan::since("sled_agents", "phase", start));
+
+        let start = Utc::now();
         self.collect_all_keepers().await;
+        self.spans.push(TraceSpan::since("keepers", "phase", start));
+
+        let start = Utc::now();
         self.collect_all_cockroach().await;
+        self.spans.push(TraceSpan::since("cockroach", "phase", start));
 
         // The following must be called after "collect_all_sled_agents",
         // or they'll see an empty set of services.
+        let start = Utc::now();
         self.collect_all_timesync().await;
+        self.spans.push(TraceSpan::since("timesync", "phase", start));
+
+        let start = Utc::now();
         self.collect_all_dns_generations().await;
+        self.spans.push(TraceSpan::since("dns_generations", "phase", start));
 
         debug!(&self.log, "finished collection");
 
-        Ok(self.in_progress.build())
+        Ok((self.in_progress.build(), self.spans))
     }
 
     /// Collect inventory from all MGS instances
     async fn collect_all_mgs(&mut self) {
         for client in &self.mgs_clients {
-            Self::collect_one_mgs(client, &self.log, &mut self.in_progress)
-                .await;
+            let start = Utc::now();
+            Self::collect_one_mgs(
+                client,
+                &self.log,
+                &mut self.in_progress,
+                &mut self.spans,
+            )
+            .await;
+            self.spans.push(TraceSpan::since(
+                client.baseurl(),
+                "mgs_client",
+                start,
+            ));
         }
     }
 
@@ -122,6 +161,7 @@ impl<'a> Collector<'a> {
         client: &gateway_client::Client,
         log: &Logger,
         in_progress: &mut CollectionBuilder,
+        spans: &mut Vec<TraceSpan>,
     ) {
         debug!(log, "begin collection from MGS";
             "mgs_url" => client.baseurl()
@@ -163,277 +203,280 @@ impl<'a> Collector<'a> {
         // For each SP that ignition reports up, fetch the state and caboose
         // information.
         for sp in sps {
-            // First, fetch the state of the SP.  If that fails, report the
-            // error but continue.
-            let result =
-                client.sp_get(&sp.typ, sp.slot).await.with_context(|| {
-                    format!(
-                        "MGS {:?}: fetching state of SP {:?}",
+            let start = Utc::now();
+            let name = format!("sp {:?} {}", sp.typ, sp.slot);
+            Self::collect_one_sp(client, log, in_progress, sp).await;
+            spans.push(TraceSpan::since(name, "sp", start));
+        }
+    }
+
+    /// Collect inventory reported by one MGS instance for one SP
+    async fn collect_one_sp(
+        client: &gateway_client::Client,
+        log: &Logger,
+        in_progress: &mut CollectionBuilder,
+        sp: SpIdentifier,
+    ) {
+        // First, fetch the state of the SP.  If that fails, report the
+        // error but continue.
+        let result = client.sp_get(&sp.typ, sp.slot).await.with_context(|| {
+            format!("MGS {:?}: fetching state of SP {:?}", client.baseurl(), sp)
+        });
+        let sp_state = match result {
+            Err(error) => {
+                in_progress.found_error(InventoryError::from(error));
+                return;
+            }
+            Ok(response) => response.into_inner(),
+        };
+
+        // Record the state that we found.
+        let Some(baseboard_id) = in_progress.found_sp_state(
+            client.baseurl(),
+            sp.typ,
+            sp.slot,
+            sp_state,
+        ) else {
+            // We failed to parse this SP for some reason.  The error was
+            // reported already.  Move on.
+            return;
+        };
+
+        // For sled SPs, collect the currently-active phase 1 slot and the
+        // hash of the contents of both slots, if they haven't been
+        // collected already. Generally, we'd only get here for the first
+        // MGS client.  Assuming that one succeeds, the other(s) will skip
+        // this loop.
+        if matches!(sp.typ, SpType::Sled) {
+            if !in_progress
+                .found_host_phase_1_active_slot_already(&baseboard_id)
+            {
+                let result = client
+                    .sp_component_active_slot_get(
+                        &sp.typ,
+                        sp.slot,
+                        SpComponent::HOST_CPU_BOOT_FLASH.const_as_str(),
+                    )
+                    .await
+                    .with_context(|| {
+                        format!(
+                            "MGS {:?}: SP {sp:?}: phase 1 active slot",
+                            client.baseurl(),
+                        )
+                    })
+                    .and_then(|response| {
+                        M2Slot::from_mgs_firmware_slot(response.slot)
+                            .ok_or_else(|| {
+                                anyhow!(
+                                    "MGS {:?}: SP {sp:?}: \
+                                         invalid host phase 1 slot {}",
+                                    client.baseurl(),
+                                    response.slot
+                                )
+                            })
+                    });
+                match result {
+                    Ok(phase_1_slot) => {
+                        if let Err(error) = in_progress
+                            .found_host_phase_1_active_slot(
+                                &baseboard_id,
+                                client.baseurl(),
+                                phase_1_slot,
+                            )
+                        {
+                            error!(
+                                log,
+                                "error reporting host phase 1 active slot: \
+                                     {baseboard_id:?} {phase_1_slot:?} \
+                                     {:?}: {error:#}",
+                                client.baseurl(),
+                            );
+                        }
+                    }
+                    Err(err) => {
+                        in_progress.found_error(InventoryError::from(err));
+                    }
+                }
+            }
+
+            for slot in M2Slot::iter() {
+                const PHASE1_HASH_TIMEOUT: Duration = Duration::from_secs(30);
+
+                if in_progress
+                    .found_host_phase_1_flash_hash_already(&baseboard_id, slot)
+                {
+                    continue;
+                }
+
+                let phase1_slot = match slot {
+                    M2Slot::A => 0,
+                    M2Slot::B => 1,
+                };
+
+                let result = client
+                    .host_phase_1_flash_hash_calculate_with_timeout(
+                        sp.typ,
+                        sp.slot,
+                        phase1_slot,
+                        PHASE1_HASH_TIMEOUT,
+                    )
+                    .await
+                    .with_context(|| {
+                        format!(
+                            "MGS {:?}: SP {sp:?}: phase 1 slot {slot:?}",
+                            client.baseurl(),
+                        )
+                    });
+                let hash = match result {
+                    Err(error) => {
+                        in_progress.found_error(InventoryError::from(error));
+                        continue;
+                    }
+                    Ok(hash) => hash,
+                };
+                if let Err(error) = in_progress.found_host_phase_1_flash_hash(
+                    &baseboard_id,
+                    slot,
+                    client.baseurl(),
+                    ArtifactHash(hash),
+                ) {
+                    error!(
+                        log,
+                        "error reporting host phase 1 flash hash: \
+                             {baseboard_id:?} {slot:?} {:?}: {error:#}",
                         client.baseurl(),
-                        sp
+                    );
+                }
+            }
+        }
+
+        // For each kind of caboose that we care about, if it hasn't been
+        // fetched already, fetch it and record it.  Generally, we'd only
+        // get here for the first MGS client.  Assuming that one succeeds,
+        // the other(s) will skip this loop.
+        for which in CabooseWhich::iter() {
+            if in_progress.found_caboose_already(&baseboard_id, which) {
+                continue;
+            }
+
+            let (component, slot) = match which {
+                CabooseWhich::SpSlot0 => ("sp", 0),
+                CabooseWhich::SpSlot1 => ("sp", 1),
+                CabooseWhich::RotSlotA => ("rot", 0),
+                CabooseWhich::RotSlotB => ("rot", 1),
+                CabooseWhich::Stage0 => ("stage0", 0),
+                CabooseWhich::Stage0Next => ("stage0", 1),
+            };
+
+            let result = client
+                .sp_component_caboose_get(&sp.typ, sp.slot, component, slot)
+                .await
+                .with_context(|| {
+                    format!(
+                        "MGS {:?}: SP {:?}: caboose {:?}",
+                        client.baseurl(),
+                        sp,
+                        which
                     )
                 });
-            let sp_state = match result {
+            let caboose = match result {
                 Err(error) => {
                     in_progress.found_error(InventoryError::from(error));
                     continue;
                 }
                 Ok(response) => response.into_inner(),
             };
-
-            // Record the state that we found.
-            let Some(baseboard_id) = in_progress.found_sp_state(
+            if let Err(error) = in_progress.found_caboose(
+                &baseboard_id,
+                which,
                 client.baseurl(),
-                sp.typ,
-                sp.slot,
-                sp_state,
-            ) else {
-                // We failed to parse this SP for some reason.  The error was
-                // reported already.  Move on.
+                caboose,
+            ) {
+                error!(
+                    log,
+                    "error reporting caboose: {:?} {:?} {:?}: {:#}",
+                    baseboard_id,
+                    which,
+                    client.baseurl(),
+                    error
+                );
+            }
+        }
+
+        // For each kind of RoT page that we care about, if it hasn't been
+        // fetched already, fetch it and record it.  Generally, we'd only
+        // get here for the first MGS client.  Assuming that one succeeds,
+        // the other(s) will skip this loop.
+        for which in RotPageWhich::iter() {
+            if in_progress.found_rot_page_already(&baseboard_id, which) {
                 continue;
-            };
-
-            // For sled SPs, collect the currently-active phase 1 slot and the
-            // hash of the contents of both slots, if they haven't been
-            // collected already. Generally, we'd only get here for the first
-            // MGS client.  Assuming that one succeeds, the other(s) will skip
-            // this loop.
-            if matches!(sp.typ, SpType::Sled) {
-                if !in_progress
-                    .found_host_phase_1_active_slot_already(&baseboard_id)
-                {
-                    let result = client
-                        .sp_component_active_slot_get(
-                            &sp.typ,
-                            sp.slot,
-                            SpComponent::HOST_CPU_BOOT_FLASH.const_as_str(),
-                        )
-                        .await
-                        .with_context(|| {
-                            format!(
-                                "MGS {:?}: SP {sp:?}: phase 1 active slot",
-                                client.baseurl(),
-                            )
-                        })
-                        .and_then(|response| {
-                            M2Slot::from_mgs_firmware_slot(response.slot)
-                                .ok_or_else(|| {
-                                    anyhow!(
-                                        "MGS {:?}: SP {sp:?}: \
-                                         invalid host phase 1 slot {}",
-                                        client.baseurl(),
-                                        response.slot
-                                    )
-                                })
-                        });
-                    match result {
-                        Ok(phase_1_slot) => {
-                            if let Err(error) = in_progress
-                                .found_host_phase_1_active_slot(
-                                    &baseboard_id,
-                                    client.baseurl(),
-                                    phase_1_slot,
-                                )
-                            {
-                                error!(
-                                    log,
-                                    "error reporting host phase 1 active slot: \
-                                     {baseboard_id:?} {phase_1_slot:?} \
-                                     {:?}: {error:#}",
-                                    client.baseurl(),
-                                );
-                            }
-                        }
-                        Err(err) => {
-                            in_progress.found_error(InventoryError::from(err));
-                        }
-                    }
-                }
-
-                for slot in M2Slot::iter() {
-                    const PHASE1_HASH_TIMEOUT: Duration =
-                        Duration::from_secs(30);
-
-                    if in_progress.found_host_phase_1_flash_hash_already(
-                        &baseboard_id,
-                        slot,
-                    ) {
-                        continue;
-                    }
-
-                    let phase1_slot = match slot {
-                        M2Slot::A => 0,
-                        M2Slot::B => 1,
-                    };
-
-                    let result = client
-                        .host_phase_1_flash_hash_calculate_with_timeout(
-                            sp.typ,
-                            sp.slot,
-                            phase1_slot,
-                            PHASE1_HASH_TIMEOUT,
-                        )
-                        .await
-                        .with_context(|| {
-                            format!(
-                                "MGS {:?}: SP {sp:?}: phase 1 slot {slot:?}",
-                                client.baseurl(),
-                            )
-                        });
-                    let hash = match result {
-                        Err(error) => {
-                            in_progress
-                                .found_error(InventoryError::from(error));
-                            continue;
-                        }
-                        Ok(hash) => hash,
-                    };
-                    if let Err(error) = in_progress
-                        .found_host_phase_1_flash_hash(
-                            &baseboard_id,
-                            slot,
-                            client.baseurl(),
-                            ArtifactHash(hash),
-                        )
-                    {
-                        error!(
-                            log,
-                            "error reporting host phase 1 flash hash: \
-                             {baseboard_id:?} {slot:?} {:?}: {error:#}",
-                            client.baseurl(),
-                        );
-                    }
-                }
             }
 
-            // For each kind of caboose that we care about, if it hasn't been
-            // fetched already, fetch it and record it.  Generally, we'd only
-            // get here for the first MGS client.  Assuming that one succeeds,
-            // the other(s) will skip this loop.
-            for which in CabooseWhich::iter() {
-                if in_progress.found_caboose_already(&baseboard_id, which) {
-                    continue;
-                }
+            let component = SpComponent::ROT.const_as_str();
 
-                let (component, slot) = match which {
-                    CabooseWhich::SpSlot0 => ("sp", 0),
-                    CabooseWhich::SpSlot1 => ("sp", 1),
-                    CabooseWhich::RotSlotA => ("rot", 0),
-                    CabooseWhich::RotSlotB => ("rot", 1),
-                    CabooseWhich::Stage0 => ("stage0", 0),
-                    CabooseWhich::Stage0Next => ("stage0", 1),
-                };
-
-                let result = client
-                    .sp_component_caboose_get(&sp.typ, sp.slot, component, slot)
+            let result = match which {
+                RotPageWhich::Cmpa => client
+                    .sp_rot_cmpa_get(&sp.typ, sp.slot, component)
                     .await
-                    .with_context(|| {
-                        format!(
-                            "MGS {:?}: SP {:?}: caboose {:?}",
-                            client.baseurl(),
-                            sp,
-                            which
-                        )
-                    });
-                let caboose = match result {
-                    Err(error) => {
-                        in_progress.found_error(InventoryError::from(error));
-                        continue;
-                    }
-                    Ok(response) => response.into_inner(),
-                };
-                if let Err(error) = in_progress.found_caboose(
-                    &baseboard_id,
-                    which,
-                    client.baseurl(),
-                    caboose,
-                ) {
-                    error!(
-                        log,
-                        "error reporting caboose: {:?} {:?} {:?}: {:#}",
-                        baseboard_id,
-                        which,
-                        client.baseurl(),
-                        error
-                    );
-                }
+                    .map(|response| response.into_inner().base64_data),
+                RotPageWhich::CfpaActive => client
+                    .sp_rot_cfpa_get(
+                        &sp.typ,
+                        sp.slot,
+                        component,
+                        &GetCfpaParams { slot: RotCfpaSlot::Active },
+                    )
+                    .await
+                    .map(|response| response.into_inner().base64_data),
+                RotPageWhich::CfpaInactive => client
+                    .sp_rot_cfpa_get(
+                        &sp.typ,
+                        sp.slot,
+                        component,
+                        &GetCfpaParams { slot: RotCfpaSlot::Inactive },
+                    )
+                    .await
+                    .map(|response| response.into_inner().base64_data),
+                RotPageWhich::CfpaScratch => client
+                    .sp_rot_cfpa_get(
+                        &sp.typ,
+                        sp.slot,
+                        component,
+                        &GetCfpaParams { slot: RotCfpaSlot::Scratch },
+                    )
+                    .await
+                    .map(|response| response.into_inner().base64_data),
             }
+            .with_context(|| {
+                format!(
+                    "MGS {:?}: SP {:?}: rot page {:?}",
+                    client.baseurl(),
+                    sp,
+                    which
+                )
+            });
 
-            // For each kind of RoT page that we care about, if it hasn't been
-            // fetched already, fetch it and record it.  Generally, we'd only
-            // get here for the first MGS client.  Assuming that one succeeds,
-            // the other(s) will skip this loop.
-            for which in RotPageWhich::iter() {
-                if in_progress.found_rot_page_already(&baseboard_id, which) {
+            let page = match result {
+                Err(error) => {
+                    in_progress.found_error(InventoryError::from(error));
                     continue;
                 }
-
-                let component = SpComponent::ROT.const_as_str();
-
-                let result = match which {
-                    RotPageWhich::Cmpa => client
-                        .sp_rot_cmpa_get(&sp.typ, sp.slot, component)
-                        .await
-                        .map(|response| response.into_inner().base64_data),
-                    RotPageWhich::CfpaActive => client
-                        .sp_rot_cfpa_get(
-                            &sp.typ,
-                            sp.slot,
-                            component,
-                            &GetCfpaParams { slot: RotCfpaSlot::Active },
-                        )
-                        .await
-                        .map(|response| response.into_inner().base64_data),
-                    RotPageWhich::CfpaInactive => client
-                        .sp_rot_cfpa_get(
-                            &sp.typ,
-                            sp.slot,
-                            component,
-                            &GetCfpaParams { slot: RotCfpaSlot::Inactive },
-                        )
-                        .await
-                        .map(|response| response.into_inner().base64_data),
-                    RotPageWhich::CfpaScratch => client
-                        .sp_rot_cfpa_get(
-                            &sp.typ,
-                            sp.slot,
-                            component,
-                            &GetCfpaParams { slot: RotCfpaSlot::Scratch },
-                        )
-                        .await
-                        .map(|response| response.into_inner().base64_data),
-                }
-                .with_context(|| {
-                    format!(
-                        "MGS {:?}: SP {:?}: rot page {:?}",
-                        client.baseurl(),
-                        sp,
-                        which
-                    )
-                });
-
-                let page = match result {
-                    Err(error) => {
-                        in_progress.found_error(InventoryError::from(error));
-                        continue;
-                    }
-                    Ok(data_base64) => RotPage { data_base64 },
-                };
-                if let Err(error) = in_progress.found_rot_page(
-                    &baseboard_id,
+                Ok(data_base64) => RotPage { data_base64 },
+            };
+            if let Err(error) = in_progress.found_rot_page(
+                &baseboard_id,
+                which,
+                client.baseurl(),
+                page,
+            ) {
+                error!(
+                    log,
+                    "error reporting rot page: {:?} {:?} {:?}: {:#}",
+                    baseboard_id,
                     which,
                     client.baseurl(),
-                    page,
-                ) {
-                    error!(
-                        log,
-                        "error reporting rot page: {:?} {:?} {:?}: {:#}",
-                        baseboard_id,
-                        which,
-                        client.baseurl(),
-                        error
-                    );
-                }
+                    error
+                );
             }
         }
     }
@@ -455,8 +498,13 @@ impl<'a> Collector<'a> {
         for (idx, url) in urls.into_iter().enumerate() {
             let log = self.log.new(o!("SledAgent" => url.clone()));
             let task = async move {
-                let result = collect_one_sled_agent(&url, log).await;
-                (idx, url, result)
+                let (span, result) = timed(
+                    url.clone(),
+                    "sled_agent",
+                    collect_one_sled_agent(&url, log),
+                )
+                .await;
+                (idx, url, result, span)
             };
             if let Some(result) = tasks.spawn(task).await {
                 results.push(result);
@@ -467,8 +515,9 @@ impl<'a> Collector<'a> {
         // Merge results in the order we enumerated the sleds, so that the
         // collection's contents (in particular the order of its errors) do
         // not depend on request completion order.
-        results.sort_by_key(|(idx, _, _)| *idx);
-        for (_, url, result) in results {
+        results.sort_by_key(|(idx, _, _, _)| *idx);
+        for (_, url, result, span) in results {
+            self.spans.push(span);
             match result {
                 Err(error) => self.in_progress.found_error(error),
                 Ok(inventory) => {
@@ -521,8 +570,13 @@ impl<'a> Collector<'a> {
         {
             let log = self.log.clone();
             let task = async move {
-                let result = collect_one_timesync(&log, zone_id, &client).await;
-                (idx, zone_id, result)
+                let (span, result) = timed(
+                    zone_id.to_string(),
+                    "timesync",
+                    collect_one_timesync(&log, zone_id, &client),
+                )
+                .await;
+                (idx, zone_id, result, span)
             };
             if let Some(result) = tasks.spawn(task).await {
                 results.push(result);
@@ -530,8 +584,9 @@ impl<'a> Collector<'a> {
         }
         results.extend(tasks.join_remaining().await);
 
-        results.sort_by_key(|(idx, _, _)| *idx);
-        for (_, zone_id, result) in results {
+        results.sort_by_key(|(idx, _, _, _)| *idx);
+        for (_, zone_id, result, span) in results {
+            self.spans.push(span);
             match result {
                 Err(error) => self.in_progress.found_error(error),
                 Ok(timesync) => {
@@ -566,8 +621,13 @@ impl<'a> Collector<'a> {
             let client = client.clone();
             let log = self.log.clone();
             let task = async move {
-                let result = collect_one_keeper(&client, &log).await;
-                (idx, result)
+                let (span, result) = timed(
+                    client.baseurl().to_string(),
+                    "keeper",
+                    collect_one_keeper(&client, &log),
+                )
+                .await;
+                (idx, result, span)
             };
             if let Some(result) = tasks.spawn(task).await {
                 results.push(result);
@@ -575,8 +635,9 @@ impl<'a> Collector<'a> {
         }
         results.extend(tasks.join_remaining().await);
 
-        results.sort_by_key(|(idx, _)| *idx);
-        for (_, result) in results {
+        results.sort_by_key(|(idx, _, _)| *idx);
+        for (_, result, span) in results {
+            self.spans.push(span);
             match result {
                 Err(error) => self.in_progress.found_error(error),
                 Ok(membership) => self
@@ -650,9 +711,13 @@ impl<'a> Collector<'a> {
         {
             let log = self.log.clone();
             let task = async move {
-                let result =
-                    collect_one_dns_generation(&log, zone_id, &client).await;
-                (idx, zone_id, result)
+                let (span, result) = timed(
+                    zone_id.to_string(),
+                    "dns_generation",
+                    collect_one_dns_generation(&log, zone_id, &client),
+                )
+                .await;
+                (idx, zone_id, result, span)
             };
             if let Some(result) = tasks.spawn(task).await {
                 results.push(result);
@@ -660,8 +725,9 @@ impl<'a> Collector<'a> {
         }
         results.extend(tasks.join_remaining().await);
 
-        results.sort_by_key(|(idx, _, _)| *idx);
-        for (_, zone_id, result) in results {
+        results.sort_by_key(|(idx, _, _, _)| *idx);
+        for (_, zone_id, result, span) in results {
+            self.spans.push(span);
             let result = result.and_then(|generation_status| {
                 self.in_progress
                     .found_internal_dns_generation_status(generation_status)
@@ -1191,7 +1257,7 @@ mod test {
             &sled_enum,
             log.clone(),
         );
-        let collection = collector
+        let (collection, spans) = collector
             .collect_all()
             .await
             .expect("failed to carry out collection");
@@ -1201,6 +1267,36 @@ mod test {
             collection.errors
         );
         assert_eq!(collection.collector, "test-suite");
+
+        // The timing spans should cover every phase, in the order the phases
+        // run, without overlap.
+        let phases: Vec<_> =
+            spans.iter().filter(|s| s.category == "phase").collect();
+        assert_eq!(
+            phases.iter().map(|s| s.name.as_str()).collect::<Vec<_>>(),
+            vec![
+                "mgs",
+                "sled_agents",
+                "keepers",
+                "cockroach",
+                "timesync",
+                "dns_generations"
+            ]
+        );
+        for pair in phases.windows(2) {
+            assert!(pair[1].start >= pair[0].end);
+        }
+        for span in &spans {
+            assert!(span.end >= span.start);
+        }
+
+        // One span per collected target: two sled agents, one MGS client,
+        // and at least one SP behind it.
+        let count =
+            |cat: &str| spans.iter().filter(|s| s.category == cat).count();
+        assert_eq!(count("sled_agent"), 2);
+        assert_eq!(count("mgs_client"), 1);
+        assert!(count("sp") >= 1);
 
         let s = dump_collection(&collection);
         expectorate::assert_contents("tests/output/collector_basic.txt", &s);
@@ -1271,7 +1367,7 @@ mod test {
             &sled_enum,
             log.clone(),
         );
-        let collection = collector
+        let (collection, _spans) = collector
             .collect_all()
             .await
             .expect("failed to carry out collection");
@@ -1321,7 +1417,7 @@ mod test {
             &sled_enum,
             log.clone(),
         );
-        let collection = collector
+        let (collection, _spans) = collector
             .collect_all()
             .await
             .expect("failed to carry out collection");
@@ -1378,7 +1474,7 @@ mod test {
             &sled_enum,
             log.clone(),
         );
-        let collection = collector
+        let (collection, _spans) = collector
             .collect_all()
             .await
             .expect("failed to carry out collection");

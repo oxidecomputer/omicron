@@ -7646,6 +7646,7 @@ dependencies = [
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "parallel-task-set",
+ "perfetto-trace",
  "regex",
  "reqwest 0.13.2",
  "serde_json",
@@ -8268,6 +8269,7 @@ dependencies = [
  "oxnet",
  "oxql-types",
  "parse-display",
+ "perfetto-trace",
  "proptest",
  "regex",
  "schemars 0.8.22",
@@ -9243,6 +9245,7 @@ dependencies = [
  "parse-display",
  "paste",
  "pem",
+ "perfetto-trace",
  "petgraph 0.8.3",
  "pq-sys",
  "pretty_assertions",
@@ -11048,6 +11051,16 @@ name = "percent-encoding"
 version = "2.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220"
+
+[[package]]
+name = "perfetto-trace"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "omicron-workspace-hack",
+ "serde",
+ "serde_json",
+]
 
 [[package]]
 name = "pest"
@@ -15147,6 +15160,7 @@ dependencies = [
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "parallel-task-set",
+ "perfetto-trace",
  "pq-sys",
  "serde",
  "serde_json",
