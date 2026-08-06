@@ -7,7 +7,9 @@ use crate::app::background::BackgroundTask;
 use crate::app::background::tasks::fm_sitrep_load::CurrentSitrep;
 use anyhow::Context;
 use chrono::Utc;
+use fm::analysis_input::Input;
 use fm::analysis_input::InvalidInputs;
+use fm::analysis_reports::InputReport;
 use futures::future::BoxFuture;
 use iddqd::IdOrdMap;
 use nexus_db_model::PhysicalDiskPolicy;
@@ -217,7 +219,7 @@ impl FmAnalysis {
         );
 
         // Prepare analysis inputs.
-        let (inputs, prep_status) = match self
+        let (inputs, prep_status, input_report) = match self
             .prepare_inputs(&opctx, parent_sitrep, inv)
             .await
         {
@@ -271,7 +273,7 @@ impl FmAnalysis {
 
         // Okay, actually run analysis and generate a new sitrep.
         let outcome = self
-            .analyze(&opctx, inputs, &prep_status.report, &cfg, &mut warnings)
+            .analyze(&opctx, inputs, &input_report, &cfg, &mut warnings)
             .await;
 
         FmAnalysisStatus {
@@ -291,10 +293,8 @@ impl FmAnalysis {
         opctx: &OpContext,
         parent_sitrep: Option<CurrentSitrep>,
         inv: Arc<inventory::Collection>,
-    ) -> Result<
-        (fm::analysis_input::Input, status::PreparationStatus),
-        PreparationError,
-    > {
+    ) -> Result<(Input, status::PreparationStatus, InputReport), PreparationError>
+    {
         let mut warnings = Vec::new();
 
         let in_service_disks =
@@ -327,7 +327,7 @@ impl FmAnalysis {
         .context("failed to load existing support bundle markers")?;
 
         let (input, report) = builder.build();
-        Ok((input, status::PreparationStatus { warnings, report }))
+        Ok((input, status::PreparationStatus { warnings }, report))
     }
 
     /// Load all in-service control plane disks, projected down to FM's
@@ -545,8 +545,8 @@ impl FmAnalysis {
     async fn analyze(
         &mut self,
         opctx: &OpContext,
-        inputs: fm::analysis_input::Input,
-        input_report: &nexus_types::fm::analysis_reports::InputReport,
+        inputs: Input,
+        input_report: &InputReport,
         cfg: &FmConfig,
         warnings: &mut Vec<String>,
     ) -> status::AnalysisStatus {
@@ -567,7 +567,6 @@ impl FmAnalysis {
             return status::AnalysisStatus {
                 start_time,
                 end_time,
-                report,
                 capacity: None,
                 outcome: status::AnalysisOutcome::Error(e.to_string()),
             };
@@ -584,7 +583,6 @@ impl FmAnalysis {
                 return status::AnalysisStatus {
                     start_time,
                     end_time,
-                    report,
                     capacity: None,
                     outcome: status::AnalysisOutcome::Unchanged,
                 };
@@ -615,7 +613,6 @@ impl FmAnalysis {
                     return status::AnalysisStatus {
                         start_time,
                         end_time,
-                        report,
                         capacity: None,
                         outcome,
                     };
@@ -661,7 +658,6 @@ impl FmAnalysis {
                 status::AnalysisStatus {
                     start_time,
                     end_time,
-                    report,
                     capacity,
                     outcome: status::AnalysisOutcome::Committed { sitrep_id },
                 }
@@ -680,7 +676,6 @@ impl FmAnalysis {
                 status::AnalysisStatus {
                     start_time,
                     end_time,
-                    report,
                     capacity,
                     outcome: status::AnalysisOutcome::NotCommitted {
                         sitrep_id,
@@ -697,7 +692,6 @@ impl FmAnalysis {
                 status::AnalysisStatus {
                     start_time,
                     end_time,
-                    report,
                     capacity,
                     outcome: status::AnalysisOutcome::CommitFailed {
                         sitrep_id,
@@ -1216,7 +1210,7 @@ mod tests {
             OmicronZoneUuid::new_v4(),
         );
 
-        let (input, prep) = task
+        let (input, prep, _report) = task
             .prepare_inputs(opctx, Some(parent), inv)
             .await
             .expect("input preparation should succeed");

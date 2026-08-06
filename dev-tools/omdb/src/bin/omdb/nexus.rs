@@ -3617,22 +3617,19 @@ fn print_task_fm_analysis(details: &serde_json::Value, colored: bool) {
         }
     };
 
-    let AnalysisStatus {
-        start_time,
-        end_time,
-        report: analysis_report,
-        outcome,
-        capacity,
-    } = analysis_status;
-    match outcome {
+    let AnalysisStatus { start_time, end_time, outcome, capacity } =
+        analysis_status;
+    let sitrep_id = match outcome {
         AnalysisOutcome::Error(error) => {
             println!("{ERRICON} analysis failed: {error}");
+            None
         }
         AnalysisOutcome::Unchanged => {
             println!(
                 "    no changes from the current situation report ({:?})",
                 parent_sitrep_id
             );
+            None
         }
         AnalysisOutcome::LimitReached { limit } => {
             println!(
@@ -3640,6 +3637,7 @@ fn print_task_fm_analysis(details: &serde_json::Value, colored: bool) {
                  limit ({limit} sitreps) has been reached!"
             );
             println!("    no new sitrep was written.");
+            None
         }
         AnalysisOutcome::NotCommitted { sitrep_id } => {
             println!(
@@ -3650,6 +3648,7 @@ fn print_task_fm_analysis(details: &serde_json::Value, colored: bool) {
                 of date"
             );
             println!("    sitrep ID: {sitrep_id:?}");
+            Some(sitrep_id)
         }
         AnalysisOutcome::CommitFailed { sitrep_id, error } => {
             println!(
@@ -3658,11 +3657,20 @@ fn print_task_fm_analysis(details: &serde_json::Value, colored: bool) {
             );
             println!("    sitrep ID: {sitrep_id:?}");
             println!("    error:     {error}");
+            Some(sitrep_id)
         }
         AnalysisOutcome::Committed { sitrep_id } => {
             println!("    analyzed the situation, and committed a new sitrep!");
             println!("    sitrep ID: {sitrep_id:?}");
+            Some(sitrep_id)
         }
+    };
+    if let Some(sitrep_id) = sitrep_id {
+        println!(
+            "    note: you can view the sitrep and its reports with:\n      \
+                   $ omdb db sitrep show {sitrep_id}\n      \
+                   $ omdb db sitrep analysis-report {sitrep_id} "
+        )
     }
     println!();
 
@@ -3680,19 +3688,13 @@ fn print_task_fm_analysis(details: &serde_json::Value, colored: bool) {
         println!("      count: {:>6}", capacity.count);
     }
 
-    let PreparationStatus { warnings, report: prep_report } = prep_status;
-    println!("    preparation report:");
-    print!("{}", prep_report.display_multiline(6).colored(colored));
+    let PreparationStatus { warnings } = prep_status;
     if !warnings.is_empty() {
         println!("{ERRICON}   non-fatal errors preparing analysis inputs:");
         for error in warnings {
             println!("      > {error}")
         }
     }
-
-    println!();
-    println!("    analysis report:");
-    print!("{}", analysis_report.display_multiline(6).colored(colored));
     print_start_end_time(start_time, end_time, 4);
 }
 
