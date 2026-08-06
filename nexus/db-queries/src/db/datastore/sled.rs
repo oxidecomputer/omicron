@@ -429,21 +429,28 @@ impl fmt::Display for LocalStorageUnsatisfiable {
     }
 }
 
-/// Pair each local storage request with a distinct pool, or report that no
-/// such pairing exists.
+/// Pair each local storage request with a distinct pool, or return an error
+/// if that isn't possible.
 ///
-/// A pool fits a request if and only if `required_dataset_size < headroom`, a
-/// single scalar threshold, so pool eligibility is nested: any pool that fits
-/// a request also fits every smaller request. Sorting requests by size
-/// (descending) and pools by headroom (descending) and pairing them
-/// index-by-index therefore succeeds if and only if any valid assignment
-/// exists: in a valid assignment, the i largest requests occupy i distinct
-/// pools, each of which fits the i-th largest request, so the i pools with
-/// the most headroom must each fit it too.
+/// Sort the requests by size, sort the pools by headroom, pair them up
+/// largest-to-largest, and check that every request fits its pool. This
+/// either produces a valid pairing or proves that none exists:
 ///
-/// This pairing spreads the largest requests onto the pools with the most
-/// available space. Ties are broken by ascending disk id and ascending pool
-/// id, making the output deterministic apart from the minted allocation ids.
+/// - If the biggest request doesn't fit in the roomiest pool, no pool can
+///   hold it.
+///
+/// - If it does fit, placing it there gives nothing up: any other pool big
+///   enough for the biggest request is also big enough for whichever
+///   smaller request would have used that pool instead.
+///
+/// - The same reasoning applies at each step down the two sorted lists.
+///
+/// A caller seeing an error can conclude that these requests cannot fit on
+/// this sled at all, rather than needing to try other arrangements.
+///
+/// Ties are broken by disk id and pool id, so for a given set of requests
+/// and pools the output is deterministic. Only the freshly generated
+/// allocation ids differ between calls.
 fn pair_local_storage_requests_to_pools(
     mut requests: Vec<LocalStorageRequest>,
     mut pools: Vec<LocalStorageCandidatePool>,
