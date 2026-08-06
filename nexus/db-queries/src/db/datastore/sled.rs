@@ -565,19 +565,25 @@ fn choose_local_storage_allocations(
     pair_local_storage_requests_to_pools(requests, pools)
 }
 
-/// How many times to attempt local storage allocation on a single sled
-/// before trying another sled. Each attempt computes an assignment from a
-/// fresh zpool snapshot, so a retry is only needed when a concurrent writer
-/// consumed the chosen pools between the snapshot and the insert; losing that
-/// race repeatedly is increasingly unlikely.
+/// The number of times to try allocating local storage on a single sled
+/// before moving on to another sled.
 ///
-/// This bound is load-bearing, not just a tuning knob: the snapshot from
-/// `zpool_get_for_sled_reservation` does not count encrypted local storage
-/// dataset usage, while `sled_insert_resource_query`'s capacity check does.
-/// Those cannot diverge today (reservation bails out earlier if any disk has
-/// an encrypted allocation), but if they ever do, the deterministic chooser
-/// would recompute the same doomed assignment on every attempt, and only
-/// this bound would stop the loop.
+/// Each attempt reads a fresh snapshot of the sled's zpools, chooses an
+/// assignment, and runs the insert query. The insert can still fail if
+/// another reservation claims the space after the snapshot is read but
+/// before the insert runs. Retrying with a new snapshot handles that, and
+/// losing the race several times in a row takes increasingly bad luck, so a
+/// small number of attempts is enough.
+///
+/// The limit also protects against a subtler problem. The chooser always
+/// makes the same choice from the same snapshot, so if it ever considers a
+/// pool to have room when the insert query does not, retrying cannot help:
+/// every attempt proposes the same allocations and fails the same way. One
+/// such gap exists today: `zpool_get_for_sled_reservation` does not count
+/// encrypted local storage dataset usage, while the insert query does. That
+/// usage is always zero right now (nothing creates encrypted allocations,
+/// and reservation bails out earlier if a disk has one), but if that
+/// changes, this limit is what keeps the loop from spinning forever.
 const LOCAL_STORAGE_ATTEMPTS_PER_SLED: usize = 4;
 
 /// Return true if any local storage disk still requiring an allocation has
