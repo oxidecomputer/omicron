@@ -165,24 +165,12 @@ async fn apply_plan(
         )
     };
 
-    match (&add_v4_result, &add_v6_result, &delete_v4_result, &delete_v6_result)
-    {
-        (Ok(added_v4), Ok(added_v6), Ok(deleted_v4), Ok(deleted_v6)) => {
-            MgdStaticRouteReconcilerStatus::Success {
-                unchanged: unchanged_count,
-                deleted_v4: *deleted_v4,
-                deleted_v6: *deleted_v6,
-                added_v4: *added_v4,
-                added_v6: *added_v6,
-            }
-        }
-        _ => MgdStaticRouteReconcilerStatus::PartialSuccess {
-            unchanged: unchanged_count,
-            delete_v4_result,
-            delete_v6_result,
-            add_v4_result,
-            add_v6_result,
-        },
+    MgdStaticRouteReconcilerStatus::Complete {
+        unchanged: unchanged_count,
+        delete_v4_result,
+        delete_v6_result,
+        add_v4_result,
+        add_v6_result,
     }
 }
 

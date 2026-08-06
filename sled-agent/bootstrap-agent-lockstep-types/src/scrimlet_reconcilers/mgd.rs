@@ -220,23 +220,12 @@ pub enum MgdStaticRouteReconcilerStatus {
     /// somewhere (either coming from mgd or in the rack network config).
     FailedGeneratingPlan(String),
 
-    /// Reconciliation completed successfully.
+    /// Reconciliation completed.
     ///
     /// mgd operations are performed in bulk, so each item here contains the
-    /// count of items involved.
-    Success {
-        unchanged: usize,
-        deleted_v4: usize,
-        deleted_v6: usize,
-        added_v4: usize,
-        added_v6: usize,
-    },
-
-    /// Reconciliation completed with at least one failure.
-    ///
-    /// mgd operations are performed in bulk. Each successful result contains
-    /// the count of items involved; error results describe the failure.
-    PartialSuccess {
+    /// count of items involved (on success) or the error associated with the
+    /// bulk operation (on failure).
+    Complete {
         unchanged: usize,
         delete_v4_result: Result<usize, String>,
         delete_v6_result: Result<usize, String>,
@@ -259,29 +248,7 @@ impl slog::KV for MgdStaticRouteReconcilerStatus {
             Self::FailedGeneratingPlan(reason) => {
                 serializer.emit_str(skipped_key.into(), reason)
             }
-            Self::Success {
-                unchanged,
-                deleted_v4,
-                deleted_v6,
-                added_v4,
-                added_v6,
-            } => {
-                serializer
-                    .emit_usize("static-routes-unchanged".into(), *unchanged)?;
-                for (key, items) in [
-                    ("static-routes-delete-v4", deleted_v4),
-                    ("static-routes-delete-v6", deleted_v6),
-                    ("static-routes-add-v4", added_v4),
-                    ("static-routes-add-v6", added_v6),
-                ] {
-                    serializer.emit_arguments(
-                        key.into(),
-                        &format_args!("success ({items} routes affected)"),
-                    )?;
-                }
-                Ok(())
-            }
-            Self::PartialSuccess {
+            Self::Complete {
                 unchanged,
                 delete_v4_result,
                 delete_v6_result,
