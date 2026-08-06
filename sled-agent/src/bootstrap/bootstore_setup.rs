@@ -11,6 +11,7 @@ use super::server::StartError;
 use bootstore::schemes::v0 as bootstore;
 use camino::Utf8PathBuf;
 use omicron_common::address::BOOTSTORE_PORT;
+use omicron_common::address::SUSH_GOSSIP_PORT;
 use omicron_common::address::TRUST_QUORUM_PORT;
 use omicron_ddm_admin_client::Client as DdmAdminClient;
 use sled_hardware_types::Baseboard;
@@ -22,6 +23,7 @@ use std::collections::BTreeSet;
 use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
 use std::time::Duration;
+use tokio::sync::watch;
 
 const BOOTSTORE_FSM_STATE_FILE: &str = "bootstore-fsm-state.json";
 const BOOTSTORE_NETWORK_CONFIG_FILE: &str = "bootstore-network-config.json";
@@ -75,10 +77,11 @@ fn bootstore_network_config_paths(
     Ok(paths)
 }
 
-pub async fn poll_ddmd_for_bootstore_and_tq_peer_update(
+pub async fn poll_ddmd_for_peer_updates(
     log: Logger,
     bootstore_node_handle: bootstore::NodeHandle,
     trust_quorum_handle: trust_quorum::NodeTaskHandle,
+    sush_gossip_tx: watch::Sender<BTreeSet<SocketAddrV6>>,
 ) {
     let mut current_bootstore_peers: BTreeSet<SocketAddrV6> = BTreeSet::new();
     let mut current_tq_peers: BTreeSet<SocketAddrV6> = BTreeSet::new();
@@ -137,6 +140,18 @@ pub async fn poll_ddmd_for_bootstore_and_tq_peer_update(
                         return;
                     }
                 }
+                // Inform the sush gossip manager of all known peer addresses
+                let sush_peers: BTreeSet<_> = addrs
+                    .iter()
+                    .map(|ip| SocketAddrV6::new(*ip, SUSH_GOSSIP_PORT, 0, 0))
+                    .collect();
+                sush_gossip_tx.send_if_modified(|current| {
+                    let changed = *current != sush_peers;
+                    if changed {
+                        *current = sush_peers;
+                    }
+                    changed
+                });
             }
             Err(err) => {
                 warn!(

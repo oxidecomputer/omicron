@@ -233,6 +233,7 @@ pub const BOOTSTORE_PORT: u16 = 12347;
 pub const REPO_DEPOT_PORT: u16 = 12348;
 pub const TRUST_QUORUM_PORT: u16 = 12349;
 pub const SUSH_API_PORT: u16 = 12350;
+pub const SUSH_GOSSIP_PORT: u16 = 12351;
 
 pub const BOOTSTRAP_AGENT_LOCKSTEP_PORT: u16 = 8080;
 

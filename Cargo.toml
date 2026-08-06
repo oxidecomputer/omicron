@@ -853,6 +853,13 @@ subtle = "2.6.1"
 supports-color = "3.0.2"
 support-bundle-collection = { path = "support-bundle-collection" }
 support-bundle-viewer = "0.1.2"
+# TODO: pin to a rev before this merges, once the sush repo is public:
+#   sush-server = { git = "https://github.com/oxidecomputer/sush", rev = "..." }
+# The branch form is for integration work only. Either form exercises the
+# sled-hardware-types patch directive below identically, since that directive
+# keys off the source URL in sush's own manifest, not off how we pull sush in.
+sush-api = { git = "https://github.com/oxidecomputer/sush", branch = "omicron-integration" }
+sush-server = { git = "https://github.com/oxidecomputer/sush", branch = "omicron-integration", features = ["embedded"] }
 swrite = "0.1.0"
 sync-ptr = "0.1.4"
 libsw = { version = "3.5.0", features = ["tokio"] }
@@ -1161,3 +1168,8 @@ path = "workspace-hack"
 [patch."https://github.com/oxidecomputer/omicron"]
 omicron-uuid-kinds = { path = "uuid-kinds" }
 omicron-common = { path = "common" }
+# sush depends on this repo's sled-hardware-types as a Git dependency, for
+# BaseboardId. Without this directive the build gets two distinct copies of the
+# crate, and the BaseboardId that sush's API expects is a *different type* from
+# the one sled-agent derives from HardwareManager::baseboard().
+sled-hardware-types = { path = "sled-hardware/types" }
