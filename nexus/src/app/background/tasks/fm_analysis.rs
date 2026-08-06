@@ -1231,12 +1231,11 @@ mod tests {
         // The closed case whose only alert request has a marker is dropped
         // from the carry-forward set entirely...
         assert!(
-            !prep
-                .report
+            !report
                 .closed_cases_copied_forward
                 .contains_key(&satisfied_case_id),
             "satisfied closed case should be dropped, got: {:?}",
-            prep.report.closed_cases_copied_forward,
+            report.closed_cases_copied_forward,
         );
         // ...while the closed case with an unsatisfied alert request is
         // copied forward, with that request reported as outstanding.
