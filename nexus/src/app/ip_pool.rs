@@ -604,15 +604,9 @@ impl super::Nexus {
             self.ip_pool_service_single(opctx, range.version().into()).await?;
         opctx.authorize(authz::Action::Modify, &authz_pool).await?;
 
-        // Disallow V6 ranges until IPv6 is fully supported by the networking
-        // subsystem. Instead of changing the API to reflect that (making this
-        // endpoint inconsistent with the rest) and changing it back when we
-        // add support, we accept them at the API layer and error here. It
-        // would be nice if we could do it in the datastore layer, but we'd
-        // have no way of creating IPv6 ranges for the purpose of testing IP
-        // pool utilization.
-        //
-        // See https://github.com/oxidecomputer/omicron/issues/8761.
+        // IPv6 ranges are supported, but only through the current
+        // `/v1/system/ip-pools` endpoints. This deprecated service-pool
+        // endpoint is still IPv4-only, so we reject V6 ranges.
         if matches!(range, ip_pool::IpRange::V6(_)) {
             return Err(Error::invalid_request(
                 "IPv6 ranges are not allowed yet",

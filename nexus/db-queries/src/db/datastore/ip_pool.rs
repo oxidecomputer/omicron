@@ -914,32 +914,6 @@ impl DataStore {
         Ok(())
     }
 
-    /// Check whether the pool is assigned for system services.
-    //
-    // TODO-remove: This should go away when we let operators reassign any IP
-    // Pool. The pool belongs to them even in that case, and so we should show
-    // it to them.
-    //
-    // See https://github.com/oxidecomputer/omicron/issues/8947.
-    pub async fn ip_pool_is_assigned_to_system_services(
-        &self,
-        opctx: &OpContext,
-        authz_pool: &authz::IpPool,
-    ) -> LookupResult<bool> {
-        use nexus_db_schema::schema::ip_pool;
-        ip_pool::table
-            .find(authz_pool.id())
-            .filter(ip_pool::time_deleted.is_null())
-            .select(ip_pool::assignment.eq(IpPoolAssignment::SystemServices))
-            .first_async::<bool>(
-                &*self.pool_connection_authorized(opctx).await?,
-            )
-            .await
-            .optional()
-            .map(|result| result.unwrap_or(false))
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
-    }
-
     pub async fn ip_pool_update(
         &self,
         opctx: &OpContext,
@@ -2895,108 +2869,8 @@ mod test {
         logctx.cleanup_successful();
     }
 
-    #[tokio::test]
-    async fn test_ip_pools_assigned_to_system_services() {
-        let logctx =
-            dev::test_setup_log("test_ip_pools_assigned_to_system_services");
-        let db = TestDatabase::new_with_datastore(&logctx.log).await;
-        let (opctx, datastore) = (db.opctx(), db.datastore());
-
-        // Create the v4 and v6 system-service pools the loop expects to find.
-        create_service_ip_pool(
-            opctx,
-            datastore,
-            "oxide-service-pool-v4",
-            IpVersion::V4.into(),
-        )
-        .await;
-        create_service_ip_pool(
-            opctx,
-            datastore,
-            "oxide-service-pool-v6",
-            IpVersion::V6.into(),
-        )
-        .await;
-
-        for version in [IpVersion::V4, IpVersion::V6] {
-            // confirm system services pools are identified correctly
-            let service_pools = datastore
-                .ip_pools_service_lookup_by_version(
-                    &opctx,
-                    version,
-                    NonZeroU32::new(1).unwrap(),
-                )
-                .await
-                .unwrap();
-            let service_pool = service_pools.first().unwrap();
-            assert_eq!(service_pool.db_pool.ip_version, version);
-
-            let is_internal = datastore
-                .ip_pool_is_assigned_to_system_services(
-                    &opctx,
-                    &service_pool.authz_pool,
-                )
-                .await;
-            assert_eq!(is_internal, Ok(true));
-
-            // a silo pool should not be considered assigned for system services
-            let identity = IdentityMetadataCreateParams {
-                name: format!("other-{version}-pool").parse().unwrap(),
-                description: "".to_string(),
-            };
-            let other_pool = datastore
-                .ip_pool_create(
-                    &opctx,
-                    IpPool::new(&identity, version, IpPoolAssignment::Silos),
-                )
-                .await
-                .expect("Failed to create IP pool");
-            assert_eq!(other_pool.ip_version, version);
-
-            let authz_other_pool = authz::IpPool::new(
-                authz::FLEET,
-                other_pool.id(),
-                LookupType::ById(other_pool.id()),
-            );
-            let is_internal = datastore
-                .ip_pool_is_assigned_to_system_services(
-                    &opctx,
-                    &authz_other_pool,
-                )
-                .await;
-            assert_eq!(is_internal, Ok(false));
-
-            // now link it to the current silo; it is still not assigned for system services
-            let silo_id = opctx.authn.silo_required().unwrap().id();
-            let is_default = matches!(version, IpVersion::V4);
-            let link = IncompleteIpPoolResource {
-                ip_pool_id: other_pool.id(),
-                resource_type: IpPoolResourceType::Silo,
-                resource_id: silo_id,
-                is_default,
-            };
-            datastore
-                .ip_pool_link_silo(&opctx, link)
-                .await
-                .expect("Failed to link IP pool to silo");
-
-            let is_internal = datastore
-                .ip_pool_is_assigned_to_system_services(
-                    &opctx,
-                    &authz_other_pool,
-                )
-                .await;
-            assert_eq!(is_internal, Ok(false));
-        }
-
-        db.terminate().await;
-        logctx.cleanup_successful();
-    }
-
     // We're breaking out the utilization tests for IPv4 and IPv6 pools, since
-    // pools only contain one version now.
-    //
-    // See https://github.com/oxidecomputer/omicron/issues/8888.
+    // pools only contain one version.
     #[tokio::test]
     async fn test_ipv4_ip_pool_utilization() {
         let logctx = dev::test_setup_log("test_ipv4_ip_pool_utilization");
