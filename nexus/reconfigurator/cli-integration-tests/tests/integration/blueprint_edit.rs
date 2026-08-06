@@ -170,7 +170,7 @@ async fn test_blueprint_edit(cptestctx: &ControlPlaneTestContext) {
     );
     swriteln!(s, "save {}", saved_state2_path);
     std::fs::write(&script1_path, &s)
-        .with_context(|| format!("write {}", &script1_path))
+        .with_context(|| format!("write {}", script1_path))
         .unwrap();
 
     // Run this reconfigurator-cli invocation.
@@ -220,7 +220,7 @@ async fn test_blueprint_edit(cptestctx: &ControlPlaneTestContext) {
     );
     swriteln!(s, "blueprint-save {} {}", new_blueprint.id, new_blueprint_path);
     std::fs::write(&script2_path, &s)
-        .with_context(|| format!("write {}", &script2_path))
+        .with_context(|| format!("write {}", script2_path))
         .unwrap();
     let exec = Exec::cmd(path_to_cli()).arg(&script2_path);
     let (exit_status, _, stderr_text) = run_command(exec);

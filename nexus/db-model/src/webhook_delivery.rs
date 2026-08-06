@@ -171,6 +171,11 @@ pub struct WebhookDeliveryAttempt {
     pub time_created: DateTime<Utc>,
 
     pub deliverator_id: DbTypedUuid<OmicronZoneKind>,
+
+    /// If the result is [`WebhookDeliveryAttemptResult::FailedUnreachable`],
+    /// this is an error message explaining why the receiver endpoint was
+    /// unreachable. Otherwise, this should be [`None`]
+    pub unreachable_reason: Option<String>,
 }
 
 impl WebhookDeliveryAttempt {

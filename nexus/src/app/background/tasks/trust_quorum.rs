@@ -22,7 +22,7 @@ use nexus_types::trust_quorum::{
     TrustQuorumConfig as NexusTrustQuorumConfig, TrustQuorumConfigState,
     TrustQuorumMemberState,
 };
-use omicron_common::address::{Ipv6Subnet, RACK_PREFIX, get_64_subnet};
+use omicron_common::address::{Ipv6Subnet, RACK_PREFIX_LENGTH, get_64_subnet};
 use omicron_uuid_kinds::{RackUuid, SledUuid};
 use parallel_task_set::ParallelTaskSet;
 use rand::seq::SliceRandom;
@@ -89,6 +89,7 @@ impl TrustQuorumManager {
 
         // For each rack, do the work
         let mut workers = ParallelTaskSet::new();
+        let mut outputs = Vec::new();
         for (rack_id, epoch) in epochs_by_rack_id {
             let log = log.clone();
             let opctx = opctx.child(BTreeMap::from([
@@ -96,7 +97,7 @@ impl TrustQuorumManager {
                 ("epoch".into(), epoch.to_string()),
             ]));
             let datastore = self.datastore.clone();
-            workers
+            if let Some(output) = workers
                 .spawn(async move {
                     let res = drive_reconfiguration(
                         log, opctx, datastore, rack_id, epoch,
@@ -104,12 +105,16 @@ impl TrustQuorumManager {
                     .await;
                     (rack_id, epoch, res)
                 })
-                .await;
+                .await
+            {
+                outputs.push(output);
+            }
         }
 
         let mut statuses = vec![];
         let mut errors = vec![];
-        while let Some((rack_id, epoch, res)) = workers.join_next().await {
+        outputs.extend(workers.join_remaining().await);
+        for (rack_id, epoch, res) in outputs {
             // Propagate panics: we don't cancel the worker tasks, so this
             // can only fail if the task itself already panicked.
             match res {
@@ -274,7 +279,7 @@ async fn prepare(
             format!(
                 "failed to retrieve commissioned sled \
                     by baseboard_id {} and rack_id {}.",
-                &config.coordinator, &config.rack_id
+                config.coordinator, config.rack_id
             )
         })?
     else {
@@ -289,7 +294,7 @@ async fn prepare(
         .with_context(|| {
             format!(
                 "Failed to get coordinator status from {}.",
-                &config.coordinator
+                config.coordinator
             )
         })?
         .into_inner();
@@ -563,7 +568,7 @@ async fn start_sled_agents(
     info!(log, "Looking up subnet for rack: {}", rack_id);
     let subnet = datastore.rack_subnet(&opctx, rack_id).await?;
     let rack_subnet =
-        Ipv6Subnet::<RACK_PREFIX>::from(rack_subnet(Some(subnet))?);
+        Ipv6Subnet::<RACK_PREFIX_LENGTH>::from(rack_subnet(Some(subnet))?);
 
     // Get a set of random sled agent clients for concurrent calls to
     // `start_sled_agent`.
@@ -616,7 +621,7 @@ async fn send_start_sled_agent_requests(
     log: &Logger,
     client_dest: BaseboardId,
     client: sled_agent_client::Client,
-    rack_subnet: Ipv6Subnet<RACK_PREFIX>,
+    rack_subnet: Ipv6Subnet<RACK_PREFIX_LENGTH>,
     allocations_by_baseboard_id: BTreeMap<
         BaseboardId,
         SledUnderlaySubnetAllocation,

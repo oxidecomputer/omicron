@@ -27,7 +27,6 @@ use crate::config::SidecarRevision;
 use crate::ddm_reconciler::DdmReconciler;
 use crate::metrics::MetricsRequestQueue;
 use crate::profile::*;
-use anyhow::anyhow;
 use camino::{Utf8Path, Utf8PathBuf};
 use clickhouse_admin_types::CLICKHOUSE_KEEPER_CONFIG_DIR;
 use clickhouse_admin_types::CLICKHOUSE_KEEPER_CONFIG_FILE;
@@ -58,16 +57,18 @@ use internal_dns_resolver::Resolver;
 use internal_dns_types::names::BOUNDARY_NTP_DNS_NAME;
 use internal_dns_types::names::DNS_ZONE;
 use nexus_config::{ConfigDropshotWithTls, DeploymentConfig};
-use omicron_common::address::AZ_PREFIX;
+use omicron_common::address::AZ_PREFIX_LENGTH;
+use omicron_common::address::BOOTSTRAP_AGENT_LOCKSTEP_PORT;
 use omicron_common::address::ConcreteIp;
 use omicron_common::address::DENDRITE_PORT;
 use omicron_common::address::LLDP_PORT;
 use omicron_common::address::MAX_PORT;
 use omicron_common::address::MGS_PORT;
 use omicron_common::address::NTP_ADMIN_PORT;
-use omicron_common::address::RACK_PREFIX;
-use omicron_common::address::SLED_PREFIX;
+use omicron_common::address::RACK_PREFIX_LENGTH;
+use omicron_common::address::SLED_PREFIX_LENGTH;
 use omicron_common::address::TFPORTD_PORT;
+use omicron_common::address::WICKETD_COMMISSION_PORT;
 use omicron_common::address::WICKETD_NEXUS_PROXY_PORT;
 use omicron_common::address::WICKETD_PORT;
 use omicron_common::address::{BOOTSTRAP_ARTIFACT_PORT, COCKROACH_ADMIN_PORT};
@@ -85,7 +86,7 @@ use omicron_common::disk::{DatasetKind, DatasetName};
 use omicron_ddm_admin_client::DdmError;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::RackUuid;
-use sled_agent_early_networking::{EarlyNetworkSetup, EarlyNetworkSetupError};
+use sled_agent_early_networking::EarlyNetworkSetup;
 use sled_agent_resolvable_files::{
     ZoneImageSourceResolver, ramdisk_file_source,
 };
@@ -97,10 +98,8 @@ use sled_agent_types::inventory::{
 use sled_agent_types::resolvable_files::{
     MupdateOverrideReadError, PreparedOmicronZone,
 };
-use sled_agent_types::sled::SWITCH_ZONE_BASEBOARD_FILE;
 use sled_agent_types::sled::ThisSledSwitchZoneUnderlayIpAddr;
 use sled_agent_types::system_networking::SystemNetworkingConfig;
-use sled_agent_types::uplink::HostPortConfig;
 use sled_hardware::DendriteAsic;
 use sled_hardware::SledMode;
 use sled_hardware::underlay;
@@ -244,9 +243,6 @@ pub enum Error {
 
     #[error("Sidecar revision error")]
     SidecarRevision(#[from] anyhow::Error),
-
-    #[error("Early networking setup error")]
-    EarlyNetworkSetupError(#[from] EarlyNetworkSetupError),
 
     #[error("Error querying simnet devices")]
     Simnet(#[from] GetSimnetError),
@@ -592,15 +588,21 @@ enum SwitchZoneState {
         request: SwitchZoneConfig,
         // The currently running zone
         zone: Box<RunningZone>,
-        // A background task which keeps looping until the zone's uplinks are
-        // configured.
-        worker: Option<Task>,
     },
 }
 
 /// Manages miscellaneous Sled-local services.
 pub struct ServiceManagerInner {
     log: Logger,
+    // The bootstrap IP of the global zone. It's used for services such as trust
+    // quorum and the bootstrap-agent-lockstep server and is reported by DDMD as
+    // a peer address.
+    global_zone_bootstrap_ip: Ipv6Addr,
+    // This is the link-local bootstrap address of the global zone. It's only
+    // reachable over the direct link and is used solely for DDM routing on the
+    // bootstrap network. It is not reported by DDMD as a peer address as it
+    // is not reachable remotely except by it's directly connected peer on the
+    // same link.
     global_zone_bootstrap_link_local_address: Ipv6Addr,
     switch_zone: Mutex<SwitchZoneState>,
     sled_mode: SledMode,
@@ -780,6 +782,8 @@ impl ServiceManager {
         Self {
             inner: Arc::new(ServiceManagerInner {
                 log: log.clone(),
+                global_zone_bootstrap_ip: bootstrap_networking
+                    .global_zone_bootstrap_ip,
                 global_zone_bootstrap_link_local_address: bootstrap_networking
                     .global_zone_bootstrap_link_local_ip,
                 // TODO(https://github.com/oxidecomputer/omicron/issues/725):
@@ -950,7 +954,7 @@ impl ServiceManager {
     // Derive two unique techport /64 prefixes from the bootstrap address.
     fn bootstrap_addr_to_techport_prefixes(
         addr: &Ipv6Addr,
-    ) -> [Ipv6Subnet<SLED_PREFIX>; 2] {
+    ) -> [Ipv6Subnet<SLED_PREFIX_LENGTH>; 2] {
         // Generate two unique prefixes from the bootstrap address, by
         // incrementing the second octet. This assumes that the bootstrap
         // address starts with `fdb0`, and so we end up with `fdb1` and `fdb2`.
@@ -1050,24 +1054,21 @@ impl ServiceManager {
         // 1. We find all switch zone IPs.
         // 2. We find at least one switch zone IP and this timeout elapses.
         //
-        // If Nexus is up, we don't really need to do any of this work; it has a
-        // background task that will sync NAT entries periodically. However,
-        // it's critical that we set up NAT entries for boundary NTP in
-        // particular during cold boot; otherwise, we won't be able to timesync
-        // and bring the rack up.
+        // This should be unnecessary: the scrimlets now run reconcilers that
+        // set up NAT entries for all services on the rack. We keep it here for
+        // now for update safety to the release in which we shipped said
+        // reconcilers; we still need sled-agent to be able to set up NAT
+        // entries on its own in some (unlikely) scenarios where a rack loses
+        // power partway through an update. This function will be removed once
+        // we've shipped the release containing the reconcilers.
         //
         // The choice of timeout here is a tension between wanting to wait for
         // both switches and not wanting to block zone startup indefinitely if
         // one of the scrimlets or switches is unavailable for an extended
-        // period of time. We should probably revist this entirely - maybe
-        // sled-agent should have its own NAT config reconciler for cold boot
-        // (although it's unclear how something like that wout interact with
-        // Nexus)?
-        //
-        // We'll pick 5 minutes, which has historically been the timeout here
-        // and should hopefully give enough time for a "just rebooted" scrimlet
-        // to bring its switch zone up, if we get unlucky in coincidental
-        // timings.
+        // period of time. We'll pick 5 minutes, which has historically been the
+        // timeout here and should hopefully give enough time for a "just
+        // rebooted" scrimlet to bring its switch zone up, if we get unlucky in
+        // coincidental timings.
         const WAIT_FOR_ALL_SWITCH_ZONES_TIMEOUT: Duration =
             Duration::from_secs(5 * 60);
 
@@ -2095,10 +2096,11 @@ impl ServiceManager {
                     &[*address.ip()],
                 )?;
 
-                let rack_net =
-                    Ipv6Subnet::<RACK_PREFIX>::new(info.underlay_address)
-                        .net()
-                        .to_string();
+                let rack_net = Ipv6Subnet::<RACK_PREFIX_LENGTH>::new(
+                    info.underlay_address,
+                )
+                .net()
+                .to_string();
 
                 let dns_install_service = Self::dns_install(
                     info,
@@ -2191,10 +2193,11 @@ impl ServiceManager {
                     &[*address.ip()],
                 )?;
 
-                let rack_net =
-                    Ipv6Subnet::<RACK_PREFIX>::new(info.underlay_address)
-                        .net()
-                        .to_string();
+                let rack_net = Ipv6Subnet::<RACK_PREFIX_LENGTH>::new(
+                    info.underlay_address,
+                )
+                .net()
+                .to_string();
 
                 let dns_install_service = Self::dns_install(info, None, None)?;
 
@@ -2435,7 +2438,7 @@ impl ServiceManager {
                         compression: dropshot::CompressionConfig::None,
                     },
                     internal_dns: nexus_config::InternalDns::FromSubnet {
-                        subnet: Ipv6Subnet::<RACK_PREFIX>::new(
+                        subnet: Ipv6Subnet::<RACK_PREFIX_LENGTH>::new(
                             info.underlay_address,
                         ),
                     },
@@ -2446,6 +2449,8 @@ impl ServiceManager {
                     external_http_clients:
                         nexus_config::ExternalHttpClientConfig {
                             interface: Some(opte_iface_name.to_string()),
+                            treat_loopback_as_external:
+                                nexus_config::TreatLoopbackAsExternal::No,
                         },
                 };
 
@@ -2676,6 +2681,11 @@ impl ServiceManager {
                         &format!("[::1]:{WICKETD_PORT}"),
                     )
                     .add_property(
+                        "commission-address",
+                        "astring",
+                        &format!("[::1]:{WICKETD_COMMISSION_PORT}"),
+                    )
+                    .add_property(
                         "artifact-address",
                         "astring",
                         &format!(
@@ -2683,14 +2693,28 @@ impl ServiceManager {
                         ),
                     )
                     .add_property(
-                        "baseboard-file",
+                        "baseboard-part",
                         "astring",
-                        SWITCH_ZONE_BASEBOARD_FILE,
+                        baseboard.model(),
+                    )
+                    .add_property(
+                        "baseboard-serial",
+                        "astring",
+                        baseboard.identifier(),
                     )
                     .add_property(
                         "mgs-address",
                         "astring",
                         &format!("[::1]:{MGS_PORT}"),
+                    )
+                    .add_property(
+                        "bootstrap-agent-lockstep-address",
+                        "astring",
+                        &SocketAddr::new(
+                            IpAddr::V6(self.inner.global_zone_bootstrap_ip),
+                            BOOTSTRAP_AGENT_LOCKSTEP_PORT,
+                        )
+                        .to_string(),
                     )
                     // We intentionally bind `nexus-proxy-address` to
                     // `::` so wicketd will serve this on all
@@ -2704,8 +2728,9 @@ impl ServiceManager {
                     );
 
                     if let Some(i) = info {
-                        let rack_subnet =
-                            Ipv6Subnet::<AZ_PREFIX>::new(i.underlay_address);
+                        let rack_subnet = Ipv6Subnet::<AZ_PREFIX_LENGTH>::new(
+                            i.underlay_address,
+                        );
 
                         wicketd_config = wicketd_config.add_property(
                             "rack-subnet",
@@ -2718,15 +2743,6 @@ impl ServiceManager {
                         ServiceInstanceBuilder::new("default")
                             .add_property_group(wicketd_config),
                     );
-
-                    let baseboard_info = serde_json::to_string(&baseboard)?;
-
-                    switch_zone_setup_config =
-                        switch_zone_setup_config.clone().add_property(
-                            "baseboard_info",
-                            "astring",
-                            &baseboard_info,
-                        );
                 }
                 SwitchService::Dendrite { asic } => {
                     info!(self.inner.log, "Setting up dendrite service");
@@ -2746,7 +2762,7 @@ impl ServiceManager {
                         );
                         if *address != Ipv6Addr::LOCALHOST {
                             let az_prefix =
-                                Ipv6Subnet::<AZ_PREFIX>::new(*address);
+                                Ipv6Subnet::<AZ_PREFIX_LENGTH>::new(*address);
                             for addr in Resolver::servers_from_subnet(az_prefix)
                             {
                                 dendrite_config = dendrite_config.add_property(
@@ -2955,7 +2971,6 @@ impl ServiceManager {
                                     model,
                                 );
                         }
-                        Baseboard::Unknown => {}
                     }
 
                     for address in addresses {
@@ -2992,8 +3007,7 @@ impl ServiceManager {
                 }
                 SwitchService::Uplink => {
                     // Nothing to do here - this service is special and
-                    // configured in
-                    // `ensure_switch_zone_uplinks_configured`
+                    // configured by the scrimlet reconcilers
                     uplink_service = uplink_service
                         .add_instance(ServiceInstanceBuilder::new("default"));
                 }
@@ -3019,7 +3033,7 @@ impl ServiceManager {
                     for address in addresses {
                         if *address != Ipv6Addr::LOCALHOST {
                             let az_prefix =
-                                Ipv6Subnet::<AZ_PREFIX>::new(*address);
+                                Ipv6Subnet::<AZ_PREFIX_LENGTH>::new(*address);
                             for addr in Resolver::servers_from_subnet(az_prefix)
                             {
                                 mgd_config = mgd_config.add_property(
@@ -3061,7 +3075,7 @@ impl ServiceManager {
                     for address in addresses {
                         if *address != Ipv6Addr::LOCALHOST {
                             let az_prefix =
-                                Ipv6Subnet::<AZ_PREFIX>::new(*address);
+                                Ipv6Subnet::<AZ_PREFIX_LENGTH>::new(*address);
                             for addr in Resolver::servers_from_subnet(az_prefix)
                             {
                                 mg_ddm_config = mg_ddm_config.add_property(
@@ -3356,203 +3370,6 @@ impl ServiceManager {
         Ok(())
     }
 
-    // Retry ensuring switch zone uplinks until success or we're told to stop.
-    //
-    // TODO-correctness: This is not in great shape, and may get stuck in an
-    // infinite retry loop _within_ one attempt, or may succeed even if it
-    // didn't fully configure all switch zone services. See
-    // <https://github.com/oxidecomputer/omicron/issues/8970> for details.
-    async fn ensure_switch_zone_uplinks_configured_loop(
-        &self,
-        switch_zone_ip: ThisSledSwitchZoneUnderlayIpAddr,
-        network_config_rx: &watch::Receiver<SystemNetworkingConfig>,
-        mut exit_rx: oneshot::Receiver<()>,
-    ) {
-        // We don't really expect failures trying to initialize the switch zone
-        // unless something is unhealthy. This timeout is somewhat arbitrary,
-        // but we probably don't want to use backoff here.
-        const RETRY_DELAY: Duration = Duration::from_secs(1);
-
-        loop {
-            match self
-                .ensure_switch_zone_uplinks_configured(
-                    switch_zone_ip,
-                    network_config_rx,
-                )
-                .await
-            {
-                Ok(()) => {
-                    info!(self.inner.log, "configured switch zone uplinks");
-                    break;
-                }
-                Err(e) => {
-                    warn!(
-                        self.inner.log,
-                        "Failed to configure switch zone uplinks";
-                        InlineErrorChain::new(&e),
-                    );
-                }
-            }
-
-            tokio::select! {
-                // If we've been told to stop trying, bail.
-                _ = &mut exit_rx => {
-                    info!(
-                        self.inner.log,
-                        "instructed to give up on switch zone uplink \
-                         configuration",
-                    );
-                    return;
-                }
-
-                _ = tokio::time::sleep(RETRY_DELAY) => {
-                    info!(
-                        self.inner.log,
-                        "retrying switch zone uplink configuration",
-                    );
-                    continue;
-                }
-            };
-        }
-    }
-
-    // Ensure our switch zone (at the given IP address) has its uplinks
-    // configured based on `network_config`. This first requires us to ask
-    // MGS running in the switch zone which switch we are, so we know which
-    // uplinks from `network_config` to assign.
-    async fn ensure_switch_zone_uplinks_configured(
-        &self,
-        switch_zone_ip: ThisSledSwitchZoneUnderlayIpAddr,
-        network_config_rx: &watch::Receiver<SystemNetworkingConfig>,
-    ) -> Result<(), Error> {
-        let log = &self.inner.log;
-
-        // Configure uplinks via DPD in our switch zone.
-        let our_ports = EarlyNetworkSetup::new(log)
-            .init_switch_config(network_config_rx, switch_zone_ip)
-            .await?
-            .into_iter()
-            .map(From::from)
-            .collect();
-
-        self.ensure_scrimlet_host_ports(our_ports).await
-    }
-
-    pub async fn ensure_scrimlet_host_ports(
-        &self,
-        our_ports: Vec<HostPortConfig>,
-    ) -> Result<(), Error> {
-        // Helper function to add a property-value pair
-        // if the config actually has a value set.
-        fn apv(
-            smfh: &SmfHelper,
-            prop: &str,
-            val: &Option<String>,
-        ) -> Result<(), Error> {
-            if let Some(v) = val {
-                smfh.addpropvalue_type(prop, v, "astring")?
-            }
-            Ok(())
-        }
-
-        // We expect the switch zone to be running, as we're called immediately
-        // after `ensure_zone()` above and we just successfully configured
-        // uplinks via DPD running in our switch zone. If somehow we're in any
-        // other state, bail out.
-        let mut switch_zone = self.inner.switch_zone.lock().await;
-
-        let zone = match &mut *switch_zone {
-            SwitchZoneState::Running { zone, .. } => zone,
-            SwitchZoneState::Disabled => {
-                return Err(Error::SwitchZone(anyhow!(
-                    "Cannot configure switch zone uplinks: \
-                     switch zone disabled"
-                )));
-            }
-            SwitchZoneState::Initializing { .. } => {
-                return Err(Error::SwitchZone(anyhow!(
-                    "Cannot configure switch zone uplinks: \
-                     switch zone still initializing"
-                )));
-            }
-        };
-
-        info!(self.inner.log, "ensuring scrimlet uplinks");
-        let usmfh = SmfHelper::new(&zone, &SwitchService::Uplink);
-        let lsmfh = SmfHelper::new(
-            &zone,
-            &SwitchService::Lldpd { baseboard: Baseboard::Unknown },
-        );
-
-        // We want to delete all the properties in the `uplinks` group, but we
-        // don't know their names, so instead we'll delete and recreate the
-        // group, then add all our properties.
-        let _ = usmfh.delpropgroup("uplinks");
-        usmfh.addpropgroup("uplinks", "application")?;
-
-        for port_config in &our_ports {
-            for addr in &port_config.addrs {
-                usmfh.addpropvalue_type(
-                    format!("uplinks/{}_0", port_config.port),
-                    addr.to_uplinkd_smf_property(),
-                    "astring",
-                )?;
-            }
-
-            if let Some(lldp_config) = &port_config.lldp {
-                let group_name = format!("port_{}", port_config.port);
-                info!(self.inner.log, "setting up {group_name}");
-                let _ = lsmfh.delpropgroup(&group_name);
-                lsmfh.addpropgroup(&group_name, "application")?;
-                apv(
-                    &lsmfh,
-                    &format!("{group_name}/status"),
-                    &Some(
-                        lldp_config.status.to_lldpd_smf_property().to_owned(),
-                    ),
-                )?;
-                apv(
-                    &lsmfh,
-                    &format!("{group_name}/chassis_id"),
-                    &lldp_config.chassis_id,
-                )?;
-                apv(
-                    &lsmfh,
-                    &format!("{group_name}/system_name"),
-                    &lldp_config.system_name,
-                )?;
-                apv(
-                    &lsmfh,
-                    &format!("{group_name}/system_description"),
-                    &lldp_config.system_description,
-                )?;
-                apv(
-                    &lsmfh,
-                    &format!("{group_name}/port_description"),
-                    &lldp_config.port_description,
-                )?;
-                apv(
-                    &lsmfh,
-                    &format!("{group_name}/port_id"),
-                    &lldp_config.port_id,
-                )?;
-                if let Some(a) = &lldp_config.management_addrs {
-                    for address in a {
-                        apv(
-                            &lsmfh,
-                            &format!("{group_name}/management_addrs"),
-                            &Some(address.to_string()),
-                        )?;
-                    }
-                }
-            }
-        }
-        usmfh.refresh()?;
-        lsmfh.refresh()?;
-
-        Ok(())
-    }
-
     /// Ensures that no switch zone is active.
     pub async fn deactivate_switch(&self) -> Result<(), Error> {
         self.ensure_switch_zone(
@@ -3626,10 +3443,9 @@ impl ServiceManager {
                 // the next request with our new request.
                 *request = new_request;
             }
-            (
-                SwitchZoneState::Running { request, zone, worker },
-                Some(new_request),
-            ) if request.addresses != new_request.addresses => {
+            (SwitchZoneState::Running { request, zone }, Some(new_request))
+                if request.addresses != new_request.addresses =>
+            {
                 // If the switch zone is running but we have new addresses, it
                 // means we're moving from the bootstrap to the underlay
                 // network.  We need to add an underlay address and route in the
@@ -3786,7 +3602,9 @@ impl ServiceManager {
                                 )?;
                                 if *address != Ipv6Addr::LOCALHOST {
                                     let az_prefix =
-                                        Ipv6Subnet::<AZ_PREFIX>::new(*address);
+                                        Ipv6Subnet::<AZ_PREFIX_LENGTH>::new(
+                                            *address,
+                                        );
                                     for addr in
                                         Resolver::servers_from_subnet(az_prefix)
                                     {
@@ -3807,7 +3625,9 @@ impl ServiceManager {
                         SwitchService::Wicketd { .. } => {
                             if let Some(&address) = first_address {
                                 let rack_subnet =
-                                    Ipv6Subnet::<AZ_PREFIX>::new(address);
+                                    Ipv6Subnet::<AZ_PREFIX_LENGTH>::new(
+                                        address,
+                                    );
 
                                 info!(
                                     self.inner.log, "configuring wicketd";
@@ -3895,8 +3715,7 @@ impl ServiceManager {
                             // serviceable parts for this daemon.
                         }
                         SwitchService::Uplink { .. } => {
-                            // Only configured in
-                            // `ensure_switch_zone_uplinks_configured`
+                            // Only configured by scrimlet reconcilers
                         }
                         SwitchService::SpSim => {
                             // nothing to configure
@@ -3920,7 +3739,9 @@ impl ServiceManager {
                             for address in &request.addresses {
                                 if *address != Ipv6Addr::LOCALHOST {
                                     let az_prefix =
-                                        Ipv6Subnet::<AZ_PREFIX>::new(*address);
+                                        Ipv6Subnet::<AZ_PREFIX_LENGTH>::new(
+                                            *address,
+                                        );
                                     for addr in
                                         Resolver::servers_from_subnet(az_prefix)
                                     {
@@ -3967,7 +3788,9 @@ impl ServiceManager {
                             for address in &request.addresses {
                                 if *address != Ipv6Addr::LOCALHOST {
                                     let az_prefix =
-                                        Ipv6Subnet::<AZ_PREFIX>::new(*address);
+                                        Ipv6Subnet::<AZ_PREFIX_LENGTH>::new(
+                                            *address,
+                                        );
                                     for addr in
                                         Resolver::servers_from_subnet(az_prefix)
                                     {
@@ -4014,36 +3837,6 @@ impl ServiceManager {
                         "nameservers" => ?nameservers,
                     );
                 }
-
-                // We also need to ensure any uplinks are configured. Spawn a
-                // task that goes into an infinite retry loop until it succeeds.
-                let maybe_our_underlay_info =
-                    self.inner.sled_info.get().map(|sled_info| {
-                        (
-                            sled_info.local_switch_zone_ip,
-                            sled_info.network_config_rx.clone(),
-                        )
-                    });
-                if let Some((switch_zone_ip, network_config_rx)) =
-                    maybe_our_underlay_info
-                {
-                    if let Some(old_worker) = worker.take() {
-                        old_worker.stop().await;
-                    }
-                    let me = self.clone();
-                    let (exit_tx, exit_rx) = oneshot::channel();
-                    *worker = Some(Task {
-                        exit_tx,
-                        initializer: tokio::task::spawn(async move {
-                            me.ensure_switch_zone_uplinks_configured_loop(
-                                switch_zone_ip,
-                                &network_config_rx,
-                                exit_rx,
-                            )
-                            .await;
-                        }),
-                    });
-                }
             }
             (SwitchZoneState::Running { .. }, Some(_)) => {
                 info!(log, "Enabling {zone_typestr} zone (already complete)");
@@ -4087,15 +3880,15 @@ impl ServiceManager {
     async fn try_initialize_switch_zone(
         &self,
         sled_zone: &mut SwitchZoneState,
-    ) -> Result<Option<SwitchZoneConfig>, Error> {
+    ) -> Result<(), Error> {
         let SwitchZoneState::Initializing {
             request,
             filesystems,
             data_links,
-            worker,
+            worker: _,
         } = sled_zone
         else {
-            return Ok(None);
+            return Ok(());
         };
 
         // The switch zone must use the ramdisk in order to receive requests
@@ -4113,21 +3906,11 @@ impl ServiceManager {
             .initialize_zone(zone_args, zone_root_path, filesystems, data_links)
             .await?;
 
-        // Even though we've initialized the zone, the `worker` task may still
-        // be running to configure uplinks. If we drop `worker` now it will
-        // cause that task to exit before it gets a chance to do so. This is all
-        // very unsatisfying and needs some serious rework:
-        // https://github.com/oxidecomputer/omicron/issues/8970 and
-        // https://github.com/oxidecomputer/omicron/issues/9182 are strongly
-        // related.
-        let request = request.clone();
-        let worker = worker.take();
         *sled_zone = SwitchZoneState::Running {
             request: request.clone(),
             zone: Box::new(zone),
-            worker,
         };
-        Ok(Some(request))
+        Ok(())
     }
 
     // Body of a tokio task responsible for running until the switch zone is
@@ -4141,18 +3924,13 @@ impl ServiceManager {
         // but we probably don't want to use backoff here.
         const RETRY_DELAY: Duration = Duration::from_secs(1);
 
-        // First, go into a loop to bring up the switch zone; retry until we
-        // succeed or are told to give up via `exit_rx`.
-        let request_used_to_initialize = loop {
+        // Retry until we succeed or are told to give up via `exit_rx`.
+        loop {
             {
                 let mut sled_zone = self.inner.switch_zone.lock().await;
                 match self.try_initialize_switch_zone(&mut sled_zone).await {
-                    Ok(Some(request)) => break request,
-                    Ok(None) => {
-                        info!(
-                            self.inner.log,
-                            "switch zone already initialized",
-                        );
+                    Ok(()) => {
+                        info!(self.inner.log, "switch zone is initialized");
                         return;
                     }
                     Err(e) => {
@@ -4182,55 +3960,7 @@ impl ServiceManager {
                     continue;
                 }
             };
-        };
-
-        // If we have our underlay info and we _had_ the underlay info when we
-        // initialized the switch zone above, also go into a loop trying to
-        // configure our uplinks. As above, retry until we succeed or are told
-        // to stop.
-        let (switch_zone_ip, network_config_rx) =
-            match self.inner.sled_info.get() {
-                Some(sled_info) => {
-                    if request_used_to_initialize.addresses.contains(
-                        &Ipv6Addr::from(sled_info.local_switch_zone_ip),
-                    ) {
-                        info!(
-                            self.inner.log,
-                            "initialized switch zone (underlay info \
-                             available: will attempt uplink configuration)",
-                        );
-                        (
-                            sled_info.local_switch_zone_ip,
-                            sled_info.network_config_rx.clone(),
-                        )
-                    } else {
-                        info!(
-                            self.inner.log,
-                            "initialized switch zone - underlay info is \
-                             available now, but it wasn't when switch zone \
-                             initialization started; will not attempt uplink \
-                             configuration (but will reconfigure the switch \
-                             zone shortly)"
-                        );
-                        return;
-                    }
-                }
-                None => {
-                    info!(
-                        self.inner.log,
-                        "initialized switch zone \
-                         (no underlay info available yet)",
-                    );
-                    return;
-                }
-            };
-
-        self.ensure_switch_zone_uplinks_configured_loop(
-            switch_zone_ip,
-            &network_config_rx,
-            exit_rx,
-        )
-        .await;
+        }
     }
 
     fn private_ip_for_external_address(

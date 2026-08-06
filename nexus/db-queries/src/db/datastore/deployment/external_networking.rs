@@ -25,7 +25,6 @@ use nexus_types::deployment::UpstreamNtpConfig;
 use nexus_types::external_api::instance::PrivateIpStackCreate;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::IdentityMetadataCreateParams;
-use omicron_common::api::external::IpVersion;
 use omicron_common::api::internal::shared::PrivateIpConfig;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
@@ -200,12 +199,6 @@ impl DataStore {
         opctx: &OpContext,
         zones_to_allocate: impl Iterator<Item = &BlueprintZoneConfig>,
     ) -> Result<(), TransactionError<Error>> {
-        // Looking up the service pool IDs requires an opctx; we'll do this at
-        // most once inside the loop below, when we first encounter an address
-        // of the same IP version.
-        let mut v4_pool = None;
-        let mut v6_pool = None;
-
         for z in zones_to_allocate {
             let Some((external_ip, nic)) = z.zone_type.external_networking()
             else {
@@ -220,29 +213,26 @@ impl DataStore {
                 "nic" => format!("{nic:?}"),
             ));
 
-            // Get existing pool or look it up and cache it.
-            let version = external_ip.ip_version();
-            let pool_ref = match version {
-                IpVersion::V4 => &mut v4_pool,
-                IpVersion::V6 => &mut v6_pool,
-            };
-            let pool = match pool_ref {
-                Some(p) => p,
-                None => {
-                    let new = self
-                        .ip_pools_service_lookup(opctx, version.into())
-                        .await?
-                        .1;
-                    *pool_ref = Some(new);
-                    pool_ref.as_ref().unwrap()
-                }
-            };
+            // Look up the system-service pool containing this address, if any.
+            let (_authz_pool, db_pool) = self
+                .ip_pool_fetch_containing_address_for_services_on_connection(
+                    opctx,
+                    conn,
+                    external_ip.ip(),
+                )
+                .await
+                .map_err(|e| {
+                    Self::map_external_ip_not_found_for_zone_error(
+                        e,
+                        external_ip.ip(),
+                    )
+                })?;
 
             // Actually ensure the IP address.
             let kind = z.zone_type.kind();
             self.ensure_external_service_ip(
                 conn,
-                pool,
+                &db_pool,
                 kind,
                 z.id,
                 external_ip,
@@ -423,9 +413,6 @@ impl DataStore {
         log: &Logger,
     ) -> Result<bool, TransactionError<Error>> {
         // See the comment in is_external_ip_already_allocated().
-        //
-        // TODO-completeness: Ensure this works for dual-stack Omicron service
-        // zone NICs. See https://github.com/oxidecomputer/omicron/issues/9313.
         if cfg!(any(test, feature = "testing")) {
             match (
                 nic.ip_config.ipv4_addr().map(|ip| ip.is_loopback()),
@@ -659,6 +646,7 @@ impl DataStore {
 mod tests {
     use super::*;
     use crate::db::pub_test_utils::TestDatabase;
+    use crate::db::pub_test_utils::helpers::create_service_ip_pool;
     use crate::db::queries::ALLOW_FULL_TABLE_SCAN_SQL;
     use anyhow::Context as _;
     use async_bb8_diesel::AsyncSimpleConnection;
@@ -686,11 +674,14 @@ mod tests {
     use omicron_common::address::IpRangeIter;
     use omicron_common::address::Ipv4Range;
     use omicron_common::address::NEXUS_OPTE_IPV4_SUBNET;
+    use omicron_common::address::NEXUS_OPTE_IPV6_SUBNET;
     use omicron_common::address::NTP_OPTE_IPV4_SUBNET;
     use omicron_common::address::NUM_SOURCE_NAT_PORTS;
     use omicron_common::api::external::Generation;
     use omicron_common::api::external::MacAddr;
     use omicron_common::api::external::Vni;
+    use omicron_common::api::internal::shared::PrivateIpv4Config;
+    use omicron_common::api::internal::shared::PrivateIpv6Config;
     use omicron_common::zpool_name::ZpoolName;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::ExternalIpUuid;
@@ -756,13 +747,28 @@ mod tests {
                 id: ExternalIpUuid::new_v4(),
                 ip: external_ips.next().expect("exhausted external_ips"),
             };
-            let nexus_private_ip_config = PrivateIpConfig::new_ipv4(
-                NEXUS_OPTE_IPV4_SUBNET
-                    .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES)
-                    .unwrap(),
-                *NEXUS_OPTE_IPV4_SUBNET,
-            )
-            .unwrap();
+            // Give Nexus a dual-stack NIC so we have a way to exercise the
+            // paths allocating / handling those addresses. External DNS and NTP
+            // are still single-stack IPv4.
+            let nexus_private_ip_config = PrivateIpConfig::DualStack {
+                v4: PrivateIpv4Config::new(
+                    NEXUS_OPTE_IPV4_SUBNET
+                        .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES)
+                        .unwrap(),
+                    *NEXUS_OPTE_IPV4_SUBNET,
+                )
+                .unwrap(),
+                v6: PrivateIpv6Config::new(
+                    NEXUS_OPTE_IPV6_SUBNET
+                        .nth(
+                            u128::try_from(NUM_INITIAL_RESERVED_IP_ADDRESSES)
+                                .unwrap(),
+                        )
+                        .unwrap(),
+                    *NEXUS_OPTE_IPV6_SUBNET,
+                )
+                .unwrap(),
+            };
             let nexus_nic = NetworkInterface {
                 id: Uuid::new_v4(),
                 kind: NetworkInterfaceKind::Service {
@@ -855,15 +861,18 @@ mod tests {
             opctx: &OpContext,
             datastore: &DataStore,
         ) {
-            let (ip_pool, db_pool) = datastore
-                .ip_pools_service_lookup(&opctx, IpVersion::V4.into())
-                .await
-                .expect("failed to find service IP pool");
+            let service_pool = create_service_ip_pool(
+                opctx,
+                datastore,
+                "oxide-service-pool-v4",
+                omicron_common::api::external::IpVersion::V4,
+            )
+            .await;
             datastore
                 .ip_pool_add_range(
                     &opctx,
-                    &ip_pool,
-                    &db_pool,
+                    &service_pool.authz_pool,
+                    &service_pool.db_pool,
                     &self.external_ips_range,
                 )
                 .await
@@ -1052,14 +1061,13 @@ mod tests {
             assert_eq!(db_dns_nics[0].subnet_id, DNS_VPC_SUBNET.id());
             assert_eq!(*db_dns_nics[0].mac, self.dns_nic.mac);
             assert_eq!(
-                db_nexus_nics[0].ipv4,
-                self.nexus_nic.ip_config.ipv4_addr().copied().map(Into::into),
+                db_dns_nics[0].ipv4,
+                self.dns_nic.ip_config.ipv4_addr().copied().map(Into::into),
             );
             assert_eq!(
-                db_nexus_nics[0].ipv6,
-                self.nexus_nic.ip_config.ipv6_addr().copied().map(Into::into),
+                db_dns_nics[0].ipv6,
+                self.dns_nic.ip_config.ipv6_addr().copied().map(Into::into),
             );
-            assert!(db_nexus_nics[0].ipv6.is_none());
             assert_eq!(*db_dns_nics[0].slot, self.dns_nic.slot);
             assert_eq!(db_dns_nics[0].primary, self.dns_nic.primary);
 
@@ -1080,14 +1088,13 @@ mod tests {
             assert_eq!(db_ntp_nics[0].subnet_id, NTP_VPC_SUBNET.id());
             assert_eq!(*db_ntp_nics[0].mac, self.ntp_nic.mac);
             assert_eq!(
-                db_nexus_nics[0].ipv4,
-                self.nexus_nic.ip_config.ipv4_addr().copied().map(Into::into),
+                db_ntp_nics[0].ipv4,
+                self.ntp_nic.ip_config.ipv4_addr().copied().map(Into::into),
             );
             assert_eq!(
-                db_nexus_nics[0].ipv6,
-                self.nexus_nic.ip_config.ipv6_addr().copied().map(Into::into),
+                db_ntp_nics[0].ipv6,
+                self.ntp_nic.ip_config.ipv6_addr().copied().map(Into::into),
             );
-            assert!(db_nexus_nics[0].ipv6.is_none());
             assert_eq!(*db_ntp_nics[0].slot, self.ntp_nic.slot);
             assert_eq!(db_ntp_nics[0].primary, self.ntp_nic.primary);
         }
@@ -1356,22 +1363,23 @@ mod tests {
                 as &dyn Fn(OmicronZoneUuid, &mut NetworkInterface) -> String,
             // non-matching IP
             &|zone_id, nic| {
-                // Take the last IP still in the subnet.
-                if let Some(subnet) = nic.ip_config.ipv4_subnet() {
-                    let new =
-                        PrivateIpConfig::new_ipv4(subnet.last_addr(), *subnet)
-                            .unwrap();
-                    nic.ip_config = new;
-                } else if let Some(subnet) = nic.ip_config.ipv6_subnet() {
-                    let new =
-                        PrivateIpConfig::new_ipv6(subnet.last_addr(), *subnet)
-                            .unwrap();
-                    nic.ip_config = new;
-                } else {
-                    todo!(
-                        "See https://github.com/oxidecomputer/omicron/issues/9313"
-                    );
-                }
+                // Take the last address in each family's subnet.
+                let ipv4 = nic.ip_config.ipv4_subnet().map(|subnet| {
+                    PrivateIpv4Config::new(subnet.last_addr(), *subnet).unwrap()
+                });
+                let ipv6 = nic.ip_config.ipv6_subnet().map(|subnet| {
+                    PrivateIpv6Config::new(subnet.last_addr(), *subnet).unwrap()
+                });
+                nic.ip_config = match (ipv4, ipv6) {
+                    (Some(v4), None) => PrivateIpConfig::V4(v4),
+                    (None, Some(v6)) => PrivateIpConfig::V6(v6),
+                    (Some(v4), Some(v6)) => {
+                        PrivateIpConfig::DualStack { v4, v6 }
+                    }
+                    (None, None) => {
+                        unreachable!("a NIC always has an IPv4 or IPv6 subnet")
+                    }
+                };
                 format!("zone {zone_id} already has 1 non-matching NIC")
             },
         ] {

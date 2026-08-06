@@ -4,11 +4,8 @@
 
 //! Type definitions for the MUPdate override (RFD 556).
 
-use std::collections::BTreeSet;
-
 use omicron_uuid_kinds::MupdateOverrideUuid;
 use serde::{Deserialize, Serialize};
-use tufaceous_artifact::ArtifactHashId;
 
 /// MUPdate override information, typically serialized as JSON (RFD 556).
 ///
@@ -18,12 +15,6 @@ use tufaceous_artifact::ArtifactHashId;
 pub struct MupdateOverrideInfo {
     /// A UUID that identifies a MUPdate that occurred.
     pub mupdate_uuid: MupdateOverrideUuid,
-
-    /// Artifact hashes written out to the install dataset.
-    ///
-    /// Currently includes the host phase 2 and composite control plane
-    /// artifacts.
-    pub hash_ids: BTreeSet<ArtifactHashId>,
 }
 
 impl MupdateOverrideInfo {

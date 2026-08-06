@@ -16,10 +16,11 @@ use wicket_common::rack_update::{
 };
 use wicketd_client::types::{
     ClearUpdateStateParams, GetInventoryParams, GetInventoryResponse,
-    GetLocationResponse, IgnitionCommand, StartUpdateParams,
+    IgnitionCommand, StartUpdateParams,
 };
+use wicketd_commission_types::inventory::LocationInfo;
+use wicketd_commission_types::update::UpdateTargets;
 
-use crate::events::{ArtifactData, EventReportMap};
 use crate::keymap::ShowPopupCmd;
 use crate::state::ComponentId;
 use crate::{Cmd, Event};
@@ -65,7 +66,6 @@ pub enum Request {
     },
     IgnitionCommand(ComponentId, IgnitionCommand),
     StartRackSetup,
-    StartRackReset,
 }
 
 pub struct WicketdHandle {
@@ -79,6 +79,7 @@ pub struct WicketdManager {
     rx: mpsc::Receiver<Request>,
     events_tx: UnboundedSender<Event>,
     wicketd_addr: SocketAddrV6,
+    commission_addr: SocketAddrV6,
 }
 
 impl WicketdManager {
@@ -86,11 +87,18 @@ impl WicketdManager {
         log: &Logger,
         events_tx: UnboundedSender<Event>,
         wicketd_addr: SocketAddrV6,
+        commission_addr: SocketAddrV6,
     ) -> (WicketdHandle, WicketdManager) {
         let log = log.new(o!("component" => "WicketdManager"));
         let (tx, rx) = tokio::sync::mpsc::channel(CHANNEL_CAPACITY);
         let handle = WicketdHandle { tx };
-        let manager = WicketdManager { log, rx, events_tx, wicketd_addr };
+        let manager = WicketdManager {
+            log,
+            rx,
+            events_tx,
+            wicketd_addr,
+            commission_addr,
+        };
 
         (handle, manager)
     }
@@ -140,9 +148,6 @@ impl WicketdManager {
                         Request::StartRackSetup => {
                             self.start_rack_initialization();
                         }
-                        Request::StartRackReset => {
-                            self.start_rack_reset();
-                        }
                     }
                 }
                 else => {
@@ -165,7 +170,7 @@ impl WicketdManager {
             let update_client =
                 create_wicketd_client(&log, addr, WICKETD_TIMEOUT);
             let params = StartUpdateParams {
-                targets: vec![component_id.into()],
+                targets: UpdateTargets::single(component_id.into()),
                 options,
             };
             let response = match update_client.post_start_update(&params).await
@@ -230,7 +235,7 @@ impl WicketdManager {
             let update_client =
                 create_wicketd_client(&log, addr, WICKETD_TIMEOUT);
             let params = ClearUpdateStateParams {
-                targets: vec![component_id.into()],
+                targets: UpdateTargets::single(component_id.into()),
                 options,
             };
             let response =
@@ -301,24 +306,6 @@ impl WicketdManager {
         });
     }
 
-    fn start_rack_reset(&self) {
-        let log = self.log.clone();
-        let addr = self.wicketd_addr;
-        let events_tx = self.events_tx.clone();
-        tokio::spawn(async move {
-            let client = create_wicketd_client(&log, addr, WICKETD_TIMEOUT);
-            let response = match client.post_run_rack_reset().await {
-                Ok(_) => Ok(()),
-                Err(error) => Err(error.to_string()),
-            };
-
-            slog::info!(log, "Start rack setup response: {:?}", response);
-            _ = events_tx.send(Event::Term(Cmd::ShowPopup(
-                ShowPopupCmd::StartRackResetResponse(response),
-            )));
-        });
-    }
-
     fn poll_rack_setup_status(&self) {
         let log = self.log.clone();
         let tx = self.events_tx.clone();
@@ -348,9 +335,9 @@ impl WicketdManager {
     fn poll_location(&self) {
         let log = self.log.clone();
         let tx = self.events_tx.clone();
-        let addr = self.wicketd_addr;
+        let addr = self.commission_addr;
         tokio::spawn(async move {
-            let client = create_wicketd_client(&log, addr, WICKETD_TIMEOUT);
+            let client = create_commission_client(&log, addr, WICKETD_TIMEOUT);
             let mut ticker = interval(WICKETD_POLL_INTERVAL * 2);
             let mut prev = None;
             ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
@@ -369,7 +356,7 @@ impl WicketdManager {
                     }
                 };
 
-                // Only send a new event if the config has changed
+                // Only send a new event if the location has changed
                 if Some(&location) == prev.as_ref() {
                     continue;
                 }
@@ -379,17 +366,20 @@ impl WicketdManager {
                 // poll any more - wicketd can't move around while it's running.
                 // Check this prior to sending the event to avoid an extra
                 // clone.
-                let GetLocationResponse {
+                // Use exhaustive destructuring without a wildcard match here to
+                // force a compile failure if a new field is added.
+                let LocationInfo {
+                    // A successful response always carries the switch slot, so
+                    // there's nothing to check for `location_fully_provided`.
+                    switch_slot: _,
+                    switch_baseboard,
                     sled_baseboard,
                     sled_id,
-                    switch_baseboard,
-                    switch_id,
                 } = &location;
 
                 let location_fully_provided = sled_baseboard.is_some()
                     && sled_id.is_some()
-                    && switch_baseboard.is_some()
-                    && switch_id.is_some();
+                    && switch_baseboard.is_some();
 
                 let _ = tx.send(Event::WicketdLocation(location));
 
@@ -448,20 +438,10 @@ impl WicketdManager {
                     Ok(val) => {
                         // TODO: Only send on changes
                         let rsp = val.into_inner();
-                        let artifacts = rsp
-                            .artifacts
-                            .into_iter()
-                            .map(|artifact| ArtifactData {
-                                id: artifact.artifact_id,
-                                sign: artifact.sign,
-                            })
-                            .collect();
-                        let system_version = rsp.system_version;
-                        let event_reports: EventReportMap = rsp.event_reports;
                         let _ = tx.send(Event::ArtifactsAndEventReports {
-                            system_version,
-                            artifacts,
-                            event_reports,
+                            system_version: rsp.system_version,
+                            artifacts: rsp.artifacts,
+                            event_reports: rsp.event_reports,
                         });
                     }
                     Err(e) => {
@@ -522,13 +502,35 @@ pub(crate) fn create_wicketd_client(
     wicketd_addr: SocketAddrV6,
     timeout: Duration,
 ) -> wicketd_client::Client {
-    let endpoint =
-        format!("http://[{}]:{}", wicketd_addr.ip(), wicketd_addr.port());
-    let client = reqwest::ClientBuilder::new()
+    wicketd_client::Client::new_with_client(
+        &api_endpoint(wicketd_addr),
+        http_client(timeout),
+        log.clone(),
+    )
+}
+
+pub(crate) fn create_commission_client(
+    log: &Logger,
+    commission_addr: SocketAddrV6,
+    timeout: Duration,
+) -> wicketd_commission_client::Client {
+    wicketd_commission_client::Client::new_with_client(
+        &api_endpoint(commission_addr),
+        http_client(timeout),
+        log.clone(),
+    )
+}
+
+fn api_endpoint(addr: SocketAddrV6) -> String {
+    format!("http://[{}]:{}", addr.ip(), addr.port())
+}
+
+// Both of wicket's wicketd clients share one transport policy -- keep it in one
+// place so they don't drift.
+fn http_client(timeout: Duration) -> reqwest::Client {
+    reqwest::ClientBuilder::new()
         .connect_timeout(timeout)
         .timeout(timeout)
         .build()
-        .unwrap();
-
-    wicketd_client::Client::new_with_client(&endpoint, client, log.clone())
+        .expect("built a reqwest client")
 }

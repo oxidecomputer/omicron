@@ -94,7 +94,6 @@ use super::tasks::alert_dispatcher::AlertDispatcher;
 use super::tasks::attached_subnets;
 use super::tasks::audit_log_cleanup;
 use super::tasks::audit_log_timeout_incomplete;
-use super::tasks::bfd;
 use super::tasks::blueprint_execution;
 use super::tasks::blueprint_load;
 use super::tasks::blueprint_load::LoadedTargetBlueprint;
@@ -108,8 +107,10 @@ use super::tasks::dns_servers;
 use super::tasks::ereport_ingester;
 use super::tasks::external_endpoints;
 use super::tasks::fm_analysis::{self, FmAnalysis};
+use super::tasks::fm_config_load;
 use super::tasks::fm_rendezvous::FmRendezvous;
 use super::tasks::fm_sitrep_gc;
+use super::tasks::fm_sitrep_history_pruner;
 use super::tasks::fm_sitrep_load;
 use super::tasks::fm_sitrep_load::CurrentSitrep;
 use super::tasks::instance_reincarnation;
@@ -136,7 +137,6 @@ use super::tasks::saga_recovery;
 use super::tasks::service_firewall_rules;
 use super::tasks::session_cleanup;
 use super::tasks::support_bundle_collector;
-use super::tasks::sync_service_zone_nat::ServiceZoneNatTracker;
 use super::tasks::sync_switch_configuration::SwitchPortSettingsManager;
 use super::tasks::trust_quorum;
 use super::tasks::tuf_artifact_replication;
@@ -146,6 +146,7 @@ use super::tasks::vpc_routes;
 use super::tasks::webhook_deliverator;
 use crate::Nexus;
 use crate::app::background::tasks::populate_switch_ports;
+use crate::app::external_client::ExternalHttpClient;
 use crate::app::oximeter::PRODUCER_LEASE_DURATION;
 use crate::app::quiesce::NexusQuiesceHandle;
 use crate::app::saga::StartSaga;
@@ -166,7 +167,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio::sync::watch;
-use update_common::artifacts::ArtifactsWithPlan;
+use tufaceous::Repository;
 
 /// Internal state for communication between Nexus and background tasks.
 ///
@@ -230,7 +231,6 @@ impl BackgroundTasksInitializer {
             task_metrics_producer_gc: Activator::new(),
             task_external_endpoints: Activator::new(),
             task_nat_cleanup: Activator::new(),
-            task_bfd_manager: Activator::new(),
             task_inventory_collection: Activator::new(),
             task_inventory_loader: Activator::new(),
             task_support_bundle_collector: Activator::new(),
@@ -242,7 +242,6 @@ impl BackgroundTasksInitializer {
             task_blueprint_executor: Activator::new(),
             task_blueprint_rendezvous: Activator::new(),
             task_crdb_node_id_collector: Activator::new(),
-            task_service_zone_nat_tracker: Activator::new(),
             task_switch_port_settings_manager: Activator::new(),
             task_v2p_manager: Activator::new(),
             task_region_replacement: Activator::new(),
@@ -270,8 +269,10 @@ impl BackgroundTasksInitializer {
             task_sp_ereport_ingester: Activator::new(),
             task_reconfigurator_config_loader: Activator::new(),
             task_fm_analysis: Activator::new(),
+            task_fm_config_loader: Activator::new(),
             task_fm_sitrep_loader: Activator::new(),
             task_fm_sitrep_gc: Activator::new(),
+            task_fm_sitrep_history_pruner: Activator::new(),
             task_fm_rendezvous: Activator::new(),
             task_probe_distributor: Activator::new(),
             task_multicast_reconciler: Activator::new(),
@@ -327,7 +328,6 @@ impl BackgroundTasksInitializer {
             task_metrics_producer_gc,
             task_external_endpoints,
             task_nat_cleanup,
-            task_bfd_manager,
             task_inventory_collection,
             task_inventory_loader,
             task_support_bundle_collector,
@@ -339,7 +339,6 @@ impl BackgroundTasksInitializer {
             task_blueprint_executor,
             task_blueprint_rendezvous,
             task_crdb_node_id_collector,
-            task_service_zone_nat_tracker,
             task_switch_port_settings_manager,
             task_v2p_manager,
             task_region_replacement,
@@ -364,8 +363,10 @@ impl BackgroundTasksInitializer {
             task_sp_ereport_ingester,
             task_reconfigurator_config_loader,
             task_fm_analysis,
+            task_fm_config_loader,
             task_fm_sitrep_loader,
             task_fm_sitrep_gc,
+            task_fm_sitrep_history_pruner,
             task_fm_rendezvous,
             task_probe_distributor,
             task_multicast_reconciler,
@@ -457,20 +458,6 @@ impl BackgroundTasksInitializer {
             opctx: opctx.child(BTreeMap::new()),
             watchers: vec![],
             activator: task_nat_cleanup,
-        });
-
-        driver.register(TaskDefinition {
-            name: "bfd_manager",
-            description: "Manages bidirectional fowarding detection (BFD) \
-                 configuration on rack switches",
-            period: config.bfd_manager.period_secs,
-            task_impl: Box::new(bfd::BfdManager::new(
-                datastore.clone(),
-                resolver.clone(),
-            )),
-            opctx: opctx.child(BTreeMap::new()),
-            watchers: vec![],
-            activator: task_bfd_manager,
         });
 
         // Background task: phantom disk detection
@@ -710,24 +697,8 @@ impl BackgroundTasksInitializer {
         });
 
         driver.register(TaskDefinition {
-            name: "service_zone_nat_tracker",
-            description:
-                "ensures service zone nat records are recorded in NAT RPW \
-                 table",
-            period: config.sync_service_zone_nat.period_secs,
-            task_impl: Box::new(ServiceZoneNatTracker::new(
-                datastore.clone(),
-                resolver.clone(),
-                inventory_load_watcher.clone(),
-            )),
-            opctx: opctx.child(BTreeMap::new()),
-            watchers: vec![],
-            activator: task_service_zone_nat_tracker,
-        });
-
-        driver.register(TaskDefinition {
             name: "switch_port_config_manager",
-            description: "manages switch port settings for rack switches",
+            description: "propagates networking config to the bootstore",
             period: config.switch_port_settings_manager.period_secs,
             task_impl: Box::new(SwitchPortSettingsManager::new(
                 datastore.clone(),
@@ -1128,6 +1099,21 @@ impl BackgroundTasksInitializer {
             activator: task_sp_ereport_ingester,
         });
 
+        // Background task: fault management config loader
+        let fm_config_loader =
+            fm_config_load::FmConfigLoader::new(datastore.clone());
+        let fm_config_watcher = fm_config_loader.watcher();
+        driver.register(TaskDefinition {
+            name: "fm_config_loader",
+            description: "loads the current fault management configuration \
+                 from the database",
+            period: config.fm.config_load_period_secs,
+            task_impl: Box::new(fm_config_loader),
+            opctx: opctx.child(BTreeMap::new()),
+            watchers: vec![],
+            activator: task_fm_config_loader,
+        });
+
         let sitrep_loader = fm_sitrep_load::SitrepLoader::new(
             datastore.clone(),
             args.sitrep_load_tx,
@@ -1149,13 +1135,14 @@ impl BackgroundTasksInitializer {
             datastore.clone(),
             sitrep_watcher.clone(),
             inventory_load_watcher.clone(),
+            fm_config_watcher.clone(),
             fm_analysis::Activators {
                 inventory_loader: task_inventory_loader.clone(),
                 sitrep_loader: task_fm_sitrep_loader.clone(),
                 sitrep_gc: task_fm_sitrep_gc.clone(),
+                sitrep_history_pruner: task_fm_sitrep_history_pruner.clone(),
             },
             nexus_id,
-            config.fm.analysis_enabled,
         );
         driver.register(TaskDefinition {
             name: "fm_analysis",
@@ -1167,6 +1154,7 @@ impl BackgroundTasksInitializer {
             watchers: vec![
                 Box::new(sitrep_watcher.clone()),
                 Box::new(inventory_load_watcher.clone()),
+                Box::new(fm_config_watcher.clone()),
             ],
             activator: task_fm_analysis,
         });
@@ -1191,9 +1179,31 @@ impl BackgroundTasksInitializer {
         });
 
         driver.register(TaskDefinition {
+            name: "fm_sitrep_history_pruner",
+            description:
+                "maintains the configured limit on the fault management sitrep \
+                 history table by deleting the oldest entries",
+            period: config.fm.sitrep_history_prune_period_secs,
+            task_impl: Box::new(
+                fm_sitrep_history_pruner::SitrepHistoryPruner::new(
+                    datastore.clone(),
+                    // The pruner pokes the GC task whenever it orphans some
+                    // sitreps for it to delete.
+                    task_fm_sitrep_gc.clone(),
+                    fm_config_watcher.clone(),
+                ),
+            ),
+            opctx: opctx.child(BTreeMap::new()),
+            watchers: vec![
+                Box::new(fm_config_watcher),
+            ],
+            activator: task_fm_sitrep_history_pruner,
+        });
+
+        driver.register(TaskDefinition {
             name: "fm_sitrep_gc",
             description: "garbage collects fault management situation reports",
-            period: config.fm.sitrep_load_period_secs,
+            period: config.fm.sitrep_gc_period_secs,
             task_impl: Box::new(fm_sitrep_gc::SitrepGc::new(datastore.clone())),
             opctx: opctx.child(BTreeMap::new()),
             watchers: vec![Box::new(sitrep_watcher)],
@@ -1331,14 +1341,14 @@ pub struct BackgroundTasksData {
     /// Helpers for saga recovery
     pub saga_recovery: saga_recovery::SagaRecoveryHelpers<Arc<Nexus>>,
     /// Channel for TUF repository artifacts to be replicated out to sleds
-    pub tuf_artifact_replication_rx: mpsc::Receiver<ArtifactsWithPlan>,
+    pub tuf_artifact_replication_rx: mpsc::Receiver<Repository>,
     /// Channel for exposing the latest loaded blueprint
     pub blueprint_load_tx: watch::Sender<Option<LoadedTargetBlueprint>>,
-    /// `reqwest::Client` for webhook delivery requests.
+    /// [`ExternalHttpClient`] for webhook delivery requests.
     ///
     /// This is shared with the external API as it's also used when sending
     /// webhook liveness probe requests from the API.
-    pub webhook_delivery_client: reqwest::Client,
+    pub webhook_delivery_client: ExternalHttpClient,
     /// Channel for configuring pending MGS updates
     pub mgs_updates_tx: watch::Sender<PendingMgsUpdates>,
     /// handle for controlling Nexus quiesce

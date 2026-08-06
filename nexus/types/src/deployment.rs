@@ -30,12 +30,11 @@ use iddqd::id_ord_map::RefMut;
 use iddqd::id_upcast;
 use ipnet::IpAdd;
 use omicron_common::address::Ipv6Subnet;
-use omicron_common::address::SLED_PREFIX;
+use omicron_common::address::SLED_PREFIX_LENGTH;
 use omicron_common::address::SLED_RESERVED_ADDRESSES;
 use omicron_common::address::get_sled_address;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Generation;
-use omicron_common::api::external::TufArtifactMeta;
 use omicron_common::api::internal::shared::DatasetKind;
 use omicron_common::disk::CompressionAlgorithm;
 use omicron_common::disk::DatasetConfig;
@@ -75,6 +74,7 @@ use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
 use std::sync::Arc;
 use strum::EnumIter;
+use tufaceous_artifact::Artifact;
 use tufaceous_artifact::ArtifactHash;
 use tufaceous_artifact::ArtifactVersion;
 use tufaceous_artifact::ArtifactVersionError;
@@ -106,6 +106,7 @@ pub use network_resources::OmicronZoneExternalSnatIp;
 pub use network_resources::OmicronZoneNetworkResources;
 pub use network_resources::OmicronZoneNic;
 pub use network_resources::OmicronZoneNicEntry;
+pub use network_resources::OmicronZoneNicIp;
 use omicron_common::api::external::Error;
 pub use planning_input::ClickhouseMode;
 pub use planning_input::ClickhousePolicy;
@@ -1594,7 +1595,7 @@ impl fmt::Display for BlueprintDisplay<'_> {
 )]
 pub struct BlueprintSledConfig {
     pub state: SledState,
-    pub subnet: Ipv6Subnet<SLED_PREFIX>,
+    pub subnet: Ipv6Subnet<SLED_PREFIX_LENGTH>,
 
     /// Each sled is assigned an IPv6 /64 `subnet` (above). Currently, the
     /// lowest /112 subnet within the sled subnet is reserved for control plane
@@ -1733,7 +1734,7 @@ impl LastAllocatedSubnetIpOffset {
     }
 
     /// Convert this offset into the `offset`'th IP in `subnet`.
-    pub fn to_ip(self, subnet: Ipv6Subnet<SLED_PREFIX>) -> Ipv6Addr {
+    pub fn to_ip(self, subnet: Ipv6Subnet<SLED_PREFIX_LENGTH>) -> Ipv6Addr {
         subnet.net().prefix().saturating_add(u128::from(self.0))
     }
 
@@ -2005,14 +2006,21 @@ pub enum BlueprintZoneImageSource {
     /// This originates from TUF repos uploaded to Nexus which are then
     /// replicated out to all sleds.
     #[serde(rename_all = "snake_case")]
-    Artifact { version: BlueprintArtifactVersion, hash: ArtifactHash },
+    Artifact {
+        version: BlueprintArtifactVersion,
+        // Tufaceous v2 introduces a new JSON schema for `ArtifactHash` that is
+        // wire-compatible but perceived as different by drift. Continue using
+        // the old schema in this API version.
+        #[schemars(schema_with = "ArtifactHash::v1_json_schema")]
+        hash: ArtifactHash,
+    },
 }
 
 impl BlueprintZoneImageSource {
-    pub fn from_available_artifact(artifact: &TufArtifactMeta) -> Self {
+    pub fn from_available_artifact(artifact: &Artifact) -> Self {
         BlueprintZoneImageSource::Artifact {
             version: BlueprintArtifactVersion::Available {
-                version: artifact.id.version.clone(),
+                version: artifact.version.clone(),
             },
             hash: artifact.hash,
         }
@@ -2099,6 +2107,10 @@ impl fmt::Display for BlueprintArtifactVersion {
 )]
 pub struct BlueprintSingleMeasurement {
     pub version: BlueprintArtifactVersion,
+    // Tufaceous v2 introduces a new JSON schema for `ArtifactHash` that is
+    // wire-compatible but perceived as different by drift. Continue using the
+    // old schema in this API version.
+    #[schemars(schema_with = "ArtifactHash::v1_json_schema")]
     pub hash: ArtifactHash,
 }
 
@@ -2374,7 +2386,14 @@ pub enum BlueprintHostPhase2DesiredContents {
     /// Set the phase 2 slot to the given artifact.
     ///
     /// The artifact will come from an unpacked and distributed TUF repo.
-    Artifact { version: BlueprintArtifactVersion, hash: ArtifactHash },
+    Artifact {
+        version: BlueprintArtifactVersion,
+        // Tufaceous v2 introduces a new JSON schema for `ArtifactHash` that is
+        // wire-compatible but perceived as different by drift. Continue using
+        // the old schema in this API version.
+        #[schemars(schema_with = "ArtifactHash::v1_json_schema")]
+        hash: ArtifactHash,
+    },
 }
 
 impl From<BlueprintHostPhase2DesiredContents> for HostPhase2DesiredContents {
@@ -2544,6 +2563,10 @@ pub struct PendingMgsUpdate {
     pub details: PendingMgsUpdateDetails,
 
     /// which artifact to apply to this device
+    // Tufaceous v2 introduces a new JSON schema for `ArtifactHash` that is
+    // wire-compatible but perceived as different by drift. Continue using the
+    // old schema in this API version.
+    #[schemars(schema_with = "ArtifactHash::v1_json_schema")]
     pub artifact_hash: ArtifactHash,
     pub artifact_version: ArtifactVersion,
 }
@@ -2845,12 +2868,17 @@ pub struct PendingMgsUpdateHostPhase1Details {
     pub expected_active_phase_1_slot: M2Slot,
     /// Which slot the host OS most recently booted from.
     pub expected_boot_disk: M2Slot,
+
+    // Tufaceous v2 introduces a new JSON schema for `ArtifactHash` that is
+    // wire-compatible but perceived as different by drift. Continue using the
+    // old schema in this API version.
     /// The hash of the phase 1 slot specified by
     /// `expected_active_phase_1_hash`.
     ///
     /// We should always be able to fetch this. Even if the phase 1 contents
     /// themselves have been corrupted (very scary for the active slot!), the SP
     /// can still hash those contents.
+    #[schemars(schema_with = "ArtifactHash::v1_json_schema")]
     pub expected_active_phase_1_hash: ArtifactHash,
     /// The hash of the currently-active phase 2 artifact.
     ///
@@ -2858,6 +2886,7 @@ pub struct PendingMgsUpdateHostPhase1Details {
     /// would indicate that we don't know the version currently running. The
     /// planner wouldn't stage an update without knowing the current version, so
     /// if something has gone wrong in the meantime we won't proceede either.
+    #[schemars(schema_with = "ArtifactHash::v1_json_schema")]
     pub expected_active_phase_2_hash: ArtifactHash,
     /// The hash of the phase 1 slot specified by toggling
     /// `expected_active_phase_1_slot` to the other slot.
@@ -2865,6 +2894,7 @@ pub struct PendingMgsUpdateHostPhase1Details {
     /// We should always be able to fetch this. Even if the phase 1 contents
     /// of the inactive slot are entirely bogus, the SP can still hash those
     /// contents.
+    #[schemars(schema_with = "ArtifactHash::v1_json_schema")]
     pub expected_inactive_phase_1_hash: ArtifactHash,
     /// The hash of the currently-inactive phase 2 artifact.
     ///
@@ -2873,7 +2903,9 @@ pub struct PendingMgsUpdateHostPhase1Details {
     /// a phase 1 update is that `sled-agent` on the target sled has already
     /// written the paired phase 2 artifact to the inactive slot; therefore, we
     /// don't need to be able to represent an invalid inactive slot.
+    #[schemars(schema_with = "ArtifactHash::v1_json_schema")]
     pub expected_inactive_phase_2_hash: ArtifactHash,
+
     /// Address for contacting sled-agent to check phase 2 contents.
     #[cfg_attr(test, strategy(socket_addr_v6_without_flowinfo()))]
     pub sled_agent_address: SocketAddrV6,

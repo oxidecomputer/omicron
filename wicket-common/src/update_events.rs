@@ -3,15 +3,17 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use gateway_client::types::PowerState;
-use omicron_common::update::ArtifactId;
+use oxide_update_engine_types::errors::NestedEngineError;
+use oxide_update_engine_types::spec::EngineSpec;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 use std::fmt;
 use std::sync::Arc;
 use thiserror::Error;
-use update_engine::StepSpec;
-use update_engine::errors::NestedEngineError;
+use tufaceous_artifact::DisplayTags;
+
+use crate::artifact::ArtifactId;
 
 #[derive(JsonSchema)]
 pub enum WicketdEngineSpec {}
@@ -55,7 +57,11 @@ pub enum UpdateStepId {
     RunningInstallinator,
 }
 
-impl StepSpec for WicketdEngineSpec {
+impl EngineSpec for WicketdEngineSpec {
+    fn spec_name() -> String {
+        "WicketdEngineSpec".to_owned()
+    }
+
     type Component = UpdateComponent;
     type StepId = UpdateStepId;
     type StepMetadata = serde_json::Value;
@@ -65,7 +71,11 @@ impl StepSpec for WicketdEngineSpec {
     type Error = UpdateTerminalError;
 }
 
-update_engine::define_update_engine!(pub WicketdEngineSpec);
+oxide_update_engine::define_update_engine!(pub WicketdEngineSpec);
+oxide_update_engine_types::define_update_engine_types!(pub WicketdEngineSpec);
+
+pub type StepStatus<S = WicketdEngineSpec> =
+    oxide_update_engine_types::buffer::StepStatus<S>;
 
 #[derive(JsonSchema)]
 pub enum TestStepSpec {}
@@ -86,13 +96,17 @@ pub enum TestStepId {
 #[derive(Debug, Error)]
 pub enum TestStepError {}
 
-impl update_engine::AsError for TestStepError {
+impl oxide_update_engine_types::spec::AsError for TestStepError {
     fn as_error(&self) -> &(dyn std::error::Error + 'static) {
         self
     }
 }
 
-impl StepSpec for TestStepSpec {
+impl EngineSpec for TestStepSpec {
+    fn spec_name() -> String {
+        "TestStepSpec".to_owned()
+    }
+
     type Component = TestStepComponent;
     type StepId = TestStepId;
     type StepMetadata = serde_json::Value;
@@ -116,7 +130,11 @@ pub enum SpComponentUpdateStepId {
     CheckingActiveBootSlot,
 }
 
-impl StepSpec for SpComponentUpdateSpec {
+impl EngineSpec for SpComponentUpdateSpec {
+    fn spec_name() -> String {
+        "SpComponentUpdateSpec".to_owned()
+    }
+
     type Component = UpdateComponent;
     type StepId = SpComponentUpdateStepId;
     type StepMetadata = serde_json::Value;
@@ -162,18 +180,13 @@ pub enum UpdateTerminalError {
         #[source]
         error: gateway_client::Error<gateway_client::types::Error>,
     },
+    #[error("getting RoT bootloader caboose failed")]
+    GetRotBootloaderCabooseFailed {
+        #[source]
+        error: gateway_client::Error<gateway_client::types::Error>,
+    },
     #[error("getting RoT CMPA failed")]
     GetRotCmpaFailed {
-        #[source]
-        error: anyhow::Error,
-    },
-    #[error("getting RoT CFPA failed")]
-    GetRotCfpaFailed {
-        #[source]
-        error: anyhow::Error,
-    },
-    #[error("failed to find correctly-signed RoT image")]
-    FailedFindingSignedRotImage {
         #[source]
         error: anyhow::Error,
     },
@@ -182,8 +195,12 @@ pub enum UpdateTerminalError {
         #[source]
         error: gateway_client::Error<gateway_client::types::Error>,
     },
-    #[error("TUF repository missing SP image for board {board}")]
-    MissingSpImageForBoard { board: String },
+    #[error("failed to find artifact matching {tags}")]
+    MissingArtifact {
+        tags: tufaceous_artifact::KnownArtifactTags,
+        #[source]
+        error: tufaceous_artifact::artifact_set::GetError,
+    },
     #[error("setting installinator image ID failed")]
     SetInstallinatorImageIdFailed {
         #[source]
@@ -230,7 +247,7 @@ pub enum UpdateTerminalError {
     UnknownHost(String),
 }
 
-impl update_engine::AsError for UpdateTerminalError {
+impl oxide_update_engine_types::spec::AsError for UpdateTerminalError {
     fn as_error(&self) -> &(dyn std::error::Error + 'static) {
         self
     }
@@ -239,8 +256,9 @@ impl update_engine::AsError for UpdateTerminalError {
 #[derive(Debug, Error)]
 pub enum SpComponentUpdateTerminalError {
     #[error(
-        "SP component update failed at stage \"{stage}\" for {}",
-        display_artifact_id(.artifact)
+        "SP component update failed at stage \"{stage}\" for {} version {}",
+        DisplayTags::from(&.artifact.tags),
+        .artifact.version,
     )]
     SpComponentUpdateFailed {
         stage: SpComponentUpdateStage,
@@ -287,17 +305,12 @@ pub enum SpComponentUpdateTerminalError {
     },
 }
 
-impl update_engine::AsError for SpComponentUpdateTerminalError {
+impl oxide_update_engine_types::spec::AsError
+    for SpComponentUpdateTerminalError
+{
     fn as_error(&self) -> &(dyn std::error::Error + 'static) {
         self
     }
-}
-
-fn display_artifact_id(artifact: &ArtifactId) -> String {
-    format!(
-        "{}:{} (version {})",
-        artifact.kind, artifact.name, artifact.version
-    )
 }
 
 #[derive(

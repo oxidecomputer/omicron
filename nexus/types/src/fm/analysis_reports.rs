@@ -124,45 +124,78 @@ impl iddqd::IdOrdItem for CaseReport {
 }
 
 impl AnalysisReport {
-    pub fn display_multiline(&self, indent: usize) -> impl fmt::Display + '_ {
-        struct AnalysisReportDisplayer<'a> {
-            report: &'a AnalysisReport,
-            indent: usize,
-        }
+    pub fn display_multiline(
+        &self,
+        indent: usize,
+    ) -> AnalysisReportDisplayer<'_> {
+        AnalysisReportDisplayer { report: self, indent, colored: false }
+    }
+}
 
-        impl<'a> fmt::Display for AnalysisReportDisplayer<'a> {
-            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                let &Self {
-                    report: AnalysisReport { cases, sitrep_id, comment, log },
-                    indent,
-                } = self;
+/// Displays an [`AnalysisReport`], as returned by
+/// [`AnalysisReport::display_multiline`].
+#[must_use = "this struct does nothing unless displayed"]
+pub struct AnalysisReportDisplayer<'a> {
+    report: &'a AnalysisReport,
+    indent: usize,
+    colored: bool,
+}
 
-                display::Comment::from(comment).indent(indent).fmt(f)?;
-                writeln!(f, "{:indent$}sitrep ID: {sitrep_id}", "")?;
-                log.display_multiline(indent).titled("analysis log").fmt(f)?;
-                if cases.is_empty() {
-                    writeln!(
-                        f,
-                        "{:indent$}no cases changed in this analysis step",
-                        ""
-                    )?;
-                } else {
-                    writeln!(
-                        f,
-                        "{:indent$}cases ({} with activity):",
-                        "",
-                        cases.len()
-                    )?;
-                    for case in cases {
-                        case.display_multiline(indent + 2, Some(*sitrep_id))
-                            .fmt(f)?;
-                    }
-                }
-                Ok(())
+impl AnalysisReportDisplayer<'_> {
+    /// If `colored` is true, style the output with ANSI terminal colors.
+    pub fn colored(mut self, colored: bool) -> Self {
+        self.colored = colored;
+        self
+    }
+}
+
+impl fmt::Display for AnalysisReportDisplayer<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let &Self {
+            report: AnalysisReport { cases, sitrep_id, comment, log },
+            indent,
+            colored,
+        } = self;
+        let styles = display::Styles::new(colored);
+
+        display::Comment::from(comment)
+            .indent(indent)
+            .colored(colored)
+            .fmt(f)?;
+        writeln!(
+            f,
+            "{:indent$}{}: {sitrep_id}",
+            "",
+            styles.heading().style("sitrep ID")
+        )?;
+        log.display_multiline(indent)
+            .colored(colored)
+            .titled("analysis log")
+            .fmt(f)?;
+        if cases.is_empty() {
+            writeln!(
+                f,
+                "{:indent$}{}",
+                "",
+                styles
+                    .heading()
+                    .style("no cases changed in this analysis step")
+            )?;
+        } else {
+            writeln!(
+                f,
+                "{:indent$}{} ({} with activity):",
+                "",
+                styles.heading().style("cases"),
+                cases.len(),
+            )?;
+            for case in cases {
+                case.display_multiline(indent + 2, Some(*sitrep_id))
+                    .colored(colored)
+                    .fmt(f)?;
             }
         }
-
-        AnalysisReportDisplayer { report: self, indent }
+        Ok(())
     }
 }
 
@@ -171,32 +204,60 @@ impl CaseReport {
         &self,
         indent: usize,
         this_sitrep: Option<SitrepUuid>,
-    ) -> impl fmt::Display + '_ {
-        struct CaseReportDisplayer<'a> {
-            report: &'a CaseReport,
-            indent: usize,
-            this_sitrep: Option<SitrepUuid>,
+    ) -> CaseReportDisplayer<'_> {
+        CaseReportDisplayer {
+            report: self,
+            indent,
+            this_sitrep,
+            colored: false,
         }
+    }
+}
 
-        impl<'a> fmt::Display for CaseReportDisplayer<'a> {
-            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                let &Self {
-                    report: CaseReport { id, metadata, log },
-                    indent,
-                    this_sitrep,
-                } = self;
-                let bullet = if indent > 0 { "* " } else { "" };
-                writeln!(f, "{:indent$}{bullet}case {id}", "")?;
-                let indent = indent + 2;
-                metadata.display_multiline(indent, this_sitrep).fmt(f)?;
-                log.display_multiline(indent)
-                    .titled("activity in this analysis")
-                    .fmt(f)?;
-                Ok(())
-            }
-        }
+/// Displays a [`CaseReport`], as returned by
+/// [`CaseReport::display_multiline`].
+#[must_use = "this struct does nothing unless displayed"]
+pub struct CaseReportDisplayer<'a> {
+    report: &'a CaseReport,
+    indent: usize,
+    this_sitrep: Option<SitrepUuid>,
+    colored: bool,
+}
 
-        CaseReportDisplayer { report: self, indent, this_sitrep }
+impl CaseReportDisplayer<'_> {
+    /// If `colored` is true, style the output with ANSI terminal colors.
+    pub fn colored(mut self, colored: bool) -> Self {
+        self.colored = colored;
+        self
+    }
+}
+
+impl fmt::Display for CaseReportDisplayer<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let &Self {
+            report: CaseReport { id, metadata, log },
+            indent,
+            this_sitrep,
+            colored,
+        } = self;
+        let styles = display::Styles::new(colored);
+        let bullet = if indent > 0 { "* " } else { "" };
+        writeln!(
+            f,
+            "{:indent$}{bullet}{}",
+            "",
+            styles.heading().style(format_args!("case {id}"))
+        )?;
+        let indent = indent + 2;
+        metadata
+            .display_multiline(indent, this_sitrep)
+            .colored(colored)
+            .fmt(f)?;
+        log.display_multiline(indent)
+            .colored(colored)
+            .titled("activity in this analysis")
+            .fmt(f)?;
+        Ok(())
     }
 }
 
@@ -236,7 +297,7 @@ impl DebugLog {
     }
 
     fn display_multiline(&self, indent: usize) -> DebugLogDisplayer<'_> {
-        DebugLogDisplayer { log: self, indent, title: None }
+        DebugLogDisplayer { log: self, indent, title: None, colored: false }
     }
 }
 
@@ -244,33 +305,55 @@ struct DebugLogDisplayer<'a> {
     log: &'a DebugLog,
     indent: usize,
     title: Option<&'a str>,
+    colored: bool,
 }
 
 impl<'a> DebugLogDisplayer<'a> {
     fn titled(self, title: &'a str) -> Self {
         Self { title: Some(title), ..self }
     }
+
+    /// If `colored` is true, style the output with ANSI terminal colors.
+    fn colored(self, colored: bool) -> Self {
+        Self { colored, ..self }
+    }
 }
 
 impl fmt::Display for DebugLogDisplayer<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let &Self { log, indent, title } = self;
+        let &Self { log, indent, title, colored } = self;
+        let styles = display::Styles::new(colored);
         let mut indent = indent;
         if let Some(title) = title {
             if log.is_empty() {
-                return writeln!(f, "{:<indent$}no {title}", "");
+                return writeln!(
+                    f,
+                    "{:<indent$}{}",
+                    "",
+                    styles.heading().style(format_args!("no {title}"))
+                );
             } else {
-                writeln!(f, "{:<indent$}{title}:", "")?;
+                writeln!(
+                    f,
+                    "{:<indent$}{}:",
+                    "",
+                    styles.heading().style(format_args!("{title}"))
+                )?;
                 // log entries will be indented under the title
                 indent += 2;
             }
         }
         if log.is_empty() {
-            return writeln!(f, "{:<indent$}(no log entries)", "");
+            return writeln!(
+                f,
+                "{:<indent$}{}",
+                "",
+                styles.heading().style("(no log entries)")
+            );
         }
 
         for entry in &log.0 {
-            entry.display_indented(indent).fmt(f)?;
+            entry.display_indented(indent).colored(colored).fmt(f)?;
         }
 
         Ok(())
@@ -360,34 +443,60 @@ impl LogEntry {
         self
     }
 
-    pub fn display_indented(&self, indent: usize) -> impl fmt::Display + '_ {
-        struct LogEntryDisplayer<'a> {
-            entry: &'a LogEntry,
-            indent: usize,
-        }
+    pub fn display_indented(&self, indent: usize) -> LogEntryDisplayer<'_> {
+        LogEntryDisplayer { entry: self, indent, colored: false }
+    }
+}
 
-        impl<'a> fmt::Display for LogEntryDisplayer<'a> {
-            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                let &Self {
-                    entry: LogEntry { event, comment, kvs, level },
-                    indent,
-                } = self;
-                let bullet = if indent > 0 { "* " } else { "" };
-                let colon = if kvs.is_empty() { "" } else { ":" };
-                let lvl = match level {
-                    LogLevel::Info => "",
-                    LogLevel::Warn => "/!\\ WARNING: ",
-                };
+/// Displays a [`LogEntry`], as returned by [`LogEntry::display_indented`].
+#[must_use = "this struct does nothing unless displayed"]
+pub struct LogEntryDisplayer<'a> {
+    entry: &'a LogEntry,
+    indent: usize,
+    colored: bool,
+}
 
-                writeln!(f, "{:indent$}{bullet}{lvl}{event}{colon}", "")?;
-                display::Comment::from(comment).indent(indent + 2).fmt(f)?;
-                for (k, v) in kvs {
-                    display::fmt_json_value(f, k, v, indent + 2)?;
-                }
-                Ok(())
+impl LogEntryDisplayer<'_> {
+    /// If `colored` is true, style the output with ANSI terminal colors.
+    pub fn colored(mut self, colored: bool) -> Self {
+        self.colored = colored;
+        self
+    }
+}
+
+impl fmt::Display for LogEntryDisplayer<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let &Self {
+            entry: LogEntry { event, comment, kvs, level },
+            indent,
+            colored,
+        } = self;
+        let styles = display::Styles::new(colored);
+        let bullet = if indent > 0 { "* " } else { "" };
+        let colon = if kvs.is_empty() { "" } else { ":" };
+
+        match level {
+            LogLevel::Info => {
+                writeln!(f, "{:indent$}{bullet}{event}{colon}", "")?;
+            }
+            LogLevel::Warn => {
+                writeln!(
+                    f,
+                    "{:indent$}{bullet}{}{}{colon}",
+                    "",
+                    styles.warning().style("/!\\ WARNING: "),
+                    styles.warning_text().style(event),
+                )?;
             }
         }
-        LogEntryDisplayer { entry: self, indent }
+        display::Comment::from(comment)
+            .indent(indent + 2)
+            .colored(colored)
+            .fmt(f)?;
+        for (k, v) in kvs {
+            display::fmt_json_value(f, k, v, indent + 2, styles)?;
+        }
+        Ok(())
     }
 }
 
@@ -419,14 +528,29 @@ pub struct ClosedCaseReport {
 }
 
 impl InputReport {
-    pub fn display_multiline(&self, indent: usize) -> impl fmt::Display + '_ {
-        InputReportMultilineDisplay { report: self, indent }
+    pub fn display_multiline(
+        &self,
+        indent: usize,
+    ) -> InputReportMultilineDisplay<'_> {
+        InputReportMultilineDisplay { report: self, indent, colored: false }
     }
 }
 
-struct InputReportMultilineDisplay<'report> {
+/// Displays an [`InputReport`], as returned by
+/// [`InputReport::display_multiline`].
+#[must_use = "this struct does nothing unless displayed"]
+pub struct InputReportMultilineDisplay<'report> {
     report: &'report InputReport,
     indent: usize,
+    colored: bool,
+}
+
+impl InputReportMultilineDisplay<'_> {
+    /// If `colored` is true, style the output with ANSI terminal colors.
+    pub fn colored(mut self, colored: bool) -> Self {
+        self.colored = colored;
+        self
+    }
 }
 
 impl fmt::Display for InputReportMultilineDisplay<'_> {
@@ -444,38 +568,68 @@ impl fmt::Display for InputReportMultilineDisplay<'_> {
                     in_service_disks,
                 },
             indent,
+            colored,
         } = self;
+        let styles = display::Styles::new(*colored);
+        let heading = styles.heading();
 
         if let Some(id) = parent_sitrep_id {
-            writeln!(f, "{:indent$}parent sitrep:        {id}", "",)?;
-        } else {
-            writeln!(f, "{:indent$}parent sitrep:        <none>", "")?;
-        }
-
-        writeln!(f, "{:indent$}inventory collection: {inv_id}", "",)?;
-        if Some(inv_id) == parent_inv_id.as_ref() {
-            writeln!(f, "{:indent$} --> same collection as parent sitrep", "",)?;
-        } else if let Some(parent_inv_id) = parent_inv_id {
             writeln!(
                 f,
-                "{:indent$} --> different from parent sitrep \
-                 (collection {parent_inv_id})",
+                "{:indent$}{}:        {id}",
                 "",
+                heading.style("parent sitrep")
+            )?;
+        } else {
+            writeln!(
+                f,
+                "{:indent$}{}:        {}",
+                "",
+                heading.style("parent sitrep"),
+                styles.missing().style("<none>")
             )?;
         }
 
         writeln!(
             f,
-            "{:indent$}total known ereport restart IDs: \
-                {num_ereporter_restarts}",
+            "{:indent$}{}: {inv_id}",
             "",
+            heading.style("inventory collection")
+        )?;
+        if Some(inv_id) == parent_inv_id.as_ref() {
+            writeln!(
+                f,
+                "{:indent$} {}",
+                "",
+                styles
+                    .annotation()
+                    .style("--> same collection as parent sitrep"),
+            )?;
+        } else if let Some(parent_inv_id) = parent_inv_id {
+            writeln!(
+                f,
+                "{:indent$} {}",
+                "",
+                styles.annotation().style(format_args!(
+                    "--> different from parent sitrep \
+                     (collection {parent_inv_id})"
+                )),
+            )?;
+        }
+
+        writeln!(
+            f,
+            "{:indent$}{}: {num_ereporter_restarts}",
+            "",
+            heading.style("total known ereport restart IDs"),
         )?;
 
         if !new_ereport_ids.is_empty() {
             writeln!(
                 f,
-                "\n{:indent$}new ereports ({} total):",
+                "\n{:indent$}{} ({} total):",
                 "",
+                heading.style("new ereports"),
                 new_ereport_ids.len()
             )?;
             let indent = indent + 2;
@@ -485,42 +639,68 @@ impl fmt::Display for InputReportMultilineDisplay<'_> {
         } else {
             writeln!(
                 f,
-                "{:indent$}no new ereports since the parent sitrep",
+                "{:indent$}{}",
                 "",
+                styles
+                    .heading()
+                    .style("no new ereports since the parent sitrep"),
             )?;
         }
 
         let total_cases = open_cases.len() + closed_cases_copied_forward.len();
         if total_cases > 0 {
-            writeln!(f, "\n{:indent$}cases ({} total):", "", total_cases)?;
+            writeln!(
+                f,
+                "\n{:indent$}{} ({total_cases} total):",
+                "",
+                heading.style("cases")
+            )?;
             let indent = indent + 2;
             if open_cases.is_empty() {
-                writeln!(f, "{:indent$}no open cases", "",)?;
+                writeln!(
+                    f,
+                    "{:indent$}{}",
+                    "",
+                    styles.heading().style("no open cases"),
+                )?;
             } else {
                 writeln!(
                     f,
-                    "{:indent$}open cases ({} total):",
+                    "{:indent$}{} ({} total):",
                     "",
+                    heading.style("open cases"),
                     open_cases.len()
                 )?;
                 let indent = indent + 2;
                 for (case_id, metadata) in open_cases {
-                    writeln!(f, "{:indent$}* case {case_id}", "")?;
-                    metadata.display_multiline(indent + 2, None).fmt(f)?;
+                    writeln!(
+                        f,
+                        "{:indent$}* {}",
+                        "",
+                        heading.style(format_args!("case {case_id}"))
+                    )?;
+                    metadata
+                        .display_multiline(indent + 2, None)
+                        .colored(*colored)
+                        .fmt(f)?;
                 }
             }
 
             if closed_cases_copied_forward.is_empty() {
                 writeln!(
                     f,
-                    "{:indent$}no closed cases must be copied forwards",
+                    "{:indent$}{}",
                     "",
+                    styles
+                        .heading()
+                        .style("no closed cases must be copied forwards"),
                 )?;
             } else {
                 writeln!(
                     f,
-                    "{:indent$}closed cases copied forwards ({} total):",
+                    "{:indent$}{} ({} total):",
                     "",
+                    heading.style("closed cases copied forwards"),
                     closed_cases_copied_forward.len()
                 )?;
                 let indent = indent + 2;
@@ -534,9 +714,17 @@ impl fmt::Display for InputReportMultilineDisplay<'_> {
                     },
                 ) in closed_cases_copied_forward
                 {
-                    writeln!(f, "{:indent$}* case {case_id}", "")?;
+                    writeln!(
+                        f,
+                        "{:indent$}* {}",
+                        "",
+                        heading.style(format_args!("case {case_id}"))
+                    )?;
                     let indent = indent + 2;
-                    metadata.display_multiline(indent, None).fmt(f)?;
+                    metadata
+                        .display_multiline(indent, None)
+                        .colored(*colored)
+                        .fmt(f)?;
                     // A closed case is only carried forward when it has
                     // outstanding work, so spell out why. If we don't seem to
                     // have any outstanding work but the closed case was carried
@@ -547,19 +735,29 @@ impl fmt::Display for InputReportMultilineDisplay<'_> {
                     {
                         writeln!(
                             f,
-                            "{:indent$}/!\\ WEIRD: this case has no recorded \
-                             reason for being copied forwards!",
-                            ""
+                            "{:indent$}{} {}",
+                            "",
+                            styles.warning().style("/!\\ WEIRD:"),
+                            styles.warning_text().style(
+                                "this case has no recorded \
+                                 reason for being copied forwards!"
+                            )
                         )?;
                         continue;
                     }
-                    writeln!(f, "{:indent$}copied forwards due to:", "")?;
+                    writeln!(
+                        f,
+                        "{:indent$}{}:",
+                        "",
+                        heading.style("copied forwards due to")
+                    )?;
                     let indent = indent + 2;
                     if !unmarked_ereports.is_empty() {
                         writeln!(
                             f,
-                            "{:indent$}ereports not yet marked seen:",
-                            ""
+                            "{:indent$}{}:",
+                            "",
+                            heading.style("ereports not yet marked seen")
                         )?;
                         let indent = indent + 2;
                         for ereport_id in unmarked_ereports {
@@ -573,8 +771,9 @@ impl fmt::Display for InputReportMultilineDisplay<'_> {
                     if !unmarked_alert_requests.is_empty() {
                         writeln!(
                             f,
-                            "{:indent$}alert requests not yet satisfied:",
-                            ""
+                            "{:indent$}{}:",
+                            "",
+                            heading.style("alert requests not yet satisfied")
                         )?;
                         let indent = indent + 2;
                         for alert_id in unmarked_alert_requests {
@@ -584,9 +783,11 @@ impl fmt::Display for InputReportMultilineDisplay<'_> {
                     if !unmarked_support_bundle_requests.is_empty() {
                         writeln!(
                             f,
-                            "{:indent$}support bundle requests not yet \
-                             satisfied:",
-                            ""
+                            "{:indent$}{}:",
+                            "",
+                            heading.style(
+                                "support bundle requests not yet satisfied"
+                            )
                         )?;
                         let indent = indent + 2;
                         for bundle_id in unmarked_support_bundle_requests {
@@ -600,16 +801,27 @@ impl fmt::Display for InputReportMultilineDisplay<'_> {
                 }
             }
         } else {
-            writeln!(f, "{:indent$}no cases copied forward", "")?;
+            writeln!(
+                f,
+                "{:indent$}{}",
+                "",
+                styles.heading().style("no cases copied forward"),
+            )?;
         }
 
         if in_service_disks.is_empty() {
-            writeln!(f, "\n{:indent$}no in-service control plane disks", "")?;
+            writeln!(
+                f,
+                "\n{:indent$}{}",
+                "",
+                styles.heading().style("no in-service control plane disks"),
+            )?;
         } else {
             writeln!(
                 f,
-                "\n{:indent$}in-service control plane disks ({} total):",
+                "\n{:indent$}{} ({} total):",
                 "",
+                heading.style("in-service control plane disks"),
                 in_service_disks.len()
             )?;
             let indent = indent + 2;
@@ -787,10 +999,14 @@ mod tests {
         }
     }
 
+    // Note: the example report includes the `/!\ WEIRD` warning, so
+    // the colored-display check here also covers warning styling.
     #[test]
     fn test_analysis_input_report_display_with_cases() {
         let report = example_report_with_cases();
-        let output = format!("{}", report.display_multiline(0));
+        let output = display::test_utils::check_colored_display(|colored| {
+            report.display_multiline(0).colored(colored)
+        });
         expectorate::assert_contents(
             "output/analysis_input_report_with_cases.out",
             &output,
@@ -800,7 +1016,9 @@ mod tests {
     #[test]
     fn test_analysis_input_report_display_empty() {
         let report = example_report_empty();
-        let output = format!("{}", report.display_multiline(0));
+        let output = display::test_utils::check_colored_display(|colored| {
+            report.display_multiline(0).colored(colored)
+        });
         expectorate::assert_contents(
             "output/analysis_input_report_empty.out",
             &output,
@@ -810,11 +1028,69 @@ mod tests {
     #[test]
     fn test_analysis_input_report_display_same_inv() {
         let report = example_report_same_inv();
-        let output = format!("{}", report.display_multiline(0));
+        let output = display::test_utils::check_colored_display(|colored| {
+            report.display_multiline(0).colored(colored)
+        });
         expectorate::assert_contents(
             "output/analysis_input_report_same_inv.out",
             &output,
         );
+    }
+
+    /// Golden-file test for the full `AnalysisReport` displayer tree, which
+    /// composes the case report, debug log, and case metadata displayers.
+    /// The example includes a warning-level log entry, so the colored
+    /// check also covers `/!\ WARNING:` styling.
+    #[test]
+    fn test_analysis_report_display_full() {
+        let report: AnalysisReport =
+            serde_json::from_value(serde_json::json!({
+                "sitrep_id": "ea7affb0-36eb-4a9a-b9bd-22e00f1bcc04",
+                "comment": "an example analysis report",
+                "cases": [{
+                    "id": "b0d36461-e3e7-4a53-9162-82414fb30088",
+                    "created_sitrep_id": "ea7affb0-36eb-4a9a-b9bd-22e00f1bcc04",
+                    "closed_sitrep_id": null,
+                    "de": "power_shelf",
+                    "comment": "PSU 0 faulted",
+                    "log": [
+                        { "event": "opened case" },
+                        {
+                            "event": "something suspicious",
+                            "level": "Warn",
+                            "comment": "hmmm...",
+                            "key": "value",
+                        },
+                    ],
+                }],
+                "log": [{ "event": "began analysis" }],
+            }))
+            .expect("example analysis report should deserialize");
+
+        let output = display::test_utils::check_colored_display(|colored| {
+            report.display_multiline(0).colored(colored)
+        });
+        expectorate::assert_contents(
+            "output/analysis_report_full.out",
+            &output,
+        );
+    }
+
+    /// As above, for a warning-level `LogEntry`, covering the
+    /// `/!\ WARNING:` styling.
+    #[test]
+    fn test_log_entry_display_colored() {
+        let json = serde_json::json!({
+            "event": "something suspicious happened",
+            "comment": "hmmm...",
+            "level": "Warn",
+            "key": "value",
+            "missing": null,
+        });
+        let entry: LogEntry = serde_json::from_value(json).unwrap();
+        display::test_utils::check_colored_display(|colored| {
+            entry.display_indented(2).colored(colored)
+        });
     }
 
     /// A JSON object containing only the required `event` field should
@@ -909,7 +1185,9 @@ mod tests {
             "arr": [10, 20]
         });
         let entry: LogEntry = serde_json::from_value(json).unwrap();
-        let output = format!("{}", entry.display_indented(0));
+        let output = display::test_utils::check_colored_display(|colored| {
+            entry.display_indented(0).colored(colored)
+        });
         expectorate::assert_contents(
             "output/log_entry_display_nested_values.out",
             &output,
@@ -926,7 +1204,9 @@ mod tests {
             "flat_key": "flat_value",
         });
         let entry: LogEntry = serde_json::from_value(json).unwrap();
-        let output = format!("{}", entry.display_indented(0));
+        let output = display::test_utils::check_colored_display(|colored| {
+            entry.display_indented(0).colored(colored)
+        });
         expectorate::assert_contents(
             "output/log_entry_display_multiline_comment.out",
             &output,

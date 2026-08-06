@@ -305,9 +305,10 @@ fn decode_database_error(
     const IPV4_NOT_AVAILABLE_CONSTRAINT: &str =
         "network_interface_subnet_id_ipv4_key";
 
-    // TODO-completeness: Add a similar constraint name and check below when we
-    // support inserting VPC-private IPv6 addresses. See
-    // https://github.com/oxidecomputer/omicron/issues/9245.
+    // The name of the index whose uniqueness is violated if we try to assign an
+    // IPv6 that is already allocated to another interface in the same subnet.
+    const IPV6_NOT_AVAILABLE_CONSTRAINT: &str =
+        "network_interface_subnet_id_ipv6_key";
 
     // The name of the index whose uniqueness is violated if we try to assign a
     // MAC that is already allocated to another interface in the same VPC.
@@ -449,6 +450,22 @@ fn decode_database_error(
                     return InsertError::External(err);
                 };
                 InsertError::IpAddressNotAvailable((*ipv4).into())
+            }
+            // Constraint violated if a user-requested IPv6 address has
+            // already been assigned within the same VPC Subnet.
+            Some(constraint) if constraint == IPV6_NOT_AVAILABLE_CONSTRAINT => {
+                let Some(ipv6) = interface.ip_config.ipv6_addr() else {
+                    let err = Error::internal_error(&format!(
+                        "Violated constraint that ensures unique \
+                        IPv6 addresses when inserting an explicitly-\
+                        requested IPv6 address, but there doesn't \
+                        appear to be any such address. Instead, \
+                        found {:?}",
+                        interface.ip_config,
+                    ));
+                    return InsertError::External(err);
+                };
+                InsertError::IpAddressNotAvailable((*ipv6).into())
             }
             // Constraint violated if a user-requested MAC address has
             // already been assigned within the same VPC.
@@ -2541,6 +2558,62 @@ mod tests {
         let Err(InsertError::IpAddressNotAvailable(_)) = result else {
             panic!(
                 "Requesting an interface with an existing IP should fail, found {:?}",
+                result,
+            );
+        };
+        context.success().await;
+    }
+
+    #[tokio::test]
+    async fn test_insert_request_same_ipv6_fails() {
+        let context =
+            TestContext::new("test_insert_request_same_ipv6_fails", 2).await;
+
+        let instance = context.create_stopped_instance().await;
+        let instance_id = InstanceUuid::from_untyped_uuid(instance.id());
+        let new_instance = context.create_stopped_instance().await;
+        let new_instance_id =
+            InstanceUuid::from_untyped_uuid(new_instance.id());
+
+        // Insert an interface with an automatically-assigned IPv6 address.
+        let interface = IncompleteNetworkInterface::new_instance(
+            Uuid::new_v4(),
+            instance_id,
+            context.net1.subnets[0].clone(),
+            IdentityMetadataCreateParams {
+                name: "interface-c".parse().unwrap(),
+                description: String::from("description"),
+            },
+            PrivateIpStackCreate::auto_ipv6(),
+        )
+        .unwrap();
+        let inserted_interface = context
+            .datastore()
+            .instance_create_network_interface_raw(context.opctx(), interface)
+            .await
+            .expect("Failed to insert interface");
+
+        // Inserting an interface that explicitly requests the same IPv6
+        // address should fail, even if all other parameters are valid.
+        let ipv6 = inserted_interface.ipv6.expect("an IPv6 address");
+        let interface = IncompleteNetworkInterface::new_instance(
+            Uuid::new_v4(),
+            new_instance_id,
+            context.net1.subnets[0].clone(),
+            IdentityMetadataCreateParams {
+                name: "interface-c".parse().unwrap(),
+                description: String::from("description"),
+            },
+            PrivateIpStackCreate::from_ipv6(ipv6.into()),
+        )
+        .unwrap();
+        let result = context
+            .datastore()
+            .instance_create_network_interface_raw(context.opctx(), interface)
+            .await;
+        let Err(InsertError::IpAddressNotAvailable(_)) = result else {
+            panic!(
+                "Requesting an interface with an existing IPv6 address should fail, found {:?}",
                 result,
             );
         };

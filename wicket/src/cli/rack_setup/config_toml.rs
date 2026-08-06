@@ -5,13 +5,13 @@
 //! Support for the TOML file we give to and accept from clients for setting
 //! (most of) the rack setup configuration.
 
+use iddqd::IdOrdMap;
 use serde::Serialize;
 use sled_agent_types::early_networking::BgpConfig;
 use sled_agent_types::early_networking::LldpPortConfig;
 use sled_agent_types::early_networking::RouteConfig;
-use sled_hardware_types::Baseboard;
+use sled_hardware_types::BaseboardId;
 use std::borrow::Cow;
-use std::collections::BTreeSet;
 use std::fmt;
 use toml_edit::Array;
 use toml_edit::ArrayOfTables;
@@ -27,6 +27,7 @@ use wicket_common::rack_setup::CurrentRssUserConfigInsensitive;
 use wicketd_commission_types::rack_setup::AllowedSourceIps;
 use wicketd_commission_types::rack_setup::IpRange;
 use wicketd_commission_types::rack_setup::ManualPortConfig;
+use wicketd_commission_types::rack_setup::ServiceIpPoolConfig;
 use wicketd_commission_types::rack_setup::UplinkAddress;
 use wicketd_commission_types::rack_setup::UserSpecifiedBgpPeerConfig;
 use wicketd_commission_types::rack_setup::UserSpecifiedImportExportPolicy;
@@ -67,23 +68,7 @@ impl TomlTemplate {
             .map(|s| Value::String(Formatted::new(s.to_string())))
             .collect();
 
-        *doc.get_mut("internal_services_ip_pool_ranges")
-            .unwrap()
-            .as_array_mut()
-            .unwrap() = config
-            .internal_services_ip_pool_ranges
-            .iter()
-            .map(|r| {
-                let mut t = InlineTable::new();
-                let (first, last) = match r {
-                    IpRange::V4(r) => (r.first.to_string(), r.last.to_string()),
-                    IpRange::V6(r) => (r.first.to_string(), r.last.to_string()),
-                };
-                t.insert("first", Value::String(Formatted::new(first)));
-                t.insert("last", Value::String(Formatted::new(last)));
-                Value::InlineTable(t)
-            })
-            .collect();
+        populate_service_ip_pool_tables(&mut doc, &config.service_ip_pools);
 
         *doc.get_mut("external_dns_ips").unwrap().as_array_mut().unwrap() =
             config
@@ -92,12 +77,7 @@ impl TomlTemplate {
                 .map(|s| Value::String(Formatted::new(s.to_string())))
                 .collect();
 
-        for array in [
-            "ntp_servers",
-            "dns_servers",
-            "internal_services_ip_pool_ranges",
-            "external_dns_ips",
-        ] {
+        for array in ["ntp_servers", "dns_servers", "external_dns_ips"] {
             format_multiline_array(
                 doc.get_mut(array).unwrap().as_array_mut().unwrap(),
             );
@@ -125,6 +105,74 @@ impl TomlTemplate {
 
         Self { doc }
     }
+}
+
+fn populate_service_ip_pool_tables(
+    doc: &mut DocumentMut,
+    pools: &IdOrdMap<ServiceIpPoolConfig>,
+) {
+    // With no pools in the current config, leave the template's block (its
+    // explanatory comment and a placeholder pool) in place to give some
+    // scaffolding to the operator.
+    if pools.is_empty() {
+        return;
+    }
+
+    let existing = doc
+        .get_mut("service_ip_pools")
+        .unwrap()
+        .as_array_of_tables_mut()
+        .unwrap();
+
+    // Cache the comment from the template to reapply it later after inserting
+    // the existing tables.
+    let comment = existing.get(0).and_then(|t| t.decor().prefix().cloned());
+
+    let mut tables: ArrayOfTables = pools
+        .iter()
+        .map(|pool| {
+            let mut table = Table::new();
+            table.insert(
+                "name",
+                Item::Value(Value::String(Formatted::new(
+                    pool.name.to_string(),
+                ))),
+            );
+            table.insert(
+                "description",
+                Item::Value(Value::String(Formatted::new(
+                    pool.description.clone(),
+                ))),
+            );
+            let ranges = pool
+                .ranges()
+                .iter()
+                .map(|r| {
+                    let mut t = InlineTable::new();
+                    let (first, last) = match r {
+                        IpRange::V4(r) => {
+                            (r.first.to_string(), r.last.to_string())
+                        }
+                        IpRange::V6(r) => {
+                            (r.first.to_string(), r.last.to_string())
+                        }
+                    };
+                    t.insert("first", Value::String(Formatted::new(first)));
+                    t.insert("last", Value::String(Formatted::new(last)));
+                    Value::InlineTable(t)
+                })
+                .collect::<Array>();
+            table.insert("ranges", Item::Value(Value::Array(ranges)));
+            table
+        })
+        .collect();
+
+    // Reapply the template's section comment to the first pool.
+    if let Some(comment) = comment {
+        tables.get_mut(0).unwrap().decor_mut().set_prefix(comment);
+    }
+
+    *existing = tables;
 }
 
 // Populate the allowed source IP list, which can be specified as a specified as
@@ -188,27 +236,16 @@ fn format_multiline_array(array: &mut Array) {
     array.set_trailing("\n");
 }
 
-fn build_sleds_array(sleds: &BTreeSet<BootstrapSledDescription>) -> Array {
+fn build_sleds_array(sleds: &IdOrdMap<BootstrapSledDescription>) -> Array {
     // Helper function to build the comment attached to a given sled.
     fn sled_comment(sled: &BootstrapSledDescription, end: &str) -> String {
         let ip = sled
             .bootstrap_ip
             .map(|ip| Cow::from(format!("{ip}")))
             .unwrap_or_else(|| Cow::from("IP address UNKNOWN"));
-        match &sled.baseboard {
-            Baseboard::Gimlet { identifier, model, revision } => {
-                format!(
-                    " # {identifier} (model {model} revision {revision}, {ip})\
-                     {end}"
-                )
-            }
-            Baseboard::Unknown => {
-                format!(" # UNKNOWN SLED ({ip}){end}")
-            }
-            Baseboard::Pc { identifier, model } => {
-                format!(" # NON-OXIDE {identifier} (model {model}, {ip}){end}")
-            }
-        }
+
+        let BaseboardId { serial_number, part_number } = &sled.baseboard_id;
+        format!(" # {serial_number} (model {part_number}, {ip}){end}")
     }
 
     let mut array = Array::new();
@@ -686,5 +723,29 @@ mod tests {
         let parsed: PutRssUserConfigInsensitive =
             toml::de::from_str(&template).unwrap();
         assert_eq!(example.put_insensitive, parsed);
+    }
+
+    #[test]
+    fn empty_config_emits_service_pool_scaffold() {
+        // There are no pools in a new rack. `populate` should leave the dummy
+        // scaffolding in the template's `[[service_ip_pools]]` table, with
+        // empty values, since it provides a useful comment and example for the
+        // operator to create their own data from.
+        let empty = CurrentRssUserConfigInsensitive {
+            bootstrap_sleds: IdOrdMap::new(),
+            ntp_servers: Vec::new(),
+            dns_servers: Vec::new(),
+            service_ip_pools: IdOrdMap::new(),
+            external_dns_ips: Vec::new(),
+            external_dns_zone_name: String::new(),
+            rack_network_config: None,
+            allowed_source_ips: None,
+            external_jumbo_frames_opt_in_enabled: false,
+        };
+        let template = TomlTemplate::populate(&empty).to_string();
+        expectorate::assert_contents(
+            "tests/output/example_empty.toml",
+            &template,
+        );
     }
 }

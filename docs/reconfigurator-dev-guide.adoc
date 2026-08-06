@@ -882,11 +882,10 @@ The artifacts in TUF repos built by the Omicron build process do not work with s
 . You'll need a copy of the `tufaceous` binary.
 .. Clone the https://github.com/oxidecomputer/tufaceous[tufaceous] repository.
 .. Build with `cargo build --bin=tufaceous`.
-. You'll need a TUF repository manifest that specifies that `tufaceous` should conjure up fake Hubris images for simulated SPs.  There's one in the Omicron repo at xref:../update-common/manifests/fake.toml[].
 . Run:
 +
 ```
-$ tufaceous assemble update-common/manifests/fake.toml /var/tmp/my-fake-repo.zip
+$ tufaceous build --fake --system-version 1.0.0 -o /var/tmp/my-fake-repo.zip
 ```
 . Confirm the contents of the repo:
 +

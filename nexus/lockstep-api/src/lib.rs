@@ -31,6 +31,8 @@ use nexus_types::external_api::path_params::{BlueprintPath, PhysicalDiskPath};
 use nexus_types::external_api::sled::{SledPolicy, SledSelector};
 use nexus_types::external_api::support_bundle;
 use nexus_types::external_api::system::{Ping, PingStatus};
+use nexus_types::fm::config::FmConfigParam;
+use nexus_types::fm::config::FmConfigView;
 use nexus_types::internal_api::params::InstanceMigrateRequest;
 use nexus_types::internal_api::params::RackInitializationRequest;
 use nexus_types::internal_api::views::BackgroundTask;
@@ -598,6 +600,33 @@ pub trait NexusLockstepApi {
     async fn fm_known_ereport_classes_list(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<Vec<String>>, HttpError>;
+
+    #[endpoint {
+        method = GET,
+        path = "/fm/config"
+    }]
+    async fn fm_config_show_current(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<FmConfigView>, HttpError>;
+
+    /// Update the fault management config at the latest version
+    #[endpoint {
+        method = POST,
+        path = "/fm/config"
+    }]
+    async fn fm_config_set(
+        rqctx: RequestContext<Self::Context>,
+        config: TypedBody<FmConfigParam>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    #[endpoint {
+        method = GET,
+        path = "/fm/config/versions/{version}"
+    }]
+    async fn fm_config_show_version(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<VersionPathParam>,
+    ) -> Result<HttpResponseOk<FmConfigView>, HttpError>;
 }
 
 /// Path parameters for Rack requests.

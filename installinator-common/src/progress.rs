@@ -7,6 +7,8 @@ use std::{collections::BTreeSet, fmt, net::SocketAddr};
 use camino::Utf8PathBuf;
 use illumos_utils::zpool;
 use omicron_common::disk::M2Slot;
+use oxide_update_engine_types::errors::NestedEngineError;
+use oxide_update_engine_types::spec::{AsError, EngineSpec};
 use schemars::{
     JsonSchema,
     r#gen::SchemaGenerator,
@@ -15,19 +17,23 @@ use schemars::{
 use serde::{Deserialize, Serialize};
 use serde_with::rust::deserialize_ignore_any;
 use thiserror::Error;
-use update_engine::{AsError, StepSpec, errors::NestedEngineError};
 
 // ---
 // Type definitions for use by installinator code.
 // ---
 
-update_engine::define_update_engine!(pub InstallinatorSpec);
+oxide_update_engine::define_update_engine!(pub InstallinatorSpec);
+oxide_update_engine_types::define_update_engine_types!(pub InstallinatorSpec);
 
 /// The specification for installinator events.
 #[derive(JsonSchema)]
 pub enum InstallinatorSpec {}
 
-impl StepSpec for InstallinatorSpec {
+impl EngineSpec for InstallinatorSpec {
+    fn spec_name() -> String {
+        "InstallinatorSpec".to_owned()
+    }
+
     type Component = InstallinatorComponent;
     type StepId = InstallinatorStepId;
     type StepMetadata = InstallinatorStepMetadata;
@@ -49,16 +55,16 @@ pub enum InstallinatorComponent {
     /// The host phase 2 component.
     HostPhase2,
 
-    /// The control plane component.
-    ControlPlane,
+    /// The control plane zone component.
+    ControlPlaneZone,
 
     /// The measurement corpus component.
     MeasurementCorpus,
 
-    /// A component that means "both the host and the control plane", used for
-    /// writes for now. It is possible that this component will go away in the
-    /// future.
-    Both,
+    /// A component that means "all components", used for downloads, writes, and
+    /// hardware scans for now. It is possible that this component will go away
+    /// in the future.
+    All,
 
     /// Future variants that might be unknown.
     #[serde(other, deserialize_with = "deserialize_ignore_any")]
@@ -72,18 +78,7 @@ pub enum InstallinatorComponent {
 #[serde(rename_all = "snake_case")]
 pub enum InstallinatorStepId {
     Download,
-    Format,
     Scan,
-    // There are multiple "composite" artifacts in the tuf repository the user
-    // gives to wicketd: the RoT (A/B images), the host (phase1/phase2), and the
-    // control plane (the collection of zones). wicketd handles unpacking the
-    // RoT and host composite artifacts, because it needs to give pieces from
-    // inside them to MGS. However, it does not unpack the control plane
-    // artifact: only installinator needs access to the zone images inside, so
-    // we have an explicit step here for that unpacking. If the user uploads a
-    // tuf repository with a malformed control plane composite artifact, this
-    // step is the point at which we'd discover that and fail.
-    UnpackControlPlaneArtifact,
     Write,
 }
 
@@ -91,7 +86,7 @@ pub enum InstallinatorStepId {
 #[serde(rename_all = "snake_case", tag = "reason")]
 pub enum InstallinatorStepMetadata {
     Write {
-        /// The destination being formatted or written to.
+        /// The destination being written to.
         ///
         /// Available with format and destination events.
         #[schemars(schema_with = "path_schema_opt")]
@@ -126,15 +121,11 @@ pub enum InstallinatorCompletionMetadata {
         disks_found: usize,
     },
 
-    ControlPlaneZones {
-        /// Number of zone images that will be installed.
-        zones_to_install: usize,
-    },
-
     Download {
         /// The address the artifact was downloaded from.
         address: SocketAddr,
     },
+
     Write {
         /// The output of the write operation.
         output: WriteOutput,
@@ -175,7 +166,11 @@ impl WriteOutput {
 #[derive(JsonSchema)]
 pub enum WriteSpec {}
 
-impl StepSpec for WriteSpec {
+impl EngineSpec for WriteSpec {
+    fn spec_name() -> String {
+        "WriteSpec".to_owned()
+    }
+
     type Component = WriteComponent;
     type StepId = WriteStepId;
     type StepMetadata = ();
@@ -293,7 +288,11 @@ pub enum ControlPlaneZonesSpec {}
 
 // This is a nested spec used within a `WriteSpec` engine, and we reuse a couple
 // of `WriteSpec`'s types for simplicity.
-impl StepSpec for ControlPlaneZonesSpec {
+impl EngineSpec for ControlPlaneZonesSpec {
+    fn spec_name() -> String {
+        "ControlPlaneZonesSpec".to_owned()
+    }
+
     type Component = WriteComponent;
     type StepId = ControlPlaneZonesStepId;
     type StepMetadata = ();

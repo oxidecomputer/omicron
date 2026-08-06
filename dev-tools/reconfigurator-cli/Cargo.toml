@@ -35,6 +35,7 @@ sled-agent-types.workspace = true
 omicron-common.workspace = true
 omicron-repl-utils.workspace = true
 omicron-uuid-kinds.workspace = true
+oxide-tokio-rt.workspace = true
 # See omicron-rpaths for more about the "pq-sys" dependency.
 pq-sys = "*"
 semver.workspace = true
@@ -48,8 +49,6 @@ tokio.workspace = true
 toml.workspace = true
 tufaceous.workspace = true
 tufaceous-artifact.workspace = true
-tufaceous-lib.workspace = true
-update-common.workspace = true
 uuid.workspace = true
 omicron-workspace-hack.workspace = true
 

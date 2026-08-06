@@ -82,6 +82,7 @@ pub struct OmicronInstallMetadata {
     pub file_size: u64,
 
     /// The hash of the file.
+    #[schemars(schema_with = "ArtifactHash::v1_json_schema")]
     pub hash: ArtifactHash,
 }
 
