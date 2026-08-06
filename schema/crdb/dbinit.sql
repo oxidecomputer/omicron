@@ -6338,6 +6338,11 @@ WHERE
 
 CREATE SEQUENCE IF NOT EXISTS omicron.public.nat_version START 1 INCREMENT 1;
 
+-- This table only holds NAT entries for instances, and is used in the dpd ->
+-- Nexus "pull" API we eventually want to rework
+-- (<https://github.com/oxidecomputer/dendrite/issues/83>). Omicron services
+-- that require NAT entries (NTP, Nexus, etc.) are managed by sled-agent on the
+-- scrimlets based on information in the bootstore.
 CREATE TABLE IF NOT EXISTS omicron.public.nat_entry (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     external_address INET NOT NULL,
@@ -9103,6 +9108,70 @@ CREATE TABLE IF NOT EXISTS omicron.public.trust_quorum_member (
     PRIMARY KEY (rack_id, epoch DESC, hw_baseboard_id)
 );
 
+
+-- Overrides to the fault management system's global configuration.
+--
+-- If no overrides are set, this table is empty and the system uses the default
+-- configuration. Otherwise, the row in this table with the highest `version` is
+-- selected and used as the active configuration.
+--
+-- All values that represent config settings (i.e. every column except for
+-- `version` and `comment`) are nullable. If they are NULL, the system will use
+-- the default value defined in the current software version for that setting.
+CREATE TABLE IF NOT EXISTS omicron.public.fm_config (
+    -- The version number of the configuration.
+    --
+    -- Configuration changes are made by inserting a new row with a higher
+    -- version number.
+    version INT8 PRIMARY KEY,
+    -- A comment describing why this override was created.
+    comment TEXT NOT NULL,
+    -- The time at which this config version was created.
+    time_modified TIMESTAMPTZ NOT NULL,
+    -- BREAK GLASS TO COMPLETELY DISABLE FAULT MANAGEMENT ANALYSIS
+    analysis_enabled BOOL,
+    -- The maximum number of sitreps to keep in the database.
+    --
+    -- If the number of records in the `omicron.public.fm_sitrep` table
+    -- (including both sitreps in the history and orphaned sitreps that have
+    -- yet to be garbage-collected) exceeds this limit, the FM analysis
+    -- background task will not produce a new sitrep until old ones are
+    -- deleted.
+    sitrep_limit INT8,
+    -- The number of entries in the `omicron.public.fm_sitrep_history` table at
+    -- which the `fm_sitrep_history_pruner` background task will begin deleting
+    -- the oldest sitreps from the history.
+    --
+    -- This must be less than `sitrep_limit`, and must be at least 2.
+    history_pruning_threshold INT8,
+
+    CONSTRAINT versions_are_positive CHECK (version > 0),
+
+    -- Comments are mandatory when overriding the default config, so we enforce
+    -- that this is both non-NULL and not the empty string. We can't force the
+    -- operator to write a *good* comment, but at least we can force you to type
+    -- SOMETHING if you really don't want to say anything... :)
+    CONSTRAINT comment_required CHECK (comment != '' AND comment != ' '),
+
+    CONSTRAINT sitrep_limit_validity CHECK (
+        sitrep_limit IS NULL OR (
+            sitrep_limit >= 5 AND
+            sitrep_limit <= 5000
+        )
+    ),
+    CONSTRAINT history_pruning_threshold_validity CHECK (
+        history_pruning_threshold IS NULL OR (
+            history_pruning_threshold <= 5000 AND
+            history_pruning_threshold >= 2
+        )
+    ),
+    CONSTRAINT history_limit_is_less_than_sirep_limit CHECK (
+        (history_pruning_threshold IS NULL OR sitrep_limit IS NULL) OR
+            history_pruning_threshold < sitrep_limit
+    )
+);
+
+
 -- Keep this at the end of file so that the database does not contain a version
 -- until it is fully populated.
 INSERT INTO omicron.public.db_metadata (
@@ -9112,7 +9181,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '283.0.0', NULL)
+    (TRUE, NOW(), NOW(), '285.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

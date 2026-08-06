@@ -4,6 +4,7 @@
 
 //! omdb commands that query or update specific Nexus instances
 
+mod fm_config;
 mod quiesce;
 mod reconfigurator_config;
 mod update_status;
@@ -26,6 +27,8 @@ use clap::Args;
 use clap::ColorChoice;
 use clap::Subcommand;
 use clap::ValueEnum;
+use fm_config::FmConfigArgs;
+use fm_config::cmd_nexus_fm_config;
 use futures::StreamExt;
 use futures::TryStreamExt;
 use http::StatusCode;
@@ -60,6 +63,7 @@ use nexus_types::internal_api::background::BlueprintRendezvousStatus;
 use nexus_types::internal_api::background::DatasetsRendezvousStats;
 use nexus_types::internal_api::background::EreporterStatus;
 use nexus_types::internal_api::background::FmAnalysisStatus;
+use nexus_types::internal_api::background::FmConfigLoadStatus;
 use nexus_types::internal_api::background::FmRendezvousStatus;
 use nexus_types::internal_api::background::IncompleteBootstoreConfigReport;
 use nexus_types::internal_api::background::InstanceReincarnationStatus;
@@ -184,6 +188,8 @@ enum NexusCommands {
     TrustQuorum(TrustQuorumArgs),
     /// show running artifact versions
     UpdateStatus(UpdateStatusArgs),
+    /// view or modify fault management config
+    FmConfig(FmConfigArgs),
 }
 
 #[derive(Debug, Args)]
@@ -945,6 +951,9 @@ impl NexusArgs {
             NexusCommands::UpdateStatus(args) => {
                 cmd_nexus_update_status(&client, args).await
             }
+            NexusCommands::FmConfig(args) => {
+                cmd_nexus_fm_config(omdb, &client, args).await
+            }
         }
     }
 }
@@ -1378,6 +1387,9 @@ fn print_task_details(
         }
         "fm_analysis" => {
             print_task_fm_analysis(details, colored);
+        }
+        "fm_config_loader" => {
+            print_task_fm_config_loader(details);
         }
         "fm_sitrep_loader" => {
             print_task_fm_sitrep_loader(details);
@@ -3547,10 +3559,18 @@ fn print_task_fm_analysis(details: &serde_json::Value, colored: bool) {
     println!("    FAULT MANAGEMENT ANALYSIS SUMMARY");
     println!("    =================================");
     let (prep_status, analysis_status) = match outcome {
-        Outcome::Disabled => {
+        Outcome::Disabled(config_source) => {
             println!(
-                "    fault management analysis explicitly disabled \
-                 by config!"
+                "    fault management analysis explicitly disabled by config!"
+            );
+            println!("{}", config_source.display_multiline(6));
+            return;
+        }
+        Outcome::WaitingForConfig => {
+            println!(
+                "    analysis was not performed, as the fault management\n    \
+                     configuration has not yet been loaded.\n\
+                 (i) note: this should only happen if Nexus has just started.",
             );
             return;
         }
@@ -3676,6 +3696,45 @@ fn print_task_fm_analysis(details: &serde_json::Value, colored: bool) {
     print_start_end_time(start_time, end_time, 4);
 }
 
+fn print_task_fm_config_loader(details: &serde_json::Value) {
+    use nexus_types::internal_api::background::CurrentFmConfig;
+    let current_config =
+        match serde_json::from_value::<FmConfigLoadStatus>(details.clone()) {
+            Err(error) => {
+                eprintln!(
+                    "warning: failed to interpret task details: {:?}: {:?}",
+                    error, details
+                );
+                return;
+            }
+            Ok(FmConfigLoadStatus::Error(error)) => {
+                println!("    task did not complete successfully: {error}");
+                return;
+            }
+            Ok(FmConfigLoadStatus::LatestConfigInvalid { error, fallback }) => {
+                println!(
+                    "/!\\ the latest FM config override in the database is \
+                 invalid: {error}"
+                );
+                fallback
+            }
+            Ok(FmConfigLoadStatus::Loaded(config)) => config,
+        };
+
+    let CurrentFmConfig { time_loaded, updated, config } = current_config;
+
+    const TIME_LOADED: &str = "config last loaded at:";
+    const UPDATED: &str = "  loaded by this activation:";
+    const WIDTH: usize = const_max_len(&[TIME_LOADED, UPDATED]) + 1;
+    println!(
+        "    {TIME_LOADED:<WIDTH$}{}",
+        humantime::format_rfc3339_millis(time_loaded.into()),
+    );
+    println!("    {UPDATED:<WIDTH$}{updated}");
+    println!("    current config:");
+    print!("{}", config.display_multiline(6));
+}
+
 fn print_task_fm_sitrep_loader(details: &serde_json::Value) {
     match serde_json::from_value::<SitrepLoadStatus>(details.clone()) {
         Err(error) => eprintln!(
@@ -3709,25 +3768,34 @@ fn print_task_fm_sitrep_history_pruner(details: &serde_json::Value) {
         Outcome, SitrepsPruned,
     };
 
-    let SitrepHistoryPrunerStatus {
-        history_limit,
-        batch_size,
-        pruned: SitrepsPruned { batches, total, versions },
-        outcome,
-    } = match serde_json::from_value::<SitrepHistoryPrunerStatus>(
-        details.clone(),
-    ) {
-        Err(error) => {
-            eprintln!(
-                "warning: failed to interpret task details: {:?}: {:?}",
-                error, details
-            );
-            return;
-        }
-        Ok(status) => status,
-    };
+    let (cfg, batch_size, SitrepsPruned { batches, total, versions }, outcome) =
+        match serde_json::from_value::<SitrepHistoryPrunerStatus>(
+            details.clone(),
+        ) {
+            Err(error) => {
+                eprintln!(
+                    "warning: failed to interpret task details: {:?}: {:?}",
+                    error, details
+                );
+                return;
+            }
+            Ok(SitrepHistoryPrunerStatus::WaitingForConfig) => {
+                println!(
+                    "    nothing was pruned, as the fault management\n    \
+                         configuration has not yet been loaded.\n\
+                     (i) note: this should only happen if Nexus has just \
+                     started.",
+                );
+                return;
+            }
+            Ok(SitrepHistoryPrunerStatus::Activated {
+                cfg,
+                batch_size,
+                pruned,
+                outcome,
+            }) => (cfg, batch_size, pruned, outcome),
+        };
 
-    const HISTORY_LIMIT: &str = "max sitreps to keep:";
     const STATUS: &str = "status:";
     const SITREP_COUNT: &str = "  current count:";
     const PRUNED_COUNT: &str = "  sitreps pruned:";
@@ -3735,7 +3803,6 @@ fn print_task_fm_sitrep_history_pruner(details: &serde_json::Value) {
     const BATCHES: &str = "  batches:";
     const BATCH_SIZE: &str = "deletion batch size:";
     const P_WIDTH: usize = const_max_len(&[
-        HISTORY_LIMIT,
         SITREP_COUNT,
         PRUNED_COUNT,
         PRUNED_VERSIONS,
@@ -3743,7 +3810,8 @@ fn print_task_fm_sitrep_history_pruner(details: &serde_json::Value) {
         BATCH_SIZE,
     ]) + 1;
     const NUM_WIDTH: usize = 4;
-    println!("    {HISTORY_LIMIT:<P_WIDTH$}{history_limit:>NUM_WIDTH$}");
+    println!("    configuration:");
+    print!("{}", cfg.display_multiline(6));
     println!("    {BATCH_SIZE:<P_WIDTH$}{batch_size:>NUM_WIDTH$}");
     match outcome {
         Outcome::Error(error) => {

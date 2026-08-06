@@ -453,7 +453,24 @@ impl DataStore {
     /// - the total upper bound on usage as reported by their crucible and local
     ///   storage datasets
     /// - their most recent total_size as reported by inventory.
+    ///
+    /// Delegates to `zpool_get_for_sled_reservation_on_conn`
     pub async fn zpool_get_for_sled_reservation(
+        &self,
+        opctx: &OpContext,
+        sled_id: SledUuid,
+    ) -> LookupResult<IdOrdMap<ZpoolGetForSledReservationResult>> {
+        let conn = self.pool_connection_authorized(opctx).await?;
+        Self::zpool_get_for_sled_reservation_on_conn(&conn, opctx, sled_id)
+            .await
+    }
+
+    /// For a given sled id, return all zpools for that sled plus:
+    ///
+    /// - the total upper bound on usage as reported by their crucible and local
+    ///   storage datasets
+    /// - their most recent total_size as reported by inventory.
+    pub async fn zpool_get_for_sled_reservation_on_conn(
         conn: &async_bb8_diesel::Connection<DbConnection>,
         opctx: &OpContext,
         sled_id: SledUuid,
@@ -615,5 +632,67 @@ impl DataStore {
         }
 
         Ok(converted)
+    }
+
+    /// Return a list of zpools that could fit the argument local storage
+    /// allocation. This does _not_ check against the zpool's existing usage,
+    /// only the available non-control-plane-storage-buffer space, and should
+    /// only be used (for example) as a sanity check during disk creation.
+    pub async fn zpools_that_can_fit_local_storage_allocation(
+        &self,
+        opctx: &OpContext,
+        size: i64,
+    ) -> LookupResult<Vec<Zpool>> {
+        use nexus_db_schema::schema::inv_zpool;
+        use nexus_db_schema::schema::physical_disk::dsl as physical_disk_dsl;
+        use nexus_db_schema::schema::zpool::dsl;
+
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        let results = dsl::zpool
+            .filter(dsl::time_deleted.is_null())
+            .inner_join(
+                physical_disk_dsl::physical_disk
+                    .on(dsl::physical_disk_id.eq(physical_disk_dsl::id)),
+            )
+            .filter(
+                physical_disk_dsl::disk_policy
+                    .eq(PhysicalDiskPolicy::InService),
+            )
+            // Only U2 disks will be considered for local storage allocations.
+            .filter(physical_disk_dsl::variant.eq(PhysicalDiskKind::U2))
+            .select((
+                Zpool::as_select(),
+                // last reported total size of this pool from inventory
+                inv_zpool::table
+                    .select(inv_zpool::total_size)
+                    .filter(inv_zpool::id.eq(dsl::id))
+                    .order_by(inv_zpool::time_collected.desc())
+                    .limit(1)
+                    .single_value(),
+            ))
+            .load_async::<(Zpool, Option<i64>)>(&*conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        Ok(results
+            .into_iter()
+            .filter(|(zpool, maybe_total_size)| {
+                // If there isn't an inventory collection for this zpool, filter
+                // it out.
+                let Some(last_inv_total_size) = maybe_total_size else {
+                    return false;
+                };
+
+                // Compute the available size without considering other usage of
+                // the pool.
+                let buffer: i64 = zpool.control_plane_storage_buffer().into();
+
+                let available_size: i64 = last_inv_total_size - buffer;
+
+                size < available_size
+            })
+            .map(|(zpool, _)| zpool)
+            .collect())
     }
 }
