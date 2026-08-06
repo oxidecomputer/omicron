@@ -11,6 +11,7 @@ use nexus_db_queries::db::DataStore;
 use nexus_types::deployment::{Blueprint, BlueprintExpungedZoneAccessReason};
 use omicron_common::api::external::Error;
 use omicron_uuid_kinds::{GenericUuid, OmicronZoneUuid};
+use slog::Logger;
 use slog::{debug, info, warn};
 
 /// For each expunged Nexus zone in the same generation as the current Nexus,
@@ -99,6 +100,7 @@ fn find_expunged_same_generation(
         .collect())
 }
 
+// TODO-K: Add a comment here
 pub(crate) async fn abandon_orphan_sagas(
     opctx: &OpContext,
     datastore: &DataStore,
@@ -107,10 +109,55 @@ pub(crate) async fn abandon_orphan_sagas(
 ) -> Result<(), anyhow::Error> {
     let log = &opctx.log;
 
-    // TODO-K: clean up and extract some of the logic into a separate fn
+    // Find ids of stale expunged Nexus zones
+    let stale_sec_ids = find_expunged_older_generation(log, blueprint);
 
-    // Oldest generation of all in-service Nexuses
-    //
+    debug!(
+        log,
+        "abandon orphan sagas: abandoning running or unwinding sagas from \
+        expunged (and ready-for-cleanup) Nexus zones of an older generation \
+        than those in service";
+        "stale_expunged_sec_ids" => ?stale_sec_ids,
+    );
+    let result = datastore
+        .sagas_abandon_orphans(
+            opctx,
+            &stale_sec_ids,
+            SagaReasonAbandoned::Unrecoverable,
+            "orphan: current_sec Nexus is expunged and unreassignable \
+            (older than all in-service generations)"
+                .to_string(),
+        )
+        .await;
+
+    match result {
+        Ok(count) => {
+            info!(log, "abandoned orphan sagas";
+                "nexus_zone_ids" => ?stale_sec_ids,
+                "count" => count,
+            );
+
+            Ok(())
+        }
+        Err(error) => {
+            warn!(log, "failed to abandon orphan sagas";
+                "nexus_zone_ids" => ?stale_sec_ids,
+                &error,
+            );
+
+            // TODO-K: Decide if I want anyhow error or not as the return value
+            Err(error.into())
+        }
+    }
+}
+
+/// Returns the ids of expunged (and ready-for-cleanup) Nexus zones whose
+/// generation is older than the oldest in-service Nexus generation in the
+/// blueprint.
+fn find_expunged_older_generation(
+    log: &Logger,
+    blueprint: &Blueprint,
+) -> Vec<SecId> {
     // We chose the oldest of the live generations for a few reasons. During
     // Nexus handover there is a possibility that there will be more than one
     // generation of Nexuses in-service, and the target blueprint could become
@@ -122,7 +169,7 @@ pub(crate) async fn abandon_orphan_sagas(
         .map(|(_, _, nexus)| nexus.nexus_generation)
         .min()
     else {
-        return Ok(());
+        return vec![];
     };
     debug!(
         log,
@@ -130,15 +177,13 @@ pub(crate) async fn abandon_orphan_sagas(
         "oldest_in_service_generation" => %oldest_live_generation,
     );
 
-    // TODO-K: Add more logs
-
-    // SEC ids of expunged and ready_for_cleanup Nexus zones whose generation is
-    // strictly older than the oldest still-running Nexus generation.
+    // SEC ids of expunged and ready-for-cleanup Nexus zones whose generation is
+    // strictly older than the oldest in-service Nexus generation.
     //
     // We source SEC ids strictly from the target blueprint as these are the
     // only Nexuses we can confidently confirm the state of. Any Nexus not in
     // the target blueprint is effectively ignored.
-    let orphan_sec_ids: Vec<SecId> = blueprint
+    blueprint
         .expunged_nexus_zones_ready_for_cleanup(
             BlueprintExpungedZoneAccessReason::NexusOrphanSagaAbandonment,
         )
@@ -146,39 +191,7 @@ pub(crate) async fn abandon_orphan_sagas(
             (nexus.nexus_generation < oldest_live_generation)
                 .then_some(SecId(config.id.into_untyped_uuid()))
         })
-        .collect();
-
-    // Orphans are abandoned
-    let result = datastore
-        .sagas_abandon_orphans(
-            opctx,
-            &orphan_sec_ids,
-            SagaReasonAbandoned::Unrecoverable,
-            "Orphan: current_sec Nexus is expunged and unreassignable \
-            (older than all in-service generations)"
-                .to_string(),
-        )
-        .await;
-
-    match result {
-        Ok(count) => {
-            info!(log, "abandoned orphan sagas";
-                "nexus_zone_ids" => ?orphan_sec_ids,
-                "count" => count,
-            );
-
-            Ok(())
-        }
-        Err(error) => {
-            warn!(log, "failed to abandon orphan sagas";
-                "nexus_zone_ids" => ?orphan_sec_ids,
-                &error,
-            );
-
-            // TODO-K: Decide if I want anyhow error or not as the return value
-            Err(error.into())
-        }
-    }
+        .collect()
 }
 
 #[cfg(test)]
@@ -588,7 +601,7 @@ mod test {
         let orphan_sec = SecId(orphan_zone.into_untyped_uuid());
 
         // For each SEC, create one saga in each state (running, unwinding,
-        // done, and abandoned) so the test is exhaustive.
+        // done, and abandoned).
         let mut sagas_to_insert = Vec::new();
         for sec in
             [in_service_sec, expunged_same_gen_sec, absent_sec, orphan_sec]
@@ -628,8 +641,8 @@ mod test {
             .map(|saga| (saga.id, saga.saga_state.clone()))
             .collect();
 
-        // The only sagas that should end up newly abandoned are `orphan_sec`'s
-        // sagas that started out running or unwinding.
+        // The only sagas that should end up newly abandoned are those from `orphan_sec`
+        // that started out running or unwinding.
         let expected_newly_abandoned: BTreeSet<SagaId> = sagas_to_insert
             .iter()
             .filter_map(|saga| {
@@ -677,15 +690,14 @@ mod test {
         for saga in loaded {
             if expected_newly_abandoned.contains(&saga.id) {
                 // `orphan_sec`'s running/unwinding sagas should now be
-                // abandoned as unrecoverable, with the comment set by
-                // `abandon_orphan_sagas`.
+                // abandoned as unrecoverable.
                 assert_eq!(
                     state_summary(&saga.saga_state),
                     (
                         SagaState::Abandoned,
                         Some((
                             SagaReasonAbandoned::Unrecoverable,
-                            "Orphan: current_sec Nexus is expunged and \
+                            "orphan: current_sec Nexus is expunged and \
                              unreassignable (older than all in-service \
                              generations)"
                                 .to_string(),
