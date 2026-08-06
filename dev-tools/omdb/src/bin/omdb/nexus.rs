@@ -68,6 +68,7 @@ use nexus_types::internal_api::background::FmRendezvousStatus;
 use nexus_types::internal_api::background::IncompleteBootstoreConfigReport;
 use nexus_types::internal_api::background::InstanceReincarnationStatus;
 use nexus_types::internal_api::background::InstanceUpdaterStatus;
+use nexus_types::internal_api::background::InventoryCollectionStatus;
 use nexus_types::internal_api::background::InventoryLoadStatus;
 use nexus_types::internal_api::background::LookupRegionPortStatus;
 use nexus_types::internal_api::background::PhysicalDiskAdoptionStatus;
@@ -208,8 +209,21 @@ enum BackgroundTasksCommands {
     Show(BackgroundTasksShowArgs),
     /// Print an event report for a background task if available.
     PrintReport(BackgroundTasksPrintReportArgs),
+    /// Save the last inventory collection's timing trace to a file
+    ///
+    /// The file is in Chrome Trace Event format and can be loaded into
+    /// <https://ui.perfetto.dev/> to visualize where collection time was
+    /// spent.
+    InventoryTrace(BackgroundTasksInventoryTraceArgs),
     /// Activate one or more background tasks
     Activate(BackgroundTasksActivateArgs),
+}
+
+#[derive(Debug, Args)]
+struct BackgroundTasksInventoryTraceArgs {
+    /// where to write the trace JSON
+    #[clap(long)]
+    output: Utf8PathBuf,
 }
 
 #[derive(Debug, Args)]
@@ -747,6 +761,11 @@ impl NexusArgs {
                 .await
             }
             NexusCommands::BackgroundTasks(BackgroundTasksArgs {
+                command: BackgroundTasksCommands::InventoryTrace(args),
+            }) => {
+                cmd_nexus_background_tasks_inventory_trace(&client, args).await
+            }
+            NexusCommands::BackgroundTasks(BackgroundTasksArgs {
                 command: BackgroundTasksCommands::Activate(args),
             }) => {
                 let token = omdb.check_allow_destructive()?;
@@ -1129,6 +1148,46 @@ async fn cmd_nexus_background_tasks_print_report(
         }
     }
 
+    Ok(())
+}
+
+/// Runs `omdb nexus background-tasks inventory-trace`
+async fn cmd_nexus_background_tasks_inventory_trace(
+    client: &nexus_lockstep_client::Client,
+    args: &BackgroundTasksInventoryTraceArgs,
+) -> Result<(), anyhow::Error> {
+    const TASK_NAME: &str = "inventory_collection";
+    let response = client
+        .bgtask_view(TASK_NAME)
+        .await
+        .context("fetching background task")?;
+    let task = response.into_inner();
+    let LastResult::Completed(last) = task.last else {
+        bail!("task {:?} has never completed", TASK_NAME);
+    };
+    let status: InventoryCollectionStatus =
+        serde_json::from_value(last.details.clone()).with_context(|| {
+            format!(
+                "interpreting task details (did the last activation fail?) \
+                 -- found {:?}",
+                last.details
+            )
+        })?;
+    let Some(trace) = status.trace else {
+        bail!(
+            "task status has no trace (is this Nexus running a version \
+             that records one?)"
+        );
+    };
+    let json =
+        serde_json::to_string_pretty(&trace).context("serializing trace")?;
+    std::fs::write(&args.output, json)
+        .with_context(|| format!("writing {:?}", args.output))?;
+    println!(
+        "wrote trace for collection {} to {}",
+        status.collection_id, args.output
+    );
+    println!("load it into https://ui.perfetto.dev/ to visualize");
     Ok(())
 }
 
@@ -2195,14 +2254,7 @@ fn print_task_instance_watcher(details: &serde_json::Value) {
 }
 
 fn print_task_inventory_collection(details: &serde_json::Value) {
-    #[derive(Deserialize)]
-    struct InventorySuccess {
-        collection_id: Uuid,
-        time_started: DateTime<Utc>,
-        time_done: DateTime<Utc>,
-    }
-
-    match serde_json::from_value::<InventorySuccess>(details.clone()) {
+    match serde_json::from_value::<InventoryCollectionStatus>(details.clone()) {
         Err(error) => eprintln!(
             "warning: failed to interpret task details: {:?}: {:?}",
             error, details
@@ -2224,6 +2276,20 @@ fn print_task_inventory_collection(details: &serde_json::Value) {
                     .time_done
                     .to_rfc3339_opts(SecondsFormat::Secs, true),
             );
+            if let Some(trace) = &found_inventory.trace {
+                println!("    phase timings:");
+                for event in
+                    trace.trace_events.iter().filter(|e| e.cat == "phase")
+                {
+                    // Bare integer milliseconds: the omdb test output
+                    // redactor recognizes exactly this form.
+                    println!("        {}: {}ms", event.name, event.dur / 1000);
+                }
+                println!(
+                    "    (fetch the full trace with `omdb nexus \
+                     background-tasks inventory-trace`)"
+                );
+            }
         }
     };
 }

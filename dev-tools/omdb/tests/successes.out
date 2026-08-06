@@ -859,6 +859,14 @@ task: "inventory_collection"
     last collection id:      ..........<REDACTED_UUID>...........
     last collection started: <REDACTED_TIMESTAMP>
     last collection done:    <REDACTED_TIMESTAMP>
+    phase timings:
+        mgs: <REDACTED DURATION>ms
+        sled_agents: <REDACTED DURATION>ms
+        keepers: <REDACTED DURATION>ms
+        cockroach: <REDACTED DURATION>ms
+        timesync: <REDACTED DURATION>ms
+        dns_generations: <REDACTED DURATION>ms
+    (fetch the full trace with `omdb nexus background-tasks inventory-trace`)
 
 task: "inventory_loader"
   configured period: every <REDACTED_DURATION>s
@@ -1584,6 +1592,14 @@ task: "inventory_collection"
     last collection id:      ..........<REDACTED_UUID>...........
     last collection started: <REDACTED_TIMESTAMP>
     last collection done:    <REDACTED_TIMESTAMP>
+    phase timings:
+        mgs: <REDACTED DURATION>ms
+        sled_agents: <REDACTED DURATION>ms
+        keepers: <REDACTED DURATION>ms
+        cockroach: <REDACTED DURATION>ms
+        timesync: <REDACTED DURATION>ms
+        dns_generations: <REDACTED DURATION>ms
+    (fetch the full trace with `omdb nexus background-tasks inventory-trace`)
 
 task: "inventory_loader"
   configured period: every <REDACTED_DURATION>s
