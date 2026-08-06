@@ -598,10 +598,10 @@ async fn any_request_disk_deleted_or_detached(
 
     let expected = disk_ids.len();
 
-    let disks: Vec<db::model::Disk> = dsl::disk
+    let attach_instance_ids: Vec<Option<Uuid>> = dsl::disk
         .filter(dsl::id.eq_any(disk_ids))
         .filter(dsl::time_deleted.is_null())
-        .select(db::model::Disk::as_select())
+        .select(dsl::attach_instance_id)
         .load_async(conn)
         .await
         .map_err(|e| {
@@ -611,12 +611,12 @@ async fn any_request_disk_deleted_or_detached(
 
     // A missing row means the disk was deleted: soft-deleted rows are
     // filtered out above, and a hard-deleted row is gone entirely.
-    if disks.len() != expected {
+    if attach_instance_ids.len() != expected {
         return Ok(true);
     }
 
-    Ok(disks.iter().any(|disk| {
-        disk.attach_instance_id != Some(instance_id.into_untyped_uuid())
+    Ok(attach_instance_ids.iter().any(|attach_instance_id| {
+        *attach_instance_id != Some(instance_id.into_untyped_uuid())
     }))
 }
 
