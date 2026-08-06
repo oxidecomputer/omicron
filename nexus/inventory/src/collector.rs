@@ -10,6 +10,7 @@ use crate::builder::InventoryError;
 use anyhow::Context;
 use anyhow::anyhow;
 use clickhouse_admin_keeper_client::ClientInfo as _;
+use clickhouse_admin_types::keeper::ClickhouseKeeperClusterMembership;
 use gateway_client::types::GetCfpaParams;
 use gateway_client::types::RotCfpaSlot;
 use gateway_messages::SpComponent;
@@ -20,10 +21,13 @@ use nexus_types::inventory::InternalDnsGenerationStatus;
 use nexus_types::inventory::RotPage;
 use nexus_types::inventory::RotPageWhich;
 use nexus_types::inventory::SpType;
+use nexus_types::inventory::TimeSync;
 use omicron_cockroach_metrics::CockroachClusterAdminClient;
 use omicron_common::address::NTP_ADMIN_PORT;
 use omicron_common::disk::M2Slot;
 use omicron_uuid_kinds::OmicronZoneUuid;
+use parallel_task_set::ParallelTaskSet;
+use sled_agent_types::inventory::Inventory;
 use sled_agent_types::inventory::OmicronZoneType;
 use sled_agent_types::inventory::ZoneKind;
 use slog::Logger;
@@ -36,6 +40,9 @@ use tufaceous_artifact::ArtifactHash;
 
 /// connection and request timeout used for Sled Agent HTTP client
 const SLED_AGENT_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// maximum number of concurrent outgoing requests within a collection phase
+const MAX_CONCURRENT_INVENTORY_REQUESTS: usize = 8;
 
 /// Collect all inventory data from an Oxide system
 pub struct Collector<'a> {
@@ -74,12 +81,17 @@ impl<'a> Collector<'a> {
     /// Such errors generally don't cause this function to fail.  Rather, the
     /// returned `Collection` keeps track of these errors.
     pub async fn collect_all(mut self) -> Result<Collection, anyhow::Error> {
-        // We're about to do a bunch of asynchronous operations.  With a
-        // combination of async, futures, and some cleverness, we could do much
-        // of this in parallel.  But this code path is not remotely
-        // latency-sensitive.  And there's real risk of overloading our
-        // downstream services.  So we just do one step at a time.  This also
-        // keeps the code simpler.
+        // Most of the phases below fan requests out to their targets with
+        // bounded concurrency (MAX_CONCURRENT_INVENTORY_REQUESTS) and then
+        // merge the results into the in-progress collection on this task.
+        // The phases themselves run one at a time: some depend on data
+        // gathered by earlier phases (timesync and DNS collection derive
+        // their target lists from sled agent inventory), and the bound
+        // keeps us from overloading downstream services.
+        //
+        // MGS collection is the exception: it queries targets serially
+        // because it deduplicates work across MGS clients as it goes,
+        // which assumes ordered processing.
 
         debug!(&self.log, "begin collection");
 
@@ -436,51 +448,38 @@ impl<'a> Collector<'a> {
             Ok(clients) => clients,
         };
 
-        for url in urls {
+        let mut tasks = ParallelTaskSet::new_with_parallelism(
+            MAX_CONCURRENT_INVENTORY_REQUESTS,
+        );
+        let mut results = Vec::new();
+        for (idx, url) in urls.into_iter().enumerate() {
             let log = self.log.new(o!("SledAgent" => url.clone()));
-            let reqwest_client = reqwest::ClientBuilder::new()
-                .connect_timeout(SLED_AGENT_TIMEOUT)
-                .timeout(SLED_AGENT_TIMEOUT)
-                .build()
-                .unwrap();
-            let client = sled_agent_client::Client::new_with_client(
-                &url,
-                reqwest_client,
-                log,
-            );
-
-            if let Err(error) = self.collect_one_sled_agent(&client).await {
-                error!(
-                    &self.log,
-                    "sled agent {:?}: {:#}",
-                    client.baseurl(),
-                    error
-                );
+            let task = async move {
+                let result = collect_one_sled_agent(&url, log).await;
+                (idx, url, result)
+            };
+            if let Some(result) = tasks.spawn(task).await {
+                results.push(result);
             }
         }
-    }
+        results.extend(tasks.join_remaining().await);
 
-    async fn collect_one_sled_agent(
-        &mut self,
-        client: &sled_agent_client::Client,
-    ) -> Result<(), anyhow::Error> {
-        let sled_agent_url = client.baseurl();
-        debug!(&self.log, "begin collection from Sled Agent";
-            "sled_agent_url" => client.baseurl()
-        );
-
-        let maybe_ident = client.inventory().await.with_context(|| {
-            format!("Sled Agent {:?}: inventory", sled_agent_url)
-        });
-        let inventory = match maybe_ident {
-            Ok(inventory) => inventory.into_inner(),
-            Err(error) => {
-                self.in_progress.found_error(InventoryError::from(error));
-                return Ok(());
+        // Merge results in the order we enumerated the sleds so that the
+        // collection's contents (in particular the order of its errors) do
+        // not depend on request completion order.
+        results.sort_by_key(|(idx, _, _)| *idx);
+        for (_, url, result) in results {
+            match result {
+                Err(error) => self.in_progress.found_error(error),
+                Ok(inventory) => {
+                    if let Err(error) =
+                        self.in_progress.found_sled_inventory(&url, inventory)
+                    {
+                        error!(&self.log, "sled agent {:?}: {:#}", url, error);
+                    }
+                }
             }
-        };
-
-        self.in_progress.found_sled_inventory(&sled_agent_url, inventory)
+        }
     }
 
     /// Collect timesync status from all sleds
@@ -513,52 +512,44 @@ impl<'a> Collector<'a> {
             })
             .collect();
 
-        for (zone_id, client) in ntp_admin_clients {
-            if let Err(err) = Self::collect_one_timesync(
-                &self.log,
-                zone_id,
-                &client,
-                &mut self.in_progress,
-            )
-            .await
-            {
-                error!(
-                    &self.log,
-                    "timesync collection error";
-                    "zone_id" => ?zone_id,
-                    slog_error_chain::InlineErrorChain::new(err.as_ref())
-                );
+        let mut tasks = ParallelTaskSet::new_with_parallelism(
+            MAX_CONCURRENT_INVENTORY_REQUESTS,
+        );
+        let mut results = Vec::new();
+        for (idx, (zone_id, client)) in
+            ntp_admin_clients.into_iter().enumerate()
+        {
+            let log = self.log.clone();
+            let task = async move {
+                let result = collect_one_timesync(&log, zone_id, &client).await;
+                (idx, zone_id, result)
+            };
+            if let Some(result) = tasks.spawn(task).await {
+                results.push(result);
             }
         }
-    }
+        results.extend(tasks.join_remaining().await);
 
-    async fn collect_one_timesync(
-        log: &slog::Logger,
-        zone_id: OmicronZoneUuid,
-        client: &ntp_admin_client::Client,
-        in_progress: &mut CollectionBuilder,
-    ) -> Result<(), anyhow::Error> {
-        let sled_agent_url = client.baseurl();
-        debug!(&log, "begin collection from NTP admin (timesync)";
-            "sled_agent_url" => client.baseurl(),
-            "zone_id" => ?zone_id
-        );
-
-        let maybe_ident = client.timesync().await.with_context(|| {
-            format!("Sled Agent {:?}: timesync", sled_agent_url)
-        });
-        let timesync = match maybe_ident {
-            Ok(timesync) => nexus_types::inventory::TimeSync {
-                zone_id,
-                synced: timesync.into_inner().sync,
-            },
-            Err(error) => {
-                in_progress.found_error(InventoryError::from(error));
-                return Ok(());
+        results.sort_by_key(|(idx, _, _)| *idx);
+        for (_, zone_id, result) in results {
+            match result {
+                Err(error) => self.in_progress.found_error(error),
+                Ok(timesync) => {
+                    if let Err(err) =
+                        self.in_progress.found_ntp_timesync(timesync)
+                    {
+                        error!(
+                            &self.log,
+                            "timesync collection error";
+                            "zone_id" => ?zone_id,
+                            slog_error_chain::InlineErrorChain::new(
+                                err.as_ref()
+                            )
+                        );
+                    }
+                }
             }
-        };
-
-        in_progress.found_ntp_timesync(timesync)
+        }
     }
 
     /// Collect inventory from about keepers from all `ClickhouseAdminKeeper`
@@ -567,44 +558,35 @@ impl<'a> Collector<'a> {
         debug!(self.log, "begin collecting all keepers";
             "nkeeper_admin_clients" => self.keeper_admin_clients.len());
 
-        for client in &self.keeper_admin_clients {
-            Self::collect_one_keeper(&client, &self.log, &mut self.in_progress)
-                .await;
+        let mut tasks = ParallelTaskSet::new_with_parallelism(
+            MAX_CONCURRENT_INVENTORY_REQUESTS,
+        );
+        let mut results = Vec::new();
+        for (idx, client) in self.keeper_admin_clients.iter().enumerate() {
+            let client = client.clone();
+            let log = self.log.clone();
+            let task = async move {
+                let result = collect_one_keeper(&client, &log).await;
+                (idx, result)
+            };
+            if let Some(result) = tasks.spawn(task).await {
+                results.push(result);
+            }
+        }
+        results.extend(tasks.join_remaining().await);
+
+        results.sort_by_key(|(idx, _)| *idx);
+        for (_, result) in results {
+            match result {
+                Err(error) => self.in_progress.found_error(error),
+                Ok(membership) => self
+                    .in_progress
+                    .found_clickhouse_keeper_cluster_membership(membership),
+            }
         }
 
         debug!(self.log, "end collecting all keepers";
             "nkeeper_admin_clients" => self.keeper_admin_clients.len());
-    }
-
-    /// Collect inventory about one keeper from one `ClickhouseAdminKeeper`
-    async fn collect_one_keeper(
-        client: &clickhouse_admin_keeper_client::Client,
-        log: &slog::Logger,
-        in_progress: &mut CollectionBuilder,
-    ) {
-        debug!(log, "begin collection from clickhouse-admin-keeper";
-            "keeper_admin_url" => client.baseurl()
-        );
-
-        let res = client.keeper_cluster_membership().await.with_context(|| {
-            format!("Clickhouse Keeper {:?}: inventory", client.baseurl())
-        });
-
-        match res {
-            Err(error) => {
-                in_progress.found_error(InventoryError::from(error));
-            }
-            Ok(membership) => {
-                let membership = membership.into_inner();
-                debug!(log, "found keeper membership";
-                    "keeper_admin_url" => client.baseurl(),
-                    "leader_committed_log_index" =>
-                    membership.leader_committed_log_index
-                );
-                in_progress
-                    .found_clickhouse_keeper_cluster_membership(membership);
-            }
-        }
     }
 
     /// Collect inventory from CockroachDB nodes
@@ -659,15 +641,32 @@ impl<'a> Collector<'a> {
             })
             .collect();
 
-        for (zone_id, client) in internal_dns_clients {
-            if let Err(err) = Self::collect_one_dns_generation(
-                &self.log,
-                zone_id,
-                &client,
-                &mut self.in_progress,
-            )
-            .await
-            {
+        let mut tasks = ParallelTaskSet::new_with_parallelism(
+            MAX_CONCURRENT_INVENTORY_REQUESTS,
+        );
+        let mut results = Vec::new();
+        for (idx, (zone_id, client)) in
+            internal_dns_clients.into_iter().enumerate()
+        {
+            let log = self.log.clone();
+            let task = async move {
+                let result =
+                    collect_one_dns_generation(&log, zone_id, &client).await;
+                (idx, zone_id, result)
+            };
+            if let Some(result) = tasks.spawn(task).await {
+                results.push(result);
+            }
+        }
+        results.extend(tasks.join_remaining().await);
+
+        results.sort_by_key(|(idx, _, _)| *idx);
+        for (_, zone_id, result) in results {
+            let result = result.and_then(|generation_status| {
+                self.in_progress
+                    .found_internal_dns_generation_status(generation_status)
+            });
+            if let Err(err) = result {
                 error!(
                     &self.log,
                     "DNS generation collection error";
@@ -679,32 +678,95 @@ impl<'a> Collector<'a> {
 
         debug!(&self.log, "finished collection from internal DNS servers");
     }
+}
 
-    async fn collect_one_dns_generation(
-        log: &slog::Logger,
-        zone_id: OmicronZoneUuid,
-        client: &dns_service_client::Client,
-        in_progress: &mut CollectionBuilder,
-    ) -> Result<(), anyhow::Error> {
-        debug!(&log, "begin collection from DNS server";
-            "zone_id" => ?zone_id
-        );
+/// Collect inventory from a single sled agent
+async fn collect_one_sled_agent(
+    url: &str,
+    log: Logger,
+) -> Result<Inventory, InventoryError> {
+    debug!(&log, "begin collection from Sled Agent";
+        "sled_agent_url" => url
+    );
 
-        let config = client.dns_config_get().await.with_context(|| {
-            format!("DNS server {:?}: dns_config_get", client.baseurl())
-        })?;
+    let reqwest_client = reqwest::ClientBuilder::new()
+        .connect_timeout(SLED_AGENT_TIMEOUT)
+        .timeout(SLED_AGENT_TIMEOUT)
+        .build()
+        .unwrap();
+    let client =
+        sled_agent_client::Client::new_with_client(url, reqwest_client, log);
 
-        let generation_status = InternalDnsGenerationStatus {
-            zone_id,
-            generation: config.into_inner().generation,
-        };
+    let inventory = client
+        .inventory()
+        .await
+        .with_context(|| format!("Sled Agent {:?}: inventory", url))?;
+    Ok(inventory.into_inner())
+}
 
-        in_progress.found_internal_dns_generation_status(generation_status)?;
+/// Collect timesync status from a single NTP admin server
+async fn collect_one_timesync(
+    log: &slog::Logger,
+    zone_id: OmicronZoneUuid,
+    client: &ntp_admin_client::Client,
+) -> Result<TimeSync, InventoryError> {
+    let sled_agent_url = client.baseurl();
+    debug!(&log, "begin collection from NTP admin (timesync)";
+        "sled_agent_url" => client.baseurl(),
+        "zone_id" => ?zone_id
+    );
 
-        debug!(&log, "finished collection from DNS server"; "zone_id" => ?zone_id);
+    let timesync = client.timesync().await.with_context(|| {
+        format!("Sled Agent {:?}: timesync", sled_agent_url)
+    })?;
+    Ok(TimeSync { zone_id, synced: timesync.into_inner().sync })
+}
 
-        Ok(())
-    }
+/// Collect inventory about one keeper from one `ClickhouseAdminKeeper`
+async fn collect_one_keeper(
+    client: &clickhouse_admin_keeper_client::Client,
+    log: &slog::Logger,
+) -> Result<ClickhouseKeeperClusterMembership, InventoryError> {
+    debug!(log, "begin collection from clickhouse-admin-keeper";
+        "keeper_admin_url" => client.baseurl()
+    );
+
+    let membership = client
+        .keeper_cluster_membership()
+        .await
+        .with_context(|| {
+            format!("Clickhouse Keeper {:?}: inventory", client.baseurl())
+        })?
+        .into_inner();
+
+    debug!(log, "found keeper membership";
+        "keeper_admin_url" => client.baseurl(),
+        "leader_committed_log_index" =>
+        membership.leader_committed_log_index
+    );
+    Ok(membership)
+}
+
+/// Collect the DNS generation from a single internal DNS server
+async fn collect_one_dns_generation(
+    log: &slog::Logger,
+    zone_id: OmicronZoneUuid,
+    client: &dns_service_client::Client,
+) -> Result<InternalDnsGenerationStatus, anyhow::Error> {
+    debug!(&log, "begin collection from DNS server";
+        "zone_id" => ?zone_id
+    );
+
+    let config = client.dns_config_get().await.with_context(|| {
+        format!("DNS server {:?}: dns_config_get", client.baseurl())
+    })?;
+
+    debug!(&log, "finished collection from DNS server"; "zone_id" => ?zone_id);
+
+    Ok(InternalDnsGenerationStatus {
+        zone_id,
+        generation: config.into_inner().generation,
+    })
 }
 
 #[cfg(test)]
