@@ -451,7 +451,7 @@ impl<'a> Collector<'a> {
         let mut tasks = ParallelTaskSet::new_with_parallelism(
             MAX_CONCURRENT_INVENTORY_REQUESTS,
         );
-        let mut results = Vec::new();
+        let mut results = Vec::with_capacity(urls.len());
         for (idx, url) in urls.into_iter().enumerate() {
             let log = self.log.new(o!("SledAgent" => url.clone()));
             let task = async move {
@@ -464,7 +464,7 @@ impl<'a> Collector<'a> {
         }
         results.extend(tasks.join_remaining().await);
 
-        // Merge results in the order we enumerated the sleds so that the
+        // Merge results in the order we enumerated the sleds, so that the
         // collection's contents (in particular the order of its errors) do
         // not depend on request completion order.
         results.sort_by_key(|(idx, _, _)| *idx);
@@ -515,7 +515,7 @@ impl<'a> Collector<'a> {
         let mut tasks = ParallelTaskSet::new_with_parallelism(
             MAX_CONCURRENT_INVENTORY_REQUESTS,
         );
-        let mut results = Vec::new();
+        let mut results = Vec::with_capacity(ntp_admin_clients.len());
         for (idx, (zone_id, client)) in
             ntp_admin_clients.into_iter().enumerate()
         {
@@ -561,7 +561,7 @@ impl<'a> Collector<'a> {
         let mut tasks = ParallelTaskSet::new_with_parallelism(
             MAX_CONCURRENT_INVENTORY_REQUESTS,
         );
-        let mut results = Vec::new();
+        let mut results = Vec::with_capacity(self.keeper_admin_clients.len());
         for (idx, client) in self.keeper_admin_clients.iter().enumerate() {
             let client = client.clone();
             let log = self.log.clone();
@@ -644,7 +644,7 @@ impl<'a> Collector<'a> {
         let mut tasks = ParallelTaskSet::new_with_parallelism(
             MAX_CONCURRENT_INVENTORY_REQUESTS,
         );
-        let mut results = Vec::new();
+        let mut results = Vec::with_capacity(internal_dns_clients.len());
         for (idx, (zone_id, client)) in
             internal_dns_clients.into_iter().enumerate()
         {
