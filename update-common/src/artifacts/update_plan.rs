@@ -16,13 +16,13 @@ use super::ExtractedArtifactDataHandle;
 use super::ExtractedArtifacts;
 use super::HashingNamedUtf8TempFile;
 use crate::errors::RepositoryError;
+use crate::tuf_repo::ArtifactId;
+use crate::tuf_repo::TufArtifactMeta;
 use bytes::Bytes;
 use futures::Stream;
 use futures::StreamExt;
 use futures::TryStreamExt;
 use hubtools::RawHubrisArchive;
-use omicron_common::api::external::TufArtifactMeta;
-use omicron_common::update::ArtifactId;
 use semver::Version;
 use slog::Logger;
 use slog::info;
@@ -33,15 +33,15 @@ use std::collections::hash_map;
 use std::io;
 use tokio::io::AsyncReadExt;
 use tokio::runtime::Handle;
-use tufaceous_artifact::ArtifactHash;
-use tufaceous_artifact::ArtifactHashId;
-use tufaceous_artifact::ArtifactKind;
-use tufaceous_artifact::ArtifactVersion;
-use tufaceous_artifact::KnownArtifactKind;
-use tufaceous_lib::ControlPlaneZoneImages;
-use tufaceous_lib::HostPhaseImageSource;
-use tufaceous_lib::HostPhaseImages;
-use tufaceous_lib::RotArchives;
+use tufaceous_artifact_v1::ArtifactHash;
+use tufaceous_artifact_v1::ArtifactHashId;
+use tufaceous_artifact_v1::ArtifactKind;
+use tufaceous_artifact_v1::ArtifactVersion;
+use tufaceous_artifact_v1::KnownArtifactKind;
+use tufaceous_lib_v1::ControlPlaneZoneImages;
+use tufaceous_lib_v1::HostPhaseImageSource;
+use tufaceous_lib_v1::HostPhaseImages;
+use tufaceous_lib_v1::RotArchives;
 
 /// Artifacts with their hashes and sources, as obtained from an uploaded
 /// repository.
@@ -1207,7 +1207,7 @@ impl<'a> UpdatePlanBuilder<'a> {
             })?;
             let mut tar = tar::Archive::new(flate2::read::GzDecoder::new(file));
             let metadata =
-                tufaceous_brand_metadata::Metadata::read_from_tar(&mut tar)?;
+                tufaceous_brand_metadata_v1::Metadata::read_from_tar(&mut tar)?;
             let info = metadata.layer_info()?;
 
             let artifact_id = ArtifactId {
@@ -1579,8 +1579,8 @@ mod tests {
     use omicron_test_utils::dev::test_setup_log;
     use rand::{Rng, distr::StandardUniform};
     use sha2::{Digest, Sha256};
-    use tufaceous_brand_metadata::{ArchiveType, LayerInfo, Metadata};
-    use tufaceous_lib::{
+    use tufaceous_brand_metadata_v1::{ArchiveType, LayerInfo, Metadata};
+    use tufaceous_lib_v1::{
         CompositeControlPlaneArchiveBuilder, CompositeEntry, MtimeSource,
     };
 
@@ -1596,7 +1596,7 @@ mod tests {
     }
 
     fn make_random_host_os_image() -> RandomHostOsImage {
-        use tufaceous_lib::CompositeHostArchiveBuilder;
+        use tufaceous_lib_v1::CompositeHostArchiveBuilder;
 
         let gimlet_phase1 = make_random_bytes();
         let cosmo_phase1 = make_random_bytes();
@@ -1641,7 +1641,7 @@ mod tests {
     }
 
     fn make_bad_rot_image(board: &str) -> RandomRotImage {
-        use tufaceous_lib::CompositeRotArchiveBuilder;
+        use tufaceous_lib_v1::CompositeRotArchiveBuilder;
 
         let archive_a = make_fake_bad_rot_image(board);
         let archive_b = make_fake_bad_rot_image(board);
@@ -1676,7 +1676,7 @@ mod tests {
         board: &str,
         gitc: &str,
     ) -> RandomRotImage {
-        use tufaceous_lib::CompositeRotArchiveBuilder;
+        use tufaceous_lib_v1::CompositeRotArchiveBuilder;
 
         let archive_a = make_fake_rot_image(sign, board, gitc);
         let archive_b = make_fake_rot_image(sign, board, gitc);

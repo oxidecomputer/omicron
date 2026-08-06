@@ -86,6 +86,8 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyy_mm_dd_nn, IDENT),
+    (2026_08_04_00, MULTICAST_SSM_EXAMPLE_DOCS),
+    (2026_07_31_00, SET_TARGET_RELEASE_UPDATE_RECOVERY_DOCS),
     (2026_07_30_00, MULTICAST_SOURCE_LIMITS),
     (2026_07_28_00, INTERNET_GATEWAY_CASCADE_DOCS),
     (2026_06_11_00, ADD_SYSTEM_IP_POOL_APIS),
@@ -1845,8 +1847,8 @@ pub trait NexusExternalApi {
     /// or Source-Specific Multicast (SSM), but not both. Mixing ASM and SSM
     /// ranges in the same pool is not allowed.
     ///
-    /// ASM: IPv4 addresses outside 232.0.0.0/8, IPv6 addresses with flag field != 3
-    /// SSM: IPv4 addresses in 232.0.0.0/8, IPv6 addresses with flag field = 3
+    /// ASM: IPv4 addresses outside 232.0.0.0/8, IPv6 addresses outside ff3x::/32
+    /// SSM: IPv4 addresses in 232.0.0.0/8, IPv6 addresses within ff3x::/32
     #[endpoint {
         method = POST,
         path = "/v1/system/ip-pools/{pool}/ranges/add",
@@ -1865,8 +1867,8 @@ pub trait NexusExternalApi {
     /// or Source-Specific Multicast (SSM), but not both. Mixing ASM and SSM
     /// ranges in the same pool is not allowed.
     ///
-    /// ASM: IPv4 addresses outside 232.0.0.0/8, IPv6 addresses with flag field != 3
-    /// SSM: IPv4 addresses in 232.0.0.0/8, IPv6 addresses with flag field = 3
+    /// ASM: IPv4 addresses outside 232.0.0.0/8, IPv6 addresses outside ff3x::/32
+    /// SSM: IPv4 addresses in 232.0.0.0/8, IPv6 addresses within ff3x::/32
     #[endpoint {
         operation_id = "ip_pool_range_add",
         method = POST,
@@ -3208,7 +3210,7 @@ pub trait NexusExternalApi {
     /// Fetch multicast group
     ///
     /// The group can be specified by name, UUID, or multicast IP address.
-    /// (e.g., "224.1.2.3" or "ff38::1").
+    /// (e.g., "224.1.2.3" or "ff38::8000:1").
     #[endpoint {
         method = GET,
         path = "/v1/multicast-groups/{multicast_group}",
@@ -8038,7 +8040,12 @@ pub trait NexusExternalApi {
     /// instructing it that the specified software (which is also what's
     /// currently running) is what's supposed to be deployed.
     ///
-    /// If the provided version does not match what's currently running, the
+    /// If the control plane knows the version of all running software (e.g., a
+    /// single sled was recovered to the same version as the rest of the rack),
+    /// requests where the provided version does not match what's currently
+    /// running will fail. If the control plane does not know the version of all
+    /// running software (e.g., the entire rack was mupdated to a new release),
+    /// requests with an incorrect provided version will succeed, but the
     /// control plane will continue to avoid changing deployed software until
     /// this operation is invoked with the correct version.
     ///

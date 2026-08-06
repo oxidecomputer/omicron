@@ -432,7 +432,7 @@ cast_lossless = "warn"
 
 [workspace.dependencies]
 anyhow = "1.0"
-anstyle = "1.0.14"
+anstyle = "1.0.11"
 api_identity = { path = "api_identity" }
 approx = "0.5.1"
 assert_matches = "1.5.0"
@@ -489,11 +489,11 @@ crossterm = { version = "0.29.0", features = ["event-stream"] }
 # NOTE: if you change the pinned revision of the `crucible` dependencies, you
 # must also update the references in package-manifest.toml to match the new
 # revision.
-crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "2bfe090eb5318ec8c467157018db2429d4df535b" }
-crucible-pantry-client = { git = "https://github.com/oxidecomputer/crucible", rev = "2bfe090eb5318ec8c467157018db2429d4df535b" }
-crucible-smf = { git = "https://github.com/oxidecomputer/crucible", rev = "2bfe090eb5318ec8c467157018db2429d4df535b" }
-crucible-common = { git = "https://github.com/oxidecomputer/crucible", rev = "2bfe090eb5318ec8c467157018db2429d4df535b" }
-crucible-client-types = { git = "https://github.com/oxidecomputer/crucible", rev = "2bfe090eb5318ec8c467157018db2429d4df535b" }
+crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "ad8a31742adc45e925e63443a5b43c8e30604022" }
+crucible-pantry-client = { git = "https://github.com/oxidecomputer/crucible", rev = "ad8a31742adc45e925e63443a5b43c8e30604022" }
+crucible-smf = { git = "https://github.com/oxidecomputer/crucible", rev = "ad8a31742adc45e925e63443a5b43c8e30604022" }
+crucible-common = { git = "https://github.com/oxidecomputer/crucible", rev = "ad8a31742adc45e925e63443a5b43c8e30604022" }
+crucible-client-types = { git = "https://github.com/oxidecomputer/crucible", rev = "ad8a31742adc45e925e63443a5b43c8e30604022" }
 # NOTE: See above!
 csv = "1.3.1"
 curve25519-dalek = "4"
@@ -514,7 +514,7 @@ digest = "0.10.7"
 dns-server = { path = "dns-server" }
 dns-server-api = { path = "dns-server-api" }
 dns-service-client = { path = "clients/dns-service-client" }
-dpd-client = { git = "https://github.com/oxidecomputer/dendrite", rev = "96483d0c52f0cfc4e22e70229466798254a99b6c" }
+dpd-client = { git = "https://github.com/oxidecomputer/dendrite", rev = "0d48b5a39dc49d30b228ae01f04b8cc27a161e74" }
 dropshot = { version = "0.17.1", features = [ "usdt-probes" ] }
 dropshot-api-manager = "0.7.2"
 dropshot-api-manager-types = "0.7.2"
@@ -616,6 +616,7 @@ linear-map = "1.2.0"
 live-tests-macros = { path = "live-tests/macros" }
 lldpd_client = { git = "https://github.com/oxidecomputer/lldp", rev = "54b266174d4de9628bca9c97b0db176e16f12154", package = "lldpd-client" }
 lldp_protocol = { git = "https://github.com/oxidecomputer/lldp", rev = "54b266174d4de9628bca9c97b0db176e16f12154", package = "protocol" }
+lpc55_areas = { git = "https://github.com/oxidecomputer/lpc55_support" }
 omicron-deployment-graph = { path = "dev-tools/omicron-deployment-graph" }
 macaddr = { version = "1.0.1", features = ["serde_std"] }
 maplit = "1.0.2"
@@ -624,8 +625,8 @@ ntp-admin-api = { path = "ntp-admin/api" }
 ntp-admin-client = { path = "clients/ntp-admin-client" }
 ntp-admin-types = { path = "ntp-admin/types" }
 ntp-admin-types-versions = { path = "ntp-admin/types/versions" }
-mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "c7dadcb4bcec35493e1c1f597f7ee293de7e52ba" }
-ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "c7dadcb4bcec35493e1c1f597f7ee293de7e52ba" }
+mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "f74e74694b2df8c88c862b6e32409898ad85ded5" }
+ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "f74e74694b2df8c88c862b6e32409898ad85ded5" }
 multimap = "0.10.1"
 nexus-auth = { path = "nexus/auth" }
 nexus-background-task-interface = { path = "nexus/background-task-interface" }
@@ -695,7 +696,7 @@ oxide-update-engine-types = { version = "0.1.2", features = ["schemars08"] }
 oxide-update-engine-display = "0.1.2"
 oxide-vpc = { git = "https://github.com/oxidecomputer/opte", rev = "aa4714289cbf28010a821c49d9b73ec94074fb91", features = [ "api", "std" ] }
 oxlog = { path = "dev-tools/oxlog" }
-oxnet = "0.1.6"
+oxnet = "0.1.5"
 once_cell = "1.21.3"
 openapi-lint = { git = "https://github.com/oxidecomputer/openapi-lint", branch = "main" }
 openapiv3 = "2.2.0"
@@ -747,17 +748,17 @@ progenitor-extras = "0.2.0"
 # NOTE: if you change the pinned revision of the `bhyve_api` and propolis
 # dependencies, you must also update the references in package-manifest.toml to
 # match the new revision.
-bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "27abaf3e33e5de5c02712f8ba88d686407de1197" }
-propolis-api-types-versions = { git = "https://github.com/oxidecomputer/propolis", rev = "27abaf3e33e5de5c02712f8ba88d686407de1197" }
-propolis_api_types = { git = "https://github.com/oxidecomputer/propolis", rev = "27abaf3e33e5de5c02712f8ba88d686407de1197" }
-propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "27abaf3e33e5de5c02712f8ba88d686407de1197" }
-propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "27abaf3e33e5de5c02712f8ba88d686407de1197" }
+bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "6885fe0476bdd3767449065698fe0aa763f98a4d" }
+propolis-api-types-versions = { git = "https://github.com/oxidecomputer/propolis", rev = "6885fe0476bdd3767449065698fe0aa763f98a4d" }
+propolis_api_types = { git = "https://github.com/oxidecomputer/propolis", rev = "6885fe0476bdd3767449065698fe0aa763f98a4d" }
+propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "6885fe0476bdd3767449065698fe0aa763f98a4d" }
+propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "6885fe0476bdd3767449065698fe0aa763f98a4d" }
 # NOTE: see above!
 proptest = "1.11.0"
 qorb = "0.4.1"
 quote = "1.0"
 # Some dependencies still require rand 0.8.x.
-rand08 = { package = "rand", version = "0.8.5" }
+rand08 = { package = "rand", version = "0.8.6" }
 rand = "0.9.2"
 rand_core = "0.9.3"
 rand_distr = "0.5.1"
@@ -768,7 +769,7 @@ rats-corim = { git = "https://github.com/oxidecomputer/rats-corim.git", rev = "f
 raw-cpuid = { git = "https://github.com/oxidecomputer/rust-cpuid.git", rev = "a4cf01df76f35430ff5d39dc2fe470bcb953503b" }
 rayon = "1.10"
 rcgen = { version = "0.12.1", default-features = false, features = ["aws_lc_rs", "pem"] }
-mg-api-types = { git = "https://github.com/oxidecomputer/maghemite", rev = "c7dadcb4bcec35493e1c1f597f7ee293de7e52ba" }
+mg-api-types = { git = "https://github.com/oxidecomputer/maghemite", rev = "f74e74694b2df8c88c862b6e32409898ad85ded5" }
 reconfigurator-cli = { path = "dev-tools/reconfigurator-cli" }
 reedline = "0.40.0"
 ref-cast = "1.0"
@@ -877,12 +878,13 @@ tough = { version = "0.22.0" }
 transceiver-controller = { git = "https://github.com/oxidecomputer/transceiver-control", features = [ "api-traits" ] }
 transient-dns-server = { path = "dns-server/transient" }
 trybuild = "1.0.106"
-tufaceous = { git = "https://github.com/oxidecomputer/tufaceous", branch = "v1" }
-tufaceous-artifact = { git = "https://github.com/oxidecomputer/tufaceous", branch = "v1", features = ["proptest", "schemars"] }
-tufaceous-brand-metadata = { git = "https://github.com/oxidecomputer/tufaceous", branch = "v1" }
-tufaceous-lib = { git = "https://github.com/oxidecomputer/tufaceous", branch = "v1" }
-tufaceous-v2 = { git = "https://github.com/oxidecomputer/tufaceous", branch = "main", package = "tufaceous" }
-tufaceous-artifact-v2 = { git = "https://github.com/oxidecomputer/tufaceous", branch = "main", package = "tufaceous-artifact" }
+tufaceous-v1 = { git = "https://github.com/oxidecomputer/tufaceous", branch = "v1", package = "tufaceous" }
+tufaceous-artifact-v1 = { git = "https://github.com/oxidecomputer/tufaceous", branch = "v1", package = "tufaceous-artifact", features = ["proptest", "schemars"] }
+tufaceous-brand-metadata-v1 = { git = "https://github.com/oxidecomputer/tufaceous", branch = "v1", package = "tufaceous-brand-metadata" }
+tufaceous-lib-v1 = { git = "https://github.com/oxidecomputer/tufaceous", branch = "v1", package = "tufaceous-lib" }
+tufaceous = { git = "https://github.com/oxidecomputer/tufaceous", branch = "main" }
+tufaceous-artifact = { git = "https://github.com/oxidecomputer/tufaceous", branch = "main", features = ["proptest", "schemars"] }
+tufaceous-brand-metadata = { git = "https://github.com/oxidecomputer/tufaceous", branch = "main" }
 tui-tree-widget = "0.23.1"
 typed-rng = { path = "typed-rng" }
 typify = "0.3.0"
@@ -1159,17 +1161,4 @@ path = "workspace-hack"
 [patch."https://github.com/oxidecomputer/omicron"]
 omicron-uuid-kinds = { path = "uuid-kinds" }
 omicron-common = { path = "common" }
-# oxlog is built as a binary by omicron-package. Without this patch,
-# transitive git-pulls of oxlog (illumos-utils -> oxlog, via maghemite's
-# branch=main omicron deps) leave both local and git copies in the dep graph,
-# and cargo's `--package oxlog` fails as ambiguous.
-#
-# TODO: This patch is a symptom of the broader maghemite -> omicron
-# self-reference loop (maghemite depends on oximeter-producer, which pulls
-# nexus-client -> nexus-types from omicron@main and not a rev). @jgallagher
-# flagged this in review; @bnaecker suggested extracting oximeter-producer
-# out of omicron to break it. When that lands, this patch (and any
-# duplicated path+git entries for illumos-utils, nexus-types, etc.) can be
-# removed.
-oxlog = { path = "dev-tools/oxlog" }
 

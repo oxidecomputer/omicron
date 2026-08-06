@@ -5,7 +5,7 @@
 use std::net::SocketAddr;
 
 use omicron_uuid_kinds::InstanceUuid;
-use propolis_api_types::instance_spec::InstanceSpec;
+use propolis_api_types_versions::v3::instance_spec::InstanceSpec;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;

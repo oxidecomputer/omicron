@@ -22,7 +22,7 @@ pub fn validate_source_ip(ip: IpAddr) -> Result<(), String> {
 fn validate_ipv4_source(addr: Ipv4Addr) -> Result<(), String> {
     // Must be a unicast address
     if !is_unicast_v4(&addr) {
-        return Err(format!("{} is not a unicast address", addr));
+        return Err(format!("{addr} is not a unicast address"));
     }
 
     // Exclude problematic addresses (mostly align with Dendrite, but block link-local)
@@ -31,7 +31,7 @@ fn validate_ipv4_source(addr: Ipv4Addr) -> Result<(), String> {
         || addr.is_unspecified()
         || addr.is_link_local()
     {
-        return Err(format!("{} is a special-use address", addr));
+        return Err(format!("{addr} is a special-use address"));
     }
 
     Ok(())
@@ -41,16 +41,15 @@ fn validate_ipv4_source(addr: Ipv4Addr) -> Result<(), String> {
 fn validate_ipv6_source(addr: Ipv6Addr) -> Result<(), String> {
     // Must be a unicast address
     if !is_unicast_v6(&addr) {
-        return Err(format!("{} is not a unicast address", addr));
+        return Err(format!("{addr} is not a unicast address"));
     }
 
     // Exclude problematic addresses (align with Dendrite validation, but block link-local)
     if addr.is_loopback()
         || addr.is_unspecified()
-        || ((addr.segments()[0] & 0xffc0) == 0xfe80)
-    // fe80::/10 link-local
+        || addr.is_unicast_link_local()
     {
-        return Err(format!("{} is a special-use address", addr));
+        return Err(format!("{addr} is a special-use address"));
     }
 
     Ok(())
@@ -73,7 +72,7 @@ const RESERVED_IPV4_MULTICAST_LINK_LOCAL_PREFIX: u8 = 24;
 fn validate_ipv4_multicast(addr: Ipv4Addr) -> Result<(), String> {
     // Verify this is actually a multicast address
     if !addr.is_multicast() {
-        return Err(format!("{} is not a multicast address", addr));
+        return Err(format!("{addr} is not a multicast address"));
     }
 
     // Block link-local multicast (224.0.0.0/24) as it's reserved for local network control
@@ -109,8 +108,7 @@ fn validate_ipv6_multicast(addr: Ipv6Addr) -> Result<(), String> {
     for subnet in &reserved_subnets {
         if subnet.contains(addr) {
             return Err(format!(
-                "{} is in the reserved multicast subnet {}",
-                addr, subnet
+                "{addr} is in the reserved multicast subnet {subnet}"
             ));
         }
     }

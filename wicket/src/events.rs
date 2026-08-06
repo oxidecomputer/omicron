@@ -1,33 +1,25 @@
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 use crate::{State, keymap::Cmd, state::ComponentId};
 use camino::Utf8PathBuf;
 use humantime::format_rfc3339;
-use omicron_common::update::ArtifactId;
 use semver::Version;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs::File;
 use std::time::SystemTime;
+use wicket_common::artifact::ArtifactId;
 use wicket_common::inventory::RackV1Inventory;
 use wicket_common::update_events::EventReport;
 use wicketd_client::types::{
-    CurrentRssUserConfig, GetLocationResponse, IgnitionCommand,
-    RackOperationStatus,
+    CurrentRssUserConfig, IgnitionCommand, RackOperationStatus,
 };
+use wicketd_commission_types::inventory::LocationInfo;
 
 /// Event report type returned by the get_artifacts_and_event_reports API call.
 pub type EventReportMap = HashMap<String, HashMap<String, EventReport>>;
-
-/// Represents an artifact from a TUF repo
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ArtifactData {
-    /// Artifact ID
-    pub id: ArtifactId,
-    /// Optional sign information (currently only used for RoT images)
-    pub sign: Option<Vec<u8>>,
-}
 
 /// An event that will update state
 ///
@@ -43,7 +35,7 @@ pub enum Event {
     /// TUF repo artifacts unpacked by wicketd, and event reports
     ArtifactsAndEventReports {
         system_version: Option<Version>,
-        artifacts: Vec<ArtifactData>,
+        artifacts: Vec<ArtifactId>,
         event_reports: EventReportMap,
     },
 
@@ -54,7 +46,7 @@ pub enum Event {
     RackSetupStatus(Result<RackOperationStatus, String>),
 
     /// The location within the rack where wicketd is running.
-    WicketdLocation(GetLocationResponse),
+    WicketdLocation(LocationInfo),
 
     /// The tick of a Timer
     /// This can be used to draw a frame to the terminal

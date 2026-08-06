@@ -324,7 +324,7 @@ impl Collection {
             .filter_map(|sled_agent| {
                 match &sled_agent.smf_services_enabled_not_online {
                     SvcsEnabledNotOnlineResult::SvcsEnabledNotOnline(svcs)
-                        if svcs.services.is_empty() =>
+                        if svcs.is_empty() =>
                     {
                         None
                     }

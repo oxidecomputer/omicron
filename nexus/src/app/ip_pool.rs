@@ -20,12 +20,10 @@ use nexus_db_queries::db::model::Name;
 use nexus_types::external_api::ip_pool;
 use nexus_types::identity::Resource;
 use omicron_common::address::{
-    IPV4_LINK_LOCAL_MULTICAST_SUBNET, IPV4_SSM_SUBNET,
-    IPV6_INTERFACE_LOCAL_MULTICAST_LAST, IPV6_INTERFACE_LOCAL_MULTICAST_SUBNET,
-    IPV6_LINK_LOCAL_MULTICAST_LAST, IPV6_LINK_LOCAL_MULTICAST_SUBNET,
-    IPV6_RESERVED_SCOPE_MULTICAST_LAST, IPV6_RESERVED_SCOPE_MULTICAST_SUBNET,
-    IPV6_SSM_SUBNET, Ipv4Range, Ipv6Range, UNDERLAY_MULTICAST_SUBNET,
-    UNDERLAY_MULTICAST_SUBNET_LAST,
+    IPV4_LINK_LOCAL_MULTICAST_SUBNET, IPV4_SSM_RESERVED_SUBNET,
+    IPV4_SSM_SUBNET, IPV6_SSM_SUBNETS, Ipv4Range, Ipv6Range,
+    UNDERLAY_MULTICAST_SUBNET, UNDERLAY_MULTICAST_SUBNET_LAST,
+    ipv6_ssm_allocatable_range,
 };
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
@@ -43,11 +41,14 @@ use uuid::Uuid;
 
 /// Validate multicast-specific constraints for IP ranges.
 ///
-/// Rejects reserved or special-use addresses that Dendrite would reject:
+/// Rejects reserved or special-use addresses:
 ///
-/// - IPv4: link-local (224.0.0.0/24), ASM/SSM boundary spanning
-/// - IPv6: reserved-scope (ff00::/16), interface-local (ff01::/16),
-///   link-local (ff02::/16), underlay (ff04::/64), ASM/SSM boundary spanning
+/// - IPv4: link-local (224.0.0.0/24), ASM/SSM boundary spanning, and the
+///   reserved SSM /24 (232.0.0.0/24, RFC 4607)
+/// - IPv6: scope nibbles outside the usable set (admin-local, site-local,
+///   organization-local, global) across all flag variants,
+///   underlay (ff04::/64), ASM/SSM boundary spanning, and SSM group IDs
+///   outside the dynamically allocatable range (RFC 4607)
 ///
 /// The underlay prefix (ff04::/64) is reserved for internal external→underlay
 /// mapping via `UNDERLAY_MULTICAST_SUBNET`. This prefix is static for
@@ -57,8 +58,10 @@ use uuid::Uuid;
 /// Validates early so operators get immediate feedback rather than errors
 /// when allocating addresses later.
 fn validate_multicast_range(range: &ip_pool::IpRange) -> Result<(), Error> {
-    // These restrictions match the validation performed by Dendrite DPD
-    // management (see dendrite/dpd/src/mcast/validate.rs).
+    // ASM/SSM classification and the RFC 4607 reserved and invalid
+    // sub-range checks match Dendrite DPD management (see
+    // dendrite/dpd/src/mcast/validate.rs). Nexus validates ranges at pool
+    // admission and Dendrite validates individual group addresses.
     match range {
         ip_pool::IpRange::V4(v4_range) => {
             let first = v4_range.first_address();
@@ -81,14 +84,40 @@ fn validate_multicast_range(range: &ip_pool::IpRange) -> Result<(), Error> {
                 }
             }
 
-            // Validate range doesn't span ASM/SSM boundary
+            // Validate range doesn't span the ASM/SSM boundary. Endpoint
+            // classification alone misses a range that strictly contains
+            // 232/8 with both endpoints in ASM space, so an ASM-classified
+            // range must also not overlap the SSM subnet.
             let first_is_ssm = IPV4_SSM_SUBNET.contains(first);
             let last_is_ssm = IPV4_SSM_SUBNET.contains(last);
+            let ssm = Ipv4Range {
+                first: IPV4_SSM_SUBNET.addr(),
+                last: IPV4_SSM_SUBNET.broadcast().expect("valid IPv4 subnet"),
+            };
 
-            if first_is_ssm != last_is_ssm {
+            if first_is_ssm != last_is_ssm
+                || (!first_is_ssm && v4_range.overlaps(&ssm))
+            {
                 return Err(Error::invalid_request(
                     "IP range cannot span ASM and SSM address spaces",
                 ));
+            }
+
+            // For SSM ranges, reject overlap with the reserved first /24
+            // (232.0.0.0/24, RFC 4607 section 4.3)
+            if first_is_ssm {
+                let reserved = Ipv4Range {
+                    first: IPV4_SSM_RESERVED_SUBNET.addr(),
+                    last: IPV4_SSM_RESERVED_SUBNET
+                        .broadcast()
+                        .expect("valid IPv4 subnet"),
+                };
+                if v4_range.overlaps(&reserved) {
+                    return Err(Error::invalid_request(
+                        "Cannot add reserved IPv4 SSM range \
+                         (232.0.0.0/24) to IP pool",
+                    ));
+                }
             }
         }
         ip_pool::IpRange::V6(v6_range) => {
@@ -97,40 +126,36 @@ fn validate_multicast_range(range: &ip_pool::IpRange) -> Result<(), Error> {
 
             // Reject IPv6 ranges that intersect reserved subnets
             {
-                // reserved-scope (ff00::/16)
-                let reserved = Ipv6Range {
-                    first: IPV6_RESERVED_SCOPE_MULTICAST_SUBNET.addr(),
-                    last: IPV6_RESERVED_SCOPE_MULTICAST_LAST,
-                };
-                if v6_range.overlaps(&reserved) {
-                    return Err(Error::invalid_request(
-                        "Cannot add IPv6 reserved-scope multicast range \
-                         (ff00::/16) to IP pool",
-                    ));
-                }
-
-                // interface-local (ff01::/16)
-                let reserved = Ipv6Range {
-                    first: IPV6_INTERFACE_LOCAL_MULTICAST_SUBNET.addr(),
-                    last: IPV6_INTERFACE_LOCAL_MULTICAST_LAST,
-                };
-                if v6_range.overlaps(&reserved) {
-                    return Err(Error::invalid_request(
-                        "Cannot add IPv6 interface-local multicast range \
-                         (ff01::/16) to IP pool",
-                    ));
-                }
-
-                // link-local (ff02::/16)
-                let reserved = Ipv6Range {
-                    first: IPV6_LINK_LOCAL_MULTICAST_SUBNET.addr(),
-                    last: IPV6_LINK_LOCAL_MULTICAST_LAST,
-                };
-                if v6_range.overlaps(&reserved) {
-                    return Err(Error::invalid_request(
-                        "Cannot add IPv6 link-local multicast range \
-                         (ff02::/16) to IP pool",
-                    ));
+                // Admit only /16 blocks whose scope nibble is usable for
+                // inter-sled delivery, independent of the flags nibble:
+                // admin-local (4, incl. the non-underlay ff04::/16 space),
+                // site-local (5), organization-local (8), and global (e).
+                // [RFC 7346 §2] reserves 0 and f, scopes 1 and 2 never
+                // leave a host or link, and 6, 7, and 9 through d are
+                // unassigned ([RFC 4291 §2.7]).
+                //
+                // Realm-local (3) is defined per network technology
+                // ([RFC 7346 §3] covers only IEEE 802.15.4), so it is
+                // excluded absent an Ethernet realm definition. Callers
+                // guarantee the range is multicast, so the first segment
+                // falls in 0xff00..=0xffff.
+                //
+                // [RFC 4291 §2.7]: https://www.rfc-editor.org/rfc/rfc4291#section-2.7
+                // [RFC 7346 §2]: https://www.rfc-editor.org/rfc/rfc7346#section-2
+                // [RFC 7346 §3]: https://www.rfc-editor.org/rfc/rfc7346#section-3
+                for seg0 in first.segments()[0]..=last.segments()[0] {
+                    let scope_name = match seg0 & 0x000f {
+                        0x0 | 0xf => "reserved",
+                        0x1 => "interface-local",
+                        0x2 => "link-local",
+                        0x3 => "realm-local",
+                        0x4 | 0x5 | 0x8 | 0xe => continue,
+                        _ => "unassigned",
+                    };
+                    return Err(Error::invalid_request(&format!(
+                        "Cannot add IPv6 multicast range overlapping \
+                         {scope_name} scope ({seg0:x}::/16) to IP pool"
+                    )));
                 }
 
                 // underlay multicast (ff04::/64, reserved for internal use)
@@ -146,14 +171,47 @@ fn validate_multicast_range(range: &ip_pool::IpRange) -> Result<(), Error> {
                 }
             }
 
-            // Validate range doesn't span ASM/SSM boundary
-            let first_is_ssm = IPV6_SSM_SUBNET.contains(first);
-            let last_is_ssm = IPV6_SSM_SUBNET.contains(last);
+            // IPv6 SSM consists of sixteen disjoint ff3x::/32 blocks. A range
+            // is entirely SSM only when one block contains both endpoints. A
+            // range that intersects a block without being contained by it
+            // mixes ASM and SSM addresses, even when both endpoints happen to
+            // be in different SSM blocks.
+            let ssm_block = IPV6_SSM_SUBNETS
+                .iter()
+                .find(|subnet| subnet.contains(first) && subnet.contains(last));
 
-            if first_is_ssm != last_is_ssm {
-                return Err(Error::invalid_request(
-                    "IP range cannot span ASM and SSM address spaces",
-                ));
+            match ssm_block {
+                Some(subnet) => {
+                    // Within a block only the low 32 bits form the group
+                    // ID. RFC 4607 section 1 invalidates IDs below
+                    // 0x40000000 and section 4.3 reserves 0x40000000
+                    // through 0x7fffffff for IANA allocation. Require the
+                    // range to sit within the dynamically allocatable
+                    // remainder.
+                    let allocatable = ipv6_ssm_allocatable_range(subnet);
+                    if !allocatable.contains(first)
+                        || !allocatable.contains(last)
+                    {
+                        return Err(Error::invalid_request(
+                            "IPv6 SSM range must fall within the dynamically \
+                             allocatable group IDs (ff3x::8000:0 through \
+                             ff3x::ffff:ffff per RFC 4607)",
+                        ));
+                    }
+                }
+                None => {
+                    let overlaps_ssm = IPV6_SSM_SUBNETS.iter().any(|subnet| {
+                        v6_range.overlaps(&Ipv6Range {
+                            first: subnet.addr(),
+                            last: subnet.last_addr(),
+                        })
+                    });
+                    if overlaps_ssm {
+                        return Err(Error::invalid_request(
+                            "IP range cannot span ASM and SSM address spaces",
+                        ));
+                    }
+                }
             }
         }
     }
@@ -770,6 +828,124 @@ mod tests {
         );
     }
 
+    #[test]
+    fn test_validate_multicast_rejects_unusable_ipv6_scopes() {
+        // Reserved (0, f), interface-local (1), link-local (2), realm-local
+        // (3, no Ethernet realm definition), and the RFC 7346 unassigned
+        // scopes (6, 7, 9 through d) are rejected regardless of the flags
+        // nibble.
+        for scoped in [
+            "ff00", "ff01", "ff02", "ff03", "ff06", "ff0f", "ff13", "ff17",
+            "ff19", "ff1d",
+        ] {
+            let range = IpRange::V6(
+                Ipv6Range::new(
+                    format!("{scoped}::1").parse().unwrap(),
+                    format!("{scoped}::ff").parse().unwrap(),
+                )
+                .unwrap(),
+            );
+            assert!(
+                validate_multicast_range(&range).is_err(),
+                "{scoped}::/16 should be rejected for its scope"
+            );
+        }
+    }
+
+    #[test]
+    fn test_validate_multicast_ipv6_ssm_boundaries() {
+        let ssm = IpRange::V6(
+            Ipv6Range::new(
+                "ff3e::8000:0".parse().unwrap(),
+                "ff3e::8000:ff".parse().unwrap(),
+            )
+            .unwrap(),
+        );
+        assert!(validate_multicast_range(&ssm).is_ok());
+
+        // Group IDs below 0x40000000 are invalid (RFC 4607 section 1).
+        let low_group_ids = IpRange::V6(
+            Ipv6Range::new(
+                "ff3e::1".parse().unwrap(),
+                "ff3e::ff".parse().unwrap(),
+            )
+            .unwrap(),
+        );
+        assert!(validate_multicast_range(&low_group_ids).is_err());
+
+        // Group IDs 0x40000000 through 0x7fffffff are reserved or held
+        // for IANA allocation (RFC 4607 section 4.3), not locally
+        // allocatable.
+        let iana_space = IpRange::V6(
+            Ipv6Range::new(
+                "ff3e::4000:0".parse().unwrap(),
+                "ff3e::7fff:ffff".parse().unwrap(),
+            )
+            .unwrap(),
+        );
+        assert!(validate_multicast_range(&iana_space).is_err());
+
+        // SSM blocks with unusable or unassigned scope nibbles are rejected
+        // even with allocatable group IDs.
+        for scoped in
+            ["ff30", "ff31", "ff32", "ff33", "ff36", "ff39", "ff3d", "ff3f"]
+        {
+            let range = IpRange::V6(
+                Ipv6Range::new(
+                    format!("{scoped}::8000:1").parse().unwrap(),
+                    format!("{scoped}::8000:ff").parse().unwrap(),
+                )
+                .unwrap(),
+            );
+            assert!(
+                validate_multicast_range(&range).is_err(),
+                "{scoped}::/32 should be rejected for its scope"
+            );
+        }
+
+        // Inside the ff3e::/32 SSM block but outside ff3e::/96, so not a
+        // valid 32-bit group ID.
+        let outside_group_id_space = IpRange::V6(
+            Ipv6Range::new(
+                "ff3e:0:1234::1".parse().unwrap(),
+                "ff3e:0:1234::ff".parse().unwrap(),
+            )
+            .unwrap(),
+        );
+        assert!(validate_multicast_range(&outside_group_id_space).is_err());
+
+        // This is unicast-prefix-based ASM inside the broad ff30::/12 prefix,
+        // but outside every RFC 4607 ff3x::/32 SSM block.
+        let asm = IpRange::V6(
+            Ipv6Range::new(
+                "ff3e:20:1234::1".parse().unwrap(),
+                "ff3e:20:1234::ff".parse().unwrap(),
+            )
+            .unwrap(),
+        );
+        assert!(validate_multicast_range(&asm).is_ok());
+
+        let crosses_block_end = IpRange::V6(
+            Ipv6Range::new(
+                "ff3e::ffff:ffff:ffff:fffe".parse().unwrap(),
+                "ff3e:1::1".parse().unwrap(),
+            )
+            .unwrap(),
+        );
+        assert!(validate_multicast_range(&crosses_block_end).is_err());
+
+        // Both endpoints are SSM blocks with usable scopes, but the space
+        // between scope-specific /32s is ASM.
+        let crosses_scopes = IpRange::V6(
+            Ipv6Range::new(
+                "ff34::8000:1".parse().unwrap(),
+                "ff35::8000:1".parse().unwrap(),
+            )
+            .unwrap(),
+        );
+        assert!(validate_multicast_range(&crosses_scopes).is_err());
+    }
+
     // IPv4 validation tests
 
     #[test]
@@ -815,5 +991,43 @@ mod tests {
         let result = validate_multicast_range(&spanning);
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("ASM and SSM"));
+
+        // Both endpoints classify ASM but the range strictly contains all
+        // of 232/8.
+        let contains_ssm = IpRange::V4(
+            Ipv4Range::new(
+                Ipv4Addr::new(231, 0, 0, 1),
+                Ipv4Addr::new(233, 0, 0, 1),
+            )
+            .unwrap(),
+        );
+        let result = validate_multicast_range(&contains_ssm);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("ASM and SSM"));
+    }
+
+    #[test]
+    fn test_validate_multicast_rejects_reserved_ipv4_ssm() {
+        // 232.0.0.0/24 is reserved (RFC 4607 section 4.3)
+        let reserved = IpRange::V4(
+            Ipv4Range::new(
+                Ipv4Addr::new(232, 0, 0, 1),
+                Ipv4Addr::new(232, 0, 0, 10),
+            )
+            .unwrap(),
+        );
+        let result = validate_multicast_range(&reserved);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("reserved IPv4 SSM"));
+
+        // The remainder of 232.0.0.0/8 is allocatable.
+        let valid_ssm = IpRange::V4(
+            Ipv4Range::new(
+                Ipv4Addr::new(232, 0, 1, 0),
+                Ipv4Addr::new(232, 0, 1, 255),
+            )
+            .unwrap(),
+        );
+        assert!(validate_multicast_range(&valid_ssm).is_ok());
     }
 }

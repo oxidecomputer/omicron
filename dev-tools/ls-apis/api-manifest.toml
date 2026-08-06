@@ -433,7 +433,8 @@ versioned_how = "server"
 notes = """
 Stable rack commissioning API (RFD 710), served by wicketd on its own port. The
 production consumer is rkdeploy, which lives outside this workspace and is
-not currently modeled by ls-apis.
+not currently modeled by ls-apis. Wicket also uses it, and is deployed in a
+unit with wicketd.
 """
 
 [[apis]]
@@ -639,15 +640,6 @@ client = "crucible-agent-client"
 evaluation = "bogus"
 note = """
 Sled Agent uses the Crucible Agent client types only, and only in the simulated
-sled agent.
-"""
-
-[[dependency_filter_rules]]
-ancestor = "omicron-sled-agent"
-client = "crucible-pantry-client"
-evaluation = "bogus"
-note = """
-Sled Agent uses the Crucible Pantry client types only, and only in the simulated
 sled agent.
 """
 

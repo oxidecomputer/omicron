@@ -73,7 +73,6 @@ pub mod rack_setup {
     pub use crate::v1::rack_setup::NewPasswordHash;
     pub use crate::v1::rack_setup::PrivateKeyPem;
     pub use crate::v1::rack_setup::PutRecoveryUserPasswordHash;
-    pub use crate::v1::rack_setup::PutRssUserConfigInsensitive;
     pub use crate::v1::rack_setup::RackOperation;
     pub use crate::v1::rack_setup::RackOperationKind;
     pub use crate::v1::rack_setup::RackOperationState;
@@ -94,6 +93,9 @@ pub mod rack_setup {
     pub use crate::v1::rack_setup::UserSpecifiedRackNetworkConfig;
     pub use crate::v1::rack_setup::UserSpecifiedRouterPeerAddr;
     pub use crate::v1::rack_setup::UserSpecifiedUplinkAddressConfig;
+    pub use crate::v2::rack_setup::PutRssUserConfigInsensitive;
+    pub use crate::v2::rack_setup::ServiceIpPoolConfig;
+    pub use crate::v2::rack_setup::ServiceIpPoolError;
 }
 
 pub mod update {

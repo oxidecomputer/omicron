@@ -170,10 +170,11 @@ Taking the port number mentioned above, run:
 cargo run -p wicketd -- run wicketd/examples/config.toml --address '[::1]:12226' --artifact-address '[::]:12227' --commission-address '[::1]:12234' --nexus-proxy-address '[::1]:12228' --mgs-address '[::1]:12225'
 ```
 
-In this case, the port number in `--address` provides the interface between
-wicketd and wicket. The port number is _not_ arbitrary: wicket connects to port
-12226 by default. There is currently no way to specify a different port (but
-there probably should be!)
+ In this case, the port numbers in `--address` and
+`--commission-address` provide the two interfaces between wicketd and wicket.
+Neither is arbitrary: wicket connects to (respectively) ports 12226 and 12234 by
+default. There is currently no way to specify different ports (but there
+probably should be!)
 
 ### Running wicket
 
