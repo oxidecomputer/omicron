@@ -728,14 +728,7 @@ impl NexusArgs {
             }) => cmd_nexus_background_tasks_list(&client).await,
             NexusCommands::BackgroundTasks(BackgroundTasksArgs {
                 command: BackgroundTasksCommands::Show(args),
-            }) => {
-                cmd_nexus_background_tasks_show(
-                    &client,
-                    args,
-                    omdb.output.color,
-                )
-                .await
-            }
+            }) => cmd_nexus_background_tasks_show(&client, args).await,
             NexusCommands::BackgroundTasks(BackgroundTasksArgs {
                 command: BackgroundTasksCommands::PrintReport(args),
             }) => {
@@ -1006,7 +999,6 @@ async fn cmd_nexus_background_tasks_list(
 async fn cmd_nexus_background_tasks_show(
     client: &nexus_lockstep_client::Client,
     args: &BackgroundTasksShowArgs,
-    color: ColorChoice,
 ) -> Result<(), anyhow::Error> {
     let response =
         client.bgtask_list().await.context("listing background tasks")?;
@@ -1056,7 +1048,6 @@ async fn cmd_nexus_background_tasks_show(
 
     let opts = BackgroundTasksPrintOpts {
         show_executing_info: !args.no_executing_info,
-        colored: should_colorize(color, supports_color::Stream::Stdout),
     };
 
     // Some tasks should be grouped and printed together in a certain order,
@@ -1155,8 +1146,6 @@ async fn cmd_nexus_background_tasks_activate(
 #[derive(Clone, Debug)]
 struct BackgroundTasksPrintOpts {
     show_executing_info: bool,
-    /// Whether to style output with ANSI terminal colors.
-    colored: bool,
 }
 
 fn print_task(bgtask: &BackgroundTask, opts: &BackgroundTasksPrintOpts) {
@@ -1205,7 +1194,7 @@ fn print_task(bgtask: &BackgroundTask, opts: &BackgroundTasksPrintOpts) {
     // unstable -- it gets exposed by background tasks as unstructured
     // (schemaless) data.  We make a best effort to interpret it.
     if let LastResult::Completed(completed) = &bgtask.last {
-        print_task_details(&bgtask, &completed.details, opts.colored);
+        print_task_details(&bgtask, &completed.details);
     }
 }
 
@@ -1249,11 +1238,7 @@ fn print_start_end_time(
 /// undocumented and unstable (subject to change).  That does make this code
 /// both ugly and brittle.  It's not a fatal error to fail to parse these, but
 /// we do warn the user if that happens.
-fn print_task_details(
-    bgtask: &BackgroundTask,
-    details: &serde_json::Value,
-    colored: bool,
-) {
+fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
     // All tasks might produce an "error" property.  If we find one, print that
     // out and stop.
     #[derive(Deserialize)]
@@ -1386,7 +1371,7 @@ fn print_task_details(
             print_task_webhook_deliverator(details);
         }
         "fm_analysis" => {
-            print_task_fm_analysis(details, colored);
+            print_task_fm_analysis(details);
         }
         "fm_config_loader" => {
             print_task_fm_config_loader(details);
@@ -3520,7 +3505,7 @@ mod ereporter_status_fields {
     pub const NUM_WIDTH: usize = 4;
 }
 
-fn print_task_fm_analysis(details: &serde_json::Value, colored: bool) {
+fn print_task_fm_analysis(details: &serde_json::Value) {
     use nexus_types::internal_api::background::fm_analysis::{
         AnalysisOutcome, AnalysisStatus, Outcome, PreparationStatus,
     };
@@ -3617,22 +3602,19 @@ fn print_task_fm_analysis(details: &serde_json::Value, colored: bool) {
         }
     };
 
-    let AnalysisStatus {
-        start_time,
-        end_time,
-        report: analysis_report,
-        outcome,
-        capacity,
-    } = analysis_status;
-    match outcome {
+    let AnalysisStatus { start_time, end_time, outcome, capacity } =
+        analysis_status;
+    let sitrep_id = match outcome {
         AnalysisOutcome::Error(error) => {
             println!("{ERRICON} analysis failed: {error}");
+            None
         }
         AnalysisOutcome::Unchanged => {
             println!(
                 "    no changes from the current situation report ({:?})",
                 parent_sitrep_id
             );
+            None
         }
         AnalysisOutcome::LimitReached { limit } => {
             println!(
@@ -3640,6 +3622,7 @@ fn print_task_fm_analysis(details: &serde_json::Value, colored: bool) {
                  limit ({limit} sitreps) has been reached!"
             );
             println!("    no new sitrep was written.");
+            None
         }
         AnalysisOutcome::NotCommitted { sitrep_id } => {
             println!(
@@ -3650,6 +3633,7 @@ fn print_task_fm_analysis(details: &serde_json::Value, colored: bool) {
                 of date"
             );
             println!("    sitrep ID: {sitrep_id:?}");
+            Some(sitrep_id)
         }
         AnalysisOutcome::CommitFailed { sitrep_id, error } => {
             println!(
@@ -3658,11 +3642,20 @@ fn print_task_fm_analysis(details: &serde_json::Value, colored: bool) {
             );
             println!("    sitrep ID: {sitrep_id:?}");
             println!("    error:     {error}");
+            Some(sitrep_id)
         }
         AnalysisOutcome::Committed { sitrep_id } => {
             println!("    analyzed the situation, and committed a new sitrep!");
             println!("    sitrep ID: {sitrep_id:?}");
+            Some(sitrep_id)
         }
+    };
+    if let Some(sitrep_id) = sitrep_id {
+        println!(
+            "    note: you can view the sitrep and its reports with:\n      \
+                   $ omdb db sitrep show {sitrep_id}\n      \
+                   $ omdb db sitrep analysis-report {sitrep_id} "
+        )
     }
     println!();
 
@@ -3680,19 +3673,13 @@ fn print_task_fm_analysis(details: &serde_json::Value, colored: bool) {
         println!("      count: {:>6}", capacity.count);
     }
 
-    let PreparationStatus { warnings, report: prep_report } = prep_status;
-    println!("    preparation report:");
-    print!("{}", prep_report.display_multiline(6).colored(colored));
+    let PreparationStatus { warnings } = prep_status;
     if !warnings.is_empty() {
         println!("{ERRICON}   non-fatal errors preparing analysis inputs:");
         for error in warnings {
             println!("      > {error}")
         }
     }
-
-    println!();
-    println!("    analysis report:");
-    print!("{}", analysis_report.display_multiline(6).colored(colored));
     print_start_end_time(start_time, end_time, 4);
 }
 
