@@ -40,15 +40,8 @@ pub enum DpdPortReconcilerStatus {
     /// plan - this should be impossible absent bugs.
     FailedGeneratingPlan(String),
 
-    /// Reconciliation completed successfully.
-    Success {
-        unchanged: BTreeSet<String>,
-        cleared: BTreeSet<String>,
-        applied: BTreeSet<String>,
-    },
-
-    /// Reconciliation completed but had at least one failure.
-    PartialSuccess {
+    /// Reconciliation completed.
+    Complete {
         unchanged: BTreeSet<String>,
         cleared: BTreeSet<String>,
         clear_failures: Vec<DpdPortOperationFailure>,
@@ -71,21 +64,7 @@ impl slog::KV for DpdPortReconcilerStatus {
             Self::FailedGeneratingPlan(reason) => {
                 serializer.emit_str(skipped_key.into(), reason)
             }
-            Self::Success { unchanged, cleared, applied } => {
-                // Only show a summary count; we have individual log statements
-                // for each clear/apply.
-                for (key, val) in [
-                    ("port-settings-unchanged", unchanged.len()),
-                    ("port-settings-successfully-cleared", cleared.len()),
-                    ("port-settings-failed-to-clear", 0),
-                    ("port-settings-successfully-applied", applied.len()),
-                    ("port-settings-failed-to-apply", 0),
-                ] {
-                    serializer.emit_usize(key.into(), val)?;
-                }
-                Ok(())
-            }
-            Self::PartialSuccess {
+            Self::Complete {
                 unchanged,
                 cleared,
                 clear_failures,
