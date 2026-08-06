@@ -139,20 +139,12 @@ async fn apply_plan(
         }
     }
 
-    if remove_failure.is_empty() && add_failure.is_empty() {
-        MgdBfdReconcilerStatus::Success {
-            unchanged,
-            remove_success,
-            add_success,
-        }
-    } else {
-        MgdBfdReconcilerStatus::PartialSuccess {
-            unchanged,
-            remove_success,
-            remove_failure,
-            add_success,
-            add_failure,
-        }
+    MgdBfdReconcilerStatus::Complete {
+        unchanged,
+        remove_success,
+        remove_failure,
+        add_success,
+        add_failure,
     }
 }
 
