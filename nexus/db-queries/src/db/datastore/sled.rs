@@ -593,11 +593,6 @@ const LOCAL_STORAGE_ATTEMPTS_PER_SLED: usize = 4;
 /// to tell two situations apart: the zpool snapshot went stale (retry with a
 /// fresh one), or a disk in the request went away (no sled can ever satisfy
 /// this reservation, so fail now rather than retrying everywhere).
-///
-/// The two kinds of wrong answer are not symmetric. Wrongly returning true
-/// fails a reservation that could have succeeded. Wrongly returning false
-/// only wastes retries: the insert query rejects deleted and detached disks
-/// itself, so a bad allocation still cannot be written.
 async fn any_request_disk_deleted_or_detached(
     conn: &async_bb8_diesel::Connection<DbConnection>,
     instance_id: InstanceUuid,
