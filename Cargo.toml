@@ -607,7 +607,7 @@ ispf = { git = "https://github.com/oxidecomputer/ispf" }
 jiff = "0.2.15"
 key-manager = { path = "key-manager" }
 key-manager-types = { path = "key-manager/types" }
-kstat-rs = "0.2.4"
+kstat-rs = "0.2.5"
 libc = "0.2.174"
 linkme = "0.3"
 libipcc = { git = "https://github.com/oxidecomputer/ipcc-rs", rev = "524eb8f125003dff50b9703900c6b323f00f9e1b" }
@@ -878,12 +878,13 @@ tough = { version = "0.22.0" }
 transceiver-controller = { git = "https://github.com/oxidecomputer/transceiver-control", features = [ "api-traits" ] }
 transient-dns-server = { path = "dns-server/transient" }
 trybuild = "1.0.106"
-tufaceous = { git = "https://github.com/oxidecomputer/tufaceous", branch = "v1" }
-tufaceous-artifact = { git = "https://github.com/oxidecomputer/tufaceous", branch = "v1", features = ["proptest", "schemars"] }
-tufaceous-brand-metadata = { git = "https://github.com/oxidecomputer/tufaceous", branch = "v1" }
-tufaceous-lib = { git = "https://github.com/oxidecomputer/tufaceous", branch = "v1" }
-tufaceous-v2 = { git = "https://github.com/oxidecomputer/tufaceous", branch = "main", package = "tufaceous" }
-tufaceous-artifact-v2 = { git = "https://github.com/oxidecomputer/tufaceous", branch = "main", package = "tufaceous-artifact", features = ["proptest", "schemars"] }
+tufaceous-v1 = { git = "https://github.com/oxidecomputer/tufaceous", branch = "v1", package = "tufaceous" }
+tufaceous-artifact-v1 = { git = "https://github.com/oxidecomputer/tufaceous", branch = "v1", package = "tufaceous-artifact", features = ["proptest", "schemars"] }
+tufaceous-brand-metadata-v1 = { git = "https://github.com/oxidecomputer/tufaceous", branch = "v1", package = "tufaceous-brand-metadata" }
+tufaceous-lib-v1 = { git = "https://github.com/oxidecomputer/tufaceous", branch = "v1", package = "tufaceous-lib" }
+tufaceous = { git = "https://github.com/oxidecomputer/tufaceous", branch = "main" }
+tufaceous-artifact = { git = "https://github.com/oxidecomputer/tufaceous", branch = "main", features = ["proptest", "schemars"] }
+tufaceous-brand-metadata = { git = "https://github.com/oxidecomputer/tufaceous", branch = "main" }
 tui-tree-widget = "0.23.1"
 typed-rng = { path = "typed-rng" }
 typify = "0.3.0"

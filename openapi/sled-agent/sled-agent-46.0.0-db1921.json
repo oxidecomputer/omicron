@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "45.0.0"
+    "version": "46.0.0"
   },
   "paths": {
     "/artifacts": {
@@ -1553,32 +1553,6 @@
                 }
               }
             }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/switch-ports": {
-      "post": {
-        "operationId": "uplink_ensure",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SwitchPorts"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "204": {
-            "description": "resource updated"
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -5755,42 +5729,6 @@
         "required": [
           "slot_a",
           "slot_b"
-        ]
-      },
-      "HostPortConfig": {
-        "type": "object",
-        "properties": {
-          "addrs": {
-            "description": "IP Address and prefix (e.g., `192.168.0.1/16`) to apply to switchport (must be in infra_ip pool).  May also include an optional VLAN ID.",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/UplinkAddressConfig"
-            }
-          },
-          "lldp": {
-            "nullable": true,
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/LldpPortConfig"
-              }
-            ]
-          },
-          "port": {
-            "description": "Switchport to use for external connectivity",
-            "type": "string"
-          },
-          "tx_eq": {
-            "nullable": true,
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/TxEqConfig"
-              }
-            ]
-          }
-        },
-        "required": [
-          "addrs",
-          "port"
         ]
       },
       "Hostname": {
@@ -10087,21 +10025,6 @@
         "required": [
           "error",
           "time_of_status"
-        ]
-      },
-      "SwitchPorts": {
-        "description": "A set of switch uplinks.",
-        "type": "object",
-        "properties": {
-          "uplinks": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/HostPortConfig"
-            }
-          }
-        },
-        "required": [
-          "uplinks"
         ]
       },
       "SwitchSlot": {

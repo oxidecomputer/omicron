@@ -15,7 +15,6 @@ use camino::Utf8Path;
 use futures::FutureExt;
 use futures::StreamExt;
 use futures::future::Future;
-use futures::stream::FuturesUnordered;
 use nexus_db_model::Sled;
 use nexus_networking;
 use nexus_types::identity::Asset;
@@ -25,6 +24,11 @@ use slog::info;
 use slog_error_chain::InlineErrorChain;
 use tokio::io::AsyncWriteExt;
 use tokio_util::sync::CancellationToken;
+
+/// The maximum number of concurrent requests to a single sled-agent
+/// from one sled-data collection step, applied independently to the
+/// diagnostics-command fan-out and to zone-log downloads.
+const MAX_CONCURRENT_SLED_AGENT_REQUESTS: usize = 10;
 
 pub async fn spawn_query_all_sleds(
     collection: &BundleCollection,
@@ -135,8 +139,8 @@ async fn collect_data_from_sled(
 
     // Each helper function handles its own cancellation internally:
     // HTTP requests are eagerly cancelled via select!, while filesystem
-    // writes complete cooperatively. This means the FuturesUnordered
-    // streams drain quickly on cancellation without dropping in-flight
+    // writes complete cooperatively. This means the buffered streams
+    // below drain quickly on cancellation without dropping in-flight
     // file writes.
 
     // NB: As new sled-diagnostic commands are added they should
@@ -215,11 +219,10 @@ async fn collect_data_from_sled(
         )
         .boxed(),
     ])
-    // Currently we execute up to 10 commands concurrently which
-    // might be doing their own concurrent work, for example
-    // collectiong `pstack` output of every Oxide process that is
-    // found on a sled.
-    .buffer_unordered(10);
+    // Commands executing concurrently might be doing their own
+    // concurrent work on the sled, for example collecting `pstack`
+    // output of every Oxide process that is found on a sled.
+    .buffer_unordered(MAX_CONCURRENT_SLED_AGENT_REQUESTS);
 
     while let Some(result) = diag_cmds.next().await {
         // Log that we failed to write the diag command output to a
@@ -239,22 +242,30 @@ async fn collect_data_from_sled(
         result = sled_client.support_logs() => result?.into_inner(),
     };
 
-    // For each zone we concurrently fire off a request to its
-    // sled-agent to collect its logs in a zip file and write the
-    // result to the support bundle.
-    let mut log_futs: FuturesUnordered<_> = zones
-        .iter()
-        .map(|zone| {
+    // For each zone we fire off a request to its sled-agent to collect
+    // its logs in a zip file and write the result to the support
+    // bundle.
+    //
+    // The number of zones on a sled is unbounded (it grows with every
+    // zone that has ever had logs on the sled), and each request makes
+    // the sled-agent take ZFS snapshots and assemble a zip file before
+    // it can respond, so we cap the number of in-flight requests.
+    let sled_client = &sled_client;
+    let sled_path = &sled_path;
+    let time_range = time_range.as_ref();
+    let mut log_futs = futures::stream::iter(zones)
+        .map(|zone| async move {
             save_zone_log_zip_or_error(
                 log,
-                &sled_client,
-                zone,
-                &sled_path,
-                time_range.as_ref(),
+                sled_client,
+                &zone,
+                sled_path,
+                time_range,
                 cancellation_token,
             )
+            .await
         })
-        .collect();
+        .buffer_unordered(MAX_CONCURRENT_SLED_AGENT_REQUESTS);
 
     while let Some(log_collection_result) = log_futs.next().await {
         // We log any errors saving the zip file to disk and
@@ -306,9 +317,10 @@ where
                 })?;
         }
         Err(err) => {
+            let err_string = InlineErrorChain::new(&err).to_string();
             tokio::fs::write(
                 path.join(format!("{command}_err.txt")),
-                err.to_string(),
+                err_string,
             )
             .await?;
         }
@@ -395,11 +407,9 @@ async fn save_zone_log_zip_or_error(
             }
         }
         Err(err) => {
-            tokio::fs::write(
-                path.join(format!("{zone}.logs.err")),
-                err.to_string(),
-            )
-            .await?;
+            let err_string = InlineErrorChain::new(&err).to_string();
+            tokio::fs::write(path.join(format!("{zone}.logs.err")), err_string)
+                .await?;
         }
     };
 

@@ -6,7 +6,7 @@
 
 use std::borrow::Borrow;
 
-use omicron_common::update::ArtifactId;
+use crate::tuf_repo::ArtifactId;
 
 use super::ExtractedArtifactDataHandle;
 

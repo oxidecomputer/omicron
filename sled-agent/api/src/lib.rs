@@ -38,7 +38,8 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
-    (45, ADD_LOG_TIME_RANGE),
+    (46, ADD_LOG_TIME_RANGE),
+    (45, REMOVE_UPLINK_ENSURE),
     (44, PROPOLIS_NVME_VWC),
     (43, INVENTORY_BASEBOARD_ID),
     (42, NON_EMPTY_UPLINK_PORTS),
@@ -849,12 +850,26 @@ pub trait SledAgentApi {
     #[endpoint {
         method = POST,
         path = "/switch-ports",
-        versions = VERSION_STRONGER_BGP_UNNUMBERED_TYPES..,
+        versions = VERSION_STRONGER_BGP_UNNUMBERED_TYPES..VERSION_REMOVE_UPLINK_ENSURE,
     }]
     async fn uplink_ensure(
-        rqctx: RequestContext<Self::Context>,
-        body: TypedBody<latest::uplink::SwitchPorts>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+        _rqctx: RequestContext<Self::Context>,
+        _body: TypedBody<latest::uplink::SwitchPorts>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        // This endpoint has been removed, but we still have to provide an
+        // implementation in case we're called by an old client.
+        //
+        // Nexus's `sync_switch_configuration` used to call this endpoint to
+        // induce us to update SMF properties of services within the switch
+        // zone. Now, `sync_switch_configuration` only pushes config to the
+        // bootstore, and the scrimlet reconcilers automatically update those
+        // properties. During a live update, we may be updated before Nexus, so
+        // may receive this request after we've transitioned to the scrimlet
+        // reconcilers system, but Nexus still thinks it needs to tell us to do
+        // this explicitly. We have nothing to do in that case - just claim
+        // success.
+        Ok(HttpResponseUpdatedNoContent())
+    }
 
     #[endpoint {
         method = POST,

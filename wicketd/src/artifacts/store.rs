@@ -7,9 +7,9 @@ use slog::Logger;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::sync::Mutex;
-use tufaceous_artifact_v2::ArtifactHash;
-use tufaceous_v2::ArtifactHandle;
-use tufaceous_v2::Repository;
+use tufaceous::ArtifactHandle;
+use tufaceous::Repository;
+use tufaceous_artifact::ArtifactHash;
 use wicket_common::artifact::ArtifactId;
 
 /// The artifact store for wicketd.

@@ -3081,15 +3081,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.tuf_repo (
     -- implementation detail of our ZIP archives.
     sha256 STRING(64) NOT NULL,
 
-    -- The version of the targets.json role that was used to generate the repo.
-    targets_role_version INT NOT NULL,
-
-    -- The valid_until time for the repo.
-    -- TODO: Figure out timestamp validity policy for uploaded repos vs those
-    -- fetched over HTTP; my (iliana's) current presumption is that we will make
-    -- this NULL for uploaded ZIP archives of repos.
-    valid_until TIMESTAMPTZ NOT NULL,
-
     -- The system version described in the TUF repo.
     --
     -- This is the "true" primary key, but is not treated as such in the
@@ -3115,18 +3106,23 @@ CREATE UNIQUE INDEX IF NOT EXISTS tuf_repo_not_pruned
     ON omicron.public.tuf_repo (id)
     WHERE time_pruned IS NULL;
 
+-- Describes the contents of the `metadata` member of `artifacts-v2.json` in a
+-- TUF repo.
+CREATE TABLE IF NOT EXISTS omicron.public.tuf_repo_metadata (
+    tuf_repo_id UUID NOT NULL,
+    key TEXT NOT NULL,
+    value TEXT NOT NULL,
+
+    PRIMARY KEY (tuf_repo_id, key)
+);
+
 -- Describes an individual artifact from an uploaded TUF repo.
 --
--- In the future, this may also be used to describe artifacts that are fetched
--- from a remote TUF repo, but that requires some additional design work.
+-- A row in this table represents a set of tags for a given artifact hash. (This
+-- is ideally a unique set of tags, which Nexus attempts to ensure, but this
+-- cannot be guaranteed by the schema.)
 CREATE TABLE IF NOT EXISTS omicron.public.tuf_artifact (
     id UUID PRIMARY KEY,
-    name STRING(63) NOT NULL,
-    version STRING(64) NOT NULL,
-    -- This used to be an enum but is now a string, because it can represent
-    -- artifact kinds currently unknown to a particular version of Nexus as
-    -- well.
-    kind STRING(63) NOT NULL,
 
     -- The time this artifact was first recorded.
     time_created TIMESTAMPTZ NOT NULL,
@@ -3134,29 +3130,34 @@ CREATE TABLE IF NOT EXISTS omicron.public.tuf_artifact (
     -- The SHA256 hash of the artifact, typically obtained from the TUF
     -- targets.json (and validated at extract time).
     sha256 STRING(64) NOT NULL,
-    -- The length of the artifact, in bytes.
-    artifact_size INT8 NOT NULL,
 
     -- The generation number this artifact was added for.
-    generation_added INT8 NOT NULL,
-
-    -- Sign (root key hash table) hash of a signed RoT or RoT bootloader image.
-    sign BYTES, -- nullable
-
-    -- Board (caboose BORD) for artifacts that are Hubris archives.
-    board TEXT, -- nullable (null for non-Hubris artifacts)
-
-    CONSTRAINT unique_name_version_kind UNIQUE (name, version, kind)
+    generation_added INT8 NOT NULL
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS tuf_artifact_added
-    ON omicron.public.tuf_artifact (generation_added, id)
-    STORING (name, version, kind, time_created, sha256, artifact_size);
+CREATE UNIQUE INDEX IF NOT EXISTS tuf_artifact_sha256
+    ON omicron.public.tuf_artifact (sha256, id);
 
--- RFD 554: (kind, hash) is unique for artifacts. This index is used while
--- looking up artifacts.
-CREATE UNIQUE INDEX IF NOT EXISTS tuf_artifact_kind_sha256
-    ON omicron.public.tuf_artifact (kind, sha256);
+-- Describes the version and length for a given artifact SHA256 hash.
+--
+-- This is a separate table to enforce the one-to-one mapping between SHA256
+-- hash and version/length. Per RFD 554, artifacts must be stamped with their
+-- version (or a similar identifier) to ensure that they change when the version
+-- changes.
+CREATE TABLE IF NOT EXISTS omicron.public.tuf_artifact_file (
+    sha256 STRING(64) PRIMARY KEY,
+    version STRING(64) NOT NULL,
+    artifact_size INT8 NOT NULL
+);
+
+-- Describes a single tag in the set of tags that describe an artifact.
+CREATE TABLE IF NOT EXISTS omicron.public.tuf_artifact_tag (
+    tuf_artifact_id UUID NOT NULL,
+    key TEXT NOT NULL,
+    value TEXT NOT NULL,
+
+    PRIMARY KEY (tuf_artifact_id, key)
+);
 
 -- Reflects that a particular artifact was provided by a particular TUF repo.
 -- This is a many-many mapping.
@@ -5223,14 +5224,30 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_sled_config_zone_nic (
     sled_config_id UUID NOT NULL,
     id UUID NOT NULL,
     name TEXT NOT NULL,
-    ip INET NOT NULL,
+    -- NOTE: `ip` and `subnet` hold the IPv4 address and subnet, despite the
+    -- names. We kept the original names because renaming columns is not
+    -- idempotent in CRDB as of today.
+    ip INET,
     mac INT8 NOT NULL,
-    subnet INET NOT NULL,
+    subnet INET,
     vni INT8 NOT NULL,
     is_primary BOOLEAN NOT NULL,
     slot INT2 NOT NULL,
+    ipv6 INET,
+    ipv6_subnet INET,
 
-    PRIMARY KEY (inv_collection_id, sled_config_id, id)
+    PRIMARY KEY (inv_collection_id, sled_config_id, id),
+
+    -- A NIC must have at least one IP family, and may have both.
+    CONSTRAINT at_least_one_ip_address CHECK (
+        ip IS NOT NULL OR ipv6 IS NOT NULL
+    ),
+
+    -- Each family's address and subnet are present together or not at all.
+    CONSTRAINT ip_and_subnet_consistent CHECK (
+        (ip IS NULL) = (subnet IS NULL) AND
+        (ipv6 IS NULL) = (ipv6_subnet IS NULL)
+    )
 );
 
 CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_sled_config_dataset (
@@ -5844,14 +5861,30 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_omicron_zone_nic (
     blueprint_id UUID NOT NULL,
     id UUID NOT NULL,
     name TEXT NOT NULL,
-    ip INET NOT NULL,
+    -- NOTE: `ip` and `subnet` hold the IPv4 address and subnet, despite the
+    -- names. We kept the original names because renaming columns is not
+    -- idempotent in CRDB as of today.
+    ip INET,
     mac INT8 NOT NULL,
-    subnet INET NOT NULL,
+    subnet INET,
     vni INT8 NOT NULL,
     is_primary BOOLEAN NOT NULL,
     slot INT2 NOT NULL,
+    ipv6 INET,
+    ipv6_subnet INET,
 
-    PRIMARY KEY (blueprint_id, id)
+    PRIMARY KEY (blueprint_id, id),
+
+    -- A NIC must have at least one IP family, and may have both.
+    CONSTRAINT at_least_one_ip_address CHECK (
+        ip IS NOT NULL OR ipv6 IS NOT NULL
+    ),
+
+    -- Each family's address and subnet are present together or not at all.
+    CONSTRAINT ip_and_subnet_consistent CHECK (
+        (ip IS NULL) = (subnet IS NULL) AND
+        (ipv6 IS NULL) = (ipv6_subnet IS NULL)
+    )
 );
 
 -- Blueprint information related to clickhouse cluster management
@@ -6315,6 +6348,11 @@ WHERE
 
 CREATE SEQUENCE IF NOT EXISTS omicron.public.nat_version START 1 INCREMENT 1;
 
+-- This table only holds NAT entries for instances, and is used in the dpd ->
+-- Nexus "pull" API we eventually want to rework
+-- (<https://github.com/oxidecomputer/dendrite/issues/83>). Omicron services
+-- that require NAT entries (NTP, Nexus, etc.) are managed by sled-agent on the
+-- scrimlets based on information in the bootstore.
 CREATE TABLE IF NOT EXISTS omicron.public.nat_entry (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     external_address INET NOT NULL,
@@ -9091,6 +9129,70 @@ CREATE TABLE IF NOT EXISTS omicron.public.trust_quorum_member (
     PRIMARY KEY (rack_id, epoch DESC, hw_baseboard_id)
 );
 
+
+-- Overrides to the fault management system's global configuration.
+--
+-- If no overrides are set, this table is empty and the system uses the default
+-- configuration. Otherwise, the row in this table with the highest `version` is
+-- selected and used as the active configuration.
+--
+-- All values that represent config settings (i.e. every column except for
+-- `version` and `comment`) are nullable. If they are NULL, the system will use
+-- the default value defined in the current software version for that setting.
+CREATE TABLE IF NOT EXISTS omicron.public.fm_config (
+    -- The version number of the configuration.
+    --
+    -- Configuration changes are made by inserting a new row with a higher
+    -- version number.
+    version INT8 PRIMARY KEY,
+    -- A comment describing why this override was created.
+    comment TEXT NOT NULL,
+    -- The time at which this config version was created.
+    time_modified TIMESTAMPTZ NOT NULL,
+    -- BREAK GLASS TO COMPLETELY DISABLE FAULT MANAGEMENT ANALYSIS
+    analysis_enabled BOOL,
+    -- The maximum number of sitreps to keep in the database.
+    --
+    -- If the number of records in the `omicron.public.fm_sitrep` table
+    -- (including both sitreps in the history and orphaned sitreps that have
+    -- yet to be garbage-collected) exceeds this limit, the FM analysis
+    -- background task will not produce a new sitrep until old ones are
+    -- deleted.
+    sitrep_limit INT8,
+    -- The number of entries in the `omicron.public.fm_sitrep_history` table at
+    -- which the `fm_sitrep_history_pruner` background task will begin deleting
+    -- the oldest sitreps from the history.
+    --
+    -- This must be less than `sitrep_limit`, and must be at least 2.
+    history_pruning_threshold INT8,
+
+    CONSTRAINT versions_are_positive CHECK (version > 0),
+
+    -- Comments are mandatory when overriding the default config, so we enforce
+    -- that this is both non-NULL and not the empty string. We can't force the
+    -- operator to write a *good* comment, but at least we can force you to type
+    -- SOMETHING if you really don't want to say anything... :)
+    CONSTRAINT comment_required CHECK (comment != '' AND comment != ' '),
+
+    CONSTRAINT sitrep_limit_validity CHECK (
+        sitrep_limit IS NULL OR (
+            sitrep_limit >= 5 AND
+            sitrep_limit <= 5000
+        )
+    ),
+    CONSTRAINT history_pruning_threshold_validity CHECK (
+        history_pruning_threshold IS NULL OR (
+            history_pruning_threshold <= 5000 AND
+            history_pruning_threshold >= 2
+        )
+    ),
+    CONSTRAINT history_limit_is_less_than_sirep_limit CHECK (
+        (history_pruning_threshold IS NULL OR sitrep_limit IS NULL) OR
+            history_pruning_threshold < sitrep_limit
+    )
+);
+
+
 -- Keep this at the end of file so that the database does not contain a version
 -- until it is fully populated.
 INSERT INTO omicron.public.db_metadata (
@@ -9100,7 +9202,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '281.0.0', NULL)
+    (TRUE, NOW(), NOW(), '286.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

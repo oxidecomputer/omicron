@@ -414,10 +414,6 @@ pub struct BackgroundTaskConfig {
     pub phantom_disks: PhantomDiskConfig,
     /// configuration for blueprint related tasks
     pub blueprints: BlueprintTasksConfig,
-    /// configuration for service zone nat sync task
-    pub sync_service_zone_nat: SyncServiceZoneNatConfig,
-    /// configuration for the bfd manager task
-    pub bfd_manager: BfdManagerConfig,
     /// configuration for the switch port settings manager task
     pub switch_port_settings_manager: SwitchPortSettingsManagerConfig,
     /// configuration for region replacement starter task
@@ -622,22 +618,6 @@ pub struct DecommissionedDiskCleanerConfig {
 #[serde_as]
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct NatCleanupConfig {
-    /// period (in seconds) for periodic activations of this background task
-    #[serde_as(as = "DurationSeconds<u64>")]
-    pub period_secs: Duration,
-}
-
-#[serde_as]
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub struct BfdManagerConfig {
-    /// period (in seconds) for periodic activations of this background task
-    #[serde_as(as = "DurationSeconds<u64>")]
-    pub period_secs: Duration,
-}
-
-#[serde_as]
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub struct SyncServiceZoneNatConfig {
     /// period (in seconds) for periodic activations of this background task
     #[serde_as(as = "DurationSeconds<u64>")]
     pub period_secs: Duration,
@@ -1016,21 +996,17 @@ impl Default for MulticastGroupReconcilerConfig {
     }
 }
 
-/// Default for [`FmTasksConfig::analysis_enabled`].
-fn default_fm_analysis_enabled() -> bool {
-    true
-}
-
 #[serde_as]
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct FmTasksConfig {
-    /// whether the fault management analysis background task runs.
-    #[serde(default = "default_fm_analysis_enabled")]
-    pub analysis_enabled: bool,
     /// period (in seconds) for periodic activations of the background task that
     /// drives fault management analysis.
     #[serde_as(as = "DurationSeconds<u64>")]
     pub analysis_period_secs: Duration,
+    /// period (in seconds) for periodic activations of the background task that
+    /// reads the current fault management configuration from the database.
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub config_load_period_secs: Duration,
     /// period (in seconds) for periodic activations of the background task that
     /// reads the latest fault management sitrep from the database.
     #[serde_as(as = "DurationSeconds<u64>")]
@@ -1053,11 +1029,13 @@ pub struct FmTasksConfig {
 impl Default for FmTasksConfig {
     fn default() -> Self {
         Self {
-            analysis_enabled: default_fm_analysis_enabled(),
             // Analysis is generally triggered by changes in the current sitrep,
             // inventory, or by the ereport ingester(s), so it need not be
             // periodically activated all that frequently.
             analysis_period_secs: Duration::from_secs(60),
+            // Loading the config is cheap, and operators expect config
+            // changes to take effect promptly.
+            config_load_period_secs: Duration::from_secs(15),
             sitrep_load_period_secs: Duration::from_secs(15),
             // This need not be activated very frequently, as it's triggered any
             // time the current sitrep changes, and activating it more
@@ -1337,7 +1315,6 @@ mod test {
             metrics_producer_gc.period_secs = 60
             external_endpoints.period_secs = 9
             nat_cleanup.period_secs = 30
-            bfd_manager.period_secs = 30
             inventory.period_secs_load = 10
             inventory.period_secs_collect = 11
             inventory.nkeep = 12
@@ -1352,7 +1329,6 @@ mod test {
             blueprints.period_secs_rendezvous = 300
             blueprints.period_secs_collect_crdb_node_ids = 180
             blueprints.period_secs_load_reconfigurator_config = 5
-            sync_service_zone_nat.period_secs = 30
             switch_port_settings_manager.period_secs = 30
             region_replacement.period_secs = 30
             region_replacement_driver.period_secs = 30
@@ -1388,6 +1364,7 @@ mod test {
             multicast_reconciler.period_secs = 60
             fm.rendezvous_period_secs = 51
             fm.analysis_period_secs = 52
+            fm.config_load_period_secs = 53
             trust_quorum.period_secs = 60
             attached_subnet_manager.period_secs = 60
             session_cleanup.period_secs = 300
@@ -1524,9 +1501,6 @@ mod test {
                         nat_cleanup: NatCleanupConfig {
                             period_secs: Duration::from_secs(30),
                         },
-                        bfd_manager: BfdManagerConfig {
-                            period_secs: Duration::from_secs(30),
-                        },
                         inventory: InventoryConfig {
                             period_secs_load: Duration::from_secs(10),
                             period_secs_collect: Duration::from_secs(11),
@@ -1559,9 +1533,6 @@ mod test {
                             period_secs_rendezvous: Duration::from_secs(300),
                             period_secs_load_reconfigurator_config:
                                 Duration::from_secs(5)
-                        },
-                        sync_service_zone_nat: SyncServiceZoneNatConfig {
-                            period_secs: Duration::from_secs(30)
                         },
                         switch_port_settings_manager:
                             SwitchPortSettingsManagerConfig {
@@ -1645,8 +1616,8 @@ mod test {
                             disable: false,
                         },
                         fm: FmTasksConfig {
-                            analysis_enabled: default_fm_analysis_enabled(),
                             analysis_period_secs: Duration::from_secs(52),
+                            config_load_period_secs: Duration::from_secs(53),
                             sitrep_load_period_secs: Duration::from_secs(48),
                             sitrep_gc_period_secs: Duration::from_secs(49),
                             sitrep_history_prune_period_secs:
@@ -1744,7 +1715,6 @@ mod test {
             metrics_producer_gc.period_secs = 60
             external_endpoints.period_secs = 9
             nat_cleanup.period_secs = 30
-            bfd_manager.period_secs = 30
             inventory.period_secs_load = 10
             inventory.period_secs_collect = 10
             inventory.nkeep = 3
@@ -1759,7 +1729,6 @@ mod test {
             blueprints.period_secs_rendezvous = 300
             blueprints.period_secs_collect_crdb_node_ids = 180
             blueprints.period_secs_load_reconfigurator_config = 5
-            sync_service_zone_nat.period_secs = 30
             switch_port_settings_manager.period_secs = 30
             region_replacement.period_secs = 30
             region_replacement_driver.period_secs = 30
@@ -1790,6 +1759,7 @@ mod test {
             probe_distributor.period_secs = 47
             fm.rendezvous_period_secs = 48
             fm.analysis_period_secs = 49
+            fm.config_load_period_secs = 50
             multicast_reconciler.period_secs = 60
             trust_quorum.period_secs = 60
             attached_subnet_manager.period_secs = 60
