@@ -167,20 +167,11 @@ pub enum MgdBgpReconcilerStatus {
     /// persisted config.
     FailedGeneratingDesiredConfig(String),
 
-    /// Reconciliation completed successfully.
+    /// Reconciliation completed.
     ///
-    /// mgd operations are performed in bulk, so each item here contains the
-    /// count of items involved.
-    Success {
-        counts: MgdBgpReconcilerStatusOpCount,
-        did_change_max_paths: bool,
-    },
-
-    /// Reconciliation completed with at least one failure.
-    ///
-    /// mgd operations are performed in bulk, so each item here contains the
-    /// count of items applied on success.
-    PartialSuccess {
+    /// mgd operations are performed in bulk, so `counts` contains the number of
+    /// items involved.
+    Complete {
         counts: MgdBgpReconcilerStatusOpCount,
         did_change_max_paths: bool,
         errors: Vec<String>,
@@ -199,14 +190,7 @@ impl slog::KV for MgdBgpReconcilerStatus {
             | Self::FailedGeneratingDesiredConfig(reason) => {
                 serializer.emit_str(skipped_key, reason)
             }
-            Self::Success { counts, did_change_max_paths } => {
-                serializer.emit_bool(
-                    "bgp-did-change-max-paths".into(),
-                    *did_change_max_paths,
-                )?;
-                slog::KV::serialize(&counts, record, serializer)
-            }
-            MgdBgpReconcilerStatus::PartialSuccess {
+            MgdBgpReconcilerStatus::Complete {
                 counts,
                 did_change_max_paths,
                 errors,
