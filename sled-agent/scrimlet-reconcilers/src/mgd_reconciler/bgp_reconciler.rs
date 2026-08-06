@@ -456,15 +456,7 @@ async fn apply_plan(
     }
 
     let StatusBuilder { counts, did_change_max_paths, errors } = status_builder;
-    if errors.is_empty() {
-        MgdBgpReconcilerStatus::Success { counts, did_change_max_paths }
-    } else {
-        MgdBgpReconcilerStatus::PartialSuccess {
-            counts,
-            did_change_max_paths,
-            errors,
-        }
-    }
+    MgdBgpReconcilerStatus::Complete { counts, did_change_max_paths, errors }
 }
 
 #[derive(Debug)]
