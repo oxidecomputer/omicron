@@ -634,6 +634,21 @@ impl<'a> CompleteLocalStorageAllocationLists<'a> {
             .await
             .internal_context("zpool_get_for_sled_reservation failed")?;
 
+        // Right off the top, if there aren't enough zpools for the requested
+        // allocations, prune the entire search space.
+
+        if zpools_for_sled.len() < self.allocations_to_perform.len() {
+            info!(
+                self.log,
+                "only {} zpools for sled, not enough for {} allocations",
+                zpools_for_sled.len(),
+                self.allocations_to_perform.len(),
+            );
+
+            self.queue.clear();
+            return Ok(());
+        }
+
         let mut incomplete_allocations_removed = 0;
 
         self.queue.retain(|incomplete_allocation_list| {
@@ -738,6 +753,20 @@ impl<'a> CompleteLocalStorageAllocationLists<'a> {
 
                 true
             });
+
+            // If this causes the list of candidate datasets to become empty,
+            // then prune the entire search space.
+
+            if allocation.candidate_datasets.is_empty() {
+                info!(
+                    self.log,
+                    "no more candidate datasets for allocation for disk {}",
+                    allocation.request.id(),
+                );
+
+                self.queue.clear();
+                return Ok(());
+            }
         }
 
         if candidate_datasets_removed > 0 {
@@ -746,6 +775,31 @@ impl<'a> CompleteLocalStorageAllocationLists<'a> {
                 "pruned {candidate_datasets_removed} candidate datasets \
                 during instance provisioning",
             );
+        }
+
+        // If, after pruning the candidate datasets, there aren't enough
+        // distinct zpools to provide one per requested allocation, then prune
+        // the entire search space: each allocation has to be put on a distinct
+        // zpool, so this iterator will search through the entire search space
+        // and fail to yield anything valid. Short circuit this so we don't
+        // waste CPU time!
+
+        let distinct_pools: HashSet<ZpoolUuid> = self
+            .allocations_to_perform
+            .iter()
+            .flat_map(|r| r.candidate_datasets.iter().map(|c| c.pool_id))
+            .collect();
+
+        if distinct_pools.len() < self.allocations_to_perform.len() {
+            info!(
+                self.log,
+                "only {} distinct zpools after pruning, not enough for {}
+                allocations",
+                distinct_pools.len(),
+                self.allocations_to_perform.len(),
+            );
+
+            self.queue.clear();
         }
 
         Ok(())
