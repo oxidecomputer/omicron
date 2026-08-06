@@ -597,6 +597,7 @@ async fn any_request_disk_deleted_or_detached(
 
     let disks: Vec<db::model::Disk> = dsl::disk
         .filter(dsl::id.eq_any(disk_ids))
+        .filter(dsl::time_deleted.is_null())
         .select(db::model::Disk::as_select())
         .load_async(conn)
         .await
@@ -605,14 +606,14 @@ async fn any_request_disk_deleted_or_detached(
                 .internal_context("selecting local storage disks failed")
         })?;
 
-    // A missing row means the disk was hard deleted.
+    // A missing row means the disk was deleted: soft-deleted rows are
+    // filtered out above, and a hard-deleted row is gone entirely.
     if disks.len() != expected {
         return Ok(true);
     }
 
     Ok(disks.iter().any(|disk| {
-        disk.time_deleted().is_some()
-            || disk.attach_instance_id != Some(instance_id.into_untyped_uuid())
+        disk.attach_instance_id != Some(instance_id.into_untyped_uuid())
     }))
 }
 
