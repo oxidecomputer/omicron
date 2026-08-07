@@ -7645,6 +7645,7 @@ dependencies = [
  "omicron-sled-agent",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
+ "parallel-task-set",
  "regex",
  "reqwest 0.13.2",
  "serde_json",

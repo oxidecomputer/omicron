@@ -33,6 +33,7 @@ nexus-types.workspace = true
 ntp-admin-client.workspace = true
 omicron-common.workspace = true
 omicron-uuid-kinds.workspace = true
+parallel-task-set.workspace = true
 reqwest.workspace = true
 serde_json.workspace = true
 sled-agent-client.workspace = true
