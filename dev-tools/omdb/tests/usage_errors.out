@@ -9,16 +9,19 @@ Omicron debugger (unstable)
 Usage: omdb [OPTIONS] <COMMAND>
 
 Commands:
-  crucible-agent   Debug a specific crucible-agent
-  crucible-pantry  Query a specific crucible-pantry
-  db               Query the control plane database (CockroachDB)
-  mgs              Debug a specific Management Gateway Service instance
-  nexus            Debug a specific Nexus instance
-  oximeter         Query oximeter collector state
-  oxql             Enter the Oximeter Query Language shell for interactive querying
-  reconfigurator   Interact with the Reconfigurator system
-  sled-agent       Debug a specific Sled
-  help             Print this message or the help of the given subcommand(s)
+  clickhouse-admin  Operate on a single-node ClickHouse admin server
+  crucible-agent    Debug a specific crucible-agent
+  crucible-pantry   Query a specific crucible-pantry
+  db                Query the control plane database (CockroachDB)
+  mgs               Debug a specific Management Gateway Service instance
+  nexus             Debug a specific Nexus instance
+  oximeter          Query oximeter collector state
+  oxql              Enter the Oximeter Query Language shell for interactive querying
+  reconfigurator    Interact with the Reconfigurator system
+  sled-agent        Debug a specific Sled
+  support-bundle    Collect or inspect a support bundle
+  timesync          Monitor time synchronization
+  help              Print this message or the help of the given subcommand(s)
 
 Options:
       --log-level <LOG_LEVEL>  log level filter [env: LOG_LEVEL=] [default: warn]
@@ -43,16 +46,19 @@ using internal APIs.  This is a prototype.  The commands and output are unstable
 Usage: omdb [OPTIONS] <COMMAND>
 
 Commands:
-  crucible-agent   Debug a specific crucible-agent
-  crucible-pantry  Query a specific crucible-pantry
-  db               Query the control plane database (CockroachDB)
-  mgs              Debug a specific Management Gateway Service instance
-  nexus            Debug a specific Nexus instance
-  oximeter         Query oximeter collector state
-  oxql             Enter the Oximeter Query Language shell for interactive querying
-  reconfigurator   Interact with the Reconfigurator system
-  sled-agent       Debug a specific Sled
-  help             Print this message or the help of the given subcommand(s)
+  clickhouse-admin  Operate on a single-node ClickHouse admin server
+  crucible-agent    Debug a specific crucible-agent
+  crucible-pantry   Query a specific crucible-pantry
+  db                Query the control plane database (CockroachDB)
+  mgs               Debug a specific Management Gateway Service instance
+  nexus             Debug a specific Nexus instance
+  oximeter          Query oximeter collector state
+  oxql              Enter the Oximeter Query Language shell for interactive querying
+  reconfigurator    Interact with the Reconfigurator system
+  sled-agent        Debug a specific Sled
+  support-bundle    Collect or inspect a support bundle
+  timesync          Monitor time synchronization
+  help              Print this message or the help of the given subcommand(s)
 
 Options:
       --log-level <LOG_LEVEL>
@@ -138,6 +144,7 @@ Commands:
   sitreps                      Show the current history of fault management situation reports
   sleds                        Print information about sleds
   sled-instances               Show instances grouped by the sled they are running on
+  target-release               Print the current target release and the update date
   instance                     Print information about customer instances
   instances                    Alias to `omdb instance list`
   network                      Print information about the network
@@ -206,6 +213,7 @@ Commands:
   sitreps                      Show the current history of fault management situation reports
   sleds                        Print information about sleds
   sled-instances               Show instances grouped by the sled they are running on
+  target-release               Print the current target release and the update date
   instance                     Print information about customer instances
   instances                    Alias to `omdb instance list`
   network                      Print information about the network
@@ -243,6 +251,255 @@ Safety Options:
   -w, --destructive  Allow potentially-destructive subcommands
 ---------------------------------------------
 stderr:
+=============================================
+EXECUTING COMMAND: omdb ["db", "alert"]
+termination: Exited(2)
+---------------------------------------------
+stdout:
+---------------------------------------------
+stderr:
+Print information about alerts
+
+Usage: omdb db alert [OPTIONS] <COMMAND>
+
+Commands:
+  list     List alerts
+  info     Show details on an alert
+  webhook  Commands relating to webhook alerts
+  help     Print this message or the help of the given subcommand(s)
+
+Options:
+      --log-level <LOG_LEVEL>  log level filter [env: LOG_LEVEL=] [default: warn]
+      --color <COLOR>          Color output [default: auto] [possible values: auto, always, never]
+  -h, --help                   Print help
+
+Connection Options:
+      --db-url <DB_URL>          URL of the database SQL interface [env: OMDB_DB_URL=]
+      --dns-server <DNS_SERVER>  [env: OMDB_DNS_SERVER=]
+
+Database Options:
+      --fetch-limit <FETCH_LIMIT>  limit to apply to queries that fetch rows [env:
+                                   OMDB_FETCH_LIMIT=] [default: 500]
+      --include-deleted            whether to include soft-deleted records when enumerating objects
+                                   that can be soft-deleted
+
+Safety Options:
+  -w, --destructive  Allow potentially-destructive subcommands
+=============================================
+EXECUTING COMMAND: omdb ["db", "alert", "list", "--help"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+List alerts
+
+Usage: omdb db alert list [OPTIONS]
+
+Options:
+      --log-level <LOG_LEVEL>
+          log level filter
+          
+          [env: LOG_LEVEL=]
+          [default: warn]
+
+  -p, --payload
+          If set, include alert JSON payloads in the output.
+          
+          Note that this results in very wide output.
+
+  -b, --before <BEFORE>
+          Include only alerts created before this timestamp
+
+  -a, --after <AFTER>
+          Include only alerts created after this timestamp
+
+      --color <COLOR>
+          Color output
+          
+          [default: auto]
+          [possible values: auto, always, never]
+
+      --dispatched-before <DISPATCHED_BEFORE>
+          Include only alerts fully dispatched before this timestamp
+
+      --dispatched-after <DISPATCHED_AFTER>
+          Include only alerts fully dispatched after this timestamp
+
+      --cases <CASES>...
+          Include only alerts requested by the fault management case(s) with the specified UUIDs.
+          
+          If multiple case IDs are provided, alerts requested by any of those cases will be included
+          in the output.
+          
+          Note that not all alerts are requested by fault management cases.
+
+      --classes <CLASSES>...
+          Include only alerts with the specified alert classes.
+          
+          If multiple values are provided, alerts with any of those classes will be included in the
+          output.
+
+          Possible values:
+          - probe:                           Synthetic events sent for webhook receiver liveness
+            probes.
+            Receivers should return 2xx HTTP responses for these events, but they should NOT be
+            treated as notifications of an actual event in the system.
+          - test.foo:                        This is a test of the emergency alert system
+          - test.foo.bar:                    This is a test of the emergency alert system
+          - test.foo.baz:                    This is a test of the emergency alert system
+          - test.quux.bar:                   This is a test of the emergency alert system
+          - test.quux.bar.baz:               This is a test of the emergency alert system
+          - hardware.power_shelf.psu.insert: A power supply unit (PSU) has been inserted into a
+            power shelf
+          - hardware.power_shelf.psu.remove: A power supply unit (PSU) has been removed from a power
+            shelf
+
+  -d, --dispatched <DISPATCHED>
+          If `true`, include only alerts that have been fully dispatched. If `false`, include only
+          alerts that have not been fully dispatched.
+          
+          If this argument is not provided, both dispatched and un-dispatched events are included.
+          
+          [possible values: true, false]
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+Connection Options:
+      --db-url <DB_URL>
+          URL of the database SQL interface
+          
+          [env: OMDB_DB_URL=]
+
+      --dns-server <DNS_SERVER>
+          [env: OMDB_DNS_SERVER=]
+
+Database Options:
+      --fetch-limit <FETCH_LIMIT>
+          limit to apply to queries that fetch rows
+          
+          [env: OMDB_FETCH_LIMIT=]
+          [default: 500]
+
+      --include-deleted
+          whether to include soft-deleted records when enumerating objects that can be soft-deleted
+
+Safety Options:
+  -w, --destructive
+          Allow potentially-destructive subcommands
+---------------------------------------------
+stderr:
+=============================================
+EXECUTING COMMAND: omdb ["db", "alert", "list", "--classes", "test.foo.bar", "test.foo.box"]
+termination: Exited(2)
+---------------------------------------------
+stdout:
+---------------------------------------------
+stderr:
+error: invalid value 'test.foo.box' for '--classes <CLASSES>...'
+  [possible values: probe, test.foo, test.foo.bar, test.foo.baz, test.quux.bar, test.quux.bar.baz, hardware.power_shelf.psu.insert, hardware.power_shelf.psu.remove]
+
+  tip: a similar value exists: 'test.foo.baz'
+
+For more information, try '--help'.
+=============================================
+EXECUTING COMMAND: omdb ["db", "alert", "webhook", "delivery", "list", "--help"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+List webhook deliveries
+
+Usage: omdb db alert webhook delivery list [OPTIONS]
+
+Options:
+      --log-level <LOG_LEVEL>
+          log level filter
+          
+          [env: LOG_LEVEL=]
+          [default: warn]
+
+  -r, --receiver <RECEIVER>
+          If present, show only deliveries to this receiver
+
+  -A, --alert <ALERT>
+          If present, select only deliveries for the given alert
+
+  -s, --state <STATES>...
+          If present, select only deliveries in the provided state(s)
+          
+          If multiple values are provided, deliveries in any of those states will be included in the
+          output.
+          
+          [possible values: pending, delivered, failed]
+
+      --color <COLOR>
+          Color output
+          
+          [default: auto]
+          [possible values: auto, always, never]
+
+  -t, --trigger <TRIGGERS>...
+          If present, select only deliveries with the provided trigger(s)
+          
+          If multiple values are provided, deliveries with any of those triggers will be included in
+          the output.
+          
+          [possible values: alert, resend, probe]
+
+  -b, --before <BEFORE>
+          Include only delivery entries created before this timestamp
+
+  -a, --after <AFTER>
+          Include only delivery entries created after this timestamp
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+Connection Options:
+      --db-url <DB_URL>
+          URL of the database SQL interface
+          
+          [env: OMDB_DB_URL=]
+
+      --dns-server <DNS_SERVER>
+          [env: OMDB_DNS_SERVER=]
+
+Database Options:
+      --fetch-limit <FETCH_LIMIT>
+          limit to apply to queries that fetch rows
+          
+          [env: OMDB_FETCH_LIMIT=]
+          [default: 500]
+
+      --include-deleted
+          whether to include soft-deleted records when enumerating objects that can be soft-deleted
+
+Safety Options:
+  -w, --destructive
+          Allow potentially-destructive subcommands
+---------------------------------------------
+stderr:
+=============================================
+EXECUTING COMMAND: omdb ["db", "alert", "webhook", "delivery", "list", "--state", "bogus"]
+termination: Exited(2)
+---------------------------------------------
+stdout:
+---------------------------------------------
+stderr:
+error: invalid value 'bogus' for '--state <STATES>...'
+  [possible values: pending, delivered, failed]
+
+For more information, try '--help'.
+=============================================
+EXECUTING COMMAND: omdb ["db", "alert", "webhook", "delivery", "list", "--trigger", "bogus"]
+termination: Exited(2)
+---------------------------------------------
+stdout:
+---------------------------------------------
+stderr:
+error: invalid value 'bogus' for '--trigger <TRIGGERS>...'
+  [possible values: alert, resend, probe]
+
+For more information, try '--help'.
 =============================================
 EXECUTING COMMAND: omdb ["db", "disks"]
 termination: Exited(2)
@@ -533,6 +790,8 @@ Commands:
   list       List ereports
   info       Show an ereport
   reporters  List ereport reporters
+  classes    Summarize ereports by class, marking which classes a diagnosis engine in Nexus consumes
+             (fetched from Nexus's lockstep API; falls back to `?` if Nexus is unreachable)
   help       Print this message or the help of the given subcommand(s)
 
 Options:
@@ -562,27 +821,75 @@ List ereports
 Usage: omdb db ereport list [OPTIONS]
 
 Options:
-      --log-level <LOG_LEVEL>  log level filter [env: LOG_LEVEL=] [default: warn]
-  -s, --serial <SERIALS>       Include only ereports from systems with the provided serial numbers
-  -i, --id <IDS>               Include only ereports from the provided reporter restart IDs
-  -c, --class <CLASSES>        Include only ereports with the provided class strings
-  -b, --before <BEFORE>        Include only ereports collected before this timestamp
-      --color <COLOR>          Color output [default: auto] [possible values: auto, always, never]
-  -a, --after <AFTER>          Include only ereports collected after this timestamp
-  -h, --help                   Print help
+      --log-level <LOG_LEVEL>
+          log level filter
+          
+          [env: LOG_LEVEL=]
+          [default: warn]
+
+  -s, --serial <SERIALS>
+          Include only ereports from systems with the provided serial numbers
+
+  -i, --id <IDS>
+          Include only ereports from the provided reporter restart IDs
+
+  -c, --class <CLASSES>
+          Include only ereports with the provided class strings
+
+  -b, --before <BEFORE>
+          Include only ereports collected before this timestamp
+
+      --color <COLOR>
+          Color output
+          
+          [default: auto]
+          [possible values: auto, always, never]
+
+  -a, --after <AFTER>
+          Include only ereports collected after this timestamp
+
+  -m, --seen <SEEN>
+          Filter ereports based on whether or not their database records have been marked as "seen"
+          (included in a committed sitrep).
+          
+          Note that ereports which have not been marked in the database *may* still have been
+          included in a sitrep. Marking of ereport database records occurs in the background, and
+          may not be up to date with the latest sitrep. If an ereport has been marked as seen, it
+          has *definitely* been included in a committed sitrep, but if an ereport has not been
+          marked, it *may or may not* have been included in a committed sitrep.
+
+          Possible values:
+          - all:      Include all ereports, regardless of whether or not they have been marked
+          - marked:   Include only ereports whose database records have been marked as seen
+          - unmarked: Include only ereports whose database records have NOT been marked as seen
+          
+          [default: all]
+
+  -h, --help
+          Print help (see a summary with '-h')
 
 Connection Options:
-      --db-url <DB_URL>          URL of the database SQL interface [env: OMDB_DB_URL=]
-      --dns-server <DNS_SERVER>  [env: OMDB_DNS_SERVER=]
+      --db-url <DB_URL>
+          URL of the database SQL interface
+          
+          [env: OMDB_DB_URL=]
+
+      --dns-server <DNS_SERVER>
+          [env: OMDB_DNS_SERVER=]
 
 Database Options:
-      --fetch-limit <FETCH_LIMIT>  limit to apply to queries that fetch rows [env:
-                                   OMDB_FETCH_LIMIT=] [default: 500]
-      --include-deleted            whether to include soft-deleted records when enumerating objects
-                                   that can be soft-deleted
+      --fetch-limit <FETCH_LIMIT>
+          limit to apply to queries that fetch rows
+          
+          [env: OMDB_FETCH_LIMIT=]
+          [default: 500]
+
+      --include-deleted
+          whether to include soft-deleted records when enumerating objects that can be soft-deleted
 
 Safety Options:
-  -w, --destructive  Allow potentially-destructive subcommands
+  -w, --destructive
+          Allow potentially-destructive subcommands
 ---------------------------------------------
 stderr:
 =============================================
@@ -592,15 +899,13 @@ termination: Exited(0)
 stdout:
 List ereport reporters
 
-Usage: omdb db ereport reporters [OPTIONS] [SERIAL]
-
-Arguments:
-  [SERIAL]  
+Usage: omdb db ereport reporters [OPTIONS]
 
 Options:
       --log-level <LOG_LEVEL>  log level filter [env: LOG_LEVEL=] [default: warn]
   -t, --type <SLOT_TYPE>       
   -s, --slot <SLOT>            
+      --serial <SERIAL>        
       --color <COLOR>          Color output [default: auto] [possible values: auto, always, never]
   -h, --help                   Print help
 
@@ -628,26 +933,61 @@ Show an ereport
 Usage: omdb db ereport info [OPTIONS] <RESTART_ID> <ENA>
 
 Arguments:
-  <RESTART_ID>  The reporter restart UUID of the ereport to show
-  <ENA>         The ENA of the ereport within the reporter restart
+  <RESTART_ID>
+          The reporter restart UUID of the ereport to show
+
+  <ENA>
+          The ENA of the ereport within the reporter restart
 
 Options:
-      --log-level <LOG_LEVEL>  log level filter [env: LOG_LEVEL=] [default: warn]
-      --color <COLOR>          Color output [default: auto] [possible values: auto, always, never]
-  -h, --help                   Print help
+  -j, --json
+          If set, output the ereport as JSON, rather than using the default human-readable format.
+          
+          Note that this will output a JSON object containing the raw ereport data along with
+          additional metadata from the database record for this ereport. To emit *only* the original
+          JSON received from the reporter, add the `--raw` flag in addition to `--json`.
+
+      --log-level <LOG_LEVEL>
+          log level filter
+          
+          [env: LOG_LEVEL=]
+          [default: warn]
+
+  -r, --raw
+          If outputting the ereport as JSON, output *only* the raw JSON received from the reporter
+          in its original form, omitting additional metadata from the database
+
+      --color <COLOR>
+          Color output
+          
+          [default: auto]
+          [possible values: auto, always, never]
+
+  -h, --help
+          Print help (see a summary with '-h')
 
 Connection Options:
-      --db-url <DB_URL>          URL of the database SQL interface [env: OMDB_DB_URL=]
-      --dns-server <DNS_SERVER>  [env: OMDB_DNS_SERVER=]
+      --db-url <DB_URL>
+          URL of the database SQL interface
+          
+          [env: OMDB_DB_URL=]
+
+      --dns-server <DNS_SERVER>
+          [env: OMDB_DNS_SERVER=]
 
 Database Options:
-      --fetch-limit <FETCH_LIMIT>  limit to apply to queries that fetch rows [env:
-                                   OMDB_FETCH_LIMIT=] [default: 500]
-      --include-deleted            whether to include soft-deleted records when enumerating objects
-                                   that can be soft-deleted
+      --fetch-limit <FETCH_LIMIT>
+          limit to apply to queries that fetch rows
+          
+          [env: OMDB_FETCH_LIMIT=]
+          [default: 500]
+
+      --include-deleted
+          whether to include soft-deleted records when enumerating objects that can be soft-deleted
 
 Safety Options:
-  -w, --destructive  Allow potentially-destructive subcommands
+  -w, --destructive
+          Allow potentially-destructive subcommands
 ---------------------------------------------
 stderr:
 =============================================
@@ -730,10 +1070,11 @@ Commands for querying and interacting with fault management situation reports
 Usage: omdb db sitrep [OPTIONS] <COMMAND>
 
 Commands:
-  history  List the current situation report history
-  current  Show the current situation report
-  info     Show details on a situation report
-  help     Print this message or the help of the given subcommand(s)
+  history          List the current situation report history
+  current          Show the current situation report
+  info             Show details on a situation report
+  analysis-report  Show the analysis report for the requested sitrep, if one exists
+  help             Print this message or the help of the given subcommand(s)
 
 Options:
       --log-level <LOG_LEVEL>  log level filter [env: LOG_LEVEL=] [default: warn]
@@ -754,6 +1095,147 @@ Safety Options:
   -w, --destructive  Allow potentially-destructive subcommands
 ---------------------------------------------
 stderr:
+=============================================
+EXECUTING COMMAND: omdb ["db", "sitrep", "show", "--help"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+Show details on a situation report
+
+Usage: omdb db sitrep info [OPTIONS] <UUID|VERSION|current>
+
+Arguments:
+  <UUID|VERSION|current>
+          The sitrep to show, identified by UUID, version number, or "current".
+          
+          A value of "current" selects the current sitrep. An integer (optionally prefixed with "v",
+          e.g. "3" or "v3") selects the sitrep with that version number in the sitrep history. Any
+          other value is parsed as a sitrep UUID.
+
+Options:
+  -j, --json
+          
+
+      --log-level <LOG_LEVEL>
+          log level filter
+          
+          [env: LOG_LEVEL=]
+          [default: warn]
+
+      --color <COLOR>
+          Color output
+          
+          [default: auto]
+          [possible values: auto, always, never]
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+Connection Options:
+      --db-url <DB_URL>
+          URL of the database SQL interface
+          
+          [env: OMDB_DB_URL=]
+
+      --dns-server <DNS_SERVER>
+          [env: OMDB_DNS_SERVER=]
+
+Database Options:
+      --fetch-limit <FETCH_LIMIT>
+          limit to apply to queries that fetch rows
+          
+          [env: OMDB_FETCH_LIMIT=]
+          [default: 500]
+
+      --include-deleted
+          whether to include soft-deleted records when enumerating objects that can be soft-deleted
+
+Safety Options:
+  -w, --destructive
+          Allow potentially-destructive subcommands
+---------------------------------------------
+stderr:
+=============================================
+EXECUTING COMMAND: omdb ["db", "sitrep", "analysis-report", "--help"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+Show the analysis report for the requested sitrep, if one exists
+
+Usage: omdb db sitrep analysis-report [OPTIONS] <UUID|VERSION|current>
+
+Arguments:
+  <UUID|VERSION|current>
+          The sitrep whose analysis report to show, identified by UUID, version number, or
+          "current".
+          
+          A value of "current" selects the current sitrep. An integer (optionally prefixed with "v",
+          e.g. "3" or "v3") selects the sitrep with that version number in the sitrep history. Any
+          other value is parsed as a sitrep UUID.
+
+Options:
+  -j, --json
+          
+
+      --log-level <LOG_LEVEL>
+          log level filter
+          
+          [env: LOG_LEVEL=]
+          [default: warn]
+
+      --color <COLOR>
+          Color output
+          
+          [default: auto]
+          [possible values: auto, always, never]
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+Connection Options:
+      --db-url <DB_URL>
+          URL of the database SQL interface
+          
+          [env: OMDB_DB_URL=]
+
+      --dns-server <DNS_SERVER>
+          [env: OMDB_DNS_SERVER=]
+
+Database Options:
+      --fetch-limit <FETCH_LIMIT>
+          limit to apply to queries that fetch rows
+          
+          [env: OMDB_FETCH_LIMIT=]
+          [default: 500]
+
+      --include-deleted
+          whether to include soft-deleted records when enumerating objects that can be soft-deleted
+
+Safety Options:
+  -w, --destructive
+          Allow potentially-destructive subcommands
+---------------------------------------------
+stderr:
+=============================================
+EXECUTING COMMAND: omdb ["db", "sitrep", "show", "not-a-sitrep"]
+termination: Exited(2)
+---------------------------------------------
+stdout:
+---------------------------------------------
+stderr:
+error: invalid value 'not-a-sitrep' for '<UUID|VERSION|current>': expected a sitrep UUID, a version number, or "current"
+
+For more information, try '--help'.
+=============================================
+EXECUTING COMMAND: omdb ["db", "sitrep", "show", "v1.2.3"]
+termination: Exited(2)
+---------------------------------------------
+stdout:
+---------------------------------------------
+stderr:
+error: invalid value 'v1.2.3' for '<UUID|VERSION|current>': a sitrep version (prefixed with 'v' or 'V') must be a valid 32-bit unsigned integer
+
+For more information, try '--help'.
 =============================================
 EXECUTING COMMAND: omdb ["db", "saga"]
 termination: Exited(2)
@@ -909,6 +1391,7 @@ Commands:
   support-bundles        interact with support bundles [aliases: sb]
   trust-quorum           interact with the trust quorum
   update-status          show running artifact versions
+  fm-config              view or modify fault management config
   help                   Print this message or the help of the given subcommand(s)
 
 Options:
@@ -1331,4 +1814,172 @@ error: the following required arguments were not provided:
 Usage: omdb reconfigurator archive <OUTPUT_FILE>
 
 For more information, try '--help'.
+=============================================
+EXECUTING COMMAND: omdb ["nexus", "fm-config"]
+termination: Exited(2)
+---------------------------------------------
+stdout:
+---------------------------------------------
+stderr:
+view or modify fault management config
+
+Usage: omdb nexus fm-config [OPTIONS] <COMMAND>
+
+Commands:
+  current        Show the current fault management configuration
+  show           Show a configuration at a given version
+  show-defaults  Show the system-defined default values for all config settings, as of the current
+                 Oxide system software version
+  set            Override one or more config option(s), creating a new version
+  help           Print this message or the help of the given subcommand(s)
+
+Options:
+      --log-level <LOG_LEVEL>  log level filter [env: LOG_LEVEL=] [default: warn]
+      --color <COLOR>          Color output [default: auto] [possible values: auto, always, never]
+  -h, --help                   Print help
+
+Connection Options:
+      --nexus-internal-url <NEXUS_INTERNAL_URL>
+          URL of the Nexus internal lockstep API [env: OMDB_NEXUS_URL=]
+      --dns-server <DNS_SERVER>
+          [env: OMDB_DNS_SERVER=]
+
+Safety Options:
+  -w, --destructive  Allow potentially-destructive subcommands
+=============================================
+EXECUTING COMMAND: omdb ["nexus", "fm-config", "show", "--help"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+Show a configuration at a given version
+
+Usage: omdb nexus fm-config show [OPTIONS] <VERSION|current|default>
+
+Arguments:
+  <VERSION|current|default>
+          The config version to show
+          
+          A value of 'current' or 'latest' selects the currently active config version, while a
+          value of 'default' displays the default values as defined by the current Oxide system
+          software release. An integer version will select that config version if it exists.
+
+Options:
+      --json
+          If set, output the config in JSON rather than pretty-printing it
+
+      --log-level <LOG_LEVEL>
+          log level filter
+          
+          [env: LOG_LEVEL=]
+          [default: warn]
+
+      --color <COLOR>
+          Color output
+          
+          [default: auto]
+          [possible values: auto, always, never]
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+Connection Options:
+      --nexus-internal-url <NEXUS_INTERNAL_URL>
+          URL of the Nexus internal lockstep API
+          
+          [env: OMDB_NEXUS_URL=]
+
+      --dns-server <DNS_SERVER>
+          [env: OMDB_DNS_SERVER=]
+
+Safety Options:
+  -w, --destructive
+          Allow potentially-destructive subcommands
+---------------------------------------------
+stderr:
+=============================================
+EXECUTING COMMAND: omdb ["nexus", "fm-config", "set", "--help"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+Override one or more config option(s), creating a new version.
+
+The flags listed under 'Config Options' provide values for settings in the fault-management config.
+Any number of these flags may be provided to set multiple config values. If a flag is *not*
+provided, the previous value of that setting (which may be an override from an earlier config
+version or the system-defined default) is preserved.
+
+A value of 'default' may also be provided for any flag. This will explicitly restore that setting to
+its system-provided default value. Note that default values may change in new Oxide system software
+releases. Therefore, there is a semantic difference between an override that explicitly sets a
+config option to a value that *happens* to be the default, and restoring the default value through
+this mechanism: if the default value changes in a new system software version, the override will
+remain the same, while the restored default will use the value defined by the current software
+version.
+
+Use the `omdb nexus fm-config show-defaults` command to view the default values for all config
+options.
+
+Usage: omdb nexus fm-config set [OPTIONS] --comment <COMMENT> <--sitrep-limit <SITREP_LIMIT>|--history-pruning-threshold <HISTORY_PRUNING_THRESHOLD>|--analysis-enabled <ANALYSIS_ENABLED>>
+
+Options:
+      --comment <COMMENT>
+          A comment describing this config change.
+          
+          Note that comments are mandatory and may not be empty.
+
+      --log-level <LOG_LEVEL>
+          log level filter
+          
+          [env: LOG_LEVEL=]
+          [default: warn]
+
+      --color <COLOR>
+          Color output
+          
+          [default: auto]
+          [possible values: auto, always, never]
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+Config Options:
+      --sitrep-limit <SITREP_LIMIT>
+          Configures the maximum number of sitreps permitted in the database.
+          
+          If the number of sitreps in the database, including orphaned sitreps, reaches or exceeds
+          this limit, fault management analysis will not produce new sitreps until some are deleted.
+          
+          This must be a non-zero integer, or 'default'. If it is set to 'default', any previous
+          override will be removed, and the system will revert this setting to the default value.
+
+      --history-pruning-threshold <HISTORY_PRUNING_THRESHOLD>
+          Sets the number of sitreps in the history table after which the oldest sitreps will be
+          removed from the history.
+          
+          This must be a non-zero integer, or 'default'. If it is set to 'default', any previous
+          override will be removed, and the system will revert this setting to the default value.
+          
+          If an integer value is provided, it must be less than the total sitrep limit.
+
+      --analysis-enabled <ANALYSIS_ENABLED>
+          BREAK GLASS IN CASE OF EMERGENCY: COMPLETELY DISABLE FM ANALYSIS
+          
+          This must be a boolean ('true' or 'false'), or 'default'. If it is set to 'default', any
+          previous override will be removed, and the system will revert this setting to the default
+          value.
+
+Connection Options:
+      --nexus-internal-url <NEXUS_INTERNAL_URL>
+          URL of the Nexus internal lockstep API
+          
+          [env: OMDB_NEXUS_URL=]
+
+      --dns-server <DNS_SERVER>
+          [env: OMDB_DNS_SERVER=]
+
+Safety Options:
+  -w, --destructive
+          Allow potentially-destructive subcommands
+---------------------------------------------
+stderr:
 =============================================

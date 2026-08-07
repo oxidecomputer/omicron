@@ -11,10 +11,12 @@
 //! corruption.
 
 use async_trait::async_trait;
+use atomicwrites::{AtomicFile, OverwriteBehavior};
 use camino::{Utf8Path, Utf8PathBuf};
 use serde::{Serialize, de::DeserializeOwned};
 use slog::{Logger, debug, error, info, warn};
 use slog_error_chain::SlogInlineError;
+use std::io::Write;
 
 #[derive(thiserror::Error, Debug, SlogInlineError)]
 pub enum Error {
@@ -30,6 +32,13 @@ pub enum Error {
         path: Utf8PathBuf,
         #[source]
         err: serde_json::error::Error,
+    },
+
+    #[error("Failed to join tokio task while writing to {path}")]
+    JoinTask {
+        path: Utf8PathBuf,
+        #[source]
+        err: tokio::task::JoinError,
     },
 
     #[error("Failed to perform I/O: {message}")]
@@ -147,24 +156,34 @@ impl<T: Ledgerable> Ledger<T> {
     }
 
     // Atomically serialize and write the ledger to storage.
-    //
-    // We accomplish this by first writing to a temporary file, then
-    // renaming to the target location.
     async fn atomic_write(&self, path: &Utf8Path) -> Result<(), Error> {
-        let mut tmp_path = path.to_path_buf();
-        let tmp_filename = format!(
-            ".{}.tmp",
-            tmp_path.file_name().expect("Should have file name")
-        );
-        tmp_path.set_file_name(tmp_filename);
+        info!(self.log, "Writing ledger to {path}");
 
-        self.ledger.write_to(&self.log, &tmp_path).await?;
+        // Serialize the content prior to `spawn_blocking()`; this is bad if
+        // `self.ledger` is very large, but it shouldn't be! And it makes
+        // ownership of the closure below simple.
+        let content = serde_json::to_vec(&self.ledger).map_err(|err| {
+            Error::JsonSerialize { path: path.to_path_buf(), err }
+        })?;
 
-        tokio::fs::rename(&tmp_path, &path)
+        let result = {
+            let path = path.to_path_buf();
+            tokio::task::spawn_blocking(move || {
+                let atomic_file =
+                    AtomicFile::new(path, OverwriteBehavior::AllowOverwrite);
+                atomic_file.write(|f| f.write_all(&content))
+            })
             .await
-            .map_err(|err| Error::io_path(&path, err))?;
+        };
 
-        Ok(())
+        match result {
+            Ok(Ok(())) => Ok(()),
+            Ok(Err(
+                atomicwrites::Error::User(err)
+                | atomicwrites::Error::Internal(err),
+            )) => Err(Error::io_path(path, err)),
+            Err(err) => Err(Error::JoinTask { path: path.to_path_buf(), err }),
+        }
     }
 }
 
@@ -195,22 +214,7 @@ pub trait Ledgerable: DeserializeOwned + Serialize + Send + Sync {
         }
     }
 
-    /// Writes to `path` as a json-serialized version of `Self`.
-    async fn write_to(
-        &self,
-        log: &Logger,
-        path: &Utf8Path,
-    ) -> Result<(), Error> {
-        info!(log, "Writing ledger to {}", path);
-        let as_str = serde_json::to_string(&self).map_err(|err| {
-            Error::JsonSerialize { path: path.to_path_buf(), err }
-        })?;
-        tokio::fs::write(&path, as_str)
-            .await
-            .map_err(|err| Error::io_path(&path, err))?;
-        Ok(())
-    }
-
+    /// Deserialize `s`, a json-serialized version of `Self`.
     fn deserialize(s: &str) -> Result<Self, serde_json::Error> {
         serde_json::from_str(s)
     }

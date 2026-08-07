@@ -5,9 +5,6 @@
 //! Bootstrap-related utilities
 
 pub(crate) mod bootstore_setup;
-pub mod client;
-pub mod early_networking;
-mod http_entrypoints;
 mod http_entrypoints_lockstep;
 mod maghemite;
 pub(crate) mod params;
@@ -17,6 +14,7 @@ mod rack_ops;
 pub(crate) mod rss_handle;
 pub mod secret_retriever;
 pub mod server;
+pub mod sprockets_client;
 mod sprockets_server;
 pub(crate) mod trust_quorum_setup;
 mod views;

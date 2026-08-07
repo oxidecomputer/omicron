@@ -4,6 +4,7 @@
 
 //! omdb commands that query or update specific Nexus instances
 
+mod fm_config;
 mod quiesce;
 mod reconfigurator_config;
 mod update_status;
@@ -26,6 +27,8 @@ use clap::Args;
 use clap::ColorChoice;
 use clap::Subcommand;
 use clap::ValueEnum;
+use fm_config::FmConfigArgs;
+use fm_config::cmd_nexus_fm_config;
 use futures::StreamExt;
 use futures::TryStreamExt;
 use http::StatusCode;
@@ -60,11 +63,14 @@ use nexus_types::internal_api::background::BlueprintRendezvousStatus;
 use nexus_types::internal_api::background::DatasetsRendezvousStats;
 use nexus_types::internal_api::background::EreporterStatus;
 use nexus_types::internal_api::background::FmAnalysisStatus;
+use nexus_types::internal_api::background::FmConfigLoadStatus;
 use nexus_types::internal_api::background::FmRendezvousStatus;
+use nexus_types::internal_api::background::IncompleteBootstoreConfigReport;
 use nexus_types::internal_api::background::InstanceReincarnationStatus;
 use nexus_types::internal_api::background::InstanceUpdaterStatus;
 use nexus_types::internal_api::background::InventoryLoadStatus;
 use nexus_types::internal_api::background::LookupRegionPortStatus;
+use nexus_types::internal_api::background::PhysicalDiskAdoptionStatus;
 use nexus_types::internal_api::background::ProbeDistributorStatus;
 use nexus_types::internal_api::background::ReadOnlyRegionReplacementStartStatus;
 use nexus_types::internal_api::background::RegionReplacementDriverStatus;
@@ -77,10 +83,12 @@ use nexus_types::internal_api::background::ServiceFirewallRuleStatus;
 use nexus_types::internal_api::background::SessionCleanupStatus;
 use nexus_types::internal_api::background::SitrepGcStatus;
 use nexus_types::internal_api::background::SitrepLoadStatus;
+use nexus_types::internal_api::background::SupportBundleActivationReport;
 use nexus_types::internal_api::background::SupportBundleCleanupReport;
-use nexus_types::internal_api::background::SupportBundleCollectionReport;
 use nexus_types::internal_api::background::SupportBundleCollectionStepStatus;
-use nexus_types::internal_api::background::SupportBundleEreportStatus;
+use nexus_types::internal_api::background::SwitchPortPopulatorStatus;
+use nexus_types::internal_api::background::SwitchPortPopulatorStatusKind;
+use nexus_types::internal_api::background::SwitchPortSettingsManagerStatus;
 use nexus_types::internal_api::background::TrustQuorumManagerStatus;
 use nexus_types::internal_api::background::TufArtifactReplicationCounters;
 use nexus_types::internal_api::background::TufArtifactReplicationRequest;
@@ -97,6 +105,17 @@ use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::SupportBundleUuid;
+use oxide_update_engine_display::LineDisplay;
+use oxide_update_engine_display::LineDisplayStyles;
+use oxide_update_engine_display::ProgressRatioDisplay;
+use oxide_update_engine_types::buffer::EventBuffer;
+use oxide_update_engine_types::buffer::ExecutionStatus;
+use oxide_update_engine_types::buffer::ExecutionTerminalInfo;
+use oxide_update_engine_types::buffer::TerminalKind;
+use oxide_update_engine_types::events::EventReport;
+use oxide_update_engine_types::events::StepOutcome;
+use oxide_update_engine_types::spec::GenericSpec;
+use oxide_update_engine_types::spec::SerializableError;
 use quiesce::QuiesceArgs;
 use quiesce::cmd_nexus_quiesce;
 use reconfigurator_config::ReconfiguratorConfigArgs;
@@ -120,17 +139,6 @@ use tabled::settings::object::Columns;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::OnceCell;
 use trust_quorum_types::types::Epoch;
-use update_engine::EventBuffer;
-use update_engine::ExecutionStatus;
-use update_engine::ExecutionTerminalInfo;
-use update_engine::NestedError;
-use update_engine::NestedSpec;
-use update_engine::TerminalKind;
-use update_engine::display::LineDisplay;
-use update_engine::display::LineDisplayStyles;
-use update_engine::display::ProgressRatioDisplay;
-use update_engine::events::EventReport;
-use update_engine::events::StepOutcome;
 use update_status::cmd_nexus_update_status;
 use uuid::Uuid;
 
@@ -181,6 +189,8 @@ enum NexusCommands {
     TrustQuorum(TrustQuorumArgs),
     /// show running artifact versions
     UpdateStatus(UpdateStatusArgs),
+    /// view or modify fault management config
+    FmConfig(FmConfigArgs),
 }
 
 #[derive(Debug, Args)]
@@ -706,7 +716,7 @@ impl NexusArgs {
                 format!("http://{}", addr)
             }
         };
-        eprintln!("note: using Nexus URL {}", &nexus_url);
+        eprintln!("note: using Nexus URL {}", nexus_url);
         let client =
             nexus_lockstep_client::Client::new(&nexus_url, log.clone());
 
@@ -934,6 +944,9 @@ impl NexusArgs {
             }
             NexusCommands::UpdateStatus(args) => {
                 cmd_nexus_update_status(&client, args).await
+            }
+            NexusCommands::FmConfig(args) => {
+                cmd_nexus_fm_config(omdb, &client, args).await
             }
         }
     }
@@ -1301,6 +1314,9 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
         "phantom_disks" => {
             print_task_phantom_disks(details);
         }
+        "physical_disk_adoption" => {
+            print_task_physical_disk_adoption(details);
+        }
         "probe_distributor" => {
             print_task_probe_distributor(details);
         }
@@ -1358,17 +1374,29 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
         "fm_analysis" => {
             print_task_fm_analysis(details);
         }
+        "fm_config_loader" => {
+            print_task_fm_config_loader(details);
+        }
         "fm_sitrep_loader" => {
             print_task_fm_sitrep_loader(details);
         }
         "fm_sitrep_gc" => {
             print_task_fm_sitrep_gc(details);
         }
+        "fm_sitrep_history_pruner" => {
+            print_task_fm_sitrep_history_pruner(details);
+        }
         "fm_rendezvous" => {
             print_task_fm_rendezvous(details);
         }
         "trust_quorum_manager" => {
             print_task_trust_quorum_manager(details);
+        }
+        "populate_switch_ports" => {
+            print_task_populate_switch_ports(details);
+        }
+        "switch_port_config_manager" => {
+            print_task_switch_port_settings_manager(details);
         }
         "user_data_export_coordinator" => {
             print_task_user_data_export_coordinator(details);
@@ -1534,7 +1562,7 @@ fn print_task_blueprint_executor(details: &serde_json::Value) {
     struct BlueprintExecutorStatus {
         target_id: Uuid,
         enabled: bool,
-        execution_error: Option<NestedError>,
+        execution_error: Option<SerializableError>,
     }
 
     match serde_json::from_value::<BlueprintExecutorStatus>(value) {
@@ -2843,7 +2871,7 @@ fn print_task_support_bundle_collector(details: &serde_json::Value) {
     struct SupportBundleCollectionStatus {
         cleanup_report: Option<SupportBundleCleanupReport>,
         cleanup_err: Option<String>,
-        collection_report: Option<SupportBundleCollectionReport>,
+        collection_report: Option<SupportBundleActivationReport>,
         collection_err: Option<String>,
     }
 
@@ -2893,15 +2921,13 @@ fn print_task_support_bundle_collector(details: &serde_json::Value) {
                 println!("    failed to perform collection: {collection_err}");
             }
 
-            if let Some(SupportBundleCollectionReport {
-                bundle,
+            if let Some(SupportBundleActivationReport {
+                collection,
                 activated_in_db_ok,
-                mut steps,
-                ereports,
             }) = collection_report
             {
                 println!("    Support Bundle Collection Report:");
-                println!("      Bundle ID: {bundle}");
+                println!("      Bundle ID: {}", collection.bundle);
 
                 #[derive(Tabled)]
                 #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
@@ -2912,18 +2938,19 @@ fn print_task_support_bundle_collector(details: &serde_json::Value) {
                     status: SupportBundleCollectionStepStatus,
                 }
 
+                let mut steps = collection.steps;
                 steps.sort_unstable_by_key(|s| s.start);
                 let rows: Vec<StepRow> = steps
-                    .into_iter()
+                    .iter()
                     .map(|step| {
                         let duration = (step.end - step.start)
                             .to_std()
                             .unwrap_or(Duration::from_millis(0));
                         StepRow {
-                            step_name: step.name,
+                            step_name: step.name.clone(),
                             start_time: step.start,
                             duration: format!("{:.3}s", duration.as_secs_f64()),
-                            status: step.status,
+                            status: step.status.clone(),
                         }
                     })
                     .collect();
@@ -2931,38 +2958,17 @@ fn print_task_support_bundle_collector(details: &serde_json::Value) {
                 if !rows.is_empty() {
                     println!("\n{}", tabled::Table::new(rows));
                 }
+                for step in &steps {
+                    if let Some(details) = &step.details {
+                        println!("      {} details:", step.name);
+                        let pretty = serde_json::to_string_pretty(details)
+                            .unwrap_or_else(|_| details.to_string());
+                        println!("{}", textwrap::indent(&pretty, "        "));
+                    }
+                }
                 println!(
                     "      Bundle was activated in the database: {activated_in_db_ok}"
                 );
-                match ereports {
-                    None => {
-                        println!("      ereport collection was not requested");
-                    }
-                    Some(SupportBundleEreportStatus {
-                        errors,
-                        n_collected,
-                        n_found,
-                    }) if !errors.is_empty() => {
-                        println!("      ereport collection failed:");
-                        println!(
-                            "        total matching ereports found: {n_found}"
-                        );
-                        println!(
-                            "        ereports collected successfully: {n_collected}"
-                        );
-                        println!("        errors:");
-                        for error in errors {
-                            println!("          {error}");
-                        }
-                    }
-                    Some(SupportBundleEreportStatus {
-                        n_collected, ..
-                    }) => {
-                        // If ereport collection succeeded, n_found should be
-                        // equal to n_collected.
-                        println!("      ereports collected: {n_collected}");
-                    }
-                }
             }
         }
     }
@@ -3338,17 +3344,22 @@ fn print_task_sp_ereport_ingester(details: &serde_json::Value) {
     use nexus_types::internal_api::background::SpEreportIngesterStatus;
     use nexus_types::internal_api::background::SpEreporterStatus;
 
-    let SpEreportIngesterStatus { sps, errors, disabled, sps_not_present } =
-        match serde_json::from_value(details.clone()) {
-            Err(error) => {
-                eprintln!(
-                    "warning: failed to interpret task details: {:?}: {:?}",
-                    error, details
-                );
-                return;
-            }
-            Ok(status) => status,
-        };
+    let SpEreportIngesterStatus {
+        sps,
+        errors,
+        disabled,
+        sps_found,
+        sps_not_present,
+    } = match serde_json::from_value(details.clone()) {
+        Err(error) => {
+            eprintln!(
+                "warning: failed to interpret task details: {:?}: {:?}",
+                error, details
+            );
+            return;
+        }
+        Ok(status) => status,
+    };
 
     if !errors.is_empty() {
         println!("    errors listing reporters:");
@@ -3360,11 +3371,13 @@ fn print_task_sp_ereport_ingester(details: &serde_json::Value) {
     if disabled {
         println!("    SP ereport ingestion explicitly disabled by config!");
     } else {
+        println!("    {SPS_FOUND:<WIDTH$}{sps_found:>NUM_WIDTH$}");
+        if sps_not_present > 0 {
+            println!(
+                "(i) {SPS_NOT_PRESENT:<WIDTH$}{sps_not_present:>NUM_WIDTH$}"
+            );
+        }
         print_ereporter_status_totals(sps.iter().map(|sp| &sp.status));
-    }
-
-    if sps_not_present > 0 {
-        println!("(i) {SPS_NOT_PRESENT:<WIDTH$}{sps_not_present:>NUM_WIDTH$}");
     }
 
     if !sps.is_empty() {
@@ -3427,12 +3440,12 @@ fn print_ereporter_status_totals<'status>(
         total_new += new_ereports;
         total_reqs += requests;
         total_errors += errors.len();
-        if total_received > 0 {
+        if ereports_received > 0 {
             reporters_with_ereports += 1;
         } else {
             reporters_without_ereports += 1;
         }
-        if total_errors > 0 {
+        if !errors.is_empty() {
             reporters_with_errors += 1;
         } else {
             reporters_without_errors += 1;
@@ -3444,7 +3457,7 @@ fn print_ereporter_status_totals<'status>(
     println!("    {EREPORTS_RECEIVED:<WIDTH$}{total_received:>NUM_WIDTH$}");
     println!("    {NEW_EREPORTS:<WIDTH$}{total_new:>NUM_WIDTH$}");
     println!("    {HTTP_REQUESTS:<WIDTH$}{total_reqs:>NUM_WIDTH$}");
-    println!("    {ERRORS:<WIDTH$}{total_reqs:>NUM_WIDTH$}");
+    println!("    {ERRORS:<WIDTH$}{total_errors:>NUM_WIDTH$}");
     println!("    {TOTAL_REPORTERS:<WIDTH$}{total_reporters:>NUM_WIDTH$}",);
     println!(
         "    {REPORTERS_CONTACTED_SUCCESSFULLY:<WIDTH$}\
@@ -3478,6 +3491,7 @@ mod ereporter_status_fields {
     pub const REPORTERS_WITH_EREPORTS: &str = "    with ereports:";
     pub const REPORTERS_WITHOUT_EREPORTS: &str = "    without ereports:";
     pub const REPORTERS_WITH_ERRORS: &str = "  with collection errors:";
+    pub const SPS_FOUND: &str = "SPs found via ignition:";
     pub const SPS_NOT_PRESENT: &str = "SPs not present:";
     pub const WIDTH: usize = super::const_max_len(&[
         TOTAL_NEW_EREPORTS,
@@ -3490,6 +3504,7 @@ mod ereporter_status_fields {
         REPORTERS_WITH_EREPORTS,
         REPORTERS_WITHOUT_EREPORTS,
         REPORTERS_WITH_ERRORS,
+        SPS_FOUND,
         SPS_NOT_PRESENT,
     ]) + 1;
     pub const NUM_WIDTH: usize = 4;
@@ -3500,25 +3515,55 @@ fn print_task_fm_analysis(details: &serde_json::Value) {
         AnalysisOutcome, AnalysisStatus, Outcome, PreparationStatus,
     };
 
-    let FmAnalysisStatus { parent_sitrep_id, inv_collection_id, outcome } =
-        match serde_json::from_value::<FmAnalysisStatus>(details.clone()) {
-            Err(error) => {
-                eprintln!(
-                    "warning: failed to interpret task details: {:?}: {:?}",
-                    error, details
-                );
-                return;
-            }
-            Ok(status) => status,
-        };
+    let FmAnalysisStatus {
+        parent_sitrep_id,
+        inv_collection_id,
+        known_classes,
+        outcome,
+        warnings,
+    } = match serde_json::from_value::<FmAnalysisStatus>(details.clone()) {
+        Err(error) => {
+            eprintln!(
+                "warning: failed to interpret task details: {:?}: {:?}",
+                error, details
+            );
+            return;
+        }
+        Ok(status) => status,
+    };
     pub const PARENT_SITREP_ID: &str = "parent sitrep ID:";
     pub const INV_ID: &str = "current inventory collection ID:";
-    pub const WIDTH: usize = const_max_len(&[PARENT_SITREP_ID, INV_ID]) + 1;
+    pub const KNOWN_CLASSES: &str = "ereport classes consumed:";
+    pub const WIDTH: usize =
+        const_max_len(&[PARENT_SITREP_ID, INV_ID, KNOWN_CLASSES]) + 1;
     println!("    {PARENT_SITREP_ID:<WIDTH$}{parent_sitrep_id:?}");
     println!("    {INV_ID:<WIDTH$}{inv_collection_id:?}");
+    if known_classes.is_empty() {
+        println!("    {KNOWN_CLASSES:<WIDTH$}(none)");
+    } else {
+        println!("    {KNOWN_CLASSES:<WIDTH$}({} total)", known_classes.len());
+        for class in &known_classes {
+            println!("      - {class}");
+        }
+    }
     println!("    FAULT MANAGEMENT ANALYSIS SUMMARY");
     println!("    =================================");
     let (prep_status, analysis_status) = match outcome {
+        Outcome::Disabled(config_source) => {
+            println!(
+                "    fault management analysis explicitly disabled by config!"
+            );
+            println!("{}", config_source.display_multiline(6));
+            return;
+        }
+        Outcome::WaitingForConfig => {
+            println!(
+                "    analysis was not performed, as the fault management\n    \
+                     configuration has not yet been loaded.\n\
+                 (i) note: this should only happen if Nexus has just started.",
+            );
+            return;
+        }
         Outcome::WaitingForInventory => {
             println!(
                 "    analysis was not performed, as the inventory has\n    \
@@ -3562,21 +3607,27 @@ fn print_task_fm_analysis(details: &serde_json::Value) {
         }
     };
 
-    let AnalysisStatus {
-        start_time,
-        end_time,
-        report: analysis_report,
-        outcome,
-    } = analysis_status;
-    match outcome {
+    let AnalysisStatus { start_time, end_time, outcome, capacity } =
+        analysis_status;
+    let sitrep_id = match outcome {
         AnalysisOutcome::Error(error) => {
             println!("{ERRICON} analysis failed: {error}");
+            None
         }
         AnalysisOutcome::Unchanged => {
             println!(
                 "    no changes from the current situation report ({:?})",
                 parent_sitrep_id
             );
+            None
+        }
+        AnalysisOutcome::LimitReached { limit } => {
+            println!(
+                "{ERRICON}   analysis succeeded, but the database sitrep \
+                 limit ({limit} sitreps) has been reached!"
+            );
+            println!("    no new sitrep was written.");
+            None
         }
         AnalysisOutcome::NotCommitted { sitrep_id } => {
             println!(
@@ -3587,6 +3638,7 @@ fn print_task_fm_analysis(details: &serde_json::Value) {
                 of date"
             );
             println!("    sitrep ID: {sitrep_id:?}");
+            Some(sitrep_id)
         }
         AnalysisOutcome::CommitFailed { sitrep_id, error } => {
             println!(
@@ -3595,25 +3647,84 @@ fn print_task_fm_analysis(details: &serde_json::Value) {
             );
             println!("    sitrep ID: {sitrep_id:?}");
             println!("    error:     {error}");
+            Some(sitrep_id)
         }
         AnalysisOutcome::Committed { sitrep_id } => {
             println!("    analyzed the situation, and committed a new sitrep!");
             println!("    sitrep ID: {sitrep_id:?}");
+            Some(sitrep_id)
         }
+    };
+    if let Some(sitrep_id) = sitrep_id {
+        println!(
+            "    note: you can view the sitrep and its reports with:\n      \
+                   $ omdb db sitrep show {sitrep_id}\n      \
+                   $ omdb db sitrep analysis-report {sitrep_id} "
+        )
     }
     println!();
 
-    let PreparationStatus { errors, report: prep_report } = prep_status;
-    print!("{}", prep_report.display_multiline(4));
-    if !errors.is_empty() {
-        println!("{ERRICON}   errors preparing analysis inputs:");
-        for error in errors {
+    if !warnings.is_empty() {
+        println!("{ERRICON}   non-fatal errors occurred during analysis:");
+        for error in warnings {
             println!("      > {error}")
         }
     }
-    println!();
-    print!("{}", analysis_report.display_multiline(4));
+
+    if let Some(capacity) = capacity {
+        let usage_percent = capacity.usage_percent();
+        println!("    sitrep storage capacity: {usage_percent}% used");
+        println!("      limit: {:>6}", capacity.limit);
+        println!("      count: {:>6}", capacity.count);
+    }
+
+    let PreparationStatus { warnings } = prep_status;
+    if !warnings.is_empty() {
+        println!("{ERRICON}   non-fatal errors preparing analysis inputs:");
+        for error in warnings {
+            println!("      > {error}")
+        }
+    }
     print_start_end_time(start_time, end_time, 4);
+}
+
+fn print_task_fm_config_loader(details: &serde_json::Value) {
+    use nexus_types::internal_api::background::CurrentFmConfig;
+    let current_config =
+        match serde_json::from_value::<FmConfigLoadStatus>(details.clone()) {
+            Err(error) => {
+                eprintln!(
+                    "warning: failed to interpret task details: {:?}: {:?}",
+                    error, details
+                );
+                return;
+            }
+            Ok(FmConfigLoadStatus::Error(error)) => {
+                println!("    task did not complete successfully: {error}");
+                return;
+            }
+            Ok(FmConfigLoadStatus::LatestConfigInvalid { error, fallback }) => {
+                println!(
+                    "/!\\ the latest FM config override in the database is \
+                 invalid: {error}"
+                );
+                fallback
+            }
+            Ok(FmConfigLoadStatus::Loaded(config)) => config,
+        };
+
+    let CurrentFmConfig { time_loaded, updated, config } = current_config;
+
+    const TIME_LOADED: &str = "config last loaded at:";
+    const UPDATED: &str = "  loaded by this activation:";
+    const WIDTH: usize = const_max_len(&[TIME_LOADED, UPDATED]) + 1;
+    println!(
+        "    {TIME_LOADED:<WIDTH$}{}",
+        humantime::format_rfc3339_millis(time_loaded.into()),
+    );
+    println!("    {UPDATED:<WIDTH$}{updated}");
+    println!("    current config:");
+    print!("{}", config.display_multiline(6));
 }
 
 fn print_task_fm_sitrep_loader(details: &serde_json::Value) {
@@ -3641,6 +3752,83 @@ fn print_task_fm_sitrep_loader(details: &serde_json::Value) {
             );
         }
     };
+}
+
+fn print_task_fm_sitrep_history_pruner(details: &serde_json::Value) {
+    use nexus_types::internal_api::background::SitrepHistoryPrunerStatus;
+    use nexus_types::internal_api::background::fm_sitrep_history_pruner::{
+        Outcome, SitrepsPruned,
+    };
+
+    let (cfg, batch_size, SitrepsPruned { batches, total, versions }, outcome) =
+        match serde_json::from_value::<SitrepHistoryPrunerStatus>(
+            details.clone(),
+        ) {
+            Err(error) => {
+                eprintln!(
+                    "warning: failed to interpret task details: {:?}: {:?}",
+                    error, details
+                );
+                return;
+            }
+            Ok(SitrepHistoryPrunerStatus::WaitingForConfig) => {
+                println!(
+                    "    nothing was pruned, as the fault management\n    \
+                         configuration has not yet been loaded.\n\
+                     (i) note: this should only happen if Nexus has just \
+                     started.",
+                );
+                return;
+            }
+            Ok(SitrepHistoryPrunerStatus::Activated {
+                cfg,
+                batch_size,
+                pruned,
+                outcome,
+            }) => (cfg, batch_size, pruned, outcome),
+        };
+
+    const STATUS: &str = "status:";
+    const SITREP_COUNT: &str = "  current count:";
+    const PRUNED_COUNT: &str = "  sitreps pruned:";
+    const PRUNED_VERSIONS: &str = "  versions pruned:";
+    const BATCHES: &str = "  batches:";
+    const BATCH_SIZE: &str = "deletion batch size:";
+    const P_WIDTH: usize = const_max_len(&[
+        SITREP_COUNT,
+        PRUNED_COUNT,
+        PRUNED_VERSIONS,
+        BATCHES,
+        BATCH_SIZE,
+    ]) + 1;
+    const NUM_WIDTH: usize = 4;
+    println!("    configuration:");
+    print!("{}", cfg.display_multiline(6));
+    println!("    {BATCH_SIZE:<P_WIDTH$}{batch_size:>NUM_WIDTH$}");
+    match outcome {
+        Outcome::Error(error) => {
+            println!("{ERRICON} {STATUS} failed!");
+            println!("      > {error}")
+        }
+        Outcome::NotPruned { count } => {
+            println!("    {STATUS} within limit (nothing was deleted)");
+            println!("    {SITREP_COUNT:<P_WIDTH$}{count:>NUM_WIDTH$}");
+        }
+        Outcome::Pruned { count } => {
+            println!("    {STATUS} limit reached (old sitreps were deleted)");
+            println!("    {SITREP_COUNT:<P_WIDTH$}{count:>NUM_WIDTH$}");
+        }
+    }
+
+    // If anything was deleted, including partial progress made before a
+    // query failed, display the details of what was pruned.
+    if total > 0 {
+        println!("    {PRUNED_COUNT:<P_WIDTH$}{total:>NUM_WIDTH$}");
+        if let Some(versions) = versions {
+            println!("    {PRUNED_VERSIONS:<P_WIDTH$}v{versions:?}");
+        }
+        println!("    {BATCHES:<P_WIDTH$}{batches:>NUM_WIDTH$}");
+    }
 }
 
 fn print_task_fm_sitrep_gc(details: &serde_json::Value) {
@@ -3674,13 +3862,9 @@ fn print_task_fm_sitrep_gc(details: &serde_json::Value) {
         .fold(BASE_WIDTH, |w, l| w.max(l));
 
     if !errors.is_empty() {
-        println!(
-            "{ERRICON}   {:<width$}{:>NUM_WIDTH$}",
-            "errors:",
-            errors.len()
-        );
+        println!("{ERRICON} {:<width$}{:>NUM_WIDTH$}", "errors:", errors.len());
         for error in errors {
-            println!("      > {error}")
+            println!("    > {error}")
         }
     }
 
@@ -3704,7 +3888,7 @@ fn print_task_fm_sitrep_gc(details: &serde_json::Value) {
             format!("orphaned {table_name} rows deleted:"),
             stats.rows_deleted,
         );
-        println!("    {:<width$}{:>NUM_WIDTH$}", "  batches:", stats.batches,);
+        println!("    {:<width$}{:>NUM_WIDTH$}", "  batches:", stats.batches);
     }
 }
 
@@ -3732,6 +3916,8 @@ fn print_task_fm_rendezvous(details: &serde_json::Value) {
         alerts,
         support_bundles,
         ereport_marking: marking,
+        alert_marker_gc,
+        support_bundle_marker_gc,
     } = match serde_json::from_value::<FmRendezvousStatus>(details.clone()) {
         Err(error) => {
             eprintln!(
@@ -3756,23 +3942,26 @@ fn print_task_fm_rendezvous(details: &serde_json::Value) {
              total_alerts_requested,
              current_sitrep_alerts_requested,
              alerts_created,
+             alerts_already_existed,
+             stale_sitrep,
              errors,
          }| {
-            let already_created =
-                total_alerts_requested - alerts_created - errors.len();
             const REQUESTED: &str = "alerts requested:";
             const REQUESTED_THIS_SITREP: &str = "  requested in this sitrep:";
             const CREATED: &str = "  created in this activation:";
-            const ALREADY_CREATED: &str = "  already created:";
+            const ALREADY_EXISTED: &str = "  already existed:";
             const ERRORS: &str = "  errors:";
             const WIDTH: usize = const_max_len(&[
                 REQUESTED,
                 REQUESTED_THIS_SITREP,
                 CREATED,
-                ALREADY_CREATED,
+                ALREADY_EXISTED,
                 ERRORS,
             ]) + 1;
             pub const NUM_WIDTH: usize = 4;
+            if *stale_sitrep {
+                println!("{ERRICON}   sitrep was stale");
+            }
             println!(
                 "      {REQUESTED:<WIDTH$}{total_alerts_requested:>NUM_WIDTH$}"
             );
@@ -3782,7 +3971,7 @@ fn print_task_fm_rendezvous(details: &serde_json::Value) {
             );
             println!("      {CREATED:<WIDTH$}{alerts_created:>NUM_WIDTH$}");
             println!(
-                "      {ALREADY_CREATED:<WIDTH$}{already_created:>NUM_WIDTH$}"
+                "      {ALREADY_EXISTED:<WIDTH$}{alerts_already_existed:>NUM_WIDTH$}"
             );
             println!(
                 "{}   {ERRORS:<WIDTH$}{:>NUM_WIDTH$}",
@@ -3801,23 +3990,26 @@ fn print_task_fm_rendezvous(details: &serde_json::Value) {
              total_bundles_requested,
              current_sitrep_bundles_requested,
              bundles_created,
+             bundles_already_existed,
+             stale_sitrep,
              errors,
          }| {
-            let already_created =
-                total_bundles_requested - bundles_created - errors.len();
             const REQUESTED: &str = "support bundles requested:";
             const REQUESTED_THIS_SITREP: &str = "  requested in this sitrep:";
             const CREATED: &str = "  created in this activation:";
-            const ALREADY_CREATED: &str = "  already created:";
+            const ALREADY_EXISTED: &str = "  already existed:";
             const ERRORS: &str = "  errors:";
             const WIDTH: usize = const_max_len(&[
                 REQUESTED,
                 REQUESTED_THIS_SITREP,
                 CREATED,
-                ALREADY_CREATED,
+                ALREADY_EXISTED,
                 ERRORS,
             ]) + 1;
             pub const NUM_WIDTH: usize = 4;
+            if *stale_sitrep {
+                println!("{ERRICON}   sitrep was stale");
+            }
             println!(
                 "      {REQUESTED:<WIDTH$}{total_bundles_requested:>NUM_WIDTH$}"
             );
@@ -3827,7 +4019,7 @@ fn print_task_fm_rendezvous(details: &serde_json::Value) {
             );
             println!("      {CREATED:<WIDTH$}{bundles_created:>NUM_WIDTH$}");
             println!(
-                "      {ALREADY_CREATED:<WIDTH$}{already_created:>NUM_WIDTH$}"
+                "      {ALREADY_EXISTED:<WIDTH$}{bundles_already_existed:>NUM_WIDTH$}"
             );
             println!(
                 "{}   {ERRORS:<WIDTH$}{:>NUM_WIDTH$}",
@@ -3903,6 +4095,36 @@ fn print_task_fm_rendezvous(details: &serde_json::Value) {
             }
         },
     );
+    print_op(
+        "garbage collecting alert creation markers",
+        &alert_marker_gc,
+        print_marker_gc_details,
+    );
+    print_op(
+        "garbage collecting support bundle creation markers",
+        &support_bundle_marker_gc,
+        print_marker_gc_details,
+    );
+}
+
+fn print_marker_gc_details(status: &fm_rendezvous::MarkerGcStatus) {
+    let fm_rendezvous::MarkerGcStatus { rows_deleted, batches, errors } =
+        status;
+    const ROWS_DELETED: &str = "rows deleted:";
+    const BATCHES: &str = "batches:";
+    const ERRORS: &str = "errors:";
+    const WIDTH: usize = const_max_len(&[ROWS_DELETED, BATCHES, ERRORS]) + 1;
+    const NUM_WIDTH: usize = 4;
+    println!("      {ROWS_DELETED:<WIDTH$}{rows_deleted:>NUM_WIDTH$}");
+    println!("      {BATCHES:<WIDTH$}{batches:>NUM_WIDTH$}");
+    println!(
+        "{}   {ERRORS:<WIDTH$}{:>NUM_WIDTH$}",
+        warn_if_nonzero(errors.len()),
+        errors.len()
+    );
+    for error in errors {
+        println!("        > {error}");
+    }
 }
 
 fn print_task_trust_quorum_manager(details: &serde_json::Value) {
@@ -3935,6 +4157,104 @@ fn print_task_trust_quorum_manager(details: &serde_json::Value) {
         TrustQuorumManagerStatus::Error(error) => {
             println!("    task did not complete successfully: {error}");
         }
+    }
+}
+
+fn print_task_populate_switch_ports(details: &serde_json::Value) {
+    fn print_one(
+        name: &str,
+        result: Result<SwitchPortPopulatorStatusKind, String>,
+    ) {
+        match result {
+            Ok(SwitchPortPopulatorStatusKind::Populated { num_ports }) => {
+                println!("{name}: populated {num_ports} ports");
+            }
+            Ok(SwitchPortPopulatorStatusKind::PreviouslyPopulated) => {
+                println!("{name} skipped: previously populated ports");
+            }
+            Err(err) => println!("{name} failed: {err}"),
+        }
+    }
+
+    let status = match serde_json::from_value::<SwitchPortPopulatorStatus>(
+        details.clone(),
+    ) {
+        Ok(status) => status,
+        Err(error) => {
+            eprintln!(
+                "warning: failed to interpret task details: {:?}: {:#?}",
+                error, details
+            );
+            return;
+        }
+    };
+
+    let SwitchPortPopulatorStatus { switch0, switch1 } = status;
+    print_one("switch0", switch0);
+    print_one("switch1", switch1);
+}
+
+fn print_task_switch_port_settings_manager(details: &serde_json::Value) {
+    let status = match serde_json::from_value::<SwitchPortSettingsManagerStatus>(
+        details.clone(),
+    ) {
+        Ok(status) => status,
+        Err(error) => {
+            eprintln!(
+                "warning: failed to interpret task details: {:?}: {:#?}",
+                error, details
+            );
+            return;
+        }
+    };
+
+    let SwitchPortSettingsManagerStatus { incomplete_bootstore_configs } =
+        status;
+
+    if incomplete_bootstore_configs.is_empty() {
+        println!(
+            "all racks appear to have a complete bootstore network config\n\
+             (note: this check is not yet complete -- there might still \
+             be errors that aren't in the report)"
+        );
+        return;
+    }
+
+    println!(
+        "{ERRICON} {} rack(s) skipped due to an incomplete bootstore network \
+         config:",
+        incomplete_bootstore_configs.len(),
+    );
+    for IncompleteBootstoreConfigReport { rack_id, problems } in
+        incomplete_bootstore_configs
+    {
+        println!("  rack {rack_id}: {} problem(s)", problems.len());
+        for problem in problems {
+            println!("    {ERRICON} {problem}");
+        }
+    }
+    println!(
+        "(note: this check is not yet complete -- there might be other \
+         errors that aren't in the report)"
+    );
+}
+
+fn print_task_physical_disk_adoption(details: &serde_json::Value) {
+    let status = match serde_json::from_value::<PhysicalDiskAdoptionStatus>(
+        details.clone(),
+    ) {
+        Ok(status) => status,
+        Err(error) => {
+            eprintln!(
+                "warning: failed to interpret task details: {:?}: {:#?}",
+                error, details
+            );
+            return;
+        }
+    };
+    println!("physical disks added: {}", status.disks_added);
+    for error in status.errors {
+        println!("{ERRICON} {error}");
     }
 }
 
@@ -4014,7 +4334,7 @@ fn bgtask_apply_kv_style(table: &mut tabled::Table) {
 /// output can be quite large.)
 fn extract_event_buffer(
     value: &mut serde_json::Value,
-) -> anyhow::Result<Option<EventBuffer<NestedSpec>>> {
+) -> anyhow::Result<Option<EventBuffer<GenericSpec>>> {
     let Some(obj) = value.as_object_mut() else {
         bail!("expected value to be an object")
     };
@@ -4025,7 +4345,7 @@ fn extract_event_buffer(
     // Try deserializing the event report generically. We could deserialize to
     // a more explicit spec, e.g. `ReconfiguratorExecutionSpec`, but that's
     // unnecessary for omdb's purposes.
-    let value: Result<EventReport<NestedSpec>, NestedError> =
+    let value: Result<EventReport<GenericSpec>, SerializableError> =
         serde_json::from_value(event_report)
             .context("failed to deserialize event report")?;
     let event_report = value.context(
@@ -4040,7 +4360,7 @@ fn extract_event_buffer(
 // Make a short summary of the current state of an execution based on an event
 // buffer, and add it to the table.
 fn push_event_buffer_summary(
-    event_buffer: anyhow::Result<Option<EventBuffer<NestedSpec>>>,
+    event_buffer: anyhow::Result<Option<EventBuffer<GenericSpec>>>,
     builder: &mut tabled::builder::Builder,
 ) {
     match event_buffer {
@@ -4066,7 +4386,7 @@ fn push_event_buffer_summary(
 }
 
 fn event_buffer_summary_impl(
-    buffer: EventBuffer<NestedSpec>,
+    buffer: EventBuffer<GenericSpec>,
     builder: &mut tabled::builder::Builder,
 ) {
     let Some(summary) = buffer.root_execution_summary() else {
@@ -4126,7 +4446,7 @@ fn event_buffer_summary_impl(
 fn push_event_buffer_terminal_info(
     info: &ExecutionTerminalInfo,
     total_steps: usize,
-    buffer: &EventBuffer<NestedSpec>,
+    buffer: &EventBuffer<GenericSpec>,
     builder: &mut tabled::builder::Builder,
 ) {
     let step_data = buffer.get(&info.step_key).expect("step exists");

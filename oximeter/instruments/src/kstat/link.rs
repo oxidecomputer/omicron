@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Report metrics about Ethernet data links on the host system
+//! Report metrics about Ethernet data links on the host system.
 
 use crate::kstat::ConvertNamedData;
 use crate::kstat::Error;
@@ -101,12 +101,6 @@ impl SledDataLink {
         Self { target, time_synced }
     }
 
-    /// Create a new `SledDataLink` with the given target .
-    #[cfg(test)]
-    pub fn unsynced(target: SledDataLinkTarget) -> Self {
-        Self { target, time_synced: false }
-    }
-
     /// Return the name of the link.
     pub fn link_name(&self) -> &str {
         &self.target.link_name
@@ -140,19 +134,21 @@ impl KstatTarget for SledDataLink {
         &self,
         kstats: KstatList<'_, '_>,
     ) -> Result<Vec<Sample>, Error> {
-        let Some((creation_time, kstat, data)) = kstats.first() else {
-            return Ok(vec![]);
-        };
-        let snapshot_time = hrtime_to_utc(kstat.ks_snaptime)?;
-        let Data::Named(named) = data else {
-            return Err(Error::ExpectedNamedKstat);
-        };
-        named
-            .iter()
-            .filter_map(|nd| {
-                extract_link_kstats(self, nd, *creation_time, snapshot_time)
-            })
-            .collect()
+        let mut samples = Vec::new();
+        for (creation_time, kstat, data) in kstats.iter() {
+            let snapshot_time = hrtime_to_utc(kstat.ks_snaptime)?;
+            let Data::Named(named) = data else {
+                return Err(Error::ExpectedNamedKstat);
+            };
+            let result = named
+                .iter()
+                .filter_map(|nd| {
+                    extract_link_kstats(self, nd, *creation_time, snapshot_time)
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            samples.extend(result);
+        }
+        Ok(samples)
     }
 }
 
@@ -175,8 +171,94 @@ impl Target for SledDataLink {
     }
 }
 
-#[cfg(all(test, target_os = "illumos"))]
+#[cfg(test)]
 mod tests {
+    use super::*;
+    use kstat_rs::Kstat;
+    use kstat_rs::NamedData;
+    use oximeter::Datum;
+    use uuid::uuid;
+
+    const RACK_ID: Uuid = uuid!("de784702-cafb-41a9-b3e5-93af189def29");
+    const SLED_ID: Uuid = uuid!("88240343-5262-45f4-86f1-3c82fe383f2a");
+
+    fn data_link(link_name: &'static str) -> SledDataLink {
+        SledDataLink::new(
+            SledDataLinkTarget {
+                rack_id: RACK_ID,
+                sled_id: SLED_ID,
+                sled_serial: "test-serial".into(),
+                link_name: link_name.into(),
+                kind: "vnic".into(),
+                sled_model: "test-gimlet".into(),
+                sled_revision: 1,
+                zone_name: "global".into(),
+            },
+            true,
+        )
+    }
+
+    #[test]
+    fn test_interested_positive() {
+        let link = data_link("opte0");
+        assert!(link.interested(&Kstat::with_null_kstat("link", 0, "opte0")));
+    }
+
+    #[test]
+    fn test_interested_negative() {
+        let mut link = data_link("opte1");
+
+        assert!(!link.interested(&Kstat::with_null_kstat("link", 0, "opte2")));
+        assert!(!link.interested(&Kstat::with_null_kstat("link", 0, "opte10")));
+        assert!(!link.interested(&Kstat::with_null_kstat("xde", 0, "opte1")));
+        assert!(!link.interested(&Kstat::with_null_kstat("link", 1, "opte1")));
+
+        link.time_synced = false;
+        assert!(!link.interested(&Kstat::with_null_kstat("link", 0, "opte1")));
+    }
+
+    fn cumulative_value(sample: &Sample) -> u64 {
+        match sample.measurement.datum() {
+            Datum::CumulativeU64(value) => value.value(),
+            other => panic!("expected a CumulativeU64, found {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_to_samples() {
+        let link = data_link("opte0");
+        let data = Data::Named(vec![
+            Named { name: "rbytes64", value: NamedData::UInt64(1) },
+            Named { name: "obytes64", value: NamedData::UInt64(2) },
+            Named { name: "ipackets64", value: NamedData::UInt64(3) },
+            Named { name: "opackets64", value: NamedData::UInt64(4) },
+            Named { name: "ierrors", value: NamedData::UInt32(5) },
+            Named { name: "oerrors", value: NamedData::UInt32(6) },
+            Named { name: "unmatched", value: NamedData::UInt32(7) },
+        ]);
+        let kstat = Kstat::with_null_kstat("link", 0, "opte0");
+        let samples = link.to_samples(&[(Utc::now(), kstat, data)]).unwrap();
+        let values: Vec<_> = samples
+            .iter()
+            .map(|s| (s.timeseries_name.to_string(), cumulative_value(s)))
+            .collect();
+
+        assert_eq!(
+            values,
+            [
+                ("sled_data_link:bytes_received".to_string(), 1),
+                ("sled_data_link:bytes_sent".to_string(), 2),
+                ("sled_data_link:packets_received".to_string(), 3),
+                ("sled_data_link:packets_sent".to_string(), 4),
+                ("sled_data_link:errors_received".to_string(), 5),
+                ("sled_data_link:errors_sent".to_string(), 6),
+            ]
+        );
+    }
+}
+
+#[cfg(all(test, target_os = "illumos"))]
+mod illumos_tests {
     use super::*;
     use crate::kstat::CollectionDetails;
     use crate::kstat::KstatSampler;
@@ -269,42 +351,12 @@ mod tests {
                 eprintln!(
                     "Failed to delete etherstub '{}'.\n\
                     Delete manually with `dladm delete-etherstub {}`:\n{}",
-                    &self.name,
-                    &self.name,
+                    self.name,
+                    self.name,
                     String::from_utf8_lossy(&output.stderr),
                 );
             }
         }
-    }
-
-    #[test]
-    fn test_kstat_interested() {
-        let link = TestEtherstub::new();
-        let target = SledDataLinkTarget {
-            rack_id: RACK_ID,
-            sled_id: SLED_ID,
-            sled_serial: SLED_SERIAL.into(),
-            link_name: link.name.clone().into(),
-            kind: KIND.into(),
-            sled_model: SLED_MODEL.into(),
-            sled_revision: SLED_REVISION,
-            zone_name: ZONE_NAME.into(),
-        };
-        // not with a synced sled (by default)
-        let mut dl = SledDataLink::unsynced(target);
-
-        let ctl = Ctl::new().unwrap();
-        let ctl = ctl.update().unwrap();
-        let kstat = ctl
-            .filter(Some("link"), Some(0), Some(link.name.as_str()))
-            .next()
-            .unwrap();
-
-        assert!(!dl.interested(&kstat));
-
-        // with a synced sled
-        dl.time_synced = true;
-        assert!(dl.interested(&kstat));
     }
 
     #[test]
@@ -330,7 +382,21 @@ mod tests {
         let creation_time = hrtime_to_utc(kstat.ks_crtime).unwrap();
         let data = ctl.read(&mut kstat).unwrap();
         let samples = dl.to_samples(&[(creation_time, kstat, data)]).unwrap();
-        println!("{samples:#?}");
+
+        let mut names: Vec<_> =
+            samples.iter().map(|s| s.timeseries_name.to_string()).collect();
+        names.sort();
+        assert_eq!(
+            names,
+            [
+                "sled_data_link:bytes_received",
+                "sled_data_link:bytes_sent",
+                "sled_data_link:errors_received",
+                "sled_data_link:errors_sent",
+                "sled_data_link:packets_received",
+                "sled_data_link:packets_sent",
+            ]
+        );
     }
 
     #[tokio::test]
@@ -348,7 +414,7 @@ mod tests {
             zone_name: ZONE_NAME.into(),
         };
         let dl = SledDataLink::new(target, true);
-        let details = CollectionDetails::never(Duration::from_secs(1));
+        let details = CollectionDetails::never(Duration::from_secs(1), 512);
         let id = sampler.add_target(dl, details).await.unwrap();
         let samples: Vec<_> = sampler.produce().unwrap().collect();
         assert!(samples.is_empty());
@@ -385,8 +451,7 @@ mod tests {
     #[tokio::test]
     async fn test_kstat_sampler_with_overflow() {
         let limit = 2;
-        let mut sampler =
-            KstatSampler::with_sample_limit(&test_logger(), limit).unwrap();
+        let mut sampler = KstatSampler::new(&test_logger()).unwrap();
         let link = TestEtherstub::new();
         let target = SledDataLinkTarget {
             rack_id: RACK_ID,
@@ -399,8 +464,8 @@ mod tests {
             zone_name: ZONE_NAME.into(),
         };
         let dl = SledDataLink::new(target, true);
-        let details = CollectionDetails::never(Duration::from_secs(1));
-        sampler.add_target(dl, details).await.unwrap();
+        let details = CollectionDetails::never(Duration::from_secs(1), limit);
+        sampler.add_target(dl.clone(), details).await.unwrap();
         let samples: Vec<_> = sampler.produce().unwrap().collect();
         assert!(samples.is_empty());
 
@@ -448,6 +513,47 @@ mod tests {
             unreachable!();
         };
         assert_eq!(overflow.value(), expected_counts.overflow as u64);
+
+        // Now, resize the target queue, and test again.
+        //
+        // This is nearly the same test as above, just with a new value of
+        // limit. We also handle slightly different overflow conditions.
+        tokio::time::resume();
+        let limit = 4;
+        let details = CollectionDetails::never(Duration::from_secs(1), limit);
+        sampler.update_target(dl, details).await.unwrap();
+        tokio::time::pause();
+        let now = Instant::now();
+        let old_expected_counts = expected_counts;
+        let expected_counts = loop {
+            tokio::time::advance(STEP_DURATION).await;
+            if now.elapsed() > MAX_DURATION {
+                panic!("Waited too long for samples");
+            }
+            if let Some(counts) = sampler.sample_counts() {
+                break counts;
+            }
+        };
+        let samples: Vec<_> = sampler.produce().unwrap().collect();
+        let (link_samples, dropped_samples): (Vec<_>, Vec<_>) = samples
+            .iter()
+            .partition(|s| s.timeseries_name.contains("sled_data_link"));
+        println!("{link_samples:#?}");
+        assert_eq!(link_samples.len(), limit);
+        assert_eq!(
+            link_samples.len(),
+            expected_counts.total - expected_counts.overflow
+        );
+        println!("{dropped_samples:#?}");
+        assert_eq!(dropped_samples.len(), 1);
+        let oximeter::Datum::CumulativeU64(overflow) =
+            dropped_samples[0].measurement.datum()
+        else {
+            unreachable!();
+        };
+        let all_overflow =
+            old_expected_counts.overflow + expected_counts.overflow;
+        assert_eq!(overflow.value(), all_overflow as u64);
     }
 
     #[tokio::test]
@@ -471,7 +577,8 @@ mod tests {
         let dl = SledDataLink::new(target, true);
         let collection_interval = Duration::from_secs(1);
         let expiry = Duration::from_secs(1);
-        let details = CollectionDetails::duration(collection_interval, expiry);
+        let details =
+            CollectionDetails::duration(collection_interval, expiry, 512);
         let id = sampler.add_target(dl, details).await.unwrap();
         info!(log, "target added"; "id" => ?id);
         assert!(matches!(
@@ -531,7 +638,8 @@ mod tests {
         let dl = SledDataLink::new(target, true);
         let collection_interval = Duration::from_secs(1);
         let expiry = Duration::from_secs(1);
-        let details = CollectionDetails::duration(collection_interval, expiry);
+        let details =
+            CollectionDetails::duration(collection_interval, expiry, 512);
         let id = sampler.add_target(dl, details).await.unwrap();
         info!(log, "target added"; "id" => ?id);
         assert!(matches!(
@@ -583,7 +691,8 @@ mod tests {
         let dl = SledDataLink::new(target, true);
         let collection_interval = Duration::from_secs(1);
         let expiry = Duration::from_secs(1);
-        let details = CollectionDetails::duration(collection_interval, expiry);
+        let details =
+            CollectionDetails::duration(collection_interval, expiry, 512);
         let id = sampler.add_target(dl, details).await.unwrap();
         info!(log, "target added"; "id" => ?id);
         assert!(matches!(
@@ -633,7 +742,8 @@ mod tests {
         let dl = SledDataLink::new(target, true);
         let collection_interval = Duration::from_secs(1);
         let expiry = Duration::from_secs(1);
-        let details = CollectionDetails::duration(collection_interval, expiry);
+        let details =
+            CollectionDetails::duration(collection_interval, expiry, 512);
         let id = sampler.add_target(dl, details).await.unwrap();
         info!(log, "target added"; "id" => ?id);
         assert!(matches!(
@@ -661,7 +771,7 @@ mod tests {
     #[tokio::test]
     async fn overflowing_self_stat_queue_does_not_block_sampler() {
         let log = test_logger();
-        let mut sampler = KstatSampler::with_sample_limit(&log, 1).unwrap();
+        let mut sampler = KstatSampler::new(&log).unwrap();
 
         // We'll create an actual link, so that we can generate valid samples
         // and overflow the per-target queue. This will ensure we continually
@@ -680,7 +790,7 @@ mod tests {
         };
         let dl = SledDataLink::new(target, true);
         let collection_interval = Duration::from_millis(10);
-        let details = CollectionDetails::never(collection_interval);
+        let details = CollectionDetails::never(collection_interval, 1);
         let _id = sampler.add_target(dl, details).await.unwrap();
 
         // Pause time long enough for the sampler to have produced a bunch of
@@ -760,13 +870,13 @@ mod tests {
         };
         let dl = SledDataLink::new(target.clone(), true);
         let collection_interval = Duration::from_millis(10);
-        let details = CollectionDetails::never(collection_interval);
+        let details = CollectionDetails::never(collection_interval, 512);
         let id = sampler.add_target(dl.clone(), details).await.unwrap();
 
         // Update the target.
         let new_duration = Duration::from_millis(15);
         sampler
-            .update_target(dl, CollectionDetails::never(new_duration))
+            .update_target(dl, CollectionDetails::never(new_duration, 512))
             .await
             .unwrap();
 
@@ -799,7 +909,7 @@ mod tests {
         };
         let dl = SledDataLink::new(target.clone(), true);
         let collection_interval = Duration::from_millis(100);
-        let details = CollectionDetails::never(collection_interval);
+        let details = CollectionDetails::never(collection_interval, 512);
         let id = sampler.add_target(dl.clone(), details).await.unwrap();
 
         // And remove right away.

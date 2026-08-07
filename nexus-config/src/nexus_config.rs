@@ -11,12 +11,13 @@ use dropshot::ConfigDropshot;
 use dropshot::ConfigLogging;
 use nexus_types::deployment::ReconfiguratorConfig;
 use omicron_common::address::Ipv6Subnet;
-pub use omicron_common::address::MAX_VPC_IPV4_SUBNET_PREFIX;
-pub use omicron_common::address::MIN_VPC_IPV4_SUBNET_PREFIX;
+pub use omicron_common::address::MAX_VPC_IPV4_SUBNET_PREFIX_LENGTH;
+pub use omicron_common::address::MIN_VPC_IPV4_SUBNET_PREFIX_LENGTH;
 use omicron_common::address::NEXUS_TECHPORT_EXTERNAL_PORT;
 pub use omicron_common::address::NUM_INITIAL_RESERVED_IP_ADDRESSES;
-use omicron_common::address::RACK_PREFIX;
+use omicron_common::address::RACK_PREFIX_LENGTH;
 use omicron_uuid_kinds::OmicronZoneUuid;
+use omicron_uuid_kinds::RackUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_with::DisplayFromStr;
@@ -29,7 +30,6 @@ use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::num::NonZeroU32;
 use std::time::Duration;
-use uuid::Uuid;
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct NexusConfig {
@@ -142,7 +142,7 @@ pub enum InternalDns {
     /// Nexus should infer the DNS server addresses from this subnet.
     ///
     /// This is a more common usage for production.
-    FromSubnet { subnet: Ipv6Subnet<RACK_PREFIX> },
+    FromSubnet { subnet: Ipv6Subnet<RACK_PREFIX_LENGTH> },
     /// Nexus should use precisely the following address.
     ///
     /// This is less desirable in production, but can give value
@@ -155,7 +155,7 @@ pub struct DeploymentConfig {
     /// Uuid of the Nexus instance
     pub id: OmicronZoneUuid,
     /// Uuid of the Rack where Nexus is executing.
-    pub rack_id: Uuid,
+    pub rack_id: RackUuid,
     /// Port on which the "techport external" dropshot server should listen.
     /// This dropshot server copies _most_ of its config from
     /// `dropshot_external` (so that it matches TLS, etc.), but builds its
@@ -276,6 +276,33 @@ struct UnvalidatedTunables {
     load_timeout: Option<std::time::Duration>,
 }
 
+/// Whether HTTP clients for external services permit requests to loopback
+/// addresses.
+///
+/// This is an enum rather than a `bool`, so that if you want to turn on the
+/// test-only config, you have to type the string "yes_for_test_purposes_only"
+/// in the config file so you know what you're doing.
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    Deserialize,
+    Eq,
+    JsonSchema,
+    PartialEq,
+    Serialize,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum TreatLoopbackAsExternal {
+    /// Loopback addresses are considered "external". This must only be used
+    /// in test environments.
+    YesForTestPurposesOnly,
+    /// Loopback addresses are rejected (the default).
+    #[default]
+    No,
+}
+
 /// Configuration for HTTP clients to external services.
 #[derive(
     Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema,
@@ -285,6 +312,15 @@ pub struct ExternalHttpClientConfig {
     /// specified interface name.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub interface: Option<String>,
+    /// Whether external HTTP clients are permitted to make requests to
+    /// loopback addresses (and names in the special-use "localhost." zone).
+    ///
+    /// External HTTP clients normally refuse to make requests to any address
+    /// that isn't external to the rack, including loopback addresses. Test
+    /// environments, however, run their "external" servers on localhost, so
+    /// the test suite needs a way to turn that off.
+    #[serde(default)]
+    pub treat_loopback_as_external: TreatLoopbackAsExternal,
 }
 
 /// Tunable configuration parameters, intended for use in test environments or
@@ -329,7 +365,8 @@ impl Tunables {
                 as u8,
             )
             .expect("Invalid absolute maximum IPv4 subnet prefix");
-        if prefix >= MIN_VPC_IPV4_SUBNET_PREFIX && prefix <= absolute_max {
+        if prefix >= MIN_VPC_IPV4_SUBNET_PREFIX_LENGTH && prefix <= absolute_max
+        {
             Ok(())
         } else {
             Err(InvalidTunable {
@@ -346,7 +383,7 @@ impl Tunables {
 impl Default for Tunables {
     fn default() -> Self {
         Tunables {
-            max_vpc_ipv4_subnet_prefix: MAX_VPC_IPV4_SUBNET_PREFIX,
+            max_vpc_ipv4_subnet_prefix: MAX_VPC_IPV4_SUBNET_PREFIX_LENGTH,
             load_timeout: None,
         }
     }
@@ -377,10 +414,6 @@ pub struct BackgroundTaskConfig {
     pub phantom_disks: PhantomDiskConfig,
     /// configuration for blueprint related tasks
     pub blueprints: BlueprintTasksConfig,
-    /// configuration for service zone nat sync task
-    pub sync_service_zone_nat: SyncServiceZoneNatConfig,
-    /// configuration for the bfd manager task
-    pub bfd_manager: BfdManagerConfig,
     /// configuration for the switch port settings manager task
     pub switch_port_settings_manager: SwitchPortSettingsManagerConfig,
     /// configuration for region replacement starter task
@@ -442,6 +475,8 @@ pub struct BackgroundTaskConfig {
     pub audit_log_timeout_incomplete: AuditLogTimeoutIncompleteConfig,
     /// configuration for audit log cleanup (retention) task
     pub audit_log_cleanup: AuditLogCleanupConfig,
+    /// configuration for populate switch ports task
+    pub populate_switch_ports: PopulateSwitchPortsConfig,
     /// configuration for user data export coordinator task
     pub user_data_export_coordinator: UserDataExportCoordinatorConfig,
 }
@@ -488,6 +523,15 @@ pub struct AuditLogCleanupConfig {
 
     /// maximum rows hard-deleted per activation
     pub max_deleted_per_activation: u32,
+}
+
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct PopulateSwitchPortsConfig {
+    /// period (in seconds) for periodic activations of the background task that
+    /// attempts to populate the `switch_port` table.
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
 }
 
 #[serde_as]
@@ -576,22 +620,6 @@ pub struct DecommissionedDiskCleanerConfig {
 #[serde_as]
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct NatCleanupConfig {
-    /// period (in seconds) for periodic activations of this background task
-    #[serde_as(as = "DurationSeconds<u64>")]
-    pub period_secs: Duration,
-}
-
-#[serde_as]
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub struct BfdManagerConfig {
-    /// period (in seconds) for periodic activations of this background task
-    #[serde_as(as = "DurationSeconds<u64>")]
-    pub period_secs: Duration,
-}
-
-#[serde_as]
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub struct SyncServiceZoneNatConfig {
     /// period (in seconds) for periodic activations of this background task
     #[serde_as(as = "DurationSeconds<u64>")]
     pub period_secs: Duration,
@@ -978,6 +1006,10 @@ pub struct FmTasksConfig {
     #[serde_as(as = "DurationSeconds<u64>")]
     pub analysis_period_secs: Duration,
     /// period (in seconds) for periodic activations of the background task that
+    /// reads the current fault management configuration from the database.
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub config_load_period_secs: Duration,
+    /// period (in seconds) for periodic activations of the background task that
     /// reads the latest fault management sitrep from the database.
     #[serde_as(as = "DurationSeconds<u64>")]
     pub sitrep_load_period_secs: Duration,
@@ -985,6 +1017,10 @@ pub struct FmTasksConfig {
     /// garbage collects unneeded fault management sitreps in the database.
     #[serde_as(as = "DurationSeconds<u64>")]
     pub sitrep_gc_period_secs: Duration,
+    /// period (in seconds) for periodic activations of the background task that
+    /// prunes the oldest entries from the fault management sitrep history
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub sitrep_history_prune_period_secs: Duration,
     /// period (in seconds) for periodic activations of the background task that
     /// updates externally-visible database tables to match the current situation
     /// report.
@@ -999,11 +1035,19 @@ impl Default for FmTasksConfig {
             // inventory, or by the ereport ingester(s), so it need not be
             // periodically activated all that frequently.
             analysis_period_secs: Duration::from_secs(60),
+            // Loading the config is cheap, and operators expect config
+            // changes to take effect promptly.
+            config_load_period_secs: Duration::from_secs(15),
             sitrep_load_period_secs: Duration::from_secs(15),
             // This need not be activated very frequently, as it's triggered any
             // time the current sitrep changes, and activating it more
             // frequently won't make things more responsive.
             sitrep_gc_period_secs: Duration::from_secs(600),
+            // This need not be activated very frequently, as it's triggered
+            // whenever a new sitrep is committed and by the analysis task when
+            // nearing capacity limits, so periodic activation is only a
+            // backstop.
+            sitrep_history_prune_period_secs: Duration::from_secs(600),
             // This, too, is activated whenever a new sitrep is loaded, so we
             // need not set the periodic activation interval too high.
             rendezvous_period_secs: Duration::from_secs(300),
@@ -1127,8 +1171,9 @@ mod test {
     use super::*;
 
     use nexus_types::deployment::PlannerConfig;
+    use nexus_types::deployment::ReconfiguratorDisruptionPolicy;
     use omicron_common::address::{
-        CLICKHOUSE_TCP_PORT, Ipv6Subnet, RACK_PREFIX,
+        CLICKHOUSE_TCP_PORT, Ipv6Subnet, RACK_PREFIX_LENGTH,
     };
 
     use camino::{Utf8Path, Utf8PathBuf};
@@ -1246,6 +1291,7 @@ mod test {
             external_dns_servers = [ "1.1.1.1", "9.9.9.9" ]
             [deployment.external_http_clients]
             interface = "opte0"
+            treat_loopback_as_external = "yes_for_test_purposes_only"
             [deployment.dropshot_external]
             bind_address = "10.1.2.3:4567"
             default_request_body_max_bytes = 1024
@@ -1266,8 +1312,8 @@ mod test {
             address = "[::1]:4676"
             [initial_reconfigurator_config]
             planner_enabled = true
-            planner_config.add_zones_with_mupdate_override = true
             tuf_repo_pruner_enabled = false
+            disruption_policy = "terminate"
             [background_tasks]
             dns_internal.period_secs_config = 1
             dns_internal.period_secs_servers = 2
@@ -1280,7 +1326,6 @@ mod test {
             metrics_producer_gc.period_secs = 60
             external_endpoints.period_secs = 9
             nat_cleanup.period_secs = 30
-            bfd_manager.period_secs = 30
             inventory.period_secs_load = 10
             inventory.period_secs_collect = 11
             inventory.nkeep = 12
@@ -1295,7 +1340,6 @@ mod test {
             blueprints.period_secs_rendezvous = 300
             blueprints.period_secs_collect_crdb_node_ids = 180
             blueprints.period_secs_load_reconfigurator_config = 5
-            sync_service_zone_nat.period_secs = 30
             switch_port_settings_manager.period_secs = 30
             region_replacement.period_secs = 30
             region_replacement_driver.period_secs = 30
@@ -1326,10 +1370,12 @@ mod test {
             sp_ereport_ingester.period_secs = 47
             fm.sitrep_load_period_secs = 48
             fm.sitrep_gc_period_secs = 49
+            fm.sitrep_history_prune_period_secs = 53
             probe_distributor.period_secs = 50
             multicast_reconciler.period_secs = 60
             fm.rendezvous_period_secs = 51
             fm.analysis_period_secs = 52
+            fm.config_load_period_secs = 53
             trust_quorum.period_secs = 60
             attached_subnet_manager.period_secs = 60
             session_cleanup.period_secs = 300
@@ -1340,6 +1386,7 @@ mod test {
             audit_log_cleanup.period_secs = 600
             audit_log_cleanup.retention_days = 90
             audit_log_cleanup.max_deleted_per_activation = 10000
+            populate_switch_ports.period_secs = 31
             user_data_export_coordinator.period_secs = 60
             [default_region_allocation_strategy]
             type = "random"
@@ -1382,7 +1429,7 @@ mod test {
                         ..Default::default()
                     },
                     internal_dns: InternalDns::FromSubnet {
-                        subnet: Ipv6Subnet::<RACK_PREFIX>::new(
+                        subnet: Ipv6Subnet::<RACK_PREFIX_LENGTH>::new(
                             Ipv6Addr::LOCALHOST
                         )
                     },
@@ -1393,6 +1440,7 @@ mod test {
                     ],
                     external_http_clients: ExternalHttpClientConfig {
                         interface: Some("opte0".to_string()),
+                        treat_loopback_as_external: TreatLoopbackAsExternal::YesForTestPurposesOnly,
                     },
                 },
                 pkg: PackageConfig {
@@ -1439,10 +1487,9 @@ mod test {
                     )]),
                     initial_reconfigurator_config: Some(ReconfiguratorConfig {
                         planner_enabled: true,
-                        planner_config: PlannerConfig {
-                            add_zones_with_mupdate_override: true,
-                        },
+                        planner_config: PlannerConfig::default(),
                         tuf_repo_pruner_enabled: false,
+                        disruption_policy: ReconfiguratorDisruptionPolicy::Terminate,
                     }),
                     background_tasks: BackgroundTaskConfig {
                         dns_internal: DnsTasksConfig {
@@ -1464,9 +1511,6 @@ mod test {
                             period_secs: Duration::from_secs(9),
                         },
                         nat_cleanup: NatCleanupConfig {
-                            period_secs: Duration::from_secs(30),
-                        },
-                        bfd_manager: BfdManagerConfig {
                             period_secs: Duration::from_secs(30),
                         },
                         inventory: InventoryConfig {
@@ -1501,9 +1545,6 @@ mod test {
                             period_secs_rendezvous: Duration::from_secs(300),
                             period_secs_load_reconfigurator_config:
                                 Duration::from_secs(5)
-                        },
-                        sync_service_zone_nat: SyncServiceZoneNatConfig {
-                            period_secs: Duration::from_secs(30)
                         },
                         switch_port_settings_manager:
                             SwitchPortSettingsManagerConfig {
@@ -1588,8 +1629,11 @@ mod test {
                         },
                         fm: FmTasksConfig {
                             analysis_period_secs: Duration::from_secs(52),
+                            config_load_period_secs: Duration::from_secs(53),
                             sitrep_load_period_secs: Duration::from_secs(48),
                             sitrep_gc_period_secs: Duration::from_secs(49),
+                            sitrep_history_prune_period_secs:
+                                Duration::from_secs(53),
                             rendezvous_period_secs: Duration::from_secs(51),
                         },
                         probe_distributor: ProbeDistributorConfig {
@@ -1620,6 +1664,9 @@ mod test {
                             period_secs: Duration::from_secs(600),
                             retention_days: NonZeroU32::new(90).unwrap(),
                             max_deleted_per_activation: 10_000,
+                        },
+                        populate_switch_ports: PopulateSwitchPortsConfig {
+                            period_secs: Duration::from_secs(31),
                         },
                         user_data_export_coordinator:
                             UserDataExportCoordinatorConfig {
@@ -1684,7 +1731,6 @@ mod test {
             metrics_producer_gc.period_secs = 60
             external_endpoints.period_secs = 9
             nat_cleanup.period_secs = 30
-            bfd_manager.period_secs = 30
             inventory.period_secs_load = 10
             inventory.period_secs_collect = 10
             inventory.nkeep = 3
@@ -1699,7 +1745,6 @@ mod test {
             blueprints.period_secs_rendezvous = 300
             blueprints.period_secs_collect_crdb_node_ids = 180
             blueprints.period_secs_load_reconfigurator_config = 5
-            sync_service_zone_nat.period_secs = 30
             switch_port_settings_manager.period_secs = 30
             region_replacement.period_secs = 30
             region_replacement_driver.period_secs = 30
@@ -1726,9 +1771,11 @@ mod test {
             sp_ereport_ingester.period_secs = 44
             fm.sitrep_load_period_secs = 45
             fm.sitrep_gc_period_secs = 46
+            fm.sitrep_history_prune_period_secs = 50
             probe_distributor.period_secs = 47
             fm.rendezvous_period_secs = 48
             fm.analysis_period_secs = 49
+            fm.config_load_period_secs = 50
             multicast_reconciler.period_secs = 60
             trust_quorum.period_secs = 60
             attached_subnet_manager.period_secs = 60
@@ -1740,6 +1787,7 @@ mod test {
             audit_log_cleanup.period_secs = 600
             audit_log_cleanup.retention_days = 90
             audit_log_cleanup.max_deleted_per_activation = 10000
+            populate_switch_ports.period_secs = 31
             user_data_export_coordinator.period_secs = 60
 
             [default_region_allocation_strategy]

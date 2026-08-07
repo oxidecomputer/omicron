@@ -4,7 +4,6 @@
 
 //! Tests for APIs against sled-based endpoints.
 
-use camino::Utf8Path;
 use dropshot::test_util::ClientTestContext;
 use nexus_db_model::PhysicalDisk as DbPhysicalDisk;
 use nexus_db_model::PhysicalDiskKind as DbPhysicalDiskKind;
@@ -68,7 +67,6 @@ async fn test_sleds_list(cptestctx: &ControlPlaneTestContext) {
         let log =
             cptestctx.logctx.log.new(o!( "sled_id" => sa_id.to_string() ));
         let addr = cptestctx.server.get_http_server_internal_address();
-        let update_directory = Utf8Path::new("/should/not/be/used");
         sas.push(
             start_sled_agent(
                 log,
@@ -77,7 +75,6 @@ async fn test_sleds_list(cptestctx: &ControlPlaneTestContext) {
                 // Index starts at 2: the `nexus_test` macro already created two
                 // sled agents as part of the ControlPlaneTestContext setup.
                 2 + i as u16,
-                &update_directory,
                 sim::SimMode::Explicit,
                 &cptestctx.first_sled_agent().simulated_upstairs,
             )
@@ -121,7 +118,7 @@ async fn test_physical_disk_create_list_delete(
     let nexus = &cptestctx.server.server_context().nexus;
     let datastore = nexus.datastore();
     let sled_id = SledUuid::from_str(&SLED_AGENT_UUID).unwrap();
-    let physical_disk = DbPhysicalDisk::new(
+    let physical_disk = DbPhysicalDisk::from_parts(
         PhysicalDiskUuid::new_v4(),
         "v".into(),
         "s".into(),
@@ -214,7 +211,7 @@ async fn test_sled_instance_list(cptestctx: &ControlPlaneTestContext) {
                 if total_instances.len() == 1 {
                     Ok(total_instances)
                 } else {
-                    Err(CondCheckError::<()>::NotYet)
+                    Err(CondCheckError::<()>::NotYet { status: None })
                 }
             }
         },

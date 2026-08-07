@@ -68,9 +68,10 @@ external_certificates = []
 # by services like NTP as their externally-facing address for NAT.
 #
 # For more on this and what to put here, see docs/how-to-run.adoc.
-[[internal_services_ip_pool_ranges]]
-first = "192.168.1.20"
-last = "192.168.1.29"
+[[service_ip_pools]]
+name = "oxide-service-pool-v4"
+description = "IPv4 IP Pool for Oxide Services"
+ranges = [ { first = "192.168.1.20", last = "192.168.1.29" } ]
 
 # TODO - this configuration is subject to change going forward. Ultimately these
 # parameters should be provided to the control plane via wicket, but we need to
@@ -145,6 +146,13 @@ allow = "any"
 #
 # Note that single IP addresses must include the netmask as well, so `/32` or
 # `/128`.
+
+# Enable the fleet-wide jumbo-frames opt-in. When true, end users may opt
+# in to jumbo frames on the primary interface of an instance, and control
+# plane services with external-facing OPTE NICs are brought up with an 8500
+# byte MTU. Defaults to false. Can also be toggled at runtime via the Nexus
+# `/v1/system/networking/settings` endpoint after handoff.
+external_jumbo_frames_opt_in_enabled = false
 
 # Configuration for the initial Silo, user, and password.
 #

@@ -96,7 +96,7 @@ impl super::Nexus {
 
         let (_, db_vpc) = saga_outputs
             .lookup_node_output::<(authz::Vpc, db::model::Vpc)>("vpc")
-            .map_err(|e| Error::internal_error(&format!("{:#}", &e)))
+            .map_err(|e| Error::internal_error(&format!("{:#}", e)))
             .internal_context("looking up output from VPC create saga")?;
 
         Ok(db_vpc)
@@ -191,6 +191,12 @@ impl super::Nexus {
             authz_vpc.id(),
             params.clone(),
         )?;
+
+        // Reject cross-VPC references before writing anything. The same check
+        // happens again when resolving rules for sled-agents, but that runs
+        // after the write, so without this the rules would be persisted even
+        // though the request fails (omicron#10561).
+        nexus_networking::ensure_no_cross_vpc_references(&db_vpc, &rules)?;
 
         let rules = self
             .db_datastore

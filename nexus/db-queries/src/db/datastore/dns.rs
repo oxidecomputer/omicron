@@ -267,7 +267,7 @@ impl DataStore {
                     )
                     .await?;
                 paginator = p.found_batch(&names_batch, &|(n, _)| n.clone());
-                zone_records.extend(names_batch.into_iter());
+                zone_records.extend(names_batch);
             }
 
             debug!(log, "found all DNS names for zone";
@@ -687,7 +687,7 @@ impl DnsVersionUpdateBuilder {
             Err(Error::internal_error(&format!(
                 "DNS update ({:?}) attempted to remove name {:?} \
                 multiple times",
-                self.comment, &name,
+                self.comment, name,
             )))
         } else {
             assert!(self.names_removed.insert(name));

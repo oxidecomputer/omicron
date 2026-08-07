@@ -139,11 +139,11 @@ mod tests {
     use omicron_test_utils::dev;
 
     use omicron_uuid_kinds::PhysicalDiskUuid;
+    use omicron_uuid_kinds::RackUuid;
     use omicron_uuid_kinds::SledUuid;
     use omicron_uuid_kinds::ZpoolUuid;
     use proptest::prelude::*;
     use proptest::proptest;
-    use uuid::Uuid;
 
     async fn proptest_do_prep(
         opctx: &OpContext,
@@ -201,7 +201,7 @@ mod tests {
                         reservoir_size: (16 << 30).try_into().unwrap(),
                         cpu_family: SledCpuFamily::Unknown,
                     },
-                    Uuid::new_v4(),
+                    RackUuid::new_v4(),
                     Generation::new(),
                 ))
                 .await

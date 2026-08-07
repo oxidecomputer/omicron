@@ -190,6 +190,7 @@ pub struct UplinkAddressConfig {
 
 #[derive(
     Clone,
+    Copy,
     Debug,
     Default,
     Deserialize,
@@ -200,6 +201,7 @@ pub struct UplinkAddressConfig {
     JsonSchema,
 )]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(any(test, feature = "testing"), derive(test_strategy::Arbitrary))]
 /// To what extent should this port participate in LLDP
 pub enum LldpAdminStatus {
     #[default]
@@ -215,6 +217,7 @@ pub enum LldpAdminStatus {
 #[derive(
     Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Hash, JsonSchema,
 )]
+#[cfg_attr(any(test, feature = "testing"), derive(test_strategy::Arbitrary))]
 pub struct LldpPortConfig {
     /// To what extent should this port participate in LLDP
     pub status: LldpAdminStatus,
@@ -245,6 +248,7 @@ pub struct LldpPortConfig {
 #[derive(
     Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq, Hash, JsonSchema,
 )]
+#[cfg_attr(any(test, feature = "testing"), derive(test_strategy::Arbitrary))]
 pub struct TxEqConfig {
     /// Pre-cursor tap1
     pub pre1: Option<i32>,
@@ -269,9 +273,9 @@ pub struct PortConfig {
     /// Nmae of the port this config applies to.
     pub port: String,
     /// Port speed.
-    pub uplink_port_speed: PortSpeed,
+    pub uplink_port_speed: LinkSpeed,
     /// Port forward error correction type.
-    pub uplink_port_fec: Option<PortFec>,
+    pub uplink_port_fec: Option<LinkFec>,
     /// BGP peers on this port
     pub bgp_peers: Vec<BgpPeerConfig>,
     /// Whether or not to set autonegotiation
@@ -298,6 +302,7 @@ pub struct PortConfig {
     strum::EnumIter,
 )]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(any(test, feature = "testing"), derive(test_strategy::Arbitrary))]
 pub enum SwitchSlot {
     /// Switch in upper slot
     Switch0,
@@ -305,40 +310,63 @@ pub enum SwitchSlot {
     Switch1,
 }
 
-/// Switchport Speed options
+/// The speed of a link.
 #[derive(
-    Copy, Clone, Debug, Deserialize, Serialize, PartialEq, Eq, JsonSchema, Hash,
+    Copy,
+    Clone,
+    Debug,
+    Deserialize,
+    Serialize,
+    PartialEq,
+    Eq,
+    JsonSchema,
+    Hash,
+    daft::Diffable,
 )]
 #[serde(rename_all = "snake_case")]
-pub enum PortSpeed {
+#[cfg_attr(any(test, feature = "testing"), derive(test_strategy::Arbitrary))]
+pub enum LinkSpeed {
+    /// Zero gigabits per second.
     #[serde(alias = "0G")]
     Speed0G,
+    /// 1 gigabit per second.
     #[serde(alias = "1G")]
     Speed1G,
+    /// 10 gigabits per second.
     #[serde(alias = "10G")]
     Speed10G,
+    /// 25 gigabits per second.
     #[serde(alias = "25G")]
     Speed25G,
+    /// 40 gigabits per second.
     #[serde(alias = "40G")]
     Speed40G,
+    /// 50 gigabits per second.
     #[serde(alias = "50G")]
     Speed50G,
+    /// 100 gigabits per second.
     #[serde(alias = "100G")]
     Speed100G,
+    /// 200 gigabits per second.
     #[serde(alias = "200G")]
     Speed200G,
+    /// 400 gigabits per second.
     #[serde(alias = "400G")]
     Speed400G,
 }
 
-/// Switchport FEC options
+/// The forward error correction mode of a link.
 #[derive(
     Copy, Clone, Debug, Deserialize, Serialize, PartialEq, Eq, JsonSchema, Hash,
 )]
 #[serde(rename_all = "snake_case")]
-pub enum PortFec {
+#[cfg_attr(any(test, feature = "testing"), derive(test_strategy::Arbitrary))]
+pub enum LinkFec {
+    /// Firecode forward error correction.
     Firecode,
+    /// No forward error correction.
     None,
+    /// Reed-Solomon forward error correction.
     Rs,
 }
 
@@ -356,6 +384,7 @@ pub enum PortFec {
     PartialOrd,
     Hash,
 )]
+#[cfg_attr(any(test, feature = "testing"), derive(test_strategy::Arbitrary))]
 #[serde(rename_all = "snake_case")]
 pub enum BfdMode {
     SingleHop,

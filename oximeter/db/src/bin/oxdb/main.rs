@@ -5,8 +5,6 @@
 //! CLI-Tool for developing against the Oximeter timeseries database, populating
 //! data and querying.
 
-// Copyright 2024 Oxide Computer Company
-
 use anyhow::{Context, bail};
 use chrono::{DateTime, Utc};
 use clap::{Args, Parser};

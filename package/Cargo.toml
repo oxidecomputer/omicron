@@ -25,9 +25,9 @@ oxide-tokio-rt.workspace = true
 petgraph.workspace = true
 rayon.workspace = true
 reqwest = { workspace = true, features = [ "rustls" ] }
-ring.workspace = true
 semver.workspace = true
 serde.workspace = true
+sha2.workspace = true
 shell-words.workspace = true
 sled-hardware.workspace = true
 slog.workspace = true

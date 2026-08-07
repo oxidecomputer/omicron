@@ -557,3 +557,97 @@ async fn test_ping(cptestctx: &ControlPlaneTestContext) {
         .await;
     assert_eq!(health.status, system::PingStatus::Ok);
 }
+
+/// Test that the external API returns gzip-compressed responses when the
+/// client sends Accept-Encoding: gzip.
+#[nexus_test]
+async fn test_gzip_compression(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
+
+    // Create several projects so the response body exceeds the minimum
+    // compression threshold (512 bytes).
+    for i in 0..10 {
+        create_project(&client, &format!("project-{i}")).await;
+    }
+
+    // With Accept-Encoding: gzip, response should be compressed.
+    let response = NexusRequest::new(
+        RequestBuilder::new(client, Method::GET, "/v1/projects")
+            .header(http::header::ACCEPT_ENCODING, "gzip")
+            .expect_status(Some(StatusCode::OK)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+
+    assert_eq!(
+        response.headers.get(http::header::CONTENT_ENCODING).unwrap(),
+        "gzip",
+    );
+
+    // Decompress and verify the body is valid JSON.
+    let compressed_len = response.body.len();
+    let mut decoder = flate2::read::GzDecoder::new(&response.body[..]);
+    let mut decompressed = String::new();
+    std::io::Read::read_to_string(&mut decoder, &mut decompressed).unwrap();
+    let page: dropshot::ResultsPage<Project> =
+        serde_json::from_str(&decompressed).unwrap();
+    assert_eq!(page.items.len(), 10);
+
+    // Without Accept-Encoding: gzip, response should not be compressed.
+    let response = NexusRequest::object_get(client, "/v1/projects")
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap();
+    assert!(response.headers.get(http::header::CONTENT_ENCODING).is_none());
+
+    let uncompressed_len = response.body.len();
+    assert!(
+        compressed_len < uncompressed_len,
+        "compressed body ({compressed_len} bytes) should be smaller \
+         than uncompressed body ({uncompressed_len} bytes)"
+    );
+
+    // Accept-Encoding: gzip;q=0 explicitly refuses gzip, so the response
+    // should not be compressed even though the client mentions gzip. This
+    // verifies that q-value parsing is wired up correctly through the
+    // dropshot config.
+    let response = NexusRequest::new(
+        RequestBuilder::new(client, Method::GET, "/v1/projects")
+            .header(http::header::ACCEPT_ENCODING, "gzip;q=0")
+            .expect_status(Some(StatusCode::OK)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+    assert!(response.headers.get(http::header::CONTENT_ENCODING).is_none());
+
+    // Even when a response is too small to compress, dropshot should still
+    // set Vary: Accept-Encoding on a compressible content type so caches
+    // behave correctly. /v1/ping returns a tiny JSON body well under the
+    // 512-byte compression threshold.
+    let response = NexusRequest::new(
+        RequestBuilder::new(client, Method::GET, "/v1/ping")
+            .header(http::header::ACCEPT_ENCODING, "gzip")
+            .expect_status(Some(StatusCode::OK)),
+    )
+    .execute()
+    .await
+    .unwrap();
+    assert!(response.headers.get(http::header::CONTENT_ENCODING).is_none());
+    let vary_values: Vec<_> = response
+        .headers
+        .get_all(http::header::VARY)
+        .iter()
+        .filter_map(|v| v.to_str().ok())
+        .collect();
+    assert!(
+        vary_values.iter().any(|v| v
+            .split(',')
+            .any(|entry| entry.trim().eq_ignore_ascii_case("accept-encoding"))),
+        "expected Vary: Accept-Encoding on small uncompressed response, got {vary_values:?}",
+    );
+}

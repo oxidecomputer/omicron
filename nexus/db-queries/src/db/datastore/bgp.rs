@@ -3,208 +3,188 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::DataStore;
+use crate::authz;
 use crate::context::OpContext;
-use crate::db::model::{BgpAnnounceSet, BgpAnnouncement, BgpConfig, Name};
+use crate::db::model::{
+    BgpAnnounceSet, BgpAnnouncement, BgpConfig, Name, to_db_typed_uuid,
+};
 use crate::db::pagination::paginated;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
-use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
+use diesel::{
+    ExpressionMethods, PgExpressionMethods, QueryDsl, SelectableHelper,
+};
 use ipnetwork::IpNetwork;
 use nexus_db_errors::OptionalError;
 use nexus_db_errors::{ErrorHandler, public_error_from_diesel};
 use nexus_db_model::{
-    BgpPeerView, DbSwitchSlot, SwitchPortBgpPeerConfigAllowExport,
-    SwitchPortBgpPeerConfigAllowImport, SwitchPortBgpPeerConfigCommunity,
+    BgpPeerView, DbSwitchSlot, RouterPeerTypeDbRepresentation,
+    SwitchPortBgpPeerConfigAllowExport, SwitchPortBgpPeerConfigAllowImport,
+    SwitchPortBgpPeerConfigCommunity,
 };
 use nexus_types::external_api::networking;
 use nexus_types::identity::Resource;
-use omicron_common::api::external;
 use omicron_common::api::external::http_pagination::PaginatedBy;
+use omicron_common::api::external::{self};
 use omicron_common::api::external::{
     CreateResult, DeleteResult, Error, ListResultVec, LookupResult, NameOrId,
-    ResourceType,
+    ResourceType, UpdateResult,
 };
+use omicron_uuid_kinds::{BgpConfigUuid, GenericUuid};
 use ref_cast::RefCast;
 use sled_agent_types::early_networking::RouterPeerType;
 use sled_agent_types::early_networking::SwitchSlot;
-use std::net::IpAddr;
 use uuid::Uuid;
 
 impl DataStore {
     pub async fn bgp_config_create(
         &self,
         opctx: &OpContext,
-        config: &networking::BgpConfigCreate,
+        config: BgpConfig,
     ) -> CreateResult<BgpConfig> {
+        use diesel::dsl::exists;
         use nexus_db_schema::schema::bgp_config::dsl;
         use nexus_db_schema::schema::{
             bgp_announce_set, bgp_announce_set::dsl as announce_set_dsl,
         };
 
+        let announce_set_id = config.bgp_announce_set_id();
         let conn = self.pool_connection_authorized(opctx).await?;
         let err = OptionalError::new();
         self.transaction_retry_wrapper("bgp_config_create")
-            .transaction(&conn, |conn| {
+            .transaction(&conn, async |conn| {
+                // Guarantee that the announce set exists within the transaction
+                let announce_set_exists = diesel::select(exists(
+                    announce_set_dsl::bgp_announce_set
+                        .filter(bgp_announce_set::time_deleted.is_null())
+                        .filter(bgp_announce_set::id.eq(announce_set_id.into_untyped_uuid())),
+                ))
+                .get_result_async::<bool>(&conn)
+                .await?;
 
-                let err = err.clone();
-                async move {
-                    let announce_set_id = match config.bgp_announce_set_id.clone() {
-                        // Resolve Name to UUID
-                        NameOrId::Name(name) => announce_set_dsl::bgp_announce_set
-                            .filter(bgp_announce_set::time_deleted.is_null())
-                            .filter(bgp_announce_set::name.eq(name.to_string()))
-                            .select(bgp_announce_set::id)
-                            .limit(1)
-                            .first_async::<Uuid>(&conn)
-                            .await
-                            .map_err(|e| {
-                                let msg = "failed to lookup announce set by name";
-                                error!(opctx.log, "{msg}"; "error" => ?e);
+                if !announce_set_exists {
+                    return Err(err.bail(Error::ObjectNotFound {
+                        type_name: ResourceType::BgpAnnounceSet,
+                        lookup_type: external::LookupType::ById(
+                            announce_set_id.into_untyped_uuid(),
+                        ),
+                    }));
+                }
 
-                                match e {
-                                    diesel::result::Error::NotFound => {
-                                        err.bail(Error::not_found_by_name(
-                                            ResourceType::BgpAnnounceSet,
-                                            &name,
-                                        ))
-                                    }
-                                    _ => err.bail(Error::internal_error(msg)),
+                let BgpConfig {
+                    identity,
+                    asn,
+                    bgp_announce_set_id,
+                    vrf,
+                    shaper,
+                    checker,
+                    max_paths,
+                } = config.clone();
 
+                // Idempotency:
+                // Check to see if an exact match for the config already exists
+                let query = dsl::bgp_config
+                    .filter(dsl::name.eq(identity.name.to_string()))
+                    .filter(dsl::description.eq(identity.description.to_string()))
+                    .filter(dsl::asn.eq(asn))
+                    .filter(dsl::bgp_announce_set_id.eq(bgp_announce_set_id))
+                    .filter(dsl::max_paths.eq(max_paths))
+                    .into_boxed();
+
+                let query = match vrf {
+                    Some(v) => query.filter(dsl::vrf.eq(v)),
+                    None => query.filter(dsl::vrf.is_null()),
+                };
+
+                let query = match shaper {
+                    Some(v) => query.filter(dsl::shaper.eq(v)),
+                    None => query.filter(dsl::shaper.is_null()),
+                };
+
+                let query = match checker {
+                    Some(v) => query.filter(dsl::checker.eq(v)),
+                    None => query.filter(dsl::checker.is_null()),
+                };
+
+                let matching_config = match query
+                    .filter(dsl::time_deleted.is_null())
+                    .select(BgpConfig::as_select())
+                    .first_async::<BgpConfig>(&conn)
+                    .await {
+                        Ok(v)  => Ok(Some(v)),
+                        Err(e) => {
+                            match e {
+                                diesel::result::Error::NotFound => {
+                                    info!(opctx.log, "no matching bgp config found");
+                                    Ok(None)
                                 }
-                            }),
-
-                        // We cannot assume that the provided UUID is actually real.
-                        // Lookup the parent record by UUID to verify that it is valid.
-                        NameOrId::Id(id) => announce_set_dsl::bgp_announce_set
-                            .filter(bgp_announce_set::time_deleted.is_null())
-                            .filter(bgp_announce_set::id.eq(id))
-                            .select(bgp_announce_set::id)
-                            .limit(1)
-                            .first_async::<Uuid>(&conn)
-                            .await
-                            .map_err(|e| {
-                                let msg = "failed to lookup announce set by id";
-                                error!(opctx.log, "{msg}"; "error" => ?e);
-
-                                match e {
-                                    diesel::result::Error::NotFound => {
-                                        err.bail(Error::not_found_by_id(
-                                            ResourceType::BgpAnnounceSet,
-                                            &id,
-                                        ))
-                                    }
-                                    _ => err.bail(Error::internal_error(msg)),
-
+                                _ => {
+                                    let msg = "error while checking if bgp config exists";
+                                    error!(opctx.log, "{msg}"; "error" => ?e);
+                                    Err(err.bail(Error::internal_error(msg)))
                                 }
-                            }),
+                            }
+                        }
                     }?;
 
-                    let config =
-                        BgpConfig::from_config_create(config, announce_set_id);
-
-                    // Idempotency:
-                    // Check to see if an exact match for the config already exists
-                    let query = dsl::bgp_config
-                        .filter(dsl::name.eq(config.name().to_string()))
-                        .filter(dsl::asn.eq(config.asn))
-                        .filter(dsl::bgp_announce_set_id.eq(config.bgp_announce_set_id))
-                        .into_boxed();
-
-                    let query = match config.vrf.clone() {
-                        Some(v) => query.filter(dsl::vrf.eq(v)),
-                        None => query.filter(dsl::vrf.is_null()),
-                    };
-
-                    let query = match config.shaper.clone() {
-                        Some(v) => query.filter(dsl::shaper.eq(v)),
-                        None => query.filter(dsl::shaper.is_null()),
-                    };
-
-                    let query = match config.checker.clone() {
-                        Some(v) => query.filter(dsl::checker.eq(v)),
-                        None => query.filter(dsl::checker.is_null()),
-                    };
-
-                    let matching_config = match query
-                        .filter(dsl::time_deleted.is_null())
-                        .select(BgpConfig::as_select())
-                        .first_async::<BgpConfig>(&conn)
-                        .await {
-                            Ok(v)  => Ok(Some(v)),
-                            Err(e) => {
-                                match e {
-                                    diesel::result::Error::NotFound => {
-                                        info!(opctx.log, "no matching bgp config found");
-                                        Ok(None)
-                                    }
-                                    _ => {
-                                        let msg = "error while checking if bgp config exists";
-                                        error!(opctx.log, "{msg}"; "error" => ?e);
-                                        Err(err.bail(Error::internal_error(msg)))
-                                    }
-                                }
-                            }
-                        }?;
-
-                    // If so, we're done!
-                    if let Some(existing_config) = matching_config {
-                        return Ok(existing_config);
-                    }
-
-                    // TODO: remove once per-switch-multi-asn support is added
-                    // Bail if a conflicting config for this ASN already exists.
-                    // This is a temporary measure until multi-asn-per-switch is supported.
-                    let configs_with_asn: Vec<BgpConfig> = dsl::bgp_config
-                        .filter(dsl::asn.eq(config.asn))
-                        .filter(dsl::time_deleted.is_null())
-                        .select(BgpConfig::as_select())
-                        .load_async(&conn)
-                        .await?;
-
-                    if !configs_with_asn.is_empty() {
-                        error!(
-                            opctx.log,
-                            "different config for asn already exists";
-                            "asn" => ?config.asn,
-                            "requested_config" => ?config,
-                            "conflicting_configs" => ?configs_with_asn
-                        );
-                        return Err(err.bail(Error::conflict("cannot have more than one configuration per ASN")));
-                    }
-
-                    diesel::insert_into(dsl::bgp_config)
-                        .values(config.clone())
-                        .returning(BgpConfig::as_returning())
-                        .get_result_async(&conn)
-                        .await
-                        .map_err(|e | {
-                            let msg = "failed to insert bgp config";
-                            error!(opctx.log, "{msg}"; "error" => ?e);
-
-                            match e {
-                                diesel::result::Error::DatabaseError(kind, _) => {
-                                    match kind {
-                                        diesel::result::DatabaseErrorKind::UniqueViolation => {
-                                            err.bail(Error::conflict("a field that must be unique conflicts with an existing record"))
-                                        },
-                                        // technically we don't use Foreign Keys but it doesn't hurt to match on them
-                                        // instead of returning a 500 by default in the event that we do switch to Foreign Keys
-                                        diesel::result::DatabaseErrorKind::ForeignKeyViolation => {
-                                            err.bail(Error::conflict("an id field references an object that does not exist"))
-                                        }
-                                        diesel::result::DatabaseErrorKind::NotNullViolation => {
-                                            err.bail(Error::invalid_request("a required field was not provided"))
-                                        }
-                                        diesel::result::DatabaseErrorKind::CheckViolation => {
-                                            err.bail(Error::invalid_request("one or more fields are not valid values"))
-                                        },
-                                        _ => err.bail(Error::internal_error(msg)),
-                                    }
-                                }
-                                _ => err.bail(Error::internal_error(msg)),
-                            }
-                        })
+                // If so, we're done!
+                if let Some(existing_config) = matching_config {
+                    return Ok(existing_config);
                 }
+
+                // TODO: remove once per-switch-multi-asn support is added
+                // Bail if a conflicting config for this ASN already exists.
+                // This is a temporary measure until multi-asn-per-switch is supported.
+                let configs_with_asn: Vec<BgpConfig> = dsl::bgp_config
+                    .filter(dsl::asn.eq(config.asn))
+                    .filter(dsl::time_deleted.is_null())
+                    .select(BgpConfig::as_select())
+                    .load_async(&conn)
+                    .await?;
+
+                if !configs_with_asn.is_empty() {
+                    error!(
+                        opctx.log,
+                        "different config for asn already exists";
+                        "asn" => ?config.asn,
+                        "requested_config" => ?config,
+                        "conflicting_configs" => ?configs_with_asn
+                    );
+                    return Err(err.bail(Error::conflict("cannot have more than one configuration per ASN")));
+                }
+
+                diesel::insert_into(dsl::bgp_config)
+                    .values(config.clone())
+                    .returning(BgpConfig::as_returning())
+                    .get_result_async(&conn)
+                    .await
+                    .map_err(|e | {
+                        let msg = "failed to insert bgp config";
+                        error!(opctx.log, "{msg}"; "error" => ?e);
+
+                        match e {
+                            diesel::result::Error::DatabaseError(kind, _) => {
+                                match kind {
+                                    diesel::result::DatabaseErrorKind::UniqueViolation => {
+                                        err.bail(Error::conflict("a field that must be unique conflicts with an existing record"))
+                                    },
+                                    // technically we don't use Foreign Keys but it doesn't hurt to match on them
+                                    // instead of returning a 500 by default in the event that we do switch to Foreign Keys
+                                    diesel::result::DatabaseErrorKind::ForeignKeyViolation => {
+                                        err.bail(Error::conflict("an id field references an object that does not exist"))
+                                    }
+                                    diesel::result::DatabaseErrorKind::NotNullViolation => {
+                                        err.bail(Error::invalid_request("a required field was not provided"))
+                                    }
+                                    diesel::result::DatabaseErrorKind::CheckViolation => {
+                                        err.bail(Error::invalid_request("one or more fields are not valid values"))
+                                    },
+                                    _ => err.bail(Error::internal_error(msg)),
+                                }
+                            }
+                            _ => err.bail(Error::internal_error(msg)),
+                        }
+                    })
             })
             .await
             .map_err(|e|{
@@ -223,95 +203,103 @@ impl DataStore {
             })
     }
 
+    pub async fn bgp_config_update(
+        &self,
+        opctx: &OpContext,
+        authz_bgp_config: &authz::BgpConfig,
+        update: nexus_db_model::BgpConfigUpdate,
+    ) -> UpdateResult<BgpConfig> {
+        use diesel::dsl::exists;
+        use nexus_db_schema::schema::bgp_config::dsl;
+        use nexus_db_schema::schema::{
+            bgp_announce_set, bgp_announce_set::dsl as announce_set_dsl,
+        };
+
+        let id = authz_bgp_config.id();
+        let err = OptionalError::new();
+        let announce_set_id = update.bgp_announce_set_id;
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        self.transaction_retry_wrapper("bgp_config_update")
+            .transaction(&conn, async |conn| {
+                // Guarantee that the announce set exists within the transaction
+                let announce_set_exists = diesel::select(exists(
+                    announce_set_dsl::bgp_announce_set
+                        .filter(bgp_announce_set::time_deleted.is_null())
+                        .filter(bgp_announce_set::id.eq(announce_set_id)),
+                ))
+                .get_result_async::<bool>(&conn)
+                .await?;
+
+                if !announce_set_exists {
+                    return Err(err.bail(Error::ObjectNotFound {
+                        type_name: ResourceType::BgpAnnounceSet,
+                        lookup_type: external::LookupType::ById(
+                            announce_set_id,
+                        ),
+                    }));
+                }
+
+                diesel::update(dsl::bgp_config)
+                    .filter(dsl::time_deleted.is_null())
+                    .filter(dsl::id.eq(to_db_typed_uuid(id)))
+                    .set(update.clone())
+                    .returning(BgpConfig::as_returning())
+                    .get_result_async(&conn)
+                    .await
+            })
+            .await
+            .map_err(|e| {
+                let msg = "bgp_config_update failed";
+                if let Some(err) = err.take() {
+                    error!(opctx.log, "{msg}"; "error" => ?err);
+                    err
+                } else {
+                    error!(opctx.log, "{msg}"; "error" => ?e);
+                    public_error_from_diesel(
+                        e,
+                        ErrorHandler::NotFoundByResource(authz_bgp_config),
+                    )
+                }
+            })
+    }
+
     pub async fn bgp_config_delete(
         &self,
         opctx: &OpContext,
-        sel: &networking::BgpConfigSelector,
+        authz_bgp_config: &authz::BgpConfig,
     ) -> DeleteResult {
-        use nexus_db_schema::schema::bgp_config;
         use nexus_db_schema::schema::bgp_config::dsl as bgp_config_dsl;
 
         use nexus_db_schema::schema::switch_port_settings_bgp_peer_config as sps_bgp_peer_config;
         use nexus_db_schema::schema::switch_port_settings_bgp_peer_config::dsl as sps_bgp_peer_config_dsl;
 
         let err = OptionalError::new();
+        let id = authz_bgp_config.id();
         let conn = self.pool_connection_authorized(opctx).await?;
+
         self.transaction_retry_wrapper("bgp_config_delete")
-            .transaction(&conn, |conn| {
-                let err = err.clone();
-                async move {
-                    let name_or_id = sel.name_or_id.clone();
+            .transaction(&conn, async |conn| {
+                // Guarantee that the BGP Config is not in use before deleting it
+                let in_use = diesel::dsl::select(diesel::dsl::exists(
+                    sps_bgp_peer_config_dsl::switch_port_settings_bgp_peer_config
+                        .filter(sps_bgp_peer_config::bgp_config_id.eq(id.into_untyped_uuid()))
+                        .select(sps_bgp_peer_config::bgp_config_id),
+                ))
+                .get_result_async::<bool>(&conn)
+                .await?;
 
-                    let id: Uuid = match name_or_id {
-                        NameOrId::Id(id) => bgp_config_dsl::bgp_config
-                            .filter(bgp_config::id.eq(id))
-                            .select(bgp_config::id)
-                            .filter(bgp_config::time_deleted.is_null())
-                            .limit(1)
-                            .first_async::<Uuid>(&conn)
-                            .await
-                            .map_err(|e| {
-                                let msg = "failed to lookup bgp config by id";
-                                error!(opctx.log, "{msg}"; "error" => ?e);
-
-                                match e {
-                                    diesel::result::Error::NotFound => {
-                                        err.bail(Error::not_found_by_id(
-                                            ResourceType::BgpConfig,
-                                            &id,
-                                        ))
-                                    }
-                                    _ => err.bail(Error::internal_error(msg)),
-
-                                }
-                            }),
-                        NameOrId::Name(name) =>
-                            bgp_config_dsl::bgp_config
-                            .filter(bgp_config::name.eq(name.to_string()))
-                            .filter(bgp_config::time_deleted.is_null())
-                            .select(bgp_config::id)
-                            .limit(1)
-                            .first_async::<Uuid>(&conn)
-                            .await
-                            .map_err(|e| {
-                                let msg = "failed to lookup bgp config by name";
-                                error!(opctx.log, "{msg}"; "error" => ?e);
-
-                                match e {
-                                    diesel::result::Error::NotFound => {
-                                        err.bail(Error::not_found_by_name(
-                                            ResourceType::BgpConfig,
-                                            &name,
-                                        ))
-                                    }
-                                    _ => err.bail(Error::internal_error(msg)),
-
-                                }
-                            }),
-                    }?;
-
-
-                    let in_use =
-                        diesel::dsl::select(diesel::dsl::exists(
-                            sps_bgp_peer_config_dsl::switch_port_settings_bgp_peer_config
-                                .filter(sps_bgp_peer_config::bgp_config_id.eq(id))
-                                .select(sps_bgp_peer_config::bgp_config_id)
-                        ))
-                        .get_result_async::<bool>(&conn)
-                        .await?;
-
-                    if in_use {
-                        return Err(err.bail(Error::conflict("BGP Config is in use and cannot be deleted")));
-                    }
-
-                    diesel::update(bgp_config_dsl::bgp_config)
-                        .filter(bgp_config_dsl::id.eq(id))
-                        .set(bgp_config_dsl::time_deleted.eq(Utc::now()))
-                        .execute_async(&conn)
-                        .await?;
-
-                    Ok(())
+                if in_use {
+                    return Err(err.bail(Error::conflict("BGP Config is in use and cannot be deleted")));
                 }
+
+                diesel::update(bgp_config_dsl::bgp_config)
+                    .filter(bgp_config_dsl::id.eq(id.into_untyped_uuid()))
+                    .set(bgp_config_dsl::time_deleted.eq(Utc::now()))
+                    .execute_async(&conn)
+                    .await?;
+
+                Ok(())
             })
             .await
             .map_err(|e| {
@@ -329,53 +317,30 @@ impl DataStore {
     pub async fn bgp_config_get(
         &self,
         opctx: &OpContext,
-        name_or_id: &NameOrId,
+        bgp_config_id: BgpConfigUuid,
     ) -> LookupResult<BgpConfig> {
         use nexus_db_schema::schema::bgp_config;
         use nexus_db_schema::schema::bgp_config::dsl;
         let conn = self.pool_connection_authorized(opctx).await?;
+        let id = bgp_config_id.into_untyped_uuid();
 
-        let name_or_id = name_or_id.clone();
-
-        match name_or_id {
-            NameOrId::Name(name) => dsl::bgp_config
-                .filter(bgp_config::name.eq(name.to_string()))
-                .select(BgpConfig::as_select())
-                .limit(1)
-                .first_async::<BgpConfig>(&*conn)
-                .await
-                .map_err(|e| {
-                    let msg = "failed to lookup bgp config by name";
-                    error!(opctx.log, "{msg}"; "error" => ?e);
-
-                    match e {
-                        diesel::result::Error::NotFound => {
-                            Error::not_found_by_name(
-                                ResourceType::BgpConfig,
-                                &name,
-                            )
-                        }
-                        _ => Error::internal_error(msg),
-                    }
-                }),
-            NameOrId::Id(id) => dsl::bgp_config
-                .filter(bgp_config::id.eq(id))
-                .select(BgpConfig::as_select())
-                .limit(1)
-                .first_async::<BgpConfig>(&*conn)
-                .await
-                .map_err(|e| {
-                    let msg = "failed to lookup bgp config by id";
-                    error!(opctx.log, "{msg}"; "error" => ?e);
-
-                    match e {
-                        diesel::result::Error::NotFound => {
-                            Error::not_found_by_id(ResourceType::BgpConfig, &id)
-                        }
-                        _ => Error::internal_error(msg),
-                    }
-                }),
-        }
+        dsl::bgp_config
+            .filter(bgp_config::id.eq(id))
+            .filter(bgp_config::time_deleted.is_null())
+            .select(BgpConfig::as_select())
+            .limit(1)
+            .first_async::<BgpConfig>(&*conn)
+            .await
+            .map_err(|e| {
+                error!(opctx.log, "bgp_config_get failed"; "error" => ?e);
+                public_error_from_diesel(
+                    e,
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::BgpConfig,
+                        external::LookupType::ById(id),
+                    ),
+                )
+            })
     }
 
     pub async fn bgp_config_list(
@@ -571,7 +536,8 @@ impl DataStore {
                 // clear existing announcements
                 diesel::delete(bgp_announcement_dsl::bgp_announcement)
                     .filter(
-                        bgp_announcement_dsl::announce_set_id.eq(db_as.id()),
+                        bgp_announcement_dsl::announce_set_id
+                            .eq(to_db_typed_uuid(db_as.id())),
                     )
                     .execute_async(&conn)
                     .await?;
@@ -580,8 +546,11 @@ impl DataStore {
                 let mut db_annoucements = Vec::new();
                 for a in &announce.announcement {
                     let an = BgpAnnouncement {
-                        announce_set_id: db_as.id(),
-                        address_lot_block_id: bas.identity.id,
+                        announce_set_id: to_db_typed_uuid(db_as.id()),
+                        // XXX: address_lot_block_id seems unused -- get rid of
+                        // it?
+                        // https://github.com/oxidecomputer/omicron/issues/10719
+                        address_lot_block_id: bas.id().into_untyped_uuid(),
                         network: a.network.into(),
                     };
                     let db_an = diesel::insert_into(
@@ -648,8 +617,11 @@ impl DataStore {
                 let mut db_annoucements = Vec::new();
                 for a in &announce.announcement {
                     let an = BgpAnnouncement {
-                        announce_set_id: db_as.id(),
-                        address_lot_block_id: bas.identity.id,
+                        announce_set_id: to_db_typed_uuid(db_as.id()),
+                        // XXX: address_lot_block_id seems unused -- get rid of
+                        // it?
+                        // https://github.com/oxidecomputer/omicron/issues/10719
+                        address_lot_block_id: bas.id().into_untyped_uuid(),
                         network: a.network.into(),
                     };
 
@@ -657,7 +629,7 @@ impl DataStore {
                         bgp_announcement_dsl::bgp_announcement
                             .filter(
                                 bgp_announcement_dsl::announce_set_id
-                                    .eq(db_as.id()),
+                                    .eq(to_db_typed_uuid(db_as.id())),
                             )
                             .filter(
                                 bgp_announcement_dsl::network
@@ -843,14 +815,11 @@ impl DataStore {
     ) -> ListResultVec<SwitchPortBgpPeerConfigCommunity> {
         use nexus_db_schema::schema::switch_port_settings_bgp_peer_config_communities::dsl;
 
-        // For unnumbered peers (addr is None), use sentinel value
-        let db_addr: IpNetwork =
-            addr.ip_squashing_unnumbered_to_sentinel().into();
-
         let results = dsl::switch_port_settings_bgp_peer_config_communities
             .filter(dsl::port_settings_id.eq(port_settings_id))
             .filter(dsl::interface_name.eq(interface_name.to_string()))
-            .filter(dsl::addr.eq(db_addr))
+            // Use `is_not_distinct_from` instead of `eq` to compare NULL/None.
+            .filter(dsl::addr.is_not_distinct_from(addr.ip_db_repr()))
             .load_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| {
@@ -875,54 +844,46 @@ impl DataStore {
         use nexus_db_schema::schema::switch_port_settings_bgp_peer_config_allow_export as db_allow;
         use nexus_db_schema::schema::switch_port_settings_bgp_peer_config_allow_export::dsl;
 
-        // For unnumbered peers (addr is None), use sentinel value for the
-        // allow_export table (which has non-nullable addr)
-        let db_addr: IpNetwork =
-            addr.ip_squashing_unnumbered_to_sentinel().into();
-
         let conn = self.pool_connection_authorized(opctx).await?;
         let err = OptionalError::new();
         self.transaction_retry_wrapper("bgp_allow_export_for_peer")
             .transaction(&conn, |conn| {
                 let err = err.clone();
                 async move {
-                    // Query the main peer config table. For unnumbered peers,
-                    // addr is NULL; for numbered peers, addr matches.
-                    let active = match addr {
-                        RouterPeerType::Numbered { ip } => {
-                            let addr = IpNetwork::from(IpAddr::from(ip));
-                            peer_dsl::switch_port_settings_bgp_peer_config
-                                .filter(db_peer::port_settings_id.eq(port_settings_id))
-                                .filter(db_peer::addr.eq(addr))
-                                .select(db_peer::allow_export_list_active)
-                                .limit(1)
-                                .first_async::<bool>(&conn)
-                                .await
-                        }
-                        RouterPeerType::Unnumbered { .. } => {
-                            peer_dsl::switch_port_settings_bgp_peer_config
-                                .filter(db_peer::port_settings_id.eq(port_settings_id))
-                                .filter(db_peer::addr.is_null())
-                                .filter(db_peer::interface_name.eq(interface_name.to_string()))
-                                .select(db_peer::allow_export_list_active)
-                                .limit(1)
-                                .first_async::<bool>(&conn)
-                                .await
-                        }
-                    };
+                    // Query the main peer config table.
+                    let active = peer_dsl::switch_port_settings_bgp_peer_config
+                        .filter(db_peer::port_settings_id.eq(port_settings_id))
+                        .filter(
+                            db_peer::addr
+                                .is_not_distinct_from(addr.ip_db_repr()),
+                        )
+                        .filter(
+                            db_peer::interface_name
+                                .eq(interface_name.to_string()),
+                        )
+                        .select(db_peer::allow_export_list_active)
+                        .limit(1)
+                        .first_async::<bool>(&conn)
+                        .await
+                        .map_err(|e| {
+                            let msg =
+                                "failed to lookup export settings for peer";
+                            error!(opctx.log, "{msg}"; "error" => ?e);
 
-                    let active = active.map_err(|e| {
-                        let msg = "failed to lookup export settings for peer";
-                        error!(opctx.log, "{msg}"; "error" => ?e);
-
-                        match e {
-                            diesel::result::Error::NotFound => {
-                                let not_found_msg = format!("peer with {:?} not found for port settings {port_settings_id}", addr);
-                                err.bail(Error::non_resourcetype_not_found(not_found_msg))
-                            },
-                            _ => err.bail(Error::internal_error(msg)),
-                        }
-                    })?;
+                            match e {
+                                diesel::result::Error::NotFound => {
+                                    let not_found_msg = format!(
+                                        "peer with {:?} not found for port \
+                                         settings {port_settings_id}",
+                                        addr
+                                    );
+                                    err.bail(Error::non_resourcetype_not_found(
+                                        not_found_msg,
+                                    ))
+                                }
+                                _ => err.bail(Error::internal_error(msg)),
+                            }
+                        })?;
 
                     if !active {
                         return Ok(None);
@@ -930,16 +891,19 @@ impl DataStore {
 
                     let list =
                         dsl::switch_port_settings_bgp_peer_config_allow_export
-                        .filter(
-                            db_allow::port_settings_id.eq(port_settings_id),
-                        )
-                        .filter(
-                            db_allow::interface_name
-                                .eq(interface_name.to_string()),
-                        )
-                        .filter(db_allow::addr.eq(db_addr))
-                        .load_async(&conn)
-                        .await?;
+                            .filter(
+                                db_allow::port_settings_id.eq(port_settings_id),
+                            )
+                            .filter(
+                                db_allow::interface_name
+                                    .eq(interface_name.to_string()),
+                            )
+                            .filter(
+                                db_allow::addr
+                                    .is_not_distinct_from(addr.ip_db_repr()),
+                            )
+                            .load_async(&conn)
+                            .await?;
 
                     Ok(Some(list))
                 }
@@ -970,55 +934,46 @@ impl DataStore {
         use nexus_db_schema::schema::switch_port_settings_bgp_peer_config_allow_import as db_allow;
         use nexus_db_schema::schema::switch_port_settings_bgp_peer_config_allow_import::dsl;
 
-        // For unnumbered peers (addr is None), use sentinel value for the
-        // allow_import table (which has non-nullable addr)
-        let db_addr: IpNetwork =
-            addr.ip_squashing_unnumbered_to_sentinel().into();
-
         let err = OptionalError::new();
         let conn = self.pool_connection_authorized(opctx).await?;
-        self
-            .transaction_retry_wrapper("bgp_allow_import_for_peer")
+        self.transaction_retry_wrapper("bgp_allow_import_for_peer")
             .transaction(&conn, |conn| {
                 let err = err.clone();
                 async move {
-                    // Query the main peer config table. For unnumbered peers,
-                    // addr is NULL; for numbered peers, addr matches.
-                    let active = match addr {
-                        RouterPeerType::Numbered { ip } => {
-                            let addr = IpNetwork::from(IpAddr::from(ip));
-                            peer_dsl::switch_port_settings_bgp_peer_config
-                                .filter(db_peer::port_settings_id.eq(port_settings_id))
-                                .filter(db_peer::addr.eq(addr))
-                                .select(db_peer::allow_import_list_active)
-                                .limit(1)
-                                .first_async::<bool>(&conn)
-                                .await
-                        }
-                        RouterPeerType::Unnumbered { .. } => {
-                            peer_dsl::switch_port_settings_bgp_peer_config
-                                .filter(db_peer::port_settings_id.eq(port_settings_id))
-                                .filter(db_peer::addr.is_null())
-                                .filter(db_peer::interface_name.eq(interface_name.to_string()))
-                                .select(db_peer::allow_import_list_active)
-                                .limit(1)
-                                .first_async::<bool>(&conn)
-                                .await
-                        }
-                    };
+                    // Query the main peer config table.
+                    let active = peer_dsl::switch_port_settings_bgp_peer_config
+                        .filter(db_peer::port_settings_id.eq(port_settings_id))
+                        .filter(
+                            db_peer::addr
+                                .is_not_distinct_from(addr.ip_db_repr()),
+                        )
+                        .filter(
+                            db_peer::interface_name
+                                .eq(interface_name.to_string()),
+                        )
+                        .select(db_peer::allow_import_list_active)
+                        .limit(1)
+                        .first_async::<bool>(&conn)
+                        .await
+                        .map_err(|e| {
+                            let msg =
+                                "failed to lookup import settings for peer";
+                            error!(opctx.log, "{msg}"; "error" => ?e);
 
-                    let active = active.map_err(|e| {
-                        let msg = "failed to lookup import settings for peer";
-                        error!(opctx.log, "{msg}"; "error" => ?e);
-
-                        match e {
-                            diesel::result::Error::NotFound => {
-                                let not_found_msg = format!("peer with {:?} not found for port settings {port_settings_id}", addr);
-                                err.bail(Error::non_resourcetype_not_found(not_found_msg))
-                            },
-                            _ => err.bail(Error::internal_error(msg)),
-                        }
-                    })?;
+                            match e {
+                                diesel::result::Error::NotFound => {
+                                    let not_found_msg = format!(
+                                        "peer with {:?} not found for port \
+                                         settings {port_settings_id}",
+                                        addr
+                                    );
+                                    err.bail(Error::non_resourcetype_not_found(
+                                        not_found_msg,
+                                    ))
+                                }
+                                _ => err.bail(Error::internal_error(msg)),
+                            }
+                        })?;
 
                     if !active {
                         return Ok(None);
@@ -1026,16 +981,19 @@ impl DataStore {
 
                     let list =
                         dsl::switch_port_settings_bgp_peer_config_allow_import
-                        .filter(
-                            db_allow::port_settings_id.eq(port_settings_id),
-                        )
-                        .filter(
-                            db_allow::interface_name
-                                .eq(interface_name.to_string()),
-                        )
-                        .filter(db_allow::addr.eq(db_addr))
-                        .load_async(&conn)
-                        .await?;
+                            .filter(
+                                db_allow::port_settings_id.eq(port_settings_id),
+                            )
+                            .filter(
+                                db_allow::interface_name
+                                    .eq(interface_name.to_string()),
+                            )
+                            .filter(
+                                db_allow::addr
+                                    .is_not_distinct_from(addr.ip_db_repr()),
+                            )
+                            .load_async(&conn)
+                            .await?;
 
                     Ok(Some(list))
                 }
@@ -1058,9 +1016,178 @@ impl DataStore {
 mod tests {
     use super::*;
     use crate::db::pub_test_utils::TestDatabase;
+    use nexus_db_lookup::LookupPath;
+    use nexus_db_model::SwitchPortBgpPeerConfig;
+    use nexus_types::external_api::networking::BgpConfigCreate;
+    use nexus_types::external_api::networking::BgpPeer;
     use omicron_common::api::external::IdentityMetadataCreateParams;
+    use omicron_common::api::external::IdentityMetadataUpdateParams;
     use omicron_common::api::external::Name;
     use omicron_test_utils::dev;
+    use omicron_uuid_kinds::BgpConfigUuid;
+    use oxnet::IpNet;
+    use sled_agent_types::early_networking::ImportExportPolicy;
+    use sled_agent_types::early_networking::MaxPathConfig;
+    use sled_agent_types::early_networking::RouterLifetimeConfig;
+    use std::net::IpAddr;
+
+    /// A `BgpConfigCreate` for a test config named `name` that references
+    /// `bgp_announce_set_id`.
+    fn make_bgp_config(
+        name: &Name,
+        bgp_announce_set_id: NameOrId,
+    ) -> networking::BgpConfigCreate {
+        networking::BgpConfigCreate {
+            identity: IdentityMetadataCreateParams {
+                name: name.clone(),
+                description: "a test config".into(),
+            },
+            asn: 47,
+            bgp_announce_set_id,
+            vrf: None,
+            shaper: None,
+            checker: None,
+            max_paths: Default::default(),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_update_bgp_config() {
+        let logctx = dev::test_setup_log("test_update_bgp_config");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let config_name: Name = "config-name".parse().unwrap();
+        let announce_name: Name = "announce-name".parse().unwrap();
+
+        let config = networking::BgpConfigCreate {
+            identity: IdentityMetadataCreateParams {
+                name: config_name.clone(),
+                description: String::from("a test config"),
+            },
+            asn: 47,
+            bgp_announce_set_id: NameOrId::Name(announce_name.clone()),
+            vrf: None,
+            shaper: None,
+            checker: None,
+            max_paths: MaxPathConfig::new(1).unwrap(),
+        };
+
+        let new_announce_name: Name = "new-announce-name".parse().unwrap();
+        let new_max_paths = MaxPathConfig::new(2).unwrap();
+        let new_config_name: Name = "new-config-name".parse().unwrap();
+        let new_description = String::from("updated description");
+
+        let update = networking::BgpConfigUpdate {
+            identity: IdentityMetadataUpdateParams {
+                name: Some(new_config_name.clone()),
+                description: Some(new_description.clone()),
+            },
+            bgp_announce_set_id: Some(NameOrId::Name(
+                new_announce_name.clone(),
+            )),
+            max_paths: Some(new_max_paths),
+        };
+
+        // Make sure the announces exist
+        datastore
+            .bgp_create_announce_set(
+                &opctx,
+                &networking::BgpAnnounceSetCreate {
+                    identity: IdentityMetadataCreateParams {
+                        name: announce_name.clone(),
+                        description: String::from("the first announce set"),
+                    },
+                    announcement: Vec::default(),
+                },
+            )
+            .await
+            .expect("create bgp announce set");
+
+        let new_announce_id = datastore
+            .bgp_create_announce_set(
+                &opctx,
+                &networking::BgpAnnounceSetCreate {
+                    identity: IdentityMetadataCreateParams {
+                        name: new_announce_name.clone(),
+                        description: String::from("the second announce set"),
+                    },
+                    announcement: Vec::default(),
+                },
+            )
+            .await
+            .expect("create bgp announce set")
+            .0
+            .identity
+            .id;
+
+        // Create the BGP config
+        let config_id = datastore
+            .bgp_config_create(
+                &opctx,
+                BgpConfig::from_config_create(&config, new_announce_id.into()),
+            )
+            .await
+            .expect("create bgp config")
+            .identity
+            .id;
+
+        let (.., authz_bgp_config) = LookupPath::new(&opctx, datastore)
+            .bgp_config_id(config_id.into())
+            .lookup_for(authz::Action::Modify)
+            .await
+            .expect("lookup bgp config");
+
+        let (.., authz_announce_set) = LookupPath::new(&opctx, datastore)
+            .bgp_announce_set_id(new_announce_id.into())
+            .lookup_for(authz::Action::Read)
+            .await
+            .expect("lookup bgp announce set");
+
+        let update = nexus_db_model::BgpConfigUpdate::new(
+            update,
+            authz_announce_set.id().into_untyped_uuid(),
+        );
+
+        // Update the BGP config
+        datastore
+            .bgp_config_update(&opctx, &authz_bgp_config, update.clone())
+            .await
+            .expect("update bgp config");
+
+        // Verify the BGP config was updated
+        let bgp_config = datastore
+            .bgp_config_get(&opctx, config_id.into())
+            .await
+            .expect("get bgp config");
+
+        assert_eq!(
+            bgp_config.identity.name.to_string(),
+            new_config_name.to_string()
+        );
+        assert_eq!(bgp_config.identity.description, new_description);
+        assert_eq!(bgp_config.bgp_announce_set_id, new_announce_id);
+        assert_eq!(bgp_config.max_paths.0, new_max_paths.as_u8());
+
+        // Simulate deletion after the app layer has resolved the config but
+        // before the datastore update begins.
+        datastore
+            .bgp_config_delete(&opctx, &authz_bgp_config)
+            .await
+            .expect("delete bgp config");
+
+        let err = datastore
+            .bgp_config_update(&opctx, &authz_bgp_config, update)
+            .await
+            .expect_err("updating a deleted BGP config should fail");
+        assert!(
+            matches!(err, Error::ObjectNotFound { .. }),
+            "unexpected error: {err:?}"
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
 
     #[tokio::test]
     async fn test_delete_bgp_config_and_announce_set_by_name() {
@@ -1073,7 +1200,7 @@ mod tests {
         let config_name: Name = "testconfig47".parse().unwrap();
         let announce_name: Name = "testannounce47".parse().unwrap();
 
-        datastore
+        let (announce_set, _) = datastore
             .bgp_create_announce_set(
                 &opctx,
                 &networking::BgpAnnounceSetCreate {
@@ -1090,29 +1217,25 @@ mod tests {
         datastore
             .bgp_config_create(
                 &opctx,
-                &networking::BgpConfigCreate {
-                    identity: IdentityMetadataCreateParams {
-                        name: config_name.clone(),
-                        description: String::from("a test config"),
-                    },
-                    asn: 47,
-                    bgp_announce_set_id: NameOrId::Name(announce_name.clone()),
-                    vrf: None,
-                    shaper: None,
-                    checker: None,
-                    max_paths: Default::default(),
-                },
+                BgpConfig::from_config_create(
+                    &make_bgp_config(
+                        &config_name,
+                        NameOrId::Name(announce_name.clone()),
+                    ),
+                    announce_set.id(),
+                ),
             )
             .await
             .expect("create bgp config");
 
+        let (.., authz_bgp_config) = LookupPath::new(&opctx, datastore)
+            .bgp_config_name_owned(config_name.clone().into())
+            .lookup_for(authz::Action::Read)
+            .await
+            .expect("lookup bgp config");
+
         datastore
-            .bgp_config_delete(
-                &opctx,
-                &networking::BgpConfigSelector {
-                    name_or_id: NameOrId::Name(config_name),
-                },
-            )
+            .bgp_config_delete(&opctx, &authz_bgp_config)
             .await
             .expect("delete bgp config by name");
 
@@ -1125,6 +1248,805 @@ mod tests {
             )
             .await
             .expect("delete announce set by name");
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    /// After a config name is reused, a by-name `bgp_config_get` must return
+    /// the live config.
+    #[tokio::test]
+    async fn bgp_config_get_by_name_after_reuse_returns_live() {
+        let logctx = dev::test_setup_log(
+            "bgp_config_get_by_name_after_reuse_returns_live",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let announce_name: Name = "test-announce-set".parse().unwrap();
+        let config_name: Name = "test-bgp-config".parse().unwrap();
+
+        let (announce_set, _) = datastore
+            .bgp_create_announce_set(
+                &opctx,
+                &networking::BgpAnnounceSetCreate {
+                    identity: IdentityMetadataCreateParams {
+                        name: announce_name.clone(),
+                        description: "a test announce set".into(),
+                    },
+                    announcement: vec![],
+                },
+            )
+            .await
+            .expect("created announce set");
+
+        let config_create = make_bgp_config(
+            &config_name,
+            NameOrId::Name(announce_name.clone()),
+        );
+
+        // Create the config, delete it, then create it again under the same
+        // name.
+        let first = datastore
+            .bgp_config_create(
+                &opctx,
+                BgpConfig::from_config_create(
+                    &config_create,
+                    announce_set.id(),
+                ),
+            )
+            .await
+            .unwrap();
+        let first_id = first.id();
+
+        let (.., authz_bgp_config) = LookupPath::new(&opctx, datastore)
+            .bgp_config_name_owned(config_name.clone().into())
+            .lookup_for(authz::Action::Read)
+            .await
+            .expect("lookup bgp config");
+
+        datastore
+            .bgp_config_delete(&opctx, &authz_bgp_config)
+            .await
+            .expect("the unreferenced config can be deleted");
+        let second = datastore
+            .bgp_config_create(
+                &opctx,
+                BgpConfig::from_config_create(
+                    &config_create,
+                    announce_set.id(),
+                ),
+            )
+            .await
+            .unwrap();
+        let second_id = second.id();
+        assert_ne!(first_id, second_id, "the recreation is a distinct row");
+
+        // A by-name lookup returns the live (second) config, not the dead one.
+        let (.., got) = LookupPath::new(&opctx, datastore)
+            .bgp_config_name_owned(config_name.clone().into())
+            .lookup_for(authz::Action::Read)
+            .await
+            .expect("lookup bgp config");
+
+        assert_eq!(got.id(), second_id);
+
+        datastore
+            .bgp_config_get(&opctx, second_id)
+            .await
+            .expect("the live config is readable by id");
+        let dead = datastore
+            .bgp_config_get(&opctx, first_id)
+            .await
+            .expect_err("the soft-deleted row must not be found by id");
+        let Error::ObjectNotFound { type_name, .. } = &dead else {
+            panic!("expected ObjectNotFound, got {dead:#?}");
+        };
+        assert_eq!(*type_name, ResourceType::BgpConfig);
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_communities_for_peer() {
+        let logctx = dev::test_setup_log("test_communities_for_peer");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let port_settings_id = Uuid::new_v4();
+        let iface_ext: Name = "phy0".parse().unwrap();
+        let iface_db: nexus_db_model::Name = iface_ext.clone().into();
+
+        // Set up peer types: one numbered, one unnumbered.
+        let numbered =
+            RouterPeerType::Numbered { ip: "192.168.1.1".parse().unwrap() };
+        let unnumbered = RouterPeerType::Unnumbered {
+            router_lifetime: RouterLifetimeConfig::default(),
+        };
+
+        let rows = [
+            // insert communities 100, 200 for the numbered peer
+            (numbered, 100),
+            (numbered, 200),
+            // insert communities 300, 400 for the unnumbered peer
+            (unnumbered, 300),
+            (unnumbered, 400),
+        ]
+        .into_iter()
+        .map(|(peer, community)| {
+            SwitchPortBgpPeerConfigCommunity::new(
+                port_settings_id,
+                iface_db.clone(),
+                peer,
+                community,
+            )
+        })
+        .collect::<Vec<_>>();
+
+        {
+            use nexus_db_schema::schema::switch_port_settings_bgp_peer_config_communities::dsl;
+            let conn =
+                datastore.pool_connection_authorized(&opctx).await.unwrap();
+            diesel::insert_into(
+                dsl::switch_port_settings_bgp_peer_config_communities,
+            )
+            .values(rows)
+            .execute_async(&*conn)
+            .await
+            .expect("insert community rows");
+        }
+
+        // Look up communities for the numbered peer.
+        let numbered_communities = datastore
+            .communities_for_peer(
+                &opctx,
+                port_settings_id,
+                &iface_ext,
+                numbered,
+            )
+            .await
+            .expect("lookup numbered peer communities");
+
+        let mut numbered_vals: Vec<u32> =
+            numbered_communities.into_iter().map(|c| c.community.0).collect();
+        numbered_vals.sort_unstable();
+        assert_eq!(numbered_vals, &[100, 200]);
+
+        // Look up communities for the unnumbered peer.
+        let unnumbered_communities = datastore
+            .communities_for_peer(
+                &opctx,
+                port_settings_id,
+                &iface_ext,
+                unnumbered,
+            )
+            .await
+            .expect("lookup unnumbered peer communities");
+
+        let mut unnumbered_vals: Vec<u32> =
+            unnumbered_communities.into_iter().map(|c| c.community.0).collect();
+        unnumbered_vals.sort_unstable();
+        assert_eq!(unnumbered_vals, &[300, 400]);
+
+        // A different numbered IP returns nothing.
+        let other_ip: IpAddr = "10.0.0.1".parse().unwrap();
+        let other =
+            RouterPeerType::Numbered { ip: other_ip.try_into().unwrap() };
+        let empty = datastore
+            .communities_for_peer(&opctx, port_settings_id, &iface_ext, other)
+            .await
+            .expect("lookup other peer communities");
+        assert!(empty.is_empty());
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    // Helper to construct a `BgpPeer` for allow import/export tests below
+    fn make_bgp_peer_for_allow_import_export_tests(
+        bgp_config_id: BgpConfigUuid,
+        addr: RouterPeerType,
+        import_subnets: Vec<IpNet>,
+        export_subnets: Vec<IpNet>,
+    ) -> BgpPeer {
+        let allowed_import = if import_subnets.is_empty() {
+            ImportExportPolicy::NoFiltering
+        } else {
+            ImportExportPolicy::Allow(import_subnets)
+        };
+        let allowed_export = if export_subnets.is_empty() {
+            ImportExportPolicy::NoFiltering
+        } else {
+            ImportExportPolicy::Allow(export_subnets)
+        };
+        BgpPeer {
+            bgp_config: bgp_config_id.into_untyped_uuid().into(),
+            addr,
+            hold_time: 0,
+            idle_hold_time: 0,
+            delay_open: 0,
+            connect_retry: 0,
+            keepalive: 0,
+            remote_asn: None,
+            min_ttl: None,
+            md5_auth_key: None,
+            multi_exit_discriminator: None,
+            communities: Vec::new(),
+            local_pref: None,
+            enforce_first_as: false,
+            allowed_import,
+            allowed_export,
+            vlan_id: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn test_allow_import_for_peer() {
+        let logctx = dev::test_setup_log("test_allow_import_for_peer");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let port_settings_id = Uuid::new_v4();
+        let iface_ext: Name = "phy0".parse().unwrap();
+        let iface_db: nexus_db_model::Name = iface_ext.clone().into();
+
+        // Set up peer types: two numbered (one with imports, one without), one
+        // unnumbered.
+        let numbered =
+            RouterPeerType::Numbered { ip: "192.168.1.1".parse().unwrap() };
+        let numbered_no_filtering =
+            RouterPeerType::Numbered { ip: "192.168.1.2".parse().unwrap() };
+        let unnumbered = RouterPeerType::Unnumbered {
+            router_lifetime: RouterLifetimeConfig::default(),
+        };
+
+        let expected_numbered_prefixes: Vec<IpNet> = vec![
+            "192.168.1.0/24".parse().unwrap(),
+            "fd00:1234::/64".parse().unwrap(),
+        ];
+        let expected_unnumbered_prefixes: Vec<IpNet> = vec![
+            "192.168.2.0/24".parse().unwrap(),
+            "fd00:4567::/64".parse().unwrap(),
+        ];
+        let rows = [
+            // insert rows for the numbered peer
+            (numbered, expected_numbered_prefixes[0]),
+            (numbered, expected_numbered_prefixes[1]),
+            // insert rows for the unnumbered peer
+            (unnumbered, expected_unnumbered_prefixes[0]),
+            (unnumbered, expected_unnumbered_prefixes[1]),
+        ]
+        .into_iter()
+        .map(|(peer, prefix)| {
+            SwitchPortBgpPeerConfigAllowImport::new(
+                port_settings_id,
+                iface_db.clone(),
+                peer,
+                prefix,
+            )
+        })
+        .collect::<Vec<_>>();
+
+        // allow_import lookups only work if there's a parent BGP peer config
+        // with `allow_import_list_active` set to true; insert that first.
+        {
+            use nexus_db_schema::schema::switch_port_settings_bgp_peer_config::dsl;
+            let conn =
+                datastore.pool_connection_authorized(&opctx).await.unwrap();
+            let bgp_config_id = BgpConfigUuid::new_v4();
+            diesel::insert_into(dsl::switch_port_settings_bgp_peer_config)
+                .values(vec![
+                    SwitchPortBgpPeerConfig::new(
+                        port_settings_id,
+                        bgp_config_id,
+                        iface_db.clone(),
+                        &make_bgp_peer_for_allow_import_export_tests(
+                            bgp_config_id,
+                            numbered,
+                            expected_numbered_prefixes.clone(),
+                            Vec::new(),
+                        ),
+                    ),
+                    SwitchPortBgpPeerConfig::new(
+                        port_settings_id,
+                        bgp_config_id,
+                        iface_db.clone(),
+                        &make_bgp_peer_for_allow_import_export_tests(
+                            bgp_config_id,
+                            numbered_no_filtering,
+                            Vec::new(),
+                            Vec::new(),
+                        ),
+                    ),
+                    SwitchPortBgpPeerConfig::new(
+                        port_settings_id,
+                        bgp_config_id,
+                        iface_db.clone(),
+                        &make_bgp_peer_for_allow_import_export_tests(
+                            bgp_config_id,
+                            unnumbered,
+                            expected_unnumbered_prefixes.clone(),
+                            Vec::new(),
+                        ),
+                    ),
+                ])
+                .execute_async(&*conn)
+                .await
+                .expect("insert rows");
+        }
+        {
+            use nexus_db_schema::schema::switch_port_settings_bgp_peer_config_allow_import::dsl;
+            let conn =
+                datastore.pool_connection_authorized(&opctx).await.unwrap();
+            diesel::insert_into(
+                dsl::switch_port_settings_bgp_peer_config_allow_import,
+            )
+            .values(rows)
+            .execute_async(&*conn)
+            .await
+            .expect("insert rows");
+        }
+
+        // Look up prefixes for the numbered peer.
+        let mut numbered_prefixes = datastore
+            .allow_import_for_peer(
+                &opctx,
+                port_settings_id,
+                &iface_ext,
+                numbered,
+            )
+            .await
+            .expect("lookup numbered peer")
+            .expect("peer has allowed imports")
+            .iter()
+            .map(|p| IpNet::from(p.prefix))
+            .collect::<Vec<_>>();
+        numbered_prefixes.sort_unstable();
+        assert_eq!(numbered_prefixes, expected_numbered_prefixes);
+
+        // Look up prefixes for the unnumbered peer.
+        let mut unnumbered_prefixes = datastore
+            .allow_import_for_peer(
+                &opctx,
+                port_settings_id,
+                &iface_ext,
+                unnumbered,
+            )
+            .await
+            .expect("lookup unnumbered peer")
+            .expect("peer has allowed imports")
+            .iter()
+            .map(|p| IpNet::from(p.prefix))
+            .collect::<Vec<_>>();
+        unnumbered_prefixes.sort_unstable();
+        assert_eq!(unnumbered_prefixes, expected_unnumbered_prefixes);
+
+        // A peer without filter returns None.
+        let empty = datastore
+            .allow_import_for_peer(
+                &opctx,
+                port_settings_id,
+                &iface_ext,
+                numbered_no_filtering,
+            )
+            .await
+            .expect("lookup other peer");
+        assert!(empty.is_none());
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_allow_export_for_peer() {
+        let logctx = dev::test_setup_log("test_allow_export_for_peer");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let port_settings_id = Uuid::new_v4();
+        let iface_ext: Name = "phy0".parse().unwrap();
+        let iface_db: nexus_db_model::Name = iface_ext.clone().into();
+
+        // Set up peer types: two numbered (one with exports, one without), one
+        // unnumbered.
+        let numbered =
+            RouterPeerType::Numbered { ip: "192.168.1.1".parse().unwrap() };
+        let numbered_no_filtering =
+            RouterPeerType::Numbered { ip: "192.168.1.2".parse().unwrap() };
+        let unnumbered = RouterPeerType::Unnumbered {
+            router_lifetime: RouterLifetimeConfig::default(),
+        };
+
+        let expected_numbered_prefixes: Vec<IpNet> = vec![
+            "192.168.1.0/24".parse().unwrap(),
+            "fd00:1234::/64".parse().unwrap(),
+        ];
+        let expected_unnumbered_prefixes: Vec<IpNet> = vec![
+            "192.168.2.0/24".parse().unwrap(),
+            "fd00:4567::/64".parse().unwrap(),
+        ];
+        let rows = [
+            // insert rows for the numbered peer
+            (numbered, expected_numbered_prefixes[0]),
+            (numbered, expected_numbered_prefixes[1]),
+            // insert rows for the unnumbered peer
+            (unnumbered, expected_unnumbered_prefixes[0]),
+            (unnumbered, expected_unnumbered_prefixes[1]),
+        ]
+        .into_iter()
+        .map(|(peer, prefix)| {
+            SwitchPortBgpPeerConfigAllowExport::new(
+                port_settings_id,
+                iface_db.clone(),
+                peer,
+                prefix,
+            )
+        })
+        .collect::<Vec<_>>();
+
+        // allow_export lookups only work if there's a parent BGP peer config
+        // with `allow_export_list_active` set to true; insert that first.
+        {
+            use nexus_db_schema::schema::switch_port_settings_bgp_peer_config::dsl;
+            let conn =
+                datastore.pool_connection_authorized(&opctx).await.unwrap();
+            let bgp_config_id = BgpConfigUuid::new_v4();
+            diesel::insert_into(dsl::switch_port_settings_bgp_peer_config)
+                .values(vec![
+                    SwitchPortBgpPeerConfig::new(
+                        port_settings_id,
+                        bgp_config_id,
+                        iface_db.clone(),
+                        &make_bgp_peer_for_allow_import_export_tests(
+                            bgp_config_id,
+                            numbered,
+                            Vec::new(),
+                            expected_numbered_prefixes.clone(),
+                        ),
+                    ),
+                    SwitchPortBgpPeerConfig::new(
+                        port_settings_id,
+                        bgp_config_id,
+                        iface_db.clone(),
+                        &make_bgp_peer_for_allow_import_export_tests(
+                            bgp_config_id,
+                            numbered_no_filtering,
+                            Vec::new(),
+                            Vec::new(),
+                        ),
+                    ),
+                    SwitchPortBgpPeerConfig::new(
+                        port_settings_id,
+                        bgp_config_id,
+                        iface_db.clone(),
+                        &make_bgp_peer_for_allow_import_export_tests(
+                            bgp_config_id,
+                            unnumbered,
+                            Vec::new(),
+                            expected_unnumbered_prefixes.clone(),
+                        ),
+                    ),
+                ])
+                .execute_async(&*conn)
+                .await
+                .expect("insert rows");
+        }
+        {
+            use nexus_db_schema::schema::switch_port_settings_bgp_peer_config_allow_export::dsl;
+            let conn =
+                datastore.pool_connection_authorized(&opctx).await.unwrap();
+            diesel::insert_into(
+                dsl::switch_port_settings_bgp_peer_config_allow_export,
+            )
+            .values(rows)
+            .execute_async(&*conn)
+            .await
+            .expect("insert rows");
+        }
+
+        // Look up prefixes for the numbered peer.
+        let mut numbered_prefixes = datastore
+            .allow_export_for_peer(
+                &opctx,
+                port_settings_id,
+                &iface_ext,
+                numbered,
+            )
+            .await
+            .expect("lookup numbered peer")
+            .expect("peer has allowed exports")
+            .iter()
+            .map(|p| IpNet::from(p.prefix))
+            .collect::<Vec<_>>();
+        numbered_prefixes.sort_unstable();
+        assert_eq!(numbered_prefixes, expected_numbered_prefixes);
+
+        // Look up prefixes for the unnumbered peer.
+        let mut unnumbered_prefixes = datastore
+            .allow_export_for_peer(
+                &opctx,
+                port_settings_id,
+                &iface_ext,
+                unnumbered,
+            )
+            .await
+            .expect("lookup unnumbered peer")
+            .expect("peer has allowed exports")
+            .iter()
+            .map(|p| IpNet::from(p.prefix))
+            .collect::<Vec<_>>();
+        unnumbered_prefixes.sort_unstable();
+        assert_eq!(unnumbered_prefixes, expected_unnumbered_prefixes);
+
+        // A peer without filter returns None.
+        let empty = datastore
+            .allow_export_for_peer(
+                &opctx,
+                port_settings_id,
+                &iface_ext,
+                numbered_no_filtering,
+            )
+            .await
+            .expect("lookup other peer");
+        assert!(empty.is_none());
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    // Regression test for being able to get/delete bgp configs by name
+    #[tokio::test]
+    async fn test_bgp_config_by_name() {
+        let logctx = dev::test_setup_log("test_bgp_config_by_name");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let config_name: Name = "config-name".parse().unwrap();
+
+        let announce_id = datastore
+            .bgp_create_announce_set(
+                &opctx,
+                &networking::BgpAnnounceSetCreate {
+                    identity: IdentityMetadataCreateParams {
+                        name: "announce-set".parse().unwrap(),
+                        description: String::from("the first announce set"),
+                    },
+                    announcement: Vec::default(),
+                },
+            )
+            .await
+            .expect("create bgp announce set")
+            .0
+            .identity
+            .id;
+
+        datastore
+            .bgp_config_create(
+                &opctx,
+                BgpConfig::from_config_create(
+                    &make_bgp_config(
+                        &config_name,
+                        NameOrId::Id(announce_id.into_untyped_uuid()),
+                    ),
+                    announce_id.into(),
+                ),
+            )
+            .await
+            .expect("create bgp config");
+
+        let (.., authz_bgp_config) = LookupPath::new(&opctx, datastore)
+            .bgp_config_name_owned(config_name.clone().into())
+            .lookup_for(authz::Action::Read)
+            .await
+            .expect("lookup bgp config");
+
+        let bgp_config = datastore
+            .bgp_config_get(&opctx, authz_bgp_config.id())
+            .await
+            .expect("get bgp config by name");
+
+        assert_eq!(bgp_config.identity.name.0, config_name);
+        assert_eq!(bgp_config.identity.description, "a test config");
+        assert_eq!(bgp_config.asn.0, 47);
+        assert_eq!(bgp_config.bgp_announce_set_id, announce_id);
+
+        let (.., authz_bgp_config) = LookupPath::new(&opctx, datastore)
+            .bgp_config_name_owned(config_name.clone().into())
+            .lookup_for(authz::Action::Read)
+            .await
+            .expect("lookup bgp config");
+
+        // The same live config is also readable by id.
+        datastore
+            .bgp_config_get(&opctx, authz_bgp_config.id())
+            .await
+            .expect("get bgp config by id");
+
+        datastore
+            .bgp_config_delete(&opctx, &authz_bgp_config)
+            .await
+            .expect("delete bgp config by name");
+
+        let err = datastore
+            .bgp_config_get(&opctx, authz_bgp_config.id())
+            .await
+            .expect_err("get deleted BGP config should fail");
+
+        assert!(
+            matches!(err, Error::ObjectNotFound { .. }),
+            "unexpected error: {err:?}"
+        );
+        // Once soft-deleted, the config is gone by both name and id (rather
+        // than resolving to the dead row or full-scanning).
+        let by_name = datastore
+            .bgp_config_get(&opctx, authz_bgp_config.id())
+            .await
+            .expect_err("a soft-deleted config must not be found by name");
+        let Error::ObjectNotFound { type_name, .. } = &by_name else {
+            panic!("expected ObjectNotFound by name, got {by_name:#?}");
+        };
+        assert_eq!(*type_name, ResourceType::BgpConfig);
+
+        let by_id = datastore
+            .bgp_config_get(&opctx, authz_bgp_config.id())
+            .await
+            .expect_err("a soft-deleted config must not be found by id");
+        let Error::ObjectNotFound { type_name, .. } = &by_id else {
+            panic!("expected ObjectNotFound by id, got {by_id:#?}");
+        };
+        assert_eq!(*type_name, ResourceType::BgpConfig);
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_bgp_config_create_idempotency() {
+        let logctx = dev::test_setup_log("test_bgp_config_create_idempotency");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let bgp_announce_set_id = datastore
+            .bgp_create_announce_set(
+                &opctx,
+                &networking::BgpAnnounceSetCreate {
+                    identity: IdentityMetadataCreateParams {
+                        name: "announce-set".parse().unwrap(),
+                        description: String::from("the first announce set"),
+                    },
+                    announcement: Vec::default(),
+                },
+            )
+            .await
+            .expect("create bgp announce set")
+            .0
+            .identity
+            .id;
+
+        datastore
+            .bgp_create_announce_set(
+                &opctx,
+                &networking::BgpAnnounceSetCreate {
+                    identity: IdentityMetadataCreateParams {
+                        name: "other-announce-set".parse().unwrap(),
+                        description: String::from("another announce set"),
+                    },
+                    announcement: Vec::default(),
+                },
+            )
+            .await
+            .expect("create other bgp announce set");
+
+        let bgp_config = networking::BgpConfigCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "config-name".parse().unwrap(),
+                description: String::from("a test config"),
+            },
+            asn: 47,
+            bgp_announce_set_id: NameOrId::Id(
+                bgp_announce_set_id.into_untyped_uuid(),
+            ),
+            vrf: None,
+            shaper: None,
+            checker: None,
+            max_paths: MaxPathConfig::new(1).unwrap(),
+        };
+
+        let created = datastore
+            .bgp_config_create(
+                &opctx,
+                BgpConfig::from_config_create(
+                    &bgp_config,
+                    bgp_announce_set_id.into(),
+                ),
+            )
+            .await
+            .expect("create bgp config");
+
+        // Subsequent creates should succeed if all fields match
+        let replayed = datastore
+            .bgp_config_create(
+                &opctx,
+                BgpConfig::from_config_create(
+                    &bgp_config,
+                    bgp_announce_set_id.into(),
+                ),
+            )
+            .await
+            .expect("replay identical bgp config create");
+        assert_eq!(created.identity.id, replayed.identity.id);
+
+        // Subsequent creates should fail if any field is different
+        type Mutation = (&'static str, fn(&mut BgpConfigCreate));
+        let mutations: &[Mutation] = &[
+            ("identity.name", |config| {
+                config.identity.name = "other-config-name".parse().unwrap();
+            }),
+            ("identity.description", |config| {
+                config.identity.description =
+                    String::from("another description");
+            }),
+            ("asn", |config| {
+                config.asn = 48;
+            }),
+            ("bgp_announce_set_id", |config| {
+                config.bgp_announce_set_id =
+                    NameOrId::Name("other-announce-set".parse().unwrap());
+            }),
+            ("vrf", |config| {
+                config.vrf = Some("other-vrf".parse().unwrap());
+            }),
+            ("shaper", |config| {
+                config.shaper = Some(String::from("other shaper"));
+            }),
+            ("checker", |config| {
+                config.checker = Some(String::from("other checker"));
+            }),
+            ("max_paths", |config| {
+                config.max_paths = MaxPathConfig::new(2).unwrap();
+            }),
+        ];
+
+        for &(field, mutate) in mutations {
+            let mut conflicting_config = bgp_config.clone();
+            mutate(&mut conflicting_config);
+
+            let announce_id = match conflicting_config
+                .bgp_announce_set_id
+                .clone()
+            {
+                NameOrId::Name(name) => {
+                    let (.., authz_announce_set) =
+                        LookupPath::new(&opctx, datastore)
+                            .bgp_announce_set_name_owned(name.into())
+                            .lookup_for(nexus_auth::authz::Action::Read)
+                            .await
+                            .expect("lookup announce set");
+                    authz_announce_set.id()
+                }
+                NameOrId::Id(id) => {
+                    omicron_uuid_kinds::BgpAnnounceSetUuid::from_untyped_uuid(
+                        id,
+                    )
+                }
+            };
+
+            let error = datastore
+                .bgp_config_create(
+                    &opctx,
+                    BgpConfig::from_config_create(
+                        &conflicting_config,
+                        announce_id,
+                    ),
+                )
+                .await
+                .expect_err(&format!("{field} should affect idempotency"));
+            assert!(
+                matches!(error, Error::Conflict { .. }),
+                "changing {field} returned an unexpected error: {error:?}"
+            );
+        }
 
         db.terminate().await;
         logctx.cleanup_successful();

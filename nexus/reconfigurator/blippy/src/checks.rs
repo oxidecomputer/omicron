@@ -7,6 +7,7 @@ use crate::blippy::BlueprintKind;
 use crate::blippy::PlanningInputKind;
 use crate::blippy::Severity;
 use crate::blippy::SledKind;
+use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintDatasetConfig;
 use nexus_types::deployment::BlueprintDatasetDisposition;
 use nexus_types::deployment::BlueprintExpungedZoneAccessReason;
@@ -22,13 +23,15 @@ use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::blueprint_zone_type;
 use omicron_common::address::DnsSubnet;
 use omicron_common::address::Ipv6Subnet;
-use omicron_common::address::SLED_PREFIX;
+use omicron_common::address::SLED_PREFIX_LENGTH;
 use omicron_common::api::external::Generation;
 use omicron_common::disk::DatasetKind;
 use omicron_common::disk::M2Slot;
 use omicron_uuid_kinds::MupdateOverrideUuid;
+use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
+use sled_agent_types::inventory::NetworkInterface;
 use sled_agent_types::inventory::ZoneKind;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
@@ -41,6 +44,7 @@ pub(crate) fn perform_planning_input_checks(
     input: &PlanningInput,
 ) {
     check_planning_input_network_records_appear_in_blueprint(blippy, input);
+    check_external_networking_generation(blippy, input.parent_blueprint());
 }
 
 pub(crate) fn perform_all_blueprint_only_checks(blippy: &mut Blippy<'_>) {
@@ -56,7 +60,7 @@ fn check_underlay_ips(blippy: &mut Blippy<'_>) {
     let mut underlay_ips: BTreeMap<Ipv6Addr, &BlueprintZoneConfig> =
         BTreeMap::new();
     let mut sled_subnets_by_subnet: BTreeMap<
-        Ipv6Subnet<SLED_PREFIX>,
+        Ipv6Subnet<SLED_PREFIX_LENGTH>,
         SledUuid,
     > = BTreeMap::new();
     let mut rack_dns_subnets: BTreeSet<DnsSubnet> = BTreeSet::new();
@@ -2292,64 +2296,100 @@ fn check_planning_input_network_records_appear_in_blueprint(
                 PlanningInputKind::NicMacNotInBluperint(nic_entry),
             );
         }
-        match nic_entry.nic.ip {
-            IpAddr::V4(ip) if NEXUS_OPTE_IPV4_SUBNET.contains(ip) => {
-                if !all_nexus_nic_ips.contains(&ip.into()) {
-                    blippy.push_planning_input_note(
-                        Severity::Fatal,
-                        PlanningInputKind::NicIpNotInBlueprint(nic_entry),
-                    );
+        // A NIC may be IPv4-only, IPv6-only, or dual-stack; check each address
+        // it carries against the known OPTE subnets.
+        for ip in nic_entry.nic.ip.addrs() {
+            // Determine which set of blueprint NIC IPs this address ought to
+            // appear in, based on the OPTE subnet it falls in.
+            let expected_ips = match ip {
+                IpAddr::V4(ip) if NEXUS_OPTE_IPV4_SUBNET.contains(ip) => {
+                    &all_nexus_nic_ips
                 }
-            }
-            IpAddr::V4(ip) if NTP_OPTE_IPV4_SUBNET.contains(ip) => {
-                if !all_boundary_ntp_nic_ips.contains(&ip.into()) {
-                    blippy.push_planning_input_note(
-                        Severity::Fatal,
-                        PlanningInputKind::NicIpNotInBlueprint(nic_entry),
-                    );
+                IpAddr::V4(ip) if NTP_OPTE_IPV4_SUBNET.contains(ip) => {
+                    &all_boundary_ntp_nic_ips
                 }
-            }
-            IpAddr::V4(ip) if DNS_OPTE_IPV4_SUBNET.contains(ip) => {
-                if !all_external_dns_nic_ips.contains(&ip.into()) {
-                    blippy.push_planning_input_note(
-                        Severity::Fatal,
-                        PlanningInputKind::NicIpNotInBlueprint(nic_entry),
-                    );
+                IpAddr::V4(ip) if DNS_OPTE_IPV4_SUBNET.contains(ip) => {
+                    &all_external_dns_nic_ips
                 }
-            }
-            IpAddr::V6(ip) if NEXUS_OPTE_IPV6_SUBNET.contains(ip) => {
-                if !all_nexus_nic_ips.contains(&ip.into()) {
-                    blippy.push_planning_input_note(
-                        Severity::Fatal,
-                        PlanningInputKind::NicIpNotInBlueprint(nic_entry),
-                    );
+                IpAddr::V6(ip) if NEXUS_OPTE_IPV6_SUBNET.contains(ip) => {
+                    &all_nexus_nic_ips
                 }
-            }
-            IpAddr::V6(ip) if NTP_OPTE_IPV6_SUBNET.contains(ip) => {
-                if !all_boundary_ntp_nic_ips.contains(&ip.into()) {
-                    blippy.push_planning_input_note(
-                        Severity::Fatal,
-                        PlanningInputKind::NicIpNotInBlueprint(nic_entry),
-                    );
+                IpAddr::V6(ip) if NTP_OPTE_IPV6_SUBNET.contains(ip) => {
+                    &all_boundary_ntp_nic_ips
                 }
-            }
-            IpAddr::V6(ip) if DNS_OPTE_IPV6_SUBNET.contains(ip) => {
-                if !all_external_dns_nic_ips.contains(&ip.into()) {
-                    blippy.push_planning_input_note(
-                        Severity::Fatal,
-                        PlanningInputKind::NicIpNotInBlueprint(nic_entry),
-                    );
+                IpAddr::V6(ip) if DNS_OPTE_IPV6_SUBNET.contains(ip) => {
+                    &all_external_dns_nic_ips
                 }
-            }
-            _ => {
-                // Ignore localhost (used by the test suite).
-                if !nic_entry.nic.ip.is_loopback() {
-                    blippy.push_planning_input_note(
-                        Severity::Fatal,
-                        PlanningInputKind::NicWithUnknownOpteSubnet(nic_entry),
-                    );
+                _ => {
+                    // Ignore localhost (used by the test suite).
+                    if !ip.is_loopback() {
+                        blippy.push_planning_input_note(
+                            Severity::Fatal,
+                            PlanningInputKind::NicWithUnknownOpteSubnet(
+                                nic_entry,
+                            ),
+                        );
+                    }
+                    continue;
                 }
+            };
+            if !expected_ips.contains(&ip) {
+                blippy.push_planning_input_note(
+                    Severity::Fatal,
+                    PlanningInputKind::NicIpNotInBlueprint(nic_entry),
+                );
             }
         }
+    }
+}
+
+fn check_external_networking_generation(
+    blippy: &mut Blippy<'_>,
+    parent_blueprint: &Blueprint,
+) {
+    // Helper function to condense a blueprint into just a set of all its
+    // external networking config, suitable only for comparison.
+    fn all_external_networking_config(
+        blueprint: &Blueprint,
+    ) -> BTreeSet<(
+        SledUuid,
+        OmicronZoneUuid,
+        OmicronZoneExternalIp,
+        &NetworkInterface,
+    )> {
+        blueprint
+            .in_service_zones()
+            .filter_map(|(sled_id, zone_config)| {
+                let (ip, nic) = zone_config.zone_type.external_networking()?;
+                Some((sled_id, zone_config.id, ip, nic))
+            })
+            .collect()
+    }
+
+    let parent_generation = parent_blueprint.external_networking_generation;
+    let actual_child_generation =
+        blippy.blueprint().external_networking_generation;
+
+    // We expect the child generation to be the next gen after the parent if and
+    // only if there have been any changes to the networking config.
+    let expect_generation_bump =
+        all_external_networking_config(blippy.blueprint())
+            != all_external_networking_config(parent_blueprint);
+
+    let expected_child_generation = if expect_generation_bump {
+        parent_generation.next()
+    } else {
+        parent_generation
+    };
+
+    if actual_child_generation != expected_child_generation {
+        blippy.push_planning_input_note(
+            Severity::Fatal,
+            PlanningInputKind::WrongExternalNetworkingGeneration {
+                parent_generation,
+                expected_child_generation,
+                actual_child_generation,
+            },
+        );
     }
 }

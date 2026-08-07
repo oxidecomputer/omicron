@@ -3,6 +3,13 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 //! Functions common to interacting with Crucible agents
+//!
+//! A note: there are multiple places in this file that have two layers of
+//! retries. This is because the majority of the requests to the Crucible agent
+//! are requests for something to happen in the background, and it's the
+//! client's responsibility to poll for a state change. One example of this is
+//! for creating regions: the inner loop retries the POST until it succeeds, and
+//! the outer loop checks the state returned.
 
 use super::*;
 
@@ -19,11 +26,16 @@ use futures::StreamExt;
 use nexus_db_queries::db;
 use nexus_db_queries::db::identity::Asset;
 use omicron_common::api::external::Error;
+use omicron_common::backoff::backon_retry_policy_internal_service;
 use omicron_common::backoff::{self, BackoffError};
-use omicron_common::progenitor_operation_retry::ProgenitorOperationRetry;
-use omicron_common::progenitor_operation_retry::ProgenitorOperationRetryError;
 use omicron_uuid_kinds::DatasetUuid;
+use progenitor_extras::retry::GoneCheckResult;
+use progenitor_extras::retry::IndefiniteRetryOperationWhileError;
+use progenitor_extras::retry::IndefiniteRetryOperationWhileErrorKind;
+use progenitor_extras::retry::retry_operation_while_indefinitely;
 use slog::Logger;
+use std::collections::VecDeque;
+use std::net::SocketAddrV6;
 
 // Arbitrary limit on concurrency, for operations issued on multiple regions
 // within a disk at the same time.
@@ -41,21 +53,23 @@ enum WaitError {
     Permanent(#[from] Error),
 }
 
-/// Convert an error returned from the ProgenitorOperationRetry loops in this
-/// file into an external Error
+/// Convert an error returned from a retry loop into an external Error
 fn into_external_error(
-    e: ProgenitorOperationRetryError<crucible_agent_client::types::Error>,
+    e: IndefiniteRetryOperationWhileError<
+        crucible_agent_client::types::Error,
+        Error,
+    >,
 ) -> Error {
-    match e {
-        ProgenitorOperationRetryError::Gone => Error::Gone,
+    match e.kind {
+        IndefiniteRetryOperationWhileErrorKind::Gone => Error::Gone,
 
-        ProgenitorOperationRetryError::GoneCheckError(e) => {
+        IndefiniteRetryOperationWhileErrorKind::GoneCheckError(e) => {
             Error::internal_error(&format!(
                 "insufficient permission for crucible_agent_gone_check: {e}"
             ))
         }
 
-        ProgenitorOperationRetryError::ProgenitorError(e) => match e {
+        IndefiniteRetryOperationWhileErrorKind::OperationError(e) => match e {
             crucible_agent_client::Error::ErrorResponse(rv) => {
                 if rv.status().is_client_error() {
                     Error::invalid_request(&rv.message)
@@ -64,7 +78,7 @@ fn into_external_error(
                 }
             }
 
-            _ => Error::internal_error(&format!("unexpected failure: {e}",)),
+            _ => Error::internal_error(&format!("unexpected failure: {e}")),
         },
     }
 }
@@ -74,27 +88,28 @@ impl super::Nexus {
         &self,
         dataset: &db::model::CrucibleDataset,
     ) -> CrucibleAgentClient {
-        // Use reqwest012_client because the rev-pinned crucible-agent-client
-        // is still on reqwest 0.12.
         CrucibleAgentClient::new_with_client(
             &format!("http://{}", dataset.address()),
-            self.reqwest012_client.clone(),
+            self.reqwest_client.clone(),
         )
     }
 
     /// Return if the Crucible agent is expected to be there and answer Nexus:
-    /// true means it's gone, and the caller should bail out of the
-    /// ProgenitorOperationRetry loop.
+    /// if it's [`GoneCheckResult::Gone`], the caller should bail out of the
+    /// retry loop.
     async fn crucible_agent_gone_check(
         &self,
         dataset_id: DatasetUuid,
-    ) -> Result<bool, Error> {
+    ) -> Result<GoneCheckResult, Error> {
         let on_in_service_physical_disk = self
             .datastore()
             .crucible_dataset_physical_disk_in_service(dataset_id)
             .await?;
 
-        Ok(!on_in_service_physical_disk)
+        Ok(match on_in_service_physical_disk {
+            true => GoneCheckResult::StillAvailable,
+            false => GoneCheckResult::Gone,
+        })
     }
 
     /// Return a region's associated address
@@ -156,6 +171,7 @@ impl super::Nexus {
         source: Option<String>,
     ) -> Result<Region, Error> {
         let client = self.crucible_agent_client_for_dataset(dataset);
+        let region_id = region.id();
         let dataset_id = dataset.id();
 
         let Ok(extent_count) = u32::try_from(region.extent_count()) else {
@@ -179,21 +195,35 @@ impl super::Nexus {
         };
 
         let create_region = || async {
-            let region = match ProgenitorOperationRetry::new(
-                || async { client.region_create(&region_request).await },
-                || async { self.crucible_agent_gone_check(dataset_id).await },
+            let create_region_operation =
+                || async { client.region_create(&region_request).await };
+
+            let gone_check =
+                || async { self.crucible_agent_gone_check(dataset_id).await };
+
+            let region = match retry_operation_while_indefinitely(
+                backon_retry_policy_internal_service(),
+                create_region_operation,
+                gone_check,
+                |notification| {
+                    slog::warn!(
+                        log,
+                        "failed to create region {region_id}, retrying in {:?}",
+                        notification.delay;
+                        InlineErrorChain::new(&notification.error),
+                    );
+                },
             )
-            .run(log)
             .await
             {
-                Ok(v) => Ok(v),
+                Ok(v) => Ok(v.into_inner()),
 
                 Err(e) => {
                     error!(
                         log,
                         "region_create saw {:?}",
                         e;
-                        "region_id" => %region.id(),
+                        "region_id" => %region_id,
                         "dataset_id" => %dataset_id,
                     );
 
@@ -228,8 +258,8 @@ impl super::Nexus {
                 log,
                 "Region requested, not yet created. Retrying in {:?}",
                 delay;
-                "dataset" => %dataset.id(),
-                "region" => %region.id(),
+                "dataset" => %dataset_id,
+                "region" => %region_id,
             );
         };
 
@@ -250,8 +280,6 @@ impl super::Nexus {
 
             WaitError::Permanent(e) => e,
         })?;
-
-        let returned_region = returned_region.into_inner();
 
         // Record the returned port
         self.datastore()
@@ -361,21 +389,35 @@ impl super::Nexus {
         // transitions from Requested to Created
 
         let create_running_snapshot = || async {
-            let running_snapshot = match ProgenitorOperationRetry::new(
-                || async {
-                    client
-                        .region_run_snapshot(
-                            &RegionId(region_id.to_string()),
-                            &snapshot_id.to_string(),
-                        )
-                        .await
+            let run_snapshot_operation = || async {
+                client
+                    .region_run_snapshot(
+                        &RegionId(region_id.to_string()),
+                        &snapshot_id.to_string(),
+                    )
+                    .await
+            };
+
+            let gone_check =
+                || async { self.crucible_agent_gone_check(dataset_id).await };
+
+            let running_snapshot = match retry_operation_while_indefinitely(
+                backon_retry_policy_internal_service(),
+                run_snapshot_operation,
+                gone_check,
+                |notification| {
+                    slog::warn!(
+                        log,
+                        "failed to run region {region_id} snapshot \
+                        {snapshot_id}, retrying in {:?}",
+                        notification.delay;
+                        InlineErrorChain::new(&notification.error),
+                    );
                 },
-                || async { self.crucible_agent_gone_check(dataset_id).await },
             )
-            .run(log)
             .await
             {
-                Ok(v) => Ok(v),
+                Ok(v) => Ok(v.into_inner()),
 
                 Err(e) => {
                     error!(
@@ -443,8 +485,6 @@ impl super::Nexus {
             WaitError::Permanent(e) => e,
         })?;
 
-        let running_snapshot = running_snapshot.into_inner();
-
         Ok((region, snapshot, running_snapshot))
     }
 
@@ -459,13 +499,26 @@ impl super::Nexus {
         let client = self.crucible_agent_client_for_dataset(dataset);
         let dataset_id = dataset.id();
 
-        let result = ProgenitorOperationRetry::new(
-            || async {
-                client.region_get(&RegionId(region_id.to_string())).await
+        let region_get_operation = || async {
+            client.region_get(&RegionId(region_id.to_string())).await
+        };
+
+        let gone_check =
+            || async { self.crucible_agent_gone_check(dataset_id).await };
+
+        let result = retry_operation_while_indefinitely(
+            backon_retry_policy_internal_service(),
+            region_get_operation,
+            gone_check,
+            |notification| {
+                slog::warn!(
+                    log,
+                    "failed to get region {region_id}, retrying in {:?}",
+                    notification.delay;
+                    InlineErrorChain::new(&notification.error),
+                );
             },
-            || async { self.crucible_agent_gone_check(dataset_id).await },
         )
-        .run(log)
         .await;
 
         match result {
@@ -504,18 +557,32 @@ impl super::Nexus {
         let client = self.crucible_agent_client_for_dataset(dataset);
         let dataset_id = dataset.id();
 
-        let result = ProgenitorOperationRetry::new(
-            || async {
-                client
-                    .region_get_snapshot(
-                        &RegionId(region_id.to_string()),
-                        &snapshot_id.to_string(),
-                    )
-                    .await
+        let snapshot_get_operation = || async {
+            client
+                .region_get_snapshot(
+                    &RegionId(region_id.to_string()),
+                    &snapshot_id.to_string(),
+                )
+                .await
+        };
+
+        let gone_check =
+            || async { self.crucible_agent_gone_check(dataset_id).await };
+
+        let result = retry_operation_while_indefinitely(
+            backon_retry_policy_internal_service(),
+            snapshot_get_operation,
+            gone_check,
+            |notification| {
+                slog::warn!(
+                    log,
+                    "failed to get region {region_id} snapshot {snapshot_id}, \
+                    retrying in {:?}",
+                    notification.delay;
+                    InlineErrorChain::new(&notification.error),
+                );
             },
-            || async { self.crucible_agent_gone_check(dataset_id).await },
         )
-        .run(log)
         .await;
 
         match result {
@@ -552,15 +619,27 @@ impl super::Nexus {
         let client = self.crucible_agent_client_for_dataset(dataset);
         let dataset_id = dataset.id();
 
-        let result = ProgenitorOperationRetry::new(
-            || async {
-                client
-                    .region_get_snapshots(&RegionId(region_id.to_string()))
-                    .await
+        let region_get_snapshots_operation = || async {
+            client.region_get_snapshots(&RegionId(region_id.to_string())).await
+        };
+
+        let gone_check =
+            || async { self.crucible_agent_gone_check(dataset_id).await };
+
+        let result = retry_operation_while_indefinitely(
+            backon_retry_policy_internal_service(),
+            region_get_snapshots_operation,
+            gone_check,
+            |notification| {
+                slog::warn!(
+                    log,
+                    "failed to get snapshots for region {region_id}, \
+                    retrying in {:?}",
+                    notification.delay;
+                    InlineErrorChain::new(&notification.error),
+                );
             },
-            || async { self.crucible_agent_gone_check(dataset_id).await },
         )
-        .run(log)
         .await;
 
         match result {
@@ -592,13 +671,26 @@ impl super::Nexus {
         let client = self.crucible_agent_client_for_dataset(dataset);
         let dataset_id = dataset.id();
 
-        let result = ProgenitorOperationRetry::new(
-            || async {
-                client.region_delete(&RegionId(region_id.to_string())).await
+        let region_delete_operation = || async {
+            client.region_delete(&RegionId(region_id.to_string())).await
+        };
+
+        let gone_check =
+            || async { self.crucible_agent_gone_check(dataset_id).await };
+
+        let result = retry_operation_while_indefinitely(
+            backon_retry_policy_internal_service(),
+            region_delete_operation,
+            gone_check,
+            |notification| {
+                slog::warn!(
+                    log,
+                    "failed to delete region {region_id}, retrying in {:?}",
+                    notification.delay;
+                    InlineErrorChain::new(&notification.error),
+                );
             },
-            || async { self.crucible_agent_gone_check(dataset_id).await },
         )
-        .run(log)
         .await;
 
         match result {
@@ -635,18 +727,32 @@ impl super::Nexus {
         let client = self.crucible_agent_client_for_dataset(dataset);
         let dataset_id = dataset.id();
 
-        let result = ProgenitorOperationRetry::new(
-            || async {
-                client
-                    .region_delete_running_snapshot(
-                        &RegionId(region_id.to_string()),
-                        &snapshot_id.to_string(),
-                    )
-                    .await
+        let delete_running_snapshot_operation = || async {
+            client
+                .region_delete_running_snapshot(
+                    &RegionId(region_id.to_string()),
+                    &snapshot_id.to_string(),
+                )
+                .await
+        };
+
+        let gone_check =
+            || async { self.crucible_agent_gone_check(dataset_id).await };
+
+        let result = retry_operation_while_indefinitely(
+            backon_retry_policy_internal_service(),
+            delete_running_snapshot_operation,
+            gone_check,
+            |notification| {
+                slog::warn!(
+                    log,
+                    "failed to delete region {region_id} running snapshot \
+                    {snapshot_id}, retrying in {:?}",
+                    notification.delay;
+                    InlineErrorChain::new(&notification.error),
+                );
             },
-            || async { self.crucible_agent_gone_check(dataset_id).await },
         )
-        .run(log)
         .await;
 
         match result {
@@ -684,18 +790,32 @@ impl super::Nexus {
         let client = self.crucible_agent_client_for_dataset(dataset);
         let dataset_id = dataset.id();
 
-        let result = ProgenitorOperationRetry::new(
-            || async {
-                client
-                    .region_delete_snapshot(
-                        &RegionId(region_id.to_string()),
-                        &snapshot_id.to_string(),
-                    )
-                    .await
+        let delete_snapshot_operation = || async {
+            client
+                .region_delete_snapshot(
+                    &RegionId(region_id.to_string()),
+                    &snapshot_id.to_string(),
+                )
+                .await
+        };
+
+        let gone_check =
+            || async { self.crucible_agent_gone_check(dataset_id).await };
+
+        let result = retry_operation_while_indefinitely(
+            backon_retry_policy_internal_service(),
+            delete_snapshot_operation,
+            gone_check,
+            |notification| {
+                slog::warn!(
+                    log,
+                    "failed to delete region {region_id} snapshot \
+                    {snapshot_id}, retrying in {:?}",
+                    notification.delay;
+                    InlineErrorChain::new(&notification.error),
+                );
             },
-            || async { self.crucible_agent_gone_check(dataset_id).await },
         )
-        .run(log)
         .await;
 
         match result {
@@ -1360,5 +1480,1388 @@ impl super::Nexus {
             .await
             .into_iter()
             .collect::<Result<Vec<_>, _>>()
+    }
+}
+
+/// From a VolumeInfo, collect all the Upstairs' health for Nexus to get a
+/// picture of the health of the whole Volume.
+#[derive(Clone, Debug)]
+pub struct VolumeHealth {
+    all_upstairs_health: Vec<UpstairsHealth>,
+}
+
+impl VolumeHealth {
+    pub fn all_upstairs_healthy(&self) -> bool {
+        self.all_upstairs_health.iter().all(|upstairs_health| {
+            matches!(upstairs_health, UpstairsHealth::Healthy { .. })
+        })
+    }
+
+    pub fn unhealthy_upstairs(&self) -> Vec<&UpstairsHealthDegradedDetails> {
+        self.all_upstairs_health
+            .iter()
+            .filter_map(|upstairs_health| match upstairs_health {
+                UpstairsHealth::Healthy { .. } => None,
+
+                UpstairsHealth::Degraded(details) => Some(details),
+            })
+            .collect()
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum UpstairsHealth {
+    Healthy { upstairs_id: Uuid },
+
+    Degraded(UpstairsHealthDegradedDetails),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct UpstairsHealthDegradedDetails {
+    pub upstairs_id: Uuid,
+    pub reason: UpstairsDegradedReason,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum UpstairsDegradedReason {
+    /// This Upstairs is not active
+    NotActive,
+
+    /// Not all three downstairs are present in the region set.
+    ReducedRedundancy,
+
+    /// Three downstairs are present but one or more is degraded.
+    DownstairsDegraded,
+
+    /// The Upstairs is in an unexpected or impossible state
+    InvalidState { message: String },
+}
+
+impl std::fmt::Display for UpstairsDegradedReason {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            UpstairsDegradedReason::NotActive => {
+                write!(f, "upstairs is not active")
+            }
+
+            UpstairsDegradedReason::ReducedRedundancy => {
+                write!(f, "operating at reduced redundancy")
+            }
+
+            UpstairsDegradedReason::DownstairsDegraded => {
+                write!(f, "one or more downstairs is degraded")
+            }
+
+            UpstairsDegradedReason::InvalidState { message } => {
+                write!(f, "invalid state: {message}")
+            }
+        }
+    }
+}
+
+// Crucible can return a `VolumeInfo` that describes the state of the entire
+// Volume in a tree structure. Both Propolis (from `propolis_client::types`) and
+// the Crucible Pantry (from `crucible_pantry_client::types`) export this type
+// from their import of the `crucible-client-types` crate, meaning two versions
+// could exist that Nexus could read. Do the simplest thing: write two versions
+// of the function that reads each type returns an `UpstairsHealth`. These
+// functions currently are the same, but in the future may temporarily look
+// different if Propolis and the Crucible Pantry import different
+// `crucible-client-types` versions. These types should eventually be derived
+// from the same `crucible-client-types` version though as that is equivalent to
+// both imports being up to date.
+
+/// Return whether Nexus should consider a VolumeInfo::Upstairs healthy, using
+/// fields from that object.
+fn propolis_client_single_upstairs_health(
+    state: &propolis_client::types::UpstairsInfoStatus,
+    upstairs_id: Uuid,
+    read_only: bool,
+    reconcile_in_progress: bool,
+    live_repair_in_progress: bool,
+    targets: &[propolis_client::types::DownstairsInfo],
+) -> UpstairsHealth {
+    use propolis_client::types::DownstairsInfoStatus;
+    use propolis_client::types::UpstairsInfoStatus;
+
+    // Separate from the state of the Downstairs themselves, the Upstairs could
+    // be preparing for reconciliation or live repair: check those here.
+    if reconcile_in_progress || live_repair_in_progress {
+        return UpstairsHealth::Degraded(UpstairsHealthDegradedDetails {
+            upstairs_id,
+            reason: UpstairsDegradedReason::DownstairsDegraded,
+        });
+    }
+
+    match state {
+        UpstairsInfoStatus::Initializing
+        | UpstairsInfoStatus::GoActive
+        | UpstairsInfoStatus::Deactivating
+        | UpstairsInfoStatus::Disabled => {
+            return UpstairsHealth::Degraded(UpstairsHealthDegradedDetails {
+                upstairs_id,
+                reason: UpstairsDegradedReason::NotActive,
+            });
+        }
+
+        UpstairsInfoStatus::Active => {
+            // ok!
+        }
+    }
+
+    let mut num_downstairs_active = 0;
+
+    if targets.len() != 3 {
+        return UpstairsHealth::Degraded(UpstairsHealthDegradedDetails {
+            upstairs_id,
+            reason: UpstairsDegradedReason::InvalidState {
+                message: format!(
+                    "number of targets is {} instead of 3",
+                    targets.len(),
+                ),
+            },
+        });
+    }
+
+    for target in targets {
+        match target.state {
+            DownstairsInfoStatus::Connecting { .. } => {
+                // Read-only Upstairs can start with only one downstairs
+                // connected. Read-write Upstairs currently need all three to be
+                // present.
+                if !read_only {
+                    return UpstairsHealth::Degraded(
+                        UpstairsHealthDegradedDetails {
+                            upstairs_id,
+                            reason: UpstairsDegradedReason::ReducedRedundancy,
+                        },
+                    );
+                }
+            }
+
+            DownstairsInfoStatus::Active => {
+                // ok!
+                num_downstairs_active += 1;
+            }
+
+            DownstairsInfoStatus::LiveRepair => {
+                // note: should never see this status when read_only!
+
+                return UpstairsHealth::Degraded(
+                    UpstairsHealthDegradedDetails {
+                        upstairs_id,
+                        reason: UpstairsDegradedReason::DownstairsDegraded,
+                    },
+                );
+            }
+
+            DownstairsInfoStatus::Stopping => {
+                // Read-only Upstairs can start with only one downstairs
+                // connected. Read-write Upstairs currently need all three to be
+                // present.
+                if !read_only {
+                    return UpstairsHealth::Degraded(
+                        UpstairsHealthDegradedDetails {
+                            upstairs_id,
+                            reason: UpstairsDegradedReason::ReducedRedundancy,
+                        },
+                    );
+                }
+            }
+        }
+    }
+
+    if read_only && num_downstairs_active == 0 {
+        return UpstairsHealth::Degraded(UpstairsHealthDegradedDetails {
+            upstairs_id,
+            reason: UpstairsDegradedReason::ReducedRedundancy,
+        });
+    }
+
+    if !read_only && num_downstairs_active != 3 {
+        return UpstairsHealth::Degraded(UpstairsHealthDegradedDetails {
+            upstairs_id,
+            reason: UpstairsDegradedReason::ReducedRedundancy,
+        });
+    }
+
+    UpstairsHealth::Healthy { upstairs_id }
+}
+
+/// Given a [`propolis_client::types::VolumeInfo`], return if the Upstairs for a
+/// particular Downstairs should be considered healthy by Nexus. Returns None if
+/// no Upstairs targets the downstairs_addr argument.
+pub fn propolis_client_upstairs_health(
+    log: &Logger,
+    info: &propolis_client::types::VolumeInfo,
+    downstairs_addr: SocketAddrV6,
+) -> Option<UpstairsHealth> {
+    use propolis_client::types::VolumeInfo;
+
+    let mut parts: VecDeque<&VolumeInfo> = VecDeque::new();
+    parts.push_back(info);
+
+    while let Some(part) = parts.pop_front() {
+        match part {
+            VolumeInfo::Volume { sub_volumes, read_only_parent } => {
+                for sub_volume in sub_volumes {
+                    parts.push_back(sub_volume);
+                }
+
+                if let Some(read_only_parent) = read_only_parent {
+                    parts.push_back(read_only_parent);
+                }
+            }
+
+            VolumeInfo::Upstairs {
+                state,
+                block_size: _,
+                upstairs_id,
+                session_id: _,
+                generation: _,
+                read_only,
+                encrypted: _,
+                reconcile_in_progress,
+                live_repair_in_progress,
+                targets,
+            } => {
+                // If this Upstairs does not target the requested downstairs,
+                // then continue searching.
+                let mut found_downstairs = false;
+
+                for downstairs_info in targets {
+                    let Some(target_addr) = &downstairs_info.target_addr else {
+                        continue;
+                    };
+
+                    let parsed_target_addr: SocketAddrV6 = match target_addr
+                        .parse()
+                    {
+                        Ok(v) => v,
+                        Err(e) => {
+                            error!(log, "could not parse {target_addr}: {e}",);
+
+                            continue;
+                        }
+                    };
+
+                    if parsed_target_addr == downstairs_addr {
+                        found_downstairs = true;
+                        break;
+                    }
+                }
+
+                if !found_downstairs {
+                    continue;
+                }
+
+                return Some(propolis_client_single_upstairs_health(
+                    state,
+                    *upstairs_id,
+                    *read_only,
+                    *reconcile_in_progress,
+                    *live_repair_in_progress,
+                    &targets,
+                ));
+            }
+        }
+    }
+
+    None
+}
+
+/// Given a [`propolis_client::types::VolumeInfo`], should this Volume be
+/// considered healthy by Nexus?
+pub fn propolis_client_volume_health(
+    info: &propolis_client::types::VolumeInfo,
+) -> VolumeHealth {
+    use propolis_client::types::VolumeInfo;
+
+    let mut volume_health = VolumeHealth { all_upstairs_health: vec![] };
+
+    let mut parts: VecDeque<&VolumeInfo> = VecDeque::new();
+    parts.push_back(info);
+
+    while let Some(part) = parts.pop_front() {
+        match part {
+            VolumeInfo::Volume { sub_volumes, read_only_parent } => {
+                for sub_volume in sub_volumes {
+                    parts.push_back(sub_volume);
+                }
+
+                if let Some(read_only_parent) = read_only_parent {
+                    parts.push_back(read_only_parent);
+                }
+            }
+
+            VolumeInfo::Upstairs {
+                state,
+                block_size: _,
+                upstairs_id,
+                session_id: _,
+                generation: _,
+                read_only,
+                encrypted: _,
+                reconcile_in_progress,
+                live_repair_in_progress,
+                targets,
+            } => {
+                volume_health.all_upstairs_health.push(
+                    propolis_client_single_upstairs_health(
+                        state,
+                        *upstairs_id,
+                        *read_only,
+                        *reconcile_in_progress,
+                        *live_repair_in_progress,
+                        &targets,
+                    ),
+                );
+            }
+        }
+    }
+
+    volume_health
+}
+
+/// Return whether Nexus should consider a VolumeInfo::Upstairs healthy, using
+/// fields from that object.
+fn crucible_pantry_client_single_upstairs_health(
+    state: &crucible_pantry_client::types::UpstairsInfoStatus,
+    upstairs_id: Uuid,
+    read_only: bool,
+    reconcile_in_progress: bool,
+    live_repair_in_progress: bool,
+    targets: &[crucible_pantry_client::types::DownstairsInfo],
+) -> UpstairsHealth {
+    use crucible_pantry_client::types::DownstairsInfoStatus;
+    use crucible_pantry_client::types::UpstairsInfoStatus;
+
+    // Separate from the state of the Downstairs themselves, the Upstairs could
+    // be preparing for reconciliation or live repair: check those here.
+    if reconcile_in_progress || live_repair_in_progress {
+        return UpstairsHealth::Degraded(UpstairsHealthDegradedDetails {
+            upstairs_id,
+            reason: UpstairsDegradedReason::DownstairsDegraded,
+        });
+    }
+
+    match state {
+        UpstairsInfoStatus::Initializing
+        | UpstairsInfoStatus::GoActive
+        | UpstairsInfoStatus::Deactivating
+        | UpstairsInfoStatus::Disabled => {
+            return UpstairsHealth::Degraded(UpstairsHealthDegradedDetails {
+                upstairs_id,
+                reason: UpstairsDegradedReason::NotActive,
+            });
+        }
+
+        UpstairsInfoStatus::Active => {
+            // ok!
+        }
+    }
+
+    let mut num_downstairs_active = 0;
+
+    if targets.len() != 3 {
+        return UpstairsHealth::Degraded(UpstairsHealthDegradedDetails {
+            upstairs_id,
+            reason: UpstairsDegradedReason::InvalidState {
+                message: format!(
+                    "number of targets is {} instead of 3",
+                    targets.len(),
+                ),
+            },
+        });
+    }
+
+    for target in targets {
+        match target.state {
+            DownstairsInfoStatus::Connecting { .. } => {
+                // Read-only Upstairs can start with only one downstairs
+                // connected. Read-write Upstairs currently need all three to be
+                // present.
+                if !read_only {
+                    return UpstairsHealth::Degraded(
+                        UpstairsHealthDegradedDetails {
+                            upstairs_id,
+                            reason: UpstairsDegradedReason::ReducedRedundancy,
+                        },
+                    );
+                }
+            }
+
+            DownstairsInfoStatus::Active => {
+                // ok!
+                num_downstairs_active += 1;
+            }
+
+            DownstairsInfoStatus::LiveRepair => {
+                // note: should never see this status when read_only!
+
+                return UpstairsHealth::Degraded(
+                    UpstairsHealthDegradedDetails {
+                        upstairs_id,
+                        reason: UpstairsDegradedReason::DownstairsDegraded,
+                    },
+                );
+            }
+
+            DownstairsInfoStatus::Stopping => {
+                // Read-only Upstairs can start with only one downstairs
+                // connected. Read-write Upstairs currently need all three to be
+                // present.
+                if !read_only {
+                    return UpstairsHealth::Degraded(
+                        UpstairsHealthDegradedDetails {
+                            upstairs_id,
+                            reason: UpstairsDegradedReason::ReducedRedundancy,
+                        },
+                    );
+                }
+            }
+        }
+    }
+
+    if read_only && num_downstairs_active == 0 {
+        return UpstairsHealth::Degraded(UpstairsHealthDegradedDetails {
+            upstairs_id,
+            reason: UpstairsDegradedReason::ReducedRedundancy,
+        });
+    }
+
+    if !read_only && num_downstairs_active != 3 {
+        return UpstairsHealth::Degraded(UpstairsHealthDegradedDetails {
+            upstairs_id,
+            reason: UpstairsDegradedReason::ReducedRedundancy,
+        });
+    }
+
+    UpstairsHealth::Healthy { upstairs_id }
+}
+
+/// Given a [`crucible_pantry_client::types::VolumeInfo`], return if the
+/// Upstairs for a particular Downstairs should be considered healthy by Nexus.
+/// Returns None if no Upstairs targets the downstairs_addr argument.
+pub fn crucible_pantry_client_upstairs_health(
+    log: &Logger,
+    info: &crucible_pantry_client::types::VolumeInfo,
+    downstairs_addr: SocketAddrV6,
+) -> Option<UpstairsHealth> {
+    use crucible_pantry_client::types::VolumeInfo;
+
+    let mut parts: VecDeque<&VolumeInfo> = VecDeque::new();
+    parts.push_back(info);
+
+    while let Some(part) = parts.pop_front() {
+        match part {
+            VolumeInfo::Volume { sub_volumes, read_only_parent } => {
+                for sub_volume in sub_volumes {
+                    parts.push_back(sub_volume);
+                }
+
+                if let Some(read_only_parent) = read_only_parent {
+                    parts.push_back(read_only_parent);
+                }
+            }
+
+            VolumeInfo::Upstairs {
+                state,
+                block_size: _,
+                upstairs_id,
+                session_id: _,
+                generation: _,
+                read_only,
+                encrypted: _,
+                reconcile_in_progress,
+                live_repair_in_progress,
+                targets,
+            } => {
+                // If this Upstairs does not target the requested downstairs,
+                // then continue searching.
+                let mut found_downstairs = false;
+
+                for downstairs_info in targets {
+                    let Some(target_addr) = &downstairs_info.target_addr else {
+                        continue;
+                    };
+
+                    let parsed_target_addr: SocketAddrV6 = match target_addr
+                        .parse()
+                    {
+                        Ok(v) => v,
+                        Err(e) => {
+                            error!(log, "could not parse {target_addr}: {e}",);
+
+                            continue;
+                        }
+                    };
+
+                    if parsed_target_addr == downstairs_addr {
+                        found_downstairs = true;
+                        break;
+                    }
+                }
+
+                if !found_downstairs {
+                    continue;
+                }
+
+                return Some(crucible_pantry_client_single_upstairs_health(
+                    state,
+                    *upstairs_id,
+                    *read_only,
+                    *reconcile_in_progress,
+                    *live_repair_in_progress,
+                    &targets,
+                ));
+            }
+        }
+    }
+
+    None
+}
+
+/// Given a [`crucible_pantry_client::types::VolumeInfo`], should this Volume be
+/// considered healthy by Nexus?
+pub fn crucible_pantry_client_volume_health(
+    info: &crucible_pantry_client::types::VolumeInfo,
+) -> VolumeHealth {
+    use crucible_pantry_client::types::VolumeInfo;
+
+    let mut volume_health = VolumeHealth { all_upstairs_health: vec![] };
+
+    let mut parts: VecDeque<&VolumeInfo> = VecDeque::new();
+    parts.push_back(info);
+
+    while let Some(part) = parts.pop_front() {
+        match part {
+            VolumeInfo::Volume { sub_volumes, read_only_parent } => {
+                for sub_volume in sub_volumes {
+                    parts.push_back(sub_volume);
+                }
+
+                if let Some(read_only_parent) = read_only_parent {
+                    parts.push_back(read_only_parent);
+                }
+            }
+
+            VolumeInfo::Upstairs {
+                state,
+                block_size: _,
+                upstairs_id,
+                session_id: _,
+                generation: _,
+                read_only,
+                encrypted: _,
+                reconcile_in_progress,
+                live_repair_in_progress,
+                targets,
+            } => {
+                volume_health.all_upstairs_health.push(
+                    crucible_pantry_client_single_upstairs_health(
+                        state,
+                        *upstairs_id,
+                        *read_only,
+                        *reconcile_in_progress,
+                        *live_repair_in_progress,
+                        &targets,
+                    ),
+                );
+            }
+        }
+    }
+
+    volume_health
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    use propolis_client::types::DownstairsInfo;
+    use propolis_client::types::DownstairsInfoConnectionMode;
+    use propolis_client::types::DownstairsInfoNegotiationStatus;
+    use propolis_client::types::DownstairsInfoStatus;
+    use propolis_client::types::UpstairsInfoStatus;
+    use propolis_client::types::VolumeInfo;
+
+    /// For a read/write Upstairs, if all three downstairs are active, then the
+    /// Upstairs should be considered healthy
+    #[test]
+    fn single_upstairs_health_rw_basic() {
+        let upstairs_id = Uuid::new_v4();
+
+        let upstairs_health = propolis_client_single_upstairs_health(
+            &UpstairsInfoStatus::Active,
+            upstairs_id,
+            false, // read_only
+            false, // reconcile_in_progress
+            false, // live_repair_in_progress
+            &[
+                DownstairsInfo {
+                    region_id: Some(Uuid::new_v4()),
+                    target_addr: Some(
+                        "[fd00:1122:3344::101]:17000".parse().unwrap(),
+                    ),
+                    repair_addr: Some(
+                        "[fd00:1122:3344::101]:21000".parse().unwrap(),
+                    ),
+                    state: DownstairsInfoStatus::Active,
+                },
+                DownstairsInfo {
+                    region_id: Some(Uuid::new_v4()),
+                    target_addr: Some(
+                        "[fd00:1122:3344::201]:17000".parse().unwrap(),
+                    ),
+                    repair_addr: Some(
+                        "[fd00:1122:3344::201]:21000".parse().unwrap(),
+                    ),
+                    state: DownstairsInfoStatus::Active,
+                },
+                DownstairsInfo {
+                    region_id: Some(Uuid::new_v4()),
+                    target_addr: Some(
+                        "[fd00:1122:3344::301]:17000".parse().unwrap(),
+                    ),
+                    repair_addr: Some(
+                        "[fd00:1122:3344::301]:21000".parse().unwrap(),
+                    ),
+                    state: DownstairsInfoStatus::Active,
+                },
+            ],
+        );
+
+        assert_eq!(upstairs_health, UpstairsHealth::Healthy { upstairs_id });
+    }
+
+    /// For a read/write Upstairs, if all downstairs are active but less than
+    /// three are present, then the Upstairs should be considered unhealthy
+    #[test]
+    fn single_upstairs_health_rw_only_two_present_and_active() {
+        let upstairs_id = Uuid::new_v4();
+
+        let upstairs_health = propolis_client_single_upstairs_health(
+            &UpstairsInfoStatus::Active,
+            upstairs_id,
+            false, // read_only
+            false, // reconcile_in_progress
+            false, // live_repair_in_progress
+            &[
+                DownstairsInfo {
+                    region_id: Some(Uuid::new_v4()),
+                    target_addr: Some(
+                        "[fd00:1122:3344::101]:17000".parse().unwrap(),
+                    ),
+                    repair_addr: Some(
+                        "[fd00:1122:3344::101]:21000".parse().unwrap(),
+                    ),
+                    state: DownstairsInfoStatus::Active,
+                },
+                DownstairsInfo {
+                    region_id: Some(Uuid::new_v4()),
+                    target_addr: Some(
+                        "[fd00:1122:3344::201]:17000".parse().unwrap(),
+                    ),
+                    repair_addr: Some(
+                        "[fd00:1122:3344::201]:21000".parse().unwrap(),
+                    ),
+                    state: DownstairsInfoStatus::Active,
+                },
+            ],
+        );
+
+        assert_eq!(
+            upstairs_health,
+            UpstairsHealth::Degraded(UpstairsHealthDegradedDetails {
+                upstairs_id,
+                reason: UpstairsDegradedReason::InvalidState {
+                    message: String::from(
+                        "number of targets is 2 instead of 3"
+                    ),
+                },
+            }),
+        );
+    }
+
+    /// For a read/write Upstairs, if any downstairs are stopping, then the
+    /// Upstairs should be considered unhealthy
+    #[test]
+    fn single_upstairs_health_rw_one_stopping() {
+        let upstairs_id = Uuid::new_v4();
+
+        let upstairs_health = propolis_client_single_upstairs_health(
+            &UpstairsInfoStatus::Active,
+            upstairs_id,
+            false, // read_only
+            false, // reconcile_in_progress
+            false, // live_repair_in_progress
+            &[
+                DownstairsInfo {
+                    region_id: Some(Uuid::new_v4()),
+                    target_addr: Some(
+                        "[fd00:1122:3344::101]:17000".parse().unwrap(),
+                    ),
+                    repair_addr: Some(
+                        "[fd00:1122:3344::101]:21000".parse().unwrap(),
+                    ),
+                    state: DownstairsInfoStatus::Active,
+                },
+                DownstairsInfo {
+                    region_id: Some(Uuid::new_v4()),
+                    target_addr: Some(
+                        "[fd00:1122:3344::201]:17000".parse().unwrap(),
+                    ),
+                    repair_addr: Some(
+                        "[fd00:1122:3344::201]:21000".parse().unwrap(),
+                    ),
+                    state: DownstairsInfoStatus::Stopping,
+                },
+                DownstairsInfo {
+                    region_id: Some(Uuid::new_v4()),
+                    target_addr: Some(
+                        "[fd00:1122:3344::301]:17000".parse().unwrap(),
+                    ),
+                    repair_addr: Some(
+                        "[fd00:1122:3344::301]:21000".parse().unwrap(),
+                    ),
+                    state: DownstairsInfoStatus::Active,
+                },
+            ],
+        );
+
+        assert_eq!(
+            upstairs_health,
+            UpstairsHealth::Degraded(UpstairsHealthDegradedDetails {
+                upstairs_id,
+                reason: UpstairsDegradedReason::ReducedRedundancy,
+            }),
+        );
+    }
+
+    /// For a read/write Upstairs, if any downstairs are in live repair, then
+    /// the Upstairs should be considered unhealthy, even if
+    /// `live_repair_in_progress` is false.
+    #[test]
+    fn single_upstairs_health_rw_one_live_repair() {
+        let upstairs_id = Uuid::new_v4();
+
+        let upstairs_health = propolis_client_single_upstairs_health(
+            &UpstairsInfoStatus::Active,
+            upstairs_id,
+            false, // read_only
+            false, // reconcile_in_progress
+            false, // live_repair_in_progress
+            &[
+                DownstairsInfo {
+                    region_id: Some(Uuid::new_v4()),
+                    target_addr: Some(
+                        "[fd00:1122:3344::101]:17000".parse().unwrap(),
+                    ),
+                    repair_addr: Some(
+                        "[fd00:1122:3344::101]:21000".parse().unwrap(),
+                    ),
+                    state: DownstairsInfoStatus::Active,
+                },
+                DownstairsInfo {
+                    region_id: Some(Uuid::new_v4()),
+                    target_addr: Some(
+                        "[fd00:1122:3344::201]:17000".parse().unwrap(),
+                    ),
+                    repair_addr: Some(
+                        "[fd00:1122:3344::201]:21000".parse().unwrap(),
+                    ),
+                    state: DownstairsInfoStatus::LiveRepair,
+                },
+                DownstairsInfo {
+                    region_id: Some(Uuid::new_v4()),
+                    target_addr: Some(
+                        "[fd00:1122:3344::301]:17000".parse().unwrap(),
+                    ),
+                    repair_addr: Some(
+                        "[fd00:1122:3344::301]:21000".parse().unwrap(),
+                    ),
+                    state: DownstairsInfoStatus::Active,
+                },
+            ],
+        );
+
+        assert_eq!(
+            upstairs_health,
+            UpstairsHealth::Degraded(UpstairsHealthDegradedDetails {
+                upstairs_id,
+                reason: UpstairsDegradedReason::DownstairsDegraded,
+            }),
+        );
+    }
+
+    /// For a read/write Upstairs, if any two downstairs are in live repair,
+    /// then the Upstairs should be considered unhealthy, even if
+    /// `live_repair_in_progress` is false.
+    #[test]
+    fn single_upstairs_health_rw_two_live_repair() {
+        let upstairs_id = Uuid::new_v4();
+
+        let upstairs_health = propolis_client_single_upstairs_health(
+            &UpstairsInfoStatus::Active,
+            upstairs_id,
+            false, // read_only
+            false, // reconcile_in_progress
+            false, // live_repair_in_progress
+            &[
+                DownstairsInfo {
+                    region_id: Some(Uuid::new_v4()),
+                    target_addr: Some(
+                        "[fd00:1122:3344::101]:17000".parse().unwrap(),
+                    ),
+                    repair_addr: Some(
+                        "[fd00:1122:3344::101]:21000".parse().unwrap(),
+                    ),
+                    state: DownstairsInfoStatus::LiveRepair,
+                },
+                DownstairsInfo {
+                    region_id: Some(Uuid::new_v4()),
+                    target_addr: Some(
+                        "[fd00:1122:3344::201]:17000".parse().unwrap(),
+                    ),
+                    repair_addr: Some(
+                        "[fd00:1122:3344::201]:21000".parse().unwrap(),
+                    ),
+                    state: DownstairsInfoStatus::LiveRepair,
+                },
+                DownstairsInfo {
+                    region_id: Some(Uuid::new_v4()),
+                    target_addr: Some(
+                        "[fd00:1122:3344::301]:17000".parse().unwrap(),
+                    ),
+                    repair_addr: Some(
+                        "[fd00:1122:3344::301]:21000".parse().unwrap(),
+                    ),
+                    state: DownstairsInfoStatus::Active,
+                },
+            ],
+        );
+
+        assert_eq!(
+            upstairs_health,
+            UpstairsHealth::Degraded(UpstairsHealthDegradedDetails {
+                upstairs_id,
+                reason: UpstairsDegradedReason::DownstairsDegraded,
+            }),
+        );
+    }
+
+    /// For a read/write Upstairs, if none of the downstairs are in live repair,
+    /// but the Upstairs indicates that one is in progress, then the Upstairs
+    /// should be considered unhealthy.
+    #[test]
+    fn single_upstairs_health_rw_live_repair_in_progress() {
+        let upstairs_id = Uuid::new_v4();
+
+        let upstairs_health = propolis_client_single_upstairs_health(
+            &UpstairsInfoStatus::Active,
+            upstairs_id,
+            false, // read_only
+            false, // reconcile_in_progress
+            true,  // live_repair_in_progress
+            &[
+                DownstairsInfo {
+                    region_id: Some(Uuid::new_v4()),
+                    target_addr: Some(
+                        "[fd00:1122:3344::101]:17000".parse().unwrap(),
+                    ),
+                    repair_addr: Some(
+                        "[fd00:1122:3344::101]:21000".parse().unwrap(),
+                    ),
+                    state: DownstairsInfoStatus::Active,
+                },
+                DownstairsInfo {
+                    region_id: Some(Uuid::new_v4()),
+                    target_addr: Some(
+                        "[fd00:1122:3344::201]:17000".parse().unwrap(),
+                    ),
+                    repair_addr: Some(
+                        "[fd00:1122:3344::201]:21000".parse().unwrap(),
+                    ),
+                    state: DownstairsInfoStatus::Active,
+                },
+                DownstairsInfo {
+                    region_id: Some(Uuid::new_v4()),
+                    target_addr: Some(
+                        "[fd00:1122:3344::301]:17000".parse().unwrap(),
+                    ),
+                    repair_addr: Some(
+                        "[fd00:1122:3344::301]:21000".parse().unwrap(),
+                    ),
+                    state: DownstairsInfoStatus::Active,
+                },
+            ],
+        );
+
+        assert_eq!(
+            upstairs_health,
+            UpstairsHealth::Degraded(UpstairsHealthDegradedDetails {
+                upstairs_id,
+                reason: UpstairsDegradedReason::DownstairsDegraded,
+            }),
+        );
+    }
+
+    /// For a read/write Upstairs, if one of the downstairs was replaced, then
+    /// the Upstairs should be considered unhealthy.
+    #[test]
+    fn single_upstairs_health_rw_replace() {
+        let upstairs_id = Uuid::new_v4();
+
+        let upstairs_health = propolis_client_single_upstairs_health(
+            &UpstairsInfoStatus::Active,
+            upstairs_id,
+            false, // read_only
+            false, // reconcile_in_progress
+            false, // live_repair_in_progress
+            &[
+                DownstairsInfo {
+                    region_id: None,
+                    target_addr: Some(
+                        "[fd00:1122:3344::101]:17000".parse().unwrap(),
+                    ),
+                    repair_addr: None,
+                    state: DownstairsInfoStatus::Connecting {
+                        state: DownstairsInfoNegotiationStatus::LiveRepairReady,
+                        mode: DownstairsInfoConnectionMode::Replaced,
+                    },
+                },
+                DownstairsInfo {
+                    region_id: Some(Uuid::new_v4()),
+                    target_addr: Some(
+                        "[fd00:1122:3344::201]:17000".parse().unwrap(),
+                    ),
+                    repair_addr: Some(
+                        "[fd00:1122:3344::201]:21000".parse().unwrap(),
+                    ),
+                    state: DownstairsInfoStatus::Active,
+                },
+                DownstairsInfo {
+                    region_id: Some(Uuid::new_v4()),
+                    target_addr: Some(
+                        "[fd00:1122:3344::301]:17000".parse().unwrap(),
+                    ),
+                    repair_addr: Some(
+                        "[fd00:1122:3344::301]:21000".parse().unwrap(),
+                    ),
+                    state: DownstairsInfoStatus::Active,
+                },
+            ],
+        );
+
+        assert_eq!(
+            upstairs_health,
+            UpstairsHealth::Degraded(UpstairsHealthDegradedDetails {
+                upstairs_id,
+                reason: UpstairsDegradedReason::ReducedRedundancy,
+            }),
+        );
+
+        let upstairs_health = propolis_client_single_upstairs_health(
+            &UpstairsInfoStatus::Active,
+            upstairs_id,
+            false, // read_only
+            false, // reconcile_in_progress
+            true,  // live_repair_in_progress
+            &[
+                DownstairsInfo {
+                    region_id: Some(Uuid::new_v4()),
+                    target_addr: Some(
+                        "[fd00:1122:3344::101]:17000".parse().unwrap(),
+                    ),
+                    repair_addr: Some(
+                        "[fd00:1122:3344::101]:21000".parse().unwrap(),
+                    ),
+                    state: DownstairsInfoStatus::LiveRepair,
+                },
+                DownstairsInfo {
+                    region_id: Some(Uuid::new_v4()),
+                    target_addr: Some(
+                        "[fd00:1122:3344::201]:17000".parse().unwrap(),
+                    ),
+                    repair_addr: Some(
+                        "[fd00:1122:3344::201]:21000".parse().unwrap(),
+                    ),
+                    state: DownstairsInfoStatus::Active,
+                },
+                DownstairsInfo {
+                    region_id: Some(Uuid::new_v4()),
+                    target_addr: Some(
+                        "[fd00:1122:3344::301]:17000".parse().unwrap(),
+                    ),
+                    repair_addr: Some(
+                        "[fd00:1122:3344::301]:21000".parse().unwrap(),
+                    ),
+                    state: DownstairsInfoStatus::Active,
+                },
+            ],
+        );
+
+        assert_eq!(
+            upstairs_health,
+            UpstairsHealth::Degraded(UpstairsHealthDegradedDetails {
+                upstairs_id,
+                reason: UpstairsDegradedReason::DownstairsDegraded,
+            }),
+        );
+    }
+
+    /// For a read/write Upstairs, if all the downstairs are in reconciliation,
+    /// then the Upstairs should be considered unhealthy.
+    #[test]
+    fn single_upstairs_health_rw_reconciliation() {
+        let upstairs_id = Uuid::new_v4();
+
+        let upstairs_health = propolis_client_single_upstairs_health(
+            &UpstairsInfoStatus::Active,
+            upstairs_id,
+            false, // read_only
+            true,  // reconcile_in_progress
+            false, // live_repair_in_progress
+            &[
+                DownstairsInfo {
+                    region_id: Some(Uuid::new_v4()),
+                    target_addr: Some(
+                        "[fd00:1122:3344::101]:17000".parse().unwrap(),
+                    ),
+                    repair_addr: Some(
+                        "[fd00:1122:3344::101]:21000".parse().unwrap(),
+                    ),
+                    state: DownstairsInfoStatus::Connecting {
+                        state: DownstairsInfoNegotiationStatus::Reconcile,
+                        mode: DownstairsInfoConnectionMode::New,
+                    },
+                },
+                DownstairsInfo {
+                    region_id: Some(Uuid::new_v4()),
+                    target_addr: Some(
+                        "[fd00:1122:3344::201]:17000".parse().unwrap(),
+                    ),
+                    repair_addr: Some(
+                        "[fd00:1122:3344::201]:21000".parse().unwrap(),
+                    ),
+                    state: DownstairsInfoStatus::Connecting {
+                        state: DownstairsInfoNegotiationStatus::Reconcile,
+                        mode: DownstairsInfoConnectionMode::New,
+                    },
+                },
+                DownstairsInfo {
+                    region_id: Some(Uuid::new_v4()),
+                    target_addr: Some(
+                        "[fd00:1122:3344::301]:17000".parse().unwrap(),
+                    ),
+                    repair_addr: Some(
+                        "[fd00:1122:3344::301]:21000".parse().unwrap(),
+                    ),
+                    state: DownstairsInfoStatus::Connecting {
+                        state: DownstairsInfoNegotiationStatus::Reconcile,
+                        mode: DownstairsInfoConnectionMode::New,
+                    },
+                },
+            ],
+        );
+
+        assert_eq!(
+            upstairs_health,
+            UpstairsHealth::Degraded(UpstairsHealthDegradedDetails {
+                upstairs_id,
+                reason: UpstairsDegradedReason::DownstairsDegraded,
+            }),
+        );
+    }
+
+    /// For a read-only Upstairs, if any of the three downstairs are active,
+    /// then the Upstairs should be considered healthy
+    #[test]
+    fn single_upstairs_health_ro_basic() {
+        let upstairs_id = Uuid::new_v4();
+
+        let upstairs_health = propolis_client_single_upstairs_health(
+            &UpstairsInfoStatus::Active,
+            upstairs_id,
+            true,  // read_only
+            false, // reconcile_in_progress
+            false, // live_repair_in_progress
+            &[
+                DownstairsInfo {
+                    region_id: None,
+                    target_addr: None,
+                    repair_addr: None,
+                    state: DownstairsInfoStatus::Connecting {
+                        state: DownstairsInfoNegotiationStatus::WaitConnect,
+                        mode: DownstairsInfoConnectionMode::New,
+                    },
+                },
+                DownstairsInfo {
+                    region_id: Some(Uuid::new_v4()),
+                    target_addr: Some(
+                        "[fd00:1122:3344::201]:17000".parse().unwrap(),
+                    ),
+                    repair_addr: Some(
+                        "[fd00:1122:3344::201]:21000".parse().unwrap(),
+                    ),
+                    state: DownstairsInfoStatus::Connecting {
+                        state: DownstairsInfoNegotiationStatus::WaitConnect,
+                        mode: DownstairsInfoConnectionMode::Offline,
+                    },
+                },
+                DownstairsInfo {
+                    region_id: Some(Uuid::new_v4()),
+                    target_addr: Some(
+                        "[fd00:1122:3344::301]:17000".parse().unwrap(),
+                    ),
+                    repair_addr: Some(
+                        "[fd00:1122:3344::301]:21000".parse().unwrap(),
+                    ),
+                    state: DownstairsInfoStatus::Active,
+                },
+            ],
+        );
+
+        assert_eq!(upstairs_health, UpstairsHealth::Healthy { upstairs_id });
+    }
+
+    /// Ensure that `propolis_client_upstairs_health` can find the requested
+    /// Upstairs for a paricular Downstairs when in various spots of the
+    /// VolumeInfo tree.
+    #[test]
+    fn upstairs_health_search() {
+        let log = slog::Logger::root(slog::Discard, slog::o!());
+
+        let upstairs_id = Uuid::new_v4();
+
+        let target_upstairs = VolumeInfo::Upstairs {
+            state: UpstairsInfoStatus::Active,
+            block_size: Some(512),
+            upstairs_id,
+            session_id: Uuid::new_v4(),
+            generation: 12345,
+            read_only: false,
+            encrypted: true,
+            reconcile_in_progress: false,
+            live_repair_in_progress: false,
+            targets: vec![
+                DownstairsInfo {
+                    region_id: Some(Uuid::new_v4()),
+                    target_addr: Some(String::from(
+                        "[fd00:1122:3344::101]:10000",
+                    )),
+                    repair_addr: Some(String::from(
+                        "[fd00:1122:3344::101]:14000",
+                    )),
+                    state: DownstairsInfoStatus::Active,
+                },
+                DownstairsInfo {
+                    region_id: Some(Uuid::new_v4()),
+                    target_addr: Some(String::from(
+                        "[fd00:1122:3344::201]:10000",
+                    )),
+                    repair_addr: Some(String::from(
+                        "[fd00:1122:3344::201]:14000",
+                    )),
+                    state: DownstairsInfoStatus::Active,
+                },
+                DownstairsInfo {
+                    region_id: Some(Uuid::new_v4()),
+                    target_addr: Some(String::from(
+                        "[fd00:1122:3344::301]:10000",
+                    )),
+                    repair_addr: Some(String::from(
+                        "[fd00:1122:3344::301]:14000",
+                    )),
+                    state: DownstairsInfoStatus::Active,
+                },
+            ],
+        };
+
+        let random_upstairs_1 = VolumeInfo::Upstairs {
+            state: UpstairsInfoStatus::Active,
+            block_size: Some(512),
+            upstairs_id: Uuid::new_v4(),
+            session_id: Uuid::new_v4(),
+            generation: 12345,
+            read_only: false,
+            encrypted: true,
+            reconcile_in_progress: false,
+            live_repair_in_progress: false,
+            targets: vec![
+                DownstairsInfo {
+                    region_id: Some(Uuid::new_v4()),
+                    target_addr: Some(String::from(
+                        "[fd00:1122:3344::501]:10000",
+                    )),
+                    repair_addr: Some(String::from(
+                        "[fd00:1122:3344::501]:14000",
+                    )),
+                    state: DownstairsInfoStatus::Active,
+                },
+                DownstairsInfo {
+                    region_id: Some(Uuid::new_v4()),
+                    target_addr: Some(String::from(
+                        "[fd00:1122:3344::601]:10000",
+                    )),
+                    repair_addr: Some(String::from(
+                        "[fd00:1122:3344::601]:14000",
+                    )),
+                    state: DownstairsInfoStatus::Active,
+                },
+                DownstairsInfo {
+                    region_id: Some(Uuid::new_v4()),
+                    target_addr: Some(String::from(
+                        "[fd00:1122:3344::701]:10000",
+                    )),
+                    repair_addr: Some(String::from(
+                        "[fd00:1122:3344::701]:14000",
+                    )),
+                    state: DownstairsInfoStatus::Active,
+                },
+            ],
+        };
+
+        let random_upstairs_2 = VolumeInfo::Upstairs {
+            state: UpstairsInfoStatus::Active,
+            block_size: Some(512),
+            upstairs_id: Uuid::new_v4(),
+            session_id: Uuid::new_v4(),
+            generation: 12345,
+            read_only: false,
+            encrypted: true,
+            reconcile_in_progress: false,
+            live_repair_in_progress: false,
+            targets: vec![
+                DownstairsInfo {
+                    region_id: Some(Uuid::new_v4()),
+                    target_addr: Some(String::from(
+                        "[fd00:1122:3344::801]:10000",
+                    )),
+                    repair_addr: Some(String::from(
+                        "[fd00:1122:3344::801]:14000",
+                    )),
+                    state: DownstairsInfoStatus::Active,
+                },
+                DownstairsInfo {
+                    region_id: Some(Uuid::new_v4()),
+                    target_addr: Some(String::from(
+                        "[fd00:1122:3344::901]:10000",
+                    )),
+                    repair_addr: Some(String::from(
+                        "[fd00:1122:3344::901]:14000",
+                    )),
+                    state: DownstairsInfoStatus::Active,
+                },
+                DownstairsInfo {
+                    region_id: Some(Uuid::new_v4()),
+                    target_addr: Some(String::from(
+                        "[fd00:1122:3344::a01]:10000",
+                    )),
+                    repair_addr: Some(String::from(
+                        "[fd00:1122:3344::a01]:14000",
+                    )),
+                    state: DownstairsInfoStatus::Active,
+                },
+            ],
+        };
+
+        // The Upstairs we are searching for is in a sub volume
+
+        let maybe_upstairs_health = propolis_client_upstairs_health(
+            &log,
+            &VolumeInfo::Volume {
+                sub_volumes: vec![
+                    random_upstairs_1.clone(),
+                    target_upstairs.clone(),
+                ],
+
+                read_only_parent: None,
+            },
+            "[fd00:1122:3344::301]:10000".parse().unwrap(),
+        );
+
+        assert_eq!(
+            maybe_upstairs_health,
+            Some(UpstairsHealth::Healthy { upstairs_id }),
+        );
+
+        // The Upstairs we are searching for is in a read-only parent
+
+        let maybe_upstairs_health = propolis_client_upstairs_health(
+            &log,
+            &VolumeInfo::Volume {
+                sub_volumes: vec![
+                    random_upstairs_1.clone(),
+                    random_upstairs_2.clone(),
+                ],
+
+                read_only_parent: Some(Box::new(target_upstairs.clone())),
+            },
+            "[fd00:1122:3344::301]:10000".parse().unwrap(),
+        );
+
+        assert_eq!(
+            maybe_upstairs_health,
+            Some(UpstairsHealth::Healthy { upstairs_id }),
+        );
+
+        // The Upstairs we are searching for is buried in the hierarchy
+
+        let maybe_upstairs_health = propolis_client_upstairs_health(
+            &log,
+            &VolumeInfo::Volume {
+                sub_volumes: vec![
+                    VolumeInfo::Volume {
+                        sub_volumes: vec![
+                            random_upstairs_1.clone(),
+                            random_upstairs_2.clone(),
+                        ],
+
+                        read_only_parent: Some(Box::new(
+                            random_upstairs_2.clone(),
+                        )),
+                    },
+                    VolumeInfo::Volume {
+                        sub_volumes: vec![VolumeInfo::Volume {
+                            sub_volumes: vec![random_upstairs_1.clone()],
+                            read_only_parent: Some(Box::new(
+                                VolumeInfo::Volume {
+                                    sub_volumes: vec![target_upstairs.clone()],
+                                    read_only_parent: None,
+                                },
+                            )),
+                        }],
+
+                        read_only_parent: Some(Box::new(
+                            random_upstairs_2.clone(),
+                        )),
+                    },
+                ],
+
+                read_only_parent: Some(Box::new(random_upstairs_1)),
+            },
+            "[fd00:1122:3344::101]:10000".parse().unwrap(),
+        );
+
+        assert_eq!(
+            maybe_upstairs_health,
+            Some(UpstairsHealth::Healthy { upstairs_id }),
+        );
+
+        // The Upstairs we are searching for not present
+
+        let maybe_upstairs_health = propolis_client_upstairs_health(
+            &log,
+            &VolumeInfo::Volume {
+                sub_volumes: vec![],
+
+                read_only_parent: Some(Box::new(target_upstairs.clone())),
+            },
+            "[fd00:1122:3344::401]:10000".parse().unwrap(),
+        );
+
+        assert_eq!(maybe_upstairs_health, None);
     }
 }

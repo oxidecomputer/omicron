@@ -11,41 +11,13 @@ use sled_agent_types::early_networking::BfdMode;
 use sled_agent_types::early_networking::SwitchSlot;
 
 impl super::Nexus {
-    async fn mg_client_for_switch_slot(
-        &self,
-        switch: SwitchSlot,
-    ) -> Result<mg_admin_client::Client, Error> {
-        let mg_client: mg_admin_client::Client = self
-            .mg_clients()
-            .await
-            .map_err(|e| {
-                Error::internal_error(&format!("failed to get mg clients: {e}"))
-            })?
-            .get(&switch)
-            .ok_or_else(|| {
-                // TODO-correctness Only having one switch shouldn't be an
-                // error; this will be fixed by
-                // <https://github.com/oxidecomputer/omicron/pull/9979> or
-                // <https://github.com/oxidecomputer/omicron/pull/9533>.
-                Error::internal_error(&format!(
-                    "failed to find switch {switch:?}"
-                ))
-            })?
-            .clone();
-
-        Ok(mg_client)
-    }
-
     pub async fn bfd_enable(
         &self,
         opctx: &OpContext,
         session: networking::BfdSessionEnable,
     ) -> Result<(), Error> {
-        // add the bfd session to the db and trigger the bfd manager to handle
-        // the reset
+        // add the bfd session to the db and trigger bootstore propagation
         self.datastore().bfd_session_create(opctx, &session).await?;
-        self.background_tasks.activate(&self.background_tasks.task_bfd_manager);
-        // for timely propagation to bootstore
         self.background_tasks
             .activate(&self.background_tasks.task_switch_port_settings_manager);
         Ok(())
@@ -56,11 +28,8 @@ impl super::Nexus {
         opctx: &OpContext,
         session: networking::BfdSessionDisable,
     ) -> Result<(), Error> {
-        // remove the bfd session from the db and trigger the bfd manager to
-        // handle the reset
+        // remove the bfd session from the db and trigger bootstore propagation
         self.datastore().bfd_session_delete(opctx, &session).await?;
-        self.background_tasks.activate(&self.background_tasks.task_bfd_manager);
-        // for timely propagation to bootstore
         self.background_tasks
             .activate(&self.background_tasks.task_switch_port_settings_manager);
         Ok(())
@@ -72,9 +41,22 @@ impl super::Nexus {
     ) -> Result<Vec<bfd::BfdStatus>, Error> {
         // ask each rack switch about all its BFD sessions. This will need to
         // be updated for multirack.
+        let mg_clients = self.mg_clients().await.map_err(|err| {
+            Error::internal_error(&format!("failed to get mg clients: {err}"))
+        })?;
         let mut result = Vec::new();
         for switch_slot in [SwitchSlot::Switch0, SwitchSlot::Switch1] {
-            let mg_client = self.mg_client_for_switch_slot(switch_slot).await?;
+            // If we only have one scrimlet, we won't have an entry in
+            // `mg_clients` for one of the switch locations. Log that, but
+            // continue so we can still report status from whichever switch we
+            // do have.
+            let Some(mg_client) = mg_clients.get(&switch_slot) else {
+                warn!(
+                    self.log, "no mgd client found for switch slot";
+                    "switch-slot" => ?switch_slot,
+                );
+                continue;
+            };
             let status = mg_client
                 .get_bfd_peers()
                 .await
@@ -96,7 +78,7 @@ impl super::Nexus {
                     },
                     switch_slot,
                     local: Some(info.config.listen),
-                    detection_threshold: info.config.detection_threshold,
+                    detection_threshold: info.config.detection_threshold.into(),
                     required_rx: info.config.required_rx,
                     mode: match info.config.mode {
                         mg_admin_client::types::SessionMode::SingleHop => {

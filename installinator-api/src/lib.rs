@@ -18,8 +18,11 @@ use dropshot_api_manager_types::api_versions;
 use hyper::header;
 use installinator_common_versions::latest;
 use omicron_uuid_kinds::MupdateUuid;
-use tufaceous_artifact::ArtifactHashId;
-use update_engine::{NestedSpec, events::EventReport};
+use oxide_update_engine_types::events::EventReport;
+use oxide_update_engine_types::spec::GenericSpec;
+use schemars::JsonSchema;
+use serde::Deserialize;
+use tufaceous_artifact::ArtifactHash;
 
 api_versions!([
     // Do not create new versions of this client-side versioned API.
@@ -40,7 +43,7 @@ pub trait InstallinatorApi {
     }]
     async fn get_artifact_by_hash(
         rqctx: RequestContext<Self::Context>,
-        path: Path<ArtifactHashId>,
+        path: Path<GetArtifactPathParams>,
     ) -> Result<HttpResponseHeaders<HttpResponseOk<FreeformBody>>, HttpError>;
 
     /// Report progress and completion to the server.
@@ -57,8 +60,22 @@ pub trait InstallinatorApi {
     async fn report_progress(
         rqctx: RequestContext<Self::Context>,
         path: Path<latest::report::ReportQuery>,
-        report: TypedBody<EventReport<NestedSpec>>,
+        report: TypedBody<EventReport<GenericSpec>>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct GetArtifactPathParams {
+    /// This parameter is ignored and is present only to avoid needing a new
+    /// API version. Recommend using "any".
+    pub kind: String,
+
+    /// The hash of the artifact.
+    // Tufaceous v2 introduces a new JSON schema for `ArtifactHash` that is
+    // wire-compatible but perceived as different by drift. Continue using the
+    // old schema in this API version.
+    #[schemars(schema_with = "ArtifactHash::v1_json_schema")]
+    pub hash: ArtifactHash,
 }
 
 /// Add a content length header to a response.
@@ -126,5 +143,6 @@ pub fn default_config(bind_address: std::net::SocketAddr) -> ConfigDropshot {
         default_request_body_max_bytes: 1024,
         default_handler_task_mode: HandlerTaskMode::Detached,
         log_headers: vec![],
+        compression: dropshot::CompressionConfig::None,
     }
 }

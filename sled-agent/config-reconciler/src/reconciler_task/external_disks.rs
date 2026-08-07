@@ -1015,7 +1015,7 @@ async fn cleanup_former_zone_roots(
             &Mountpoint(Utf8PathBuf::from(&mountpoint)),
         )
         .await
-        .with_context(|| format!("mounting {:?}", &child_dataset_name))
+        .with_context(|| format!("mounting {:?}", child_dataset_name))
         .map_err(|error| {
             DiskManagementError::Other(
                 InlineErrorChain::new(&*error).to_string(),
@@ -1085,7 +1085,6 @@ mod tests {
                     dev_path: None,
                 },
                 slot: raw_disk.slot(),
-                variant: raw_disk.variant(),
                 identity: raw_disk.identity().clone(),
                 is_boot_disk: raw_disk.is_boot_disk(),
                 partitions: vec![],

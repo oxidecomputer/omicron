@@ -47,6 +47,7 @@ use nexus_db_errors::OptionalError;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_lookup::LookupPath;
 use nexus_types::external_api::disk as disk_types;
+use nexus_types::external_api::instance as instance_types;
 use nexus_types::identity::Asset;
 use omicron_common::api;
 use omicron_common::api::external;
@@ -299,8 +300,25 @@ impl LocalStorageDisk {
         self.model().slot()
     }
 
-    pub fn required_dataset_overhead(&self) -> external::ByteCount {
+    fn required_dataset_overhead(&self) -> external::ByteCount {
         self.disk_type_local_storage.required_dataset_overhead()
+    }
+
+    /// Size required for the disk's data plus overhead
+    pub fn required_dataset_size(&self) -> i64 {
+        // The value in ByteCount is capped at i64::MAX, but a disk backed by
+        // local storage cannot be created that does not fit in a zpool at the
+        // time of the disk creation request (note this is different from the
+        // time of instance reservation where Nexus actually assigns the disk an
+        // allocation). This means that the size is well below that MAX, meaning
+        // this won't overflow.
+        //
+        // Additionally, there's a checked_add in DiskTypeLocalStorage::New that
+        // checks this won't happen. Note this won't protect against cases of
+        // database modification, but not much will!
+
+        self.size().to_bytes() as i64
+            + self.required_dataset_overhead().to_bytes() as i64
     }
 
     /// Return the full path to the local storage zvol's device
@@ -1146,8 +1164,8 @@ impl DataStore {
                             }
                             match collection.nexus_state.state() {
                                 // Ok-to-be-attached instance states:
-                                api::external::InstanceState::Creating
-                                | api::external::InstanceState::Stopped => {
+                                instance_types::InstanceState::Creating
+                                | instance_types::InstanceState::Stopped => {
                                     // The disk is ready to be attached, and the
                                     // instance is ready to be attached. Perhaps
                                     // we are at attachment capacity?
@@ -1336,8 +1354,8 @@ impl DataStore {
                             }
                             match collection.nexus_state.state() {
                                 // Ok-to-be-detached instance states:
-                                api::external::InstanceState::Creating |
-                                api::external::InstanceState::Stopped => {
+                                instance_types::InstanceState::Creating |
+                                instance_types::InstanceState::Stopped => {
                                     if collection.boot_disk_id == Some(authz_disk.id()) {
                                         return Err(Error::conflict(
                                             "boot disk cannot be detached"

@@ -28,11 +28,15 @@ use nexus_types_versions::v2026_01_01_00;
 use nexus_types_versions::v2026_01_03_00;
 use nexus_types_versions::v2026_01_05_00;
 use nexus_types_versions::v2026_01_08_00;
+use nexus_types_versions::v2026_01_15_00;
 use nexus_types_versions::v2026_01_16_00;
 use nexus_types_versions::v2026_01_16_01;
 use nexus_types_versions::v2026_01_22_00;
 use nexus_types_versions::v2026_01_30_01;
+use nexus_types_versions::v2026_01_31_00;
 use nexus_types_versions::v2026_02_13_01;
+use nexus_types_versions::v2026_04_16_00;
+use nexus_types_versions::v2026_06_05_00;
 use omicron_common::address::IpRange;
 use omicron_common::api::external::{
     http_pagination::{
@@ -51,6 +55,7 @@ mod v2025_11_20_00_local;
 mod v2026_01_01_00_local;
 mod v2026_01_30_00_local;
 mod v2026_03_24_00_local;
+mod v2026_05_20_00_local;
 
 api_versions!([
     // API versions are in the format YYYY_MM_DD_NN.0.0, defined below as
@@ -81,6 +86,20 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyy_mm_dd_nn, IDENT),
+    (2026_07_31_00, SET_TARGET_RELEASE_UPDATE_RECOVERY_DOCS),
+    (2026_07_28_00, INTERNET_GATEWAY_CASCADE_DOCS),
+    (2026_06_11_00, ADD_SYSTEM_IP_POOL_APIS),
+    (2026_06_10_00, BGP_CONFIGURATION_UPDATE),
+    (2026_06_08_00, INSTANCE_CPU_TYPE_TURIN_V2),
+    (2026_06_05_00, EXTERNAL_JUMBO_FRAMES),
+    (2026_06_04_00, IMAGE_BLOCK_SIZE_TYPE),
+    (2026_06_03_00, DISK_BLOCK_SIZE_TYPE),
+    (2026_05_20_00, ADD_CONTACT_SUPPORT_TO_UPDATE_STATUS),
+    (2026_05_08_00, MANUAL_DISK_ADOPTION),
+    (2026_05_07_00, REMOVE_DUPLICATED_NETWORKING_TYPES),
+    (2026_04_30_00, PROBE_AND_SAML_DOCS),
+    (2026_04_29_00, METRICS_ADD_JOULES),
+    (2026_04_24_00, DROPSHOT_WEBSOCKET_SPEC_CHANGE),
     (2026_04_19_00, INLINE_ROUTER_PEER_IP_ADDR),
     (2026_04_16_00, STRONGER_BGP_UNNUMBERED_TYPES),
     (2026_03_25_00, SUBNET_POOL_UTILIZATION_REMAINING),
@@ -427,6 +446,37 @@ pub trait NexusExternalApi {
         >,
     ) -> Result<
         HttpResponseOk<latest::policy::Policy<latest::policy::FleetRole>>,
+        HttpError,
+    >;
+
+    /// Fetch fleet-wide networking settings
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/networking/settings",
+        tags = ["system/networking"],
+        versions = VERSION_EXTERNAL_JUMBO_FRAMES..,
+    }]
+    async fn system_networking_settings_view(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<
+        HttpResponseOk<latest::system_networking::SystemNetworkingSettings>,
+        HttpError,
+    >;
+
+    /// Update fleet-wide networking settings
+    #[endpoint {
+        method = PUT,
+        path = "/v1/system/networking/settings",
+        tags = ["system/networking"],
+        versions = VERSION_EXTERNAL_JUMBO_FRAMES..,
+    }]
+    async fn system_networking_settings_update(
+        rqctx: RequestContext<Self::Context>,
+        new_settings: TypedBody<
+            latest::system_networking::SystemNetworkingSettingsUpdate,
+        >,
+    ) -> Result<
+        HttpResponseOk<latest::system_networking::SystemNetworkingSettings>,
         HttpError,
     >;
 
@@ -1180,15 +1230,33 @@ pub trait NexusExternalApi {
         method = GET,
         path = "/v1/ip-pools",
         tags = ["ip-pools"],
-        versions = VERSION_RENAME_POOL_ENDPOINTS..,
+        versions = VERSION_ADD_SYSTEM_IP_POOL_APIS..,
     }]
     async fn ip_pool_list(
         rqctx: RequestContext<Self::Context>,
-        query_params: Query<PaginatedByNameOrId>,
+        query_params: Query<PaginatedByNameOrId<latest::ip_pool::IpPoolFilter>>,
     ) -> Result<
         HttpResponseOk<ResultsPage<latest::ip_pool::SiloIpPool>>,
         HttpError,
     >;
+
+    /// List IP pools
+    #[endpoint {
+        operation_id = "ip_pool_list",
+        method = GET,
+        path = "/v1/ip-pools",
+        tags = ["ip-pools"],
+        versions = VERSION_RENAME_POOL_ENDPOINTS..VERSION_ADD_SYSTEM_IP_POOL_APIS,
+    }]
+    async fn ip_pool_list_v2026_02_09_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedByNameOrId>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<v2026_01_01_00::ip_pool::SiloIpPool>>,
+        HttpError,
+    > {
+        Self::project_ip_pool_list_v2026_01_01_00(rqctx, query_params).await
+    }
 
     /// List IP pools
     #[endpoint {
@@ -1204,9 +1272,7 @@ pub trait NexusExternalApi {
     ) -> Result<
         HttpResponseOk<ResultsPage<v2026_01_01_00::ip_pool::SiloIpPool>>,
         HttpError,
-    > {
-        Self::ip_pool_list(rqctx, query_params).await
-    }
+    >;
 
     /// List IP pools
     #[endpoint {
@@ -1223,7 +1289,10 @@ pub trait NexusExternalApi {
         HttpResponseOk<ResultsPage<v2025_11_20_00::ip_pool::SiloIpPool>>,
         HttpError,
     > {
-        let page = Self::ip_pool_list(rqctx, query_params).await?.0;
+        let page =
+            Self::project_ip_pool_list_v2026_01_01_00(rqctx, query_params)
+                .await?
+                .0;
         Ok(HttpResponseOk(ResultsPage {
             items: page.items.into_iter().map(Into::into).collect(),
             next_page: page.next_page,
@@ -1281,12 +1350,30 @@ pub trait NexusExternalApi {
         method = GET,
         path = "/v1/system/ip-pools",
         tags = ["system/ip-pools"],
-        versions = VERSION_RENAME_POOL_ENDPOINTS..,
+        versions = VERSION_ADD_SYSTEM_IP_POOL_APIS..,
     }]
     async fn system_ip_pool_list(
         rqctx: RequestContext<Self::Context>,
-        query_params: Query<PaginatedByNameOrId>,
+        query_params: Query<
+            PaginatedByNameOrId<latest::ip_pool::SystemIpPoolFilter>,
+        >,
     ) -> Result<HttpResponseOk<ResultsPage<latest::ip_pool::IpPool>>, HttpError>;
+
+    /// List IP pools
+    #[endpoint {
+        operation_id = "system_ip_pool_list",
+        method = GET,
+        path = "/v1/system/ip-pools",
+        tags = ["system/ip-pools"],
+        versions = VERSION_RENAME_POOL_ENDPOINTS..VERSION_ADD_SYSTEM_IP_POOL_APIS,
+    }]
+    async fn system_ip_pool_list_v2026_02_09_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedByNameOrId>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<v2025_11_20_00::ip_pool::IpPool>>,
+        HttpError,
+    >;
 
     /// List IP pools
     #[endpoint {
@@ -1303,7 +1390,7 @@ pub trait NexusExternalApi {
         HttpResponseOk<ResultsPage<v2025_11_20_00::ip_pool::IpPool>>,
         HttpError,
     > {
-        Self::system_ip_pool_list(rqctx, query_params).await
+        Self::system_ip_pool_list_v2026_02_09_00(rqctx, query_params).await
     }
 
     /// Create IP pool
@@ -1311,12 +1398,30 @@ pub trait NexusExternalApi {
         method = POST,
         path = "/v1/system/ip-pools",
         tags = ["system/ip-pools"],
-        versions = VERSION_RENAME_POOL_ENDPOINTS..,
+        versions = VERSION_ADD_SYSTEM_IP_POOL_APIS..,
     }]
     async fn system_ip_pool_create(
         rqctx: RequestContext<Self::Context>,
         pool_params: TypedBody<latest::ip_pool::IpPoolCreate>,
     ) -> Result<HttpResponseCreated<latest::ip_pool::IpPool>, HttpError>;
+
+    /// Create IP pool
+    #[endpoint {
+        operation_id = "system_ip_pool_create",
+        method = POST,
+        path = "/v1/system/ip-pools",
+        tags = ["system/ip-pools"],
+        versions = VERSION_RENAME_POOL_ENDPOINTS..VERSION_ADD_SYSTEM_IP_POOL_APIS,
+    }]
+    async fn system_ip_pool_create_v2026_02_09_00(
+        rqctx: RequestContext<Self::Context>,
+        pool_params: TypedBody<v2025_11_20_00::ip_pool::IpPoolCreate>,
+    ) -> Result<HttpResponseCreated<v2025_11_20_00::ip_pool::IpPool>, HttpError>
+    {
+        Ok(Self::system_ip_pool_create(rqctx, pool_params.map(Into::into))
+            .await?
+            .map(Into::into))
+    }
 
     /// Create IP pool
     #[endpoint {
@@ -1331,7 +1436,7 @@ pub trait NexusExternalApi {
         pool_params: TypedBody<v2025_11_20_00::ip_pool::IpPoolCreate>,
     ) -> Result<HttpResponseCreated<v2025_11_20_00::ip_pool::IpPool>, HttpError>
     {
-        Self::system_ip_pool_create(rqctx, pool_params).await
+        Self::system_ip_pool_create_v2026_02_09_00(rqctx, pool_params).await
     }
 
     /// Fetch IP pool
@@ -1339,12 +1444,28 @@ pub trait NexusExternalApi {
         method = GET,
         path = "/v1/system/ip-pools/{pool}",
         tags = ["system/ip-pools"],
-        versions = VERSION_RENAME_POOL_ENDPOINTS..,
+        versions = VERSION_ADD_SYSTEM_IP_POOL_APIS..,
     }]
     async fn system_ip_pool_view(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<latest::path_params::IpPoolPath>,
     ) -> Result<HttpResponseOk<latest::ip_pool::IpPool>, HttpError>;
+
+    /// Fetch IP pool
+    #[endpoint {
+        operation_id = "system_ip_pool_view",
+        method = GET,
+        path = "/v1/system/ip-pools/{pool}",
+        tags = ["system/ip-pools"],
+        versions = VERSION_RENAME_POOL_ENDPOINTS..VERSION_ADD_SYSTEM_IP_POOL_APIS,
+    }]
+    async fn system_ip_pool_view_v2026_02_09_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::IpPoolPath>,
+    ) -> Result<HttpResponseOk<v2025_11_20_00::ip_pool::IpPool>, HttpError>
+    {
+        Ok(Self::system_ip_pool_view(rqctx, path_params).await?.map(Into::into))
+    }
 
     /// Fetch IP pool
     #[endpoint {
@@ -1359,7 +1480,7 @@ pub trait NexusExternalApi {
         path_params: Path<v2025_11_20_00::path_params::IpPoolPath>,
     ) -> Result<HttpResponseOk<v2025_11_20_00::ip_pool::IpPool>, HttpError>
     {
-        Self::system_ip_pool_view(rqctx, path_params).await
+        Self::system_ip_pool_view_v2026_02_09_00(rqctx, path_params).await
     }
 
     /// Delete IP pool
@@ -1394,13 +1515,32 @@ pub trait NexusExternalApi {
         method = PUT,
         path = "/v1/system/ip-pools/{pool}",
         tags = ["system/ip-pools"],
-        versions = VERSION_RENAME_POOL_ENDPOINTS..,
+        versions = VERSION_ADD_SYSTEM_IP_POOL_APIS..,
     }]
     async fn system_ip_pool_update(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<latest::path_params::IpPoolPath>,
         updates: TypedBody<latest::ip_pool::IpPoolUpdate>,
     ) -> Result<HttpResponseOk<latest::ip_pool::IpPool>, HttpError>;
+
+    /// Update IP pool
+    #[endpoint {
+        operation_id = "system_ip_pool_update",
+        method = PUT,
+        path = "/v1/system/ip-pools/{pool}",
+        tags = ["system/ip-pools"],
+        versions = VERSION_RENAME_POOL_ENDPOINTS..VERSION_ADD_SYSTEM_IP_POOL_APIS,
+    }]
+    async fn system_ip_pool_update_v2026_02_09_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::IpPoolPath>,
+        updates: TypedBody<latest::ip_pool::IpPoolUpdate>,
+    ) -> Result<HttpResponseOk<v2025_11_20_00::ip_pool::IpPool>, HttpError>
+    {
+        Ok(Self::system_ip_pool_update(rqctx, path_params, updates)
+            .await?
+            .map(Into::into))
+    }
 
     /// Update IP pool
     #[endpoint {
@@ -1416,7 +1556,8 @@ pub trait NexusExternalApi {
         updates: TypedBody<v2025_11_20_00::ip_pool::IpPoolUpdate>,
     ) -> Result<HttpResponseOk<v2025_11_20_00::ip_pool::IpPool>, HttpError>
     {
-        Self::system_ip_pool_update(rqctx, path_params, updates).await
+        Self::system_ip_pool_update_v2026_02_09_00(rqctx, path_params, updates)
+            .await
     }
 
     /// Fetch IP pool utilization
@@ -1619,16 +1760,30 @@ pub trait NexusExternalApi {
         .await
     }
 
+    /// Assign IP pool
+    #[endpoint {
+        method = POST,
+        path = "/v1/system/ip-pools/{pool}/assignment",
+        tags = ["system/ip-pools"],
+        versions = VERSION_ADD_SYSTEM_IP_POOL_APIS..,
+    }]
+    async fn system_ip_pool_assign(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::IpPoolPath>,
+        assign_params: TypedBody<latest::ip_pool::IpPoolAssignParam>,
+    ) -> Result<HttpResponseOk<latest::ip_pool::IpPool>, HttpError>;
+
     /// Fetch Oxide service IP pool
     #[endpoint {
         method = GET,
         path = "/v1/system/ip-pools-service",
         tags = ["system/ip-pools"],
-        versions = VERSION_RENAME_POOL_ENDPOINTS..,
+        deprecated = true,
+        versions = VERSION_RENAME_POOL_ENDPOINTS..VERSION_ADD_SYSTEM_IP_POOL_APIS,
     }]
     async fn system_ip_pool_service_view(
         rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<latest::ip_pool::IpPool>, HttpError>;
+    ) -> Result<HttpResponseOk<v2025_11_20_00::ip_pool::IpPool>, HttpError>;
 
     /// Fetch Oxide service IP pool
     #[endpoint {
@@ -1767,7 +1922,8 @@ pub trait NexusExternalApi {
         method = GET,
         path = "/v1/system/ip-pools-service/ranges",
         tags = ["system/ip-pools"],
-        versions = VERSION_RENAME_POOL_ENDPOINTS..,
+        deprecated = true,
+        versions = VERSION_RENAME_POOL_ENDPOINTS..VERSION_ADD_SYSTEM_IP_POOL_APIS,
     }]
     async fn system_ip_pool_service_range_list(
         rqctx: RequestContext<Self::Context>,
@@ -1804,7 +1960,8 @@ pub trait NexusExternalApi {
         method = POST,
         path = "/v1/system/ip-pools-service/ranges/add",
         tags = ["system/ip-pools"],
-        versions = VERSION_RENAME_POOL_ENDPOINTS..,
+        deprecated = true,
+        versions = VERSION_RENAME_POOL_ENDPOINTS..VERSION_ADD_SYSTEM_IP_POOL_APIS,
     }]
     async fn system_ip_pool_service_range_add(
         rqctx: RequestContext<Self::Context>,
@@ -1836,7 +1993,8 @@ pub trait NexusExternalApi {
         method = POST,
         path = "/v1/system/ip-pools-service/ranges/remove",
         tags = ["system/ip-pools"],
-        versions = VERSION_RENAME_POOL_ENDPOINTS..,
+        deprecated = true,
+        versions = VERSION_RENAME_POOL_ENDPOINTS..VERSION_ADD_SYSTEM_IP_POOL_APIS,
     }]
     async fn system_ip_pool_service_range_remove(
         rqctx: RequestContext<Self::Context>,
@@ -3296,7 +3454,7 @@ pub trait NexusExternalApi {
         method = GET,
         path = "/v1/disks",
         tags = ["disks"],
-        versions = VERSION_READ_ONLY_DISKS..,
+        versions = VERSION_DISK_BLOCK_SIZE_TYPE..,
     }]
     async fn disk_list(
         rqctx: RequestContext<Self::Context>,
@@ -3304,6 +3462,32 @@ pub trait NexusExternalApi {
             PaginatedByNameOrId<latest::project::ProjectSelector>,
         >,
     ) -> Result<HttpResponseOk<ResultsPage<Disk>>, HttpError>;
+
+    /// List disks
+    #[endpoint {
+        operation_id = "disk_list",
+        method = GET,
+        path = "/v1/disks",
+        tags = ["disks"],
+        versions = VERSION_READ_ONLY_DISKS..VERSION_DISK_BLOCK_SIZE_TYPE,
+    }]
+    async fn disk_list_v2026_01_30_01(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<
+            PaginatedByNameOrId<latest::project::ProjectSelector>,
+        >,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<v2026_05_20_00_local::Disk>>,
+        HttpError,
+    > {
+        Self::disk_list(rqctx, query_params).await.map(
+            |HttpResponseOk(page)| {
+                let items: Vec<_> =
+                    page.items.into_iter().map(Into::into).collect();
+                HttpResponseOk(ResultsPage { next_page: page.next_page, items })
+            },
+        )
+    }
 
     /// List disks
     #[endpoint {
@@ -3368,7 +3552,7 @@ pub trait NexusExternalApi {
         method = POST,
         path = "/v1/disks",
         tags = ["disks"],
-        versions = VERSION_READ_ONLY_DISKS_NULLABLE..,
+        versions = VERSION_DISK_BLOCK_SIZE_TYPE..,
     }]
     async fn disk_create(
         rqctx: RequestContext<Self::Context>,
@@ -3383,14 +3567,40 @@ pub trait NexusExternalApi {
         method = POST,
         path = "/v1/disks",
         tags = ["disks"],
+        versions = VERSION_READ_ONLY_DISKS_NULLABLE..VERSION_DISK_BLOCK_SIZE_TYPE,
+    }]
+    async fn disk_create_v2026_01_31_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<latest::project::ProjectSelector>,
+        new_disk: TypedBody<latest::disk::DiskCreate>,
+    ) -> Result<HttpResponseCreated<v2026_05_20_00_local::Disk>, HttpError>
+    {
+        Self::disk_create(rqctx, query_params, new_disk)
+            .await
+            .map(|resp| resp.map(Into::into))
+    }
+
+    // TODO-correctness See note about instance create.  This should be async.
+    /// Create disk
+    #[endpoint {
+        operation_id = "disk_create",
+        method = POST,
+        path = "/v1/disks",
+        tags = ["disks"],
         versions = VERSION_READ_ONLY_DISKS..VERSION_READ_ONLY_DISKS_NULLABLE,
     }]
     async fn disk_create_v2026_01_30_01(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<v2025_11_20_00::project::ProjectSelector>,
         new_disk: TypedBody<v2026_01_30_01::disk::DiskCreate>,
-    ) -> Result<HttpResponseCreated<Disk>, HttpError> {
-        Self::disk_create(rqctx, query_params, new_disk.map(Into::into)).await
+    ) -> Result<HttpResponseCreated<v2026_05_20_00_local::Disk>, HttpError>
+    {
+        Self::disk_create_v2026_01_31_00(
+            rqctx,
+            query_params,
+            new_disk.map(Into::into),
+        )
+        .await
     }
 
     // TODO-correctness See note about instance create.  This should be async.
@@ -3443,13 +3653,31 @@ pub trait NexusExternalApi {
         method = GET,
         path = "/v1/disks/{disk}",
         tags = ["disks"],
-        versions = VERSION_READ_ONLY_DISKS..,
+        versions = VERSION_DISK_BLOCK_SIZE_TYPE..,
     }]
     async fn disk_view(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<latest::path_params::DiskPath>,
         query_params: Query<latest::project::OptionalProjectSelector>,
     ) -> Result<HttpResponseOk<Disk>, HttpError>;
+
+    /// Fetch disk
+    #[endpoint {
+        operation_id = "disk_view",
+        method = GET,
+        path = "/v1/disks/{disk}",
+        tags = ["disks"],
+        versions = VERSION_READ_ONLY_DISKS..VERSION_DISK_BLOCK_SIZE_TYPE,
+    }]
+    async fn disk_view_v2026_01_30_01(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::DiskPath>,
+        query_params: Query<latest::project::OptionalProjectSelector>,
+    ) -> Result<HttpResponseOk<v2026_05_20_00_local::Disk>, HttpError> {
+        Self::disk_view(rqctx, path_params, query_params)
+            .await
+            .map(|resp| resp.map(Into::into))
+    }
 
     /// Fetch disk
     #[endpoint {
@@ -3561,26 +3789,131 @@ pub trait NexusExternalApi {
         method = GET,
         path = "/v1/instances",
         tags = ["instances"],
+        versions = VERSION_INSTANCE_CPU_TYPE_TURIN_V2..,
     }]
     async fn instance_list(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<
             PaginatedByNameOrId<latest::project::ProjectSelector>,
         >,
-    ) -> Result<HttpResponseOk<ResultsPage<Instance>>, HttpError>;
+    ) -> Result<
+        HttpResponseOk<ResultsPage<latest::instance::Instance>>,
+        HttpError,
+    >;
+
+    #[endpoint {
+        operation_id = "instance_list",
+        method = GET,
+        path = "/v1/instances",
+        tags = ["instances"],
+        versions = VERSION_EXTERNAL_JUMBO_FRAMES..VERSION_INSTANCE_CPU_TYPE_TURIN_V2,
+    }]
+    async fn instance_list_v2026_06_05_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<
+            PaginatedByNameOrId<latest::project::ProjectSelector>,
+        >,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<v2026_06_05_00::instance::Instance>>,
+        HttpError,
+    > {
+        let resp = Self::instance_list(rqctx, query_params).await?;
+        let inner = resp.0;
+        Ok(HttpResponseOk(ResultsPage {
+            items: inner
+                .items
+                .into_iter()
+                .map(TryInto::try_into)
+                .collect::<Result<Vec<_>, _>>()?,
+            next_page: inner.next_page,
+        }))
+    }
+
+    #[endpoint {
+        operation_id = "instance_list",
+        method = GET,
+        path = "/v1/instances",
+        tags = ["instances"],
+        versions = ..VERSION_EXTERNAL_JUMBO_FRAMES,
+    }]
+    async fn instance_list_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<
+            PaginatedByNameOrId<latest::project::ProjectSelector>,
+        >,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<v2025_11_20_00::instance::Instance>>,
+        HttpError,
+    > {
+        let resp =
+            Self::instance_list_v2026_06_05_00(rqctx, query_params).await?;
+        let inner = resp.0;
+        Ok(HttpResponseOk(ResultsPage {
+            items: inner.items.into_iter().map(Into::into).collect(),
+            next_page: inner.next_page,
+        }))
+    }
 
     /// Create instance
     #[endpoint {
         method = POST,
         path = "/v1/instances",
         tags = ["instances"],
-        versions = VERSION_READ_ONLY_DISKS_NULLABLE..,
+        versions = VERSION_INSTANCE_CPU_TYPE_TURIN_V2..,
     }]
     async fn instance_create(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<latest::project::ProjectSelector>,
         new_instance: TypedBody<latest::instance::InstanceCreate>,
-    ) -> Result<HttpResponseCreated<Instance>, HttpError>;
+    ) -> Result<HttpResponseCreated<latest::instance::Instance>, HttpError>;
+
+    #[endpoint {
+        operation_id = "instance_create",
+        method = POST,
+        path = "/v1/instances",
+        tags = ["instances"],
+        versions = VERSION_EXTERNAL_JUMBO_FRAMES..VERSION_INSTANCE_CPU_TYPE_TURIN_V2,
+    }]
+    async fn instance_create_v2026_06_05_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<latest::project::ProjectSelector>,
+        new_instance: TypedBody<v2026_06_05_00::instance::InstanceCreate>,
+    ) -> Result<
+        HttpResponseCreated<v2026_06_05_00::instance::Instance>,
+        HttpError,
+    > {
+        let resp = Self::instance_create(
+            rqctx,
+            query_params,
+            new_instance.map(Into::into),
+        )
+        .await?;
+        Ok(HttpResponseCreated(resp.0.try_into()?))
+    }
+
+    #[endpoint {
+        operation_id = "instance_create",
+        method = POST,
+        path = "/v1/instances",
+        tags = ["instances"],
+        versions = VERSION_READ_ONLY_DISKS_NULLABLE..VERSION_EXTERNAL_JUMBO_FRAMES,
+    }]
+    async fn instance_create_v2026_01_31_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<v2025_11_20_00::project::ProjectSelector>,
+        new_instance: TypedBody<v2026_01_31_00::instance::InstanceCreate>,
+    ) -> Result<
+        HttpResponseCreated<v2025_11_20_00::instance::Instance>,
+        HttpError,
+    > {
+        let resp = Self::instance_create_v2026_06_05_00(
+            rqctx,
+            query_params,
+            new_instance.map(Into::into),
+        )
+        .await?;
+        Ok(HttpResponseCreated(resp.0.into()))
+    }
 
     #[endpoint {
         operation_id = "instance_create",
@@ -3593,9 +3926,16 @@ pub trait NexusExternalApi {
         rqctx: RequestContext<Self::Context>,
         query_params: Query<v2025_11_20_00::project::ProjectSelector>,
         new_instance: TypedBody<v2026_01_30_01::instance::InstanceCreate>,
-    ) -> Result<HttpResponseCreated<Instance>, HttpError> {
-        Self::instance_create(rqctx, query_params, new_instance.map(Into::into))
-            .await
+    ) -> Result<
+        HttpResponseCreated<v2025_11_20_00::instance::Instance>,
+        HttpError,
+    > {
+        Self::instance_create_v2026_01_31_00(
+            rqctx,
+            query_params,
+            new_instance.map(Into::into),
+        )
+        .await
     }
 
     /// Create instance
@@ -3610,7 +3950,10 @@ pub trait NexusExternalApi {
         rqctx: RequestContext<Self::Context>,
         query_params: Query<v2025_11_20_00::project::ProjectSelector>,
         new_instance: TypedBody<v2026_01_08_00::instance::InstanceCreate>,
-    ) -> Result<HttpResponseCreated<Instance>, HttpError> {
+    ) -> Result<
+        HttpResponseCreated<v2025_11_20_00::instance::Instance>,
+        HttpError,
+    > {
         Self::instance_create_v2026_01_30_01(
             rqctx,
             query_params,
@@ -3631,7 +3974,10 @@ pub trait NexusExternalApi {
         rqctx: RequestContext<Self::Context>,
         query_params: Query<v2025_11_20_00::project::ProjectSelector>,
         new_instance: TypedBody<v2026_01_05_00::instance::InstanceCreate>,
-    ) -> Result<HttpResponseCreated<Instance>, HttpError> {
+    ) -> Result<
+        HttpResponseCreated<v2025_11_20_00::instance::Instance>,
+        HttpError,
+    > {
         Self::instance_create_v2026_01_08_00(
             rqctx,
             query_params,
@@ -3652,7 +3998,10 @@ pub trait NexusExternalApi {
         rqctx: RequestContext<Self::Context>,
         query_params: Query<v2025_11_20_00::project::ProjectSelector>,
         new_instance: TypedBody<v2026_01_03_00::instance::InstanceCreate>,
-    ) -> Result<HttpResponseCreated<Instance>, HttpError> {
+    ) -> Result<
+        HttpResponseCreated<v2025_11_20_00::instance::Instance>,
+        HttpError,
+    > {
         let new_instance = new_instance.try_map(TryInto::try_into)?;
         Self::instance_create_v2026_01_05_00(rqctx, query_params, new_instance)
             .await
@@ -3671,7 +4020,10 @@ pub trait NexusExternalApi {
         rqctx: RequestContext<Self::Context>,
         query_params: Query<v2025_11_20_00::project::ProjectSelector>,
         new_instance: TypedBody<v2025_12_23_00::instance::InstanceCreate>,
-    ) -> Result<HttpResponseCreated<Instance>, HttpError> {
+    ) -> Result<
+        HttpResponseCreated<v2025_11_20_00::instance::Instance>,
+        HttpError,
+    > {
         let new_instance = new_instance.try_map(TryInto::try_into)?;
         Self::instance_create_v2026_01_03_00(rqctx, query_params, new_instance)
             .await
@@ -3689,7 +4041,10 @@ pub trait NexusExternalApi {
         rqctx: RequestContext<Self::Context>,
         query_params: Query<v2025_11_20_00::project::ProjectSelector>,
         new_instance: TypedBody<v2025_12_03_00::instance::InstanceCreate>,
-    ) -> Result<HttpResponseCreated<Instance>, HttpError> {
+    ) -> Result<
+        HttpResponseCreated<v2025_11_20_00::instance::Instance>,
+        HttpError,
+    > {
         Self::instance_create_v2025_12_23_00(
             rqctx,
             query_params,
@@ -3710,7 +4065,10 @@ pub trait NexusExternalApi {
         rqctx: RequestContext<Self::Context>,
         query_params: Query<v2025_11_20_00::project::ProjectSelector>,
         new_instance: TypedBody<v2025_11_20_00::instance::InstanceCreate>,
-    ) -> Result<HttpResponseCreated<Instance>, HttpError> {
+    ) -> Result<
+        HttpResponseCreated<v2025_11_20_00::instance::Instance>,
+        HttpError,
+    > {
         Self::instance_create_v2025_12_03_00(
             rqctx,
             query_params,
@@ -3724,12 +4082,53 @@ pub trait NexusExternalApi {
         method = GET,
         path = "/v1/instances/{instance}",
         tags = ["instances"],
+        versions = VERSION_INSTANCE_CPU_TYPE_TURIN_V2..,
     }]
     async fn instance_view(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<latest::project::OptionalProjectSelector>,
         path_params: Path<latest::path_params::InstancePath>,
-    ) -> Result<HttpResponseOk<Instance>, HttpError>;
+    ) -> Result<HttpResponseOk<latest::instance::Instance>, HttpError>;
+
+    #[endpoint {
+        operation_id = "instance_view",
+        method = GET,
+        path = "/v1/instances/{instance}",
+        tags = ["instances"],
+        versions = VERSION_EXTERNAL_JUMBO_FRAMES..VERSION_INSTANCE_CPU_TYPE_TURIN_V2,
+    }]
+    async fn instance_view_v2026_06_05_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<latest::project::OptionalProjectSelector>,
+        path_params: Path<latest::path_params::InstancePath>,
+    ) -> Result<HttpResponseOk<v2026_06_05_00::instance::Instance>, HttpError>
+    {
+        let resp =
+            Self::instance_view(rqctx, query_params, path_params).await?;
+        Ok(HttpResponseOk(resp.0.try_into()?))
+    }
+
+    #[endpoint {
+        operation_id = "instance_view",
+        method = GET,
+        path = "/v1/instances/{instance}",
+        tags = ["instances"],
+        versions = ..VERSION_EXTERNAL_JUMBO_FRAMES,
+    }]
+    async fn instance_view_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<latest::project::OptionalProjectSelector>,
+        path_params: Path<latest::path_params::InstancePath>,
+    ) -> Result<HttpResponseOk<v2025_11_20_00::instance::Instance>, HttpError>
+    {
+        let resp = Self::instance_view_v2026_06_05_00(
+            rqctx,
+            query_params,
+            path_params,
+        )
+        .await?;
+        Ok(HttpResponseOk(resp.0.into()))
+    }
 
     /// Delete instance
     #[endpoint {
@@ -3748,14 +4147,64 @@ pub trait NexusExternalApi {
         method = PUT,
         path = "/v1/instances/{instance}",
         tags = ["instances"],
-        versions = VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES..,
+        versions = VERSION_INSTANCE_CPU_TYPE_TURIN_V2..,
     }]
     async fn instance_update(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<latest::project::OptionalProjectSelector>,
         path_params: Path<latest::path_params::InstancePath>,
         instance_config: TypedBody<latest::instance::InstanceUpdate>,
-    ) -> Result<HttpResponseOk<Instance>, HttpError>;
+    ) -> Result<HttpResponseOk<latest::instance::Instance>, HttpError>;
+
+    /// Update instance
+    #[endpoint {
+        operation_id = "instance_update",
+        method = PUT,
+        path = "/v1/instances/{instance}",
+        tags = ["instances"],
+        versions = VERSION_EXTERNAL_JUMBO_FRAMES..VERSION_INSTANCE_CPU_TYPE_TURIN_V2,
+    }]
+    async fn instance_update_v2026_06_05_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<v2025_11_20_00::project::OptionalProjectSelector>,
+        path_params: Path<v2025_11_20_00::path_params::InstancePath>,
+        instance_config: TypedBody<v2026_06_05_00::instance::InstanceUpdate>,
+    ) -> Result<HttpResponseOk<v2026_06_05_00::instance::Instance>, HttpError>
+    {
+        let resp = Self::instance_update(
+            rqctx,
+            query_params,
+            path_params,
+            instance_config.map(Into::into),
+        )
+        .await?;
+        Ok(HttpResponseOk(resp.0.try_into()?))
+    }
+
+    /// Update instance
+    #[endpoint {
+        operation_id = "instance_update",
+        method = PUT,
+        path = "/v1/instances/{instance}",
+        tags = ["instances"],
+        versions = VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES..VERSION_EXTERNAL_JUMBO_FRAMES,
+    }]
+    async fn instance_update_v2026_01_08_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<v2025_11_20_00::project::OptionalProjectSelector>,
+        path_params: Path<v2025_11_20_00::path_params::InstancePath>,
+        instance_config: TypedBody<v2026_01_08_00::instance::InstanceUpdate>,
+    ) -> Result<HttpResponseOk<v2025_11_20_00::instance::Instance>, HttpError>
+    {
+        let resp = Self::instance_update_v2026_06_05_00(
+            rqctx,
+            query_params,
+            path_params,
+            instance_config.map(Into::into),
+        )
+        .await?;
+        Ok(HttpResponseOk(resp.0.into()))
+    }
 
     /// Update instance
     #[endpoint {
@@ -3770,8 +4219,9 @@ pub trait NexusExternalApi {
         query_params: Query<v2025_11_20_00::project::OptionalProjectSelector>,
         path_params: Path<v2025_11_20_00::path_params::InstancePath>,
         instance_config: TypedBody<v2025_11_20_00::instance::InstanceUpdate>,
-    ) -> Result<HttpResponseOk<Instance>, HttpError> {
-        Self::instance_update(
+    ) -> Result<HttpResponseOk<v2025_11_20_00::instance::Instance>, HttpError>
+    {
+        Self::instance_update_v2026_01_08_00(
             rqctx,
             query_params,
             path_params,
@@ -3785,36 +4235,171 @@ pub trait NexusExternalApi {
         method = POST,
         path = "/v1/instances/{instance}/reboot",
         tags = ["instances"],
+        versions = VERSION_INSTANCE_CPU_TYPE_TURIN_V2..,
     }]
     async fn instance_reboot(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<latest::project::OptionalProjectSelector>,
         path_params: Path<latest::path_params::InstancePath>,
-    ) -> Result<HttpResponseAccepted<Instance>, HttpError>;
+    ) -> Result<HttpResponseAccepted<latest::instance::Instance>, HttpError>;
+
+    #[endpoint {
+        operation_id = "instance_reboot",
+        method = POST,
+        path = "/v1/instances/{instance}/reboot",
+        tags = ["instances"],
+        versions = VERSION_EXTERNAL_JUMBO_FRAMES..VERSION_INSTANCE_CPU_TYPE_TURIN_V2,
+    }]
+    async fn instance_reboot_v2026_06_05_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<latest::project::OptionalProjectSelector>,
+        path_params: Path<latest::path_params::InstancePath>,
+    ) -> Result<
+        HttpResponseAccepted<v2026_06_05_00::instance::Instance>,
+        HttpError,
+    > {
+        let resp =
+            Self::instance_reboot(rqctx, query_params, path_params).await?;
+        Ok(HttpResponseAccepted(resp.0.try_into()?))
+    }
+
+    #[endpoint {
+        operation_id = "instance_reboot",
+        method = POST,
+        path = "/v1/instances/{instance}/reboot",
+        tags = ["instances"],
+        versions = ..VERSION_EXTERNAL_JUMBO_FRAMES,
+    }]
+    async fn instance_reboot_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<latest::project::OptionalProjectSelector>,
+        path_params: Path<latest::path_params::InstancePath>,
+    ) -> Result<
+        HttpResponseAccepted<v2025_11_20_00::instance::Instance>,
+        HttpError,
+    > {
+        let resp = Self::instance_reboot_v2026_06_05_00(
+            rqctx,
+            query_params,
+            path_params,
+        )
+        .await?;
+        Ok(HttpResponseAccepted(resp.0.into()))
+    }
 
     /// Boot instance
     #[endpoint {
         method = POST,
         path = "/v1/instances/{instance}/start",
         tags = ["instances"],
+        versions = VERSION_INSTANCE_CPU_TYPE_TURIN_V2..,
     }]
     async fn instance_start(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<latest::project::OptionalProjectSelector>,
         path_params: Path<latest::path_params::InstancePath>,
-    ) -> Result<HttpResponseAccepted<Instance>, HttpError>;
+    ) -> Result<HttpResponseAccepted<latest::instance::Instance>, HttpError>;
+
+    #[endpoint {
+        operation_id = "instance_start",
+        method = POST,
+        path = "/v1/instances/{instance}/start",
+        tags = ["instances"],
+        versions = VERSION_EXTERNAL_JUMBO_FRAMES..VERSION_INSTANCE_CPU_TYPE_TURIN_V2,
+    }]
+    async fn instance_start_v2026_06_05_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<latest::project::OptionalProjectSelector>,
+        path_params: Path<latest::path_params::InstancePath>,
+    ) -> Result<
+        HttpResponseAccepted<v2026_06_05_00::instance::Instance>,
+        HttpError,
+    > {
+        let resp =
+            Self::instance_start(rqctx, query_params, path_params).await?;
+        Ok(HttpResponseAccepted(resp.0.try_into()?))
+    }
+
+    #[endpoint {
+        operation_id = "instance_start",
+        method = POST,
+        path = "/v1/instances/{instance}/start",
+        tags = ["instances"],
+        versions = ..VERSION_EXTERNAL_JUMBO_FRAMES,
+    }]
+    async fn instance_start_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<latest::project::OptionalProjectSelector>,
+        path_params: Path<latest::path_params::InstancePath>,
+    ) -> Result<
+        HttpResponseAccepted<v2025_11_20_00::instance::Instance>,
+        HttpError,
+    > {
+        let resp = Self::instance_start_v2026_06_05_00(
+            rqctx,
+            query_params,
+            path_params,
+        )
+        .await?;
+        Ok(HttpResponseAccepted(resp.0.into()))
+    }
 
     /// Stop instance
     #[endpoint {
         method = POST,
         path = "/v1/instances/{instance}/stop",
         tags = ["instances"],
+        versions = VERSION_INSTANCE_CPU_TYPE_TURIN_V2..,
     }]
     async fn instance_stop(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<latest::project::OptionalProjectSelector>,
         path_params: Path<latest::path_params::InstancePath>,
-    ) -> Result<HttpResponseAccepted<Instance>, HttpError>;
+    ) -> Result<HttpResponseAccepted<latest::instance::Instance>, HttpError>;
+
+    #[endpoint {
+        operation_id = "instance_stop",
+        method = POST,
+        path = "/v1/instances/{instance}/stop",
+        tags = ["instances"],
+        versions = VERSION_EXTERNAL_JUMBO_FRAMES..VERSION_INSTANCE_CPU_TYPE_TURIN_V2,
+    }]
+    async fn instance_stop_v2026_06_05_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<latest::project::OptionalProjectSelector>,
+        path_params: Path<latest::path_params::InstancePath>,
+    ) -> Result<
+        HttpResponseAccepted<v2026_06_05_00::instance::Instance>,
+        HttpError,
+    > {
+        let resp =
+            Self::instance_stop(rqctx, query_params, path_params).await?;
+        Ok(HttpResponseAccepted(resp.0.try_into()?))
+    }
+
+    #[endpoint {
+        operation_id = "instance_stop",
+        method = POST,
+        path = "/v1/instances/{instance}/stop",
+        tags = ["instances"],
+        versions = ..VERSION_EXTERNAL_JUMBO_FRAMES,
+    }]
+    async fn instance_stop_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<latest::project::OptionalProjectSelector>,
+        path_params: Path<latest::path_params::InstancePath>,
+    ) -> Result<
+        HttpResponseAccepted<v2025_11_20_00::instance::Instance>,
+        HttpError,
+    > {
+        let resp = Self::instance_stop_v2026_06_05_00(
+            rqctx,
+            query_params,
+            path_params,
+        )
+        .await?;
+        Ok(HttpResponseAccepted(resp.0.into()))
+    }
 
     /// Fetch instance serial console
     #[endpoint {
@@ -3869,7 +4454,7 @@ pub trait NexusExternalApi {
         method = GET,
         path = "/v1/instances/{instance}/disks",
         tags = ["instances"],
-        versions = VERSION_READ_ONLY_DISKS..,
+        versions = VERSION_DISK_BLOCK_SIZE_TYPE..,
     }]
     async fn instance_disk_list(
         rqctx: RequestContext<Self::Context>,
@@ -3878,6 +4463,33 @@ pub trait NexusExternalApi {
         >,
         path_params: Path<latest::path_params::InstancePath>,
     ) -> Result<HttpResponseOk<ResultsPage<Disk>>, HttpError>;
+
+    /// List disks for instance
+    #[endpoint {
+        operation_id = "instance_disk_list",
+        method = GET,
+        path = "/v1/instances/{instance}/disks",
+        tags = ["instances"],
+        versions = VERSION_READ_ONLY_DISKS..VERSION_DISK_BLOCK_SIZE_TYPE,
+    }]
+    async fn instance_disk_list_v2026_01_30_01(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<
+            PaginatedByNameOrId<latest::project::OptionalProjectSelector>,
+        >,
+        path_params: Path<latest::path_params::InstancePath>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<v2026_05_20_00_local::Disk>>,
+        HttpError,
+    > {
+        Self::instance_disk_list(rqctx, query_params, path_params).await.map(
+            |HttpResponseOk(page)| {
+                let items: Vec<_> =
+                    page.items.into_iter().map(Into::into).collect();
+                HttpResponseOk(ResultsPage { next_page: page.next_page, items })
+            },
+        )
+    }
 
     /// List disks for instance
     #[endpoint {
@@ -3947,7 +4559,7 @@ pub trait NexusExternalApi {
         method = POST,
         path = "/v1/instances/{instance}/disks/attach",
         tags = ["instances"],
-        versions = VERSION_READ_ONLY_DISKS..,
+        versions = VERSION_DISK_BLOCK_SIZE_TYPE..,
     }]
     async fn instance_disk_attach(
         rqctx: RequestContext<Self::Context>,
@@ -3955,6 +4567,31 @@ pub trait NexusExternalApi {
         query_params: Query<latest::project::OptionalProjectSelector>,
         disk_to_attach: TypedBody<latest::path_params::DiskPath>,
     ) -> Result<HttpResponseAccepted<Disk>, HttpError>;
+
+    /// Attach disk to instance
+    #[endpoint {
+        operation_id = "instance_disk_attach",
+        method = POST,
+        path = "/v1/instances/{instance}/disks/attach",
+        tags = ["instances"],
+        versions = VERSION_READ_ONLY_DISKS..VERSION_DISK_BLOCK_SIZE_TYPE,
+    }]
+    async fn instance_disk_attach_v2026_01_30_01(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::InstancePath>,
+        query_params: Query<latest::project::OptionalProjectSelector>,
+        disk_to_attach: TypedBody<latest::path_params::DiskPath>,
+    ) -> Result<HttpResponseAccepted<v2026_05_20_00_local::Disk>, HttpError>
+    {
+        Self::instance_disk_attach(
+            rqctx,
+            path_params,
+            query_params,
+            disk_to_attach,
+        )
+        .await
+        .map(|resp| resp.map(Into::into))
+    }
 
     /// Attach disk to instance
     #[endpoint {
@@ -4011,7 +4648,7 @@ pub trait NexusExternalApi {
         method = POST,
         path = "/v1/instances/{instance}/disks/detach",
         tags = ["instances"],
-        versions = VERSION_READ_ONLY_DISKS..,
+        versions = VERSION_DISK_BLOCK_SIZE_TYPE..,
     }]
     async fn instance_disk_detach(
         rqctx: RequestContext<Self::Context>,
@@ -4019,6 +4656,31 @@ pub trait NexusExternalApi {
         query_params: Query<latest::project::OptionalProjectSelector>,
         disk_to_detach: TypedBody<latest::path_params::DiskPath>,
     ) -> Result<HttpResponseAccepted<Disk>, HttpError>;
+
+    /// Detach disk from instance
+    #[endpoint {
+        operation_id = "instance_disk_detach",
+        method = POST,
+        path = "/v1/instances/{instance}/disks/detach",
+        tags = ["instances"],
+        versions = VERSION_READ_ONLY_DISKS..VERSION_DISK_BLOCK_SIZE_TYPE,
+    }]
+    async fn instance_disk_detach_v2026_01_30_01(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::InstancePath>,
+        query_params: Query<latest::project::OptionalProjectSelector>,
+        disk_to_detach: TypedBody<latest::path_params::DiskPath>,
+    ) -> Result<HttpResponseAccepted<v2026_05_20_00_local::Disk>, HttpError>
+    {
+        Self::instance_disk_detach(
+            rqctx,
+            path_params,
+            query_params,
+            disk_to_detach,
+        )
+        .await
+        .map(|resp| resp.map(Into::into))
+    }
 
     /// Detach disk from instance
     #[endpoint {
@@ -4146,7 +4808,10 @@ pub trait NexusExternalApi {
             PaginatedByNameOrId<latest::project::OptionalProjectSelector>,
         >,
         path_params: Path<latest::path_params::AffinityGroupPath>,
-    ) -> Result<HttpResponseOk<ResultsPage<AffinityGroupMember>>, HttpError>;
+    ) -> Result<
+        HttpResponseOk<ResultsPage<latest::affinity::AffinityGroupMember>>,
+        HttpError,
+    >;
 
     /// Fetch affinity group member
     #[endpoint {
@@ -4158,7 +4823,7 @@ pub trait NexusExternalApi {
         rqctx: RequestContext<Self::Context>,
         query_params: Query<latest::project::OptionalProjectSelector>,
         path_params: Path<latest::affinity::AffinityInstanceGroupMemberPath>,
-    ) -> Result<HttpResponseOk<AffinityGroupMember>, HttpError>;
+    ) -> Result<HttpResponseOk<latest::affinity::AffinityGroupMember>, HttpError>;
 
     /// Add member to affinity group
     #[endpoint {
@@ -4170,7 +4835,10 @@ pub trait NexusExternalApi {
         rqctx: RequestContext<Self::Context>,
         query_params: Query<latest::project::OptionalProjectSelector>,
         path_params: Path<latest::affinity::AffinityInstanceGroupMemberPath>,
-    ) -> Result<HttpResponseCreated<AffinityGroupMember>, HttpError>;
+    ) -> Result<
+        HttpResponseCreated<latest::affinity::AffinityGroupMember>,
+        HttpError,
+    >;
 
     /// Remove member from affinity group
     #[endpoint {
@@ -4263,7 +4931,10 @@ pub trait NexusExternalApi {
             PaginatedByNameOrId<latest::project::OptionalProjectSelector>,
         >,
         path_params: Path<latest::path_params::AntiAffinityGroupPath>,
-    ) -> Result<HttpResponseOk<ResultsPage<AntiAffinityGroupMember>>, HttpError>;
+    ) -> Result<
+        HttpResponseOk<ResultsPage<latest::affinity::AntiAffinityGroupMember>>,
+        HttpError,
+    >;
 
     /// Fetch anti-affinity group member
     #[endpoint {
@@ -4277,7 +4948,10 @@ pub trait NexusExternalApi {
         path_params: Path<
             latest::affinity::AntiAffinityInstanceGroupMemberPath,
         >,
-    ) -> Result<HttpResponseOk<AntiAffinityGroupMember>, HttpError>;
+    ) -> Result<
+        HttpResponseOk<latest::affinity::AntiAffinityGroupMember>,
+        HttpError,
+    >;
 
     /// Add member to anti-affinity group
     #[endpoint {
@@ -4291,7 +4965,10 @@ pub trait NexusExternalApi {
         path_params: Path<
             latest::affinity::AntiAffinityInstanceGroupMemberPath,
         >,
-    ) -> Result<HttpResponseCreated<AntiAffinityGroupMember>, HttpError>;
+    ) -> Result<
+        HttpResponseCreated<latest::affinity::AntiAffinityGroupMember>,
+        HttpError,
+    >;
 
     /// Remove member from anti-affinity group
     #[endpoint {
@@ -4418,7 +5095,10 @@ pub trait NexusExternalApi {
     async fn networking_address_lot_create(
         rqctx: RequestContext<Self::Context>,
         new_address_lot: TypedBody<latest::networking::AddressLotCreate>,
-    ) -> Result<HttpResponseCreated<AddressLotCreateResponse>, HttpError>;
+    ) -> Result<
+        HttpResponseCreated<latest::networking::AddressLotCreateResponse>,
+        HttpError,
+    >;
 
     /// Delete address lot
     #[endpoint {
@@ -4440,7 +5120,10 @@ pub trait NexusExternalApi {
     async fn networking_address_lot_list(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<PaginatedByNameOrId>,
-    ) -> Result<HttpResponseOk<ResultsPage<AddressLot>>, HttpError>;
+    ) -> Result<
+        HttpResponseOk<ResultsPage<latest::networking::AddressLot>>,
+        HttpError,
+    >;
 
     /// Fetch address lot
     #[endpoint {
@@ -4451,7 +5134,10 @@ pub trait NexusExternalApi {
     async fn networking_address_lot_view(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<latest::path_params::AddressLotPath>,
-    ) -> Result<HttpResponseOk<AddressLotViewResponse>, HttpError>;
+    ) -> Result<
+        HttpResponseOk<latest::networking::AddressLotViewResponse>,
+        HttpError,
+    >;
 
     /// List blocks in address lot
     #[endpoint {
@@ -4463,7 +5149,10 @@ pub trait NexusExternalApi {
         rqctx: RequestContext<Self::Context>,
         path_params: Path<latest::path_params::AddressLotPath>,
         query_params: Query<PaginatedById>,
-    ) -> Result<HttpResponseOk<ResultsPage<AddressLotBlock>>, HttpError>;
+    ) -> Result<
+        HttpResponseOk<ResultsPage<latest::networking::AddressLotBlock>>,
+        HttpError,
+    >;
 
     /// Create loopback address
     #[endpoint {
@@ -4581,7 +5270,7 @@ pub trait NexusExternalApi {
         method = POST,
         path = "/v1/system/networking/switch-port-settings",
         tags = ["system/networking"],
-        versions = VERSION_STRONGER_BGP_UNNUMBERED_TYPES..,
+        versions = VERSION_REMOVE_DUPLICATED_NETWORKING_TYPES..,
     }]
     async fn networking_switch_port_settings_create(
         rqctx: RequestContext<Self::Context>,
@@ -4590,6 +5279,35 @@ pub trait NexusExternalApi {
         HttpResponseCreated<latest::networking::SwitchPortSettings>,
         HttpError,
     >;
+
+    #[endpoint {
+        operation_id = "networking_switch_port_settings_create",
+        method = POST,
+        path = "/v1/system/networking/switch-port-settings",
+        tags = ["system/networking"],
+        versions = VERSION_STRONGER_BGP_UNNUMBERED_TYPES..VERSION_REMOVE_DUPLICATED_NETWORKING_TYPES,
+    }]
+    async fn networking_switch_port_settings_create_v2026_04_16_00(
+        rqctx: RequestContext<Self::Context>,
+        new_settings: TypedBody<
+            v2026_04_16_00::networking::SwitchPortSettingsCreate,
+        >,
+    ) -> Result<
+        HttpResponseCreated<v2026_04_16_00::networking::SwitchPortSettings>,
+        HttpError,
+    > {
+        Self::networking_switch_port_settings_create(
+            rqctx,
+            new_settings.try_map(TryFrom::try_from).map_err(|err| {
+                HttpError::for_bad_request(
+                    None,
+                    InlineErrorChain::new(&err).to_string(),
+                )
+            })?,
+        )
+        .await
+        .map(|response| response.map(From::from))
+    }
 
     #[endpoint {
         operation_id = "networking_switch_port_settings_create",
@@ -4607,7 +5325,7 @@ pub trait NexusExternalApi {
         HttpResponseCreated<v2026_02_13_01::networking::SwitchPortSettings>,
         HttpError,
     > {
-        Self::networking_switch_port_settings_create(
+        Self::networking_switch_port_settings_create_v2026_04_16_00(
             rqctx,
             new_settings.try_map(TryFrom::try_from).map_err(|err| {
                 HttpError::for_bad_request(
@@ -4673,7 +5391,9 @@ pub trait NexusExternalApi {
             PaginatedByNameOrId<latest::networking::SwitchPortSettingsSelector>,
         >,
     ) -> Result<
-        HttpResponseOk<ResultsPage<SwitchPortSettingsIdentity>>,
+        HttpResponseOk<
+            ResultsPage<latest::networking::SwitchPortSettingsIdentity>,
+        >,
         HttpError,
     >;
 
@@ -4682,12 +5402,31 @@ pub trait NexusExternalApi {
         method = GET,
         path = "/v1/system/networking/switch-port-settings/{port}",
         tags = ["system/networking"],
-        versions = VERSION_STRONGER_BGP_UNNUMBERED_TYPES..,
+        versions = VERSION_REMOVE_DUPLICATED_NETWORKING_TYPES..,
     }]
     async fn networking_switch_port_settings_view(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<latest::networking::SwitchPortSettingsInfoSelector>,
     ) -> Result<HttpResponseOk<latest::networking::SwitchPortSettings>, HttpError>;
+
+    #[endpoint {
+        operation_id = "networking_switch_port_settings_view",
+        method = GET,
+        path = "/v1/system/networking/switch-port-settings/{port}",
+        tags = ["system/networking"],
+        versions = VERSION_STRONGER_BGP_UNNUMBERED_TYPES..VERSION_REMOVE_DUPLICATED_NETWORKING_TYPES,
+    }]
+    async fn networking_switch_port_settings_view_v2026_04_16_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::networking::SwitchPortSettingsInfoSelector>,
+    ) -> Result<
+        HttpResponseOk<v2026_04_16_00::networking::SwitchPortSettings>,
+        HttpError,
+    > {
+        Self::networking_switch_port_settings_view(rqctx, path_params)
+            .await
+            .map(|response| response.map(From::from))
+    }
 
     #[endpoint {
         operation_id = "networking_switch_port_settings_view",
@@ -4703,9 +5442,12 @@ pub trait NexusExternalApi {
         HttpResponseOk<v2026_02_13_01::networking::SwitchPortSettings>,
         HttpError,
     > {
-        Self::networking_switch_port_settings_view(rqctx, path_params)
-            .await
-            .map(|response| response.map(From::from))
+        Self::networking_switch_port_settings_view_v2026_04_16_00(
+            rqctx,
+            path_params,
+        )
+        .await
+        .map(|response| response.map(From::from))
     }
 
     /// Get information about switch port (old version with required BgpPeer.addr)
@@ -4896,7 +5638,7 @@ pub trait NexusExternalApi {
         rqctx: RequestContext<Self::Context>,
         path_params: Path<latest::networking::SwitchPortPathSelector>,
         query_params: Query<latest::networking::SwitchPortSelector>,
-    ) -> Result<HttpResponseOk<LldpLinkConfig>, HttpError>;
+    ) -> Result<HttpResponseOk<latest::networking::LldpLinkConfig>, HttpError>;
 
     /// Fetch LLDP configuration for switch port
     #[endpoint {
@@ -4910,7 +5652,8 @@ pub trait NexusExternalApi {
         rqctx: RequestContext<Self::Context>,
         path_params: Path<latest::networking::SwitchPortPathSelector>,
         query_params: Query<v2025_11_20_00::networking::SwitchPortSelector>,
-    ) -> Result<HttpResponseOk<LldpLinkConfig>, HttpError> {
+    ) -> Result<HttpResponseOk<latest::networking::LldpLinkConfig>, HttpError>
+    {
         let query_params = query_params.try_map(TryInto::try_into)?;
         Self::networking_switch_port_lldp_config_view(
             rqctx,
@@ -4931,7 +5674,7 @@ pub trait NexusExternalApi {
         rqctx: RequestContext<Self::Context>,
         path_params: Path<latest::networking::SwitchPortPathSelector>,
         query_params: Query<latest::networking::SwitchPortSelector>,
-        config: TypedBody<LldpLinkConfig>,
+        config: TypedBody<latest::networking::LldpLinkConfig>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
     /// Update LLDP configuration for switch port
@@ -4946,7 +5689,7 @@ pub trait NexusExternalApi {
         rqctx: RequestContext<Self::Context>,
         path_params: Path<latest::networking::SwitchPortPathSelector>,
         query_params: Query<v2025_11_20_00::networking::SwitchPortSelector>,
-        config: TypedBody<LldpLinkConfig>,
+        config: TypedBody<latest::networking::LldpLinkConfig>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let query_params = query_params.try_map(TryInto::try_into)?;
         Self::networking_switch_port_lldp_config_update(
@@ -4969,7 +5712,10 @@ pub trait NexusExternalApi {
         rqctx: RequestContext<Self::Context>,
         path_params: Path<latest::networking::LldpPortPathSelector>,
         query_params: Query<PaginatedById>,
-    ) -> Result<HttpResponseOk<ResultsPage<LldpNeighbor>>, HttpError>;
+    ) -> Result<
+        HttpResponseOk<ResultsPage<latest::networking::LldpNeighbor>>,
+        HttpError,
+    >;
 
     /// Fetch LLDP neighbors for switch port
     #[endpoint {
@@ -4983,7 +5729,10 @@ pub trait NexusExternalApi {
         rqctx: RequestContext<Self::Context>,
         path_params: Path<v2025_11_20_00::networking::LldpPortPathSelector>,
         query_params: Query<PaginatedById>,
-    ) -> Result<HttpResponseOk<ResultsPage<LldpNeighbor>>, HttpError> {
+    ) -> Result<
+        HttpResponseOk<ResultsPage<latest::networking::LldpNeighbor>>,
+        HttpError,
+    > {
         let path_params = path_params.try_map(TryInto::try_into)?;
         Self::networking_switch_port_lldp_neighbors(
             rqctx,
@@ -5210,6 +5959,22 @@ pub trait NexusExternalApi {
         sel: Query<latest::networking::BgpConfigSelector>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
+    /// Update the mutable fields of an existing BGP configuration
+    ///
+    /// The asn field is not updatable; to change the autonomous system number,
+    /// create a new BGP configuration object.
+    #[endpoint {
+        method = PUT,
+        path = "/v1/system/networking/bgp",
+        tags = ["system/networking"],
+        versions = VERSION_BGP_CONFIGURATION_UPDATE..,
+    }]
+    async fn networking_bgp_config_update(
+        rqctx: RequestContext<Self::Context>,
+        sel: Query<latest::networking::BgpConfigSelector>,
+        update: TypedBody<latest::networking::BgpConfigUpdate>,
+    ) -> Result<HttpResponseOk<latest::networking::BgpConfig>, HttpError>;
+
     /// Update BGP announce set
     ///
     /// If the announce set exists, this endpoint replaces the existing announce
@@ -5396,12 +6161,14 @@ pub trait NexusExternalApi {
 
     /// List images
     ///
-    /// List images which are global or scoped to the specified project. The images
-    /// are returned sorted by creation date, with the most recent images appearing first.
+    /// List images which are global or scoped to the specified project.
+    /// The images are returned sorted by creation date, with the most
+    /// recent images appearing first.
     #[endpoint {
         method = GET,
         path = "/v1/images",
         tags = ["images"],
+        versions = VERSION_IMAGE_BLOCK_SIZE_TYPE..,
     }]
     async fn image_list(
         rqctx: RequestContext<Self::Context>,
@@ -5410,19 +6177,71 @@ pub trait NexusExternalApi {
         >,
     ) -> Result<HttpResponseOk<ResultsPage<latest::image::Image>>, HttpError>;
 
+    /// List images
+    ///
+    /// List images which are global or scoped to the specified project.
+    /// The images are returned sorted by creation date, with the most
+    /// recent images appearing first.
+    #[endpoint {
+        operation_id = "image_list",
+        method = GET,
+        path = "/v1/images",
+        tags = ["images"],
+        versions = ..VERSION_IMAGE_BLOCK_SIZE_TYPE,
+    }]
+    async fn image_list_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<
+            PaginatedByNameOrId<latest::project::OptionalProjectSelector>,
+        >,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<v2025_11_20_00::image::Image>>,
+        HttpError,
+    > {
+        Self::image_list(rqctx, query_params).await.map(
+            |HttpResponseOk(page)| {
+                let items: Vec<_> =
+                    page.items.into_iter().map(Into::into).collect();
+                HttpResponseOk(ResultsPage { next_page: page.next_page, items })
+            },
+        )
+    }
+
     /// Create image
     ///
     /// Create a new image in a project.
     #[endpoint {
         method = POST,
         path = "/v1/images",
-        tags = ["images"]
+        tags = ["images"],
+        versions = VERSION_IMAGE_BLOCK_SIZE_TYPE..,
     }]
     async fn image_create(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<latest::project::OptionalProjectSelector>,
         new_image: TypedBody<latest::image::ImageCreate>,
     ) -> Result<HttpResponseCreated<latest::image::Image>, HttpError>;
+
+    /// Create image
+    ///
+    /// Create a new image in a project.
+    #[endpoint {
+        operation_id = "image_create",
+        method = POST,
+        path = "/v1/images",
+        tags = ["images"],
+        versions = ..VERSION_IMAGE_BLOCK_SIZE_TYPE,
+    }]
+    async fn image_create_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<latest::project::OptionalProjectSelector>,
+        new_image: TypedBody<latest::image::ImageCreate>,
+    ) -> Result<HttpResponseCreated<v2025_11_20_00::image::Image>, HttpError>
+    {
+        Self::image_create(rqctx, query_params, new_image)
+            .await
+            .map(|resp| resp.map(Into::into))
+    }
 
     /// Fetch image
     ///
@@ -5431,12 +6250,33 @@ pub trait NexusExternalApi {
         method = GET,
         path = "/v1/images/{image}",
         tags = ["images"],
+        versions = VERSION_IMAGE_BLOCK_SIZE_TYPE..,
     }]
     async fn image_view(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<latest::path_params::ImagePath>,
         query_params: Query<latest::project::OptionalProjectSelector>,
     ) -> Result<HttpResponseOk<latest::image::Image>, HttpError>;
+
+    /// Fetch image
+    ///
+    /// Fetch the details for a specific image in a project.
+    #[endpoint {
+        operation_id = "image_view",
+        method = GET,
+        path = "/v1/images/{image}",
+        tags = ["images"],
+        versions = ..VERSION_IMAGE_BLOCK_SIZE_TYPE,
+    }]
+    async fn image_view_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::ImagePath>,
+        query_params: Query<latest::project::OptionalProjectSelector>,
+    ) -> Result<HttpResponseOk<v2025_11_20_00::image::Image>, HttpError> {
+        Self::image_view(rqctx, path_params, query_params)
+            .await
+            .map(|resp| resp.map(Into::into))
+    }
 
     /// Delete image
     ///
@@ -5460,7 +6300,8 @@ pub trait NexusExternalApi {
     #[endpoint {
         method = POST,
         path = "/v1/images/{image}/promote",
-        tags = ["images"]
+        tags = ["images"],
+        versions = VERSION_IMAGE_BLOCK_SIZE_TYPE..,
     }]
     async fn image_promote(
         rqctx: RequestContext<Self::Context>,
@@ -5468,19 +6309,62 @@ pub trait NexusExternalApi {
         query_params: Query<latest::project::OptionalProjectSelector>,
     ) -> Result<HttpResponseAccepted<latest::image::Image>, HttpError>;
 
+    /// Promote project image
+    ///
+    /// Promote project image to be visible to all projects in the silo
+    #[endpoint {
+        operation_id = "image_promote",
+        method = POST,
+        path = "/v1/images/{image}/promote",
+        tags = ["images"],
+        versions = ..VERSION_IMAGE_BLOCK_SIZE_TYPE,
+    }]
+    async fn image_promote_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::ImagePath>,
+        query_params: Query<latest::project::OptionalProjectSelector>,
+    ) -> Result<HttpResponseAccepted<v2025_11_20_00::image::Image>, HttpError>
+    {
+        Self::image_promote(rqctx, path_params, query_params)
+            .await
+            .map(|resp| resp.map(Into::into))
+    }
+
     /// Demote silo image
     ///
     /// Demote silo image to be visible only to a specified project
     #[endpoint {
         method = POST,
         path = "/v1/images/{image}/demote",
-        tags = ["images"]
+        tags = ["images"],
+        versions = VERSION_IMAGE_BLOCK_SIZE_TYPE..,
     }]
     async fn image_demote(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<latest::path_params::ImagePath>,
         query_params: Query<latest::project::ProjectSelector>,
     ) -> Result<HttpResponseAccepted<latest::image::Image>, HttpError>;
+
+    /// Demote silo image
+    ///
+    /// Demote silo image to be visible only to a specified project
+    #[endpoint {
+        operation_id = "image_demote",
+        method = POST,
+        path = "/v1/images/{image}/demote",
+        tags = ["images"],
+        versions = ..VERSION_IMAGE_BLOCK_SIZE_TYPE,
+    }]
+    async fn image_demote_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::ImagePath>,
+        query_params: Query<latest::project::ProjectSelector>,
+    ) -> Result<HttpResponseAccepted<v2025_11_20_00::image::Image>, HttpError>
+    {
+        Self::image_demote(rqctx, path_params, query_params)
+            .await
+            .map(|resp| resp.map(Into::into))
+    }
 
     /// List network interfaces
     #[endpoint {
@@ -6737,6 +7621,69 @@ pub trait NexusExternalApi {
         path_params: Path<latest::path_params::PhysicalDiskPath>,
     ) -> Result<HttpResponseOk<latest::physical_disk::PhysicalDisk>, HttpError>;
 
+    /// List physical disks that have not yet been adopted for use
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/hardware/disks-unadopted",
+        tags = ["system/hardware"],
+        versions = VERSION_MANUAL_DISK_ADOPTION..
+    }]
+    async fn physical_disk_list_unadopted(
+        rqctx: RequestContext<Self::Context>,
+        query: Query<PaginationParams<EmptyScanParams, String>>,
+    ) -> Result<
+        HttpResponseOk<
+            ResultsPage<latest::physical_disk::UnadoptedPhysicalDisk>,
+        >,
+        HttpError,
+    >;
+
+    /// List physical disk adoption requests
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/hardware/disk-adoption-requests",
+        tags = ["system/hardware"],
+        versions = VERSION_MANUAL_DISK_ADOPTION..
+    }]
+    async fn physical_disk_list_adoption_requests(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedById>,
+    ) -> Result<
+        HttpResponseOk<
+            ResultsPage<latest::physical_disk::PhysicalDiskAdoptionRequest>,
+        >,
+        HttpError,
+    >;
+
+    /// Enable adoption of a physical disk for general use
+    #[endpoint {
+        method = PUT,
+        path = "/v1/system/hardware/disk-adoption-request",
+        tags = ["system/hardware"],
+        versions = VERSION_MANUAL_DISK_ADOPTION..
+    }]
+    async fn physical_disk_enable_adoption(
+        rqctx: RequestContext<Self::Context>,
+        req: TypedBody<latest::physical_disk::PhysicalDiskManufacturerIdentity>,
+    ) -> Result<
+        HttpResponseCreated<latest::physical_disk::PhysicalDiskAdoptionRequest>,
+        HttpError,
+    >;
+
+    /// Disable adoption of a physical disk for general use
+    #[endpoint {
+        method = DELETE,
+        path = "/v1/system/hardware/disk-adoption-request/{physical_disk_adoption_req_id}",
+        tags = ["system/hardware"],
+        versions = VERSION_MANUAL_DISK_ADOPTION..
+    }]
+    async fn physical_disk_disable_adoption(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<
+            latest::physical_disk::PhysicalDiskAdoptionRequestPath,
+        >,
+    ) -> Result<HttpResponseDeleted, HttpError>;
+
     // Switches
 
     /// List switches
@@ -6797,7 +7744,9 @@ pub trait NexusExternalApi {
         >,
         other_params: Query<latest::silo::OptionalSiloSelector>,
     ) -> Result<
-        HttpResponseOk<ResultsPage<oximeter_types::Measurement>>,
+        HttpResponseOk<
+            ResultsPage<oximeter_types_versions::latest::types::Measurement>,
+        >,
         HttpError,
     >;
 
@@ -6820,7 +7769,9 @@ pub trait NexusExternalApi {
         >,
         other_params: Query<latest::project::OptionalProjectSelector>,
     ) -> Result<
-        HttpResponseOk<ResultsPage<oximeter_types::Measurement>>,
+        HttpResponseOk<
+            ResultsPage<oximeter_types_versions::latest::types::Measurement>,
+        >,
         HttpError,
     >;
 
@@ -6829,14 +7780,66 @@ pub trait NexusExternalApi {
         method = GET,
         path = "/v1/system/timeseries/schemas",
         tags = ["system/metrics"],
+        versions = VERSION_METRICS_ADD_JOULES..
     }]
     async fn system_timeseries_schema_list(
         rqctx: RequestContext<Self::Context>,
         pag_params: Query<TimeseriesSchemaPaginationParams>,
     ) -> Result<
-        HttpResponseOk<ResultsPage<oximeter_types::TimeseriesSchema>>,
+        HttpResponseOk<
+            ResultsPage<
+                oximeter_types_versions::latest::schema::TimeseriesSchema,
+            >,
+        >,
         HttpError,
     >;
+
+    #[endpoint {
+        operation_id = "system_timeseries_schema_list",
+        method = GET,
+        path = "/v1/system/timeseries/schemas",
+        tags = ["system/metrics"],
+        versions = ..VERSION_METRICS_ADD_JOULES
+    }]
+    async fn system_timeseries_schema_list_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        pag_params: Query<
+            PaginationParams<
+                EmptyScanParams,
+                oximeter_types_versions::v1::schema::TimeseriesName,
+            >,
+        >,
+    ) -> Result<
+        HttpResponseOk<
+            ResultsPage<oximeter_types_versions::v1::schema::TimeseriesSchema>,
+        >,
+        HttpError,
+    > {
+        use oximeter_types_versions::v1::schema::TimeseriesSchema;
+        use oximeter_types_versions::v2::schema::UnitsConversionJoulesError;
+
+        let page =
+            Self::system_timeseries_schema_list(rqctx, pag_params).await?.0;
+        let items = page
+            .items
+            .into_iter()
+            .map(|item| {
+                TimeseriesSchema::try_from(item).map_err(
+                    |UnitsConversionJoulesError| {
+                        HttpError::for_client_error(
+                            None,
+                            dropshot::ClientErrorStatusCode::BAD_REQUEST,
+                            "client version out of date: schema contains \
+                             new types of units (joules)"
+                                .to_string(),
+                        )
+                    },
+                )
+            })
+            .collect::<Result<_, _>>()?;
+
+        Ok(HttpResponseOk(ResultsPage { items, next_page: page.next_page }))
+    }
 
     // TODO: can we link to an OxQL reference? Do we have one? Can we even do links?
 
@@ -7002,7 +8005,12 @@ pub trait NexusExternalApi {
     /// instructing it that the specified software (which is also what's
     /// currently running) is what's supposed to be deployed.
     ///
-    /// If the provided version does not match what's currently running, the
+    /// If the control plane knows the version of all running software (e.g., a
+    /// single sled was recovered to the same version as the rest of the rack),
+    /// requests where the provided version does not match what's currently
+    /// running will fail. If the control plane does not know the version of all
+    /// running software (e.g., the entire rack was mupdated to a new release),
+    /// requests with an incorrect provided version will succeed, but the
     /// control plane will continue to avoid changing deployed software until
     /// this operation is invoked with the correct version.
     ///
@@ -7026,10 +8034,31 @@ pub trait NexusExternalApi {
         method = GET,
         path = "/v1/system/update/status",
         tags = ["system/update"],
+        versions = VERSION_ADD_CONTACT_SUPPORT_TO_UPDATE_STATUS..,
     }]
     async fn system_update_status(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<latest::update::UpdateStatus>, HttpError>;
+
+    /// Fetch system update status
+    ///
+    /// Returns information about the current target release and the
+    /// progress of system software updates.
+    #[endpoint {
+        operation_id = "system_update_status",
+        method = GET,
+        path = "/v1/system/update/status",
+        tags = ["system/update"],
+        versions = ..VERSION_ADD_CONTACT_SUPPORT_TO_UPDATE_STATUS,
+    }]
+    async fn system_update_status_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<v2025_11_20_00::update::UpdateStatus>, HttpError>
+    {
+        Ok(Self::system_update_status(rqctx)
+            .await?
+            .map(v2025_11_20_00::update::UpdateStatus::from))
+    }
 
     // Silo users
 
@@ -7659,6 +8688,7 @@ pub trait NexusExternalApi {
         method = GET,
         path = "/v1/system/audit-log",
         tags = ["system/audit-log"],
+        versions = VERSION_AUDIT_LOG_CREDENTIAL_ID..,
     }]
     async fn audit_log_list(
         rqctx: RequestContext<Self::Context>,
@@ -7669,6 +8699,58 @@ pub trait NexusExternalApi {
         HttpResponseOk<ResultsPage<latest::audit::AuditLogEntry>>,
         HttpError,
     >;
+
+    /// View audit log
+    #[endpoint {
+        operation_id = "audit_log_list",
+        method = GET,
+        path = "/v1/system/audit-log",
+        tags = ["system/audit-log"],
+        versions = VERSION_AUDIT_LOG_AUTH_METHOD_ENUM..VERSION_AUDIT_LOG_CREDENTIAL_ID,
+    }]
+    async fn audit_log_list_v2026_01_15_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<
+            PaginatedByTimeAndId<latest::audit::AuditLogParams>,
+        >,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<v2026_01_15_00::audit::AuditLogEntry>>,
+        HttpError,
+    > {
+        let page = Self::audit_log_list(rqctx, query_params).await?.0;
+        Ok(HttpResponseOk(ResultsPage {
+            items: page.items.into_iter().map(Into::into).collect(),
+            next_page: page.next_page,
+        }))
+    }
+
+    /// View audit log
+    #[endpoint {
+        operation_id = "audit_log_list",
+        method = GET,
+        path = "/v1/system/audit-log",
+        tags = ["system/audit-log"],
+        versions = ..VERSION_AUDIT_LOG_AUTH_METHOD_ENUM,
+    }]
+    async fn audit_log_list_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<
+            PaginatedByTimeAndId<latest::audit::AuditLogParams>,
+        >,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<v2025_11_20_00::audit::AuditLogEntry>>,
+        HttpError,
+    > {
+        let page = Self::audit_log_list(rqctx, query_params).await?.0;
+        Ok(HttpResponseOk(ResultsPage {
+            items: page
+                .items
+                .into_iter()
+                .map(|e| v2026_01_15_00::audit::AuditLogEntry::from(e).into())
+                .collect(),
+            next_page: page.next_page,
+        }))
+    }
 
     // Console API: logins
 
@@ -8282,5 +9364,7 @@ pub type SubnetPoolMemberPaginationParams =
     PaginationParams<EmptyScanParams, oxnet::IpNet>;
 
 /// Type used to paginate request to list timeseries schema
-pub type TimeseriesSchemaPaginationParams =
-    PaginationParams<EmptyScanParams, oximeter_types::TimeseriesName>;
+pub type TimeseriesSchemaPaginationParams = PaginationParams<
+    EmptyScanParams,
+    oximeter_types_versions::latest::schema::TimeseriesName,
+>;

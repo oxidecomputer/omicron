@@ -11,8 +11,8 @@ use dropshot::HttpServer;
 use dropshot::ServerBuilder;
 use omicron_common::disk::M2Slot;
 use omicron_uuid_kinds::SledUuid;
-use sled_agent_types::inventory::Baseboard;
 use sled_agent_types::inventory::SledRole;
+use sled_hardware_types::BaseboardId;
 use slog::Logger;
 use sp_sim::GimletPowerState;
 use std::net::SocketAddr;
@@ -157,7 +157,7 @@ struct HostPhase2SledAgentContext {
     state: watch::Receiver<HostPhase2State>,
     id: SledUuid,
     role: SledRole,
-    baseboard: Baseboard,
+    baseboard: BaseboardId,
 }
 
 impl HostPhase2SledAgentContext {
@@ -169,7 +169,10 @@ impl HostPhase2SledAgentContext {
             // random sled ID every time our `/inventory` endpoint is collected.
             id: SledUuid::new_v4(),
             role: SledRole::Gimlet,
-            baseboard: Baseboard::Unknown,
+            baseboard: BaseboardId {
+                part_number: "test".to_string(),
+                serial_number: "test".to_string(),
+            },
         }
     }
 }
@@ -239,6 +242,7 @@ mod api_impl {
     use sled_agent_types::inventory::BootPartitionDetails;
     use sled_agent_types::inventory::ConfigReconcilerInventory;
     use sled_agent_types::inventory::ConfigReconcilerInventoryStatus;
+    use sled_agent_types::inventory::FmdInventory;
     use sled_agent_types::inventory::HostPhase2DesiredContents;
     use sled_agent_types::inventory::HostPhase2DesiredSlots;
     use sled_agent_types::inventory::Inventory;
@@ -258,7 +262,6 @@ mod api_impl {
     use sled_agent_types::support_bundle::SupportBundleMetadata;
     use sled_agent_types::support_bundle::SupportBundlePathParam;
     use sled_agent_types::support_bundle::SupportBundleTransferQueryParams;
-    use sled_agent_types::uplink::SwitchPorts;
     use sled_agent_types::zone_bundle::BundleUtilization;
     use sled_agent_types::zone_bundle::CleanupContext;
     use sled_agent_types::zone_bundle::CleanupContextUpdate;
@@ -273,6 +276,8 @@ mod api_impl {
     use sled_agent_types_versions::v26;
     use sled_agent_types_versions::v30;
     use sled_agent_types_versions::v33;
+    use sled_agent_types_versions::v39;
+    use sled_agent_types_versions::v42;
     use sled_diagnostics::SledDiagnosticsQueryOutput;
     use std::collections::BTreeMap;
     use std::collections::BTreeSet;
@@ -354,7 +359,7 @@ mod api_impl {
                 sled_id: ctx.id,
                 sled_agent_address,
                 sled_role: ctx.role,
-                baseboard: ctx.baseboard.clone(),
+                baseboard_id: ctx.baseboard.clone(),
                 usable_hardware_threads: 64,
                 usable_physical_ram: (1 << 30).into(),
                 reservoir_size: (1 << 29).into(),
@@ -376,6 +381,7 @@ mod api_impl {
                     remove_mupdate_override: None,
                     boot_partitions,
                 }),
+                fmd: Ok(FmdInventory::default()),
                 file_source_resolver: OmicronFileSourceResolverInventory {
                     zone_manifest: ManifestInventory {
                         boot_disk_path: Utf8PathBuf::new(),
@@ -757,19 +763,26 @@ mod api_impl {
             unimplemented!()
         }
 
-        async fn uplink_ensure(
-            _rqctx: RequestContext<Self::Context>,
-            _body: TypedBody<SwitchPorts>,
-        ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-            unimplemented!()
-        }
-
         async fn read_network_bootstore_config_cache(
             _rqctx: RequestContext<Self::Context>,
         ) -> Result<
             HttpResponseOk<v20::early_networking::EarlyNetworkConfig>,
             HttpError,
         > {
+            unimplemented!()
+        }
+
+        async fn write_network_bootstore_config_v42(
+            _rqctx: RequestContext<Self::Context>,
+            _body: TypedBody<v42::system_networking::WriteNetworkConfigRequest>,
+        ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+            unimplemented!()
+        }
+
+        async fn write_network_bootstore_config_v39(
+            _rqctx: RequestContext<Self::Context>,
+            _body: TypedBody<v39::system_networking::WriteNetworkConfigRequest>,
+        ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
             unimplemented!()
         }
 

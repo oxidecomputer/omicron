@@ -532,7 +532,19 @@ impl OmicronZones {
         match &self.timesync_config {
             TimeSyncConfig::Normal => {
                 match self.timesync_status_from_ntp_zone(log).await {
-                    Ok(timesync) => TimeSyncStatus::TimeSync(timesync),
+                    Ok(timesync) => {
+                        if !timesync.sync {
+                            // TODO:
+                            // https://github.com/oxidecomputer/omicron/issues/10446.
+                            warn!(
+                                log,
+                                "time is not yet synchronized";
+                                "correction_s" => timesync.correction,
+                                "stratum" => timesync.stratum,
+                            );
+                        }
+                        TimeSyncStatus::TimeSync(timesync)
+                    }
                     Err(err) => {
                         TimeSyncStatus::FailedToGetSyncStatus(Arc::new(err))
                     }
@@ -1289,7 +1301,7 @@ mod tests {
     use illumos_utils::zpool::PathInPool;
     use illumos_utils::zpool::ZpoolName;
     use illumos_utils::zpool::ZpoolOrRamdisk;
-    use omicron_common::address::SLED_PREFIX;
+    use omicron_common::address::SLED_PREFIX_LENGTH;
     use omicron_common::disk::DatasetConfig;
     use omicron_common::disk::DatasetKind;
     use omicron_common::disk::DatasetName;
@@ -1499,7 +1511,7 @@ mod tests {
     #[derive(Debug)]
     struct FakeSledAgentFacilitiesInner {
         start_responses: VecDeque<anyhow::Result<RunningZone>>,
-        removed_ddm_prefixes: BTreeSet<Ipv6Subnet<SLED_PREFIX>>,
+        removed_ddm_prefixes: BTreeSet<Ipv6Subnet<SLED_PREFIX_LENGTH>>,
         resolver_status: ResolverStatus,
     }
 
@@ -1618,7 +1630,7 @@ mod tests {
 
         fn ddm_remove_internal_dns_prefix(
             &self,
-            prefix: Ipv6Subnet<SLED_PREFIX>,
+            prefix: Ipv6Subnet<SLED_PREFIX_LENGTH>,
         ) {
             self.inner.lock().unwrap().removed_ddm_prefixes.insert(prefix);
         }

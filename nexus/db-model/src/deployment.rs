@@ -10,7 +10,7 @@ use crate::omicron_zone_config::{self, OmicronZoneNic};
 use crate::typed_uuid::DbTypedUuid;
 use crate::{
     ArtifactHash, ByteCount, DbArtifactVersion, DbOximeterReadMode, Generation,
-    HwM2Slot, MacAddr, Name, SledState, SqlU8, SqlU16, SqlU32, TufArtifact,
+    HwM2Slot, MacAddr, Name, SledState, SqlU8, SqlU16, SqlU32, TufArtifactFile,
     impl_enum_type, ipv6,
 };
 use anyhow::{Context, Result, anyhow, bail};
@@ -60,7 +60,7 @@ use nexus_types::deployment::{
     OmicronZoneExternalSnatIp,
 };
 use omicron_common::address::Ipv6Subnet;
-use omicron_common::address::SLED_PREFIX;
+use omicron_common::address::SLED_PREFIX_LENGTH;
 use omicron_common::disk::DiskIdentity;
 use omicron_common::zpool_name::ZpoolName;
 use omicron_uuid_kinds::{
@@ -92,6 +92,7 @@ pub struct Blueprint {
     pub target_release_minimum_generation: Generation,
     pub nexus_generation: Generation,
     pub source: DbBpSource,
+    pub external_networking_generation: Generation,
 }
 
 impl From<&'_ nexus_types::deployment::Blueprint> for Blueprint {
@@ -113,6 +114,9 @@ impl From<&'_ nexus_types::deployment::Blueprint> for Blueprint {
             ),
             nexus_generation: Generation(bp.nexus_generation),
             source: DbBpSource::from(&bp.source),
+            external_networking_generation: Generation(
+                bp.external_networking_generation,
+            ),
         }
     }
 }
@@ -137,6 +141,8 @@ impl From<Blueprint> for nexus_types::deployment::BlueprintMetadata {
             creator: value.creator,
             comment: value.comment,
             source: value.source.into(),
+            external_networking_generation: *value
+                .external_networking_generation,
         }
     }
 }
@@ -253,7 +259,7 @@ pub struct BpSledMetadata {
 }
 
 impl BpSledMetadata {
-    pub fn subnet(&self) -> anyhow::Result<Ipv6Subnet<SLED_PREFIX>> {
+    pub fn subnet(&self) -> anyhow::Result<Ipv6Subnet<SLED_PREFIX_LENGTH>> {
         let subnet = match self.subnet {
             IpNetwork::V4(subnet) => bail!(
                 "invalid subnet for sled {}: {subnet} (should be Ipv6)",
@@ -872,7 +878,7 @@ impl BpOmicronZone {
     pub fn into_blueprint_zone_config(
         self,
         nic_row: Option<BpOmicronZoneNic>,
-        image_artifact_row: Option<TufArtifact>,
+        image_artifact_row: Option<TufArtifactFile>,
     ) -> anyhow::Result<BlueprintZoneConfig> {
         // Build up a set of common fields for our `BlueprintZoneType`s
         //
@@ -1183,7 +1189,7 @@ impl DbBpZoneImageSourceColumns {
     fn new(
         image_source: DbBpZoneImageSource,
         image_artifact_sha256: Option<ArtifactHash>,
-        image_artifact_row: Option<TufArtifact>,
+        image_artifact_row: Option<TufArtifactFile>,
     ) -> Self {
         // Note that artifact_row can only be Some if image_artifact_sha256 is
         // Some.
@@ -1269,7 +1275,7 @@ impl BpSingleMeasurement {
 
     pub fn to_measurement(
         self,
-        artifact: Option<TufArtifact>,
+        artifact: Option<TufArtifactFile>,
     ) -> BlueprintSingleMeasurement {
         BlueprintSingleMeasurement {
             version: match artifact {
@@ -1289,12 +1295,19 @@ pub struct BpOmicronZoneNic {
     blueprint_id: DbTypedUuid<BlueprintKind>,
     pub id: Uuid,
     name: Name,
-    ip: IpNetwork,
+    // The `ipv4`/`ipv4_subnet` fields map to the `ip`/`subnet` columns, which
+    // predate dual-stack support: CRDB can't idempotently rename columns, so we
+    // keep the original names rather than rename them to `ipv4`/`ipv4_subnet`.
+    #[diesel(column_name = ip)]
+    ipv4: Option<IpNetwork>,
+    #[diesel(column_name = subnet)]
+    ipv4_subnet: Option<IpNetwork>,
     mac: MacAddr,
-    subnet: IpNetwork,
     vni: SqlU32,
     is_primary: bool,
     slot: SqlU8,
+    ipv6: Option<IpNetwork>,
+    ipv6_subnet: Option<IpNetwork>,
 }
 
 impl BpOmicronZoneNic {
@@ -1310,9 +1323,11 @@ impl BpOmicronZoneNic {
             blueprint_id: blueprint_id.into(),
             id: nic.id,
             name: nic.name,
-            ip: nic.ip,
+            ipv4: nic.ipv4,
+            ipv4_subnet: nic.ipv4_subnet,
+            ipv6: nic.ipv6,
+            ipv6_subnet: nic.ipv6_subnet,
             mac: nic.mac,
-            subnet: nic.subnet,
             vni: nic.vni,
             is_primary: nic.is_primary,
             slot: nic.slot,
@@ -1333,9 +1348,11 @@ impl From<BpOmicronZoneNic> for OmicronZoneNic {
         OmicronZoneNic {
             id: value.id,
             name: value.name,
-            ip: value.ip,
+            ipv4: value.ipv4,
+            ipv4_subnet: value.ipv4_subnet,
+            ipv6: value.ipv6,
+            ipv6_subnet: value.ipv6_subnet,
             mac: value.mac,
-            subnet: value.subnet,
             vni: value.vni,
             is_primary: value.is_primary,
             slot: value.slot,
@@ -1675,14 +1692,8 @@ impl DebugLogBlueprintPlanning {
         // `debug_blob`, because we don't want anyone to attempt to parse it. It
         // should only be useful to humans, potentially via omdb, and they (and
         // omdb) can duplicate these fields to understand it.
-        let git_commit = if env!("VERGEN_GIT_DIRTY") == "true" {
-            concat!(env!("VERGEN_GIT_SHA"), "-dirty")
-        } else {
-            env!("VERGEN_GIT_SHA")
-        };
-
         let debug_blob = serde_json::json!({
-            "git-commit": git_commit,
+            "git-commit": omicron_git_version::GitVersion::current(),
             "report": report,
         });
 

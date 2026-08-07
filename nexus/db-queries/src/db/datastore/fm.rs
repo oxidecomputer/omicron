@@ -12,6 +12,8 @@
 use super::DataStore;
 use crate::authz;
 use crate::context::OpContext;
+use crate::db;
+use crate::db::check_if_limit_reached;
 use crate::db::datastore::RunnableQuery;
 use crate::db::datastore::SQL_BATCH_SIZE;
 use crate::db::model;
@@ -19,22 +21,28 @@ use crate::db::model::DbTypedUuid;
 use crate::db::model::SqlU32;
 use crate::db::pagination::Paginator;
 use crate::db::pagination::paginated;
+use crate::db::queries::ALLOW_FULL_TABLE_SCAN_SQL;
 use crate::db::raw_query_builder::QueryBuilder;
 use crate::db::raw_query_builder::TypedSqlQuery;
 use async_bb8_diesel::AsyncRunQueryDsl;
+use async_bb8_diesel::AsyncSimpleConnection;
 use diesel::prelude::*;
 use diesel::result::DatabaseErrorKind;
 use diesel::result::Error as DieselError;
 use diesel::sql_types;
 use dropshot::PaginationOrder;
 use nexus_db_errors::ErrorHandler;
+use nexus_db_errors::OptionalError;
+use nexus_db_errors::TransactionError;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_lookup::DbConnection;
 use nexus_db_schema::schema::ereport::dsl as ereport_dsl;
 use nexus_db_schema::schema::fm_alert_request::dsl as alert_req_dsl;
 use nexus_db_schema::schema::fm_case::dsl as case_dsl;
 use nexus_db_schema::schema::fm_ereport_in_case::dsl as case_ereport_dsl;
+use nexus_db_schema::schema::fm_fact_physical_disk::dsl as fact_pd_dsl;
 use nexus_db_schema::schema::fm_sitrep::dsl as sitrep_dsl;
+use nexus_db_schema::schema::fm_sitrep_analysis_report::dsl as analysis_report_dsl;
 use nexus_db_schema::schema::fm_sitrep_history::dsl as history_dsl;
 use nexus_db_schema::schema::fm_support_bundle_request::dsl as support_bundle_req_dsl;
 use nexus_types::fm;
@@ -48,12 +56,15 @@ use omicron_uuid_kinds::AlertUuid;
 use omicron_uuid_kinds::CaseEreportKind;
 use omicron_uuid_kinds::CaseKind;
 use omicron_uuid_kinds::CaseUuid;
+use omicron_uuid_kinds::FactKind;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SitrepUuid;
 use omicron_uuid_kinds::SupportBundleKind;
 use omicron_uuid_kinds::SupportBundleUuid;
+use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
+use std::num::NonZeroU32;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -121,6 +132,8 @@ sitrep_child_tables! {
     SupportBundleRequestDataSelectionEreports => { table: "fm_support_bundle_request_data_selection_ereports" },
     SupportBundleRequest => { table: "fm_support_bundle_request" },
     Case => { table: "fm_case" },
+    FmFactPhysicalDisk => { table: "fm_fact_physical_disk" },
+    AnalysisReport => { table: "fm_sitrep_analysis_report" },
 }
 
 /// Per-child-table statistics from a single GC pass.
@@ -135,8 +148,35 @@ pub struct ChildTableGcStats {
 pub struct GcOrphansResult {
     pub sitreps_deleted: usize,
     pub sitrep_metadata_batches: usize,
-    pub batch_size: u32,
     pub child_tables: BTreeMap<SitrepChildTable, ChildTableGcStats>,
+}
+
+/// Parameters for sitrep history table pruning. This is a struct because I
+/// really didn't like having the function take two positional arguments that
+/// were both `NonZeroU32`s that you could get backwards.
+#[derive(Copy, Clone)]
+pub struct HistoryPruningParams {
+    pub limit: NonZeroU32,
+    pub batch_size: NonZeroU32,
+}
+
+/// Describes the status of pruning old records from the end of the sitrep
+/// history table (returned by [`DataStore::fm_sitrep_history_prune`]).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum HistoryPruningResult {
+    /// The history table holds no more than the configured limit of
+    /// entries, so nothing was pruned.
+    NotPruned { count: u64 },
+    /// The history table exceeded the limit, and the oldest `n_pruned`
+    /// entries were deleted.
+    Pruned {
+        /// The number of entries that were deleted.
+        n_pruned: usize,
+        /// The version number of the oldest sitrep that was pruned.
+        oldest_pruned: u32,
+        /// The version number of the newest sitrep that was pruned.
+        newest_pruned: u32,
+    },
 }
 
 impl DataStore {
@@ -149,8 +189,7 @@ impl DataStore {
     ) -> Result<Option<fm::SitrepVersion>, Error> {
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
         let conn = self.pool_connection_authorized(opctx).await?;
-        let version = self
-            .fm_current_sitrep_version_on_conn(&conn)
+        let version = Self::fm_current_sitrep_version_on_conn(&conn)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?
             .map(Into::into);
@@ -158,7 +197,6 @@ impl DataStore {
     }
 
     async fn fm_current_sitrep_version_on_conn(
-        &self,
         conn: &async_bb8_diesel::Connection<DbConnection>,
     ) -> Result<Option<model::SitrepVersion>, DieselError> {
         history_dsl::fm_sitrep_history
@@ -215,7 +253,7 @@ impl DataStore {
         let conn = self.pool_connection_authorized(opctx).await?;
         loop {
             let version =
-                self.fm_current_sitrep_version_on_conn(&conn).await.map_err(
+                Self::fm_current_sitrep_version_on_conn(&conn).await.map_err(
                     |e| public_error_from_diesel(e, ErrorHandler::Server),
                 )?;
             let version: fm::SitrepVersion = match version {
@@ -366,6 +404,8 @@ impl DataStore {
         let mut support_bundle_requests =
             self.support_bundle_requests_read_on_conn(id, conn).await?;
 
+        let mut case_facts = self.fm_facts_read_on_conn(id, conn).await?;
+
         // Next, load the case metadata entries and marry them to the sets of
         // ereports, alert requests, and support bundle requests for those
         // cases that we loaded in the previous steps.
@@ -408,6 +448,7 @@ impl DataStore {
                         alert_requests.remove(&id).unwrap_or_default();
                     let support_bundles_requested =
                         support_bundle_requests.remove(&id).unwrap_or_default();
+                    let facts = case_facts.remove(&id).unwrap_or_default();
                     fm::Case {
                         id,
                         metadata: fm::case::Metadata {
@@ -419,6 +460,7 @@ impl DataStore {
                         alerts_requested,
                         ereports,
                         support_bundles_requested,
+                        facts,
                     }
                 }));
             }
@@ -488,6 +530,69 @@ impl DataStore {
                              {case_id} with the same alert UUID {id}. \
                              this should really not be possible, as the \
                              alert UUID is a primary key!",
+                        );
+                        Error::InternalError { internal_message }
+                    })?;
+            }
+        }
+
+        Ok(by_case)
+    }
+
+    /// Fetch all case facts belonging to cases in the given sitrep, grouped
+    /// by `case_id`.
+    ///
+    /// Each diagnosis engine stores its facts in its own typed table, read by
+    /// its own paginated loop here and unioned into the same `by_case` map. A
+    /// case belongs to exactly one engine, so keys never collide across tables.
+    async fn fm_facts_read_on_conn(
+        &self,
+        id: SitrepUuid,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+    ) -> Result<HashMap<CaseUuid, iddqd::IdOrdMap<fm::case::Fact>>, Error> {
+        let mut by_case =
+            HashMap::<CaseUuid, iddqd::IdOrdMap<fm::case::Fact>>::new();
+
+        // NOTE: Each per-DE set of facts belongs to a distinct table.
+        // This would be a reasonable spot to insert parallel_task_set
+        // and do some concurrent queries.
+        //
+        // (... gonna punt on that until we actually have a couple different
+        // tables to query from).
+
+        // --- physical-disk diagnosis engine facts ---
+        let mut paginator: Paginator<DbTypedUuid<FactKind>> =
+            Paginator::new(SQL_BATCH_SIZE, PaginationOrder::Descending);
+        while let Some(p) = paginator.next() {
+            let batch = paginated(
+                fact_pd_dsl::fm_fact_physical_disk,
+                fact_pd_dsl::id,
+                &p.current_pagparams(),
+            )
+            .filter(fact_pd_dsl::sitrep_id.eq(id.into_untyped_uuid()))
+            .select(model::fm::FmFactPhysicalDisk::as_select())
+            .load_async(conn)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(e, ErrorHandler::Server)
+                    .internal_context("failed to load physical-disk case facts")
+            })?;
+
+            paginator = p.found_batch(&batch, &|f| f.id);
+            for row in batch {
+                let case_id: CaseUuid = row.case_id.into();
+                let fact = row.into_fact()?;
+                let id = fact.metadata.id;
+                by_case
+                    .entry(case_id)
+                    .or_default()
+                    .insert_unique(fact)
+                    .map_err(|_| {
+                        let internal_message = format!(
+                            "encountered multiple case facts for case \
+                             {case_id} with the same fact UUID {id}. this \
+                             should really not be possible, as the fact \
+                             UUID is a primary key!",
                         );
                         Error::InternalError { internal_message }
                     })?;
@@ -666,6 +771,11 @@ impl DataStore {
     /// section](https://rfd.shared.oxide.computer/rfd/0603#_creating_sitreps)
     /// in RFD 603 for details.
     ///
+    /// If `analysis_report` is provided, the human-readable debug reports
+    /// describing the analysis step that produced the sitrep are stored
+    /// alongside it. These reports are diagnostic metadata only (consumed by
+    /// `omdb`), and are not part of the canonical sitrep state.
+    ///
     /// # Returns
     ///
     /// - `Ok(())` if the new sitrep was both successfully inserted *and* added
@@ -685,6 +795,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         sitrep: Sitrep,
+        analysis_report: Option<model::fm::SitrepAnalysisReport>,
     ) -> Result<(), InsertSitrepError> {
         let conn = self.pool_connection_authorized(opctx).await?;
 
@@ -740,6 +851,7 @@ impl DataStore {
         let mut support_bundles_requested = Vec::new();
         let mut bundle_data_selections_requested = Vec::new();
         let mut case_ereports = Vec::new();
+        let mut physical_disk_facts = Vec::new();
         for case in sitrep.cases {
             let case_id = case.id;
             cases.push(model::fm::CaseMetadata::from_sitrep(sitrep_id, &case));
@@ -762,6 +874,21 @@ impl DataStore {
                     ),
                 );
                 bundle_data_selections_requested.push((req_id, data_selection));
+            }
+            for fact in case.facts.iter() {
+                // Dispatch each fact to its diagnosis engine's typed table.
+                match &fact.payload {
+                    fm::FactPayload::PhysicalDisk(disk_fact) => {
+                        physical_disk_facts.push(
+                            model::fm::FmFactPhysicalDisk::from_sitrep(
+                                sitrep_id,
+                                case_id,
+                                &fact.metadata,
+                                disk_fact,
+                            ),
+                        );
+                    }
+                }
             }
         }
 
@@ -789,6 +916,30 @@ impl DataStore {
                 })?;
         }
 
+        // Store the analysis report describing how this sitrep was produced,
+        // if any were provided. Like the other child records above, this is
+        // keyed on `sitrep_id`, so it is protected from concurrent GC by the
+        // metadata row inserted first, and will be cleaned up by the GC if this
+        // sitrep ends up orphaned.
+        if let Some(analysis_report) = analysis_report {
+            let insert_result = diesel::insert_into(
+                analysis_report_dsl::fm_sitrep_analysis_report,
+            )
+            .values(analysis_report)
+            .execute_async(&*conn)
+            .await;
+
+            // If this fails, that's weird and bad, but it should not block the
+            // rest of the sitrep from being inserted.
+            if let Err(e) = insert_result {
+                slog::warn!(&opctx.log,
+                    "failed to insert sitrep analysis report";
+                    "sitrep_id" => %sitrep_id,
+                    "error" => &InlineErrorChain::new(&e),
+                );
+            }
+        }
+
         Self::fm_support_bundle_requests_insert_on_conn(
             &conn,
             sitrep_id,
@@ -796,6 +947,19 @@ impl DataStore {
             bundle_data_selections_requested,
         )
         .await?;
+
+        if !physical_disk_facts.is_empty() {
+            diesel::insert_into(fact_pd_dsl::fm_fact_physical_disk)
+                .values(physical_disk_facts)
+                .execute_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                        .internal_context(
+                            "failed to insert physical-disk case facts",
+                        )
+                })?;
+        }
 
         if !cases.is_empty() {
             diesel::insert_into(case_dsl::fm_case)
@@ -1132,22 +1296,8 @@ impl DataStore {
             .map(|id| id.into_untyped_uuid())
             .collect::<Vec<_>>();
 
-        struct SitrepDeleteResult {
-            sitreps_deleted: usize,
-            case_ereports_deleted: usize,
-            alert_requests_deleted: usize,
-            support_bundle_requests_deleted: usize,
-            cases_deleted: usize,
-        }
-
         let err = OptionalError::new();
-        let SitrepDeleteResult {
-            sitreps_deleted,
-            case_ereports_deleted,
-            alert_requests_deleted,
-            support_bundle_requests_deleted,
-            cases_deleted,
-        } = self
+        let (sitreps_deleted, child_rows_deleted) = self
             // Sitrep deletion is transactional to prevent a sitrep from being
             // left in a partially-deleted state should the Nexus instance
             // attempting the delete operation die suddenly.
@@ -1159,7 +1309,7 @@ impl DataStore {
                     // First, ensure that we are not deleting the current
                     // sitrep, and bail out if we would.
                     if let Some(model::SitrepVersion { sitrep_id, .. }) =
-                        self.fm_current_sitrep_version_on_conn(&conn).await?
+                        Self::fm_current_sitrep_version_on_conn(&conn).await?
                     {
                         if ids.contains(&sitrep_id.as_untyped_uuid()) {
                             return Err(err.bail(TransactionError::CustomError(Error::conflict(format!(
@@ -1168,37 +1318,33 @@ impl DataStore {
                         }
                     }
 
-                    // Delete case ereport assignments
-                    let case_ereports_deleted = diesel::delete(
-                        case_ereport_dsl::fm_ereport_in_case.filter(
-                            case_ereport_dsl::sitrep_id.eq_any(ids.clone()),
-                        ),
-                    )
-                    .execute_async(&conn)
-                    .await?;
+                    // Delete every child row by sitrep_id. Driving this off
+                    // SitrepChildTable::ALL keeps it in lockstep with the
+                    // orphan GC: a child table registered in the
+                    // `sitrep_child_tables!` macro is deleted here
+                    // automatically. There are no foreign keys between these
+                    // tables, so deletion order doesn't matter.
+                    let mut child_rows_deleted =
+                        BTreeMap::<SitrepChildTable, usize>::new();
+                    for &table in SitrepChildTable::ALL {
+                        let mut builder = QueryBuilder::new();
+                        builder.sql("DELETE FROM omicron.public.");
+                        builder.sql(table.table_name());
+                        builder.sql(" WHERE ");
+                        builder.sql(table.sitrep_id_column());
+                        builder.sql(" = ANY(");
+                        builder
+                            .param()
+                            .bind::<sql_types::Array<sql_types::Uuid>, _>(
+                                ids.clone(),
+                            );
+                        builder.sql(")");
+                        let deleted =
+                            builder.query::<()>().execute_async(&conn).await?;
+                        child_rows_deleted.insert(table, deleted);
+                    }
 
-                    // Delete case alert requests.
-                    let alert_requests_deleted = diesel::delete(
-                        alert_req_dsl::fm_alert_request.filter(alert_req_dsl::sitrep_id.eq_any(ids.clone()))
-                    )
-                    .execute_async(&conn)
-                    .await?;
-
-                    // Delete support bundle request child data selection rows,
-                    // then the requests themselves.
-                    let support_bundle_requests_deleted =
-                        Self::support_bundle_requests_delete_on_conn(&conn, ids.clone())
-                            .await?;
-
-                    // Delete case metadata records.
-                    let cases_deleted = diesel::delete(
-                        case_dsl::fm_case
-                            .filter(case_dsl::sitrep_id.eq_any(ids.clone())),
-                    )
-                    .execute_async(&conn)
-                    .await?;
-
-                    // Delete sitrep metadata records.
+                    // Delete sitrep metadata records last.
                     let sitreps_deleted = diesel::delete(
                         sitrep_dsl::fm_sitrep
                             .filter(sitrep_dsl::id.eq_any(ids.clone())),
@@ -1206,13 +1352,7 @@ impl DataStore {
                     .execute_async(&conn)
                     .await?;
 
-                    Ok(SitrepDeleteResult {
-                        sitreps_deleted,
-                        cases_deleted,
-                        alert_requests_deleted,
-                        support_bundle_requests_deleted,
-                        case_ereports_deleted,
-                    })
+                    Ok((sitreps_deleted, child_rows_deleted))
                 }
             })
             .await
@@ -1226,10 +1366,7 @@ impl DataStore {
             "deleted {sitreps_deleted} of {} sitreps", ids.len();
             "ids" => ?ids,
             "sitreps_deleted" => sitreps_deleted,
-            "cases_deleted" => cases_deleted,
-            "case_ereports_deleted" => case_ereports_deleted,
-            "alert_requests_deleted" => alert_requests_deleted,
-            "support_bundle_requests_deleted" => support_bundle_requests_deleted,
+            "child_rows_deleted" => ?child_rows_deleted,
         );
 
         Ok(sitreps_deleted)
@@ -1256,6 +1393,7 @@ impl DataStore {
     pub async fn fm_sitrep_gc_orphans(
         &self,
         opctx: &OpContext,
+        batch_size: NonZeroU32,
     ) -> Result<GcOrphansResult, Error> {
         let conn = self.pool_connection_authorized(opctx).await?;
 
@@ -1271,8 +1409,7 @@ impl DataStore {
                 sitrep_metadata_batches += 1;
                 let (deleted, next_marker) =
                     Self::delete_orphaned_sitrep_metadata_query(
-                        marker,
-                        SQL_BATCH_SIZE,
+                        marker, batch_size,
                     )
                     .get_result_async::<(i64, Option<Uuid>)>(&*conn)
                     .await
@@ -1304,9 +1441,7 @@ impl DataStore {
                 stats.batches += 1;
                 let (rows_deleted, next_marker) =
                     Self::deeply_orphaned_batch_query(
-                        table,
-                        marker,
-                        SQL_BATCH_SIZE,
+                        table, marker, batch_size,
                     )
                     .get_result_async::<(i64, Option<Uuid>)>(&*conn)
                     .await
@@ -1331,7 +1466,6 @@ impl DataStore {
         let result = GcOrphansResult {
             sitreps_deleted,
             sitrep_metadata_batches,
-            batch_size: SQL_BATCH_SIZE.get(),
             child_tables,
         };
 
@@ -1474,43 +1608,6 @@ impl DataStore {
         builder.query()
     }
 
-    /// Delete child data selection rows for support bundle requests, then the
-    /// support bundle request rows themselves.
-    #[cfg(test)]
-    async fn support_bundle_requests_delete_on_conn(
-        conn: &async_bb8_diesel::Connection<DbConnection>,
-        sitrep_ids: Vec<uuid::Uuid>,
-    ) -> Result<usize, DieselError> {
-        use nexus_db_schema::schema::fm_support_bundle_request_data_selection_ereports::dsl as ereports_dsl;
-        use nexus_db_schema::schema::fm_support_bundle_request_data_selection_flags::dsl as flags_dsl;
-        use nexus_db_schema::schema::fm_support_bundle_request_data_selection_host_info::dsl as host_info_dsl;
-
-        diesel::delete(
-            flags_dsl::fm_support_bundle_request_data_selection_flags
-                .filter(flags_dsl::sitrep_id.eq_any(sitrep_ids.clone())),
-        )
-        .execute_async(conn)
-        .await?;
-        diesel::delete(
-            host_info_dsl::fm_support_bundle_request_data_selection_host_info
-                .filter(host_info_dsl::sitrep_id.eq_any(sitrep_ids.clone())),
-        )
-        .execute_async(conn)
-        .await?;
-        diesel::delete(
-            ereports_dsl::fm_support_bundle_request_data_selection_ereports
-                .filter(ereports_dsl::sitrep_id.eq_any(sitrep_ids.clone())),
-        )
-        .execute_async(conn)
-        .await?;
-        diesel::delete(
-            support_bundle_req_dsl::fm_support_bundle_request
-                .filter(support_bundle_req_dsl::sitrep_id.eq_any(sitrep_ids)),
-        )
-        .execute_async(conn)
-        .await
-    }
-
     pub async fn fm_sitrep_version_list(
         &self,
         opctx: &OpContext,
@@ -1542,6 +1639,224 @@ impl DataStore {
         )
         .select(model::SitrepVersion::as_select())
     }
+
+    /// Check whether the given sitrep limit has been reached.
+    ///
+    /// This (necessarily) does a full table scan on the sitrep table up to
+    /// the limit, so `limit` must be relatively small to avoid performance
+    /// issues.
+    pub async fn fm_sitrep_check_limit_reached(
+        &self,
+        opctx: &OpContext,
+        limit: u64,
+    ) -> Result<db::IsLimitReached, Error> {
+        // The "full" table scan below is treated as a complex operation. (This
+        // should only be called from the FM analysis and sitrep GC background
+        // tasks, for which complex operations are allowed.)
+        opctx.check_complex_operations_allowed()?;
+
+        // TODO(eliza): there should probably be an authz object for the fm sitrep?
+        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
+
+        let limit_query = check_if_limit_reached::LimitQuery::new(
+            sitrep_dsl::fm_sitrep,
+            limit,
+        )?;
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        let err = OptionalError::new();
+
+        self.transaction_retry_wrapper("sitrep_count")
+            .transaction(&conn, |conn| {
+                let err = err.clone();
+                let limit_query = limit_query.clone();
+                async move {
+                    // We need this to call the COUNT(*) query below. But note
+                    // that this isn't really a "full" table scan; the number of
+                    // rows scanned is limited by the LIMIT clause.
+                    conn.batch_execute_async(ALLOW_FULL_TABLE_SCAN_SQL).await?;
+
+                    // Rather than doing a full table scan, we use a LIMIT
+                    // clause to limit the number of rows returned.
+                    let result = limit_query
+                        .check_if_limit_reached_async(&conn)
+                        .await
+                        .map_err(|e| e.into_diesel(&err))?;
+
+                    Ok(result)
+                }
+            })
+            .await
+            .map_err(|e| match err.take() {
+                Some(err) => err.into_public_ignore_retries(),
+                None => public_error_from_diesel(e, ErrorHandler::Server),
+            })
+    }
+
+    /// Prune the `fm_sitrep_history` table if more than `limit` records exist,
+    /// deleting up to `batch_size` records.
+    ///
+    /// This function will first check if more than `limit` records exist, and
+    /// then deletes up to `batch_size` records. It will never delete records
+    /// that result in *less than* `limit` records remaining in the table, so if
+    /// the current number of records is less than `limit + batch_size`, fewer
+    /// than `batch_size` records will be deleted. If more than `limit +
+    /// batch_size` records exist, only `batch_size` records will be deleted.
+    ///
+    /// If anything is deleted, this function returns
+    /// [`HistoryPruningResult::Pruned`]. Callers who wish to prune the table
+    /// to exactly `limit` records should call this function in a loop until it
+    /// returns [`HistoryPruningResult::NotPruned`], indicating that the table
+    /// has reached the desired size.
+    pub async fn fm_sitrep_history_prune(
+        &self,
+        opctx: &OpContext,
+        HistoryPruningParams { limit, batch_size }: HistoryPruningParams,
+    ) -> Result<HistoryPruningResult, Error> {
+        // The "full" table scan below is treated as a complex operation. (This
+        // should only be called from the FM analysis and sitrep GC background
+        // tasks, for which complex operations are allowed.)
+        opctx.check_complex_operations_allowed()?;
+
+        // TODO(eliza): there should probably be an authz object for the fm sitrep?
+        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
+
+        let limit = limit.get();
+        let limit_query = check_if_limit_reached::LimitQuery::new(
+            history_dsl::fm_sitrep_history,
+            u64::from(limit),
+        )?;
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        let err = OptionalError::new();
+
+        self.transaction_retry_wrapper("sitrep_history_prune")
+            .transaction(&conn, |conn| {
+                let err = err.clone();
+                let limit_query = limit_query.clone();
+                async move {
+                    // We need this to call the COUNT(*) query below. But note
+                    // that this isn't really a "full" table scan; the number of
+                    // rows scanned is limited by the LIMIT clause.
+                    conn.batch_execute_async(ALLOW_FULL_TABLE_SCAN_SQL)
+                        .await?;
+
+                    // Rather than doing a full table scan, we use a LIMIT
+                    // clause to limit the number of rows returned.
+                    let limit_reached = limit_query
+                        .check_if_limit_reached_async(&conn)
+                        .await
+                        .map_err(|e| e.into_diesel(&err))?;
+
+                    // If the history table is below the limit, we're done here.
+                    if let db::IsLimitReached::No { count } = limit_reached {
+                        return Ok(HistoryPruningResult::NotPruned {
+                            count,
+                        });
+                    }
+
+                    // Otherwise, we need to delete old versions that are over
+                    // the limit. We want to delete the oldest version first,
+                    // and we want to delete up to `batch_size` records per
+                    // query. Doing this in a batched way is a little bit
+                    // complicated, because Postgres does not support `LIMIT` or
+                    // `ORDER BY` clauses on `DELETE` statements.
+                    //
+                    // First, determine the newest version that we are ALLOWED
+                    // to prune. We may not actually delete this one, if the
+                    // batch size limits us to deleting fewer rows than the
+                    // number that are above the limit.
+                    let newest_prunable_version = {
+                        // The latest prunable version is the latest version
+                        // minus the limit. So we must first determine the
+                        // latest version...
+                        let latest_version = Self::fm_current_sitrep_version_on_conn(&conn)
+                            .await?
+                            .ok_or_else(|| {
+                                let e = Error::InternalError {
+                                    internal_message: format!(
+                                        "if the sitrep history table count is \
+                                        over the limit ({limit}), there must \
+                                        be a latest version! this makes no \
+                                        sense",
+                                    ),
+                                };
+                                err.bail(TransactionError::CustomError(e))
+                            })?
+                            .version.0;
+                        latest_version
+                            .checked_sub(limit)
+                            .ok_or_else(|| {
+                                let e = Error::InternalError {
+                                    internal_message: format!(
+                                        "if the history table is over the limit, \
+                                         subtracing the limit ({limit}) from the \
+                                         latest version (v{latest_version}) should \
+                                         give us a version to prune!",
+                                    ),
+                                };
+                                err.bail(TransactionError::CustomError(e))
+                            })?
+                    };
+
+                    // Next, determine the newest version that we actually
+                    // *will* prune, ensuring that we prune no more than
+                    // `batch_size` records. We do this by determining the
+                    // newest version we would delete if we deleted up to
+                    // `oldest_version + batch_size` records, and then taking
+                    // the minimum of that and the newest version we're allowed
+                    // to prune.
+                    let oldest_pruned: u32 = history_dsl::fm_sitrep_history
+                        .select(diesel::dsl::min(history_dsl::version))
+                        .first_async::<Option<SqlU32>>(&conn)
+                        .await?
+                        .ok_or_else(|| {
+                            let e = Error::internal_error(
+                                "min(...) only returns NULL if the table is \
+                                 empty, and we know it isn't, so this should \
+                                 be impossible.",
+                            );
+                            err.bail(TransactionError::CustomError(e))
+                        })?
+                        .into();
+                    let newest_pruned = {
+                        let max_pruned = batch_size.get() - 1;
+                        newest_prunable_version
+                            .min(oldest_pruned.saturating_add(max_pruned))
+                    };
+
+                    let n_pruned = diesel::delete(history_dsl::fm_sitrep_history)
+                        .filter(history_dsl::version.le(SqlU32(newest_pruned)))
+                        .execute_async(&conn)
+                        .await?;
+
+                    // If the delete removed no rows, every version at or below
+                    // `newest_version_pruned` was already pruned by a previous
+                    // activation. Because there are no gaps in the version
+                    // numbers assigned to sitreps as they are committed, this
+                    // means we are exactly at the limit. This is the expected
+                    // steady state if everything is more or less in sync. So,
+                    // don't say that we pruned something if we didn't actually
+                    // delete anything.
+                    if n_pruned == 0 {
+                        return Ok(HistoryPruningResult::NotPruned {
+                            count: u64::from(limit),
+                        });
+                    }
+
+                    Ok(HistoryPruningResult::Pruned {
+                        n_pruned,
+                        oldest_pruned,
+                        newest_pruned,
+                    })
+                }
+            })
+            .await
+            .map_err(|e| match err.take() {
+                Some(err) => err.into_public_ignore_retries(),
+                None => public_error_from_diesel(e, ErrorHandler::Server),
+            })
+    }
 }
 
 /// Errors returned by [`DataStore::fm_sitrep_insert`].
@@ -1554,12 +1869,168 @@ pub enum InsertSitrepError {
     ParentNotCurrent(SitrepUuid),
 }
 
+// This is a `pub(crate)` module enabled by either compiling tests or the
+// "testing" featuer flag, so that some of the code in this module can be used
+// by this crate's `pub_test_utils` module.
+#[cfg(any(feature = "testing", test))]
+pub(crate) mod test_utils {
+    use super::*;
+    use crate::db::raw_query_builder::QueryBuilder;
+    use std::collections::BTreeMap;
+    use std::collections::BTreeSet;
+
+    // ---------------------------------------------------------------
+    // SitrepChildTableCounts: queries each table listed in
+    // `SitrepChildTable::ALL` to count the number of rows matching a
+    // given `sitrep_id`. Used by tests to verify that orphan GC
+    // actually cleaned up the expected rows.
+    //
+    // Mirrors `BlueprintTableCounts` from deployment.rs; the
+    // completeness test below ensures every `fm_*` child table with
+    // a `sitrep_id` column is covered by `SitrepChildTable`.
+    // ---------------------------------------------------------------
+
+    pub(super) struct SitrepChildTableCounts {
+        pub(super) counts: BTreeMap<String, i64>,
+    }
+
+    impl SitrepChildTableCounts {
+        /// Query row counts for each child table tracked by
+        /// `SitrepChildTable`, for the given `sitrep_id`.
+        pub(super) async fn new(
+            datastore: &DataStore,
+            sitrep_id: SitrepUuid,
+        ) -> SitrepChildTableCounts {
+            let conn = datastore.pool_connection_for_tests().await.unwrap();
+            let mut counts = BTreeMap::new();
+
+            for &table in SitrepChildTable::ALL {
+                let mut query = QueryBuilder::new();
+                query.sql("SELECT COUNT(*) FROM ");
+                query.sql(table.table_name());
+                query.sql(" WHERE ");
+                query.sql(table.sitrep_id_column());
+                query.sql(" = ");
+                query.param().bind::<diesel::sql_types::Uuid, _>(
+                    sitrep_id.into_untyped_uuid(),
+                );
+
+                let count: i64 = query
+                    .query::<diesel::sql_types::BigInt>()
+                    .get_result_async(&*conn)
+                    .await
+                    .unwrap_or_else(|e| {
+                        panic!(
+                            "failed to count rows in {}: {e}",
+                            table.table_name()
+                        )
+                    });
+                counts.insert(table.table_name().to_string(), count);
+            }
+
+            let table_counts = SitrepChildTableCounts { counts };
+
+            // Verify no new fm_* child tables were added without
+            // updating SitrepChildTable.
+            if let Err(msg) =
+                table_counts.verify_all_tables_covered(datastore).await
+            {
+                panic!("{msg}");
+            }
+
+            table_counts
+        }
+
+        pub(super) fn all_empty(&self) -> bool {
+            self.counts.values().all(|&count| count == 0)
+        }
+
+        pub(super) fn non_empty_tables(&self) -> Vec<String> {
+            self.counts
+                .iter()
+                .filter_map(
+                    |(table, &count)| {
+                        if count > 0 { Some(table.clone()) } else { None }
+                    },
+                )
+                .collect()
+        }
+
+        pub(super) fn tables_checked(&self) -> BTreeSet<&str> {
+            self.counts.keys().map(|s| s.as_str()).collect()
+        }
+
+        /// Verify no new fm_* tables were added without updating
+        /// `SitrepChildTable`.
+        pub(super) async fn verify_all_tables_covered(
+            &self,
+            datastore: &DataStore,
+        ) -> Result<(), String> {
+            let conn = datastore.pool_connection_for_tests().await.unwrap();
+
+            // fm_* tables that are NOT children of fm_sitrep and are
+            // intentionally ignored.
+            let tables_ignored: BTreeSet<&str> =
+                ["fm_sitrep", "fm_sitrep_history", "fm_config"]
+                    .into_iter()
+                    .collect();
+            let tables_checked = self.tables_checked();
+
+            let mut query = QueryBuilder::new();
+            query.sql(
+                "SELECT table_name FROM information_schema.tables \
+                 WHERE table_name LIKE 'fm\\_%'",
+            );
+            let tables_unchecked: Vec<String> = query
+                .query::<diesel::sql_types::Text>()
+                .load_async(&*conn)
+                .await
+                .expect("failed to query information_schema for fm_* tables")
+                .into_iter()
+                .filter(|f: &String| {
+                    let t = f.as_str();
+                    !tables_ignored.contains(t) && !tables_checked.contains(t)
+                })
+                .collect();
+
+            if !tables_unchecked.is_empty() {
+                Err(format!(
+                    "found fm_* child table(s) not covered by \
+                     `SitrepChildTable`: {}\n\n\
+                     If you added a new fm_* child table, add a variant \
+                     to `SitrepChildTable` and update the orphan GC code \
+                     in `fm_sitrep_gc_orphans`.\n\n\
+                     If your new table should NOT be covered by orphan GC, \
+                     either drop the `fm_` prefix or add it to \
+                     `tables_ignored` in this test.",
+                    tables_unchecked.join(", ")
+                ))
+            } else {
+                Ok(())
+            }
+        }
+    }
+
+    pub(crate) async fn ensure_sitrep_children_fully_deleted(
+        datastore: &DataStore,
+        sitrep_id: SitrepUuid,
+    ) {
+        let counts = SitrepChildTableCounts::new(datastore, sitrep_id).await;
+
+        assert!(
+            counts.all_empty(),
+            "sitrep {sitrep_id} not fully deleted. Non-empty tables: {:?}",
+            counts.non_empty_tables()
+        );
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use super::test_utils::*;
     use super::*;
     use crate::db::explain::ExplainableAsync;
     use crate::db::pub_test_utils::TestDatabase;
-    use crate::db::raw_query_builder::QueryBuilder;
     use crate::db::raw_query_builder::expectorate_query_contents;
     use chrono::Utc;
     use diesel::pg::Pg;
@@ -1567,12 +2038,15 @@ mod tests {
     use nexus_types::alert::AlertClass;
     use nexus_types::fm;
     use nexus_types::fm::ereport::{EreportData, Reporter};
+    use omicron_common::api::external::Generation;
     use omicron_test_utils::dev;
+    use omicron_uuid_kinds::CaseEreportUuid;
     use omicron_uuid_kinds::CollectionUuid;
+    use omicron_uuid_kinds::EreporterRestartUuid;
+    use omicron_uuid_kinds::FactUuid;
     use omicron_uuid_kinds::OmicronZoneUuid;
+    use omicron_uuid_kinds::RackUuid;
     use omicron_uuid_kinds::SupportBundleUuid;
-    use std::collections::BTreeMap;
-    use std::collections::BTreeSet;
     use std::sync::Arc;
 
     #[tokio::test]
@@ -1781,12 +2255,14 @@ mod tests {
                 time_created: Utc::now(),
                 parent_sitrep_id: None,
                 next_inv_min_time_started: Utc::now(),
+                alert_generation: Generation::new(),
+                support_bundle_generation: Generation::new(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
         };
 
-        datastore.fm_sitrep_insert(&opctx, sitrep.clone()).await.unwrap();
+        datastore.fm_sitrep_insert(&opctx, sitrep.clone(), None).await.unwrap();
 
         let current = datastore
             .fm_sitrep_read_current(&opctx)
@@ -1805,7 +2281,7 @@ mod tests {
 
         // Trying to insert the same sitrep again should fail.
         let err = datastore
-            .fm_sitrep_insert(&opctx, sitrep.clone())
+            .fm_sitrep_insert(&opctx, sitrep.clone(), None)
             .await
             .unwrap_err();
         assert!(err.to_string().contains("duplicate key"));
@@ -1832,11 +2308,16 @@ mod tests {
                 time_created: Utc::now(),
                 parent_sitrep_id: None,
                 next_inv_min_time_started: Utc::now(),
+                alert_generation: Generation::new(),
+                support_bundle_generation: Generation::new(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
         };
-        datastore.fm_sitrep_insert(&opctx, sitrep1.clone()).await.unwrap();
+        datastore
+            .fm_sitrep_insert(&opctx, sitrep1.clone(), None)
+            .await
+            .unwrap();
 
         // Create a second sitrep with the first as parent
         let sitrep2 = nexus_types::fm::Sitrep {
@@ -1848,11 +2329,13 @@ mod tests {
                 time_created: Utc::now(),
                 parent_sitrep_id: Some(sitrep1.id()),
                 next_inv_min_time_started: Utc::now(),
+                alert_generation: Generation::new(),
+                support_bundle_generation: Generation::new(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
         };
-        datastore.fm_sitrep_insert(&opctx, sitrep2.clone()).await.expect(
+        datastore.fm_sitrep_insert(&opctx, sitrep2.clone(), None).await.expect(
             "inserting a sitrep whose parent is current should succeed",
         );
 
@@ -1891,11 +2374,16 @@ mod tests {
                 time_created: Utc::now(),
                 parent_sitrep_id: None,
                 next_inv_min_time_started: Utc::now(),
+                alert_generation: Generation::new(),
+                support_bundle_generation: Generation::new(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
         };
-        datastore.fm_sitrep_insert(&opctx, sitrep1.clone()).await.unwrap();
+        datastore
+            .fm_sitrep_insert(&opctx, sitrep1.clone(), None)
+            .await
+            .unwrap();
 
         // Try to insert a sitrep with a non-existent parent ID
         let nonexistent_id = SitrepUuid::new_v4();
@@ -1908,12 +2396,14 @@ mod tests {
                 time_created: Utc::now(),
                 parent_sitrep_id: Some(nonexistent_id),
                 next_inv_min_time_started: Utc::now(),
+                alert_generation: Generation::new(),
+                support_bundle_generation: Generation::new(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
         };
 
-        let result = datastore.fm_sitrep_insert(&opctx, sitrep2).await;
+        let result = datastore.fm_sitrep_insert(&opctx, sitrep2, None).await;
 
         // Should fail with ParentNotCurrent error
         match result {
@@ -1945,11 +2435,16 @@ mod tests {
                 time_created: Utc::now(),
                 parent_sitrep_id: None,
                 next_inv_min_time_started: Utc::now(),
+                alert_generation: Generation::new(),
+                support_bundle_generation: Generation::new(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
         };
-        datastore.fm_sitrep_insert(&opctx, sitrep1.clone()).await.unwrap();
+        datastore
+            .fm_sitrep_insert(&opctx, sitrep1.clone(), None)
+            .await
+            .unwrap();
 
         // Create a second sitrep with the first as parent
         let sitrep2 = nexus_types::fm::Sitrep {
@@ -1961,11 +2456,16 @@ mod tests {
                 time_created: Utc::now(),
                 parent_sitrep_id: Some(sitrep1.id()),
                 next_inv_min_time_started: Utc::now(),
+                alert_generation: Generation::new(),
+                support_bundle_generation: Generation::new(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
         };
-        datastore.fm_sitrep_insert(&opctx, sitrep2.clone()).await.unwrap();
+        datastore
+            .fm_sitrep_insert(&opctx, sitrep2.clone(), None)
+            .await
+            .unwrap();
 
         // Try to create a third sitrep with sitrep1 (outdated) as parent.
         // This should fail, as sitrep2 is now the current sitrep.
@@ -1978,11 +2478,14 @@ mod tests {
                 time_created: Utc::now(),
                 parent_sitrep_id: Some(sitrep1.id()),
                 next_inv_min_time_started: Utc::now(),
+                alert_generation: Generation::new(),
+                support_bundle_generation: Generation::new(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
         };
-        let result = datastore.fm_sitrep_insert(&opctx, sitrep3.clone()).await;
+        let result =
+            datastore.fm_sitrep_insert(&opctx, sitrep3.clone(), None).await;
 
         // Should fail with ParentNotCurrent error
         match result {
@@ -2037,6 +2540,7 @@ mod tests {
                 ereports,
                 alerts_requested,
                 support_bundles_requested,
+                facts,
             } = case;
             let case_id = id;
             let Some(expected) = this.cases.get(&case_id) else {
@@ -2068,11 +2572,12 @@ mod tests {
                 &expected.metadata.de, de,
                 "while checking case {case_id}"
             );
+            assert_eq!(&expected.facts, facts, "while checking case {case_id}");
 
             // Now, check that all the ereports are present in both cases.
             assert_eq!(ereports.len(), expected.ereports.len());
             for expected in &expected.ereports {
-                let ereport_id = expected.ereport.id();
+                let ereport_id = expected.ereport.id;
                 let Some(ereport) = ereports.get(&ereport_id) else {
                     panic!(
                         "assertion failed: left == right (while checking case {case_id})\n  \
@@ -2080,7 +2585,7 @@ mod tests {
                         it contains only these ereports: {:?}\n",
                         ereports
                             .iter()
-                            .map(|e| e.ereport.id().to_string())
+                            .map(|e| e.ereport.id.to_string())
                             .collect::<Vec<_>>(),
                     )
                 };
@@ -2098,8 +2603,7 @@ mod tests {
                 // This is where we go out of our way to avoid the timestamp,
                 // btw.
                 assert_eq!(
-                    expected.ereport.id(),
-                    ereport.id(),
+                    expected.ereport.id, ereport.id,
                     "while checking ereport {ereport_id} in case {case_id}",
                 );
                 assert_eq!(
@@ -2132,23 +2636,23 @@ mod tests {
         // In order to read sitreps with case ereport assignments, the
         // corresponding entries in the `ereport` table must also exist, so
         // we'll make those here first.
-        let restart_id = omicron_uuid_kinds::EreporterRestartUuid::new_v4();
+        let restart_id = EreporterRestartUuid::new_v4();
         let collector_id = OmicronZoneUuid::new_v4();
+        let rack_id = RackUuid::new_v4();
+        let time_collected = Utc::now();
 
+        let ereport1_id =
+            fm::EreportId { restart_id, ena: ereport_types::Ena(2) };
         let ereport1 = EreportData {
-            id: fm::EreportId { restart_id, ena: ereport_types::Ena(2) },
-            time_collected: Utc::now(),
-            collector_id,
             part_number: Some("930-55555".to_string()),
             serial_number: Some("BRM6900420".to_string()),
             class: Some("ereport.my_cool_ereport.wow".to_string()),
             report: serde_json::json!({"severity": "critical"}),
         };
 
+        let ereport2_id =
+            fm::EreportId { restart_id, ena: ereport_types::Ena(3) };
         let ereport2 = EreportData {
-            id: fm::EreportId { restart_id, ena: ereport_types::Ena(3) },
-            time_collected: Utc::now(),
-            collector_id,
             part_number: Some("930-55555".to_string()),
             serial_number: Some("BRM6900420".to_string()),
             class: Some("ereport.gov.nasa.apollo".to_string()),
@@ -2164,8 +2668,15 @@ mod tests {
         datastore
             .ereports_insert(
                 &opctx,
+                restart_id,
+                time_collected,
+                collector_id,
+                rack_id,
                 reporter,
-                vec![ereport1.clone(), ereport2.clone()],
+                vec![
+                    (ereport1_id.ena, ereport1.clone()),
+                    (ereport2_id.ena, ereport2.clone()),
+                ],
             )
             .await
             .expect("failed to insert ereports");
@@ -2176,8 +2687,14 @@ mod tests {
             let mut ereports = iddqd::IdOrdMap::new();
             ereports
                 .insert_unique(fm::case::CaseEreport {
-                    id: omicron_uuid_kinds::CaseEreportUuid::new_v4(),
-                    ereport: Arc::new(fm::Ereport::new(ereport1, reporter)),
+                    id: CaseEreportUuid::new_v4(),
+                    ereport: Arc::new(fm::Ereport::new(
+                        ereport1_id,
+                        time_collected,
+                        collector_id,
+                        ereport1,
+                        reporter,
+                    )),
                     assigned_sitrep_id: sitrep_id,
                     comment: "this has something to do with case 1".to_string(),
                 })
@@ -2188,6 +2705,7 @@ mod tests {
                 .insert_unique(fm::case::AlertRequest {
                     id: AlertUuid::new_v4(),
                     class: AlertClass::TestFoo,
+                    version: 0,
                     payload: serde_json::json!({}),
                     requested_sitrep_id: sitrep_id,
                     comment: String::new(),
@@ -2197,6 +2715,7 @@ mod tests {
                 .insert_unique(fm::case::AlertRequest {
                     id: AlertUuid::new_v4(),
                     class: AlertClass::TestFooBar,
+                    version: 0,
                     payload: serde_json::json!({}),
                     requested_sitrep_id: sitrep_id,
                     comment: String::new(),
@@ -2241,17 +2760,45 @@ mod tests {
                     .unwrap();
             }
 
+            let mut facts = iddqd::IdOrdMap::new();
+            facts
+                .insert_unique(fm::case::Fact {
+                    metadata: fm::case::FactMetadata {
+                        id: FactUuid::new_v4(),
+                        created_sitrep_id: sitrep_id,
+                        comment: "a representative fact for case 1".to_string(),
+                    },
+                    payload: fm::FactPayload::PhysicalDisk(
+                        fm::DiskFact::ZpoolUnhealthy(
+                            fm::ZpoolUnhealthyFactPayload {
+                                physical_disk_id:
+                                    omicron_uuid_kinds::PhysicalDiskUuid::new_v4(
+                                    ),
+                                zpool_id:
+                                    omicron_uuid_kinds::ZpoolUuid::new_v4(),
+                                last_seen_health:
+                                    nexus_types::inventory::ZpoolHealth::Degraded,
+                                observed_in_inv: CollectionUuid::new_v4(),
+                                time_observed: omicron_common::now_db_precision(
+                                ),
+                            },
+                        ),
+                    ),
+                })
+                .unwrap();
+
             fm::Case {
                 id: omicron_uuid_kinds::CaseUuid::new_v4(),
                 metadata: fm::case::Metadata {
                     created_sitrep_id: sitrep_id,
                     closed_sitrep_id: None,
-                    de: fm::DiagnosisEngineKind::PowerShelf,
+                    de: fm::DiagnosisEngineKind::PhysicalDisk,
                     comment: "my cool case".to_string(),
                 },
                 ereports,
                 alerts_requested,
                 support_bundles_requested,
+                facts,
             }
         };
 
@@ -2260,7 +2807,13 @@ mod tests {
             ereports
                 .insert_unique(fm::case::CaseEreport {
                     id: omicron_uuid_kinds::CaseEreportUuid::new_v4(),
-                    ereport: Arc::new(fm::Ereport::new(ereport2, reporter)),
+                    ereport: Arc::new(fm::Ereport::new(
+                        ereport2_id,
+                        time_collected,
+                        collector_id,
+                        ereport2,
+                        reporter,
+                    )),
                     assigned_sitrep_id: sitrep_id,
                     comment: "this has something to do with case 2".to_string(),
                 })
@@ -2271,6 +2824,7 @@ mod tests {
                 .insert_unique(fm::case::AlertRequest {
                     id: AlertUuid::new_v4(),
                     class: AlertClass::TestQuuxBar,
+                    version: 0,
                     payload: serde_json::json!({}),
                     requested_sitrep_id: sitrep_id,
                     comment: String::new(),
@@ -2288,6 +2842,7 @@ mod tests {
                 ereports,
                 alerts_requested,
                 support_bundles_requested: iddqd::IdOrdMap::new(),
+                facts: iddqd::IdOrdMap::new(),
             }
         };
 
@@ -2309,10 +2864,89 @@ mod tests {
                 time_created: Utc::now(),
                 parent_sitrep_id: None,
                 next_inv_min_time_started: Utc::now(),
+                alert_generation: Generation::new(),
+                support_bundle_generation: Generation::new(),
             },
             cases,
             ereports_by_id,
         }
+    }
+
+    /// Make an empty analysis report for testing purposes.
+    fn make_test_analysis_report(
+        sitrep: &fm::Sitrep,
+    ) -> model::fm::SitrepAnalysisReport {
+        use nexus_types::fm::analysis_reports::{AnalysisReport, InputReport};
+
+        // XXX(eliza): this is not actually representative of the new sitrep,
+        // since we don't have access to its parent (and there may not actually
+        // be one, as the test sitrep may be initialized with a non-existant
+        // parent). Therefore, we can't populate most of the parent fields of
+        // the analysis report --- we don't know which cases were open in the
+        // parent, or its inventory ID. This doesn't actually matter, as the
+        // tests don't care about the *contents* of the analysis reports, just
+        // that a record exists. But it's worth noting that the input report is
+        // kinda wrong.
+        let input_report = InputReport {
+            parent_sitrep_id: sitrep.parent_id(),
+            parent_inv_id: None,
+            num_ereporter_restarts: 0,
+            inv_id: sitrep.inv_id(),
+            new_ereport_ids: Default::default(),
+            open_cases: Default::default(),
+            closed_cases_copied_forward: Default::default(),
+            in_service_disks: Default::default(),
+        };
+        let analysis_report = AnalysisReport {
+            log: Default::default(),
+            sitrep_id: sitrep.id(),
+            comment: format!(
+                "{} (totally fake analysis report)",
+                sitrep.metadata.comment
+            ),
+            cases: Default::default(),
+        };
+        model::fm::SitrepAnalysisReport::new(&input_report, &analysis_report)
+            .expect("failed to serialize analysis report")
+    }
+
+    #[tokio::test]
+    async fn test_sitrep_analysis_report_roundtrip() {
+        let logctx =
+            dev::test_setup_log("test_sitrep_analysis_report_roundtrip");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let sitrep = make_sitrep_with_cases(&opctx, &datastore).await;
+        let sitrep_id = sitrep.id();
+        let report = make_test_analysis_report(&sitrep);
+
+        datastore
+            .fm_sitrep_insert(&opctx, sitrep.clone(), Some(report.clone()))
+            .await
+            .expect("failed to insert sitrep with analysis report");
+
+        // Read the analysis report back directly, mirroring how `omdb` loads
+        // it.
+        let read: model::fm::SitrepAnalysisReport = {
+            use nexus_db_schema::schema::fm_sitrep_analysis_report::dsl;
+            dsl::fm_sitrep_analysis_report
+                .filter(dsl::sitrep_id.eq(sitrep_id.into_untyped_uuid()))
+                .select(model::fm::SitrepAnalysisReport::as_select())
+                .first_async(
+                    &*datastore.pool_connection_for_tests().await.unwrap(),
+                )
+                .await
+                .expect("failed to read back analysis report")
+        };
+
+        assert_eq!(read.sitrep_id, report.sitrep_id);
+        assert_eq!(read.git_commit, report.git_commit);
+        assert_eq!(read.input_report, report.input_report);
+        assert_eq!(read.analysis_report, report.analysis_report);
+
+        db.terminate().await;
+        logctx.cleanup_successful();
     }
 
     #[tokio::test]
@@ -2322,10 +2956,11 @@ mod tests {
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
         let sitrep = make_sitrep_with_cases(&opctx, &datastore).await;
+        let report = make_test_analysis_report(&sitrep);
         let sitrep_id = sitrep.id();
 
         datastore
-            .fm_sitrep_insert(&opctx, sitrep.clone())
+            .fm_sitrep_insert(&opctx, sitrep.clone(), Some(report))
             .await
             .expect("failed to insert sitrep");
 
@@ -2406,6 +3041,7 @@ mod tests {
             ereports: iddqd::IdOrdMap::new(),
             alerts_requested: iddqd::IdOrdMap::new(),
             support_bundles_requested,
+            facts: iddqd::IdOrdMap::new(),
         };
 
         let mut cases = iddqd::IdOrdMap::new();
@@ -2419,13 +3055,15 @@ mod tests {
                 time_created: Utc::now(),
                 parent_sitrep_id: None,
                 next_inv_min_time_started: Utc::now(),
+                alert_generation: Generation::new(),
+                support_bundle_generation: Generation::new(),
             },
             cases,
             ereports_by_id: Default::default(),
         };
 
         datastore
-            .fm_sitrep_insert(&opctx, sitrep.clone())
+            .fm_sitrep_insert(&opctx, sitrep.clone(), None)
             .await
             .expect("failed to insert sitrep");
 
@@ -2448,10 +3086,11 @@ mod tests {
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
         let sitrep = make_sitrep_with_cases(&opctx, &datastore).await;
+        let report = make_test_analysis_report(&sitrep);
         let sitrep_id = sitrep.id();
 
         datastore
-            .fm_sitrep_insert(&opctx, sitrep.clone())
+            .fm_sitrep_insert(&opctx, sitrep.clone(), Some(report))
             .await
             .expect("failed to insert sitrep");
 
@@ -2471,10 +3110,13 @@ mod tests {
                         comment: "my cool sitrep".to_string(),
                         inv_collection_id: CollectionUuid::new_v4(),
                         next_inv_min_time_started: Utc::now(),
+                        alert_generation: Generation::new(),
+                        support_bundle_generation: Generation::new(),
                     },
                     cases: Default::default(),
                     ereports_by_id: Default::default(),
                 },
+                None,
             )
             .await
             .expect("failed to insert second sitrep");
@@ -2600,8 +3242,9 @@ mod tests {
         // Create a sitrep and insert it.
         let sitrep = make_sitrep_with_cases(opctx, datastore).await;
         let sitrep_id = sitrep.metadata.id;
+        let report = make_test_analysis_report(&sitrep);
         datastore
-            .fm_sitrep_insert(opctx, sitrep.clone())
+            .fm_sitrep_insert(opctx, sitrep.clone(), Some(report))
             .await
             .expect("failed to insert sitrep");
 
@@ -2616,23 +3259,24 @@ mod tests {
         // sitrep we intend to delete, as the sitrep insert operation makes a
         // sitrep the current sitrep, and a sitrep cannot be deleted if it is
         // current.
+        let child = fm::Sitrep {
+            metadata: fm::SitrepMetadata {
+                parent_sitrep_id: Some(sitrep_id),
+                id: SitrepUuid::new_v4(),
+                time_created: Utc::now(),
+                creator_id: OmicronZoneUuid::new_v4(),
+                comment: "my cool sitrep".to_string(),
+                inv_collection_id: CollectionUuid::new_v4(),
+                next_inv_min_time_started: Utc::now(),
+                alert_generation: Generation::new(),
+                support_bundle_generation: Generation::new(),
+            },
+            cases: Default::default(),
+            ereports_by_id: Default::default(),
+        };
+        let child_report = make_test_analysis_report(&child);
         datastore
-            .fm_sitrep_insert(
-                opctx,
-                fm::Sitrep {
-                    metadata: fm::SitrepMetadata {
-                        parent_sitrep_id: Some(sitrep_id),
-                        id: SitrepUuid::new_v4(),
-                        time_created: Utc::now(),
-                        creator_id: OmicronZoneUuid::new_v4(),
-                        comment: "my cool sitrep".to_string(),
-                        inv_collection_id: CollectionUuid::new_v4(),
-                        next_inv_min_time_started: Utc::now(),
-                    },
-                    cases: Default::default(),
-                    ereports_by_id: Default::default(),
-                },
-            )
+            .fm_sitrep_insert(opctx, child, Some(child_report))
             .await
             .expect("failed to insert second sitrep");
 
@@ -2762,12 +3406,16 @@ mod tests {
                 time_created: Utc::now(),
                 parent_sitrep_id: None,
                 next_inv_min_time_started: Utc::now(),
+                alert_generation: Generation::new(),
+                support_bundle_generation: Generation::new(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
         };
+        let sitrep1_id = sitrep1.id();
+        let sitrep1_report = make_test_analysis_report(&sitrep1);
         datastore
-            .fm_sitrep_insert(opctx, sitrep1)
+            .fm_sitrep_insert(opctx, sitrep1, Some(sitrep1_report))
             .await
             .expect("inserting initial sitrep should succeed");
 
@@ -2800,6 +3448,7 @@ mod tests {
                 requested_sitrep_id: ghost_sitrep_id.into(),
                 case_id: ghost_case_id.into(),
                 class: AlertClass::Probe.into(),
+                version: 0u32.into(),
                 payload: serde_json::json!({}),
                 comment: String::new(),
             })
@@ -2856,6 +3505,39 @@ mod tests {
             .expect("inserting deeply orphaned data selection host_info");
         }
 
+        // Insert a deeply-orphaned analysis report.
+        let ghost_analysis_report = {
+            use nexus_types::fm::analysis_reports::{
+                AnalysisReport, InputReport,
+            };
+            let input_report = InputReport {
+                parent_sitrep_id: Some(sitrep1_id),
+                parent_inv_id: None,
+                inv_id: CollectionUuid::new_v4(),
+                new_ereport_ids: Default::default(),
+                open_cases: Default::default(),
+                closed_cases_copied_forward: Default::default(),
+                num_ereporter_restarts: 0,
+                in_service_disks: Default::default(),
+            };
+            let analysis_report = AnalysisReport {
+                log: Default::default(),
+                sitrep_id: ghost_sitrep_id,
+                comment: "spooky ghost analysis report".to_string(),
+                cases: Default::default(),
+            };
+            model::fm::SitrepAnalysisReport::new(
+                &input_report,
+                &analysis_report,
+            )
+            .expect("ghost analysis report should be valid")
+        };
+        diesel::insert_into(analysis_report_dsl::fm_sitrep_analysis_report)
+            .values(ghost_analysis_report)
+            .execute_async(&*conn)
+            .await
+            .expect("inserting deeply orphaned analysis report");
+
         // Verify the rows exist.
         let sb_requests_before: i64 =
             support_bundle_req_dsl::fm_support_bundle_request
@@ -2891,6 +3573,21 @@ mod tests {
             .unwrap();
         assert_eq!(alerts_before, 1, "alert request should exist before GC");
 
+        let analysis_reports_before: i64 =
+            analysis_report_dsl::fm_sitrep_analysis_report
+                .filter(
+                    analysis_report_dsl::sitrep_id
+                        .eq(ghost_sitrep_id.into_untyped_uuid()),
+                )
+                .count()
+                .get_result_async::<i64>(&*conn)
+                .await
+                .unwrap();
+        assert_eq!(
+            analysis_reports_before, 1,
+            "analysis report should exist before GC"
+        );
+
         // Verify the ghost sitrep does NOT exist in fm_sitrep.
         let sitrep_exists: i64 = sitrep_dsl::fm_sitrep
             .filter(sitrep_dsl::id.eq(ghost_sitrep_id.into_untyped_uuid()))
@@ -2902,8 +3599,10 @@ mod tests {
 
         // Run the unified GC, which should clean up the deeply-orphaned
         // children (and any normal orphans too).
-        let result =
-            datastore.fm_sitrep_gc_orphans(opctx).await.expect("GC orphans");
+        let result = datastore
+            .fm_sitrep_gc_orphans(opctx, SQL_BATCH_SIZE)
+            .await
+            .expect("GC orphans");
         assert_eq!(
             result.child_tables[&SitrepChildTable::Case].rows_deleted,
             1
@@ -2938,6 +3637,10 @@ mod tests {
                 [&SitrepChildTable::SupportBundleRequestDataSelectionEreports]
                 .rows_deleted,
             0, // we didn't insert any
+        );
+        assert_eq!(
+            result.child_tables[&SitrepChildTable::AnalysisReport].rows_deleted,
+            1,
         );
 
         // Verify the rows are gone.
@@ -2975,6 +3678,21 @@ mod tests {
             "support bundle request should be gone after GC"
         );
 
+        let analysis_reports_after: i64 =
+            analysis_report_dsl::fm_sitrep_analysis_report
+                .filter(
+                    analysis_report_dsl::sitrep_id
+                        .eq(ghost_sitrep_id.into_untyped_uuid()),
+                )
+                .count()
+                .get_result_async::<i64>(&*conn)
+                .await
+                .unwrap();
+        assert_eq!(
+            analysis_reports_after, 0,
+            "analysis report should be gone after GC"
+        );
+
         db.terminate().await;
         logctx.cleanup_successful();
     }
@@ -2999,12 +3717,15 @@ mod tests {
                 time_created: Utc::now(),
                 parent_sitrep_id: None,
                 next_inv_min_time_started: Utc::now(),
+                alert_generation: Generation::new(),
+                support_bundle_generation: Generation::new(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
         };
+        let sitrep1_report = make_test_analysis_report(&sitrep1);
         datastore
-            .fm_sitrep_insert(opctx, sitrep1)
+            .fm_sitrep_insert(opctx, sitrep1, Some(sitrep1_report))
             .await
             .expect("inserting initial sitrep should succeed");
 
@@ -3126,12 +3847,15 @@ mod tests {
                 time_created: Utc::now(),
                 parent_sitrep_id: None,
                 next_inv_min_time_started: Utc::now(),
+                alert_generation: Generation::new(),
+                support_bundle_generation: Generation::new(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
         };
+        let sitrep1_report = make_test_analysis_report(&sitrep1);
         datastore
-            .fm_sitrep_insert(opctx, sitrep1)
+            .fm_sitrep_insert(opctx, sitrep1, Some(sitrep1_report))
             .await
             .expect("inserting initial sitrep should succeed");
 
@@ -3215,72 +3939,9 @@ mod tests {
         logctx.cleanup_successful();
     }
 
-    // ---------------------------------------------------------------
-    // SitrepChildTableCounts: queries each table listed in
-    // `SitrepChildTable::ALL` to count the number of rows matching a
-    // given `sitrep_id`. Used by tests to verify that orphan GC
-    // actually cleaned up the expected rows.
-    //
-    // Mirrors `BlueprintTableCounts` from deployment.rs; the
-    // completeness test below ensures every `fm_*` child table with
-    // a `sitrep_id` column is covered by `SitrepChildTable`.
-    // ---------------------------------------------------------------
-
-    struct SitrepChildTableCounts {
-        counts: BTreeMap<String, i64>,
-    }
-
+    // This one lives here because the pub test utils don't need it, and rustc
+    // warns it's unused if it lives there.
     impl SitrepChildTableCounts {
-        /// Query row counts for each child table tracked by
-        /// `SitrepChildTable`, for the given `sitrep_id`.
-        async fn new(
-            datastore: &DataStore,
-            sitrep_id: SitrepUuid,
-        ) -> SitrepChildTableCounts {
-            let conn = datastore.pool_connection_for_tests().await.unwrap();
-            let mut counts = BTreeMap::new();
-
-            for &table in SitrepChildTable::ALL {
-                let mut query = QueryBuilder::new();
-                query.sql("SELECT COUNT(*) FROM ");
-                query.sql(table.table_name());
-                query.sql(" WHERE ");
-                query.sql(table.sitrep_id_column());
-                query.sql(" = ");
-                query.param().bind::<diesel::sql_types::Uuid, _>(
-                    sitrep_id.into_untyped_uuid(),
-                );
-
-                let count: i64 = query
-                    .query::<diesel::sql_types::BigInt>()
-                    .get_result_async(&*conn)
-                    .await
-                    .unwrap_or_else(|e| {
-                        panic!(
-                            "failed to count rows in {}: {e}",
-                            table.table_name()
-                        )
-                    });
-                counts.insert(table.table_name().to_string(), count);
-            }
-
-            let table_counts = SitrepChildTableCounts { counts };
-
-            // Verify no new fm_* child tables were added without
-            // updating SitrepChildTable.
-            if let Err(msg) =
-                table_counts.verify_all_tables_covered(datastore).await
-            {
-                panic!("{msg}");
-            }
-
-            table_counts
-        }
-
-        fn all_empty(&self) -> bool {
-            self.counts.values().all(|&count| count == 0)
-        }
-
         fn empty_tables(&self) -> Vec<String> {
             self.counts
                 .iter()
@@ -3290,69 +3951,6 @@ mod tests {
                     },
                 )
                 .collect()
-        }
-
-        fn non_empty_tables(&self) -> Vec<String> {
-            self.counts
-                .iter()
-                .filter_map(
-                    |(table, &count)| {
-                        if count > 0 { Some(table.clone()) } else { None }
-                    },
-                )
-                .collect()
-        }
-
-        fn tables_checked(&self) -> BTreeSet<&str> {
-            self.counts.keys().map(|s| s.as_str()).collect()
-        }
-
-        /// Verify no new fm_* tables were added without updating
-        /// `SitrepChildTable`.
-        async fn verify_all_tables_covered(
-            &self,
-            datastore: &DataStore,
-        ) -> Result<(), String> {
-            let conn = datastore.pool_connection_for_tests().await.unwrap();
-
-            // fm_* tables that are NOT children of fm_sitrep and are
-            // intentionally ignored.
-            let tables_ignored: BTreeSet<&str> =
-                ["fm_sitrep", "fm_sitrep_history"].into_iter().collect();
-            let tables_checked = self.tables_checked();
-
-            let mut query = QueryBuilder::new();
-            query.sql(
-                "SELECT table_name FROM information_schema.tables \
-                 WHERE table_name LIKE 'fm\\_%'",
-            );
-            let tables_unchecked: Vec<String> = query
-                .query::<diesel::sql_types::Text>()
-                .load_async(&*conn)
-                .await
-                .expect("failed to query information_schema for fm_* tables")
-                .into_iter()
-                .filter(|f: &String| {
-                    let t = f.as_str();
-                    !tables_ignored.contains(t) && !tables_checked.contains(t)
-                })
-                .collect();
-
-            if !tables_unchecked.is_empty() {
-                Err(format!(
-                    "found fm_* child table(s) not covered by \
-                     `SitrepChildTable`: {}\n\n\
-                     If you added a new fm_* child table, add a variant \
-                     to `SitrepChildTable` and update the orphan GC code \
-                     in `fm_sitrep_gc_orphans`.\n\n\
-                     If your new table should NOT be covered by orphan GC, \
-                     either drop the `fm_` prefix or add it to \
-                     `tables_ignored` in this test.",
-                    tables_unchecked.join(", ")
-                ))
-            } else {
-                Ok(())
-            }
         }
     }
 
@@ -3374,19 +3972,6 @@ mod tests {
         }
     }
 
-    async fn ensure_sitrep_children_fully_deleted(
-        datastore: &DataStore,
-        sitrep_id: SitrepUuid,
-    ) {
-        let counts = SitrepChildTableCounts::new(datastore, sitrep_id).await;
-
-        assert!(
-            counts.all_empty(),
-            "sitrep {sitrep_id} not fully deleted. Non-empty tables: {:?}",
-            counts.non_empty_tables()
-        );
-    }
-
     #[tokio::test]
     async fn test_representative_sitrep_child_tables() {
         let logctx =
@@ -3397,9 +3982,10 @@ mod tests {
         // Build a representative sitrep that populates every child table.
         let sitrep = make_sitrep_with_cases(&opctx, &datastore).await;
         let sitrep_id = sitrep.id();
+        let report = make_test_analysis_report(&sitrep);
 
         datastore
-            .fm_sitrep_insert(&opctx, sitrep.clone())
+            .fm_sitrep_insert(&opctx, sitrep.clone(), Some(report))
             .await
             .expect("failed to insert sitrep");
 
@@ -3409,23 +3995,24 @@ mod tests {
 
         // Insert a child sitrep so the original is no longer current
         // and can be deleted.
+        let child = fm::Sitrep {
+            metadata: fm::SitrepMetadata {
+                parent_sitrep_id: Some(sitrep_id),
+                id: SitrepUuid::new_v4(),
+                time_created: Utc::now(),
+                creator_id: OmicronZoneUuid::new_v4(),
+                comment: "child sitrep".to_string(),
+                inv_collection_id: CollectionUuid::new_v4(),
+                next_inv_min_time_started: Utc::now(),
+                alert_generation: Generation::new(),
+                support_bundle_generation: Generation::new(),
+            },
+            cases: Default::default(),
+            ereports_by_id: Default::default(),
+        };
+        let child_report = make_test_analysis_report(&child);
         datastore
-            .fm_sitrep_insert(
-                opctx,
-                fm::Sitrep {
-                    metadata: fm::SitrepMetadata {
-                        parent_sitrep_id: Some(sitrep_id),
-                        id: SitrepUuid::new_v4(),
-                        time_created: Utc::now(),
-                        creator_id: OmicronZoneUuid::new_v4(),
-                        comment: "child sitrep".to_string(),
-                        inv_collection_id: CollectionUuid::new_v4(),
-                        next_inv_min_time_started: Utc::now(),
-                    },
-                    cases: Default::default(),
-                    ereports_by_id: Default::default(),
-                },
-            )
+            .fm_sitrep_insert(opctx, child, Some(child_report))
             .await
             .expect("failed to insert child sitrep");
 
@@ -3530,8 +4117,9 @@ mod tests {
                         make_sitrep_with_cases(&opctx, &datastore).await;
                     sitrep.metadata.parent_sitrep_id = last_child_id;
                     let sitrep_id = sitrep.id();
+                    let report = make_test_analysis_report(&sitrep);
                     match datastore
-                        .fm_sitrep_insert(&opctx, sitrep.clone())
+                        .fm_sitrep_insert(&opctx, sitrep.clone(), Some(report))
                         .await
                     {
                         Ok(()) => {}
@@ -3559,7 +4147,11 @@ mod tests {
                         make_sitrep_with_cases(&opctx, &datastore).await;
                     child.metadata.parent_sitrep_id = Some(sitrep_id);
                     let child_id = child.id();
-                    match datastore.fm_sitrep_insert(&opctx, child).await {
+                    let child_report = make_test_analysis_report(&child);
+                    match datastore
+                        .fm_sitrep_insert(&opctx, child, Some(child_report))
+                        .await
+                    {
                         Ok(()) => {}
                         Err(InsertSitrepError::ParentNotCurrent(_)) => {
                             slog::info!(
@@ -3667,7 +4259,7 @@ mod tests {
             handles.push(tokio::spawn(async move {
                 while !stop.load(Ordering::Relaxed) {
                     let result = datastore
-                        .fm_sitrep_gc_orphans(&opctx)
+                        .fm_sitrep_gc_orphans(&opctx, SQL_BATCH_SIZE)
                         .await
                         .unwrap_or_else(|e| {
                             panic!(

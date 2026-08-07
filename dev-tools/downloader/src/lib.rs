@@ -69,6 +69,9 @@ enum Target {
     /// Maghemite mgd binary
     MaghemiteMgd,
 
+    /// Maghemite ddmd binary
+    MaghemiteDdmd,
+
     /// SoftNPU, an admin program (scadm) and a pre-compiled P4 program.
     Softnpu,
 
@@ -137,6 +140,7 @@ pub async fn run_cmd(args: DownloadArgs) -> Result<()> {
                     Target::Console => downloader.download_console().await,
                     Target::DendriteStub => downloader.download_dendrite_stub().await,
                     Target::MaghemiteMgd => downloader.download_maghemite_mgd().await,
+                    Target::MaghemiteDdmd => downloader.download_maghemite_ddmd().await,
                     Target::Softnpu => downloader.download_softnpu().await,
                     Target::TransceiverControl => {
                         downloader.download_transceiver_control().await
@@ -253,8 +257,8 @@ impl<'a> Downloader<'a> {
 
         // Need to build - create temp directory
         info!(self.log, "Building {project} from source at commit {commit}");
-        let temp_dir = tempfile::tempdir()?;
-        let temp_path = Utf8PathBuf::try_from(temp_dir.path().to_path_buf())?;
+        let temp_dir = camino_tempfile::tempdir()?;
+        let temp_path = temp_dir.path().to_owned();
 
         // Clone and checkout the specific commit
         let repo_url = format!("https://github.com/oxidecomputer/{}", project);
@@ -937,6 +941,84 @@ impl Downloader<'_> {
 
                 // Copy built binary to binary_dir
                 let dest = binary_dir.join("mgd");
+                tokio::fs::copy(&built_binaries[0], &dest).await?;
+                set_permissions(&dest, 0o755).await?;
+            }
+            Os::Illumos => (),
+        }
+
+        Ok(())
+    }
+
+    async fn download_maghemite_ddmd(&self) -> Result<()> {
+        let download_dir = self.output_dir.join("downloads");
+        tokio::fs::create_dir_all(&download_dir).await?;
+
+        let checksums_path = self.versions_dir.join("maghemite_mgd_checksums");
+        let [mg_ddm_sha2, ddmd_linux_sha2] = get_values_from_file(
+            ["MG_DDM_SHA256", "DDMD_LINUX_SHA256"],
+            &checksums_path,
+        )
+        .await?;
+        let commit_path =
+            self.versions_dir.join("maghemite_ddm_openapi_version");
+        let [commit] = get_values_from_file(["COMMIT"], &commit_path).await?;
+
+        let repo = "oxidecomputer/maghemite";
+        let base_url = format!("{BUILDOMAT_URL}/{repo}/image/{commit}");
+
+        let filename = "mg-ddm.tar.gz";
+        let tarball_path = download_dir.join(filename);
+        download_file_and_verify(
+            &self.log,
+            &tarball_path,
+            &format!("{base_url}/{filename}"),
+            ChecksumAlgorithm::Sha2,
+            &mg_ddm_sha2,
+        )
+        .await?;
+        unpack_tarball(&self.log, &tarball_path, &download_dir).await?;
+
+        let destination_dir = self.output_dir.join("mg-ddm");
+        let _ = tokio::fs::remove_dir_all(&destination_dir).await;
+        tokio::fs::create_dir_all(&destination_dir).await?;
+        copy_dir_all(
+            &download_dir.join("root"),
+            &destination_dir.join("root"),
+        )?;
+
+        let binary_dir = destination_dir.join("root/opt/oxide/mg-ddm/bin");
+
+        match os_name()? {
+            Os::Linux => {
+                let filename = "ddmd";
+                let path = download_dir.join(filename);
+                download_file_and_verify(
+                    &self.log,
+                    &path,
+                    &format!(
+                        "{BUILDOMAT_URL}/{repo}/linux/{commit}/{filename}"
+                    ),
+                    ChecksumAlgorithm::Sha2,
+                    &ddmd_linux_sha2,
+                )
+                .await?;
+                set_permissions(&path, 0o755).await?;
+                tokio::fs::copy(path, binary_dir.join(filename)).await?;
+            }
+            Os::Mac => {
+                info!(
+                    self.log,
+                    "Building maghemite ddmd from source for macOS"
+                );
+
+                let binaries = [("ddmd", &["--no-default-features"][..])];
+
+                let built_binaries = self
+                    .build_from_git("maghemite", &commit, &binaries)
+                    .await?;
+
+                let dest = binary_dir.join("ddmd");
                 tokio::fs::copy(&built_binaries[0], &dest).await?;
                 set_permissions(&dest, 0o755).await?;
             }

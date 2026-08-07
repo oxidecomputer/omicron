@@ -4,4 +4,9 @@
 
 //! Functional code for the latest versions of types.
 
+pub(crate) mod histogram;
 mod producer;
+pub(crate) mod quantile;
+pub(crate) mod schema;
+pub(crate) mod traits;
+pub(crate) mod types;

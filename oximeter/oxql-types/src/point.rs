@@ -4,8 +4,6 @@
 
 //! Definition of data points for OxQL.
 
-// Copyright 2026 Oxide Computer Company
-
 use anyhow::Context;
 use anyhow::Error;
 use chrono::DateTime;
@@ -2041,7 +2039,7 @@ mod tests {
         let expected = vec![now, meas0.timestamp()];
         let actual = points.start_times.as_ref().unwrap();
         assert_eq!(expected.len(), actual.len());
-        for (x, y) in expected.into_iter().zip(actual.into_iter()) {
+        for (x, y) in expected.into_iter().zip(actual) {
             assert!((*y - x).num_nanoseconds().unwrap() <= 1);
         }
     }

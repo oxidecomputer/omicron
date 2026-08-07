@@ -41,6 +41,8 @@ use nexus_types::external_api::support_bundle::{
     SupportBundleCreate, SupportBundleFilePath, SupportBundlePath,
     SupportBundleUpdate,
 };
+use nexus_types::fm::config::FmConfigParam;
+use nexus_types::fm::config::FmConfigView;
 use nexus_types::internal_api::params::InstanceMigrateRequest;
 use nexus_types::internal_api::params::RackInitializationRequest;
 use nexus_types::internal_api::views::BackgroundTask;
@@ -53,8 +55,8 @@ use nexus_types::internal_api::views::UpdateStatus;
 use nexus_types::internal_api::views::to_list;
 use nexus_types::trust_quorum::TrustQuorumConfig;
 use nexus_types_versions::latest::headers::RangeRequest;
+use nexus_types_versions::latest::instance::Instance;
 use omicron_common::api::external::Error;
-use omicron_common::api::external::Instance;
 use omicron_common::api::external::http_pagination::PaginatedById;
 use omicron_common::api::external::http_pagination::PaginatedByTimeAndId;
 use omicron_common::api::external::http_pagination::ScanById;
@@ -96,7 +98,7 @@ impl NexusLockstepApi for NexusLockstepApiImpl {
         nexus
             .rack_initialize(
                 &opctx,
-                path.rack_id,
+                RackUuid::from_untyped_uuid(path.rack_id),
                 request,
                 true, // blueprint_execution_enabled
             )
@@ -1139,6 +1141,102 @@ impl NexusLockstepApi for NexusLockstepApiImpl {
                 crate::context::op_context_for_internal_api(&rqctx).await;
             let epoch = nexus.tq_remove_sled(&opctx, sled_id).await?;
             Ok(HttpResponseOk(epoch))
+        };
+        apictx
+            .internal_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn fm_known_ereport_classes_list(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Vec<String>>, HttpError> {
+        let apictx = &rqctx.context().context;
+        let handler = async {
+            let classes = nexus_fm::diagnosis::known_ereport_classes()
+                .iter()
+                .map(|s| (*s).to_string())
+                .collect();
+            Ok(HttpResponseOk(classes))
+        };
+        apictx
+            .internal_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn fm_config_show_current(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<FmConfigView>, HttpError> {
+        let apictx = &rqctx.context().context;
+        let handler = async {
+            let datastore = &apictx.nexus.datastore();
+            let opctx =
+                crate::context::op_context_for_internal_api(&rqctx).await;
+            let config = match datastore.fm_config_get_latest(&opctx).await? {
+                Some(db_config) => FmConfigView::try_from(db_config)?,
+                // If no config overrides exist in the database, we are using
+                // the default, so just return it. The `FmConfigSource` value
+                // will clearly indicate it's a default rather than a DB
+                // override, and the caller wants to see the current config...so
+                // this will indicate that it's the default in a nicer way than
+                // just 404ing here.
+                None => FmConfigView::default(),
+            };
+
+            Ok(HttpResponseOk(config))
+        };
+        apictx
+            .internal_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn fm_config_show_version(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<VersionPathParam>,
+    ) -> Result<HttpResponseOk<FmConfigView>, HttpError> {
+        let apictx = &rqctx.context().context;
+        let handler = async {
+            let datastore = &apictx.nexus.datastore();
+            let opctx =
+                crate::context::op_context_for_internal_api(&rqctx).await;
+            let version =
+                path_params.into_inner().version.try_into().map_err(|_| {
+                    Error::invalid_value(
+                        "version",
+                        "FM config override versions must be greater \
+                             than  zero",
+                    )
+                })?;
+            let db_config = datastore
+                .fm_config_get(&opctx, version)
+                .await?
+                .ok_or_else(|| {
+                    Error::non_resourcetype_not_found(format!("no fault management config override version v{version} exists"))})?;
+            let config = FmConfigView::try_from(db_config)?;
+            Ok(HttpResponseOk(config))
+        };
+        apictx
+            .internal_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn fm_config_set(
+        rqctx: RequestContext<Self::Context>,
+        config: TypedBody<FmConfigParam>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let apictx = &rqctx.context().context;
+        let handler = async {
+            let datastore = &apictx.nexus.datastore();
+            let opctx =
+                crate::context::op_context_for_internal_api(&rqctx).await;
+
+            datastore
+                .fm_config_insert_latest_version(&opctx, config.into_inner())
+                .await?;
+            Ok(HttpResponseUpdatedNoContent())
         };
         apictx
             .internal_latencies

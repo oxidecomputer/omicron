@@ -9,6 +9,7 @@ use crate::kstat::Error;
 use crate::kstat::KstatList;
 use crate::kstat::KstatTarget;
 use crate::kstat::hrtime_to_utc;
+use crate::kstat::n_processors;
 use kstat_rs::Data;
 use kstat_rs::Kstat;
 use kstat_rs::Named;
@@ -27,6 +28,11 @@ const CPU_STATES: &[&str] = &["user", "sys", "waitrq"];
 
 /// The prefix used for Omicron zone names.
 const ZONE_PREFIX: &str = "oxz_";
+
+/// The maximum cardinality of the data we produce, per sampling interval.
+pub fn max_cardinality() -> usize {
+    CPU_STATES.len() * n_processors().unwrap_or(1024)
+}
 
 /// Parsed zone metadata from a zone name formatted as "oxz_TYPE_UUID".
 struct ZoneMetadata {
@@ -94,7 +100,7 @@ impl KstatTarget for Zone {
 
             /* Parse zone kstats into cpu samples.
 
-            States for the zone module look like this (stats we don't use elided):
+            Stats for the zone module look like this (stats we don't use elided):
 
             ...
             zones:26:oxz_cockroachdb_8bbea076-ff60-:nsec_sys        112675830670973

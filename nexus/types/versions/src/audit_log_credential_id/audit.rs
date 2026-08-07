@@ -11,23 +11,7 @@ use std::net::IpAddr;
 use uuid::Uuid;
 
 use crate::v2025_11_20_00::audit::{AuditLogEntryActor, AuditLogEntryResult};
-
-/// Authentication method used for a request
-#[derive(
-    Debug, Clone, Copy, Deserialize, Serialize, JsonSchema, PartialEq, Eq,
-)]
-#[serde(rename_all = "snake_case")]
-pub enum AuthMethod {
-    /// Console session cookie
-    SessionCookie,
-    /// Device access token (OAuth 2.0 device authorization flow)
-    AccessToken,
-    /// SCIM client bearer token
-    ScimToken,
-    /// Spoof authentication (test only)
-    #[schemars(skip)]
-    Spoof,
-}
+use crate::v2026_01_15_00::audit::AuthMethod;
 
 /// Audit log entry
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
@@ -67,4 +51,22 @@ pub struct AuditLogEntry {
 
     /// Result of the operation
     pub result: AuditLogEntryResult,
+}
+
+impl From<AuditLogEntry> for crate::v2026_01_15_00::audit::AuditLogEntry {
+    fn from(new: AuditLogEntry) -> Self {
+        Self {
+            id: new.id,
+            time_started: new.time_started,
+            request_id: new.request_id,
+            request_uri: new.request_uri,
+            operation_id: new.operation_id,
+            source_ip: new.source_ip,
+            user_agent: new.user_agent,
+            actor: new.actor,
+            auth_method: new.auth_method,
+            time_completed: new.time_completed,
+            result: new.result,
+        }
+    }
 }

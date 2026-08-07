@@ -6,11 +6,11 @@
 
 use crate::latest::early_networking::BgpPeerConfig;
 use crate::latest::early_networking::InvalidIpAddrError;
+use crate::latest::early_networking::LinkFec;
+use crate::latest::early_networking::LinkSpeed;
 use crate::latest::early_networking::LldpAdminStatus;
 use crate::latest::early_networking::MaxPathConfig;
 use crate::latest::early_networking::MaxPathConfigError;
-use crate::latest::early_networking::PortFec;
-use crate::latest::early_networking::PortSpeed;
 use crate::latest::early_networking::RouterLifetimeConfig;
 use crate::latest::early_networking::RouterLifetimeConfigError;
 use crate::latest::early_networking::RouterPeerIpAddr;
@@ -21,14 +21,13 @@ use crate::latest::early_networking::UplinkAddress;
 use crate::latest::early_networking::UplinkAddressConfig;
 use crate::latest::early_networking::UplinkIpNet;
 use crate::latest::early_networking::UplinkIpNetError;
-use omicron_common::api::external;
+use ipnetwork::IpNetwork;
 use oxnet::IpNet;
 use oxnet::IpNetParseError;
 use oxnet::Ipv6Net;
 use std::fmt;
 use std::net::AddrParseError;
 use std::net::IpAddr;
-use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
 use std::str::FromStr;
 
@@ -66,32 +65,6 @@ impl BgpPeerConfig {
 
     pub fn keepalive(&self) -> u64 {
         self.keepalive.unwrap_or(Self::DEFAULT_KEEPALIVE)
-    }
-}
-
-impl From<PortFec> for external::LinkFec {
-    fn from(x: PortFec) -> Self {
-        match x {
-            PortFec::Firecode => Self::Firecode,
-            PortFec::None => Self::None,
-            PortFec::Rs => Self::Rs,
-        }
-    }
-}
-
-impl From<PortSpeed> for external::LinkSpeed {
-    fn from(x: PortSpeed) -> Self {
-        match x {
-            PortSpeed::Speed0G => Self::Speed0G,
-            PortSpeed::Speed1G => Self::Speed1G,
-            PortSpeed::Speed10G => Self::Speed10G,
-            PortSpeed::Speed25G => Self::Speed25G,
-            PortSpeed::Speed40G => Self::Speed40G,
-            PortSpeed::Speed50G => Self::Speed50G,
-            PortSpeed::Speed100G => Self::Speed100G,
-            PortSpeed::Speed200G => Self::Speed200G,
-            PortSpeed::Speed400G => Self::Speed400G,
-        }
     }
 }
 
@@ -134,6 +107,12 @@ impl std::fmt::Display for UplinkIpNet {
 impl std::fmt::Display for RouterPeerIpAddr {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.0.fmt(f)
+    }
+}
+
+impl From<RouterPeerIpAddr> for IpNetwork {
+    fn from(value: RouterPeerIpAddr) -> Self {
+        Self::from(IpAddr::from(value))
     }
 }
 
@@ -180,18 +159,6 @@ impl FromStr for RouterPeerIpAddr {
 }
 
 impl RouterPeerType {
-    /// In contexts where we cannot use this strong type to describe
-    /// "unnumbered" addresses, we have two or three possible representations:
-    ///
-    /// * In a context where we need a non-optional `IpAddr`, we could use
-    ///   `Ipv4Addr::UNSPECIFIED` or `Ipv6Addr::UNSPECIFIED`.
-    /// * In a context where we need `Option<IpAddr>`, we could use `None`,
-    ///   Some(`Ipv4Addr::UNSPECIFIED`), or Some(`Ipv6Addr::UNSPECIFIED`).
-    ///
-    /// In the optional case, we always prefer `None`. In the non-optional case,
-    /// we choose this sentinel value.
-    pub const UNNUMBERED_SENTINEL: IpAddr = IpAddr::V4(Ipv4Addr::UNSPECIFIED);
-
     /// Returns true if `Self` describes a numbered peer; false otherwise.
     pub fn is_numbered(&self) -> bool {
         match self {
@@ -203,31 +170,6 @@ impl RouterPeerType {
     /// Returns true if `Self` describes an unnumbered peer; false otherwise.
     pub fn is_unnumbered(&self) -> bool {
         !self.is_numbered()
-    }
-
-    /// Squash this address down to an [`IpAddr`] by converting
-    /// [`RouterPeerType::Unnumbered`] to
-    /// [`RouterPeerType::UNNUMBERED_SENTINEL`].
-    ///
-    /// Uses of this function probably indicate places where we could consider
-    /// using stronger types.
-    pub fn ip_squashing_unnumbered_to_sentinel(&self) -> IpAddr {
-        match *self {
-            Self::Unnumbered { .. } => Self::UNNUMBERED_SENTINEL,
-            Self::Numbered { ip } => ip.into(),
-        }
-    }
-
-    /// Squash this address down to an [`Option<IpAddr>`] by converting
-    /// [`RouterPeerType::Unnumbered`] to `None`.
-    ///
-    /// Uses of this function probably indicate places where we could consider
-    /// using stronger types.
-    pub fn ip_squashing_unnumbered_to_none(&self) -> Option<IpAddr> {
-        match *self {
-            Self::Unnumbered { .. } => None,
-            Self::Numbered { ip } => Some(ip.into()),
-        }
     }
 }
 
@@ -336,28 +278,369 @@ impl fmt::Debug for SwitchSlot {
     }
 }
 
-impl fmt::Display for PortSpeed {
+impl fmt::Display for LinkSpeed {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            PortSpeed::Speed0G => write!(f, "0G"),
-            PortSpeed::Speed1G => write!(f, "1G"),
-            PortSpeed::Speed10G => write!(f, "10G"),
-            PortSpeed::Speed25G => write!(f, "25G"),
-            PortSpeed::Speed40G => write!(f, "40G"),
-            PortSpeed::Speed50G => write!(f, "50G"),
-            PortSpeed::Speed100G => write!(f, "100G"),
-            PortSpeed::Speed200G => write!(f, "200G"),
-            PortSpeed::Speed400G => write!(f, "400G"),
+            LinkSpeed::Speed0G => write!(f, "0G"),
+            LinkSpeed::Speed1G => write!(f, "1G"),
+            LinkSpeed::Speed10G => write!(f, "10G"),
+            LinkSpeed::Speed25G => write!(f, "25G"),
+            LinkSpeed::Speed40G => write!(f, "40G"),
+            LinkSpeed::Speed50G => write!(f, "50G"),
+            LinkSpeed::Speed100G => write!(f, "100G"),
+            LinkSpeed::Speed200G => write!(f, "200G"),
+            LinkSpeed::Speed400G => write!(f, "400G"),
         }
     }
 }
 
-impl fmt::Display for PortFec {
+impl fmt::Display for LinkFec {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            PortFec::Firecode => write!(f, "Firecode R-FEC"),
-            PortFec::None => write!(f, "None"),
-            PortFec::Rs => write!(f, "RS-FEC"),
+            LinkFec::Firecode => write!(f, "Firecode R-FEC"),
+            LinkFec::None => write!(f, "None"),
+            LinkFec::Rs => write!(f, "RS-FEC"),
+        }
+    }
+}
+
+// proptest `Arbitrary` impls that are too complex for
+// `#[derive(test_strategy::Arbitrary)]`
+#[cfg(any(test, feature = "testing"))]
+mod complicated_arbitrary_impls {
+    use super::*;
+    use crate::latest::early_networking::BfdMode;
+    use crate::latest::early_networking::BfdPeerConfig;
+    use crate::latest::early_networking::BgpConfig;
+    use crate::latest::early_networking::ImportExportPolicy;
+    use oxnet::Ipv4Net;
+    use proptest::prelude::*;
+    use std::net::Ipv4Addr;
+    use std::num::NonZeroU8;
+
+    // Some of our stricter IP address newtypes reject a variety of
+    // otherwise-valid IPs that proptest can generate: loopback addresses,
+    // multicast addresses, ipv4-mapped-ipv6 addresses, etc. These helpers
+    // define strategies for IPs that avoid all of those special cases.
+    fn arb_unspecial_ipv4() -> BoxedStrategy<Ipv4Addr> {
+        #[derive(Debug, Clone, test_strategy::Arbitrary)]
+        struct Octets {
+            #[strategy(1_u8..127)]
+            first: u8,
+            rest: [u8; 3],
+        }
+        any::<Octets>()
+            .prop_map(|arb| {
+                let mut octets = [0; 4];
+                octets[0] = arb.first;
+                octets[1..].copy_from_slice(&arb.rest);
+                Ipv4Addr::from_octets(octets)
+            })
+            .boxed()
+    }
+    fn arb_unspecial_ipv6() -> BoxedStrategy<Ipv6Addr> {
+        #[derive(Debug, Clone, test_strategy::Arbitrary)]
+        struct Segments {
+            #[strategy(1_u16..0xfe00)]
+            first: u16,
+            rest: [u16; 7],
+        }
+        any::<Segments>()
+            .prop_map(|arb| {
+                let mut segments = [0; 8];
+                segments[0] = arb.first;
+                segments[1..].copy_from_slice(&arb.rest);
+                Ipv6Addr::from_segments(segments)
+            })
+            .boxed()
+    }
+    fn arb_unspecial_ip() -> BoxedStrategy<IpAddr> {
+        #[derive(Debug, Clone, test_strategy::Arbitrary)]
+        enum Ip {
+            V4(#[strategy(arb_unspecial_ipv4())] Ipv4Addr),
+            V6(#[strategy(arb_unspecial_ipv6())] Ipv6Addr),
+        }
+        any::<Ip>()
+            .prop_map(|ip| match ip {
+                Ip::V4(ip) => IpAddr::V4(ip),
+                Ip::V6(ip) => IpAddr::V6(ip),
+            })
+            .boxed()
+    }
+
+    impl Arbitrary for RouterPeerIpAddr {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            arb_unspecial_ip()
+                .prop_map(|ip| {
+                    Self::try_from(ip).expect(
+                        "unspecial IPs should produce valid RouterPeerIpAddrs",
+                    )
+                })
+                .boxed()
+        }
+    }
+
+    impl Arbitrary for UplinkIpNet {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            #[derive(Debug, Clone, Copy, test_strategy::Arbitrary)]
+            enum ValidIpNet {
+                V4 {
+                    #[strategy(arb_unspecial_ipv4())]
+                    ip: Ipv4Addr,
+                    #[strategy(32 - #ip.to_bits().trailing_zeros() as u8..=32)]
+                    prefix: u8,
+                },
+                V6 {
+                    #[strategy(arb_unspecial_ipv6())]
+                    ip: Ipv6Addr,
+                    #[strategy(128 - #ip.to_bits().trailing_zeros() as u8..=128)]
+                    prefix: u8,
+                },
+            }
+
+            any::<ValidIpNet>()
+                .prop_map(|arb| {
+                    let ipnet = match arb {
+                        ValidIpNet::V4 { ip, prefix } => {
+                            let ipnet =
+                                Ipv4Net::new(ip, prefix).expect("valid prefix");
+                            IpNet::from(
+                                Ipv4Net::new(ipnet.prefix(), prefix)
+                                    .expect("valid prefix"),
+                            )
+                        }
+                        ValidIpNet::V6 { ip, prefix } => {
+                            let ipnet =
+                                Ipv6Net::new(ip, prefix).expect("valid prefix");
+                            IpNet::from(
+                                Ipv6Net::new(ipnet.prefix(), prefix)
+                                    .expect("valid prefix"),
+                            )
+                        }
+                    };
+                    UplinkIpNet::try_from(ipnet)
+                        .expect("ValidIpNet produces valid UplinkIpNets")
+                })
+                .boxed()
+        }
+    }
+
+    impl Arbitrary for BgpConfig {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            use proptest::collection::vec;
+
+            // mgd will reject shaper / checker source that isn't a valid Rhai
+            // program with `open()` and `update()` functions, but we're not
+            // going to try to generate arbitrary Rhai source. Instead, generate
+            // a valid (empty) Rhai program prefixed by an arbitrary comment (so
+            // we can still test _changes_ to this source).
+            fn make_rhai_checker_shaper(comment: RhaiComment) -> String {
+                format!(
+                    "// {}\n\
+                    fn open(a, b, c) {{}}\n\
+                    fn update(a, b, c) {{}}",
+                    comment.comment
+                )
+            }
+            #[derive(Debug, Clone, test_strategy::Arbitrary)]
+            struct RhaiComment {
+                #[strategy("[0-9a-zA-Z]{0,16}")]
+                comment: String,
+            }
+
+            (
+                any::<u32>(),
+                vec(any::<UplinkIpNet>(), 0..8),
+                any::<Option<RhaiComment>>(),
+                any::<Option<RhaiComment>>(),
+                any::<MaxPathConfig>(),
+            )
+                .prop_map(|(asn, originate, shaper, checker, max_paths)| Self {
+                    asn,
+                    originate: originate.into_iter().map(From::from).collect(),
+                    shaper: shaper.map(make_rhai_checker_shaper),
+                    checker: checker.map(make_rhai_checker_shaper),
+                    max_paths,
+                })
+                .boxed()
+        }
+    }
+
+    impl Arbitrary for ImportExportPolicy {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            use proptest::collection::vec;
+
+            #[derive(Debug, Clone, test_strategy::Arbitrary)]
+            enum ArbPolicy {
+                NoFiltering,
+                Allow(
+                    #[strategy(vec(any::<UplinkIpNet>(), 0..8))]
+                    Vec<UplinkIpNet>,
+                ),
+            }
+
+            any::<ArbPolicy>()
+                .prop_map(|policy| match policy {
+                    ArbPolicy::NoFiltering => Self::NoFiltering,
+                    ArbPolicy::Allow(nets) => {
+                        Self::Allow(nets.into_iter().map(From::from).collect())
+                    }
+                })
+                .boxed()
+        }
+    }
+
+    impl Arbitrary for BgpPeerConfig {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            use proptest::collection::vec;
+
+            // Initial set of fields that are generated at random.
+            #[derive(Debug, Clone, test_strategy::Arbitrary)]
+            struct InitialFields {
+                asn: u32,
+                #[strategy("[[:print:]]{0,16}")]
+                port: String,
+                addr: RouterPeerType,
+                hold_time: Option<u64>,
+                idle_hold_time: Option<u64>,
+                delay_open: Option<u64>,
+                connect_retry: Option<u64>,
+                remote_asn: Option<u32>,
+                min_ttl: Option<u8>,
+                #[strategy(prop_oneof![
+                    Just(None).boxed(),
+                    // Workaround for
+                    // https://github.com/oxidecomputer/maghemite/issues/765:
+                    // never generate a key > 80 bytes
+                    "[[:print:]]{0,80}".prop_map(Some).boxed(),
+                ])]
+                md5_auth_key: Option<String>,
+                multi_exit_discriminator: Option<u32>,
+                #[strategy(vec(any::<u32>(), 0..8))]
+                communities: Vec<u32>,
+                local_pref: Option<u32>,
+                enforce_first_as: bool,
+                allowed_import: ImportExportPolicy,
+                allowed_export: ImportExportPolicy,
+                vlan_id: Option<u16>,
+            }
+
+            fn arb_keepalive(
+                initial: &InitialFields,
+            ) -> BoxedStrategy<Option<u64>> {
+                let Some(hold_time) = initial.hold_time else {
+                    return Just(None).boxed();
+                };
+                prop_oneof![Just(None), (0..=hold_time).prop_map(Some),].boxed()
+            }
+
+            prop_compose! {
+                fn bgp_peer_config_strategy()(
+                    initial_fields in any::<InitialFields>(),
+                )(
+                    keepalive in arb_keepalive(&initial_fields),
+                    initial_fields in Just(initial_fields),
+                ) -> BgpPeerConfig {
+                    BgpPeerConfig {
+                        asn: initial_fields.asn,
+                        port: initial_fields.port,
+                        addr: initial_fields.addr,
+                        hold_time: initial_fields.hold_time,
+                        idle_hold_time: initial_fields.idle_hold_time,
+                        delay_open: initial_fields.delay_open,
+                        connect_retry: initial_fields.connect_retry,
+                        keepalive,
+                        remote_asn: initial_fields.remote_asn,
+                        min_ttl: initial_fields.min_ttl,
+                        md5_auth_key: initial_fields.md5_auth_key,
+                        multi_exit_discriminator: initial_fields
+                            .multi_exit_discriminator,
+                        communities: initial_fields.communities,
+                        local_pref: initial_fields.local_pref,
+                        enforce_first_as: initial_fields.enforce_first_as,
+                        allowed_import: initial_fields.allowed_import,
+                        allowed_export: initial_fields.allowed_export,
+                        vlan_id: initial_fields.vlan_id,
+                    }
+                }
+            }
+
+            bgp_peer_config_strategy().boxed()
+        }
+    }
+
+    impl Arbitrary for BfdPeerConfig {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            // Initial set of fields that are generated at random.
+            #[derive(Debug, Clone, test_strategy::Arbitrary)]
+            struct InitialFields {
+                remote: IpAddr,
+                // TODO-cleanup mgd rejects requests with a detection threshold
+                // of 0; we should push this type out to BfdPeerConfig.
+                detection_threshold: NonZeroU8,
+                required_rx: u64,
+                mode: BfdMode,
+                switch: SwitchSlot,
+            }
+
+            // We only want to tell proptests to attempt to use a local
+            // listening address of localhost, but we have to pick the right
+            // protocol family of localhost that matches the remote address.
+            //
+            // TODO-correctness What actual validation should be performed on
+            // BFD listening addresses? Taking an arbitrary IP doesn't seem
+            // right; we can only listen on an address that exists within the
+            // switch zone, but even then shouldn't listen on some  (e.g., the
+            // underlay/bootstrap addrs).
+            fn arb_local(initial: &InitialFields) -> Just<Option<IpAddr>> {
+                match initial.remote {
+                    IpAddr::V4(_) => {
+                        Just(Some(IpAddr::V4(Ipv4Addr::LOCALHOST)))
+                    }
+                    IpAddr::V6(_) => {
+                        Just(Some(IpAddr::V6(Ipv6Addr::LOCALHOST)))
+                    }
+                }
+            }
+
+            prop_compose! {
+                fn bfd_peer_config_strategy()(
+                    initial_fields in any::<InitialFields>(),
+                )(
+                    local in arb_local(&initial_fields),
+                    initial_fields in Just(initial_fields),
+                ) -> BfdPeerConfig {
+                    BfdPeerConfig {
+                        local,
+                        remote: initial_fields.remote,
+                        detection_threshold:
+                            initial_fields.detection_threshold.get(),
+                        required_rx: initial_fields.required_rx,
+                        mode: initial_fields.mode,
+                        switch: initial_fields.switch,
+                    }
+                }
+            }
+
+            bfd_peer_config_strategy().boxed()
         }
     }
 }
@@ -369,6 +652,7 @@ mod tests {
     use oxnet::Ipv4Net;
     use proptest::prelude::*;
     use serde::{Deserialize, Serialize};
+    use std::net::Ipv4Addr;
     use test_strategy::proptest;
 
     #[test]
