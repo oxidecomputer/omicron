@@ -8,25 +8,14 @@
 
 use chrono::DateTime;
 use chrono::Utc;
-use indent_write::fmt::IndentWriter;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use std::fmt;
-use std::fmt::Write;
 use std::time::Duration;
 
 pub mod dpd;
 pub mod lldpd;
 pub mod mgd;
 pub mod uplinkd;
-
-trait DisplayableStatus {
-    type DisplayAdapter<'a>: fmt::Display
-    where
-        Self: 'a;
-
-    fn display<'a>(&'a self) -> Self::DisplayAdapter<'a>;
-}
 
 /// Whether or not this sled is a scrimlet.
 #[derive(
@@ -88,17 +77,6 @@ pub enum ReconcilerActivationReason {
     ScrimletStatusChanged,
 }
 
-impl ReconcilerActivationReason {
-    fn description(&self) -> &'static str {
-        match self {
-            Self::Startup => "first execution on start",
-            Self::PeriodicTimer => "periodic timer fired",
-            Self::SystemNetworkingConfigChanged => "networking config changed",
-            Self::ScrimletStatusChanged => "switch presence changed",
-        }
-    }
-}
-
 /// Status of a completed-in-the-past reconciliation attempt.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[schemars(rename = "ReconciliationCompletedStatus{T}")]
@@ -114,37 +92,6 @@ pub struct ReconciliationCompletedStatus<T> {
     pub activation_count: u64,
     /// Reconciler-specific status.
     pub status: T,
-}
-
-impl<T> ReconciliationCompletedStatus<T> {
-    pub fn display(&self) -> ReconciliationCompletedStatusDisplay<'_, T> {
-        ReconciliationCompletedStatusDisplay(self)
-    }
-}
-
-pub struct ReconciliationCompletedStatusDisplay<'a, T>(
-    &'a ReconciliationCompletedStatus<T>,
-);
-
-impl<T> fmt::Display for ReconciliationCompletedStatusDisplay<'_, T>
-where
-    T: DisplayableStatus,
-{
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let ReconciliationCompletedStatus {
-            activation_reason,
-            completed_at_time,
-            ran_for,
-            activation_count,
-            status,
-        } = self.0;
-        writeln!(f, "activation reason: {}", activation_reason.description())?;
-        writeln!(f, "activation count: {activation_count}")?;
-        writeln!(f, "completed at {completed_at_time}")?;
-        writeln!(f, "ran for {ran_for:?}")?;
-        writeln!(f, "detailed status:")?;
-        write!(IndentWriter::new("    ", f), "{}", status.display())
-    }
 }
 
 /// Status of a currently-running reconciliation attempt.
@@ -169,47 +116,6 @@ pub enum ReconcilerCurrentStatus {
     Idle,
 }
 
-impl ReconcilerCurrentStatus {
-    pub fn display(&self) -> ReconcilerCurrentStatusDisplay<'_> {
-        ReconcilerCurrentStatusDisplay(self)
-    }
-}
-
-pub struct ReconcilerCurrentStatusDisplay<'a>(&'a ReconcilerCurrentStatus);
-
-impl fmt::Display for ReconcilerCurrentStatusDisplay<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self.0 {
-            ReconcilerCurrentStatus::Inert(reason) => match reason {
-                ReconcilerInertReason::NoLongerAScrimlet => {
-                    write!(f, "inert: switch no longer present")
-                }
-                ReconcilerInertReason::TaskExitedUnexpectedly => write!(
-                    f,
-                    "inert: task exited unexpectedly \
-                     (this should be impossible!)"
-                ),
-            },
-            ReconcilerCurrentStatus::Running(ReconcilerRunningStatus {
-                activation_reason,
-                started_at_time,
-                running_for,
-            }) => {
-                writeln!(f, "currently running:")?;
-                let mut f = IndentWriter::new("    ", f);
-                writeln!(
-                    f,
-                    "activation reason: {}",
-                    activation_reason.description()
-                )?;
-                writeln!(f, "started at {started_at_time}")?;
-                write!(f, "running for {running_for:?}")
-            }
-            ReconcilerCurrentStatus::Idle => write!(f, "idle"),
-        }
-    }
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[schemars(rename = "ReconcilerStatus{T}")]
 pub struct ReconcilerStatus<T> {
@@ -219,41 +125,6 @@ pub struct ReconcilerStatus<T> {
     // Box the inner status to avoid clippy complaining about
     // `ScrimletReconcilersStatus::Running { ... }` being overly large.
     pub last_completion: Option<Box<ReconciliationCompletedStatus<T>>>,
-}
-
-impl<T> ReconcilerStatus<T> {
-    pub fn display(&self) -> ReconcilerStatusDisplay<'_, T> {
-        ReconcilerStatusDisplay(self)
-    }
-}
-
-pub struct ReconcilerStatusDisplay<'a, T>(&'a ReconcilerStatus<T>);
-
-impl<T> fmt::Display for ReconcilerStatusDisplay<'_, T>
-where
-    T: DisplayableStatus,
-{
-    fn fmt(&self, mut f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let ReconcilerStatus { current_status, last_completion } = self.0;
-        writeln!(f, "current status:")?;
-        writeln!(
-            IndentWriter::new("    ", &mut f),
-            "{}",
-            current_status.display()
-        )?;
-
-        if let Some(last_completion) = last_completion {
-            writeln!(f, "last completion:")?;
-            writeln!(
-                IndentWriter::new("    ", f),
-                "{}",
-                last_completion.display()
-            )?;
-        } else {
-            writeln!(f, "last completion: none")?;
-        }
-        Ok(())
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -272,88 +143,4 @@ pub enum ScrimletReconcilersStatus {
         mgd_reconciler: ReconcilerStatus<mgd::MgdReconcilerStatus>,
         uplinkd_reconciler: ReconcilerStatus<uplinkd::UplinkdReconcilerStatus>,
     },
-}
-
-impl ScrimletReconcilersStatus {
-    /// Get a `fmt::Display`-able version of this status (e.g., for `omdb`).
-    pub fn display(&self) -> ScrimletReconcilersStatusDisplay<'_> {
-        ScrimletReconcilersStatusDisplay(self)
-    }
-}
-
-pub struct ScrimletReconcilersStatusDisplay<'a>(&'a ScrimletReconcilersStatus);
-
-impl fmt::Display for ScrimletReconcilersStatusDisplay<'_> {
-    fn fmt(&self, mut f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self.0 {
-            ScrimletReconcilersStatus::WaitingForSledAgentNetworkingInfo => {
-                write!(
-                    f,
-                    "not running: sled-agent has not yet initialized \
-                     the reconciler subsystem with networking information"
-                )
-            }
-            ScrimletReconcilersStatus::DeterminingSwitchSlot(status) => {
-                match status {
-                    DetermineSwitchSlotStatus::NotScrimlet => {
-                        write!(f, "not running: no switch detected")
-                    }
-                    DetermineSwitchSlotStatus::ContactingMgs {
-                        prev_attempt_err,
-                    } => {
-                        writeln!(
-                            f,
-                            "not yet running: attempting to contact MGS \
-                             to determine our location"
-                        )?;
-                        if let Some(err) = prev_attempt_err {
-                            write!(
-                                f,
-                                "    previous MGS contact attempt failed: {err}"
-                            )?;
-                        }
-                        Ok(())
-                    }
-                    DetermineSwitchSlotStatus::WaitingToRetry {
-                        prev_attempt_err,
-                    } => {
-                        writeln!(
-                            f,
-                            "not yet running: sleeping before retrying \
-                             contacting MGS to determine our location"
-                        )?;
-                        write!(
-                            f,
-                            "    previous MGS contact attempt failed: \
-                                 {prev_attempt_err}"
-                        )
-                    }
-                }
-            }
-            ScrimletReconcilersStatus::Running {
-                dpd_reconciler,
-                lldpd_reconciler,
-                mgd_reconciler,
-                uplinkd_reconciler,
-            } => {
-                let reconcilers = [
-                    ("dpd", &dpd_reconciler.display() as &dyn fmt::Display),
-                    ("mgd", &mgd_reconciler.display()),
-                    ("lldpd", &lldpd_reconciler.display()),
-                    ("uplinkd", &uplinkd_reconciler.display()),
-                ];
-                let mut reconcilers = reconcilers.iter().peekable();
-                while let Some((name, displayable)) = reconcilers.next() {
-                    writeln!(f, "{name} reconciler:")?;
-                    let mut f = IndentWriter::new("    ", &mut f);
-                    if reconcilers.peek().is_some() {
-                        writeln!(f, "{displayable}")?;
-                    } else {
-                        write!(f, "{displayable}")?;
-                    }
-                }
-                Ok(())
-            }
-        }
-    }
 }

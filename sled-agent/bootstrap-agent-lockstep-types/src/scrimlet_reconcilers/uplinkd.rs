@@ -5,12 +5,9 @@
 //! Types for the status and results of the scrimlet reconcilers responsible for
 //! syncing configuration from the bootstore to uplinkd in the switch zone.
 
-use indent_write::fmt::IndentWriter;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
-use std::fmt;
-use std::fmt::Write;
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case", tag = "status", content = "value")]
@@ -34,56 +31,6 @@ impl slog::KV for UplinkdReconcilerStatus {
                 .emit_str("uplinkd".into(), "skipped: config up-to-date"),
             UplinkdReconcilerStatus::Reconciled { ports } => serializer
                 .emit_usize("uplinkd-reconciled-ports".into(), ports.len()),
-        }
-    }
-}
-
-impl super::DisplayableStatus for UplinkdReconcilerStatus {
-    type DisplayAdapter<'a>
-        = UplinkdReconcilerStatusDisplay<'a>
-    where
-        Self: 'a;
-
-    /// Get a `fmt::Display`-able version of this status (e.g., for `omdb`).
-    fn display(&self) -> UplinkdReconcilerStatusDisplay<'_> {
-        UplinkdReconcilerStatusDisplay(self)
-    }
-}
-
-pub struct UplinkdReconcilerStatusDisplay<'a>(&'a UplinkdReconcilerStatus);
-
-impl fmt::Display for UplinkdReconcilerStatusDisplay<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self.0 {
-            UplinkdReconcilerStatus::Failed(reason) => {
-                write!(f, "reconciliation failed: {reason}")
-            }
-            UplinkdReconcilerStatus::SkippedConfigUpToDate => {
-                write!(f, "reconciliation skipped: config is up to date")
-            }
-            UplinkdReconcilerStatus::Reconciled { ports } => {
-                let plural = if ports.len() == 1 { "" } else { "s" };
-                write!(
-                    f,
-                    "successfully reconciled {} port{plural}",
-                    ports.len()
-                )?;
-
-                if !ports.is_empty() {
-                    writeln!(f, ":")?;
-                    let mut w = IndentWriter::new("    ", f);
-                    let mut ports = ports.iter().peekable();
-                    while let Some((port, values)) = ports.next() {
-                        let s = format_args!("* {port}: {}", values.join(", "));
-                        if ports.peek().is_some() {
-                            writeln!(w, "{s}")?;
-                        } else {
-                            write!(w, "{s}")?;
-                        }
-                    }
-                }
-                Ok(())
-            }
         }
     }
 }
