@@ -9909,7 +9909,7 @@
             ]
           },
           {
-            "description": "An instance whose state is absent or unrecognized. Like `InTransition`, this state does not explicitly exist in `svcs`. Per `man svcs`: Absent or unrecognized states are denoted by a question mark (?) character.",
+            "description": "An instance whose state is absent or unrecognized. Note: as per `man svcs`, \"Absent or unrecognized states are denoted by a question mark (?) character\". So there is not an \"unrecognized\" state per se in svcs.",
             "type": "string",
             "enum": [
               "unrecognized"

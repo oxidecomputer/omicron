@@ -56,8 +56,8 @@ pub enum SvcState {
     /// management facility.
     LegacyRun,
     /// An instance whose state is in transition from one to another. Note: as
-    /// per `man svcs`, An asterisk (*) is appended for instances in transition.
-    /// So there is not an "in-transition" state per se.
+    /// per `man svcs`, "An asterisk (*) is appended for instances in
+    /// transition". So there is not an "in-transition" state per se in svcs.
     InTransition,
     /// An instance whose state is absent or unrecognized. Like `InTransition`,
     /// this state does not explicitly exist in `svcs`. Per `man svcs`: Absent
@@ -133,9 +133,10 @@ pub enum SvcEnabledNotOnlineState {
     Degraded,
     /// The instance is enabled, but not able to run.
     Maintenance,
-    /// An instance whose state is absent or unrecognized. Like `InTransition`,
-    /// this state does not explicitly exist in `svcs`. Per `man svcs`: Absent
-    /// or unrecognized states are denoted by a question mark (?) character.
+    /// An instance whose state is absent or unrecognized. Note: as per
+    /// `man svcs`, "Absent or unrecognized states are denoted by a question
+    /// mark (?) character". So there is not an "unrecognized" state per se in
+    /// svcs.
     Unrecognized,
 }
 
