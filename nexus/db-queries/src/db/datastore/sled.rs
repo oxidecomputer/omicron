@@ -377,56 +377,34 @@ struct LocalStorageCandidatePool {
 
 /// Why no complete set of local storage allocations could be chosen for a
 /// sled.
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 enum LocalStorageUnsatisfiable {
     /// No disks required an allocation. Callers are expected to check for
     /// this case before choosing allocations.
+    #[error("no disks require a local storage allocation")]
     NoAllocationsRequired,
 
     /// There are more disks requiring an allocation than usable pools: each
     /// disk needs a distinct pool.
+    #[error(
+        "{requests} disks require a local storage allocation, \
+         but only {pools} pools are usable"
+    )]
     NotEnoughPools { requests: usize, pools: usize },
 
     /// After pairing the Nth largest request with the pool having the Nth
     /// largest headroom, this pair did not fit. No assignment of these
     /// requests to these pools exists.
+    #[error(
+        "disk {disk_id} requires {required_dataset_size} bytes, \
+         but pool {pool_id} only has {headroom} bytes of headroom"
+    )]
     RequestDoesNotFit {
         disk_id: DiskUuid,
         required_dataset_size: i64,
         pool_id: ZpoolUuid,
         headroom: i64,
     },
-}
-
-impl fmt::Display for LocalStorageUnsatisfiable {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            LocalStorageUnsatisfiable::NoAllocationsRequired => {
-                write!(f, "no disks require a local storage allocation")
-            }
-
-            LocalStorageUnsatisfiable::NotEnoughPools { requests, pools } => {
-                write!(
-                    f,
-                    "{requests} disks require a local storage allocation, \
-                    but only {pools} pools are usable",
-                )
-            }
-
-            LocalStorageUnsatisfiable::RequestDoesNotFit {
-                disk_id,
-                required_dataset_size,
-                pool_id,
-                headroom,
-            } => {
-                write!(
-                    f,
-                    "disk {disk_id} requires {required_dataset_size} bytes, \
-                    but pool {pool_id} only has {headroom} bytes of headroom",
-                )
-            }
-        }
-    }
 }
 
 /// Pair each local storage request with a distinct pool, or return an error
@@ -480,6 +458,8 @@ fn pair_local_storage_requests_to_pools(
     let mut allocations = Vec::with_capacity(requests.len());
 
     for (request, pool) in requests.iter().zip(pools.iter()) {
+        // Both lists are sorted largest-first, so if this pair does not fit,
+        // no other assignment of these requests to these pools fits either.
         if request.required_dataset_size >= pool.headroom {
             return Err(LocalStorageUnsatisfiable::RequestDoesNotFit {
                 disk_id: request.disk_id,
@@ -526,27 +506,26 @@ fn choose_local_storage_allocations(
     zpools_for_sled: &IdOrdMap<ZpoolGetForSledReservationResult>,
     local_storage_disks: &[LocalStorageDisk],
 ) -> Result<NonEmpty<LocalStorageAllocation>, LocalStorageUnsatisfiable> {
-    let requests: Vec<LocalStorageRequest> = local_storage_disks
-        .iter()
-        .filter(|disk| disk.local_storage_dataset_allocation.is_none())
-        .map(|disk| LocalStorageRequest {
-            disk_id: DiskUuid::from_untyped_uuid(disk.id()),
-            required_dataset_size: disk.required_dataset_size(),
-        })
-        .collect();
+    // Each disk either still needs an allocation, or already has one whose
+    // pool (encrypted or unencrypted) is not eligible for further
+    // allocations.
+    let mut requests: Vec<LocalStorageRequest> = Vec::new();
+    let mut used_pools: HashSet<ZpoolUuid> = HashSet::new();
 
-    // Pools that already hold a local storage allocation for this instance
-    // (encrypted or unencrypted) are not eligible for further allocations.
-    let used_pools: HashSet<ZpoolUuid> = local_storage_disks
-        .iter()
-        .filter_map(|disk| {
-            disk.local_storage_dataset_allocation.as_ref().map(|allocation| {
-                ZpoolUuid::from_untyped_uuid(
+    for disk in local_storage_disks {
+        match &disk.local_storage_dataset_allocation {
+            None => requests.push(LocalStorageRequest {
+                disk_id: DiskUuid::from_untyped_uuid(disk.id()),
+                required_dataset_size: disk.required_dataset_size(),
+            }),
+
+            Some(allocation) => {
+                used_pools.insert(ZpoolUuid::from_untyped_uuid(
                     allocation.pool_id().into_untyped_uuid(),
-                )
-            })
-        })
-        .collect();
+                ));
+            }
+        }
+    }
 
     let pools: Vec<LocalStorageCandidatePool> = zpools_for_sled
         .iter()
