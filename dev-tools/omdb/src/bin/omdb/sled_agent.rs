@@ -18,6 +18,10 @@ use clap::Subcommand;
 use sled_agent_client::types::NodeStatus;
 use sled_agent_client::types::OperatorSwitchZonePolicy;
 
+mod reconciler_status;
+
+use reconciler_status::cmd_network_config_reconciler_status;
+
 /// Arguments to the "omdb sled-agent" subcommand
 #[derive(Debug, Args)]
 pub struct SledAgentArgs {
@@ -424,17 +428,4 @@ fn print_trust_quorum_status(status: NodeStatus) {
     println!("    expunged: {:?}", status.persistent_state.expunged);
 
     println!("proxied requests: {}", status.proxied_requests);
-}
-
-/// Runs `omdb sled-agent network-config reconciler-status`
-async fn cmd_network_config_reconciler_status(
-    client: &bootstrap_agent_lockstep_client::Client,
-) -> anyhow::Result<()> {
-    let status = client
-        .scrimlet_reconcilers_status_for_debug()
-        .await
-        .context("failed to fetch reconciler status")?
-        .into_inner();
-    println!("{}", status.display());
-    Ok(())
 }

@@ -5,14 +5,11 @@
 //! Types for the status and results of the scrimlet reconcilers responsible for
 //! syncing configuration from the bootstore to mgd in the switch zone.
 
-use indent_write::fmt::IndentWriter;
 use omicron_common::snake_case_result;
 use omicron_common::snake_case_result::SnakeCaseResult;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
-use std::fmt;
-use std::fmt::Write;
 use std::net::IpAddr;
 
 /// Description of a failure to perform some mgd operation on a BFD peer.
@@ -66,94 +63,6 @@ impl slog::KV for MgdBfdReconcilerStatus {
                     ("bfd-failed-to-add", add_failure.len()),
                 ] {
                     serializer.emit_usize(key.into(), val)?;
-                }
-                Ok(())
-            }
-        }
-    }
-}
-
-impl MgdBfdReconcilerStatus {
-    pub fn display(&self) -> MgdBfdReconcilerStatusDisplay<'_> {
-        MgdBfdReconcilerStatusDisplay(self)
-    }
-}
-
-pub struct MgdBfdReconcilerStatusDisplay<'a>(&'a MgdBfdReconcilerStatus);
-
-impl fmt::Display for MgdBfdReconcilerStatusDisplay<'_> {
-    fn fmt(&self, mut f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self.0 {
-            MgdBfdReconcilerStatus::FailedReadingBfdPeers(err) => {
-                write!(f, "failed to read current bfd peers: {err}")
-            }
-            MgdBfdReconcilerStatus::Complete {
-                unchanged,
-                remove_success,
-                remove_failure,
-                add_success,
-                add_failure,
-            } => {
-                writeln!(f, "reconciliation completed")?;
-                if !unchanged.is_empty() {
-                    writeln!(
-                        f,
-                        "peers unchanged: {}",
-                        unchanged
-                            .iter()
-                            .map(|ip| ip.to_string())
-                            .collect::<Vec<_>>()
-                            .join(", ")
-                    )?;
-                }
-                if !add_success.is_empty() {
-                    writeln!(
-                        f,
-                        "peers added: {}",
-                        add_success
-                            .iter()
-                            .map(|ip| ip.to_string())
-                            .collect::<Vec<_>>()
-                            .join(", ")
-                    )?;
-                }
-                if !remove_success.is_empty() {
-                    writeln!(
-                        f,
-                        "peers removed: {}",
-                        remove_success
-                            .iter()
-                            .map(|ip| ip.to_string())
-                            .collect::<Vec<_>>()
-                            .join(", ")
-                    )?;
-                }
-                if remove_failure.is_empty() {
-                    writeln!(f, "remove failures: none")?;
-                } else {
-                    writeln!(f, "remove failures:")?;
-                    let mut f = IndentWriter::new("    ", &mut f);
-                    for MgdBfdOperationFailure { peer, error } in remove_failure
-                    {
-                        writeln!(f, "* {peer}: {error}")?;
-                    }
-                }
-                if add_failure.is_empty() {
-                    write!(f, "add failures: none")?;
-                } else {
-                    writeln!(f, "add failures:")?;
-                    let mut f = IndentWriter::new("    ", &mut f);
-                    let mut add_failure = add_failure.iter().peekable();
-                    while let Some(MgdBfdOperationFailure { peer, error }) =
-                        add_failure.next()
-                    {
-                        let s = format_args!("* {peer}: {error}");
-                        if add_failure.peek().is_some() {
-                            writeln!(f, "{s}")?;
-                        } else {
-                            write!(f, "{s}")?;
-                        }
-                    }
                 }
                 Ok(())
             }
@@ -251,76 +160,6 @@ impl slog::KV for MgdBgpReconcilerStatusOpCount {
     }
 }
 
-impl MgdBgpReconcilerStatusOpCount {
-    pub fn display(&self) -> MgdBgpReconcilerStatusOpCountDisplay<'_> {
-        MgdBgpReconcilerStatusOpCountDisplay(self)
-    }
-}
-
-pub struct MgdBgpReconcilerStatusOpCountDisplay<'a>(
-    &'a MgdBgpReconcilerStatusOpCount,
-);
-
-impl fmt::Display for MgdBgpReconcilerStatusOpCountDisplay<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let MgdBgpReconcilerStatusOpCount {
-            routers_deleted,
-            routers_updated,
-            routers_created,
-            origin4_deleted,
-            origin4_updated,
-            origin4_created,
-            origin6_deleted,
-            origin6_updated,
-            origin6_created,
-            shapers_deleted,
-            shapers_updated,
-            shapers_created,
-            checkers_deleted,
-            checkers_updated,
-            checkers_created,
-            numbered_peers_deleted,
-            numbered_peers_updated,
-            numbered_peers_created,
-            unnumbered_peers_deleted,
-            unnumbered_peers_updated,
-            unnumbered_peers_created,
-        } = self.0;
-        let lines = [
-            ("routers", routers_created, routers_updated, routers_deleted),
-            ("origin4", origin4_created, origin4_updated, origin4_deleted),
-            ("origin6", origin6_created, origin6_updated, origin6_deleted),
-            ("shapers", shapers_created, shapers_updated, shapers_deleted),
-            ("checkers", checkers_created, checkers_updated, checkers_deleted),
-            (
-                "numbered peers",
-                numbered_peers_created,
-                numbered_peers_updated,
-                numbered_peers_deleted,
-            ),
-            (
-                "unnumbered peers",
-                unnumbered_peers_created,
-                unnumbered_peers_updated,
-                unnumbered_peers_deleted,
-            ),
-        ];
-        let mut lines = lines.iter().peekable();
-        while let Some((name, created, updated, deleted)) = lines.next() {
-            let s = format_args!(
-                "{name} created / updated / deleted: \
-                 {created} / {updated} / {deleted}"
-            );
-            if lines.peek().is_some() {
-                writeln!(f, "{s}")?;
-            } else {
-                write!(f, "{s}")?;
-            }
-        }
-        Ok(())
-    }
-}
-
 /// Status of reconciling BGP settings with `mgd`.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case", tag = "status", content = "value")]
@@ -371,52 +210,6 @@ impl slog::KV for MgdBgpReconcilerStatus {
                 // Each individual error is already logged; only log the count.
                 serializer.emit_usize("bgp-errors".into(), errors.len())?;
                 slog::KV::serialize(&counts, record, serializer)
-            }
-        }
-    }
-}
-
-impl MgdBgpReconcilerStatus {
-    pub fn display(&self) -> MgdBgpReconcilerStatusDisplay<'_> {
-        MgdBgpReconcilerStatusDisplay(self)
-    }
-}
-
-pub struct MgdBgpReconcilerStatusDisplay<'a>(&'a MgdBgpReconcilerStatus);
-
-impl fmt::Display for MgdBgpReconcilerStatusDisplay<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self.0 {
-            MgdBgpReconcilerStatus::FailedReadingBgpConfig(err) => {
-                write!(f, "failed to read current bgp config: {err}")
-            }
-            MgdBgpReconcilerStatus::FailedGeneratingDesiredConfig(err) => {
-                write!(f, "failed to generate desired bgp config: {err}")
-            }
-            MgdBgpReconcilerStatus::Complete {
-                counts,
-                did_change_max_paths,
-                errors,
-            } => {
-                writeln!(f, "reconciliation completed")?;
-                writeln!(f, "did change max paths: {did_change_max_paths}")?;
-                writeln!(f, "{}", counts.display())?;
-                if errors.is_empty() {
-                    write!(f, "errors: none")?;
-                } else {
-                    writeln!(f, "errors:")?;
-                    let mut f = IndentWriter::new("    ", f);
-                    let mut errors = errors.iter().peekable();
-                    while let Some(err) = errors.next() {
-                        let s = format_args!("* {err}");
-                        if errors.peek().is_some() {
-                            writeln!(f, "{s}")?;
-                        } else {
-                            write!(f, "{s}")?;
-                        }
-                    }
-                }
-                Ok(())
             }
         }
     }
@@ -512,93 +305,6 @@ impl slog::KV for MgdStaticRouteReconcilerStatus {
     }
 }
 
-impl MgdStaticRouteReconcilerStatus {
-    pub fn display(&self) -> MgdStaticRouteReconcilerStatusDisplay<'_> {
-        MgdStaticRouteReconcilerStatusDisplay(self)
-    }
-}
-
-pub struct MgdStaticRouteReconcilerStatusDisplay<'a>(
-    &'a MgdStaticRouteReconcilerStatus,
-);
-
-impl fmt::Display for MgdStaticRouteReconcilerStatusDisplay<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self.0 {
-            MgdStaticRouteReconcilerStatus::FailedReadingStaticRoutes(err) => {
-                write!(f, "failed to read current static routes: {err}")
-            }
-            MgdStaticRouteReconcilerStatus::FailedGeneratingPlan(err) => {
-                write!(f, "failed to generate reconciliation plan: {err}")
-            }
-            MgdStaticRouteReconcilerStatus::Complete {
-                unchanged,
-                delete_v4_result,
-                delete_v6_result,
-                add_v4_result,
-                add_v6_result,
-            } => {
-                writeln!(f, "reconciliation completed")?;
-                writeln!(f, "routes unchanged: {unchanged}")?;
-
-                if let (Ok(deleted), Ok(added)) =
-                    (delete_v4_result, add_v4_result)
-                {
-                    writeln!(
-                        f,
-                        "v4 routes deleted / added: {deleted} / {added}"
-                    )?;
-                } else {
-                    match delete_v4_result {
-                        Ok(n) => {
-                            writeln!(f, "v4 routes deleted: {n}")?;
-                        }
-                        Err(err) => {
-                            writeln!(f, "failed to delete v4 routes: {err}")?;
-                        }
-                    }
-                    match add_v4_result {
-                        Ok(n) => {
-                            writeln!(f, "v4 routes added: {n}")?;
-                        }
-                        Err(err) => {
-                            writeln!(f, "failed to add v4 routes: {err}")?;
-                        }
-                    }
-                }
-
-                if let (Ok(deleted), Ok(added)) =
-                    (delete_v6_result, add_v6_result)
-                {
-                    write!(
-                        f,
-                        "v6 routes deleted / added: {deleted} / {added}"
-                    )?;
-                } else {
-                    match delete_v6_result {
-                        Ok(n) => {
-                            writeln!(f, "v6 routes deleted: {n}")?;
-                        }
-                        Err(err) => {
-                            writeln!(f, "failed to delete v6 routes: {err}")?;
-                        }
-                    }
-                    match add_v6_result {
-                        Ok(n) => {
-                            write!(f, "v6 routes added: {n}")?;
-                        }
-                        Err(err) => {
-                            write!(f, "failed to add v6 routes: {err}")?;
-                        }
-                    }
-                }
-
-                Ok(())
-            }
-        }
-    }
-}
-
 /// Status of the `mgd` scrimlet reconciler.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct MgdReconcilerStatus {
@@ -618,46 +324,5 @@ impl slog::KV for MgdReconcilerStatus {
         slog::KV::serialize(bgp_status, record, serializer)?;
         slog::KV::serialize(static_routes_status, record, serializer)?;
         Ok(())
-    }
-}
-
-impl super::DisplayableStatus for MgdReconcilerStatus {
-    type DisplayAdapter<'a>
-        = MgdReconcilerStatusDisplay<'a>
-    where
-        Self: 'a;
-
-    fn display<'a>(&'a self) -> Self::DisplayAdapter<'a> {
-        MgdReconcilerStatusDisplay(self)
-    }
-}
-
-pub struct MgdReconcilerStatusDisplay<'a>(&'a MgdReconcilerStatus);
-
-impl fmt::Display for MgdReconcilerStatusDisplay<'_> {
-    fn fmt(&self, mut f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let MgdReconcilerStatus {
-            bfd_status,
-            bgp_status,
-            static_routes_status,
-        } = self.0;
-        writeln!(f, "static routes:")?;
-        writeln!(
-            IndentWriter::new("    ", &mut f),
-            "{}",
-            static_routes_status.display()
-        )?;
-        writeln!(f, "BGP:")?;
-        writeln!(
-            IndentWriter::new("    ", &mut f),
-            "{}",
-            bgp_status.display()
-        )?;
-        writeln!(f, "BFD:")?;
-        write!(
-            IndentWriter::new("    ", &mut f),
-            "{}",
-            bfd_status.display()
-        )
     }
 }

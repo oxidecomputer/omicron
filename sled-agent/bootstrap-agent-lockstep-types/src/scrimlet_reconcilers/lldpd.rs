@@ -5,13 +5,10 @@
 //! Types for the status and results of the scrimlet reconcilers responsible for
 //! syncing configuration from the bootstore to lldpd in the switch zone.
 
-use indent_write::fmt::IndentWriter;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sled_agent_types::early_networking::LldpAdminStatus;
 use std::collections::BTreeMap;
-use std::fmt;
-use std::fmt::Write;
 
 /// Status of the `lldpd` scrimlet reconciler.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -36,56 +33,6 @@ impl slog::KV for LldpdReconcilerStatus {
                 .emit_str("lldpd".into(), "skipped: config up-to-date"),
             LldpdReconcilerStatus::Reconciled { ports } => serializer
                 .emit_usize("lldpd-reconciled-ports".into(), ports.len()),
-        }
-    }
-}
-
-impl super::DisplayableStatus for LldpdReconcilerStatus {
-    type DisplayAdapter<'a>
-        = LldpdReconcilerStatusDisplay<'a>
-    where
-        Self: 'a;
-
-    /// Get a `fmt::Display`-able version of this status (e.g., for `omdb`).
-    fn display(&self) -> LldpdReconcilerStatusDisplay<'_> {
-        LldpdReconcilerStatusDisplay(self)
-    }
-}
-
-pub struct LldpdReconcilerStatusDisplay<'a>(&'a LldpdReconcilerStatus);
-
-impl fmt::Display for LldpdReconcilerStatusDisplay<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self.0 {
-            LldpdReconcilerStatus::Failed(reason) => {
-                write!(f, "reconciliation failed: {reason}")
-            }
-            LldpdReconcilerStatus::SkippedConfigUpToDate => {
-                write!(f, "reconciliation skipped: config is up to date")
-            }
-            LldpdReconcilerStatus::Reconciled { ports } => {
-                let plural = if ports.len() == 1 { "" } else { "s" };
-                write!(
-                    f,
-                    "successfully reconciled {} port{plural}",
-                    ports.len()
-                )?;
-
-                if !ports.is_empty() {
-                    writeln!(f, ":")?;
-                    let mut w = IndentWriter::new("    ", f);
-                    let mut ports = ports.iter().peekable();
-                    while let Some((port, status)) = ports.next() {
-                        let s = format_args!("* {port}: {status:?}");
-                        if ports.peek().is_some() {
-                            writeln!(w, "{s}")?;
-                        } else {
-                            write!(w, "{s}")?;
-                        }
-                    }
-                }
-                Ok(())
-            }
         }
     }
 }
