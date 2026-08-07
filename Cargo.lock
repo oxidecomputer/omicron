@@ -7918,10 +7918,12 @@ dependencies = [
  "oxnet",
  "pq-sys",
  "reqwest 0.13.2",
+ "serde_json",
  "sled-agent-client",
  "sled-agent-types",
  "slog",
  "slog-error-chain",
+ "steno",
  "tokio",
  "uuid",
 ]
