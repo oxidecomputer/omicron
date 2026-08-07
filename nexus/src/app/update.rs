@@ -1433,9 +1433,6 @@ mod test {
     }
 
     #[nexus_test(server = crate::Server)]
-    // TODO-K: Enable once https://github.com/oxidecomputer/omicron/issues/10997
-    // is worked on
-    #[ignore]
     async fn test_contact_support_services_errors_only(
         cptestctx: &ControlPlaneTestContext,
     ) {
@@ -2237,9 +2234,6 @@ mod test {
     }
 
     #[test]
-    // TODO-K: Enable once https://github.com/oxidecomputer/omicron/issues/10997
-    // is worked on
-    #[ignore]
     fn test_problems_unhealthy_services_errors_only() {
         let logctx =
             test_setup_log("test_problems_unhealthy_services_errors_only");
