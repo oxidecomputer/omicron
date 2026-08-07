@@ -920,16 +920,13 @@ impl VolumeDeleter {
         status.volumes_deleted.push(volume_id.to_string());
     }
 
-    /// Deleting region snapshots in a previous saga node may have freed up
-    /// regions that were deleted in the DB but couldn't be deleted by the
-    /// Crucible Agent because a snapshot existed. Look for those here. These
-    /// will be a different volume id (i.e. for a previously deleted disk) than
-    /// the one in this saga's params struct.
+    /// Deleting region snapshots may have freed up regions that were deleted in
+    /// the DB but couldn't previously be deleted by the Crucible Agent because
+    /// a snapshot existed. Look for those here.
     ///
-    /// It's insufficient to rely on the struct of CrucibleResources to clean up
-    /// that is returned as part of svd_decrease_crucible_resource_count.
-    /// Imagine a disk that is composed of three regions (a subset of
-    /// [`sled_agent_client::VolumeConstructionRequest`] is shown here):
+    /// It's insufficient to rely on the struct of CrucibleResources to clean
+    /// up: imagine a disk that is composed of three regions (a subset of the
+    /// VolumeConstructionRequest is shown here):
     ///
     /// ```json
     /// {
@@ -989,12 +986,11 @@ impl VolumeDeleter {
     ///
     ///   /crucible/0/regions/{id}/snapshots/{name}
     ///
-    /// If the disk is then deleted, the volume delete saga will run for the
-    /// first volume shown here. The CrucibleResources struct returned as part
-    /// of [`svd_decrease_crucible_resource_count`] will contain *nothing* to
-    /// clean up: the regions contain snapshots that are part of other volumes
-    /// and cannot be deleted, and the disk's volume doesn't reference any
-    /// read-only resources.
+    /// If the disk is then deleted, the CrucibleResources struct returned as
+    /// from the soft-delete function will contain *nothing* to clean up: the
+    /// regions contain snapshots that are part of other volumes and cannot be
+    /// deleted, and the disk's volume doesn't reference any read-only
+    /// resources.
     ///
     /// This is expected and normal: regions are "leaked" all the time due to
     /// snapshots preventing their deletion. This function detects when those
