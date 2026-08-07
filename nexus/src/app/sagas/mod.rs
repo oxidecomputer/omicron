@@ -59,7 +59,6 @@ pub mod snapshot_delete;
 pub mod subnet_attach;
 pub mod subnet_detach;
 pub mod test_saga;
-pub mod volume_delete;
 pub mod volume_remove_rop;
 pub mod vpc_create;
 pub mod vpc_subnet_create;
@@ -193,7 +192,6 @@ fn make_action_registry() -> ActionRegistry {
         snapshot_delete::SagaSnapshotDelete,
         subnet_attach::SagaSubnetAttach,
         subnet_detach::SagaSubnetDetach,
-        volume_delete::SagaVolumeDelete,
         volume_remove_rop::SagaVolumeRemoveROP,
         vpc_create::SagaVpcCreate,
         vpc_subnet_create::SagaVpcSubnetCreate,

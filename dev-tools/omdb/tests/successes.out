@@ -389,6 +389,10 @@ task: "inventory_loader"
     loads the latest inventory collection from the DB
 
 
+task: "local_storage_delete"
+    delete resources for disks backed by local storage
+
+
 task: "lookup_region_port"
     fill in missing ports for region records
 
@@ -496,6 +500,10 @@ task: "tuf_repo_pruner"
 
 task: "v2p_manager"
     manages opte v2p mappings for vpc networking
+
+
+task: "volume_delete"
+    delete resources from soft-deleted volumes
 
 
 task: "vpc_route_manager"
@@ -853,6 +861,14 @@ task: "inventory_loader"
     loaded latest inventory collection as of <REDACTED_TIMESTAMP>:
         collection ..........<REDACTED_UUID>..........., taken at <REDACTED_TIMESTAMP>
 
+task: "local_storage_delete"
+  configured period: every <REDACTED_DURATION>h <REDACTED_DURATION>m <REDACTED_DURATION>s
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    result of deleting local storage:
+    result of deallocating local storage:
+    errors: 0
+
 task: "lookup_region_port"
   configured period: every <REDACTED_DURATION>m
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
@@ -1079,6 +1095,16 @@ task: "v2p_manager"
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
 warning: unknown background task: "v2p_manager" (don't know how to interpret details: Object {})
+
+task: "volume_delete"
+  configured period: every <REDACTED_DURATION>h <REDACTED_DURATION>m <REDACTED_DURATION>s
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    result of deleting regions:
+    result of deleting running snapshots:
+    result of deleting snapshots:
+    volumes deleted:
+    errors: 0
 
 task: "vpc_route_manager"
   configured period: every <REDACTED_DURATION>s
@@ -1564,6 +1590,14 @@ task: "inventory_loader"
     loaded latest inventory collection as of <REDACTED_TIMESTAMP>:
         collection ..........<REDACTED_UUID>..........., taken at <REDACTED_TIMESTAMP>
 
+task: "local_storage_delete"
+  configured period: every <REDACTED_DURATION>h <REDACTED_DURATION>m <REDACTED_DURATION>s
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    result of deleting local storage:
+    result of deallocating local storage:
+    errors: 0
+
 task: "lookup_region_port"
   configured period: every <REDACTED_DURATION>m
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
@@ -1790,6 +1824,16 @@ task: "v2p_manager"
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
 warning: unknown background task: "v2p_manager" (don't know how to interpret details: Object {})
+
+task: "volume_delete"
+  configured period: every <REDACTED_DURATION>h <REDACTED_DURATION>m <REDACTED_DURATION>s
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    result of deleting regions:
+    result of deleting running snapshots:
+    result of deleting snapshots:
+    volumes deleted:
+    errors: 0
 
 task: "vpc_route_manager"
   configured period: every <REDACTED_DURATION>s

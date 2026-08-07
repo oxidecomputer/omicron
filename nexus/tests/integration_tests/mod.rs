@@ -18,6 +18,7 @@ mod bfd;
 mod certificates;
 mod cockroach;
 mod commands;
+mod common;
 mod console_api;
 mod crucible_replacements;
 mod data_migrations;

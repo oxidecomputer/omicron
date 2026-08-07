@@ -1403,6 +1403,24 @@ pub struct PhysicalDiskAdoptionStatus {
     pub errors: Vec<String>,
 }
 
+/// The status of a `volume_delete` background task activation
+#[derive(Serialize, Deserialize, Default, Debug, PartialEq, Eq)]
+pub struct VolumeDeleteStatus {
+    pub region_results: Vec<String>,
+    pub running_snapshot_results: Vec<String>,
+    pub snapshot_results: Vec<String>,
+    pub volumes_deleted: Vec<String>,
+    pub errors: Vec<String>,
+}
+
+/// The status of a `local_storage_delete` background task activation
+#[derive(Serialize, Deserialize, Default, Debug, PartialEq, Eq)]
+pub struct LocalStorageDeleteStatus {
+    pub delete_results: Vec<String>,
+    pub deallocate_results: Vec<String>,
+    pub errors: Vec<String>,
+}
+
 #[cfg(test)]
 mod test {
     use super::TufRepoInfo;

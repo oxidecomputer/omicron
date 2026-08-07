@@ -4,6 +4,7 @@
 
 //! Tests basic snapshot support in the API
 
+use crate::integration_tests::common::assert_all_crucible_resources_deleted;
 use crate::integration_tests::instances::instance_simulate;
 use chrono::Utc;
 use dropshot::test_util::ClientTestContext;
@@ -995,7 +996,7 @@ async fn test_snapshot_unwind(cptestctx: &ControlPlaneTestContext) {
         .expect("failed to delete disk");
 
     // Assert everything was cleaned up
-    assert!(disk_test.crucible_resources_deleted().await);
+    assert_all_crucible_resources_deleted(cptestctx, &disk_test).await;
 }
 
 // Test that the code that Saga nodes call is idempotent
