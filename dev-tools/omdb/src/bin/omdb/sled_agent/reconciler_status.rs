@@ -32,6 +32,8 @@ use indent_write::fmt::IndentWriter;
 use std::fmt;
 use std::fmt::Write;
 
+const INDENT: &str = "    ";
+
 /// Runs `omdb sled-agent network-config reconciler-status`
 pub(super) async fn cmd_network_config_reconciler_status(
     client: &bootstrap_agent_lockstep_client::Client,
@@ -69,7 +71,7 @@ impl fmt::Display for ScrimletReconcilersStatusDisplay<'_> {
                     DetermineSwitchSlotStatus::ContactingMgs {
                         prev_attempt_err,
                     } => {
-                        writeln!(
+                        write!(
                             f,
                             "not yet running: attempting to contact MGS \
                              to determine our location"
@@ -77,7 +79,7 @@ impl fmt::Display for ScrimletReconcilersStatusDisplay<'_> {
                         if let Some(err) = prev_attempt_err {
                             write!(
                                 f,
-                                "    previous MGS contact attempt failed: {err}"
+                                " (previous MGS contact attempt failed: {err})"
                             )?;
                         }
                         Ok(())
@@ -85,15 +87,12 @@ impl fmt::Display for ScrimletReconcilersStatusDisplay<'_> {
                     DetermineSwitchSlotStatus::WaitingToRetry {
                         prev_attempt_err,
                     } => {
-                        writeln!(
-                            f,
-                            "not yet running: sleeping before retrying \
-                             contacting MGS to determine our location"
-                        )?;
                         write!(
                             f,
-                            "    previous MGS contact attempt failed: \
-                                 {prev_attempt_err}"
+                            "not yet running: sleeping before retrying \
+                             contacting MGS to determine our location \
+                             (previous MGS contact attempt failed: \
+                              {prev_attempt_err})"
                         )
                     }
                 }
@@ -117,7 +116,7 @@ impl fmt::Display for ScrimletReconcilersStatusDisplay<'_> {
                 let mut reconcilers = reconcilers.iter().peekable();
                 while let Some((name, displayable)) = reconcilers.next() {
                     writeln!(f, "{name} reconciler:")?;
-                    let mut f = IndentWriter::new("    ", &mut f);
+                    let mut f = IndentWriter::new(INDENT, &mut f);
                     if reconcilers.peek().is_some() {
                         writeln!(f, "{displayable}")?;
                     } else {
@@ -148,7 +147,7 @@ where
         let ReconcilerStatus { current_status, last_completion } = self.0;
         writeln!(f, "current status:")?;
         writeln!(
-            IndentWriter::new("    ", &mut f),
+            IndentWriter::new(INDENT, &mut f),
             "{}",
             ReconcilerCurrentStatusDisplay(&current_status),
         )?;
@@ -156,7 +155,7 @@ where
         if let Some(last_completion) = last_completion {
             writeln!(f, "last completion:")?;
             writeln!(
-                IndentWriter::new("    ", f),
+                IndentWriter::new(INDENT, f),
                 "{}",
                 ReconciliationCompletedStatusDisplay(&last_completion)
             )?;
@@ -201,7 +200,7 @@ impl fmt::Display for ReconcilerCurrentStatusDisplay<'_> {
                 running_for,
             }) => {
                 writeln!(f, "currently running:")?;
-                let mut f = IndentWriter::new("    ", f);
+                let mut f = IndentWriter::new(INDENT, f);
                 writeln!(
                     f,
                     "activation reason: {}",
@@ -248,7 +247,7 @@ where
         )?;
         writeln!(f, "ran for {ran_for:?}")?;
         writeln!(f, "detailed status:")?;
-        write!(IndentWriter::new("    ", f), "{}", status.display())
+        write!(IndentWriter::new(INDENT, f), "{}", status.display())
     }
 }
 
@@ -285,7 +284,7 @@ impl fmt::Display for LldpdReconcilerStatusDisplay<'_> {
 
                 if !ports.is_empty() {
                     writeln!(f, ":")?;
-                    let mut w = IndentWriter::new("    ", f);
+                    let mut w = IndentWriter::new(INDENT, f);
                     let mut ports = ports.iter().peekable();
                     while let Some((port, status)) = ports.next() {
                         let s = format_args!("* {port}: {status:?}");
@@ -335,7 +334,7 @@ impl fmt::Display for UplinkdReconcilerStatusDisplay<'_> {
 
                 if !ports.is_empty() {
                     writeln!(f, ":")?;
-                    let mut w = IndentWriter::new("    ", f);
+                    let mut w = IndentWriter::new(INDENT, f);
                     let mut ports = ports.iter().peekable();
                     while let Some((port, values)) = ports.next() {
                         let s = format_args!("* {port}: {}", values.join(", "));
@@ -370,13 +369,13 @@ impl fmt::Display for DpdReconcilerStatusDisplay<'_> {
         let DpdReconcilerStatus { port_settings_status, nat_status } = self.0;
         writeln!(f, "port settings:")?;
         writeln!(
-            IndentWriter::new("    ", &mut f),
+            IndentWriter::new(INDENT, &mut f),
             "{}",
             DpdPortReconcilerStatusDisplay(&port_settings_status),
         )?;
         writeln!(f, "NAT:")?;
         write!(
-            IndentWriter::new("    ", &mut f),
+            IndentWriter::new(INDENT, &mut f),
             "{}",
             DpdNatReconcilerStatusDisplay(&nat_status)
         )
@@ -401,8 +400,8 @@ impl fmt::Display for DpdPortReconcilerStatusDisplay<'_> {
                 applied,
                 apply_failures,
             } => {
-                writeln!(f, "reconciliation complete")?;
-                let mut f = IndentWriter::new("    ", f);
+                writeln!(f, "reconciliation completed")?;
+                let mut f = IndentWriter::new(INDENT, f);
                 if !unchanged.is_empty() {
                     writeln!(
                         f,
@@ -432,7 +431,7 @@ impl fmt::Display for DpdPortReconcilerStatusDisplay<'_> {
                     writeln!(f, "clear failures: none")?;
                 } else {
                     writeln!(f, "clear failures:")?;
-                    let mut f = IndentWriter::new("    ", &mut f);
+                    let mut f = IndentWriter::new(INDENT, &mut f);
                     for DpdPortOperationFailure { port_id, error } in
                         clear_failures
                     {
@@ -443,7 +442,7 @@ impl fmt::Display for DpdPortReconcilerStatusDisplay<'_> {
                     write!(f, "apply failures: none")?;
                 } else {
                     writeln!(f, "apply failures:")?;
-                    let mut f = IndentWriter::new("    ", &mut f);
+                    let mut f = IndentWriter::new(INDENT, &mut f);
                     let mut apply_failures = apply_failures.iter().peekable();
                     while let Some(DpdPortOperationFailure { port_id, error }) =
                         apply_failures.next()
@@ -499,7 +498,7 @@ impl fmt::Display for DpdNatReconcilerStatusDisplay<'_> {
                 create_failures,
             } => {
                 writeln!(f, "reconciliation completed")?;
-                let mut f = IndentWriter::new("    ", f);
+                let mut f = IndentWriter::new(INDENT, f);
                 if !unchanged.is_empty() {
                     writeln!(
                         f,
@@ -543,7 +542,7 @@ impl fmt::Display for DpdNatReconcilerStatusDisplay<'_> {
                     writeln!(f, "remove failures: none")?;
                 } else {
                     writeln!(f, "remove failures:")?;
-                    let mut f = IndentWriter::new("    ", &mut f);
+                    let mut f = IndentWriter::new(INDENT, &mut f);
                     for DpdNatReconcilerStatusNatEntryFailure {
                         entry,
                         error,
@@ -560,7 +559,7 @@ impl fmt::Display for DpdNatReconcilerStatusDisplay<'_> {
                     write!(f, "create failures: none")?;
                 } else {
                     writeln!(f, "create failures:")?;
-                    let mut f = IndentWriter::new("    ", &mut f);
+                    let mut f = IndentWriter::new(INDENT, &mut f);
                     let mut create_failures = create_failures.iter().peekable();
                     while let Some((id, failure)) = create_failures.next() {
                         let DpdNatReconcilerStatusNatEntryFailure {
@@ -606,19 +605,19 @@ impl fmt::Display for MgdReconcilerStatusDisplay<'_> {
         } = self.0;
         writeln!(f, "static routes:")?;
         writeln!(
-            IndentWriter::new("    ", &mut f),
+            IndentWriter::new(INDENT, &mut f),
             "{}",
             MgdStaticRouteReconcilerStatusDisplay(&static_routes_status)
         )?;
         writeln!(f, "BGP:")?;
         writeln!(
-            IndentWriter::new("    ", &mut f),
+            IndentWriter::new(INDENT, &mut f),
             "{}",
             MgdBgpReconcilerStatusDisplay(&bgp_status)
         )?;
         writeln!(f, "BFD:")?;
         write!(
-            IndentWriter::new("    ", &mut f),
+            IndentWriter::new(INDENT, &mut f),
             "{}",
             MgdBfdReconcilerStatusDisplay(&bfd_status)
         )
@@ -641,6 +640,7 @@ impl fmt::Display for MgdBfdReconcilerStatusDisplay<'_> {
                 add_failure,
             } => {
                 writeln!(f, "reconciliation completed")?;
+                let mut f = IndentWriter::new(INDENT, f);
                 if !unchanged.is_empty() {
                     writeln!(
                         f,
@@ -678,7 +678,7 @@ impl fmt::Display for MgdBfdReconcilerStatusDisplay<'_> {
                     writeln!(f, "remove failures: none")?;
                 } else {
                     writeln!(f, "remove failures:")?;
-                    let mut f = IndentWriter::new("    ", &mut f);
+                    let mut f = IndentWriter::new(INDENT, &mut f);
                     for MgdBfdOperationFailure { peer, error } in remove_failure
                     {
                         writeln!(f, "* {peer}: {error}")?;
@@ -688,7 +688,7 @@ impl fmt::Display for MgdBfdReconcilerStatusDisplay<'_> {
                     write!(f, "add failures: none")?;
                 } else {
                     writeln!(f, "add failures:")?;
-                    let mut f = IndentWriter::new("    ", &mut f);
+                    let mut f = IndentWriter::new(INDENT, &mut f);
                     let mut add_failure = add_failure.iter().peekable();
                     while let Some(MgdBfdOperationFailure { peer, error }) =
                         add_failure.next()
@@ -788,6 +788,7 @@ impl fmt::Display for MgdBgpReconcilerStatusDisplay<'_> {
                 errors,
             } => {
                 writeln!(f, "reconciliation completed")?;
+                let mut f = IndentWriter::new(INDENT, f);
                 writeln!(f, "did change max paths: {did_change_max_paths}")?;
                 writeln!(
                     f,
@@ -798,7 +799,7 @@ impl fmt::Display for MgdBgpReconcilerStatusDisplay<'_> {
                     write!(f, "errors: none")?;
                 } else {
                     writeln!(f, "errors:")?;
-                    let mut f = IndentWriter::new("    ", f);
+                    let mut f = IndentWriter::new(INDENT, f);
                     let mut errors = errors.iter().peekable();
                     while let Some(err) = errors.next() {
                         let s = format_args!("* {err}");
@@ -836,6 +837,8 @@ impl fmt::Display for MgdStaticRouteReconcilerStatusDisplay<'_> {
                 add_v6_result,
             } => {
                 writeln!(f, "reconciliation completed")?;
+                let mut f = IndentWriter::new(INDENT, f);
+
                 writeln!(f, "routes unchanged: {unchanged}")?;
 
                 if let (Ok(deleted), Ok(added)) =
