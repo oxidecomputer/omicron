@@ -1,0 +1,159 @@
+format_version = 1
+
+[target]
+name = "opte_port"
+description = "An OPTE port implementing a VPC network interface for an instance, service, or probe"
+authz_scope = "fleet"
+versions = [
+  { version = 1, fields = [ "port_name", "interface_id", "interface_kind", "parent_id", "zone_name", "rack_id", "sled_id", "sled_model", "sled_revision", "sled_serial" ] },
+]
+
+[fields.port_name]
+type = "string"
+description = "Name of the OPTE port"
+
+[fields.interface_kind]
+type = "string"
+description = "The kind of the OPTE port's network interface"
+
+[fields.interface_id]
+type = "uuid"
+description = "The ID of the OPTE port's network interface"
+
+[fields.parent_id]
+type = "uuid"
+description = "The ID of the OPTE port's parent (instance, service, or probe)"
+
+[fields.zone_name]
+type = "string"
+description = "Name of the zone owning the port"
+
+[fields.rack_id]
+type = "uuid"
+description = "ID for the port's rack"
+
+[fields.sled_id]
+type = "uuid"
+description = "ID for the port's sled"
+
+[fields.sled_model]
+type = "string"
+description = "Model number of the port's sled"
+
+[fields.sled_revision]
+type = "u32"
+description = "Revision number of the sled"
+
+[fields.sled_serial]
+type = "string"
+description = "Serial number of the sled"
+
+# Metrics derived from xde:0:opte*:*
+[[metrics]]
+name = "in_uft_hits"
+description = "Inbound Unified Flow Table (UFT) cache hits"
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [] }
+]
+
+[[metrics]]
+name = "in_uft_misses"
+description = "Inbound Unified Flow Table (UFT) cache misses"
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [] }
+]
+
+[[metrics]]
+name = "in_uft_flows"
+description = "Number of cached inbound Unified Flow Table (UFT) flows"
+units = "count"
+datum_type = "u64"
+versions = [
+    { added_in = 1, fields = [] }
+]
+
+[[metrics]]
+name = "in_uft_evictions"
+description = "Inbound Unified Flow Table (UFT) cache evictions"
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [] }
+]
+
+[[metrics]]
+name = "out_uft_hits"
+description = "Outbound Unified Flow Table (UFT) cache hits"
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [] }
+]
+
+[[metrics]]
+name = "out_uft_misses"
+description = "Outbound Unified Flow Table (UFT) cache misses"
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [] }
+]
+
+[[metrics]]
+name = "out_uft_flows"
+description = "Number of cached outbound Unified Flow Table (UFT) flows"
+units = "count"
+datum_type = "u64"
+versions = [
+    { added_in = 1, fields = [] }
+]
+
+[[metrics]]
+name = "out_uft_evictions"
+description = "Outbound Unified Flow Table (UFT) cache evictions"
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [] }
+]
+
+# Metrics derived from xde:0:opte*_route_cache:*
+[[metrics]]
+name = "route_cache_hits"
+description = "Outbound packets that reused a cached nexthop"
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [] }
+]
+
+[[metrics]]
+name = "route_cache_misses"
+description = "Outbound packets that required a nexthop lookup from the OS"
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [] }
+]
+
+[[metrics]]
+name = "route_cache_occupancy"
+description = "Current number of cached nexthops"
+units = "count"
+datum_type = "u64"
+versions = [
+    { added_in = 1, fields = [] }
+]
+
+[[metrics]]
+name = "route_cache_table_full"
+description = "Nexthop lookups not cached because the cache was at capacity"
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [] }
+]
