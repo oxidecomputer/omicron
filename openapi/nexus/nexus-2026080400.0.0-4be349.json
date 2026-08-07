@@ -25109,7 +25109,7 @@
         ]
       },
       "MulticastGroupMember": {
-        "description": "View of a Multicast Group Member (instance belonging to a multicast group)",
+        "description": "View of a Multicast Group Member.\n\nA member may be parented by either an instance or a probe. The `kind` discriminator selects how to interpret `parent_id`.",
         "type": "object",
         "properties": {
           "description": {
@@ -25121,10 +25121,13 @@
             "type": "string",
             "format": "uuid"
           },
-          "instance_id": {
-            "description": "The ID of the instance that is a member of this group.",
-            "type": "string",
-            "format": "uuid"
+          "kind": {
+            "description": "Discriminator for `parent_id`.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/MulticastGroupMemberParentKind"
+              }
+            ]
           },
           "multicast_group_id": {
             "description": "The ID of the multicast group this member belongs to.",
@@ -25143,6 +25146,11 @@
                 "$ref": "#/components/schemas/Name"
               }
             ]
+          },
+          "parent_id": {
+            "description": "The UUID of the parent (instance or probe) that owns this membership.",
+            "type": "string",
+            "format": "uuid"
           },
           "source_ips": {
             "description": "Source IP addresses for this member's multicast subscription.\n\n- **ASM**: Sources are optional. Empty array means any source is allowed. Non-empty array enables source filtering (IGMPv3/MLDv2). - **SSM**: Sources are required for SSM addresses (232/8, ff3x::/32).",
@@ -25170,14 +25178,23 @@
         "required": [
           "description",
           "id",
-          "instance_id",
+          "kind",
           "multicast_group_id",
           "multicast_ip",
           "name",
+          "parent_id",
           "source_ips",
           "state",
           "time_created",
           "time_modified"
+        ]
+      },
+      "MulticastGroupMemberParentKind": {
+        "description": "Kind of resource that owns a multicast group member.\n\nSelects how to interpret `parent_id`: an instance or a probe.",
+        "type": "string",
+        "enum": [
+          "instance",
+          "probe"
         ]
       },
       "MulticastGroupMemberResultsPage": {
@@ -26202,6 +26219,14 @@
         "properties": {
           "description": {
             "type": "string"
+          },
+          "multicast_groups": {
+            "description": "Multicast groups to enroll this probe as a member of at creation time. Each entry specifies a group (by name, UUID, or IP address), plus optional source IPs and IP version, matching the instance join shape. Non-existent groups are created automatically when given an IP covered by a multicast pool.\n\nIf empty (the default), this leaves the probe unenrolled. Probe memberships are fixed at creation. Recreate the probe to change or modify them.",
+            "default": [],
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MulticastGroupJoinSpec"
+            }
           },
           "name": {
             "$ref": "#/components/schemas/Name"

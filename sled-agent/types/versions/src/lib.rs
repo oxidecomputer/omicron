@@ -97,6 +97,8 @@ pub mod v43;
 pub mod v44;
 #[path = "mcast_m2p_forwarding/mod.rs"]
 pub mod v45;
+#[path = "probe_multicast_groups/mod.rs"]
+pub mod v46;
 #[path = "add_probe_put_endpoint/mod.rs"]
 pub mod v6;
 #[path = "multicast_support/mod.rs"]

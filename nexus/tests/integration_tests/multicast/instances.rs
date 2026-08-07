@@ -24,7 +24,7 @@ use std::net::IpAddr;
 
 use http::{Method, StatusCode};
 
-use nexus_db_model::MulticastGroupMemberState;
+use nexus_db_model::{MemberParentRef, MulticastGroupMemberState};
 use nexus_db_queries::context::OpContext;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils::resource_helpers::{
@@ -248,7 +248,7 @@ async fn test_multicast_lifecycle(cptestctx: &ControlPlaneTestContext) {
         1,
         "group-lifecycle-2 should have 1 member after detach"
     );
-    assert_eq!(members[0].instance_id, instances[2].identity.id);
+    assert_eq!(members[0].parent_id, instances[2].identity.id);
 
     // Verify groups are still active and functional
     for group_name in group_names.iter() {
@@ -448,7 +448,7 @@ async fn test_multicast_group_attach_multiple(
             1,
             "Instance should be member of group {group_name}"
         );
-        assert_eq!(members[0].instance_id, instance.identity.id);
+        assert_eq!(members[0].parent_id, instance.identity.id);
     }
 
     cleanup_instances(cptestctx, client, PROJECT_NAME, &["mcast-instance-1"])
@@ -603,7 +603,7 @@ async fn test_multicast_concurrent_operations(
     // Wait for all remaining members to reach "Joined" state.
     let expected: Vec<_> = post_rapid_members
         .iter()
-        .map(|m| (m.instance_id, MulticastGroupMemberState::Joined))
+        .map(|m| (m.parent_id, MulticastGroupMemberState::Joined))
         .collect();
     wait_for_members_state(cptestctx, "concurrent-test-group", &expected).await;
 
@@ -1543,7 +1543,7 @@ async fn test_instance_create_with_ssm_multicast_groups(
     assert_eq!(members.len(), 1, "Should have one member");
 
     let member = &members[0];
-    assert_eq!(member.instance_id, instance.identity.id);
+    assert_eq!(member.parent_id, instance.identity.id);
     assert_eq!(member.source_ips.len(), 1, "Member should have 1 source IP");
     assert_eq!(
         member.source_ips[0], source_ip,
@@ -1719,8 +1719,9 @@ async fn test_ssm_without_sources_fails_create_and_reconfigure(
 /// Test that instance deletion only removes that instance's membership,
 /// preserving other instances' memberships in the same group.
 ///
-/// This tests the invariant that `multicast_group_member_delete_by_group_and_instance`
-/// filters by both `group_id` and `instance_id`, not just `group_id`. This is
+/// This tests the invariant that `multicast_group_member_delete_by_group_and_parent`
+/// filters by both `group_id` and the parent (instance/probe), not just
+/// `group_id`. This is
 /// important for saga undo correctness: if instance B's create saga fails after
 /// joining a group, the undo must not affect instance A's existing membership
 /// in the same group.
@@ -1854,7 +1855,7 @@ async fn test_instance_delete_preserves_other_memberships(
         list_multicast_group_members(client, group_name).await;
     assert_eq!(members_after_b.len(), 2, "A and C must survive B's deletion");
     let remaining_instance_ids: BTreeSet<_> =
-        members_after_b.iter().map(|m| m.instance_id).collect();
+        members_after_b.iter().map(|m| m.parent_id).collect();
     assert!(
         remaining_instance_ids.contains(&instance_a.identity.id),
         "A's membership must remain"
@@ -1940,7 +1941,7 @@ async fn test_multicast_ipv6_lifecycle(cptestctx: &ControlPlaneTestContext) {
     )
     .await;
 
-    assert_eq!(member.instance_id, instance.identity.id);
+    assert_eq!(member.parent_id, instance.identity.id);
 
     // Activate reconciler and wait for group to become Active
     wait_for_multicast_reconciler(&cptestctx.lockstep_client).await;
@@ -2280,10 +2281,10 @@ async fn test_empty_active_group_reaped_by_sweep(
     let group_id =
         MulticastGroupUuid::from_untyped_uuid(group_view.identity.id);
     let member = datastore
-        .multicast_group_member_get_by_group_and_instance(
+        .multicast_group_member_get_by_group_and_parent(
             &opctx,
             group_id,
-            instance_id,
+            MemberParentRef::Instance(instance_id),
         )
         .await
         .expect("should query group member")
