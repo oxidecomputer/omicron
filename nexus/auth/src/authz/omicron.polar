@@ -39,44 +39,67 @@ has_role(actor: AuthenticatedActor, role: String, resource: Resource)
 #
 # - "read": required to read a resource
 #
-# We define predefined roles for only a few high-level resources: Fleet, Silo,
-# and Project.  Each resource defines its own role hierarchy and the permissions
-# granted by each role below.  A role on one resource grants permissions or
-# roles on related resources only where an explicit relation rule says so.
-# Consequently, similarly named roles do not necessarily have identical effects
-# at different scopes.
+# We define the following predefined roles for only a few high-level resources:
+# the Fleet (see below), Silo, and Project.  The specific roles are oriented
+# around intended use-cases:
+#
+# - "admin": has all permissions on the resource
+#
+# - "collaborator": has "read", "list_children", and "create_child", plus roles
+#   or permissions on child resources as explicitly defined below
+#
+# - "viewer": has "read" and "list_children" on the resource
+#
+# Each resource defines its own role hierarchy and the permissions granted by
+# each role below.  Consequently, similarly named roles do not necessarily have
+# identical effects at different scopes.
+#
+# A role on one resource does not automatically propagate to related resources.
+# It grants permissions or roles on those resources only where an explicit
+# relation rule says so.  In particular, a Fleet role does not by itself grant
+# access to the contents of a Silo.
 #
 # Below the Project level, permissions are granted via roles at the Project
 # level.  For example, for someone to be able to create, modify, or delete any
-# Instances, they must be granted project.collaborator, which means they can
-# create, modify, or delete _all_ resources in the Project.
-#
-# Role names describe broad levels of access, but their exact permissions are
-# defined separately for each resource type. Roles on a parent resource do not
-# automatically grant the same role, or unrestricted access, on its children.
-# Any access inherited by a child resource is explicitly defined below.
+# Instances, they must be granted at least project.limited-collaborator.
 #
 # The complete set of predefined roles:
 #
-# - fleet.admin           (full control of a given Fleet and explicitly delegated fleet-scoped resources)
-# - fleet.collaborator    (can create Silos and modify Silo configuration, but cannot access Silo contents)
-# - fleet.viewer          (can read most non-siloed resources in the Fleet, as well as explicitly exposed fleet-scoped resources)
-# - silo.admin            (full control of the Silo and its resources)
-# - silo.collaborator     (can create Projects and grants project.admin on all Projects within a given Silo)
-# - silo.limited-collaborator (can create Projects and grants project.admin on all Projects within a given Silo)
-# - silo.viewer           (can read Silo resources and grants project.viewer on all Projects within a given Silo)
-# - project.admin         (full control of a Project and its resources)
-# - project.collaborator  (can manage all resources within the Project, including networking)
-# - project.limited-collaborator (can manage compute resources, but not networking resources)
-# - project.viewer        (can read most resources within the Project)
+# - fleet.admin
+#   (full control of the Fleet and explicitly delegated resources)
+# - fleet.collaborator
+#   (can create, modify, and delete Silo objects, but receives no role within
+#   them)
+# - fleet.viewer
+#   (can read the Fleet and resources that explicitly delegate access from it)
+# - silo.admin
+#   (full control of the Silo and its resources)
+# - silo.collaborator
+#   (can create Projects and grants project.admin on all Projects within a given
+#   Silo)
+# - silo.limited-collaborator
+#   (grants project.limited-collaborator on all Projects within a given Silo)
+# - silo.viewer
+#   (can read selected Silo resources and grants project.viewer on all Projects
+#   within a given Silo)
+# - project.admin
+#   (full control of a Project and its resources)
+# - project.collaborator
+#   (can manage all resources within the Project, including networking)
+# - project.limited-collaborator
+#   (can manage compute and related resources, but not networking
+#   infrastructure)
+# - project.viewer
+#   (can read most resources within the Project)
 #
 # Outside the Silo/Project hierarchy, we (currently) treat most
 # resources as nested under Fleet or else a synthetic resource (see below).  We
-# do not yet support role assignments on anything other than Fleet, Silo, or Project.
+# do not yet support role assignments on anything other than Fleet, Silo, or
+# Project.
 
-# "Fleet" is a global singleton representing the whole system. The name comes
-# from the idea described in RFD 24, but it's not quite right. This probably
-# should be more like "Region" or "AvailabilityZone". The precise boundaries
+# "Fleet" is a global singleton representing the whole system.  The name comes
+# from the idea described in RFD 24, but it's not quite right.  This probably
+# should be more like "Region" or "AvailabilityZone".  The precise boundaries
 # have not yet been figured out.
 resource Fleet {
 	permissions = [
@@ -135,7 +158,7 @@ resource Silo {
 	"create_child" if "collaborator";
 	"modify" if "admin";
 
-	# Permissions implied by roles on this resource's parent (Fleet). Fleet
+	# Permissions implied by roles on this resource's parent (Fleet).  Fleet
 	# privileges allow a user to see and potentially administer the Silo,
 	# but they do not give anyone permission to look at anything inside the
 	# Silo.  To achieve this, we use permission rules here.  (If we granted
@@ -156,6 +179,10 @@ has_relation(fleet: Fleet, "parent_fleet", silo: Silo)
 # As a special case, every authenticated Silo user can read their own Silo even
 # if they have no role on it.  This grants only the "read" permission; it does
 # not confer the "viewer" role or its "list_children" permission.
+#
+# Among other things, this ensures that an unauthorized attempt to create a
+# Project returns 403 rather than 404: authorization failures are reported as
+# not found when the actor cannot read the resource.
 #
 # This permission also allows users to list the identity providers in their
 # Silo, since access to that collection is predicated on being able to read the
