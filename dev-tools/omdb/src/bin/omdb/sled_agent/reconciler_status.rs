@@ -32,8 +32,6 @@ use indent_write::fmt::IndentWriter;
 use std::fmt;
 use std::fmt::Write;
 
-const INDENT: &str = "    ";
-
 /// Runs `omdb sled-agent network-config reconciler-status`
 pub(super) async fn cmd_network_config_reconciler_status(
     client: &bootstrap_agent_lockstep_client::Client,
@@ -47,6 +45,35 @@ pub(super) async fn cmd_network_config_reconciler_status(
     Ok(())
 }
 
+// Indentation level for each sub-section.
+const INDENT: &str = "    ";
+
+// Helper for writing a sequence of lines where the last item does _not_ end in
+// a newline. This is used in many `Display` impls below to avoid extra blank
+// lines between sections.
+//
+// `write_one` should print each item without a trailing newline; this function
+// will add one for all items except the last.
+fn write_lines<W: fmt::Write, I, T, F>(
+    f: &mut W,
+    items: I,
+    mut write_one: F,
+) -> fmt::Result
+where
+    I: IntoIterator<Item = T>,
+    F: FnMut(&mut W, T) -> fmt::Result,
+{
+    let mut first = true;
+    for item in items {
+        if !first {
+            writeln!(f)?;
+        }
+        first = false;
+        write_one(f, item)?;
+    }
+    Ok(())
+}
+
 // The remainder of this module is `Display` adapters for formatting all the
 // details in the scrimlet reconcilers status structure returned by the
 // bootstrap agent lockstep API.
@@ -54,7 +81,7 @@ pub(super) async fn cmd_network_config_reconciler_status(
 struct ScrimletReconcilersStatusDisplay<'a>(&'a ScrimletReconcilersStatus);
 
 impl fmt::Display for ScrimletReconcilersStatusDisplay<'_> {
-    fn fmt(&self, mut f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.0 {
             ScrimletReconcilersStatus::WaitingForSledAgentNetworkingInfo => {
                 write!(
@@ -113,17 +140,10 @@ impl fmt::Display for ScrimletReconcilersStatusDisplay<'_> {
                     ("lldpd", &ReconcilerStatusDisplay(&lldpd_reconciler)),
                     ("uplinkd", &ReconcilerStatusDisplay(&uplinkd_reconciler)),
                 ];
-                let mut reconcilers = reconcilers.iter().peekable();
-                while let Some((name, displayable)) = reconcilers.next() {
+                write_lines(f, reconcilers, |f, (name, displayable)| {
                     writeln!(f, "{name} reconciler:")?;
-                    let mut f = IndentWriter::new(INDENT, &mut f);
-                    if reconcilers.peek().is_some() {
-                        writeln!(f, "{displayable}")?;
-                    } else {
-                        write!(f, "{displayable}")?;
-                    }
-                }
-                Ok(())
+                    write!(IndentWriter::new(INDENT, f), "{displayable}")
+                })
             }
         }
     }
@@ -284,16 +304,11 @@ impl fmt::Display for LldpdReconcilerStatusDisplay<'_> {
 
                 if !ports.is_empty() {
                     writeln!(f, ":")?;
-                    let mut w = IndentWriter::new(INDENT, f);
-                    let mut ports = ports.iter().peekable();
-                    while let Some((port, status)) = ports.next() {
-                        let s = format_args!("* {port}: {status:?}");
-                        if ports.peek().is_some() {
-                            writeln!(w, "{s}")?;
-                        } else {
-                            write!(w, "{s}")?;
-                        }
-                    }
+                    write_lines(
+                        &mut IndentWriter::new(INDENT, f),
+                        ports,
+                        |f, (port, status)| write!(f, "* {port}: {status:?}"),
+                    )?;
                 }
                 Ok(())
             }
@@ -334,16 +349,13 @@ impl fmt::Display for UplinkdReconcilerStatusDisplay<'_> {
 
                 if !ports.is_empty() {
                     writeln!(f, ":")?;
-                    let mut w = IndentWriter::new(INDENT, f);
-                    let mut ports = ports.iter().peekable();
-                    while let Some((port, values)) = ports.next() {
-                        let s = format_args!("* {port}: {}", values.join(", "));
-                        if ports.peek().is_some() {
-                            writeln!(w, "{s}")?;
-                        } else {
-                            write!(w, "{s}")?;
-                        }
-                    }
+                    write_lines(
+                        &mut IndentWriter::new(INDENT, f),
+                        ports,
+                        |f, (port, values)| {
+                            write!(f, "* {port}: {}", values.join(", "))
+                        },
+                    )?;
                 }
                 Ok(())
             }
@@ -442,18 +454,13 @@ impl fmt::Display for DpdPortReconcilerStatusDisplay<'_> {
                     write!(f, "apply failures: none")?;
                 } else {
                     writeln!(f, "apply failures:")?;
-                    let mut f = IndentWriter::new(INDENT, &mut f);
-                    let mut apply_failures = apply_failures.iter().peekable();
-                    while let Some(DpdPortOperationFailure { port_id, error }) =
-                        apply_failures.next()
-                    {
-                        let s = format_args!("* {port_id}: {error}");
-                        if apply_failures.peek().is_some() {
-                            writeln!(f, "{s}")?;
-                        } else {
-                            write!(f, "{s}")?;
-                        }
-                    }
+                    write_lines(
+                        &mut IndentWriter::new(INDENT, &mut f),
+                        apply_failures,
+                        |f, DpdPortOperationFailure { port_id, error }| {
+                            write!(f, "* {port_id}: {error}")
+                        },
+                    )?;
                 }
                 Ok(())
             }
@@ -559,23 +566,21 @@ impl fmt::Display for DpdNatReconcilerStatusDisplay<'_> {
                     write!(f, "create failures: none")?;
                 } else {
                     writeln!(f, "create failures:")?;
-                    let mut f = IndentWriter::new(INDENT, &mut f);
-                    let mut create_failures = create_failures.iter().peekable();
-                    while let Some((id, failure)) = create_failures.next() {
-                        let DpdNatReconcilerStatusNatEntryFailure {
-                            entry,
-                            error,
-                        } = failure;
-                        let s = format_args!(
-                            "* zone {id}, {}: {error}",
-                            DpdNatReconcilerStatusNatEntryDisplay(&entry),
-                        );
-                        if create_failures.peek().is_some() {
-                            writeln!(f, "{s}")?;
-                        } else {
-                            write!(f, "{s}")?;
-                        }
-                    }
+                    write_lines(
+                        &mut IndentWriter::new(INDENT, &mut f),
+                        create_failures,
+                        |f, (id, failure)| {
+                            let DpdNatReconcilerStatusNatEntryFailure {
+                                entry,
+                                error,
+                            } = failure;
+                            write!(
+                                f,
+                                "* zone {id}, {}: {error}",
+                                DpdNatReconcilerStatusNatEntryDisplay(&entry),
+                            )
+                        },
+                    )?;
                 }
                 Ok(())
             }
@@ -627,7 +632,7 @@ impl fmt::Display for MgdReconcilerStatusDisplay<'_> {
 struct MgdBfdReconcilerStatusDisplay<'a>(&'a MgdBfdReconcilerStatus);
 
 impl fmt::Display for MgdBfdReconcilerStatusDisplay<'_> {
-    fn fmt(&self, mut f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.0 {
             MgdBfdReconcilerStatus::FailedReadingBfdPeers(err) => {
                 write!(f, "failed to read current bfd peers: {err}")
@@ -688,18 +693,13 @@ impl fmt::Display for MgdBfdReconcilerStatusDisplay<'_> {
                     write!(f, "add failures: none")?;
                 } else {
                     writeln!(f, "add failures:")?;
-                    let mut f = IndentWriter::new(INDENT, &mut f);
-                    let mut add_failure = add_failure.iter().peekable();
-                    while let Some(MgdBfdOperationFailure { peer, error }) =
-                        add_failure.next()
-                    {
-                        let s = format_args!("* {peer}: {error}");
-                        if add_failure.peek().is_some() {
-                            writeln!(f, "{s}")?;
-                        } else {
-                            write!(f, "{s}")?;
-                        }
-                    }
+                    write_lines(
+                        &mut IndentWriter::new(INDENT, &mut f),
+                        add_failure,
+                        |f, MgdBfdOperationFailure { peer, error }| {
+                            write!(f, "* {peer}: {error}")
+                        },
+                    )?;
                 }
                 Ok(())
             }
@@ -755,19 +755,13 @@ impl fmt::Display for MgdBgpReconcilerStatusOpCountDisplay<'_> {
                 unnumbered_peers_deleted,
             ),
         ];
-        let mut lines = lines.iter().peekable();
-        while let Some((name, created, updated, deleted)) = lines.next() {
-            let s = format_args!(
+        write_lines(f, lines, |f, (name, created, updated, deleted)| {
+            write!(
+                f,
                 "{name} created / updated / deleted: \
                  {created} / {updated} / {deleted}"
-            );
-            if lines.peek().is_some() {
-                writeln!(f, "{s}")?;
-            } else {
-                write!(f, "{s}")?;
-            }
-        }
-        Ok(())
+            )
+        })
     }
 }
 
@@ -799,16 +793,11 @@ impl fmt::Display for MgdBgpReconcilerStatusDisplay<'_> {
                     write!(f, "errors: none")?;
                 } else {
                     writeln!(f, "errors:")?;
-                    let mut f = IndentWriter::new(INDENT, f);
-                    let mut errors = errors.iter().peekable();
-                    while let Some(err) = errors.next() {
-                        let s = format_args!("* {err}");
-                        if errors.peek().is_some() {
-                            writeln!(f, "{s}")?;
-                        } else {
-                            write!(f, "{s}")?;
-                        }
-                    }
+                    write_lines(
+                        &mut IndentWriter::new(INDENT, f),
+                        errors,
+                        |f, err| write!(f, "* {err}"),
+                    )?;
                 }
                 Ok(())
             }
