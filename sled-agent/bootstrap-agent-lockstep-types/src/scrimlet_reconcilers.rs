@@ -87,8 +87,8 @@ pub struct ReconciliationCompletedStatus<T> {
     pub completed_at_time: DateTime<Utc>,
     /// How long the attempt ran.
     pub ran_for: Duration,
-    /// The 0-based index of this reconciler's activation since the last time
-    /// sled-agent started.
+    /// 0-based counter of the number of times this reconciler has activated
+    /// since the last time sled-agent started.
     pub activation_count: u64,
     /// Reconciler-specific status.
     pub status: T,

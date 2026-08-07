@@ -101,7 +101,7 @@ enum NetworkConfigCommands {
     /// show the current contents of the replicated network config
     Show,
 
-    /// get the state of the network config reconciler system
+    /// get the state of the scrimlet-reconcilers system
     ///
     /// This will only be meaningful if the target sled-agent is a scrimlet.
     ReconcilerStatus,

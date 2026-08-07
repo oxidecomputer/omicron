@@ -4,6 +4,7 @@
 
 //! `omdb sled-agent network-config reconciler-status` subcommand
 
+use crate::helpers::datetime_rfc3339_concise;
 use anyhow::Context;
 use bootstrap_agent_lockstep_types::scrimlet_reconcilers::DetermineSwitchSlotStatus;
 use bootstrap_agent_lockstep_types::scrimlet_reconcilers::ReconcilerActivationReason;
@@ -206,7 +207,11 @@ impl fmt::Display for ReconcilerCurrentStatusDisplay<'_> {
                     "activation reason: {}",
                     reason_description(&activation_reason),
                 )?;
-                writeln!(f, "started at {started_at_time}")?;
+                writeln!(
+                    f,
+                    "started at {}",
+                    datetime_rfc3339_concise(started_at_time)
+                )?;
                 write!(f, "running for {running_for:?}")
             }
             ReconcilerCurrentStatus::Idle => write!(f, "idle"),
@@ -236,7 +241,11 @@ where
             reason_description(&activation_reason)
         )?;
         writeln!(f, "activation count: {activation_count}")?;
-        writeln!(f, "completed at {completed_at_time}")?;
+        writeln!(
+            f,
+            "completed at {}",
+            datetime_rfc3339_concise(completed_at_time)
+        )?;
         writeln!(f, "ran for {ran_for:?}")?;
         writeln!(f, "detailed status:")?;
         write!(IndentWriter::new("    ", f), "{}", status.display())
