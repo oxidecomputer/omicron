@@ -3099,6 +3099,7 @@ table! {
         version_removed -> Nullable<Int8>,
         multicast_ip -> Inet,
         source_ips -> Array<Inet>,
+        membership_origin -> crate::enums::MulticastGroupMemberOriginEnum,
     }
 }
 

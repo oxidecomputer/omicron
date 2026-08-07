@@ -19,11 +19,12 @@
 //! linked to it. Cross-silo multicast is enabled by linking the same pool to
 //! multiple silos. This is the same model used for unicast IP pools.
 //!
-//! # Lifecycle
+//! # Implicit lifecycle
 //!
-//! Groups are created implicitly when the first member joins (via member-add)
-//! and deleted when the last member leaves. The group's IP is allocated from
-//! the multicast pool on creation and returned on deletion.
+//! Groups have an implicit lifecycle: they are created when the first member
+//! joins (via member-add) and deleted when the last member leaves. The group's
+//! IP is allocated from the multicast pool on creation and returned on
+//! deletion.
 //!
 //! Groups use their UUID as the dpd tag for switch configuration. This avoids
 //! races when group names are reused after deletion.
@@ -47,7 +48,7 @@
 //!
 //! [`UNDERLAY_MULTICAST_SUBNET`]: omicron_common::address::UNDERLAY_MULTICAST_SUBNET
 
-use std::net::IpAddr;
+use std::net::{IpAddr, Ipv6Addr};
 use std::sync::Arc;
 
 use ref_cast::RefCast;
@@ -60,19 +61,25 @@ use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::datastore::multicast::ExternalMulticastGroupWithSources;
 use nexus_db_queries::{authz, db};
 use nexus_types::external_api::multicast;
+use nexus_types::internal_api::views::{
+    MulticastDdmPeer, MulticastDdmPeerStatus, MulticastDdmPeersView,
+};
 use nexus_types::multicast::MulticastGroupCreate;
 use omicron_common::address::{
-    MAX_SOURCE_IPS_PER_GROUP, MAX_SOURCE_IPS_PER_MEMBER, is_ssm_address,
+    MAX_SOURCE_IPS_PER_GROUP, MAX_SOURCE_IPS_PER_MEMBER,
+    UNDERLAY_MULTICAST_SUBNET, is_ssm_address,
 };
 use omicron_common::api::external::{
     self, CreateResult, DataPageParams, DeleteResult,
     IdentityMetadataCreateParams, ListResultVec, LookupResult,
     http_pagination::PaginatedBy,
 };
+use omicron_ddm_admin_client::PeerStatus;
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid, MulticastGroupUuid};
 
 pub(crate) mod dataplane;
 pub(crate) mod sled;
+pub(crate) mod switch_zone;
 
 /// Validate that SSM addresses have source IPs.
 ///
@@ -194,8 +201,9 @@ impl super::Nexus {
     /// multicast pool linked to the caller's silo.
     ///
     /// Note: SSM validation is done at member join time, not group creation.
-    /// Groups don't store sources directly; sources are per-member. The group's
-    /// `source_ips` view field shows the union of all active member sources.
+    /// Groups don't store sources directly. Sources are per-member. The
+    /// group's `source_ips` view field shows the union of all active member
+    /// sources.
     pub(crate) async fn multicast_group_create(
         &self,
         opctx: &OpContext,
@@ -341,7 +349,7 @@ impl super::Nexus {
     /// # Authorization
     ///
     /// Requires `Modify` on the instance. Groups are fleet-scoped resources
-    /// readable by any authenticated user; authorization is enforced on the
+    /// readable by any authenticated user. Authorization is enforced on the
     /// instance being attached.
     ///
     /// # Behavior
@@ -350,7 +358,7 @@ impl super::Nexus {
     /// - **ID joins**: The group must already exist (returns error otherwise)
     /// - **Source IPs**: Optional for ASM, required for SSM addresses (232/8, ff3x::/32)
     /// - **IP version**: Required when joining by name if multiple default pools exist
-    pub(crate) async fn instance_join_multicast_group(
+    pub(crate) async fn vmm_join_multicast_group(
         self: &Arc<Self>,
         opctx: &OpContext,
         group_identifier: &multicast::MulticastGroupIdentifier,
@@ -766,7 +774,7 @@ impl super::Nexus {
     /// - **Idempotent**: Returns success if the member doesn't exist
     /// - **Implicit deletion**: If this was the last member, marks the group
     ///   for deletion (reconciler completes cleanup)
-    pub(crate) async fn instance_leave_multicast_group(
+    pub(crate) async fn vmm_leave_multicast_group(
         self: &Arc<Self>,
         opctx: &OpContext,
         group_lookup: &lookup::MulticastGroup<'_>,
@@ -805,10 +813,12 @@ impl super::Nexus {
             .multicast_group_member_delete_by_id(opctx, member.id)
             .await?;
 
-        // Atomically mark group for deletion if this was the last member.
-        // The NOT EXISTS guard in the datastore method prevents race conditions
-        // where a concurrent join could slip in between a "list members" check
-        // and the mark-for-removal call.
+        // If this was the last member, eagerly mark the group for deletion so
+        // it starts deleting within the current reconciler interval instead of
+        // waiting for the next sweep. This is a best-effort latency
+        // optimization. `cleanup_empty_groups` is the authority for the
+        // emptiness decision (including the NOT EXISTS race guard) and reaps
+        // the group either way.
         if self
             .db_datastore
             .mark_multicast_group_for_removal_if_no_members(
@@ -883,6 +893,59 @@ impl super::Nexus {
             )
             .await
     }
+
+    /// Read-only view of DDM underlay peers across all switch zones.
+    ///
+    /// Under RFD 488, `mg-lower` derives underlay multicast members from these
+    /// DDM peer subscriptions. This surfaces the live per-switch-zone peer set
+    /// for operators via `omdb nexus multicast ddm-peers`.
+    pub(crate) async fn multicast_ddm_peers(
+        &self,
+        opctx: &OpContext,
+    ) -> LookupResult<MulticastDdmPeersView> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+
+        let switch_zone_client = switch_zone::MulticastSwitchZoneClient::new(
+            self.resolver().clone(),
+            opctx.log.clone(),
+        )
+        .await
+        .map_err(|e| {
+            external::Error::internal_error(&format!(
+                "failed to build switch-zone clients: {e}"
+            ))
+        })?;
+
+        let peers = switch_zone_client
+            .ddm_peers_by_switch()
+            .await
+            .into_iter()
+            .map(|(slot, peer)| {
+                let (status, status_duration) = match peer.status {
+                    PeerStatus::Init(d) => (MulticastDdmPeerStatus::Init, d),
+                    PeerStatus::Solicit(d) => {
+                        (MulticastDdmPeerStatus::Solicit, d)
+                    }
+                    PeerStatus::Exchange(d) => {
+                        (MulticastDdmPeerStatus::Exchange, d)
+                    }
+                    PeerStatus::Expired(d) => {
+                        (MulticastDdmPeerStatus::Expired, d)
+                    }
+                };
+                MulticastDdmPeer {
+                    switch: format!("{slot:?}"),
+                    addr: peer.addr,
+                    host: peer.host,
+                    status,
+                    status_duration,
+                    if_name: peer.if_name,
+                }
+            })
+            .collect();
+
+        Ok(MulticastDdmPeersView { peers })
+    }
 }
 
 /// Validate that source IPs match the multicast group's address family.
@@ -936,6 +999,76 @@ fn generate_group_name_from_ip(
             "IP should be valid as group name: {ip}"
         ))
     })
+}
+
+/// Maps an external multicast address to an underlay address in ff04::/64.
+///
+/// Maps external addresses into [`UNDERLAY_MULTICAST_SUBNET`] (ff04::/64,
+/// a subset of the admin-local scope ff04::/16 per RFC 7346) using XOR-fold.
+/// This prefix is static for consistency across racks.
+///
+/// See [RFC 7346] for IPv6 multicast admin-local scope.
+///
+/// # Salt Parameter (Collision Avoidance)
+///
+/// The `salt` enables collision avoidance via XOR perturbation. XOR is
+/// bijective: distinct salts produce distinct outputs (since
+/// `a ^ b = a ^ c` implies `b = c`), guaranteeing 256 unique addresses
+/// per external IP.
+///
+/// On collision (underlay IP already in use), the caller increments
+/// salt and retries. The successful salt is stored with the group for
+/// deterministic reconstruction.
+///
+/// # Implementation
+///
+/// ```text
+/// underlay_ip = ff04:: | ((xor_fold(external_ip) ^ salt) & HOST_MASK)
+/// ```
+///
+/// - IPv4: embedded directly (32 bits fits in 64-bit host space)
+/// - IPv6: XOR upper and lower 64-bit halves to fold 128 to 64 bits
+/// - Salt in [0, 255]: XORed into host bits for collision retry
+///
+/// The `& HOST_MASK` guarantees the result stays within ff04::/64.
+///
+/// [RFC 7346]: https://www.rfc-editor.org/rfc/rfc7346
+pub(crate) fn map_external_to_underlay_ip(
+    external_ip: IpAddr,
+    salt: u8,
+) -> IpAddr {
+    const HOST_BITS: u32 = 128 - UNDERLAY_MULTICAST_SUBNET.width() as u32;
+    let prefix_base =
+        u128::from_be_bytes(UNDERLAY_MULTICAST_SUBNET.addr().octets());
+
+    map_external_to_underlay_ip_impl(prefix_base, HOST_BITS, external_ip, salt)
+}
+
+/// Core implementation separated for testing with custom prefix/host_bits.
+pub(crate) fn map_external_to_underlay_ip_impl(
+    prefix_base: u128,
+    host_bits: u32,
+    external_ip: IpAddr,
+    salt: u8,
+) -> IpAddr {
+    let host_mask: u128 =
+        if host_bits >= 128 { u128::MAX } else { (1u128 << host_bits) - 1 };
+
+    let host_value: u128 = match external_ip {
+        IpAddr::V4(ipv4) => u128::from(u32::from_be_bytes(ipv4.octets())),
+        IpAddr::V6(ipv6) => {
+            let full = u128::from_be_bytes(ipv6.octets());
+            if host_bits >= 128 {
+                full
+            } else {
+                (full >> host_bits) ^ (full & host_mask)
+            }
+        }
+    };
+
+    let salted = (host_value ^ u128::from(salt)) & host_mask;
+    let underlay = prefix_base | salted;
+    IpAddr::V6(Ipv6Addr::from(underlay.to_be_bytes()))
 }
 
 #[cfg(test)]

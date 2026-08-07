@@ -18,9 +18,8 @@
 //! - Database state (groups, members, routing configuration)
 //! - Dataplane state (match-action tables via Dendrite/DPD)
 //! - Instance lifecycle (start/stop/migrate affecting group membership)
-//! - Network topology (sled-to-switch mappings, port configurations)
 //!
-//! ## Architecture: RPW +/- Sagas
+//! ## Architecture: RPW and Sagas
 //!
 //! **Sagas handle immediate operations:**
 //! - Instance lifecycle events (start/stop/delete)
@@ -32,6 +31,8 @@
 //! - Dataplane state convergence
 //! - Group and Member state checks and transitions ("Joining" → "Joined" → "Left")
 //! - Drift detection and correction
+//! - Switch zone coordination: MRIB route programming through MGD
+//!   (mg-lower then derives underlay members from DDM peer subscriptions)
 //! - Cleanup of orphaned resources
 //!
 //! ## Multicast Group Architecture
@@ -97,7 +98,8 @@
 //! 4. **OPTE decapsulation** removes Geneve/IPv6/Ethernet outer headers on target sleds
 //! 5. **Instance delivery** of inner (guest-facing) packet to guest
 //!
-//! TODO: Other traffic flows like egress from instances will be documented separately.
+//! TODO: Egress (instance → external) is not yet supported. See RFD 488
+//! (§sect-external-mcast) for the design.
 //!
 //! ## Reconciliation Components
 //!
@@ -105,9 +107,45 @@
 //! - **Group lifecycle**: "Creating" → "Active" → "Deleting" → hard-deleted
 //! - **Member lifecycle**: "Joining" → "Joined" → "Left" → soft-deleted → hard-deleted
 //! - **Dataplane updates**: DPD API calls for P4 table updates
+//! - **MRIB programming**: multicast routing entries written through
+//!   MGD, diffed against a per-pass snapshot and withdrawn when no
+//!   "Joined" members remain so DDM peers stop sending traffic
 //! - **Sled propagation**: M2P mappings and forwarding entries pushed to sled-agents
-//! - **OPTE subscriptions**: Per-VMM multicast group subscriptions on target sleds
-//! - **Topology mapping**: Sled-to-switch-port resolution (with caching)
+//! - **OPTE subscriptions**: Per-instance multicast group subscriptions
+//!   on target sleds (keyed at the sled by the active VMM's propolis-id)
+//!
+//! ## RPW Saga Coordination
+//!
+//! The reconciler launches sagas for transactional operations
+//! (e.g. external+underlay group ensure). By default sagas retry
+//! independently and the next reconciler tick observes the resulting
+//! state.
+//!
+//! For group creation, the reconciler instead drains saga completion
+//! within the same pass so [`reconcile_member_states`] and
+//! [`reconcile_active_groups`] can converge in one tick. The motivation
+//! is operator-visible latency: members see multicast settle within a
+//! single reconciler interval of joining, rather than waiting an
+//! additional tick for the saga's effects to be observed.
+//!
+//! This same-pass drain is bounded by the enclosing `buffer_unordered`
+//! concurrency (one slot per in-flight saga), so multiple groups still
+//! progress in parallel. A saga failure propagates to that group's per-iteration
+//! result and is logged. The pass does not abort, and member / active
+//! reconciliation still runs for the groups that succeeded.
+//!
+//! Saga completion is unbounded. Steno retries transient errors
+//! indefinitely, so a wedged dependency holds a `buffer_unordered`
+//! slot until the saga unwinds. The `group_concurrency_limit` (see
+//! [`MulticastGroupReconcilerConfig`] for the default) caps concurrent
+//! slots, but a slow saga in the creating phase delays the start of
+//! [`reconcile_member_states`] and [`reconcile_active_groups`] for
+//! this tick.
+//!
+//! This mirrors the `saga_run` + drain pattern used by
+//! [`instance_reincarnation`] and [`instance_updater`], but interleaves
+//! start-and-await per group inside `buffer_unordered` rather than
+//! batch-starting then batch-draining like those tasks do.
 //!
 //! ## Deletion Semantics: Groups vs Members
 //!
@@ -124,57 +162,39 @@
 //!   - RPW can transition back to "Joining" when instance becomes valid
 //! - Instance deleted: state="Left", time_deleted=SET (permanent soft-delete)
 //!   - Cannot be reactivated (new attach creates new member record)
-//!   - RPW removes DPD configuration
+//!   - RPW removes OPTE subscriptions and sled-agent multicast state
 //!   - Cleanup task eventually hard-deletes the row
 //!
 //! [RFC 7346]: https://www.rfc-editor.org/rfc/rfc7346
+//! [`UNDERLAY_MULTICAST_SUBNET`]: omicron_common::address::UNDERLAY_MULTICAST_SUBNET
+//! [`reconcile_member_states`]: MulticastGroupReconciler::reconcile_member_states
+//! [`reconcile_active_groups`]: MulticastGroupReconciler::reconcile_active_groups
+//! [`instance_reincarnation`]: crate::app::background::tasks::instance_reincarnation
+//! [`instance_updater`]: crate::app::background::tasks::instance_updater
+//! [`MulticastGroupReconcilerConfig`]: nexus_config::MulticastGroupReconcilerConfig
 
-use std::collections::{BTreeMap, HashMap};
-use std::net::{IpAddr, Ipv6Addr};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
 
 use futures::FutureExt;
 use futures::future::BoxFuture;
 use internal_dns_resolver::Resolver;
 use serde_json::json;
 use slog::{error, info};
-use tokio::sync::RwLock;
-use tokio::sync::watch::Receiver;
 
 use nexus_db_model::MulticastGroup;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_types::internal_api::background::MulticastGroupReconcilerStatus;
-use nexus_types::inventory::{Collection, SpType};
-use omicron_common::address::UNDERLAY_MULTICAST_SUBNET;
-use omicron_uuid_kinds::SledUuid;
-use sled_hardware_types::BaseboardId;
 
 use crate::app::background::BackgroundTask;
 use crate::app::multicast::dataplane::MulticastDataplaneClient;
 use crate::app::multicast::sled::MulticastSledClient;
+use crate::app::multicast::switch_zone::MulticastSwitchZoneClient;
 use crate::app::saga::StartSaga;
 
 pub(crate) mod groups;
 pub(crate) mod members;
-
-/// Type alias for the sled mapping cache.
-type SledMappingCache =
-    Arc<RwLock<(Instant, HashMap<SledUuid, Vec<SwitchBackplanePort>>)>>;
-
-/// Type alias for the backplane map cache.
-type BackplaneMapCache = Arc<
-    RwLock<
-        Option<(
-            Instant,
-            BTreeMap<
-                dpd_client::types::PortId,
-                dpd_client::types::BackplaneLink,
-            >,
-        )>,
-    >,
->;
+mod mrib;
 
 /// Result of processing a state transition for multicast entities.
 #[derive(Debug)]
@@ -189,45 +209,21 @@ pub(crate) enum StateTransition {
     EntityGone,
 }
 
-/// Switch port configuration for multicast group members.
-#[derive(Clone, Debug)]
-pub(crate) struct SwitchBackplanePort {
-    /// Switch port ID
-    pub port_id: dpd_client::types::PortId,
-    /// Switch link ID
-    pub link_id: dpd_client::types::LinkId,
-    /// Direction for multicast traffic (External or Underlay)
-    pub direction: dpd_client::types::Direction,
-}
-
 /// Background task that reconciles multicast group state with Dendrite
 /// configuration using the Saga + RPW hybrid pattern.
 pub(crate) struct MulticastGroupReconciler {
     datastore: Arc<DataStore>,
     resolver: Resolver,
     sagas: Arc<dyn StartSaga>,
-    /// Receiver for inventory updates from the inventory loader background task.
-    rx_inventory: Receiver<Option<Arc<Collection>>>,
-    /// Cache for sled-to-backplane-port mappings.
-    /// Maps sled_id → rear backplane ports for multicast traffic routing.
-    sled_mapping_cache: SledMappingCache,
-    sled_cache_ttl: Duration,
-    /// Cache for backplane hardware topology from DPD.
-    /// Maps PortId → BackplaneLink for platform-specific port validation.
-    backplane_map_cache: BackplaneMapCache,
-    backplane_cache_ttl: Duration,
     /// Maximum number of members to process concurrently per group.
     member_concurrency_limit: usize,
     /// Maximum number of groups to process concurrently.
     group_concurrency_limit: usize,
-    /// Whether multicast functionality is enabled (or not).
+    /// Grace period before an orphaned "Creating" group with no members is
+    /// reaped by the emptiness sweep (`cleanup_empty_groups`).
+    orphan_grace_period: chrono::TimeDelta,
+    /// Whether multicast functionality is enabled.
     enabled: bool,
-    /// Last seen sled baseboard→sp_slot mappings for cache invalidation.
-    ///
-    /// We track sled locations (keyed by baseboard identity), as sled
-    /// physical locations rarely change. Caches are only invalidated
-    /// when `sp_slot` values differ.
-    last_seen_sled_slots: HashMap<Arc<BaseboardId>, u16>,
 }
 
 impl MulticastGroupReconciler {
@@ -235,27 +231,19 @@ impl MulticastGroupReconciler {
         datastore: Arc<DataStore>,
         resolver: Resolver,
         sagas: Arc<dyn StartSaga>,
-        rx_inventory: Receiver<Option<Arc<Collection>>>,
         enabled: bool,
-        sled_cache_ttl: Duration,
-        backplane_cache_ttl: Duration,
+        group_concurrency_limit: usize,
+        member_concurrency_limit: usize,
+        orphan_grace_period: chrono::TimeDelta,
     ) -> Self {
         Self {
             datastore,
             resolver,
             sagas,
-            rx_inventory,
-            sled_mapping_cache: Arc::new(RwLock::new((
-                Instant::now(),
-                HashMap::new(),
-            ))),
-            sled_cache_ttl,
-            backplane_map_cache: Arc::new(RwLock::new(None)),
-            backplane_cache_ttl,
-            member_concurrency_limit: 100,
-            group_concurrency_limit: 100,
+            member_concurrency_limit,
+            group_concurrency_limit,
+            orphan_grace_period,
             enabled,
-            last_seen_sled_slots: HashMap::new(),
         }
     }
 
@@ -266,184 +254,6 @@ impl MulticastGroupReconciler {
     pub(crate) fn get_multicast_tag(group: &MulticastGroup) -> Option<&str> {
         group.tag.as_deref()
     }
-
-    /// Invalidate the backplane map cache, forcing refresh on next access.
-    ///
-    /// Called when:
-    /// - Sled validation fails (sp_slot not in cached backplane map)
-    /// - Need to refresh topology data after detecting potential changes
-    pub(crate) async fn invalidate_backplane_cache(&self) {
-        let mut cache = self.backplane_map_cache.write().await;
-        *cache = None; // Clear the cache entirely
-    }
-
-    /// Invalidate the sled mapping cache, forcing refresh on next access.
-    ///
-    /// Called when:
-    /// - Backplane topology changes detected (different port count/layout)
-    /// - Need to re-validate sled mappings against new topology
-    pub(crate) async fn invalidate_sled_mapping_cache(&self) {
-        let mut cache = self.sled_mapping_cache.write().await;
-        // Set timestamp to past to force refresh on next check
-        *cache = (Instant::now() - self.sled_cache_ttl, cache.1.clone());
-    }
-
-    /// Check if sled locations changed and invalidate caches if so.
-    ///
-    /// Compares actual serial→sp_slot mappings since sled locations rarely
-    /// change. Uses the inventory watch channel for cheap access to latest
-    /// inventory.
-    async fn check_sled_locations_for_cache_invalidation(
-        &mut self,
-        opctx: &OpContext,
-    ) {
-        // Get inventory from watch channel (cheap Arc::clone, no DB query)
-        let Some(inventory) =
-            self.rx_inventory.borrow_and_update().as_ref().map(Arc::clone)
-        else {
-            debug!(
-                opctx.log,
-                "skipping cache invalidation check: no inventory available"
-            );
-            return;
-        };
-
-        // Build current baseboard→sp_slot mapping for sleds only
-        let current_sled_slots: HashMap<Arc<BaseboardId>, u16> = inventory
-            .sps
-            .iter()
-            .filter(|(_, sp)| sp.sp_type == SpType::Sled)
-            .map(|(baseboard, sp)| (Arc::clone(baseboard), sp.sp_slot))
-            .collect();
-
-        if current_sled_slots != self.last_seen_sled_slots {
-            // Skip invalidation on first run (just initializing)
-            if !self.last_seen_sled_slots.is_empty() {
-                info!(
-                    opctx.log,
-                    "invalidating multicast caches due to sled location change";
-                    "previous_sled_count" => self.last_seen_sled_slots.len(),
-                    "current_sled_count" => current_sled_slots.len()
-                );
-                self.invalidate_backplane_cache().await;
-                self.invalidate_sled_mapping_cache().await;
-            }
-            self.last_seen_sled_slots = current_sled_slots;
-        }
-    }
-}
-
-/// Maps an external multicast address to an underlay address in ff04::/64.
-///
-/// Maps external addresses into [`UNDERLAY_MULTICAST_SUBNET`] (ff04::/64,
-/// a subset of the admin-local scope ff04::/16 per RFC 7346) using XOR-fold. This prefix is static
-/// for consistency across racks.
-///
-/// See [RFC 7346] for IPv6 multicast admin-local scope.
-///
-/// # Salt Parameter (Collision Avoidance)
-///
-/// The `salt` enables collision avoidance via XOR perturbation. XOR is bijective:
-/// distinct salts produce distinct outputs (since `a ⊕ b = a ⊕ c` implies `b = c`),
-/// guaranteeing 256 unique addresses per external IP.
-///
-/// This is mathematically equivalent to [binary probing] in hash table literature
-/// (`h_i(x) := h(x) ⊕ i`), though the domain context differs in that we're mapping
-/// into a sparse 2^64 IPv6 address space rather than probing array slots.
-///
-/// ```text
-/// Salt perturbation example (h = 0xa):
-/// ┌──────┬─────────┬────────┐
-/// │ salt │ h ⊕ salt│ output │
-/// ├──────┼─────────┼────────┤
-/// │  0   │ 0xa ⊕ 0 │  0xa   │
-/// │  1   │ 0xa ⊕ 1 │  0xb   │
-/// │  2   │ 0xa ⊕ 2 │  0x8   │
-/// │  3   │ 0xa ⊕ 3 │  0x9   │
-/// │  4   │ 0xa ⊕ 4 │  0xe   │
-/// │  5   │ 0xa ⊕ 5 │  0xf   │
-/// │  6   │ 0xa ⊕ 6 │  0xc   │
-/// │  7   │ 0xa ⊕ 7 │  0xd   │
-/// └──────┴─────────┴────────┘
-/// Outputs: [a, b, 8, 9, e, f, c, d] (scattered, not sequential)
-/// ```
-///
-/// On collision (i.e., underlay IP already in use), we increment salt and retry.
-/// This stores the successful salt with the group for deterministic
-/// reconstruction.
-///
-/// # Implementation
-///
-/// ```text
-/// underlay_ip = ff04:: | ((xor_fold(external_ip) ⊕ salt) & HOST_MASK)
-/// ```
-///
-/// - IPv4: embedded directly (32 bits fits in 64-bit host space)
-/// - IPv6: XOR upper and lower 64-bit halves to fold 128→64 bits
-/// - Salt ∈ [0, 255]: XORed into host bits for collision retry
-///
-/// The `& HOST_MASK` guarantees the result stays within ff04::/64, our static
-/// underlay subnet.
-///
-/// [RFC 7346]: https://www.rfc-editor.org/rfc/rfc7346
-/// [binary probing]: https://courses.grainger.illinois.edu/CS473/fa2025/notes/05-hashing.pdf
-fn map_external_to_underlay_ip(external_ip: IpAddr, salt: u8) -> IpAddr {
-    // Derive constants from the default underlay multicast subnet
-    const HOST_BITS: u32 = 128 - UNDERLAY_MULTICAST_SUBNET.width() as u32;
-    let prefix_base =
-        u128::from_be_bytes(UNDERLAY_MULTICAST_SUBNET.addr().octets());
-
-    map_external_to_underlay_ip_impl(prefix_base, HOST_BITS, external_ip, salt)
-}
-
-/// Core implementation: maps external multicast IP to underlay IPv6 address.
-///
-/// Separated for testing purposes.
-///
-/// Parameters:
-/// - `prefix_base`: Network prefix as u128 (e.g., ff04:: → 0xff04_0000_...)
-/// - `host_bits`: Number of host bits (e.g., 64 for a /64 prefix)
-/// - `external_ip`: The external multicast address to map
-/// - `salt`: XOR perturbation for collision avoidance (0-255)
-///
-/// Returns: The mapped underlay IPv6 address
-fn map_external_to_underlay_ip_impl(
-    prefix_base: u128,
-    host_bits: u32,
-    external_ip: IpAddr,
-    salt: u8,
-) -> IpAddr {
-    let host_mask: u128 =
-        if host_bits >= 128 { u128::MAX } else { (1u128 << host_bits) - 1 };
-
-    // Derive host value from external IP
-    let host_value: u128 = match external_ip {
-        IpAddr::V4(ipv4) => {
-            // IPv4 (32 bits) fits directly in host space
-            u128::from(u32::from_be_bytes(ipv4.octets()))
-        }
-        IpAddr::V6(ipv6) => {
-            // XOR-fold 128 bits → host_bits (upper ^ lower).
-            // This ensures different external addresses (even with identical
-            // lower bits but different scopes) map to different underlay IPs.
-            let full = u128::from_be_bytes(ipv6.octets());
-            if host_bits >= 128 {
-                full
-            } else {
-                (full >> host_bits) ^ (full & host_mask)
-            }
-        }
-    };
-
-    // XOR salt for collision avoidance retry, masked to stay in host bits.
-    // The salt is applied after folding, ensuring different salts produce
-    // different underlay IPs while staying within the prefix.
-    let salted = (host_value ^ u128::from(salt)) & host_mask;
-
-    // Combine prefix + host (masking guarantees result stays in prefix)
-    let underlay = prefix_base | salted;
-
-    IpAddr::V6(Ipv6Addr::from(underlay.to_be_bytes()))
 }
 
 impl BackgroundTask for MulticastGroupReconciler {
@@ -516,7 +326,23 @@ impl MulticastGroupReconciler {
 
         trace!(opctx.log, "starting multicast reconciliation pass");
 
-        self.check_sled_locations_for_cache_invalidation(opctx).await;
+        // Per-pass client construction policy:
+        //
+        // - DPD (dataplane): fail-closed. Required by every step. A
+        //   pass without DPD has nothing useful to do.
+        // - sled-agent: never fails. The wrapper builds per-sled
+        //   clients on demand, so construction is infallible.
+        // - MGD MRIB: fail-open. Only three steps are MRIB-coupled
+        //   (member states, active reconciliation, deleting
+        //   reconciliation). Creating-group reconciliation and the two
+        //   cleanup steps run regardless. Subsequent passes retry the
+        //   gated steps when MRIB returns.
+        //
+        // The non-gated cleanup steps never touch the dataplane.
+        // `cleanup_empty_groups` only marks "Deleting", and the terminal
+        // "Deleting" → "Deleted" transition lives in the gated
+        // `reconcile_deleting_groups`. A group therefore cannot vanish
+        // from the reconciler's view while its MRIB route still exists.
 
         // Create dataplane client (across switches) once for the entire
         // reconciliation pass (in case anything has changed)
@@ -543,6 +369,28 @@ impl MulticastGroupReconciler {
             self.resolver.clone(),
         );
 
+        // Create MGD MRIB client for multicast route distribution
+        // via DDM. `mg-lower` syncs MRIB changes to DDM automatically.
+        //
+        // Construction failure (e.g., transient DNS resolution returning
+        // no switch zones) skips MRIB-coupled work this pass but lets
+        // creating-group and cleanup paths progress. Subsequent passes
+        // will retry.
+        let switch_zone_client = match MulticastSwitchZoneClient::new(
+            self.resolver.clone(),
+            opctx.log.clone(),
+        )
+        .await
+        {
+            Ok(client) => Some(client),
+            Err(e) => {
+                let msg =
+                    format!("failed to create multicast MRIB client: {e:#}");
+                status.errors.push(msg);
+                None
+            }
+        };
+
         // Process creating groups
         match self.reconcile_creating_groups(opctx).await {
             Ok(count) => status.groups_created += count,
@@ -552,12 +400,14 @@ impl MulticastGroupReconciler {
             }
         }
 
-        // Process member state changes
-        match self
-            .reconcile_member_states(opctx, &dataplane_client, &sled_client)
-            .await
-        {
-            Ok(count) => status.members_processed += count,
+        // Process member state changes. Underlay dataplane members are
+        // programmed by ddmd from DDM peer subscriptions; the reconciler only
+        // advances member DB state and manages OPTE subscriptions plus
+        // M2P/forwarding propagation via sled-agent.
+        match self.reconcile_member_states(opctx, &sled_client).await {
+            Ok(counts) => {
+                status.members_processed += counts.processed;
+            }
             Err(e) => {
                 let msg = format!("failed to reconcile member states: {e:#}");
                 status.errors.push(msg);
@@ -586,28 +436,48 @@ impl MulticastGroupReconciler {
             }
         }
 
-        // Reconcile active groups (verify state, update dataplane as needed)
-        match self
-            .reconcile_active_groups(opctx, &dataplane_client, &sled_client)
-            .await
-        {
-            Ok(count) => status.groups_verified += count,
-            Err(e) => {
-                let msg = format!("failed to reconcile active groups: {e:#}");
-                status.errors.push(msg);
+        // Reconcile active groups
+        if let Some(switch_zone_client) = &switch_zone_client {
+            match self
+                .reconcile_active_groups(
+                    opctx,
+                    &dataplane_client,
+                    &sled_client,
+                    switch_zone_client,
+                )
+                .await
+            {
+                Ok(count) => status.groups_verified += count,
+                Err(e) => {
+                    let msg =
+                        format!("failed to reconcile active groups: {e:#}");
+                    status.errors.push(msg);
+                }
             }
+        } else {
+            status.skipped.push("reconcile_active_groups".to_string());
         }
 
-        // Process deleting groups (DPD cleanup + hard-delete from DB)
-        match self
-            .reconcile_deleting_groups(opctx, &dataplane_client, &sled_client)
-            .await
-        {
-            Ok(count) => status.groups_deleted += count,
-            Err(e) => {
-                let msg = format!("failed to reconcile deleting groups: {e:#}");
-                status.errors.push(msg);
+        // Process deleting groups
+        if let Some(switch_zone_client) = &switch_zone_client {
+            match self
+                .reconcile_deleting_groups(
+                    opctx,
+                    &dataplane_client,
+                    &sled_client,
+                    switch_zone_client,
+                )
+                .await
+            {
+                Ok(count) => status.groups_deleted += count,
+                Err(e) => {
+                    let msg =
+                        format!("failed to reconcile deleting groups: {e:#}");
+                    status.errors.push(msg);
+                }
             }
+        } else {
+            status.skipped.push("reconcile_deleting_groups".to_string());
         }
 
         trace!(
@@ -628,11 +498,12 @@ impl MulticastGroupReconciler {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     use std::collections::HashSet;
-    use std::net::{Ipv4Addr, Ipv6Addr};
+    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
+    use crate::app::multicast::{
+        map_external_to_underlay_ip, map_external_to_underlay_ip_impl,
+    };
     use ipnet::Ipv6Net;
     use omicron_common::address::IPV6_ADMIN_SCOPED_MULTICAST_PREFIX;
 
