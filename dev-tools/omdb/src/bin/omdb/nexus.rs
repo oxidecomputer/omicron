@@ -94,6 +94,7 @@ use nexus_types::internal_api::background::TufArtifactReplicationCounters;
 use nexus_types::internal_api::background::TufArtifactReplicationRequest;
 use nexus_types::internal_api::background::TufArtifactReplicationStatus;
 use nexus_types::internal_api::background::TufRepoPrunerStatus;
+use nexus_types::internal_api::background::UserDataExportCoordinatorStatus;
 use nexus_types::internal_api::background::fm_rendezvous;
 use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::CollectionUuid;
@@ -1396,6 +1397,9 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
         }
         "switch_port_config_manager" => {
             print_task_switch_port_settings_manager(details);
+        }
+        "user_data_export_coordinator" => {
+            print_task_user_data_export_coordinator(details);
         }
         _ => {
             println!(
@@ -3180,6 +3184,7 @@ fn print_task_alert_dispatcher(details: &serde_json::Value) {
         );
     }
 }
+
 fn print_task_webhook_deliverator(details: &serde_json::Value) {
     use nexus_types::external_api::alert::WebhookDeliveryAttemptResult;
     use nexus_types::internal_api::background::WebhookDeliveratorStatus;
@@ -4250,6 +4255,53 @@ fn print_task_physical_disk_adoption(details: &serde_json::Value) {
     println!("physical disks added: {}", status.disks_added);
     for error in status.errors {
         println!("{ERRICON} {error}");
+    }
+}
+
+fn print_task_user_data_export_coordinator(details: &serde_json::Value) {
+    match serde_json::from_value::<UserDataExportCoordinatorStatus>(
+        details.clone(),
+    ) {
+        Err(error) => eprintln!(
+            "warning: failed to interpret task details: {:?}: {:?}",
+            error, details
+        ),
+
+        Ok(status) => {
+            println!(
+                "    total create steps invoked ok: {}",
+                status.create_invoked_ok.len(),
+            );
+            for line in &status.create_invoked_ok {
+                println!("    > {line}");
+            }
+
+            println!(
+                "    total delete steps invoked ok: {}",
+                status.delete_invoked_ok.len(),
+            );
+            for line in &status.delete_invoked_ok {
+                println!("    > {line}");
+            }
+
+            println!(
+                "    total records affected by expunge: {}",
+                status.records_marked_for_deletion,
+            );
+
+            println!(
+                "    total records fast-deleted (resource was deleted): {}",
+                status.records_bypassed_ok.len(),
+            );
+            for line in &status.records_bypassed_ok {
+                println!("    > {line}");
+            }
+
+            println!("    errors: {}", status.errors.len());
+            for line in &status.errors {
+                println!("    > {line}");
+            }
+        }
     }
 }
 
