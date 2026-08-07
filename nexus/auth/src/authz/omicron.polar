@@ -39,50 +39,44 @@ has_role(actor: AuthenticatedActor, role: String, resource: Resource)
 #
 # - "read": required to read a resource
 #
-# We define the following predefined roles for only a few high-level resources:
-# the Fleet (see below), Silo, Organization, and Project.  The specific roles
-# are oriented around intended use-cases:
-#
-# - "admin": has all permissions on the resource
-#
-# - "collaborator": has "read", "list_children", and "create_child", plus
-#   the "admin" role for child resources.  The idea is that if you're an
-#   Organization Collaborator, you have full control over the Projects within
-#   the Organization, but you cannot modify or delete the Organization itself.
-#
-# - "viewer": has "read" and "list_children" on a resource
+# We define predefined roles for only a few high-level resources: Fleet, Silo,
+# and Project.  Each resource defines its own role hierarchy and the permissions
+# granted by each role below.  A role on one resource grants permissions or
+# roles on related resources only where an explicit relation rule says so.
+# Consequently, similarly named roles do not necessarily have identical effects
+# at different scopes.
 #
 # Below the Project level, permissions are granted via roles at the Project
 # level.  For example, for someone to be able to create, modify, or delete any
 # Instances, they must be granted project.collaborator, which means they can
 # create, modify, or delete _all_ resources in the Project.
 #
+# Role names describe broad levels of access, but their exact permissions are
+# defined separately for each resource type. Roles on a parent resource do not
+# automatically grant the same role, or unrestricted access, on its children.
+# Any access inherited by a child resource is explicitly defined below.
+#
 # The complete set of predefined roles:
 #
-# - fleet.admin           (superuser for the whole system)
-# - fleet.collaborator    (can manage Silos)
-# - fleet.viewer          (can read most non-siloed resources in the system)
-# - silo.admin            (superuser for the silo)
-# - silo.collaborator     (can create and own Organizations; grants project.admin on all projects)
-# - silo.limited-collaborator (grants project.limited-collaborator on all projects)
-# - silo.viewer           (can read most resources within the Silo; grants project.viewer)
-# - organization.admin    (complete control over an organization)
-# - organization.collaborator (can manage Projects)
-# - organization.viewer   (can read most resources within the Organization)
-# - project.admin         (complete control over a Project)
+# - fleet.admin           (full control of a given Fleet and explicitly delegated fleet-scoped resources)
+# - fleet.collaborator    (can create Silos and modify Silo configuration, but cannot access Silo contents)
+# - fleet.viewer          (can read most non-siloed resources in the Fleet, as well as explicitly exposed fleet-scoped resources)
+# - silo.admin            (full control of the Silo and its resources)
+# - silo.collaborator     (can create Projects and grants project.admin on all Projects within a given Silo)
+# - silo.limited-collaborator (can create Projects and grants project.admin on all Projects within a given Silo)
+# - silo.viewer           (can read Silo resources and grants project.viewer on all Projects within a given Silo)
+# - project.admin         (full control of a Project and its resources)
 # - project.collaborator  (can manage all resources within the Project, including networking)
 # - project.limited-collaborator (can manage compute resources, but not networking resources)
 # - project.viewer        (can read most resources within the Project)
 #
-# Outside the Silo/Organization/Project hierarchy, we (currently) treat most
+# Outside the Silo/Project hierarchy, we (currently) treat most
 # resources as nested under Fleet or else a synthetic resource (see below).  We
-# do not yet support role assignments on anything other than Fleet, Silo,
-# Organization, or Project.
-#
+# do not yet support role assignments on anything other than Fleet, Silo, or Project.
 
-# "Fleet" is a global singleton representing the whole system.  The name comes
-# from the idea described in RFD 24, but it's not quite right.  This probably
-# should be more like "Region" or "AvailabilityZone".  The precise boundaries
+# "Fleet" is a global singleton representing the whole system. The name comes
+# from the idea described in RFD 24, but it's not quite right. This probably
+# should be more like "Region" or "AvailabilityZone". The precise boundaries
 # have not yet been figured out.
 resource Fleet {
 	permissions = [
@@ -141,7 +135,7 @@ resource Silo {
 	"create_child" if "collaborator";
 	"modify" if "admin";
 
-	# Permissions implied by roles on this resource's parent (Fleet).  Fleet
+	# Permissions implied by roles on this resource's parent (Fleet). Fleet
 	# privileges allow a user to see and potentially administer the Silo,
 	# but they do not give anyone permission to look at anything inside the
 	# Silo.  To achieve this, we use permission rules here.  (If we granted
@@ -159,24 +153,13 @@ resource Silo {
 has_relation(fleet: Fleet, "parent_fleet", silo: Silo)
 	if silo.fleet = fleet;
 
-# As a special case, all authenticated users can read their own Silo.  That's
-# not quite the same as having the "viewer" role.  For example, they cannot list
-# Organizations in the Silo.
+# As a special case, every authenticated Silo user can read their own Silo even
+# if they have no role on it.  This grants only the "read" permission; it does
+# not confer the "viewer" role or its "list_children" permission.
 #
-# One reason this is necessary is because if an unprivileged user tries to
-# create an Organization using "POST /organizations", they should get back a 403
-# (which implies they're able to see /organizations, which is essentially seeing
-# the Silo itself) rather than a 404.  This behavior isn't a hard constraint
-# (i.e., you could reasonably get a 404 for an API you're not allowed to call).
-# Nor is the implementation (i.e., we could special-case this endpoint somehow).
-# But granting this permission is the simplest way to keep this endpoint's
-# behavior consistent with the rest of the API.
-#
-# This rule is also used to determine if a user can list the identity providers
-# in the Silo (which they should be able to), since that's predicated on being
-# able to read the Silo.
-#
-# It's unclear what else would break if users couldn't see their own Silo.
+# This permission also allows users to list the identity providers in their
+# Silo, since access to that collection is predicated on being able to read the
+# parent Silo.
 has_permission(actor: AuthenticatedActor, "read", silo: Silo)
 	if actor.is_user and silo in actor.silo;
 
