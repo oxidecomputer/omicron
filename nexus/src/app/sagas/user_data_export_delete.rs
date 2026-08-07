@@ -39,7 +39,6 @@ use crate::app::sagas::volume_delete;
 use nexus_db_queries::authn;
 use nexus_types::saga::saga_action_failed;
 use omicron_common::api::external::Error;
-use omicron_common::progenitor_operation_retry::ProgenitorOperationRetryError;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::UserDataExportUuid;
 use omicron_uuid_kinds::VolumeUuid;
@@ -293,8 +292,10 @@ async fn suded_call_pantry_detach_for_export(
     )
     .await
     {
+        Ok(()) => Ok(()),
+
         // We can treat the pantry being permanently gone as success.
-        Ok(()) | Err(ProgenitorOperationRetryError::Gone) => Ok(()),
+        Err(e) if e.is_gone() => Ok(()),
 
         Err(err) => Err(saga_action_failed(Error::internal_error(format!(
             "failed to detach {volume_id} from pantry at {pantry_address}: {}",
@@ -419,11 +420,15 @@ mod test {
                             if record.state() == UserDataExportState::Live {
                                 Ok(record)
                             } else {
-                                Err(poll::CondCheckError::<Error>::NotYet)
+                                Err(poll::CondCheckError::<Error>::NotYet {
+                                    status: None,
+                                })
                             }
                         }
 
-                        None => Err(poll::CondCheckError::<Error>::NotYet),
+                        None => Err(poll::CondCheckError::<Error>::NotYet {
+                            status: None,
+                        }),
                     }
                 }
             },

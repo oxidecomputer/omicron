@@ -225,7 +225,7 @@ pub(crate) async fn call_pantry_detach_ok_if_gone(
     log: &slog::Logger,
     attach_id: Uuid,
     pantry_address: SocketAddrV6,
-) -> Result<(), ProgenitorOperationRetryError<CruciblePantryClientError>> {
+) -> Result<(), IndefiniteRetryOperationWhileError<CruciblePantryClientError>> {
     let endpoint = format!("http://{}", pantry_address);
 
     info!(
@@ -259,13 +259,31 @@ pub(crate) async fn call_pantry_detach_ok_if_gone(
         client.detach(&attach_id.to_string()).await.map(|_| ())
     };
 
-    let gone_check =
-        || async { Ok(is_pantry_gone(nexus, pantry_address, log).await) };
+    let gone_check = || async {
+        let result = match is_pantry_gone(nexus, pantry_address, log).await {
+            true => GoneCheckResult::Gone,
+            false => GoneCheckResult::StillAvailable,
+        };
 
-    ProgenitorOperationRetry::new(detach_operation, gone_check)
-        .run(log)
-        .await
-        .map(|_response| ())
+        Ok(result)
+    };
+
+    retry_operation_while_indefinitely(
+        backon_retry_policy_internal_service(),
+        detach_operation,
+        gone_check,
+        |notification| {
+            slog::warn!(
+                log,
+                "failed to detach (ok if gone) {attach_id} from pantry \
+                {pantry_address}, retrying in {:?}",
+                notification.delay;
+                InlineErrorChain::new(&notification.error),
+            );
+        },
+    )
+    .await
+    .map(|_response| ())
 }
 
 pub(crate) fn find_only_new_region(
