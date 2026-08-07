@@ -75,6 +75,7 @@ use nexus_types::external_api::user::{Group, User, UserBuiltin};
 use nexus_types::external_api::vpc::{Vpc, VpcRouter, VpcSubnet};
 use nexus_types_versions::v2025_11_20_00;
 use nexus_types_versions::v2026_01_01_00;
+use nexus_types_versions::v2026_01_08_00;
 use omicron_common::address::IpRange;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Disk;
@@ -5455,6 +5456,32 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .await?;
             Ok(HttpResponseDeleted())
         })
+        .await
+    }
+
+    // Pre-MULTICAST_SOURCE_LIMITS version: same types as the latest variant
+    // (re-exported through `latest::`), so delegate directly. The behavioral
+    // difference (per-member and per-group source IP caps) is enforced
+    // unconditionally in the Nexus app layer.
+    async fn instance_multicast_group_join_v2026_01_08_00(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<
+            v2026_01_08_00::multicast::InstanceMulticastGroupPath,
+        >,
+        query_params: Query<project::OptionalProjectSelector>,
+        body_params: TypedBody<
+            v2026_01_08_00::multicast::InstanceMulticastGroupJoin,
+        >,
+    ) -> Result<
+        HttpResponseCreated<v2026_01_08_00::multicast::MulticastGroupMember>,
+        HttpError,
+    > {
+        Self::instance_multicast_group_join(
+            rqctx,
+            path_params,
+            query_params,
+            body_params,
+        )
         .await
     }
 

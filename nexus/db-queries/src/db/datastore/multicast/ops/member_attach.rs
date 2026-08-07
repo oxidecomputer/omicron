@@ -38,6 +38,7 @@ use uuid::Uuid;
 
 use nexus_db_lookup::DbConnection;
 use nexus_db_model::{MulticastGroupMember, MulticastGroupMemberState};
+use omicron_common::address::MAX_SOURCE_IPS_PER_GROUP;
 use omicron_common::api::external;
 
 use crate::db::true_or_cast_error::matches_sentinel;
@@ -47,6 +48,7 @@ use crate::db::true_or_cast_error::matches_sentinel;
 // the specific failure reason from the error message.
 const GROUP_NOT_FOUND_SENTINEL: &str = "group-not-found";
 const INSTANCE_NOT_FOUND_SENTINEL: &str = "instance-not-found";
+const UNION_EXCEEDED_SENTINEL: &str = "source-union-exceeded";
 
 /// Result of attaching an instance to a multicast group.
 #[derive(Debug, Clone, PartialEq)]
@@ -62,6 +64,9 @@ pub(crate) enum AttachMemberError {
     GroupNotFound,
     /// Instance doesn't exist or has been deleted
     InstanceNotFound,
+    /// Attaching this member would push the group's source IP union past
+    /// the per-group cap.
+    SourceUnionExceeded { cap: usize },
     /// Database constraint violation (unique index, etc.)
     ConstraintViolation(String),
     /// Other database error
@@ -72,15 +77,25 @@ impl AttachMemberError {
     /// Construct an [`AttachMemberError`] from a database error.
     ///
     /// This catches the sentinel errors that indicate validation failures
-    /// (group not found, instance not found) as well as constraint violations.
+    /// (group not found, instance not found, source union cap) as well as
+    /// constraint violations.
     fn from_diesel(err: DieselError) -> Self {
         // Check for sentinel errors first
-        let sentinels = [GROUP_NOT_FOUND_SENTINEL, INSTANCE_NOT_FOUND_SENTINEL];
+        let sentinels = [
+            GROUP_NOT_FOUND_SENTINEL,
+            INSTANCE_NOT_FOUND_SENTINEL,
+            UNION_EXCEEDED_SENTINEL,
+        ];
         if let Some(sentinel) = matches_sentinel(&err, &sentinels) {
             return match sentinel {
                 GROUP_NOT_FOUND_SENTINEL => AttachMemberError::GroupNotFound,
                 INSTANCE_NOT_FOUND_SENTINEL => {
                     AttachMemberError::InstanceNotFound
+                }
+                UNION_EXCEEDED_SENTINEL => {
+                    AttachMemberError::SourceUnionExceeded {
+                        cap: MAX_SOURCE_IPS_PER_GROUP,
+                    }
                 }
                 _ => unreachable!("Unknown sentinel: {sentinel}"),
             };
@@ -114,6 +129,12 @@ impl From<AttachMemberError> for external::Error {
                 external::Error::invalid_request(
                     "Instance does not exist or has been deleted",
                 )
+            }
+            AttachMemberError::SourceUnionExceeded { cap } => {
+                external::Error::invalid_request(format!(
+                    "attaching this member would exceed the per-group \
+                     source IP union cap of {cap}",
+                ))
             }
             AttachMemberError::ConstraintViolation(msg) => {
                 external::Error::invalid_request(&format!(
@@ -173,9 +194,11 @@ impl AttachMemberToGroupStatement {
     /// - `new_member_id`: UUID for new member row (if creating)
     /// - `source_ips`: Source IPs for filtering (`None` preserves existing on reactivation)
     ///
-    /// CTEs atomically validate group is not in a "Deleting" state,
-    /// that the instance exists, retrieves the current `sled_id` from
-    /// VMM table, then performs the upsert.
+    /// CTEs atomically validate group is not in a "Deleting" state, that the
+    /// instance exists, retrieves the current `sled_id` from VMM table, and
+    /// (when a non-empty source list is being applied) verifies that the
+    /// resulting per-group source IP union stays within
+    /// [`MAX_SOURCE_IPS_PER_GROUP`].
     pub fn new(
         group_id: Uuid,
         instance_id: Uuid,
@@ -273,22 +296,16 @@ impl AttachMemberToGroupStatement {
     /// Uses CAST to trigger a predictable error when validation fails:
     /// - If group not found → CAST('group-not-found' AS BOOL) fails
     /// - If instance not found → CAST('instance-not-found' AS BOOL) fails
-    /// - If both valid → CAST('TRUE' AS BOOL) succeeds
+    /// - If the resulting source IP union would exceed the per-group cap
+    ///   → CAST('source-union-exceeded' AS BOOL) fails (only checked when a
+    ///     non-empty source list is being applied)
+    /// - If all valid → CAST('TRUE' AS BOOL) succeeds
     ///
     /// This follows the pattern used in `network_interface.rs` and `external_ip.rs`.
     fn push_validation_cte<'a>(
         &'a self,
         mut out: AstPass<'_, 'a, Pg>,
     ) -> QueryResult<()> {
-        // SELECT CAST(
-        //   CASE
-        //     WHEN NOT EXISTS (SELECT 1 FROM instance_sled) THEN 'instance-not-found'
-        //     WHEN NOT EXISTS (SELECT 1 FROM valid_group) THEN 'group-not-found'
-        //     ELSE 'TRUE'
-        //   END AS BOOL
-        // ) AS validated
-        //
-        // Instance is checked first to provide more those errors up front
         out.push_sql("SELECT CAST(CASE ");
         out.push_sql("WHEN NOT EXISTS (SELECT 1 FROM instance_sled) THEN '");
         out.push_sql(INSTANCE_NOT_FOUND_SENTINEL);
@@ -296,7 +313,51 @@ impl AttachMemberToGroupStatement {
         out.push_sql("WHEN NOT EXISTS (SELECT 1 FROM valid_group) THEN '");
         out.push_sql(GROUP_NOT_FOUND_SENTINEL);
         out.push_sql("' ");
+        if self.check_union_size() {
+            out.push_sql("WHEN (SELECT size FROM proposed_union_size) > ");
+            out.push_sql(&MAX_SOURCE_IPS_PER_GROUP.to_string());
+            out.push_sql(" THEN '");
+            out.push_sql(UNION_EXCEEDED_SENTINEL);
+            out.push_sql("' ");
+        }
         out.push_sql("ELSE 'TRUE' END AS BOOL) AS validated");
+        Ok(())
+    }
+
+    /// Whether the resulting source IP union should be checked against the
+    /// per-group cap. Skipped when the caller is preserving existing sources
+    /// (`None`) or explicitly clearing them (empty list), since neither path
+    /// grows the union.
+    fn check_union_size(&self) -> bool {
+        self.update_source_ips_on_reactivation
+            && !self.source_ips_for_insert.is_empty()
+    }
+
+    /// Generates the `proposed_union_size` CTE.
+    ///
+    /// Computes the size of the source IP union that would result from this
+    /// attach: all other active members' source IPs unioned with the proposed
+    /// list. This member's existing row (if any) is excluded because its
+    /// sources are being replaced.
+    fn push_proposed_union_size_cte<'a>(
+        &'a self,
+        mut out: AstPass<'_, 'a, Pg>,
+    ) -> QueryResult<()> {
+        out.push_sql(
+            "SELECT count(DISTINCT source_ip) AS size FROM (\
+                 SELECT unnest(source_ips) AS source_ip \
+                 FROM multicast_group_member \
+                 WHERE external_group_id = ",
+        );
+        out.push_bind_param::<diesel::sql_types::Uuid, _>(&self.group_id)?;
+        out.push_sql(" AND parent_id != ");
+        out.push_bind_param::<diesel::sql_types::Uuid, _>(&self.instance_id)?;
+        out.push_sql(" AND time_deleted IS NULL ");
+        out.push_sql("UNION ALL SELECT unnest(");
+        out.push_bind_param::<Array<diesel::sql_types::Inet>, _>(
+            &self.source_ips_for_insert,
+        )?;
+        out.push_sql(") AS source_ip) s");
         Ok(())
     }
 
@@ -432,6 +493,14 @@ impl QueryFragment<Pg> for AttachMemberToGroupStatement {
         out.push_sql("instance_sled AS (");
         self.push_instance_sled_cte(out.reborrow())?;
         out.push_sql("), ");
+
+        // CTE: Compute the prospective per-group source IP union size when
+        // a non-empty source list is being applied.
+        if self.check_union_size() {
+            out.push_sql("proposed_union_size AS (");
+            self.push_proposed_union_size_cte(out.reborrow())?;
+            out.push_sql("), ");
+        }
 
         // CTE: Validation that triggers sentinel errors on failure
         out.push_sql("validation AS MATERIALIZED (");

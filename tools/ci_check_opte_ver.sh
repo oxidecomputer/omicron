@@ -96,6 +96,6 @@ BUILDOMAT_DEPLOY_TARGET=$(cat .github/buildomat/jobs/deploy.sh | sed -n 's/#:[ ]
 if [ "lab-3.0-opte-0.$API_VER" != "$BUILDOMAT_DEPLOY_TARGET" ]; then
     echo "OPTE version mismatch:"
     echo "Cargo.toml: $OPTE_REV ($OPTE_VER)"
-    echo "buildomat deploy job: $BUILDOMAT_DEPLOY_TARGET (expected lab-3.0-opte-0.$API_VER)"
+    echo "buildomat deploy job: $BUILDOMAT_DEPLOY_TARGET (expected lab-opte-0.$API_VER)"
     exit 1
 fi
