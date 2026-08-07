@@ -152,12 +152,10 @@ impl super::Nexus {
     /// API, so create is the only window to reject duplicates or exceed the
     /// per-parent cap threshold.
     ///
-    /// # Returns
-    ///
-    /// The resolved group IDs paired with their source IPs, or an empty vector
-    /// when multicast is disabled or no groups were requested. The borrowed
-    /// source IPs are tied to `params`, which the caller holds across the
-    /// subsequent attach operation.
+    /// Returns the resolved group IDs paired with the requested source IPs,
+    /// or an empty vector when multicast is disabled or no groups were
+    /// requested. The borrowed source IPs are tied to `params`, which the
+    /// caller holds across the subsequent attach operation.
     ///
     /// # Errors
     ///

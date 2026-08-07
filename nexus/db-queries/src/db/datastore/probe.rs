@@ -7,7 +7,8 @@ use crate::context::OpContext;
 use crate::db;
 use crate::db::datastore::DataStoreConnection;
 use crate::db::datastore::SQL_BATCH_SIZE;
-use crate::db::datastore::multicast::ops;
+use crate::db::datastore::multicast::ops::member_attach::AttachMemberError;
+use crate::db::datastore::multicast::ops::member_attach::AttachMemberToGroupStatement;
 use crate::db::model::Name;
 use crate::db::pagination::Paginator;
 use crate::db::pagination::paginated;
@@ -26,7 +27,6 @@ use nexus_db_lookup::LookupPath;
 use nexus_db_model::IncompleteNetworkInterface;
 use nexus_db_model::IpVersion;
 use nexus_db_model::MemberParentRef;
-use nexus_db_model::MulticastGroupMember;
 use nexus_db_model::MulticastGroupMemberParentKind;
 use nexus_db_model::MulticastGroupMemberState;
 use nexus_db_model::Probe;
@@ -349,19 +349,18 @@ impl super::DataStore {
 
             // Pre-convert the source IPs so the transaction closure (which may
             // run more than once on retry) does not (re-)borrow multicast memberships
-            let probe_id = ProbeUuid::from_untyped_uuid(probe.id());
             let member_attach_specs: Vec<(
                 MulticastGroupUuid,
                 Option<Vec<IpNetwork>>,
             )> = multicast_memberships
-                    .iter()
-                    .map(|(group_id, source_ips)| {
-                        let source_networks = source_ips.map(|ips| {
-                            ips.iter().copied().map(IpNetwork::from).collect()
-                        });
-                        (*group_id, source_networks)
-                    })
-                    .collect();
+                .iter()
+                .map(|(group_id, source_ips)| {
+                    let source_networks = source_ips.map(|ips| {
+                        ips.iter().copied().map(IpNetwork::from).collect()
+                    });
+                    (*group_id, source_networks)
+                })
+                .collect();
 
             let err = OptionalError::new();
             self.transaction_retry_wrapper("probe_create")
@@ -384,22 +383,34 @@ impl super::DataStore {
                                 })
                             })?;
 
+                        // Attach each membership through the shared CTE so probe
+                        // joins enforce the same per-group source IP union cap
+                        // (`MAX_SOURCE_IPS_PER_GROUP`) and atomic group
+                        // validation as instance joins. The probe row was just
+                        // inserted in this transaction, so the CTE's parent
+                        // lookup resolves its sled.
+                        let probe_parent = MemberParentRef::Probe(
+                            ProbeUuid::from_untyped_uuid(probe.id()),
+                        );
                         for (group_id, source_networks) in member_attach_specs {
-                            ops::member_attach::AttachMemberToGroupStatement::new(
+                            AttachMemberToGroupStatement::new(
                                 group_id.into_untyped_uuid(),
-                                MemberParentRef::Probe(probe_id),
+                                probe_parent,
                                 Uuid::new_v4(),
                                 source_networks,
                             )
-                            .get_result_async::<MulticastGroupMember>(&conn)
+                            .execute(&conn)
                             .await
-                            .map_err(|e| {
-                                err.bail_retryable_or_else(e, |e| {
-                                    ops::member_attach::AttachMemberError::
-                                        from_diesel(e)
-                                        .into()
-                                })
-                            })?;
+                            .map_err(
+                                |e| match e {
+                                    AttachMemberError::DatabaseError(e)
+                                        if nexus_db_errors::retryable(&e) =>
+                                    {
+                                        e
+                                    }
+                                    other => err.bail(other.into()),
+                                },
+                            )?;
                         }
 
                         Ok(probe)

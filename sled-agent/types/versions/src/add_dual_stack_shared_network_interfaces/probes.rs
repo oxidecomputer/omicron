@@ -36,7 +36,7 @@ impl IdHashItem for ProbeCreate {
 }
 
 /// An external IP address used by a probe.
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq, Eq)]
 pub struct ExternalIp {
     /// The external IP address.
     pub ip: IpAddr,
@@ -49,7 +49,9 @@ pub struct ExternalIp {
 }
 
 /// The kind of external IP address of a probe.
-#[derive(Clone, Copy, Debug, Deserialize, JsonSchema, Serialize)]
+#[derive(
+    Clone, Copy, Debug, Deserialize, JsonSchema, Serialize, PartialEq, Eq,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum IpKind {
     Snat,
