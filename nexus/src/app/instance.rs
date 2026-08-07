@@ -1924,7 +1924,7 @@ impl super::Nexus {
         //   - Update the DB if the request succeeded (hopefully to "Attached").
         // - If the instance is not running...
         //   - Update the disk state in the DB to "Attached".
-        let (_instance, disk) = self
+        let (_instance, _db_disk) = self
             .db_datastore
             .instance_attach_disk(
                 &opctx,
@@ -1934,6 +1934,14 @@ impl super::Nexus {
             )
             .await?;
 
+        // `instance_attach_disk` returns a `model::Disk` and deliberately does
+        // not re-fetch a `datastore::Disk` internally (see omicron#10695): a
+        // re-fetch after the attach commits can fail (e.g. pool exhaustion) and
+        // would leak the committed attach if it ran inside a saga action. It is
+        // safe to upgrade to a `datastore::Disk` here, outside the mutation,
+        // because a failure in this API path is recoverable (the client can
+        // retry; attach is idempotent).
+        let disk = self.db_datastore.disk_get(&opctx, authz_disk.id()).await?;
         Ok(disk)
     }
 
@@ -1972,10 +1980,13 @@ impl super::Nexus {
         //   - Update the DB if the request succeeded (hopefully to "Detached").
         // - If the instance is not running...
         //   - Update the disk state in the DB to "Detached".
-        let disk = self
+        let _db_disk = self
             .db_datastore
             .instance_detach_disk(&opctx, &authz_instance, &authz_disk)
             .await?;
+        // As in `instance_attach_disk`, upgrade the returned `model::Disk` to a
+        // `datastore::Disk` outside the datastore mutation (see omicron#10695).
+        let disk = self.db_datastore.disk_get(&opctx, authz_disk.id()).await?;
         Ok(disk)
     }
 
