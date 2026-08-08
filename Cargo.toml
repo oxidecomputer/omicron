@@ -489,7 +489,7 @@ crossterm = { version = "0.29.0", features = ["event-stream"] }
 # NOTE: if you change the pinned revision of the `crucible` dependencies, you
 # must also update the references in package-manifest.toml to match the new
 # revision.
-crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "ad8a31742adc45e925e63443a5b43c8e30604022" }
+crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "6d037cb60304413302e3f3658e4850980cee77b0" }
 crucible-pantry-client = { git = "https://github.com/oxidecomputer/crucible", rev = "ad8a31742adc45e925e63443a5b43c8e30604022" }
 crucible-smf = { git = "https://github.com/oxidecomputer/crucible", rev = "ad8a31742adc45e925e63443a5b43c8e30604022" }
 crucible-common = { git = "https://github.com/oxidecomputer/crucible", rev = "ad8a31742adc45e925e63443a5b43c8e30604022" }
