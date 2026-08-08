@@ -22,13 +22,13 @@ use nexus_types::external_api::floating_ip::{
     AddressAllocator, FloatingIp, FloatingIpAttach,
 };
 use nexus_types::external_api::instance::{
-    EphemeralIpCreate, ExternalIpCreate, InstanceCreate,
+    EphemeralIpCreate, ExternalIpCreate, InstanceCpuCount, InstanceCreate,
     InstanceNetworkInterfaceAttachment,
 };
 use nexus_types::external_api::ip_pool::{IpVersion, PoolSelector};
+use nexus_types_versions::latest::instance::Instance;
 use omicron_common::api::external::{
-    ByteCount, IdentityMetadataCreateParams, Instance, InstanceCpuCount,
-    NameOrId,
+    ByteCount, IdentityMetadataCreateParams, NameOrId,
 };
 use omicron_test_utils::dev::poll::{CondCheckError, wait_for_condition};
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid};
@@ -97,6 +97,7 @@ async fn test_multicast_external_ip_scenarios(
             start: true, // Start the instance
             auto_restart_policy: Default::default(),
             anti_affinity_groups: Vec::new(),
+            enable_jumbo_frames: false,
         };
 
         let instance_url = format!("/v1/instances?project={project_name}");
@@ -243,6 +244,7 @@ async fn test_multicast_external_ip_scenarios(
             start: true,
             auto_restart_policy: Default::default(),
             anti_affinity_groups: Vec::new(),
+            enable_jumbo_frames: false,
         };
 
         let instance_url = format!("/v1/instances?project={project_name}");
@@ -406,6 +408,7 @@ async fn test_multicast_external_ip_scenarios(
             start: true,
             auto_restart_policy: Default::default(),
             anti_affinity_groups: Vec::new(),
+            enable_jumbo_frames: false,
         };
 
         let instance_url = format!("/v1/instances?project={project_name}");
@@ -529,6 +532,7 @@ async fn test_multicast_with_floating_ip_basic(
         start: true, // Start the instance
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
+        enable_jumbo_frames: false,
     };
 
     let instance_url = format!("/v1/instances?project={project_name}");

@@ -31,7 +31,8 @@ use nexus_test_utils::resource_helpers::{
 };
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::instance::{
-    InstanceCreate, InstanceNetworkInterfaceAttachment, InstanceUpdate,
+    InstanceCpuCount, InstanceCreate, InstanceNetworkInterfaceAttachment,
+    InstanceState, InstanceUpdate,
 };
 use nexus_types::external_api::multicast::{
     InstanceMulticastGroupJoin, MulticastGroup, MulticastGroupJoinSpec,
@@ -39,9 +40,9 @@ use nexus_types::external_api::multicast::{
 };
 use nexus_types::internal_api::params::InstanceMigrateRequest;
 
+use nexus_types_versions::latest::instance::Instance;
 use omicron_common::api::external::{
-    ByteCount, IdentityMetadataCreateParams, Instance, InstanceCpuCount,
-    InstanceState, Nullable,
+    ByteCount, IdentityMetadataCreateParams, Nullable,
 };
 use omicron_nexus::TestInterfaces;
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid};
@@ -679,6 +680,7 @@ async fn test_multicast_member_cleanup_instance_never_started(
         start: false, // Don't start the instance
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
+        enable_jumbo_frames: false,
     };
 
     let instance_url = format!("/v1/instances?project={project_name}");
@@ -1240,6 +1242,7 @@ async fn test_source_ips_preserved_on_instance_reconfigure(
             start: false,
             auto_restart_policy: None,
             anti_affinity_groups: Vec::new(),
+            enable_jumbo_frames: false,
             cpu_platform: None,
             multicast_groups: Vec::new(),
         },
@@ -1303,6 +1306,7 @@ async fn test_source_ips_preserved_on_instance_reconfigure(
         "boot_disk": null,
         "auto_restart_policy": null,
         "cpu_platform": null,
+        "enable_jumbo_frames": false,
         "multicast_groups": [
             // Existing group: source_ips=null to preserve existing sources
             { "group": ssm_ip, "source_ips": null },
@@ -1424,6 +1428,7 @@ async fn test_instance_create_with_ssm_multicast_groups(
         start: true, // Start the instance
         auto_restart_policy: None,
         anti_affinity_groups: Vec::new(),
+        enable_jumbo_frames: false,
         cpu_platform: None,
         // Key part: SSM group with source_ips via MulticastGroupJoinSpec
         multicast_groups: vec![MulticastGroupJoinSpec {
@@ -1522,6 +1527,7 @@ async fn test_ssm_without_sources_fails_create_and_reconfigure(
         start: true,
         auto_restart_policy: None,
         anti_affinity_groups: Vec::new(),
+        enable_jumbo_frames: false,
         cpu_platform: None,
         multicast_groups: vec![MulticastGroupJoinSpec {
             group: ssm_ip.to_string().parse().unwrap(),
@@ -1572,6 +1578,7 @@ async fn test_ssm_without_sources_fails_create_and_reconfigure(
         start: true,
         auto_restart_policy: None,
         anti_affinity_groups: Vec::new(),
+        enable_jumbo_frames: false,
         cpu_platform: None,
         multicast_groups: vec![], // No multicast groups init
     };
@@ -1596,6 +1603,7 @@ async fn test_ssm_without_sources_fails_create_and_reconfigure(
             source_ips: None, // Missing sources for new SSM group!
             ip_version: None,
         }]),
+        enable_jumbo_frames: false,
     };
 
     let update_url =

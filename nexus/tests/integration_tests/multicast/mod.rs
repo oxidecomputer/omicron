@@ -32,7 +32,8 @@ use nexus_test_utils::resource_helpers::{
 };
 use nexus_types::deployment::SledFilter;
 use nexus_types::external_api::instance::{
-    InstanceCreate, InstanceNetworkInterfaceAttachment,
+    InstanceCpuCount, InstanceCreate, InstanceNetworkInterfaceAttachment,
+    InstanceState,
 };
 use nexus_types::external_api::ip_pool::{
     IpPool, IpPoolAssignment, IpPoolCreate, IpPoolRange, IpPoolType, IpRange,
@@ -43,9 +44,9 @@ use nexus_types::external_api::multicast::{
     MulticastGroupJoinSpec, MulticastGroupMember,
 };
 use nexus_types::identity::{Asset, Resource};
+use nexus_types_versions::latest::instance::Instance;
 use omicron_common::api::external::{
     ByteCount, DataPageParams, Hostname, IdentityMetadataCreateParams,
-    Instance, InstanceCpuCount, InstanceState,
 };
 use omicron_nexus::TestInterfaces;
 use omicron_test_utils::dev::poll::{self, CondCheckError, wait_for_condition};
@@ -1202,6 +1203,7 @@ pub(crate) async fn instance_for_multicast_groups(
             start,
             auto_restart_policy: Default::default(),
             anti_affinity_groups: Vec::new(),
+            enable_jumbo_frames: false,
         },
     )
     .await

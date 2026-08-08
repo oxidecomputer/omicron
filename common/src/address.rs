@@ -38,35 +38,81 @@ pub const EXTERNAL_JUMBO_FRAMES_MTU: u32 = 8500;
 
 /// IPv4 Source-Specific Multicast (SSM) subnet.
 ///
-/// See [RFC 4607 §3] for the IPv4 SSM address range allocation (232.0.0.0/8).
+/// See [RFC 4607 §1] for the IPv4 SSM address range allocation (232.0.0.0/8).
 /// This is a single contiguous block, unlike IPv6 which has per-scope ranges.
 ///
-/// [RFC 4607 §3]: https://www.rfc-editor.org/rfc/rfc4607#section-3
+/// [RFC 4607 §1]: https://www.rfc-editor.org/rfc/rfc4607#section-1
 pub const IPV4_SSM_SUBNET: Ipv4Net =
     Ipv4Net::new_unchecked(Ipv4Addr::new(232, 0, 0, 0), 8);
 
-/// IPv6 Source-Specific Multicast (SSM) subnet.
+/// Reserved IPv4 SSM subnet (232.0.0.0/24).
 ///
-/// See [RFC 4607 §3] for SSM scope allocation. The RFC specifies "ff3x::/32
+/// [RFC 4607 §4.3] reserves 232.0.0.0 (must not be assigned to any
+/// application) and notes that IANA holds 232.0.0.1 through 232.0.0.255
+/// in reserve, so the entire first /24 is excluded from allocation.
+///
+/// [RFC 4607 §4.3]: https://www.rfc-editor.org/rfc/rfc4607#section-4.3
+pub const IPV4_SSM_RESERVED_SUBNET: Ipv4Net =
+    Ipv4Net::new_unchecked(Ipv4Addr::new(232, 0, 0, 0), 24);
+
+const fn ipv6_ssm_subnet(scope: u16) -> Ipv6Net {
+    Ipv6Net::new_unchecked(
+        Ipv6Addr::new(0xff30 | scope, 0, 0, 0, 0, 0, 0, 0),
+        32,
+    )
+}
+
+/// IPv6 Source-Specific Multicast (SSM) subnets, one per scope field value.
+///
+/// See [RFC 4607 §1] for SSM scope allocation. The RFC specifies "ff3x::/32
 /// for each scope x" - meaning one /32 block per scope (ff30::/32, ff31::/32,
 /// ..., ff3f::/32).
 ///
-/// We use /12 as an implementation convenience to match all these blocks with
-/// a single subnet. This works because all SSM addresses share the same first
-/// 12 bits:
-/// - Bits 0-7:  11111111 (0xff, multicast prefix)
-/// - Bits 8-11: 0011 (flag field = 3, indicating SSM)
-/// - Bits 12-15: xxxx (scope field, any value 0-f)
+/// These blocks cannot be represented by one CIDR: the scope nibble precedes
+/// the 16 zero bits that complete each /32. In particular, ff3e:1:: is outside
+/// ff3e::/32 even though it is inside the broader ff30::/12 prefix.
 ///
-/// Thus ff30::/12 efficiently matches ff30:: through ff3f:ffff:...:ffff,
-/// covering all SSM scopes.
+/// [RFC 4607 §1]: https://www.rfc-editor.org/rfc/rfc4607#section-1
+pub const IPV6_SSM_SUBNETS: [Ipv6Net; 16] = [
+    ipv6_ssm_subnet(0x0),
+    ipv6_ssm_subnet(0x1),
+    ipv6_ssm_subnet(0x2),
+    ipv6_ssm_subnet(0x3),
+    ipv6_ssm_subnet(0x4),
+    ipv6_ssm_subnet(0x5),
+    ipv6_ssm_subnet(0x6),
+    ipv6_ssm_subnet(0x7),
+    ipv6_ssm_subnet(0x8),
+    ipv6_ssm_subnet(0x9),
+    ipv6_ssm_subnet(0xa),
+    ipv6_ssm_subnet(0xb),
+    ipv6_ssm_subnet(0xc),
+    ipv6_ssm_subnet(0xd),
+    ipv6_ssm_subnet(0xe),
+    ipv6_ssm_subnet(0xf),
+];
+
+/// Return the allocatable group-ID range within an IPv6 SSM `ff3x::/32`
+/// block.
 ///
-/// This superset is used only for contains-based classification and validation
-/// (e.g., `contains()` checks). It is not an allocation boundary.
+/// [RFC 4607 §1] restricts SSM destination addresses to the low 32 bits
+/// of each block (`ff3x::/96`) and declares group IDs 0x00000000 through
+/// 0x3fffffff invalid. [RFC 4607 §4.3] reserves 0x40000000 and holds
+/// 0x40000001 through 0x7fffffff for IANA allocation (see the
+/// [IANA IPv6 multicast registry]), leaving 0x80000000 through 0xffffffff
+/// for dynamic allocation. The locally allocatable addresses in each
+/// block are therefore `ff3x::8000:0` through `ff3x::ffff:ffff`.
 ///
-/// [RFC 4607 §3]: https://www.rfc-editor.org/rfc/rfc4607#section-3
-pub const IPV6_SSM_SUBNET: Ipv6Net =
-    Ipv6Net::new_unchecked(Ipv6Addr::new(0xff30, 0, 0, 0, 0, 0, 0, 0), 12);
+/// [RFC 4607 §1]: https://www.rfc-editor.org/rfc/rfc4607#section-1
+/// [RFC 4607 §4.3]: https://www.rfc-editor.org/rfc/rfc4607#section-4.3
+/// [IANA IPv6 multicast registry]: https://www.iana.org/assignments/ipv6-multicast-addresses/ipv6-multicast-addresses.xhtml
+pub fn ipv6_ssm_allocatable_range(subnet: &Ipv6Net) -> Ipv6Range {
+    let base = u128::from(subnet.addr());
+    Ipv6Range {
+        first: Ipv6Addr::from(base | 0x8000_0000),
+        last: Ipv6Addr::from(base | 0xffff_ffff),
+    }
+}
 
 /// Maximum source IPs per SSM group member (per [RFC 3376] IGMPv3).
 ///
@@ -75,15 +121,17 @@ pub const MAX_SSM_SOURCE_IPS: usize = 64;
 
 /// Check if an IP is in the SSM (Source-Specific Multicast) range.
 ///
-/// SSM ranges per [RFC 4607 §3]:
+/// SSM ranges per [RFC 4607 §1]:
 /// - IPv4: 232.0.0.0/8
 /// - IPv6: ff3x::/32 (all SSM scopes)
 ///
-/// [RFC 4607 §3]: https://www.rfc-editor.org/rfc/rfc4607#section-3
+/// [RFC 4607 §1]: https://www.rfc-editor.org/rfc/rfc4607#section-1
 pub fn is_ssm_address(ip: std::net::IpAddr) -> bool {
     match ip {
         IpAddr::V4(addr) => IPV4_SSM_SUBNET.contains(addr),
-        IpAddr::V6(addr) => IPV6_SSM_SUBNET.contains(addr),
+        IpAddr::V6(addr) => {
+            IPV6_SSM_SUBNETS.iter().any(|subnet| subnet.contains(addr))
+        }
     }
 }
 
@@ -1155,6 +1203,43 @@ mod test {
     use serde_json::json;
 
     use super::*;
+
+    #[test]
+    fn test_ssm_address_classification() {
+        assert!(is_ssm_address("232.0.0.1".parse().unwrap()));
+        assert!(is_ssm_address("232.255.255.255".parse().unwrap()));
+        assert!(!is_ssm_address("231.255.255.255".parse().unwrap()));
+        assert!(!is_ssm_address("233.0.0.0".parse().unwrap()));
+
+        assert!(is_ssm_address("ff30::1".parse().unwrap()));
+        assert!(is_ssm_address("ff3e::1".parse().unwrap()));
+        // RFC 4607 says systems classify the whole /32 as SSM, including
+        // possible future use of the network-prefix field.
+        assert!(is_ssm_address("ff3e:0:1234::1".parse().unwrap()));
+
+        assert!(!is_ssm_address("ff2e::1".parse().unwrap()));
+        // The flags and scope nibbles match, but this address is outside the
+        // ff3e::/32 block and is valid unicast-prefix-based ASM (RFC 3306).
+        assert!(!is_ssm_address("ff3e:20:1234::1".parse().unwrap()));
+    }
+
+    #[test]
+    fn test_ipv6_ssm_allocatable_range() {
+        let block: Ipv6Net = "ff3e::/32".parse().unwrap();
+        let range = ipv6_ssm_allocatable_range(&block);
+
+        assert_eq!(range.first, "ff3e::8000:0".parse::<Ipv6Addr>().unwrap());
+        assert_eq!(range.last, "ff3e::ffff:ffff".parse::<Ipv6Addr>().unwrap());
+
+        // Invalid group IDs (RFC 4607 section 1) fall outside the range.
+        assert!(!range.contains("ff3e::1".parse().unwrap()));
+        assert!(!range.contains("ff3e::3fff:ffff".parse().unwrap()));
+        // So do the reserved and IANA-allocation group IDs (section 4.3).
+        assert!(!range.contains("ff3e::4000:0".parse().unwrap()));
+        assert!(!range.contains("ff3e::7fff:ffff".parse().unwrap()));
+        // Addresses outside ff3e::/96 have no 32-bit group ID.
+        assert!(!range.contains("ff3e:0:1234::1".parse().unwrap()));
+    }
 
     #[test]
     fn test_dns_subnets() {
