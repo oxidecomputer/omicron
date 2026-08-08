@@ -80,7 +80,7 @@ use std::str::FromStr;
 /// See [here][1] for discussion of this limitation.
 ///
 /// [1]: https://github.com/oxidecomputer/omicron/pull/10578#discussion_r3384362440
-#[derive(Debug, serde_with::DeserializeFromStr)]
+#[derive(Debug, serde_with::DeserializeFromStr, Clone)]
 pub struct GitVersion {
     // We use a `Cow` here so that we need not allocate when constructing a
     // `GitVersion` to represent the current state of the repository, as it can
