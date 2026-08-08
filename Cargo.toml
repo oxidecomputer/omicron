@@ -103,6 +103,7 @@ members = [
     "nexus/defaults",
     "nexus/external-api",
     "nexus/fm",
+    "nexus/fm/slippy",
     "nexus/internal-api",
     "nexus/inventory",
     "nexus/lockstep-api",
@@ -298,6 +299,7 @@ default-members = [
     "nexus/defaults",
     "nexus/external-api",
     "nexus/fm",
+    "nexus/fm/slippy",
     "nexus/internal-api",
     "nexus/inventory",
     "nexus/lockstep-api",
@@ -643,6 +645,7 @@ nexus-db-schema = { path = "nexus/db-schema" }
 nexus-defaults = { path = "nexus/defaults" }
 nexus-external-api = { path = "nexus/external-api" }
 nexus-fm = { path = "nexus/fm" }
+nexus-fm-slippy = { path = "nexus/fm/slippy" }
 nexus-inventory = { path = "nexus/inventory" }
 nexus-internal-api = { path = "nexus/internal-api" }
 nexus-lockstep-api = { path = "nexus/lockstep-api" }

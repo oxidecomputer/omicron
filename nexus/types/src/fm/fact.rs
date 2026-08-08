@@ -12,6 +12,7 @@
 //! [`Case`]: super::case::Case
 //! [`Metadata::de`]: super::case::Metadata::de
 
+use crate::fm::DiagnosisEngineKind;
 use crate::inventory::ZpoolHealth;
 use chrono::{DateTime, Utc};
 use omicron_uuid_kinds::{CollectionUuid, PhysicalDiskUuid, ZpoolUuid};
@@ -36,6 +37,13 @@ impl From<DiskFact> for FactPayload {
 }
 
 impl FactPayload {
+    /// The diagnosis engine that owns this payload variant.
+    pub fn engine(&self) -> DiagnosisEngineKind {
+        match self {
+            FactPayload::PhysicalDisk(_) => DiagnosisEngineKind::PhysicalDisk,
+        }
+    }
+
     /// The physical-disk payload, or `None` if this fact belongs to a
     /// different diagnosis engine.
     pub fn as_physical_disk(&self) -> Option<&DiskFact> {

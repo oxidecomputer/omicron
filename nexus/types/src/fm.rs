@@ -235,6 +235,8 @@ pub struct SitrepVersion {
     Debug,
     PartialEq,
     Eq,
+    PartialOrd,
+    Ord,
     Hash,
     serde::Serialize,
     serde::Deserialize,
