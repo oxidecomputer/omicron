@@ -99,7 +99,7 @@ mod tests {
         (0..3)
             .map(|index| BaseboardId {
                 part_number: "913-0000019".to_string(),
-                serial_number: format!("BRM4222000{index}"),
+                serial_number: format!("2FAKE00{index}"),
             })
             .collect()
     }
