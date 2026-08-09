@@ -14,6 +14,9 @@ use either::Either;
 use omicron_common::address::BOOTSTRAP_PREFIX;
 use omicron_common::address::BOOTSTRAP_SLED_SUBNET_PREFIX_LENGTH;
 use omicron_common::address::DDMD_PORT;
+use omicron_common::address::Ipv6Subnet;
+use omicron_common::address::SLED_PREFIX_LENGTH;
+use omicron_common::address::get_sled_address;
 use oxnet::Ipv6Net;
 use sled_hardware_types::underlay::BootstrapInterface;
 use slog::Logger;
@@ -101,6 +104,19 @@ impl Client {
         request: &EnableStatsRequest,
     ) -> Result<(), Error<types::Error>> {
         self.inner.enable_stats(request).await.map(|resp| resp.into_inner())
+    }
+
+    /// Returns the sled addresses behind advertised underlay prefixes.
+    pub async fn derive_sled_addrs_from_prefixes(
+        &self,
+    ) -> Result<impl Iterator<Item = SocketAddrV6> + use<>, DdmError> {
+        let prefixes = self.inner.get_prefixes().await?.into_inner();
+        Ok(prefixes.into_values().flatten().filter_map(|prefix| {
+            let addr = prefix.destination.addr();
+            (prefix.destination.width() == SLED_PREFIX_LENGTH
+                && addr.segments()[0] != BOOTSTRAP_PREFIX)
+                .then(|| get_sled_address(Ipv6Subnet::new(addr)))
+        }))
     }
 
     /// Returns the addresses of connected sleds.

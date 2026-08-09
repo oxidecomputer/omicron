@@ -58,6 +58,7 @@ packages = [
     "lldpd",
     "mgd",
     "omicron-gateway",
+    "sush-proxy",
     "tfportd",
     "wicketd",
 ]
@@ -772,6 +773,30 @@ same deployment unit.
 """
 permalinks = [
     "https://github.com/oxidecomputer/omicron/blob/6cef874/sled-agent/src/instance.rs#L2283",
+]
+
+[[intra_deployment_unit_only_edges]]
+server = "sush-proxy"
+client = "ddm-admin-client"
+note = """
+sush-proxy discovers sleds through its own switch zone's ddmd, always
+via Client::localhost (sush-proxy/src/lib.rs).
+"""
+permalinks = [
+    "https://github.com/oxidecomputer/omicron/blob/sush-integration/sush-proxy/src/lib.rs",
+]
+
+[[intra_deployment_unit_only_edges]]
+server = "sush-proxy"
+client = "gateway-client"
+note = """
+sush-proxy reads the cubby map from its own switch zone's MGS.
+sled-agent sets the mgs-address SMF property to [::1] (services.rs),
+and the manifest passes it via --mgs-address.
+"""
+permalinks = [
+    "https://github.com/oxidecomputer/omicron/blob/sush-integration/sled-agent/src/services.rs",
+    "https://github.com/oxidecomputer/omicron/blob/sush-integration/smf/sush-proxy/manifest.xml",
 ]
 
 [[intra_deployment_unit_only_edges]]

@@ -168,6 +168,7 @@ members = [
     "sled-storage/zfs-test-harness",
     "sp-sim",
     "support-bundle-collection",
+    "sush-proxy",
     "test-utils",
     "trust-quorum",
     "trust-quorum/gfss",
@@ -363,6 +364,7 @@ default-members = [
     "sled-storage/zfs-test-harness",
     "sp-sim",
     "support-bundle-collection",
+    "sush-proxy",
     "trust-quorum",
     "trust-quorum/gfss",
     "trust-quorum/protocol",
@@ -859,6 +861,7 @@ support-bundle-viewer = "0.1.2"
 # sled-hardware-types patch directive below identically, since that directive
 # keys off the source URL in sush's own manifest, not off how we pull sush in.
 sush-api = { git = "https://github.com/oxidecomputer/sush", branch = "omicron-integration" }
+sush-common = { git = "https://github.com/oxidecomputer/sush", branch = "omicron-integration" }
 sush-server = { git = "https://github.com/oxidecomputer/sush", branch = "omicron-integration", features = ["embedded"] }
 swrite = "0.1.0"
 sync-ptr = "0.1.4"

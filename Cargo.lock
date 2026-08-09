@@ -9850,6 +9850,7 @@ dependencies = [
  "strum 0.27.2",
  "subprocess",
  "sush-api",
+ "sush-common",
  "sush-server",
  "tar",
  "thiserror 2.0.18",
@@ -9953,6 +9954,7 @@ dependencies = [
  "cc",
  "chacha20 0.10.0",
  "chrono",
+ "cipher 0.4.4",
  "cipher 0.5.2",
  "clap",
  "clap_builder",
@@ -15450,7 +15452,7 @@ dependencies = [
 [[package]]
 name = "sush-api"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/sush?branch=omicron-integration#6385bc52a525b46c80a88da10895b371d0caed21"
+source = "git+https://github.com/oxidecomputer/sush?branch=omicron-integration#b17249dc533f8b369111a45ad831e71e977bbd6f"
 dependencies = [
  "borsh",
  "chrono",
@@ -15467,7 +15469,7 @@ dependencies = [
 [[package]]
 name = "sush-common"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/sush?branch=omicron-integration#6385bc52a525b46c80a88da10895b371d0caed21"
+source = "git+https://github.com/oxidecomputer/sush?branch=omicron-integration#b17249dc533f8b369111a45ad831e71e977bbd6f"
 dependencies = [
  "blake3",
  "borsh",
@@ -15500,9 +15502,35 @@ dependencies = [
 ]
 
 [[package]]
+name = "sush-proxy"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "camino",
+ "clap",
+ "gateway-client",
+ "gateway-types",
+ "omicron-common",
+ "omicron-ddm-admin-client",
+ "omicron-workspace-hack",
+ "oxide-tokio-rt",
+ "reqwest 0.13.2",
+ "sled-hardware-types",
+ "slog",
+ "slog-async",
+ "slog-dtrace",
+ "slog-term",
+ "sprockets-tls",
+ "sush-common",
+ "sush-server",
+ "tokio",
+ "tokio-util",
+]
+
+[[package]]
 name = "sush-server"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/sush?branch=omicron-integration#6385bc52a525b46c80a88da10895b371d0caed21"
+source = "git+https://github.com/oxidecomputer/sush?branch=omicron-integration#b17249dc533f8b369111a45ad831e71e977bbd6f"
 dependencies = [
  "blake3",
  "borsh",
@@ -15518,14 +15546,17 @@ dependencies = [
  "http-body-util",
  "http-range-header",
  "hyper",
+ "hyper-util",
  "libc",
  "lru 0.18.2",
  "memmap2",
  "p256 0.13.2",
+ "percent-encoding",
  "pwd",
  "rand_core 0.6.4",
  "rumors",
  "rustix 1.1.3",
+ "rustls",
  "schemars 0.8.22",
  "serde",
  "serde_json",
@@ -15540,6 +15571,7 @@ dependencies = [
  "tempfile",
  "thiserror 1.0.69",
  "tokio",
+ "tokio-rustls",
  "tokio-stream",
  "tokio-tungstenite 0.28.0",
  "tokio-util",

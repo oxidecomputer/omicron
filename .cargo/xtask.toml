@@ -28,6 +28,8 @@
 [libraries."libxmlsec1.so.1"]
 
 # libipcc should only be depended on by binaries that communicate with ipcc.
+# sush-proxy does not, but sprockets-tls links libipcc unconditionally.
+# TODO: feature-gate ipcc in sprockets, then drop sush-proxy here.
 [libraries."libipcc.so.1"]
 binary_allow_list = [
   "installinator",
@@ -36,6 +38,7 @@ binary_allow_list = [
   "omicron-dev",
   "sled-agent",
   "sled-agent-sim",
+  "sush-proxy",
 ]
 
 # libnvme is a global zone only library and therefore we must be sure that only

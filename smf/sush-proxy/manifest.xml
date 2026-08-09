@@ -1,0 +1,48 @@
+<?xml version="1.0"?>
+<!DOCTYPE service_bundle SYSTEM "/usr/share/lib/xml/dtd/service_bundle.dtd.1">
+
+<service_bundle type='manifest' name='sush-proxy'>
+
+<service name='oxide/sush-proxy' type='service' version='1'>
+  <create_default_instance enabled='true' />
+
+  <dependency name='multi_user' grouping='require_all' restart_on='none'
+    type='service'>
+  <service_fmri value='svc:/milestone/multi-user:default' />
+  </dependency>
+
+  <dependency name='switch_zone_setup' grouping='require_all' restart_on='none'
+    type='service'>
+  <service_fmri value='svc:/oxide/switch_zone_setup:default' />
+  </dependency>
+
+  <exec_method type='method' name='start'
+      exec='ctrun -l child -o noorphan,regent /opt/oxide/sush-proxy/bin/sush-proxy --address %{config/address} --mgs-address %{config/mgs-address} --tls %{config/tls} --priv-key %{config/priv-key} --cert-chain %{config/cert-chain} &amp;'
+    timeout_seconds='0' />
+  <exec_method type='method' name='stop' exec=':kill' timeout_seconds='0' />
+
+  <property_group name='startd' type='framework'>
+    <propval name='duration' type='astring' value='contract' />
+  </property_group>
+
+  <property_group name='config' type='application'>
+    <propval name='address' type='astring' value='unknown' />
+    <propval name='mgs-address' type='astring' value='unknown' />
+    <propval name='tls' type='astring' value='unknown' />
+    <propval name='priv-key' type='astring' value='unknown' />
+    <propval name='cert-chain' type='astring' value='unknown' />
+  </property_group>
+
+  <stability value='Unstable' />
+
+  <template>
+    <common_name>
+      <loctext xml:lang='C'>sush-proxy</loctext>
+    </common_name>
+    <description>
+      <loctext xml:lang='C'>Support Shell Proxy</loctext>
+    </description>
+  </template>
+</service>
+
+</service_bundle>
