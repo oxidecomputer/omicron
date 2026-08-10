@@ -824,8 +824,7 @@ impl SwitchPortBgpPeerConfig {
                                 err: AddressFamilyConfigError::V6toV4,
                             },
                         ),
-                        (true, true)
-                        | (false, false) => Ok(()),
+                        (true, true) | (false, false) => Ok(()),
                     }?
                 }
 
