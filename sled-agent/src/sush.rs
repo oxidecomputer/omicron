@@ -31,12 +31,17 @@ use crate::config::SushConfig;
 use anyhow::Context;
 use camino::Utf8Path;
 use dropshot::{ConfigDropshot, HandlerTaskMode, HttpServer, ServerBuilder};
-use omicron_common::address::{SUSH_API_PORT, SUSH_GOSSIP_PORT};
+use gateway_client::Client as MgsClient;
+use gateway_types::component::SpType;
+use omicron_common::address::{
+    MGS_PORT, SUSH_API_PORT, SUSH_GOSSIP_PORT, get_switch_zone_address,
+};
+use omicron_ddm_admin_client::Client as DdmClient;
 use sha3::{Digest as _, Sha3_256};
 use sled_agent_config_reconciler::AvailableDatasetsReceiver;
 use sled_agent_measurements::MeasurementsHandle;
 use sled_hardware_types::BaseboardId;
-use slog::{Logger, error, info, o, warn};
+use slog::{Logger, debug, error, info, o, warn};
 use slog_error_chain::InlineErrorChain;
 use sprockets_tls::ipcc::Ipcc;
 use sprockets_tls::keys::SprocketsConfig;
@@ -48,8 +53,10 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::fs::{OpenOptions, create_dir_all};
 use tokio::io::AsyncWriteExt as _;
+use tokio::spawn;
 use tokio::sync::watch;
 use tokio::task::spawn_blocking;
+use tokio::time::sleep;
 use tokio_util::sync::CancellationToken;
 use x509_cert::Certificate;
 use x509_cert::der::oid::db::rfc8410::ID_ED_25519;
@@ -58,6 +65,7 @@ use x509_cert::spki::AlgorithmIdentifierOwned;
 use x509_cert::time::Validity;
 
 use sush_common::keys::{EphemeralKey, KeyType, pem_cert_chain};
+use sush_common::targets::{Cubbies, MAX_CUBBY};
 use sush_server::executor::PathIsolation;
 use sush_server::gossip::{GossipConfig, isolated, spawn_gossip};
 use sush_server::link::CorpusSource;
@@ -78,6 +86,12 @@ pub const SUSH_PROXY_CERT_CHAIN_PATH: &str = "/etc/sush-proxy/chain.pem";
 /// expiry today, and the identity is re-minted at every zone startup.
 const SUSH_PROXY_CERT_VALIDITY: Duration =
     Duration::from_secs(365 * 24 * 60 * 60);
+
+/// How often to refresh the cubby map from MGS.
+const MGS_POLL_INTERVAL: Duration = Duration::from_secs(30);
+
+/// How long to wait for an MGS candidate to answer.
+const MGS_PROBE_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Maximum size of a request body the API will accept. The largest thing a
 /// client sends is a signed job request or a certificate, both small.
@@ -210,11 +224,13 @@ pub async fn spawn_sush_tasks(
         }
     };
 
+    let (tx_cubbies, rx_cubbies) = watch::channel(Cubbies::new());
     let mut manager = match JobManager::new(
         log.clone(),
         PathIsolation::Enable,
         JobOutputDir::new(output_dirs_rx),
         own_baseboard,
+        rx_cubbies,
         universe,
         &config.roots,
         shutdown.clone(),
@@ -227,12 +243,16 @@ pub async fn spawn_sush_tasks(
             return None;
         }
     };
+    spawn(poll_mgs_for_cubbies(
+        log.new(o!("component" => "cubby map")),
+        tx_cubbies,
+    ));
 
     // The state manager runs until shutdown and nothing waits on it, so all we
     // can usefully do with its handle is notice when it stops.
     if let Some(join) = manager.take_join_handle() {
         let log = log.clone();
-        tokio::spawn(async move {
+        spawn(async move {
             match join.await {
                 Ok(()) => info!(log, "sush state manager stopped"),
                 Err(err) => error!(
@@ -244,7 +264,7 @@ pub async fn spawn_sush_tasks(
         });
     }
 
-    tokio::spawn(promote_output_dir(
+    spawn(promote_output_dir(
         log.clone(),
         available_datasets_rx,
         output_dirs_tx,
@@ -320,6 +340,81 @@ async fn promote_output_dir(
 
 fn mb_to_bytes(mb: u32) -> u64 {
     u64::from(mb) * 1024 * 1024
+}
+
+/// Keep the cubby map current from MGS's view of the SPs.
+///
+/// The underlay subnets DDM advertises are candidates (RFD 63): an
+/// MGS is whatever answers at a subnet's switch zone address. Answers
+/// merge over what we already know, so a probe outage never erases
+/// the map.
+async fn poll_mgs_for_cubbies(log: Logger, cubbies: watch::Sender<Cubbies>) {
+    let ddm = match DdmClient::localhost(&log) {
+        Ok(ddm) => ddm,
+        Err(err) => {
+            error!(
+                log, "not polling MGS, cubby-targeted jobs will not run here";
+                "error" => InlineErrorChain::new(&err),
+            );
+            return;
+        }
+    };
+    let client = reqwest::ClientBuilder::new()
+        .connect_timeout(MGS_PROBE_TIMEOUT)
+        .timeout(MGS_PROBE_TIMEOUT)
+        .build()
+        .expect("failed to build an HTTP client");
+    loop {
+        match ddm.derive_underlay_subnets_from_prefixes().await {
+            Ok(subnets) => {
+                let mut map = Cubbies::new();
+                for subnet in subnets {
+                    let addr = SocketAddrV6::new(
+                        get_switch_zone_address(subnet),
+                        MGS_PORT,
+                        0,
+                        0,
+                    );
+                    let mgs = MgsClient::new_with_client(
+                        &format!("http://{addr}"),
+                        client.clone(),
+                        log.clone(),
+                    );
+                    if mgs.sp_local_switch_id().await.is_err() {
+                        continue;
+                    }
+                    for cubby in 0..=MAX_CUBBY {
+                        match mgs.sp_get(&SpType::Sled, cubby.into()).await {
+                            Ok(state) => {
+                                let state = state.into_inner();
+                                map.insert(
+                                    cubby,
+                                    BaseboardId {
+                                        part_number: state.model,
+                                        serial_number: state.serial_number,
+                                    },
+                                );
+                            }
+                            Err(err) => {
+                                debug!(
+                                    log, "no SP state for cubby";
+                                    "cubby" => cubby, "error" => %err,
+                                );
+                            }
+                        }
+                    }
+                }
+                cubbies.send_modify(|current| current.extend(map));
+            }
+            Err(err) => {
+                warn!(
+                    log, "unable to fetch prefixes";
+                    "error" => InlineErrorChain::new(&err),
+                );
+            }
+        }
+        sleep(MGS_POLL_INTERVAL).await;
+    }
 }
 
 /// Mint the switch zone proxy's TLS identity: an ephemeral key whose

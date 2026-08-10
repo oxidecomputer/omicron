@@ -9769,6 +9769,8 @@ dependencies = [
  "fmd-adm",
  "fmd-adm-sys",
  "futures",
+ "gateway-client",
+ "gateway-types",
  "glob",
  "guppy",
  "hex",
@@ -15452,7 +15454,7 @@ dependencies = [
 [[package]]
 name = "sush-api"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/sush?branch=omicron-integration#b17249dc533f8b369111a45ad831e71e977bbd6f"
+source = "git+https://github.com/oxidecomputer/sush?branch=omicron-integration#3e351f714c05123796923d01e039866511eaee62"
 dependencies = [
  "borsh",
  "chrono",
@@ -15469,7 +15471,7 @@ dependencies = [
 [[package]]
 name = "sush-common"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/sush?branch=omicron-integration#b17249dc533f8b369111a45ad831e71e977bbd6f"
+source = "git+https://github.com/oxidecomputer/sush?branch=omicron-integration#3e351f714c05123796923d01e039866511eaee62"
 dependencies = [
  "blake3",
  "borsh",
@@ -15530,7 +15532,7 @@ dependencies = [
 [[package]]
 name = "sush-server"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/sush?branch=omicron-integration#b17249dc533f8b369111a45ad831e71e977bbd6f"
+source = "git+https://github.com/oxidecomputer/sush?branch=omicron-integration#3e351f714c05123796923d01e039866511eaee62"
 dependencies = [
  "blake3",
  "borsh",
