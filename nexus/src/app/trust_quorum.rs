@@ -8,9 +8,10 @@ use nexus_auth::authz;
 use nexus_auth::context::OpContext;
 use nexus_types::trust_quorum::{
     IsLrtqUpgrade, ProposedTrustQuorumConfig, TrustQuorumConfig,
+    TrustQuorumSledSelector,
 };
 use omicron_common::api::external::Error;
-use omicron_uuid_kinds::{RackUuid, SledUuid};
+use omicron_uuid_kinds::RackUuid;
 use sled_hardware_types::BaseboardId;
 use std::collections::BTreeSet;
 use std::time::Duration;
@@ -90,16 +91,27 @@ impl super::Nexus {
     pub(crate) async fn tq_remove_sled(
         &self,
         opctx: &OpContext,
-        sled_id: SledUuid,
+        sled: TrustQuorumSledSelector,
     ) -> Result<Epoch, Error> {
-        // Look up the sled to get its rack_id and baseboard_id
-        let (.., sled) = self.sled_lookup(opctx, &sled_id)?.fetch().await?;
-        let rack_id = sled.rack_id();
-        let authz_tq = authz::TrustQuorumConfig::for_rack_id(rack_id);
-        let sled_to_remove = BaseboardId {
-            part_number: sled.part_number().to_string(),
-            serial_number: sled.serial_number().to_string(),
+        let (rack_id, sled_to_remove) = match sled {
+            TrustQuorumSledSelector::SledId(sled_id) => {
+                // Look up the sled to get its rack_id and baseboard_id
+                let (.., sled) =
+                    self.sled_lookup(opctx, &sled_id)?.fetch().await?;
+                let baseboard_id = BaseboardId {
+                    part_number: sled.part_number().to_string(),
+                    serial_number: sled.serial_number().to_string(),
+                };
+                (sled.rack_id(), baseboard_id)
+            }
+            // A sled identified by baseboard may have no database record to
+            // look up a rack_id in. We only operate on a single rack, which we
+            // know from Nexus.
+            TrustQuorumSledSelector::Baseboard(baseboard_id) => {
+                (self.rack_id(), baseboard_id)
+            }
         };
+        let authz_tq = authz::TrustQuorumConfig::for_rack_id(rack_id);
 
         let (latest_committed_config, latest_epoch) = self
             .tq_load_latest_possible_committed_config(opctx, authz_tq.clone())

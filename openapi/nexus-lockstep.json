@@ -1539,23 +1539,21 @@
         }
       }
     },
-    "/trust-quorum/remove/{sled}": {
+    "/trust-quorum/remove": {
       "post": {
         "summary": "Remove a sled from the trust quorum",
-        "description": "This is a required first step towards expunging a sled\n\nReturn the epoch of the proposed configuration so it can be polled asynchronously.",
+        "description": "This is a required first step towards expunging a sled\n\nThe sled may be identified either by its ID or by its baseboard. Only the latter works for a sled that has no database record.\n\nReturn the epoch of the proposed configuration so it can be polled asynchronously.",
         "operationId": "trust_quorum_remove_sled",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "sled",
-            "description": "ID of the sled",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TrustQuorumSledSelector"
+              }
             }
-          }
-        ],
+          },
+          "required": true
+        },
         "responses": {
           "200": {
             "description": "successful operation",
@@ -9926,6 +9924,47 @@
           "unacked",
           "prepared",
           "committed"
+        ]
+      },
+      "TrustQuorumSledSelector": {
+        "description": "Identifies a sled to remove from the trust quorum.\n\nSelecting by baseboard is necessary to remove a sled that has no database record, since in that case there is no sled ID to resolve to a baseboard.",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "sled_id"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/SledUuid"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "baseboard"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/BaseboardId"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          }
         ]
       },
       "TufRepoVersion": {

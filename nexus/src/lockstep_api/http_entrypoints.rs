@@ -54,6 +54,7 @@ use nexus_types::internal_api::views::SupportBundleInfo;
 use nexus_types::internal_api::views::UpdateStatus;
 use nexus_types::internal_api::views::to_list;
 use nexus_types::trust_quorum::TrustQuorumConfig;
+use nexus_types::trust_quorum::TrustQuorumSledSelector;
 use nexus_types_versions::latest::headers::RangeRequest;
 use nexus_types_versions::latest::instance::Instance;
 use omicron_common::api::external::Error;
@@ -1131,15 +1132,15 @@ impl NexusLockstepApi for NexusLockstepApiImpl {
 
     async fn trust_quorum_remove_sled(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<SledSelector>,
+        sled: TypedBody<TrustQuorumSledSelector>,
     ) -> Result<HttpResponseOk<Epoch>, HttpError> {
         let apictx = &rqctx.context().context;
         let nexus = &apictx.nexus;
-        let sled_id = path_params.into_inner().sled;
+        let sled = sled.into_inner();
         let handler = async {
             let opctx =
                 crate::context::op_context_for_internal_api(&rqctx).await;
-            let epoch = nexus.tq_remove_sled(&opctx, sled_id).await?;
+            let epoch = nexus.tq_remove_sled(&opctx, sled).await?;
             Ok(HttpResponseOk(epoch))
         };
         apictx

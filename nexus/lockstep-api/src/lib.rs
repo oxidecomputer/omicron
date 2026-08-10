@@ -43,6 +43,7 @@ use nexus_types::internal_api::views::Saga;
 use nexus_types::internal_api::views::SupportBundleInfo;
 use nexus_types::internal_api::views::UpdateStatus;
 use nexus_types::trust_quorum::TrustQuorumConfig;
+use nexus_types::trust_quorum::TrustQuorumSledSelector;
 use nexus_types_versions::latest::headers::RangeRequest;
 use nexus_types_versions::latest::instance::Instance;
 use omicron_common::api::external::http_pagination::PaginatedById;
@@ -579,15 +580,18 @@ pub trait NexusLockstepApi {
     ///
     /// This is a required first step towards expunging a sled
     ///
+    /// The sled may be identified either by its ID or by its baseboard. Only
+    /// the latter works for a sled that has no database record.
+    ///
     /// Return the epoch of the proposed configuration so it can be polled
     /// asynchronously.
     #[endpoint {
         method = POST,
-        path = "/trust-quorum/remove/{sled}"
+        path = "/trust-quorum/remove"
     }]
     async fn trust_quorum_remove_sled(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<SledSelector>,
+        sled: TypedBody<TrustQuorumSledSelector>,
     ) -> Result<HttpResponseOk<Epoch>, HttpError>;
 
     // Fault management
