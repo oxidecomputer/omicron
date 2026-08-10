@@ -123,6 +123,7 @@ use nexus_db_queries::db::datastore::InstanceAndActiveVmm;
 use nexus_db_queries::db::datastore::LocalStorageAllocation;
 use nexus_db_queries::db::datastore::LocalStorageDisk;
 use nexus_db_queries::db::datastore::SQL_BATCH_SIZE;
+use nexus_db_queries::db::datastore::SledUnderlayAllocationResult;
 use nexus_db_queries::db::datastore::VolumeCookedResult;
 use nexus_db_queries::db::datastore::read_only_resources_associated_with_volume;
 use nexus_db_queries::db::identity::Asset;
@@ -132,6 +133,7 @@ use nexus_db_queries::db::pagination::Paginator;
 use nexus_db_queries::db::pagination::paginated;
 use nexus_db_queries::db::queries::ALLOW_FULL_TABLE_SCAN_SQL;
 use nexus_db_queries::db::queries::region_allocation;
+use nexus_networking::sled_client_by_baseboard_id_and_rack_id_if_commissioned_ext;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintExpungedZoneAccessReason;
 use nexus_types::deployment::BlueprintZoneDisposition;
@@ -149,6 +151,10 @@ use nexus_types::internal_api::params::DnsRecord;
 use nexus_types::internal_api::params::Srv;
 use nexus_types::inventory::Collection;
 use nexus_types::inventory::CollectionDisplayCliFilter;
+use nexus_types::trust_quorum::TrustQuorumMemberState;
+use omicron_common::address::Ipv6Subnet;
+use omicron_common::address::RACK_PREFIX;
+use omicron_common::address::get_64_subnet;
 use omicron_common::api::external;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Generation;
@@ -166,7 +172,12 @@ use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::VolumeUuid;
 use omicron_uuid_kinds::ZpoolUuid;
+use sled_agent_client::ClientInfo;
 use sled_agent_client::VolumeConstructionRequest;
+use sled_agent_client::types::AddSledRequest;
+use sled_agent_client::types::StartSledAgentRequest;
+use sled_agent_client::types::StartSledAgentRequestBody;
+use sled_hardware_types::BaseboardId;
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
@@ -181,6 +192,7 @@ use std::os::unix::process::CommandExt;
 use std::process::Command;
 use std::str::FromStr;
 use std::sync::Arc;
+use std::time::Duration;
 use tabled::Tabled;
 use uuid::Uuid;
 
@@ -408,6 +420,11 @@ enum DbCommands {
     SledInstances(SledInstancesArgs),
     /// Print the current target release and the update date
     TargetRelease(target_release::TargetReleaseArgs),
+    /// Add a sled that failed to add during an uncommited TQ epoch
+    ///
+    /// See <https://github.com/oxidecomputer/customer-support/issues/986> /
+    /// <https://github.com/oxidecomputer/omicron/issues/11032>.
+    TqManualAddSled(TqManualAddSledArgs),
     /// Print information about customer instances.
     Instance(InstanceArgs),
     /// Alias to `omdb instance list`.
@@ -739,6 +756,29 @@ struct SledsArgs {
     /// Show sleds that match the given filter
     #[clap(short = 'F', long, value_enum)]
     filter: Option<SledFilter>,
+}
+
+#[derive(Debug, Args, Clone)]
+struct TqManualAddSledArgs {
+    /// Rack ID where the sled needs to be added
+    #[clap(long)]
+    rack_id: RackUuid,
+    /// Part number of the sled to add
+    #[clap(long)]
+    part: String,
+    /// Serial number of the sled to add
+    #[clap(long)]
+    serial: String,
+    /// Part number of the sled to use as the add request proxy
+    ///
+    /// If omitted, a sled will be chosen from the current TQ config.
+    #[clap(long, requires = "proxy_serial")]
+    proxy_part: Option<String>,
+    /// Serial number of the sled to use as the add request proxy
+    ///
+    /// If omitted, a sled will be chosen from the current TQ config.
+    #[clap(long, requires = "proxy_part")]
+    proxy_serial: Option<String>,
 }
 
 #[derive(Debug, Args, Clone)]
@@ -1447,6 +1487,15 @@ impl DbArgs {
                     }
                     DbCommands::Sleds(args) => {
                         cmd_db_sleds(&opctx, &datastore, &fetch_opts, args).await
+                    }
+                    DbCommands::TqManualAddSled(args) => {
+                        let token = omdb.check_allow_destructive()?;
+                        cmd_tq_manual_add_sled(
+                            &opctx,
+                            &datastore,
+                            args,
+                            token,
+                        ).await
                     }
                     DbCommands::SledInstances(args) => {
                         cmd_db_sled_instances(
@@ -4698,6 +4747,202 @@ async fn cmd_db_sleds(
         .to_string();
 
     println!("{}", table);
+
+    Ok(())
+}
+
+/// Run `omdb db tq-manual-add-sled <SERIAL>`.
+async fn cmd_tq_manual_add_sled(
+    opctx: &OpContext,
+    datastore: &DataStore,
+    args: &TqManualAddSledArgs,
+    _destruction_token: DestructiveOperationToken,
+) -> anyhow::Result<()> {
+    let TqManualAddSledArgs { rack_id, part, serial, proxy_part, proxy_serial } =
+        args;
+    let rack_id = *rack_id;
+    let baseboard_id = BaseboardId {
+        part_number: part.to_owned(),
+        serial_number: serial.to_owned(),
+    };
+
+    // Get list of sleds; we do _not_ expect to find `serial` here (if it's
+    // here, it's already running); confirm that first.
+    let sleds = datastore
+        .sled_list(&opctx, &DataPageParams::max_page(), SledFilter::All)
+        .await
+        .context("failed to list sleds")?;
+    if let Some(s) = sleds
+        .iter()
+        .find(|s| s.serial_number() == serial && s.part_number() == part)
+    {
+        bail!(
+            "sled {baseboard_id} is already present with a sled_id: {}",
+            s.id()
+        );
+    }
+
+    // Next, get the current TQ config (i.e., latest epoch). We _do_ expect to
+    // see `serial` as a committed sled in this config; confirm that second.
+    let authz_tq = authz::TrustQuorumConfig::for_rack_id(rack_id);
+    let tq_config = datastore
+        .tq_get_latest_config(&opctx, authz_tq)
+        .await
+        .context("failed to get latest TQ config")?
+        .ok_or_else(|| anyhow!("rack {rack_id} has no TQ config?"))?;
+    match tq_config.members.get(&baseboard_id).map(|data| data.state) {
+        Some(TrustQuorumMemberState::Committed) => (), // expected
+        Some(other) => bail!(
+            "sled {part}:{serial} is in the TQ config, \
+             but has unexpected state {other:?}"
+        ),
+        None => bail!("sled {baseboard_id} is not in the latest TQ config"),
+    }
+
+    println!(
+        "confirmed sled {baseboard_id} is a committed member of the \
+         latest TQ config but is not yet present in the `sled` table: \
+         proceeding with subnet allocation"
+    );
+
+    // Before we try to allocate the new sled's subnet and add it, construct a
+    // sled-agent client for the proxy request we have to make.
+    let proxy_baseboard_id = {
+        // If caller requested a particular sled, use that; otherwise, take the
+        // first one.
+        if let Some(proxy_part) = proxy_part.as_ref() {
+            let proxy_serial = proxy_serial
+                .as_ref()
+                .expect("clap requires both proxy_part/serial or neither");
+            let proxy_baseboard_id = BaseboardId {
+                part_number: proxy_part.to_owned(),
+                serial_number: proxy_serial.to_owned(),
+            };
+            if proxy_baseboard_id == baseboard_id {
+                bail!("proxy sled must be different from sled-to-be-added");
+            }
+            if !tq_config.members.contains_key(&proxy_baseboard_id) {
+                bail!(
+                    "proxy sled {proxy_baseboard_id} \
+                     is not present in latest TQ config"
+                );
+            }
+            proxy_baseboard_id
+        } else {
+            let proxy_baseboard_id = tq_config
+                .members
+                .keys()
+                .find(|id| **id != baseboard_id)
+                .ok_or_else(|| anyhow!("TQ config has no members??"))?
+                .clone();
+            println!("chose proxy sled-agent {proxy_baseboard_id}");
+            proxy_baseboard_id
+        }
+    };
+    let proxy_sled_agent_client = {
+        let reqwest_client = reqwest::ClientBuilder::new()
+            .connect_timeout(Duration::from_secs(15))
+            .timeout(Duration::from_secs(300))
+            .build()
+            .context("failed to create reqwest client for sled agent")?;
+        sled_client_by_baseboard_id_and_rack_id_if_commissioned_ext(
+            datastore,
+            opctx,
+            &proxy_baseboard_id,
+            rack_id,
+            &opctx.log,
+            reqwest_client,
+        )
+        .await
+        .context("failed to look up commissioned state of proxy sled")?
+        .ok_or_else(|| anyhow!("proxy sled is not commissioned"))?
+    };
+
+    println!(
+        "constructed proxy sled-agent client at {}",
+        proxy_sled_agent_client.baseurl()
+    );
+
+    // Look up the rack subnet; we'll glue this onto the sled underlay subnet
+    // octet below to construct the sled's underlay subnet.
+    let rack_subnet = {
+        match datastore
+            .rack_subnet(&opctx, rack_id)
+            .await
+            .context("failed to look up rack subnet")?
+        {
+            ipnetwork::IpNetwork::V6(subnet) => {
+                Ipv6Subnet::<RACK_PREFIX>::from(subnet)
+            }
+            ipnetwork::IpNetwork::V4(subnet) => {
+                bail!("rack has ipv4 subnet ({subnet}): this is impossible");
+            }
+        }
+    };
+
+    // If this is the first time this command has run, we expect to get a `New`
+    // allocation. It's possible a partial success of this command has
+    // previously executed, though: we could have allocated a subnet for this
+    // sled but then failed to start sled-agent. We already confirmed that the
+    // sled isn't in the `sled` table, so we need to send the request to start
+    // sled-agent, so don't treat `CommissionedSled` as an error here: just log
+    // the result and proceed.
+    let hw_baseboard_id = datastore
+        .find_hw_baseboard_id(&opctx, &baseboard_id)
+        .await
+        .context("failed to look up hw_baseboard_id")?;
+    let allocation = match datastore
+        .allocate_sled_underlay_subnet_octets(&opctx, rack_id, hw_baseboard_id)
+        .await
+        .context("failed to allocate underlay subnet for sled")?
+    {
+        SledUnderlayAllocationResult::New(allocation) => {
+            println!(
+                "allocated new subnet octet: {:0x}",
+                allocation.subnet_octet
+            );
+            allocation
+        }
+        SledUnderlayAllocationResult::CommissionedSled(allocation) => {
+            println!(
+                "found existing allocation for subnet octet: {:0x}",
+                allocation.subnet_octet
+            );
+            allocation
+        }
+    };
+
+    let add_sled_request = AddSledRequest {
+        sled_id: baseboard_id.clone(),
+        start_request: StartSledAgentRequest {
+            generation: 0,
+            schema_version: 1,
+            body: StartSledAgentRequestBody {
+                id: allocation.sled_id.into(),
+                rack_id: allocation.rack_id.into(),
+                use_trust_quorum: true,
+                is_lrtq_learner: false,
+                subnet: sled_agent_client::types::Ipv6Subnet {
+                    net: get_64_subnet(
+                        rack_subnet,
+                        allocation.subnet_octet.try_into().unwrap(),
+                    )
+                    .net(),
+                },
+            },
+        },
+    };
+
+    println!(
+        "sending AddSledRequest to proxy sled-agent:\n{add_sled_request:#?}"
+    );
+
+    proxy_sled_agent_client
+        .sled_add(&add_sled_request)
+        .await
+        .context("failed to start sled-agent")?;
+
+    println!("successfully started sled-agent on {baseboard_id}");
 
     Ok(())
 }
