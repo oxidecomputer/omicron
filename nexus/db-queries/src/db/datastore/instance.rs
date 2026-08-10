@@ -14,6 +14,9 @@ use crate::db::collection_detach_many::DetachManyError;
 use crate::db::collection_detach_many::DetachManyFromCollectionStatement;
 use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
+use crate::db::datastore::multicast::ExpectedMulticastMembership;
+use crate::db::datastore::multicast::MulticastMembershipChange;
+use crate::db::datastore::multicast::ops::member_attach::AttachMemberError;
 use crate::db::identity::Resource;
 use crate::db::model::ByteCount;
 use crate::db::model::Generation;
@@ -70,6 +73,8 @@ use omicron_uuid_kinds::PropolisUuid;
 use omicron_uuid_kinds::SledUuid;
 use ref_cast::RefCast;
 use std::collections::HashMap;
+use std::collections::HashSet;
+use std::net::IpAddr;
 use uuid::Uuid;
 
 impl<'s> From<&'s InstanceAndActiveVmm> for InstanceStateComputer<'s> {
@@ -1049,16 +1054,48 @@ impl DataStore {
         authz_instance: &authz::Instance,
         update: InstanceUpdate,
     ) -> Result<InstanceAndActiveVmm, Error> {
+        self.instance_reconfigure_with_multicast(
+            opctx,
+            authz_instance,
+            update,
+            None,
+            &[],
+        )
+        .await
+    }
+
+    /// Reconfigure an instance and, when requested, apply its multicast
+    /// membership changes in the same transaction.
+    ///
+    /// `expected_multicast_memberships` is the membership snapshot used while
+    /// planning. When `multicast_changes` is non-empty, the instance row is
+    /// locked before the snapshot is checked so concurrent reconfigurations
+    /// fail instead of combining stale plans. Reconfigurations without
+    /// membership changes skip both the lock and the snapshot check.
+    pub async fn instance_reconfigure_with_multicast(
+        &self,
+        opctx: &OpContext,
+        authz_instance: &authz::Instance,
+        update: InstanceUpdate,
+        expected_multicast_memberships: Option<&[ExpectedMulticastMembership]>,
+        multicast_changes: &[MulticastMembershipChange],
+    ) -> Result<InstanceAndActiveVmm, Error> {
         opctx.authorize(authz::Action::Modify, authz_instance).await?;
 
         use nexus_db_schema::schema::instance::dsl as instance_dsl;
 
         let err = OptionalError::new();
         let conn = self.pool_connection_authorized(opctx).await?;
+        let expected_multicast_memberships =
+            expected_multicast_memberships.map(|expected| expected.to_vec());
+        let multicast_changes = multicast_changes.to_vec();
         let instance_and_vmm = self
             .transaction_retry_wrapper("reconfigure_instance")
             .transaction(&conn, |conn| {
                 let err = err.clone();
+                let expected_multicast_memberships =
+                    expected_multicast_memberships.clone();
+                let multicast_changes = multicast_changes.clone();
                 let InstanceUpdate {
                     boot_disk_id,
                     auto_restart_policy,
@@ -1068,6 +1105,59 @@ impl DataStore {
                     enable_jumbo_frames,
                 } = update.clone();
                 async move {
+                    // Reconfigurations that name a membership set lock the
+                    // instance row so concurrent reconfigure transactions
+                    // serialize instead of combining stale plans.
+                    //
+                    // The lock is taken whenever the request carried a
+                    // membership set, not just when the plan diffs to changes.
+                    // An empty diff is itself a claim about the snapshot, and
+                    // the request asked for set replacement, so a group joined
+                    // since the snapshot must be rejected rather than silently
+                    // retained. Requests that name no membership set skip the
+                    // lock entirely and never conflict with concurrent joins
+                    // and leaves.
+                    let reconfigures_membership = expected_multicast_memberships
+                        .is_some()
+                        || !multicast_changes.is_empty();
+                    if reconfigures_membership {
+                        let locked_instance = instance_dsl::instance
+                            .filter(instance_dsl::id.eq(authz_instance.id()))
+                            .filter(instance_dsl::time_deleted.is_null())
+                            .select(instance_dsl::id)
+                            .for_update()
+                            .first_async::<Uuid>(&conn)
+                            .await
+                            .optional()?;
+                        if locked_instance.is_none() {
+                            return Err(err.bail(authz_instance.not_found()));
+                        }
+
+                        let instance_id = InstanceUuid::from_untyped_uuid(
+                            authz_instance.id(),
+                        );
+                        if let Some(expected) = &expected_multicast_memberships
+                        {
+                            self.multicast_check_membership_snapshot_on_conn(
+                                &conn,
+                                &err,
+                                instance_id,
+                                expected,
+                            )
+                            .await?;
+                        }
+
+                        if !multicast_changes.is_empty() {
+                            self.multicast_apply_changes_on_conn(
+                                &conn,
+                                &err,
+                                instance_id,
+                                &multicast_changes,
+                            )
+                            .await?;
+                        }
+                    }
+
                     // Set the auto-restart policy.
                     diesel::update(instance_dsl::instance)
                         .filter(instance_dsl::id.eq(authz_instance.id()))
@@ -1123,6 +1213,141 @@ impl DataStore {
             })?;
 
         Ok(instance_and_vmm)
+    }
+
+    /// Reject a reconfiguration whose membership plan raced a concurrent
+    /// change, within an existing transaction.
+    ///
+    /// The set of groups must match the planning snapshot exactly. Source
+    /// filters are compared only for groups the plan meant to rewrite, since a
+    /// plan that leaves a filter alone tolerates drift.
+    async fn multicast_check_membership_snapshot_on_conn(
+        &self,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        err: &OptionalError<Error>,
+        instance_id: InstanceUuid,
+        expected: &[ExpectedMulticastMembership],
+    ) -> Result<(), diesel::result::Error> {
+        let current_memberships = self
+            .multicast_group_members_list_by_instance_on_conn(
+                conn,
+                instance_id,
+                &DataPageParams::max_page(),
+            )
+            .await
+            .map_err(|error| {
+                err.bail_retryable_or_else(error, |error| {
+                    public_error_from_diesel(error, ErrorHandler::Server)
+                })
+            })?;
+
+        // Filter ordering doesn't matter, so compare the sources as sets.
+        let current_source_ips: HashMap<Uuid, HashSet<IpAddr>> =
+            current_memberships
+                .iter()
+                .map(|member| {
+                    (
+                        member.external_group_id,
+                        member.source_ips.iter().map(|ip| ip.ip()).collect(),
+                    )
+                })
+                .collect();
+
+        let current_group_ids: HashSet<Uuid> =
+            current_source_ips.keys().copied().collect();
+        let expected_group_ids = expected
+            .iter()
+            .map(|membership| membership.group_id.into_untyped_uuid())
+            .collect();
+        if current_group_ids != expected_group_ids {
+            return Err(err.bail(Error::conflict(
+                "multicast memberships changed while reconfiguring the \
+                 instance",
+            )));
+        }
+
+        // A plan that rewrites a filter carries the sources it planned
+        // against, so a concurrent rewrite is rejected instead of silently
+        // overwritten. Groups the plan leaves alone carry no sources and
+        // tolerate drift.
+        let sources_drifted = expected.iter().any(|membership| {
+            let Some(planned) = &membership.source_ips else {
+                return false;
+            };
+            let planned: HashSet<IpAddr> = planned.iter().copied().collect();
+            current_source_ips
+                .get(&membership.group_id.into_untyped_uuid())
+                .is_some_and(|current| *current != planned)
+        });
+        if sources_drifted {
+            return Err(err.bail(Error::conflict(
+                "multicast source filters changed while reconfiguring the \
+                 instance",
+            )));
+        }
+
+        Ok(())
+    }
+
+    /// Apply an instance's planned multicast membership mutations, within an
+    /// existing transaction.
+    async fn multicast_apply_changes_on_conn(
+        &self,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        err: &OptionalError<Error>,
+        instance_id: InstanceUuid,
+        changes: &[MulticastMembershipChange],
+    ) -> Result<(), diesel::result::Error> {
+        let to_server_error = |error| {
+            err.bail_retryable_or_else(error, |error| {
+                public_error_from_diesel(error, ErrorHandler::Server)
+            })
+        };
+
+        for change in changes {
+            match change {
+                MulticastMembershipChange::Leave { group_id } => {
+                    self.multicast_group_member_detach_by_group_and_instance_on_conn(
+                        conn,
+                        *group_id,
+                        instance_id,
+                    )
+                    .await
+                    .map_err(to_server_error)?;
+
+                    // Teardown stays inside this transaction so a reconfigure
+                    // that empties a group leaves no live group behind once it
+                    // commits. The reconciler's empty-group sweep would also
+                    // reap it, at the cost of a cycle's latency and a window
+                    // where the group is visible with no members.
+                    self.multicast_group_mark_removal_if_empty_on_conn(
+                        conn, *group_id,
+                    )
+                    .await
+                    .map_err(to_server_error)?;
+                }
+                MulticastMembershipChange::Join { group_id, source_ips } => {
+                    self.multicast_group_member_attach_to_instance_on_conn(
+                        conn,
+                        *group_id,
+                        instance_id,
+                        source_ips.as_deref(),
+                    )
+                    .await
+                    .map_err(|error| match error {
+                        // Hand retryable database errors back to the retry
+                        // wrapper instead of bailing on them.
+                        AttachMemberError::DatabaseError(e) => err
+                            .bail_retryable_or_else(e, |e| {
+                                AttachMemberError::DatabaseError(e).into()
+                            }),
+                        other => err.bail(other.into()),
+                    })?;
+                }
+            }
+        }
+
+        Ok(())
     }
 
     /// Set the boot disk on an instance, bypassing the rest of an instance
@@ -2255,8 +2480,11 @@ mod tests {
     use crate::db::datastore::sled;
     use crate::db::pagination::Paginator;
     use crate::db::pub_test_utils::TestDatabase;
+    use crate::db::pub_test_utils::multicast;
     use nexus_db_lookup::LookupPath;
     use nexus_db_model::InstanceState;
+    use nexus_db_model::MulticastGroupMemberState;
+    use nexus_db_model::MulticastGroupState;
     use nexus_db_model::Project;
     use nexus_db_model::VmmCpuPlatform;
     use nexus_db_model::VmmState;
@@ -2268,6 +2496,7 @@ mod tests {
     use omicron_common::api::external::ByteCount;
     use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_test_utils::dev;
+    use omicron_uuid_kinds::MulticastGroupUuid;
 
     async fn create_test_project(
         datastore: &DataStore,
@@ -3613,6 +3842,619 @@ mod tests {
         assert_eq!(expected_instances, found_instances);
 
         // Clean up.
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    /// A join for a group the instance already belongs to replaces its source
+    /// filter, and a stale membership snapshot rejects the whole update.
+    ///
+    /// The rejection covers the instance fields too, since the membership
+    /// mutations and the configuration update share one transaction.
+    #[tokio::test]
+    async fn test_instance_reconfigure_with_multicast() {
+        let logctx =
+            dev::test_setup_log("test_instance_reconfigure_with_multicast");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let setup = multicast::create_test_setup(
+            &opctx,
+            &datastore,
+            "mcast-pool",
+            "mcast-project",
+        )
+        .await;
+        let authz_instance = create_test_instance(
+            &datastore,
+            &opctx,
+            &setup.authz_project,
+            "mcast-instance",
+        )
+        .await;
+        let instance_id = InstanceUuid::from_untyped_uuid(authz_instance.id());
+
+        let group = multicast::create_test_group_with_state(
+            &opctx,
+            &datastore,
+            "group-joined",
+            "224.10.1.10",
+            true,
+        )
+        .await;
+        let group_id = MulticastGroupUuid::from_untyped_uuid(group.id());
+        let other_group = multicast::create_test_group_with_state(
+            &opctx,
+            &datastore,
+            "group-unjoined",
+            "224.10.1.11",
+            true,
+        )
+        .await;
+        let other_group_id =
+            MulticastGroupUuid::from_untyped_uuid(other_group.id());
+
+        let update = |ncpus: u16, memory_gib: u32| InstanceUpdate {
+            boot_disk_id: None,
+            auto_restart_policy: None,
+            ncpus: instance_types::InstanceCpuCount(ncpus).into(),
+            memory: ByteCount::from_gibibytes_u32(memory_gib).into(),
+            cpu_platform: None,
+            enable_jumbo_frames: false,
+        };
+
+        let first_source: IpAddr = "10.0.0.1".parse().unwrap();
+        datastore
+            .instance_reconfigure_with_multicast(
+                &opctx,
+                &authz_instance,
+                update(2, 16),
+                Some(&[]),
+                &[MulticastMembershipChange::Join {
+                    group_id,
+                    source_ips: Some(vec![first_source]),
+                }],
+            )
+            .await
+            .expect("Should join the group");
+
+        // Rejoining an existing membership with a different filter replaces
+        // the stored sources rather than appending to them.
+        let second_source: IpAddr = "10.0.0.2".parse().unwrap();
+        datastore
+            .instance_reconfigure_with_multicast(
+                &opctx,
+                &authz_instance,
+                update(4, 8),
+                Some(&[ExpectedMulticastMembership {
+                    group_id,
+                    source_ips: Some(vec![first_source]),
+                }]),
+                &[MulticastMembershipChange::Join {
+                    group_id,
+                    source_ips: Some(vec![second_source]),
+                }],
+            )
+            .await
+            .expect("Should replace the member's source filter");
+
+        let member = datastore
+            .multicast_group_member_get_by_group_and_instance(
+                &opctx,
+                group_id,
+                instance_id,
+            )
+            .await
+            .expect("Should look up the member")
+            .expect("Member should exist");
+        assert_eq!(
+            member.source_ips.iter().map(|ip| ip.ip()).collect::<Vec<IpAddr>>(),
+            vec![second_source],
+            "Received a stale source filter after rejoining the group"
+        );
+
+        // A plan built against the filter that the rewrite above replaced is
+        // rejected, which is what a concurrent source update produces.
+        let err = datastore
+            .instance_reconfigure_with_multicast(
+                &opctx,
+                &authz_instance,
+                update(8, 32),
+                Some(&[ExpectedMulticastMembership {
+                    group_id,
+                    source_ips: Some(vec![first_source]),
+                }]),
+                &[MulticastMembershipChange::Join {
+                    group_id,
+                    source_ips: Some(vec!["10.0.0.3".parse().unwrap()]),
+                }],
+            )
+            .await
+            .expect_err("Stale source filter should be rejected");
+
+        assert!(
+            matches!(err, Error::Conflict { .. }),
+            "Received {err:?} instead of a conflict"
+        );
+
+        let member = datastore
+            .multicast_group_member_get_by_group_and_instance(
+                &opctx,
+                group_id,
+                instance_id,
+            )
+            .await
+            .expect("Should look up the member")
+            .expect("Member should exist");
+        assert_eq!(
+            member.source_ips.iter().map(|ip| ip.ip()).collect::<Vec<IpAddr>>(),
+            vec![second_source],
+            "Received a clobbered source filter from a rejected update"
+        );
+
+        // A plan that leaves a filter alone carries no sources for it, so a
+        // concurrent rewrite of that filter is not a conflict and the plan's
+        // other changes still apply.
+        datastore
+            .instance_reconfigure_with_multicast(
+                &opctx,
+                &authz_instance,
+                update(4, 8),
+                Some(&[ExpectedMulticastMembership {
+                    group_id,
+                    source_ips: None,
+                }]),
+                &[MulticastMembershipChange::Join {
+                    group_id: other_group_id,
+                    source_ips: None,
+                }],
+            )
+            .await
+            .expect("Should tolerate source drift the plan does not rewrite");
+
+        assert!(
+            datastore
+                .multicast_group_member_get_by_group_and_instance(
+                    &opctx,
+                    other_group_id,
+                    instance_id,
+                )
+                .await
+                .expect("Should look up the accepted member")
+                .is_some(),
+            "Received no member row from an accepted update"
+        );
+
+        // A snapshot taken before the joins above no longer describes the
+        // instance, so the update is rejected before anything is written.
+        let err = datastore
+            .instance_reconfigure_with_multicast(
+                &opctx,
+                &authz_instance,
+                update(8, 32),
+                Some(&[]),
+                &[MulticastMembershipChange::Leave { group_id }],
+            )
+            .await
+            .expect_err("Stale membership snapshot should be rejected");
+
+        assert!(
+            matches!(err, Error::Conflict { .. }),
+            "Received {err:?} instead of a conflict"
+        );
+
+        assert!(
+            datastore
+                .multicast_group_member_get_by_group_and_instance(
+                    &opctx,
+                    group_id,
+                    instance_id,
+                )
+                .await
+                .expect("Should look up the member")
+                .is_some(),
+            "Received a detached member from a rejected update"
+        );
+
+        let instance = datastore
+            .instance_fetch_with_vmm(&opctx, &authz_instance)
+            .await
+            .expect("Should fetch the instance");
+        assert_eq!(
+            instance.instance().ncpus.0,
+            instance_types::InstanceCpuCount(4),
+            "Received a persisted ncpus change from a rejected update"
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    /// A leave detaches the membership and marks the emptied group for removal,
+    /// while a group that keeps a member stays in its prior state.
+    #[tokio::test]
+    async fn test_instance_reconfigure_multicast_leave() {
+        let logctx =
+            dev::test_setup_log("test_instance_reconfigure_multicast_leave");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let setup = multicast::create_test_setup(
+            &opctx,
+            &datastore,
+            "mcast-pool",
+            "mcast-project",
+        )
+        .await;
+        let authz_instance = create_test_instance(
+            &datastore,
+            &opctx,
+            &setup.authz_project,
+            "mcast-instance",
+        )
+        .await;
+        let instance_id = InstanceUuid::from_untyped_uuid(authz_instance.id());
+
+        let left_group = multicast::create_test_group_with_state(
+            &opctx,
+            &datastore,
+            "group-left",
+            "224.10.1.10",
+            true,
+        )
+        .await;
+        let left_group_id =
+            MulticastGroupUuid::from_untyped_uuid(left_group.id());
+        let kept_group = multicast::create_test_group_with_state(
+            &opctx,
+            &datastore,
+            "group-kept",
+            "224.10.1.11",
+            true,
+        )
+        .await;
+        let kept_group_id =
+            MulticastGroupUuid::from_untyped_uuid(kept_group.id());
+
+        let update = |ncpus: u16, memory_gib: u32| InstanceUpdate {
+            boot_disk_id: None,
+            auto_restart_policy: None,
+            ncpus: instance_types::InstanceCpuCount(ncpus).into(),
+            memory: ByteCount::from_gibibytes_u32(memory_gib).into(),
+            cpu_platform: None,
+            enable_jumbo_frames: false,
+        };
+
+        datastore
+            .instance_reconfigure_with_multicast(
+                &opctx,
+                &authz_instance,
+                update(2, 16),
+                Some(&[]),
+                &[
+                    MulticastMembershipChange::Join {
+                        group_id: left_group_id,
+                        source_ips: None,
+                    },
+                    MulticastMembershipChange::Join {
+                        group_id: kept_group_id,
+                        source_ips: None,
+                    },
+                ],
+            )
+            .await
+            .expect("Should join both groups");
+
+        let member_id = datastore
+            .multicast_group_member_get_by_group_and_instance(
+                &opctx,
+                left_group_id,
+                instance_id,
+            )
+            .await
+            .expect("Should look up the member")
+            .expect("Member should exist")
+            .id;
+
+        datastore
+            .instance_reconfigure_with_multicast(
+                &opctx,
+                &authz_instance,
+                update(4, 8),
+                Some(&[
+                    ExpectedMulticastMembership {
+                        group_id: left_group_id,
+                        source_ips: None,
+                    },
+                    ExpectedMulticastMembership {
+                        group_id: kept_group_id,
+                        source_ips: None,
+                    },
+                ]),
+                &[MulticastMembershipChange::Leave { group_id: left_group_id }],
+            )
+            .await
+            .expect("Should leave the group");
+
+        assert!(
+            datastore
+                .multicast_group_member_get_by_group_and_instance(
+                    &opctx,
+                    left_group_id,
+                    instance_id,
+                )
+                .await
+                .expect("Should look up the departed member")
+                .is_none(),
+            "Received a live member row after leaving the group"
+        );
+
+        let detached = datastore
+            .multicast_group_member_get_by_id(&opctx, member_id, true)
+            .await
+            .expect("Should look up the detached member")
+            .expect("Detached member row should still exist");
+        assert_eq!(
+            detached.state,
+            MulticastGroupMemberState::Left,
+            "Received {:?} instead of 'Left' for a departed member",
+            detached.state
+        );
+        assert!(
+            detached.time_deleted.is_some(),
+            "Received a departed member without time_deleted"
+        );
+
+        // The group the instance left has no members now, so the same
+        // transaction marks it for removal.
+        let deleting = datastore
+            .multicast_groups_list_by_state(
+                &opctx,
+                MulticastGroupState::Deleting,
+                &DataPageParams::max_page(),
+            )
+            .await
+            .expect("Should list groups in 'Deleting'");
+        assert_eq!(
+            deleting.iter().map(|group| group.id()).collect::<Vec<Uuid>>(),
+            vec![left_group.id()],
+            "Received an unexpected set of groups in 'Deleting'"
+        );
+        assert!(
+            deleting[0].time_deleted().is_some(),
+            "Received a group in 'Deleting' without time_deleted"
+        );
+
+        // The group that kept a member is untouched by the leave.
+        let kept = datastore
+            .multicast_group_fetch(&opctx, kept_group_id)
+            .await
+            .expect("Should fetch the group the instance still belongs to");
+        assert_eq!(
+            kept.state,
+            MulticastGroupState::Active,
+            "Received {:?} instead of 'Active' for a group that still has a \
+             member",
+            kept.state
+        );
+        assert!(
+            datastore
+                .multicast_group_member_get_by_group_and_instance(
+                    &opctx,
+                    kept_group_id,
+                    instance_id,
+                )
+                .await
+                .expect("Should look up the member")
+                .is_some(),
+            "Received no member row for a group the plan did not touch"
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    /// A membership snapshot that a concurrent join invalidated rejects a plan
+    /// carrying changes, while a plan with no changes skips the check entirely.
+    ///
+    /// A plan carrying changes for an instance that was deleted underneath it
+    /// reports the instance as not found rather than an internal error.
+    #[tokio::test]
+    async fn test_instance_reconfigure_multicast_snapshot_and_lock() {
+        let logctx = dev::test_setup_log(
+            "test_instance_reconfigure_multicast_snapshot_and_lock",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let setup = multicast::create_test_setup(
+            &opctx,
+            &datastore,
+            "mcast-pool",
+            "mcast-project",
+        )
+        .await;
+        let authz_instance = create_test_instance(
+            &datastore,
+            &opctx,
+            &setup.authz_project,
+            "mcast-instance",
+        )
+        .await;
+        let instance_id = InstanceUuid::from_untyped_uuid(authz_instance.id());
+
+        let group = multicast::create_test_group_with_state(
+            &opctx,
+            &datastore,
+            "group-joined",
+            "224.10.1.10",
+            true,
+        )
+        .await;
+        let group_id = MulticastGroupUuid::from_untyped_uuid(group.id());
+        let drift_group = multicast::create_test_group_with_state(
+            &opctx,
+            &datastore,
+            "group-drift",
+            "224.10.1.11",
+            true,
+        )
+        .await;
+        let drift_group_id =
+            MulticastGroupUuid::from_untyped_uuid(drift_group.id());
+
+        let update = |ncpus: u16, memory_gib: u32| InstanceUpdate {
+            boot_disk_id: None,
+            auto_restart_policy: None,
+            ncpus: instance_types::InstanceCpuCount(ncpus).into(),
+            memory: ByteCount::from_gibibytes_u32(memory_gib).into(),
+            cpu_platform: None,
+            enable_jumbo_frames: false,
+        };
+
+        datastore
+            .instance_reconfigure_with_multicast(
+                &opctx,
+                &authz_instance,
+                update(2, 16),
+                Some(&[]),
+                &[MulticastMembershipChange::Join {
+                    group_id,
+                    source_ips: None,
+                }],
+            )
+            .await
+            .expect("Should join the group");
+
+        // The snapshot a plan would have taken before the join below lands.
+        let expected =
+            vec![ExpectedMulticastMembership { group_id, source_ips: None }];
+
+        // A join that the plan never saw, standing in for a concurrent request.
+        datastore
+            .multicast_group_member_attach_to_instance(
+                &opctx,
+                drift_group_id,
+                instance_id,
+                None,
+            )
+            .await
+            .expect("Should attach the instance behind the plan");
+
+        let err = datastore
+            .instance_reconfigure_with_multicast(
+                &opctx,
+                &authz_instance,
+                update(4, 8),
+                Some(&expected),
+                &[MulticastMembershipChange::Leave { group_id }],
+            )
+            .await
+            .expect_err("Stale membership snapshot should be rejected");
+        assert!(
+            matches!(err, Error::Conflict { .. }),
+            "Received {err:?} instead of a conflict"
+        );
+
+        let memberships = datastore
+            .multicast_group_members_list_by_instance(
+                &opctx,
+                instance_id,
+                &DataPageParams::max_page(),
+            )
+            .await
+            .expect("Should list the instance's memberships");
+        assert_eq!(
+            memberships.len(),
+            2,
+            "Received {} memberships after a rejected update instead of 2",
+            memberships.len()
+        );
+
+        // The same stale snapshot rides along with a plan that carries no
+        // membership changes. Naming a membership set is itself a claim about
+        // the snapshot, so the drifted join is still rejected.
+        let err = datastore
+            .instance_reconfigure_with_multicast(
+                &opctx,
+                &authz_instance,
+                update(8, 32),
+                Some(&expected),
+                &[],
+            )
+            .await
+            .expect_err("A stale snapshot should be rejected with no changes");
+        assert!(
+            matches!(err, Error::Conflict { .. }),
+            "Received {err:?} instead of a conflict"
+        );
+
+        // A request that names no membership set skips both the lock and the
+        // check, and never conflicts with a concurrent join.
+        datastore
+            .instance_reconfigure_with_multicast(
+                &opctx,
+                &authz_instance,
+                update(8, 32),
+                None,
+                &[],
+            )
+            .await
+            .expect("A request naming no membership set should be applied");
+
+        let instance = datastore
+            .instance_fetch_with_vmm(&opctx, &authz_instance)
+            .await
+            .expect("Should fetch the instance");
+        assert_eq!(
+            instance.instance().ncpus.0,
+            instance_types::InstanceCpuCount(8),
+            "Received an unapplied ncpus change from an accepted update"
+        );
+
+        let memberships = datastore
+            .multicast_group_members_list_by_instance(
+                &opctx,
+                instance_id,
+                &DataPageParams::max_page(),
+            )
+            .await
+            .expect("Should list the instance's memberships");
+        assert_eq!(
+            memberships
+                .iter()
+                .map(|member| member.external_group_id)
+                .collect::<HashSet<Uuid>>(),
+            HashSet::from([group.id(), drift_group.id()]),
+            "Received altered memberships from a plan with no changes"
+        );
+
+        // A reconfigure that carries changes for an instance that no longer
+        // exists reports the instance, not an internal error.
+        datastore
+            .project_delete_instance_in_states(
+                &opctx,
+                &authz_instance,
+                &[InstanceState::Creating],
+            )
+            .await
+            .expect("Should delete the instance");
+
+        let err = datastore
+            .instance_reconfigure_with_multicast(
+                &opctx,
+                &authz_instance,
+                update(2, 16),
+                None,
+                &[MulticastMembershipChange::Leave { group_id }],
+            )
+            .await
+            .expect_err("Reconfiguring a deleted instance should fail");
+        assert!(
+            matches!(err, Error::ObjectNotFound { .. }),
+            "Received {err:?} instead of a not-found error"
+        );
+
         db.terminate().await;
         logctx.cleanup_successful();
     }

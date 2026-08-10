@@ -1637,9 +1637,13 @@ async fn test_ssm_without_sources_fails_create_and_reconfigure(
 /// Covers both rejection paths: identical identifiers (rejected before any
 /// resolution runs) and aliased identifiers, a group's IP alongside its
 /// generated name, where the first spec implicitly creates the group and the
-/// rejection must roll it back. A stranded memberless group would otherwise
-/// persist, since implicit-lifecycle cleanup only triggers on last-member
-/// leave.
+/// rejection must roll it back. The reconciler's orphan pass would reap the
+/// memberless group eventually, and the rollback removes it immediately so a
+/// rejected update has no observable side effects.
+///
+/// The rejected updates also request a CPU and memory change, which must not
+/// persist: multicast specs are validated before the instance record is
+/// written.
 #[nexus_test]
 async fn test_instance_update_duplicate_groups_no_leak(
     cptestctx: &ControlPlaneTestContext,
@@ -1674,7 +1678,9 @@ async fn test_instance_update_duplicate_groups_no_leak(
         external_ips: Vec::new(),
         disks: Vec::new(),
         boot_disk: None,
-        start: true,
+        // Created stopped so the update may also request a CPU and memory
+        // change, which reconfiguration only allows on a stopped instance.
+        start: false,
         auto_restart_policy: None,
         anti_affinity_groups: Vec::new(),
         enable_jumbo_frames: false,
@@ -1683,27 +1689,23 @@ async fn test_instance_update_duplicate_groups_no_leak(
     };
 
     let instance_url = format!("/v1/instances?project={project_name}");
-    let instance: Instance =
+    let _instance: Instance =
         object_create(client, &instance_url, &instance_params).await;
-    let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
-
-    let nexus = &cptestctx.server.server_context().nexus;
-    instance_simulate(nexus, &instance_id).await;
-    instance_wait_for_state(client, instance_id, InstanceState::Running).await;
 
     let update_url =
         format!("/v1/instances/{instance_name}?project={project_name}");
+
     let update_with_groups =
         |groups: Vec<MulticastGroupJoinSpec>| InstanceUpdate {
-            ncpus: InstanceCpuCount(2),
-            memory: ByteCount::from_gibibytes_u32(4),
+            ncpus: InstanceCpuCount(4),
+            memory: ByteCount::from_gibibytes_u32(8),
             boot_disk: Nullable(None),
             auto_restart_policy: Nullable(None),
             cpu_platform: Nullable(None),
             multicast_groups: Some(groups),
             enable_jumbo_frames: false,
         };
-    let update_url = &update_url;
+
     let expect_duplicate_rejection = |update_params: InstanceUpdate| {
         let update_url = update_url.clone();
         async move {
@@ -1762,6 +1764,23 @@ async fn test_instance_update_duplicate_groups_no_leak(
     assert!(
         groups.is_empty(),
         "Received leaked multicast groups after rejected updates: {groups:?}"
+    );
+
+    // Nor may the CPU and memory changes bundled with the rejected updates
+    // have been persisted.
+    let instance: Instance = NexusRequest::object_get(client, &update_url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute_and_parse_unwrap()
+        .await;
+    assert_eq!(
+        instance.ncpus,
+        InstanceCpuCount(2),
+        "Received a persisted ncpus change from a rejected update"
+    );
+    assert_eq!(
+        instance.memory,
+        ByteCount::from_gibibytes_u32(4),
+        "Received a persisted memory change from a rejected update"
     );
 
     cleanup_instances(cptestctx, client, project_name, &[instance_name]).await;
