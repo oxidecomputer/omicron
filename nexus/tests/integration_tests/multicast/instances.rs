@@ -1631,6 +1631,142 @@ async fn test_ssm_without_sources_fails_create_and_reconfigure(
     cleanup_instances(cptestctx, client, project_name, &[instance_name]).await;
 }
 
+/// Test that an instance update referencing the same multicast group twice
+/// is rejected without leaving an implicitly created group behind.
+///
+/// Covers both rejection paths: identical identifiers (rejected before any
+/// resolution runs) and aliased identifiers, a group's IP alongside its
+/// generated name, where the first spec implicitly creates the group and the
+/// rejection must roll it back. A stranded memberless group would otherwise
+/// persist, since implicit-lifecycle cleanup only triggers on last-member
+/// leave.
+#[nexus_test]
+async fn test_instance_update_duplicate_groups_no_leak(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let project_name = "dup-group-project";
+    let instance_name = "dup-group-instance";
+
+    ops::join3(
+        create_default_ip_pools(&client),
+        create_project(client, project_name),
+        create_multicast_ip_pool_with_range(
+            client,
+            "dup-group-pool",
+            (224, 91, 0, 1),
+            (224, 91, 0, 100),
+        ),
+    )
+    .await;
+
+    let instance_params = InstanceCreate {
+        identity: IdentityMetadataCreateParams {
+            name: instance_name.parse().unwrap(),
+            description: "Instance for duplicate-group update test".into(),
+        },
+        ncpus: InstanceCpuCount(2),
+        memory: ByteCount::from_gibibytes_u32(4),
+        hostname: instance_name.parse().unwrap(),
+        user_data: Vec::new(),
+        ssh_public_keys: None,
+        network_interfaces: InstanceNetworkInterfaceAttachment::DefaultIpv4,
+        external_ips: Vec::new(),
+        disks: Vec::new(),
+        boot_disk: None,
+        start: true,
+        auto_restart_policy: None,
+        anti_affinity_groups: Vec::new(),
+        enable_jumbo_frames: false,
+        cpu_platform: None,
+        multicast_groups: vec![],
+    };
+
+    let instance_url = format!("/v1/instances?project={project_name}");
+    let instance: Instance =
+        object_create(client, &instance_url, &instance_params).await;
+    let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
+
+    let nexus = &cptestctx.server.server_context().nexus;
+    instance_simulate(nexus, &instance_id).await;
+    instance_wait_for_state(client, instance_id, InstanceState::Running).await;
+
+    let update_url =
+        format!("/v1/instances/{instance_name}?project={project_name}");
+    let update_with_groups =
+        |groups: Vec<MulticastGroupJoinSpec>| InstanceUpdate {
+            ncpus: InstanceCpuCount(2),
+            memory: ByteCount::from_gibibytes_u32(4),
+            boot_disk: Nullable(None),
+            auto_restart_policy: Nullable(None),
+            cpu_platform: Nullable(None),
+            multicast_groups: Some(groups),
+            enable_jumbo_frames: false,
+        };
+    let update_url = &update_url;
+    let expect_duplicate_rejection = |update_params: InstanceUpdate| {
+        let update_url = update_url.clone();
+        async move {
+            let error = NexusRequest::new(
+                RequestBuilder::new(client, Method::PUT, &update_url)
+                    .body(Some(&update_params))
+                    .expect_status(Some(StatusCode::BAD_REQUEST)),
+            )
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute()
+            .await
+            .expect("Update with duplicate multicast groups should fail");
+
+            let error_body: serde_json::Value =
+                serde_json::from_slice(&error.body).unwrap();
+            let message = error_body["message"].as_str().unwrap_or("");
+            assert!(
+                message.contains("Duplicate multicast group"),
+                "Received unexpected error message: {message}"
+            );
+        }
+    };
+
+    // Case: identical identifiers, rejected before any resolution runs
+    let dup_spec = || MulticastGroupJoinSpec {
+        group: "dup-group".parse().unwrap(),
+        source_ips: None,
+        ip_version: None,
+    };
+    expect_duplicate_rejection(update_with_groups(vec![
+        dup_spec(),
+        dup_spec(),
+    ]))
+    .await;
+
+    // Case: aliased identifiers, the IP spec implicitly creates the group
+    // and the name spec resolves to it, so rejection must roll the group back
+    let alias_ip_spec = MulticastGroupJoinSpec {
+        group: "224.91.0.5".parse().unwrap(),
+        source_ips: None,
+        ip_version: None,
+    };
+    let alias_name_spec = MulticastGroupJoinSpec {
+        group: "mcast-224-91-0-5".parse().unwrap(),
+        source_ips: None,
+        ip_version: None,
+    };
+    expect_duplicate_rejection(update_with_groups(vec![
+        alias_ip_spec,
+        alias_name_spec,
+    ]))
+    .await;
+
+    // Neither rejected request may leave an implicitly created group behind.
+    let groups = list_multicast_groups(client).await;
+    assert!(
+        groups.is_empty(),
+        "Received leaked multicast groups after rejected updates: {groups:?}"
+    );
+
+    cleanup_instances(cptestctx, client, project_name, &[instance_name]).await;
+}
+
 /// Test that instance deletion only removes that instance's membership,
 /// preserving other instances' memberships in the same group.
 ///

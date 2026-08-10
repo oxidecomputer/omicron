@@ -439,62 +439,56 @@ impl super::Nexus {
             "current_group_ids" => ?current_group_ids
         );
 
-        // Resolve multicast group identifiers to group IDs.
-        //
-        // For existing memberships (group already in current_group_ids), we just
-        // need the ID - no validation needed since source_ips: None means
-        // "preserve existing sources".
-        //
-        // For new memberships, we resolve (which creates groups if needed) and
-        // validation (address family + SSM) happens inside resolve.
-        let mut new_group_ids = HashSet::new();
-        let mut group_source_ips: HashMap<Uuid, Option<Vec<std::net::IpAddr>>> =
-            HashMap::new();
-        for spec in multicast_groups {
-            // Check if this is an existing membership by looking up the group ID first
-            let group_uuid = match self
-                .resolve_multicast_group_identifier(opctx, &spec.group)
-                .await
+        // Reject duplicate identifiers before any resolution runs, since
+        // resolution can implicitly create a group that a later rejection
+        // would leave behind with no members.
+        for (idx, spec) in multicast_groups.iter().enumerate() {
+            if multicast_groups[..idx]
+                .iter()
+                .any(|prior| prior.group == spec.group)
             {
-                Ok(id) => {
-                    let uuid = id.into_untyped_uuid();
-                    // If already a member, skip validation (None = preserve)
-                    if !current_group_ids.contains(&uuid) {
-                        // New membership - validate (address family + SSM)
-                        self.resolve_multicast_group_identifier_with_sources(
-                            opctx,
-                            &spec.group,
-                            spec.source_ips.as_deref(),
-                            spec.ip_version,
-                        )
-                        .await?;
-                    }
-                    uuid
-                }
-                Err(Error::ObjectNotFound { .. }) => {
-                    // Group doesn't exist: resolve will create it (and validate accordingly)
-                    let id = self
-                        .resolve_multicast_group_identifier_with_sources(
-                            opctx,
-                            &spec.group,
-                            spec.source_ips.as_deref(),
-                            spec.ip_version,
-                        )
-                        .await?;
-                    id.into_untyped_uuid()
-                }
-                Err(e) => return Err(e),
-            };
-            new_group_ids.insert(group_uuid);
-            group_source_ips.insert(group_uuid, spec.source_ips.clone());
+                return Err(Error::invalid_request(
+                    "Duplicate multicast group specified in request",
+                ));
+            }
         }
 
-        // Validate no duplicate groups were specified
-        if new_group_ids.len() != multicast_groups.len() {
-            return Err(Error::invalid_request(
-                "Duplicate multicast group specified in request",
-            ));
-        }
+        // Resolve the specs, rolling back any groups this request implicitly
+        // created if resolution rejects the request partway. The identifier
+        // dedup above cannot catch aliases (a group's IP alongside its
+        // generated name), and a later spec can fail validation after an
+        // earlier spec already created a group.
+        let mut created_group_ids = Vec::new();
+        let (new_group_ids, group_source_ips) = match self
+            .resolve_multicast_group_specs(
+                opctx,
+                &current_group_ids,
+                multicast_groups,
+                &mut created_group_ids,
+            )
+            .await
+        {
+            Ok(resolved) => resolved,
+            Err(e) => {
+                for group_id in created_group_ids {
+                    if let Err(rollback_err) = self
+                        .datastore()
+                        .mark_multicast_group_for_removal_if_no_members(
+                            opctx, group_id,
+                        )
+                        .await
+                    {
+                        error!(
+                            opctx.log,
+                            "failed to rollback orphaned multicast group";
+                            "group_id" => %group_id,
+                            "error" => ?rollback_err,
+                        );
+                    }
+                }
+                return Err(e);
+            }
+        };
 
         // Determine which groups to leave and join
         let groups_to_leave: Vec<_> =
@@ -553,6 +547,95 @@ impl super::Nexus {
         }
 
         Ok(())
+    }
+
+    /// Resolve requested multicast group specs to group IDs and their
+    /// per-member source IPs.
+    ///
+    /// For existing memberships (group already in `current_group_ids`), only
+    /// the ID is needed. `source_ips: None` means to "preserve existing
+    /// sources".
+    ///
+    /// For new memberships, resolution implicitly creates missing groups and
+    /// validates address family and SSM sources.
+    ///
+    /// Any group implicitly created here is recorded in `created_group_ids`
+    /// so the caller can roll it back if resolution returns an error.
+    async fn resolve_multicast_group_specs(
+        &self,
+        opctx: &OpContext,
+        current_group_ids: &HashSet<Uuid>,
+        multicast_groups: &[multicast::MulticastGroupJoinSpec],
+        created_group_ids: &mut Vec<MulticastGroupUuid>,
+    ) -> Result<
+        (HashSet<Uuid>, HashMap<Uuid, Option<Vec<std::net::IpAddr>>>),
+        Error,
+    > {
+        let mut new_group_ids = HashSet::new();
+        let mut group_source_ips: HashMap<Uuid, Option<Vec<std::net::IpAddr>>> =
+            HashMap::new();
+        for spec in multicast_groups {
+            // Check if this is an existing membership by looking up the group ID first
+            let group_uuid = match self
+                .resolve_multicast_group_identifier(opctx, &spec.group)
+                .await
+            {
+                Ok(id) => {
+                    let uuid = id.into_untyped_uuid();
+                    // If already a member, skip validation (None = preserve)
+                    if !current_group_ids.contains(&uuid) {
+                        // New membership - validate (address family + SSM)
+                        let resolved = self
+                            .resolve_multicast_group_identifier_with_sources(
+                                opctx,
+                                &spec.group,
+                                spec.source_ips.as_deref(),
+                                spec.ip_version,
+                            )
+                            .await?;
+                        if resolved.created {
+                            created_group_ids.push(resolved.id);
+                        }
+                        resolved.id.into_untyped_uuid()
+                    } else {
+                        uuid
+                    }
+                }
+                Err(Error::ObjectNotFound { .. }) => {
+                    // Group doesn't exist: a resolve will create it (and
+                    // validate accordingly).
+                    //
+                    // We record the ID only when this resolution
+                    // actually created the group, since it may lose a creation
+                    // race and return a group another request created.
+                    let resolved = self
+                        .resolve_multicast_group_identifier_with_sources(
+                            opctx,
+                            &spec.group,
+                            spec.source_ips.as_deref(),
+                            spec.ip_version,
+                        )
+                        .await?;
+                    if resolved.created {
+                        created_group_ids.push(resolved.id);
+                    }
+                    resolved.id.into_untyped_uuid()
+                }
+                Err(e) => return Err(e),
+            };
+            new_group_ids.insert(group_uuid);
+            group_source_ips.insert(group_uuid, spec.source_ips.clone());
+        }
+
+        // Distinct identifiers can resolve to the same group, such as a
+        // group's IP alongside its generated name.
+        if new_group_ids.len() != multicast_groups.len() {
+            return Err(Error::invalid_request(
+                "Duplicate multicast group specified in request",
+            ));
+        }
+
+        Ok((new_group_ids, group_source_ips))
     }
 
     pub(crate) async fn instance_reconfigure(

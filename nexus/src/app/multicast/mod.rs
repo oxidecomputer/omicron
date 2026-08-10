@@ -111,6 +111,18 @@ pub(crate) fn validate_ssm_sources(
     Ok(())
 }
 
+/// Outcome of resolving a multicast group identifier.
+///
+/// Distinguishes groups the resolution implicitly created from pre-existing
+/// ones so callers can roll back their own creations without touching groups
+/// a concurrent request created first.
+pub(crate) struct ResolvedGroup {
+    /// The resolved group ID.
+    pub(crate) id: MulticastGroupUuid,
+    /// Whether this resolution created the group.
+    pub(crate) created: bool,
+}
+
 impl super::Nexus {
     /// Look up a fleet-scoped multicast group by name, ID, or IP address.
     ///
@@ -357,6 +369,7 @@ impl super::Nexus {
             multicast::MulticastGroupIdentifier::Ip(ip) => {
                 self.resolve_or_create_group_by_ip(opctx, *ip, source_ips)
                     .await?
+                    .id
             }
             multicast::MulticastGroupIdentifier::Name(name) => {
                 self.resolve_or_create_group_by_name(
@@ -366,6 +379,7 @@ impl super::Nexus {
                     ip_version,
                 )
                 .await?
+                .id
             }
             multicast::MulticastGroupIdentifier::Id(id) => {
                 self.resolve_group_by_id(opctx, *id, source_ips).await?
@@ -395,12 +409,13 @@ impl super::Nexus {
     /// different sources.
     ///
     /// Validates source IPs (address family match, SSM requirements) upfront.
+    ///
     async fn resolve_or_create_group_by_ip(
         &self,
         opctx: &OpContext,
         ip: IpAddr,
         source_ips: Option<&[IpAddr]>,
-    ) -> Result<MulticastGroupUuid, external::Error> {
+    ) -> Result<ResolvedGroup, external::Error> {
         // Source IPs must match the multicast group's address family
         validate_source_address_family(ip, source_ips)?;
 
@@ -417,9 +432,12 @@ impl super::Nexus {
                     external::LookupType::ById(existing.identity.id),
                 );
                 opctx.authorize(authz::Action::Read, &authz_group).await?;
-                return Ok(MulticastGroupUuid::from_untyped_uuid(
-                    existing.identity.id,
-                ));
+                return Ok(ResolvedGroup {
+                    id: MulticastGroupUuid::from_untyped_uuid(
+                        existing.identity.id,
+                    ),
+                    created: false,
+                });
             }
             Err(external::Error::ObjectNotFound { .. }) => {
                 // Fall through to creation
@@ -443,9 +461,10 @@ impl super::Nexus {
 
         // Create the group; on conflict -> re-lookup
         match self.multicast_group_create(opctx, &create_params).await {
-            Ok(created) => {
-                Ok(MulticastGroupUuid::from_untyped_uuid(created.identity.id))
-            }
+            Ok(created) => Ok(ResolvedGroup {
+                id: MulticastGroupUuid::from_untyped_uuid(created.identity.id),
+                created: true,
+            }),
             Err(external::Error::ObjectAlreadyExists { .. }) => {
                 // Another request created it first -> re-lookup
                 let group = self
@@ -459,7 +478,12 @@ impl super::Nexus {
                     external::LookupType::ById(group.identity.id),
                 );
                 opctx.authorize(authz::Action::Read, &authz_group).await?;
-                Ok(MulticastGroupUuid::from_untyped_uuid(group.identity.id))
+                Ok(ResolvedGroup {
+                    id: MulticastGroupUuid::from_untyped_uuid(
+                        group.identity.id,
+                    ),
+                    created: false,
+                })
             }
             Err(e) => Err(e),
         }
@@ -483,7 +507,7 @@ impl super::Nexus {
         name: Name,
         source_ips: Option<&[IpAddr]>,
         ip_version: Option<external::IpVersion>,
-    ) -> Result<MulticastGroupUuid, external::Error> {
+    ) -> Result<ResolvedGroup, external::Error> {
         let selector = multicast::MulticastGroupSelector {
             multicast_group: multicast::MulticastGroupIdentifier::Name(
                 name.clone().into(),
@@ -498,9 +522,12 @@ impl super::Nexus {
                 let group_ip = db_group.multicast_ip.ip();
                 validate_source_address_family(group_ip, source_ips)?;
                 validate_ssm_sources(group_ip, source_ips)?;
-                return Ok(MulticastGroupUuid::from_untyped_uuid(
-                    db_group.identity.id,
-                ));
+                return Ok(ResolvedGroup {
+                    id: MulticastGroupUuid::from_untyped_uuid(
+                        db_group.identity.id,
+                    ),
+                    created: false,
+                });
             }
             Err(external::Error::ObjectNotFound { .. }) => {
                 // Fall through to create
@@ -555,7 +582,7 @@ impl super::Nexus {
                     return Err(e);
                 }
 
-                Ok(group_id)
+                Ok(ResolvedGroup { id: group_id, created: true })
             }
             Err(external::Error::ObjectAlreadyExists { .. }) => {
                 // Another request created it first -> re-lookup
@@ -564,7 +591,12 @@ impl super::Nexus {
                 let group_ip = db_group.multicast_ip.ip();
                 validate_source_address_family(group_ip, source_ips)?;
                 validate_ssm_sources(group_ip, source_ips)?;
-                Ok(MulticastGroupUuid::from_untyped_uuid(db_group.identity.id))
+                Ok(ResolvedGroup {
+                    id: MulticastGroupUuid::from_untyped_uuid(
+                        db_group.identity.id,
+                    ),
+                    created: false,
+                })
             }
             Err(e) => Err(e),
         }
@@ -653,7 +685,7 @@ impl super::Nexus {
         identifier: &multicast::MulticastGroupIdentifier,
         source_ips: Option<&[IpAddr]>,
         ip_version: Option<external::IpVersion>,
-    ) -> Result<MulticastGroupUuid, external::Error> {
+    ) -> Result<ResolvedGroup, external::Error> {
         match identifier {
             multicast::MulticastGroupIdentifier::Ip(ip) => {
                 self.resolve_or_create_group_by_ip(opctx, *ip, source_ips).await
@@ -670,7 +702,9 @@ impl super::Nexus {
             }
             multicast::MulticastGroupIdentifier::Id(id) => {
                 // ID-based: lookup only (UUID implies existing resource).
-                self.resolve_group_by_id(opctx, *id, source_ips).await
+                self.resolve_group_by_id(opctx, *id, source_ips)
+                    .await
+                    .map(|id| ResolvedGroup { id, created: false })
             }
         }
     }

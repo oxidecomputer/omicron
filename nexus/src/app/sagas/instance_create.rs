@@ -1101,7 +1101,8 @@ async fn sic_join_instance_multicast_group(
             join_spec.ip_version,
         )
         .await
-        .map_err(saga_action_failed)?;
+        .map_err(saga_action_failed)?
+        .id;
 
     // Add the instance as a member of the multicast group in "Joining" state.
     //
