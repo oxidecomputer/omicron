@@ -117,11 +117,13 @@ impl From<crate::v2026_04_16_00::networking::BgpPeer> for BgpPeer {
     }
 }
 
-impl From<BgpPeer> for crate::v2026_04_16_00::networking::BgpPeer {
-    fn from(value: BgpPeer) -> Self {
-        Self {
+impl TryFrom<BgpPeer> for crate::v2026_04_16_00::networking::BgpPeer {
+    type Error = anyhow::Error;
+
+    fn try_from(value: BgpPeer) -> Result<Self, Self::Error> {
+        Ok(Self {
             bgp_config: value.bgp_config,
-            addr: value.addr.into(),
+            addr: value.addr.try_into()?,
             hold_time: value.hold_time,
             idle_hold_time: value.idle_hold_time,
             delay_open: value.delay_open,
@@ -137,7 +139,7 @@ impl From<BgpPeer> for crate::v2026_04_16_00::networking::BgpPeer {
             allowed_import: value.allowed_import,
             allowed_export: value.allowed_export,
             vlan_id: value.vlan_id,
-        }
+        })
     }
 }
 
@@ -161,12 +163,20 @@ impl From<crate::v2026_04_16_00::networking::BgpPeerConfig> for BgpPeerConfig {
     }
 }
 
-impl From<BgpPeerConfig> for crate::v2026_04_16_00::networking::BgpPeerConfig {
-    fn from(value: BgpPeerConfig) -> Self {
-        Self {
+impl TryFrom<BgpPeerConfig>
+    for crate::v2026_04_16_00::networking::BgpPeerConfig
+{
+    type Error = anyhow::Error;
+
+    fn try_from(value: BgpPeerConfig) -> Result<Self, Self::Error> {
+        Ok(Self {
             link_name: value.link_name,
-            peers: value.peers.into_iter().map(From::from).collect(),
-        }
+            peers: value
+                .peers
+                .into_iter()
+                .map(TryFrom::try_from)
+                .collect::<Result<Vec<_>, _>>()?,
+        })
     }
 }
 
@@ -222,20 +232,26 @@ impl From<crate::v2026_04_16_00::networking::SwitchPortSettingsCreate>
     }
 }
 
-impl From<SwitchPortSettingsCreate>
+impl TryFrom<SwitchPortSettingsCreate>
     for crate::v2026_04_16_00::networking::SwitchPortSettingsCreate
 {
-    fn from(value: SwitchPortSettingsCreate) -> Self {
-        Self {
+    type Error = anyhow::Error;
+
+    fn try_from(value: SwitchPortSettingsCreate) -> Result<Self, Self::Error> {
+        Ok(Self {
             identity: value.identity,
             port_config: value.port_config,
             groups: value.groups,
             links: value.links,
             interfaces: value.interfaces,
             routes: value.routes,
-            bgp_peers: value.bgp_peers.into_iter().map(From::from).collect(),
+            bgp_peers: value
+                .bgp_peers
+                .into_iter()
+                .map(TryFrom::try_from)
+                .collect::<Result<Vec<_>, _>>()?,
             addresses: value.addresses,
-        }
+        })
     }
 }
 
@@ -271,31 +287,38 @@ pub struct SwitchPortSettings {
 
 /// Downgrade to v2026_05_07_00 (REMOVE_DUPLICATED_NETWORKING_TYPES) —
 /// drop `src_addr` from each BGP peer.
-impl From<SwitchPortSettings>
+impl TryFrom<SwitchPortSettings>
     for crate::v2026_05_07_00::networking::SwitchPortSettings
 {
-    fn from(value: SwitchPortSettings) -> Self {
-        Self {
+    type Error = anyhow::Error;
+
+    fn try_from(value: SwitchPortSettings) -> Result<Self, Self::Error> {
+        Ok(Self {
             identity: value.identity,
             groups: value.groups,
             port: value.port,
             links: value.links,
             interfaces: value.interfaces,
             routes: value.routes,
-            bgp_peers: value.bgp_peers.into_iter().map(From::from).collect(),
+            bgp_peers: value
+                .bgp_peers
+                .into_iter()
+                .map(TryFrom::try_from)
+                .collect::<Result<Vec<_>, _>>()?,
             addresses: value.addresses,
-        }
+        })
     }
 }
 
 /// Downgrade to v2026_04_16_00 (STRONGER_BGP_UNNUMBERED_TYPES) —
 /// drop `src_addr` field.
-impl From<SwitchPortSettings>
+impl TryFrom<SwitchPortSettings>
     for crate::v2026_04_16_00::networking::SwitchPortSettings
 {
-    fn from(value: SwitchPortSettings) -> Self {
-        let v2026_05_07_00: crate::v2026_05_07_00::networking::SwitchPortSettings =
-            value.into();
-        v2026_05_07_00.into()
+    type Error = anyhow::Error;
+
+    fn try_from(value: SwitchPortSettings) -> Result<Self, Self::Error> {
+        crate::v2026_05_07_00::networking::SwitchPortSettings::try_from(value)
+            .map(crate::v2026_04_16_00::networking::SwitchPortSettings::from)
     }
 }

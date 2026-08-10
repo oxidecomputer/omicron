@@ -991,10 +991,15 @@ impl SledAgentApi for SledAgentImpl {
                                         InlineErrorChain::new(&err),
                                     ))
                                 })?;
+                        let body_v42 = BodyV42::try_from(latest_version_body)
+                            .map_err(|err| {
+                            HttpError::for_internal_error(format!(
+                                "failed to downconvert early network \
+                                     config: {err:#}"
+                            ))
+                        })?;
                         let body = BodyV20::from(BodyV26::from(BodyV30::from(
-                            BodyV33::from(BodyV39::from(BodyV42::from(
-                                latest_version_body,
-                            ))),
+                            BodyV33::from(BodyV39::from(body_v42)),
                         )));
                         v20::early_networking::EarlyNetworkConfig {
                             generation: config.generation,

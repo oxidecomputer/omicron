@@ -45,15 +45,17 @@ impl TryFrom<v42::system_networking::SystemNetworkingConfig>
     }
 }
 
-impl From<SystemNetworkingConfig>
+impl TryFrom<SystemNetworkingConfig>
     for v42::system_networking::SystemNetworkingConfig
 {
-    fn from(value: SystemNetworkingConfig) -> Self {
-        Self {
-            rack_network_config: value.rack_network_config.into(),
+    type Error = anyhow::Error;
+
+    fn try_from(value: SystemNetworkingConfig) -> Result<Self, Self::Error> {
+        Ok(Self {
+            rack_network_config: value.rack_network_config.try_into()?,
             blueprint_external_networking_config: value
                 .blueprint_external_networking_config,
-        }
+        })
     }
 }
 

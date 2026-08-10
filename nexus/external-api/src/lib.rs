@@ -5302,7 +5302,14 @@ pub trait NexusExternalApi {
             new_settings.map(Into::into),
         )
         .await
-        .map(|response| response.map(From::from))
+        .and_then(|response| {
+            response.try_map(TryFrom::try_from).map_err(|err| {
+                HttpError::for_internal_error(format!(
+                    "switch port settings contain configuration that \
+                     cannot be represented in this API version: {err:#}"
+                ))
+            })
+        })
     }
 
     #[endpoint {
@@ -5331,7 +5338,14 @@ pub trait NexusExternalApi {
             })?,
         )
         .await
-        .map(|response| response.map(From::from))
+        .and_then(|response| {
+            response.try_map(TryFrom::try_from).map_err(|err| {
+                HttpError::for_internal_error(format!(
+                    "switch port settings contain configuration that \
+                     cannot be represented in this API version: {err:#}"
+                ))
+            })
+        })
     }
 
     #[endpoint {
@@ -5450,7 +5464,14 @@ pub trait NexusExternalApi {
     > {
         Self::networking_switch_port_settings_view(rqctx, path_params)
             .await
-            .map(|response| response.map(From::from))
+            .and_then(|response| {
+                response.try_map(TryFrom::try_from).map_err(|err| {
+                    HttpError::for_internal_error(format!(
+                        "switch port settings contain configuration that \
+                         cannot be represented in this API version: {err:#}"
+                    ))
+                })
+            })
     }
 
     #[endpoint {
@@ -5469,7 +5490,14 @@ pub trait NexusExternalApi {
     > {
         Self::networking_switch_port_settings_view(rqctx, path_params)
             .await
-            .map(|response| response.map(From::from))
+            .and_then(|response| {
+                response.try_map(TryFrom::try_from).map_err(|err| {
+                    HttpError::for_internal_error(format!(
+                        "switch port settings contain configuration that \
+                         cannot be represented in this API version: {err:#}"
+                    ))
+                })
+            })
     }
 
     #[endpoint {

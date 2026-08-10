@@ -60,14 +60,30 @@ impl From<v30::RouterPeerType> for RouterPeerType {
     }
 }
 
+/// Error returned when converting a [RouterPeerType] with `Some(src_addr)`
+/// into a [`v30::RouterPeerType`].
+#[derive(Clone, Copy, Debug, thiserror::Error, PartialEq, Eq)]
+#[error(
+    "Numbered peer has a src_addr configured, which is \
+    unrepresentable in this API version"
+)]
+pub struct NumberedPeerWithSrcAddrError;
+
 /// Downgrade to v30: drop `src_addr`.
-impl From<RouterPeerType> for v30::RouterPeerType {
-    fn from(value: RouterPeerType) -> Self {
+impl TryFrom<RouterPeerType> for v30::RouterPeerType {
+    type Error = NumberedPeerWithSrcAddrError;
+
+    fn try_from(value: RouterPeerType) -> Result<Self, Self::Error> {
         match value {
             RouterPeerType::Unnumbered { router_lifetime } => {
-                Self::Unnumbered { router_lifetime }
+                Ok(Self::Unnumbered { router_lifetime })
             }
-            RouterPeerType::Numbered { ip, .. } => Self::Numbered { ip },
+            RouterPeerType::Numbered { ip, src_addr } => {
+                if let Some(_) = src_addr {
+                    return Err(NumberedPeerWithSrcAddrError);
+                };
+                Ok(Self::Numbered { ip })
+            }
         }
     }
 }
@@ -151,12 +167,14 @@ impl From<v30::BgpPeerConfig> for BgpPeerConfig {
     }
 }
 
-impl From<BgpPeerConfig> for v30::BgpPeerConfig {
-    fn from(value: BgpPeerConfig) -> Self {
-        Self {
+impl TryFrom<BgpPeerConfig> for v30::BgpPeerConfig {
+    type Error = anyhow::Error;
+
+    fn try_from(value: BgpPeerConfig) -> Result<Self, Self::Error> {
+        Ok(Self {
             asn: value.asn,
             port: value.port,
-            addr: value.addr.into(),
+            addr: value.addr.try_into()?,
             hold_time: value.hold_time,
             idle_hold_time: value.idle_hold_time,
             delay_open: value.delay_open,
@@ -172,7 +190,7 @@ impl From<BgpPeerConfig> for v30::BgpPeerConfig {
             allowed_import: value.allowed_import,
             allowed_export: value.allowed_export,
             vlan_id: value.vlan_id,
-        }
+        })
     }
 }
 
@@ -220,20 +238,25 @@ impl From<v30::PortConfig> for PortConfig {
     }
 }
 
-impl From<PortConfig> for v30::PortConfig {
-    fn from(value: PortConfig) -> Self {
-        Self {
+impl TryFrom<PortConfig> for v30::PortConfig {
+    type Error = anyhow::Error;
+    fn try_from(value: PortConfig) -> Result<Self, Self::Error> {
+        Ok(Self {
             routes: value.routes,
             addresses: value.addresses,
             switch: value.switch,
             port: value.port,
             uplink_port_speed: value.uplink_port_speed,
             uplink_port_fec: value.uplink_port_fec,
-            bgp_peers: value.bgp_peers.into_iter().map(From::from).collect(),
+            bgp_peers: value
+                .bgp_peers
+                .into_iter()
+                .map(TryFrom::try_from)
+                .collect::<Result<_, _>>()?,
             autoneg: value.autoneg,
             lldp: value.lldp,
             tx_eq: value.tx_eq,
-        }
+        })
     }
 }
 
@@ -310,36 +333,40 @@ pub struct RackNetworkConfig {
     pub bfd: Vec<v1::BfdPeerConfig>,
 }
 
-impl TryFrom<v42::RackNetworkConfig> for RackNetworkConfig {
-    type Error = EmptyUplinkPortsError;
-
-    fn try_from(old: v42::RackNetworkConfig) -> Result<Self, Self::Error> {
-        Ok(Self {
+impl From<v42::RackNetworkConfig> for RackNetworkConfig {
+    fn from(old: v42::RackNetworkConfig) -> Self {
+        Self {
             rack_subnet: old.rack_subnet,
             infra_ip_first: old.infra_ip_first,
             infra_ip_last: old.infra_ip_last,
             ports: old.ports.into(),
             bgp: old.bgp,
             bfd: old.bfd,
-        })
+        }
     }
 }
 
-impl From<RackNetworkConfig> for v42::RackNetworkConfig {
-    fn from(new: RackNetworkConfig) -> Self {
-        Self {
+impl TryFrom<RackNetworkConfig> for v42::RackNetworkConfig {
+    type Error = anyhow::Error;
+
+    fn try_from(new: RackNetworkConfig) -> Result<Self, Self::Error> {
+        Ok(Self {
             rack_subnet: new.rack_subnet,
             infra_ip_first: new.infra_ip_first,
             infra_ip_last: new.infra_ip_last,
             ports: v42::UplinkPorts::new(
-                new.ports.into_vec().into_iter().map(From::from).collect(),
+                new.ports
+                    .into_vec()
+                    .into_iter()
+                    .map(TryFrom::try_from)
+                    .collect::<Result<_, _>>()?,
             )
             // Safety: we had at least one port coming in, so we have at
             // least one going out.
             .expect("non-empty UplinkPorts downgrade produced empty ports"),
             bgp: new.bgp,
             bfd: new.bfd,
-        }
+        })
     }
 }
 
