@@ -110,7 +110,7 @@ slog-dtrace.workspace = true
 slog-error-chain.workspace = true
 slog-term.workspace = true
 smf.workspace = true
-sprockets-tls.workspace = true
+sprockets-tls = { workspace = true, features = ["ipcc"] }
 strum.workspace = true
 sush-api.workspace = true
 sush-common.workspace = true
