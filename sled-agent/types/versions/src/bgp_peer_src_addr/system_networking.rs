@@ -29,19 +29,15 @@ impl SystemNetworkingConfig {
     pub const SCHEMA_VERSION: u32 = 8;
 }
 
-impl TryFrom<v42::system_networking::SystemNetworkingConfig>
+impl From<v42::system_networking::SystemNetworkingConfig>
     for SystemNetworkingConfig
 {
-    type Error = anyhow::Error;
-
-    fn try_from(
-        value: v42::system_networking::SystemNetworkingConfig,
-    ) -> Result<Self, Self::Error> {
-        Ok(Self {
-            rack_network_config: value.rack_network_config.try_into()?,
+    fn from(value: v42::system_networking::SystemNetworkingConfig) -> Self {
+        Self {
+            rack_network_config: value.rack_network_config.into(),
             blueprint_external_networking_config: value
                 .blueprint_external_networking_config,
-        })
+        }
     }
 }
 
