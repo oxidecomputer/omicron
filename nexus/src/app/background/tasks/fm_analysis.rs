@@ -7,16 +7,22 @@ use crate::app::background::BackgroundTask;
 use crate::app::background::tasks::fm_sitrep_load::CurrentSitrep;
 use anyhow::Context;
 use chrono::Utc;
+use fm::analysis_input::Input;
 use fm::analysis_input::InvalidInputs;
+use fm::analysis_reports::InputReport;
 use futures::future::BoxFuture;
 use iddqd::IdOrdMap;
 use nexus_db_model::PhysicalDiskPolicy;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db;
 use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::datastore;
 use nexus_db_queries::db::identity::Asset;
 use nexus_db_queries::db::pagination::Paginator;
 use nexus_fm as fm;
+use nexus_types::fm::FmConfig;
+use nexus_types::fm::FmConfigSource;
+use nexus_types::fm::FmConfigView;
 use nexus_types::in_service_disk::InServiceDisk;
 use nexus_types::internal_api::background::FmAnalysisStatus;
 use nexus_types::internal_api::background::fm_analysis as status;
@@ -35,9 +41,9 @@ pub struct FmAnalysis {
     datastore: Arc<DataStore>,
     sitrep_rx: watch::Receiver<Option<CurrentSitrep>>,
     inv_rx: watch::Receiver<Option<Arc<inventory::Collection>>>,
+    cfg_rx: watch::Receiver<Option<FmConfigView>>,
     activators: Activators,
     nexus_id: OmicronZoneUuid,
-    analysis_enabled: bool,
 }
 
 /// This is just because I don't like it when a constructor takes multiple
@@ -47,6 +53,27 @@ pub struct Activators {
     pub inventory_loader: Activator,
     pub sitrep_loader: Activator,
     pub sitrep_gc: Activator,
+    pub sitrep_history_pruner: Activator,
+}
+
+impl Activators {
+    /// Activate the sitrep history pruning and orphan sitrep GC background
+    /// tasks to try and free up some capacity for new sitreps in the database.
+    ///
+    /// The `fm_sitrep_gc` task deletes orphaned sitreps (i.e., those which are
+    /// not in the `fm_sitrep_history`) table. Meanwhile, the
+    /// `fm_sitrep_history_pruner` task deletes old sitrep versions from the end
+    /// of the `fm_sitrep_history` table, leaving those sitreps as orphans that
+    /// can be cleaned up by the garbage collection task. When we wish to
+    /// reclaim capacity for new sitreps, we activate *both* tasks: a GC pass is
+    /// necessary to delete orphaned sitreps that may have been left behind when
+    /// an analysis task lost a race to insert a new sitrep, while the history
+    /// pruning pass is necessary to free up capacity used by sitrep versions
+    /// that *are* part of the history.
+    fn reclaim_capacity(&self) {
+        self.sitrep_history_pruner.activate();
+        self.sitrep_gc.activate();
+    }
 }
 
 impl BackgroundTask for FmAnalysis {
@@ -55,26 +82,7 @@ impl BackgroundTask for FmAnalysis {
         opctx: &'a OpContext,
     ) -> BoxFuture<'a, serde_json::Value> {
         Box::pin(async {
-            let status = if self.analysis_enabled {
-                self.actually_activate(opctx).await
-            } else {
-                slog::info!(
-                    opctx.log,
-                    "fault management analysis explicitly disabled by config",
-                );
-                let known_classes: Vec<String> =
-                    fm::diagnosis::known_ereport_classes()
-                        .iter()
-                        .map(|s| (*s).to_string())
-                        .collect();
-                FmAnalysisStatus {
-                    parent_sitrep_id: None,
-                    inv_collection_id: None,
-                    known_classes,
-                    outcome: status::Outcome::Disabled,
-                    warnings: Vec::new(),
-                }
-            };
+            let status = self.actually_activate(opctx).await;
             match serde_json::to_value(status) {
                 Ok(val) => val,
                 Err(err) => {
@@ -94,18 +102,11 @@ impl FmAnalysis {
         datastore: Arc<DataStore>,
         sitrep_rx: watch::Receiver<Option<CurrentSitrep>>,
         inv_rx: watch::Receiver<Option<Arc<inventory::Collection>>>,
+        cfg_rx: watch::Receiver<Option<FmConfigView>>,
         activators: Activators,
         nexus_id: OmicronZoneUuid,
-        analysis_enabled: bool,
     ) -> Self {
-        Self {
-            datastore,
-            sitrep_rx,
-            inv_rx,
-            activators,
-            nexus_id,
-            analysis_enabled,
-        }
+        Self { datastore, sitrep_rx, inv_rx, cfg_rx, activators, nexus_id }
     }
 
     async fn actually_activate(
@@ -128,6 +129,66 @@ impl FmAnalysis {
 
         let parent_sitrep = self.sitrep_rx.borrow_and_update().clone();
         let parent_sitrep_id = parent_sitrep.as_ref().map(|s| s.1.id());
+
+        let cfg = {
+            let cfg_view = self.cfg_rx.borrow_and_update();
+            let Some(cfg_view) = cfg_view.as_ref() else {
+                // We can't proceed with analysis until the config has been
+                // loaded, since otherwise, we won't know if we're at the sitrep
+                // limit (or if we've been totally disabled)
+                slog::info!(
+                    opctx.log,
+                    "fault management analysis waiting for the FM config to be \
+                     loaded"
+                );
+                return FmAnalysisStatus {
+                    parent_sitrep_id,
+                    inv_collection_id: None,
+                    known_classes,
+                    outcome: status::Outcome::WaitingForConfig,
+                    warnings,
+                };
+            };
+
+            // Check if the current config has disabled analysis. We do this
+            // inside the borrow of the current config view because we would
+            // like to be able to log the details of the config override that
+            // has turned us off...
+            if !cfg_view.config.analysis_enabled.value() {
+                match cfg_view.source {
+                    FmConfigSource::Default => {
+                        slog::error!(
+                            opctx.log,
+                            "this is weird! the default FM config is not \
+                             supposed to disable the analysis task!",
+                        );
+                    }
+                    FmConfigSource::Override {
+                        version,
+                        ref comment,
+                        time_modified,
+                    } => {
+                        slog::info!(
+                            opctx.log,
+                            "fault management analysis disabled by FM config \
+                             override v{version}";
+                            "config_version" => version.get(),
+                            "comment" => comment,
+                            "time_modified" => %time_modified,
+                        );
+                    }
+                };
+                return FmAnalysisStatus {
+                    parent_sitrep_id,
+                    inv_collection_id: None,
+                    known_classes,
+                    outcome: status::Outcome::Disabled(cfg_view.source.clone()),
+                    warnings,
+                };
+            }
+            cfg_view.config
+        };
+
         let Some(inv) = self.inv_rx.borrow_and_update().clone() else {
             slog::debug!(
                 opctx.log,
@@ -158,7 +219,7 @@ impl FmAnalysis {
         );
 
         // Prepare analysis inputs.
-        let (inputs, prep_status) = match self
+        let (inputs, prep_status, input_report) = match self
             .prepare_inputs(&opctx, parent_sitrep, inv)
             .await
         {
@@ -212,7 +273,7 @@ impl FmAnalysis {
 
         // Okay, actually run analysis and generate a new sitrep.
         let outcome = self
-            .analyze(&opctx, inputs, &prep_status.report, &mut warnings)
+            .analyze(&opctx, inputs, &input_report, &cfg, &mut warnings)
             .await;
 
         FmAnalysisStatus {
@@ -232,10 +293,8 @@ impl FmAnalysis {
         opctx: &OpContext,
         parent_sitrep: Option<CurrentSitrep>,
         inv: Arc<inventory::Collection>,
-    ) -> Result<
-        (fm::analysis_input::Input, status::PreparationStatus),
-        PreparationError,
-    > {
+    ) -> Result<(Input, status::PreparationStatus, InputReport), PreparationError>
+    {
         let mut warnings = Vec::new();
 
         let in_service_disks =
@@ -268,7 +327,7 @@ impl FmAnalysis {
         .context("failed to load existing support bundle markers")?;
 
         let (input, report) = builder.build();
-        Ok((input, status::PreparationStatus { warnings, report }))
+        Ok((input, status::PreparationStatus { warnings }, report))
     }
 
     /// Load all in-service control plane disks, projected down to FM's
@@ -486,8 +545,9 @@ impl FmAnalysis {
     async fn analyze(
         &mut self,
         opctx: &OpContext,
-        inputs: fm::analysis_input::Input,
-        input_report: &nexus_types::fm::analysis_reports::InputReport,
+        inputs: Input,
+        input_report: &InputReport,
+        cfg: &FmConfig,
         warnings: &mut Vec<String>,
     ) -> status::AnalysisStatus {
         let start_time = Utc::now();
@@ -507,11 +567,12 @@ impl FmAnalysis {
             return status::AnalysisStatus {
                 start_time,
                 end_time,
-                report,
+                capacity: None,
                 outcome: status::AnalysisOutcome::Error(e.to_string()),
             };
         }
 
+        // Is the new sitrep identical to the parent sitrep? If so, we're done.
         if let Some(parent) = inputs.parent_sitrep() {
             if parent.compare_state() == sitrep {
                 slog::info!(
@@ -522,11 +583,41 @@ impl FmAnalysis {
                 return status::AnalysisStatus {
                     start_time,
                     end_time,
-                    report,
+                    capacity: None,
                     outcome: status::AnalysisOutcome::Unchanged,
                 };
             }
         }
+
+        // Before writing the new sitrep to the database, check whether there is
+        // capacity to write a new sitrep.
+        //
+        // Readers who have read the similar-looking code in the
+        // `blueprint_planner` background task may note that we are doing the
+        // check for whether the sitrep has changed and the check for whether
+        // the limit is reached in the opposite order as the Reconfigurator.
+        // That is by design. In the Reconfigurator case, there isn't an
+        // automated process that's automatically deleting old blueprints, so
+        // hitting the limit is a condition that requires manual human
+        // intervention. Therefore, it's important for them to be able to warn
+        // about it as soon as it's hit. For us, it's much less important to
+        // surface, and if we've hit the limit, we will probably go back down
+        // below it soon when history pruning frees up capacity. Therefore,
+        // there's no sense doing the fairly expensive scan to check if the
+        // limit has been hit when we're not actually planning on committing the
+        // new sitrep anyway.
+        let capacity =
+            match self.check_sitrep_limit(&opctx, cfg, warnings).await {
+                Ok(capacity) => Some(capacity),
+                Err(outcome) => {
+                    return status::AnalysisStatus {
+                        start_time,
+                        end_time,
+                        capacity: None,
+                        outcome,
+                    };
+                }
+            };
 
         let sitrep_id = sitrep.id();
 
@@ -567,7 +658,7 @@ impl FmAnalysis {
                 status::AnalysisStatus {
                     start_time,
                     end_time,
-                    report,
+                    capacity,
                     outcome: status::AnalysisOutcome::Committed { sitrep_id },
                 }
             }
@@ -585,7 +676,7 @@ impl FmAnalysis {
                 status::AnalysisStatus {
                     start_time,
                     end_time,
-                    report,
+                    capacity,
                     outcome: status::AnalysisOutcome::NotCommitted {
                         sitrep_id,
                     },
@@ -601,7 +692,7 @@ impl FmAnalysis {
                 status::AnalysisStatus {
                     start_time,
                     end_time,
-                    report,
+                    capacity,
                     outcome: status::AnalysisOutcome::CommitFailed {
                         sitrep_id,
                         error: e.to_string(),
@@ -609,6 +700,87 @@ impl FmAnalysis {
                 }
             }
         }
+    }
+
+    async fn check_sitrep_limit(
+        &self,
+        opctx: &OpContext,
+        cfg: &FmConfig,
+        warnings: &mut Vec<String>,
+    ) -> Result<status::SitrepCapacity, status::AnalysisOutcome> {
+        let limit = cfg.sitrep_limit.value();
+        let count = match self
+            .datastore
+            .fm_sitrep_check_limit_reached(&opctx, u64::from(limit.get()))
+            .await
+        {
+            Ok(db::IsLimitReached::Yes) => {
+                error!(
+                    &opctx.log,
+                    "sitrep capacity is at or above the limit, a new sitrep \
+                     will not be written";
+                     "limit" => limit.get(),
+                );
+                self.activators.reclaim_capacity();
+                return Err(status::AnalysisOutcome::LimitReached { limit });
+            }
+            Ok(db::IsLimitReached::No { count }) => count,
+            Err(error) => {
+                const MSG: &str = "failed to check sitrep limit";
+                let error = InlineErrorChain::new(&error);
+                error!(&opctx.log, "{MSG}"; &error);
+                return Err(status::AnalysisOutcome::Error(format!(
+                    "{MSG}: {error}"
+                )));
+            }
+        };
+
+        let capacity = status::SitrepCapacity { count, limit };
+        let usage_percent = capacity.usage_percent();
+        match usage_percent {
+            0..80 => {
+                debug!(
+                    &opctx.log,
+                    "sitrep count under limit, proceeding with analysis";
+                    "limit" => limit.get(),
+                    "count" => count,
+                    "usage_percent" => usage_percent,
+                );
+            }
+            // With the default history limit and max sitrep limit, we start
+            // pruning the history table at 80% of history, so this is just
+            // operational, not a warning.
+            80..95 => {
+                info!(
+                    &opctx.log,
+                    "sitrep count above 80% of limit, proceeding with analysis \
+                     and activating GC (will stop analysis if limit is reached)";
+                    "limit" => limit.get(),
+                    "count" => count,
+                    "usage_percent" => usage_percent,
+                );
+                self.activators.reclaim_capacity();
+            }
+            // At 95% of the limit, this is where I might start to worry that
+            // the GC tasks isn't running or something!
+            95.. => {
+                warn!(
+                    &opctx.log,
+                    "sitrep count above 95% of limit, proceeding with analysis \
+                     and activating GC (will stop analysis if limit is reached)";
+                    "limit" => limit.get(),
+                    "count" => count,
+                    "usage_percent" => usage_percent,
+                );
+                warnings.push(format!(
+                    "sitrep count ({count}) at {usage_percent}% of limit \
+                     ({limit})",
+                ));
+                self.activators.reclaim_capacity();
+            }
+        }
+
+        Ok(capacity)
     }
 }
 
@@ -624,10 +796,12 @@ enum PreparationError {
 mod tests {
     use super::*;
     use nexus_db_queries::db::pub_test_utils::TestDatabase;
+    use nexus_db_queries::db::pub_test_utils::fm::SitrepModel;
     use nexus_inventory::CollectionBuilder;
     use nexus_types::alert::AlertClass;
     use nexus_types::fm::Case;
     use nexus_types::fm::DiagnosisEngineKind;
+    use nexus_types::fm::Setting;
     use nexus_types::fm::Sitrep;
     use nexus_types::fm::SitrepMetadata;
     use nexus_types::fm::SitrepVersion;
@@ -637,18 +811,49 @@ mod tests {
     use omicron_uuid_kinds::CaseUuid;
     use omicron_uuid_kinds::SitrepUuid;
     use std::collections::BTreeSet;
+    use std::num::NonZeroU32;
 
-    const ANALYSIS_ENABLED: bool = true;
+    /// Returns an FM config view with the given sitrep limit and history
+    /// pruning threshold.
+    ///
+    /// The config is constructed directly rather than validated through
+    /// `FmConfigParam`, so tests may use limits smaller than
+    /// `FmConfig::MIN_SITREP_LIMIT`.
+    fn test_config(
+        sitrep_limit: NonZeroU32,
+        history_pruning_threshold: NonZeroU32,
+    ) -> FmConfigView {
+        assert!(
+            history_pruning_threshold < sitrep_limit,
+            "test configs must uphold the threshold < limit invariant"
+        );
+        let config = nexus_types::fm::FmConfig {
+            analysis_enabled: Setting::new(true),
+            sitrep_limit: Setting::new(sitrep_limit),
+            history_pruning_threshold: Setting::new(history_pruning_threshold),
+        };
+        FmConfigView { config, source: Default::default() }
+    }
+
+    /// Returns a config watch receiver carrying the given config, as though
+    /// the config loader task had published it.
+    fn config_rx(view: FmConfigView) -> watch::Receiver<Option<FmConfigView>> {
+        // The sender is dropped here; watch receivers continue to yield the
+        // last-sent value after the channel closes.
+        watch::channel(Some(view)).1
+    }
 
     fn activators() -> Activators {
         let a = Activators {
             inventory_loader: Activator::new(),
             sitrep_loader: Activator::new(),
             sitrep_gc: Activator::new(),
+            sitrep_history_pruner: Activator::new(),
         };
         a.inventory_loader.mark_wired_up().unwrap();
         a.sitrep_loader.mark_wired_up().unwrap();
         a.sitrep_gc.mark_wired_up().unwrap();
+        a.sitrep_history_pruner.mark_wired_up().unwrap();
         a
     }
 
@@ -723,9 +928,9 @@ mod tests {
                 datastore.clone(),
                 sitrep_rx,
                 inv_rx,
+                config_rx(Default::default()),
                 activators(),
                 OmicronZoneUuid::new_v4(),
-                ANALYSIS_ENABLED,
             );
 
             let result = task.actually_activate(opctx).await;
@@ -756,9 +961,9 @@ mod tests {
                 datastore.clone(),
                 sitrep_rx,
                 inv_rx,
+                config_rx(Default::default()),
                 activators(),
                 OmicronZoneUuid::new_v4(),
-                ANALYSIS_ENABLED,
             );
 
             let result = task.actually_activate(opctx).await;
@@ -782,9 +987,9 @@ mod tests {
                 datastore.clone(),
                 sitrep_rx,
                 inv_rx,
+                config_rx(Default::default()),
                 activators(),
                 OmicronZoneUuid::new_v4(),
-                ANALYSIS_ENABLED,
             );
 
             let result = task.actually_activate(opctx).await;
@@ -812,9 +1017,9 @@ mod tests {
                 datastore.clone(),
                 sitrep_rx,
                 inv_rx,
+                config_rx(Default::default()),
                 activators(),
                 OmicronZoneUuid::new_v4(),
-                ANALYSIS_ENABLED,
             );
 
             let result = task.actually_activate(opctx).await;
@@ -842,9 +1047,9 @@ mod tests {
                 datastore.clone(),
                 sitrep_rx,
                 inv_rx,
+                config_rx(Default::default()),
                 activators(),
                 OmicronZoneUuid::new_v4(),
-                ANALYSIS_ENABLED,
             );
 
             let result = task.actually_activate(opctx).await;
@@ -1000,12 +1205,12 @@ mod tests {
             datastore.clone(),
             sitrep_rx,
             inv_rx,
+            config_rx(Default::default()),
             activators(),
             OmicronZoneUuid::new_v4(),
-            ANALYSIS_ENABLED,
         );
 
-        let (input, prep) = task
+        let (input, prep, report) = task
             .prepare_inputs(opctx, Some(parent), inv)
             .await
             .expect("input preparation should succeed");
@@ -1019,24 +1224,22 @@ mod tests {
         assert!(input.open_cases().contains_key(&open_case_id));
         assert_eq!(input.open_cases().len(), 1);
         assert_eq!(
-            prep.report.open_cases.keys().collect::<Vec<_>>(),
+            report.open_cases.keys().collect::<Vec<_>>(),
             vec![&open_case_id]
         );
 
         // The closed case whose only alert request has a marker is dropped
         // from the carry-forward set entirely...
         assert!(
-            !prep
-                .report
+            !report
                 .closed_cases_copied_forward
                 .contains_key(&satisfied_case_id),
             "satisfied closed case should be dropped, got: {:?}",
-            prep.report.closed_cases_copied_forward,
+            report.closed_cases_copied_forward,
         );
         // ...while the closed case with an unsatisfied alert request is
         // copied forward, with that request reported as outstanding.
-        let carried = prep
-            .report
+        let carried = report
             .closed_cases_copied_forward
             .get(&unsatisfied_case_id)
             .expect("unsatisfied closed case must be copied forward");
@@ -1045,7 +1248,258 @@ mod tests {
             BTreeSet::from([unsatisfied_alert_id])
         );
         assert!(carried.unmarked_ereports.is_empty());
-        assert_eq!(prep.report.closed_cases_copied_forward.len(), 1);
+        assert_eq!(report.closed_cases_copied_forward.len(), 1);
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    /// Exercises `check_sitrep_limit` at each capacity tier:
+    ///
+    /// - below 80% of the limit, the capacity is reported and nothing else
+    ///   happens;
+    /// - at or above 80% (but below 95%), the reclamation tasks are poked to
+    ///   free up space, but no warning is recorded: steady-state pruning
+    ///   keeps the history at 80% of the sitrep limit, so this is normal
+    ///   operation;
+    /// - at or above 95%, the reclamation tasks are poked *and* a warning is
+    ///   recorded, as this suggests reclamation isn't keeping up;
+    /// - at the limit, the check fails with `LimitReached` and the
+    ///   reclamation tasks are poked.
+    #[tokio::test]
+    async fn test_check_sitrep_limit() {
+        let logctx = dev::test_setup_log("test_check_sitrep_limit");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        const LIMIT: NonZeroU32 = NonZeroU32::new(20).unwrap();
+        // The history pruning threshold doesn't participate in the capacity
+        // check; any valid value will do here.
+        let cfg = test_config(LIMIT, NonZeroU32::new(16).unwrap());
+        let (_sitrep_tx, sitrep_rx) = watch::channel(None);
+        let (_inv_tx, inv_rx) = watch::channel(None);
+        let acts = activators();
+        let task = FmAnalysis::new(
+            datastore.clone(),
+            sitrep_rx,
+            inv_rx,
+            config_rx(cfg.clone()),
+            acts.clone(),
+            OmicronZoneUuid::new_v4(),
+        );
+
+        let mut model = SitrepModel::new(datastore.clone());
+
+        // 10 sitreps: 50% of the limit. No warning, no GC activation.
+        model.insert_history(opctx, 10).await;
+        let mut warnings = Vec::new();
+        let result =
+            task.check_sitrep_limit(opctx, &cfg.config, &mut warnings).await;
+        assert_eq!(
+            result,
+            Ok(status::SitrepCapacity {
+                count: model.sitrep_count(),
+                limit: LIMIT
+            })
+        );
+        assert_eq!(warnings, Vec::<String>::new());
+        acts.sitrep_gc.assert_not_activated(
+            "GC should not be activated at 50% of the sitrep limit",
+        );
+        acts.sitrep_history_pruner.assert_not_activated(
+            "history pruning should not be activated at 50% of the sitrep \
+             limit",
+        );
+
+        // 15 sitreps: 75% of the limit, just below the GC-activation tier.
+        // Still no warning and no GC activation.
+        model.insert_history(opctx, 5).await;
+        let mut warnings = Vec::new();
+        let result =
+            task.check_sitrep_limit(opctx, &cfg.config, &mut warnings).await;
+        assert_eq!(
+            result,
+            Ok(status::SitrepCapacity {
+                count: model.sitrep_count(),
+                limit: LIMIT
+            })
+        );
+        assert_eq!(warnings, Vec::<String>::new());
+        acts.sitrep_gc.assert_not_activated(
+            "GC should not be activated at 75% of the sitrep limit",
+        );
+        acts.sitrep_history_pruner.assert_not_activated(
+            "history pruning should not be activated at 75% of the sitrep \
+             limit",
+        );
+
+        // 16 sitreps: 80% of the limit. The GC task is activated to reclaim
+        // capacity. This is roughly the expected steady state of the system, if
+        // the analysis and GC tasks are running mostly in sync.
+        model.insert_history(opctx, 1).await;
+        let mut warnings = Vec::new();
+        let result =
+            task.check_sitrep_limit(opctx, &cfg.config, &mut warnings).await;
+        assert_eq!(
+            result,
+            Ok(status::SitrepCapacity {
+                count: model.sitrep_count(),
+                limit: LIMIT
+            })
+        );
+        acts.sitrep_gc.assert_activated(
+            "GC should be activated at 80% of the sitrep limit",
+        );
+        acts.sitrep_history_pruner.assert_activated(
+            "history pruning should be activated at 80% of the sitrep limit",
+        );
+
+        // 19 sitreps: 95% of the limit. Now the check records a warning, since
+        // GC doesn't seem to be keeping up with sitrep generation.
+        model.insert_history(opctx, 3).await;
+        let mut warnings = Vec::new();
+        let result =
+            task.check_sitrep_limit(opctx, &cfg.config, &mut warnings).await;
+        assert_eq!(
+            result,
+            Ok(status::SitrepCapacity {
+                count: model.sitrep_count(),
+                limit: LIMIT
+            })
+        );
+        assert_eq!(
+            warnings.len(),
+            1,
+            "expected a capacity warning at 95% of the limit, got: \
+             {warnings:?}"
+        );
+        acts.sitrep_gc.assert_activated(
+            "GC should be activated at 95% of the sitrep limit",
+        );
+        acts.sitrep_history_pruner.assert_activated(
+            "history pruning should be activated at 95% of the sitrep limit",
+        );
+
+        // 20 sitreps: at the limit. The check fails, and the GC task is
+        // activated. Note that the last sitrep is an orphan that was never made
+        // current. Orphans also count against the total number of sitreps in
+        // the database, until GC sweeps them up.
+        model.insert_orphan(opctx, None).await;
+        assert_eq!(model.sitrep_count(), u64::from(LIMIT.get()));
+        let mut warnings = Vec::new();
+        let result =
+            task.check_sitrep_limit(opctx, &cfg.config, &mut warnings).await;
+        assert_eq!(
+            result,
+            Err(status::AnalysisOutcome::LimitReached { limit: LIMIT })
+        );
+        assert_eq!(warnings, Vec::<String>::new());
+        acts.sitrep_gc.assert_activated(
+            "GC should be activated when the sitrep limit is reached",
+        );
+        acts.sitrep_history_pruner.assert_activated(
+            "history pruning should be activated when the sitrep limit is reached",
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    /// Exercises the sitrep limit end-to-end through `actually_activate`:
+    /// below the limit, analysis commits a new sitrep and reports the
+    /// capacity; once the `fm_sitrep` table is at the limit, analysis still
+    /// runs but refuses to write its sitrep, reporting `LimitReached` and
+    /// activating the GC task instead.
+    #[tokio::test]
+    async fn test_analysis_respects_sitrep_limit() {
+        let logctx = dev::test_setup_log("test_analysis_respects_sitrep_limit");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        const LIMIT: NonZeroU32 = NonZeroU32::new(4).unwrap();
+        let inv = Arc::new(CollectionBuilder::new("test").build());
+        let (_sitrep_tx, sitrep_rx) = watch::channel(None);
+        let (_inv_tx, inv_rx) = watch::channel(Some(inv.clone()));
+        let acts = activators();
+        let history_pruning_threshold =
+            NonZeroU32::new(LIMIT.get() - 1).unwrap();
+        let mut task = FmAnalysis::new(
+            datastore.clone(),
+            sitrep_rx,
+            inv_rx,
+            config_rx(test_config(LIMIT, history_pruning_threshold)),
+            acts.clone(),
+            OmicronZoneUuid::new_v4(),
+        );
+
+        let mut model = SitrepModel::new(datastore.clone());
+
+        // With an empty database, analysis should commit the first-ever
+        // sitrep, reporting a capacity of 0 out of `LIMIT`.
+        let result = task.actually_activate(opctx).await;
+        let sitrep_id = match result.outcome {
+            status::Outcome::RanAnalysis { analysis_status, .. } => {
+                assert_eq!(
+                    analysis_status.capacity,
+                    Some(status::SitrepCapacity { count: 0, limit: LIMIT })
+                );
+                match analysis_status.outcome {
+                    status::AnalysisOutcome::Committed { sitrep_id } => {
+                        sitrep_id
+                    }
+                    other => {
+                        panic!("expected the sitrep to be committed: {other:?}")
+                    }
+                }
+            }
+            other => panic!("expected analysis to run, got: {other:?}"),
+        };
+        acts.sitrep_gc.assert_not_activated(
+            "GC should not be activated below the sitrep limit",
+        );
+        acts.sitrep_history_pruner.assert_not_activated(
+            "history pruning should not be activated below the sitrep limit",
+        );
+        // Committing a sitrep pokes the loader; consume that activation so
+        // the assertion below observes only the second activation's behavior.
+        acts.sitrep_loader.assert_activated(
+            "the sitrep loader should be activated after a commit",
+        );
+        model.record_committed(sitrep_id);
+
+        // Fill the `fm_sitrep` table up to the limit: two more live sitreps,
+        // plus an orphan, which counts against the limit even though it was
+        // never made current.
+        model.insert_history(opctx, 2).await;
+        model.insert_orphan(opctx, None).await;
+        assert_eq!(model.sitrep_count(), u64::from(LIMIT.get()));
+
+        // Now analysis should run, but refuse to write its sitrep.
+        let result = task.actually_activate(opctx).await;
+        match result.outcome {
+            status::Outcome::RanAnalysis { analysis_status, .. } => {
+                assert_eq!(
+                    analysis_status.outcome,
+                    status::AnalysisOutcome::LimitReached { limit: LIMIT }
+                );
+                assert_eq!(analysis_status.capacity, None);
+            }
+            other => panic!("expected analysis to run, got: {other:?}"),
+        }
+        acts.sitrep_gc.assert_activated(
+            "GC should be activated when the sitrep limit is reached",
+        );
+        acts.sitrep_history_pruner.assert_activated(
+            "history pruning should be activated when the sitrep limit is reached",
+        );
+        acts.sitrep_loader.assert_not_activated(
+            "the sitrep loader should not be activated when no sitrep was \
+             committed",
+        );
+
+        // No new sitrep row should have been written, and the orphan should
+        // still be present --- the GC task was only poked, not run.
+        model.assert_matches(opctx).await;
 
         db.terminate().await;
         logctx.cleanup_successful();

@@ -15,7 +15,7 @@ use sled_agent_types::early_networking::{
     LldpPortConfig, MaxPathConfig, RouteConfig, RouterLifetimeConfig,
     TxEqConfig,
 };
-use sled_hardware_types::Baseboard;
+use sled_hardware_types::BaseboardId;
 
 use crate::{
     inventory::{MgsV1Inventory, SpIdentifier, SpInventory},
@@ -23,21 +23,21 @@ use crate::{
 };
 use wicketd_commission_types::rack_setup::{
     AllowedSourceIps, BgpAuthKeyId, IpRange, Ipv4Range, ManualPortConfig,
-    PutRssUserConfigInsensitive, UplinkAddress, UserSpecifiedBgpPeerConfig,
-    UserSpecifiedImportExportPolicy, UserSpecifiedPortConfig,
-    UserSpecifiedRackNetworkConfig, UserSpecifiedRouterPeerAddr,
-    UserSpecifiedUplinkAddressConfig,
+    PutRssUserConfigInsensitive, ServiceIpPoolConfig, UplinkAddress,
+    UserSpecifiedBgpPeerConfig, UserSpecifiedImportExportPolicy,
+    UserSpecifiedPortConfig, UserSpecifiedRackNetworkConfig,
+    UserSpecifiedRouterPeerAddr, UserSpecifiedUplinkAddressConfig,
 };
 
 /// A collection of example data structures.
 pub struct ExampleRackSetupData {
     /// The example baseboard where wicket/wicketd is presumed to be running.
-    pub our_baseboard: Option<Baseboard>,
+    pub our_baseboard_id: BaseboardId,
     pub put_insensitive: PutRssUserConfigInsensitive,
     pub current_insensitive: CurrentRssUserConfigInsensitive,
     pub bgp_auth_keys: Vec<BgpAuthKeyId>,
     pub inventory: MgsV1Inventory,
-    pub ddm_discovered_sleds: BTreeMap<Baseboard, Ipv6Addr>,
+    pub ddm_discovered_sleds: BTreeMap<BaseboardId, Ipv6Addr>,
 }
 
 impl ExampleRackSetupData {
@@ -63,10 +63,9 @@ impl ExampleRackSetupData {
 
         // our_baseboard matches the baseboard of the first sled in
         // bootstrap_sleds.
-        let our_baseboard = Baseboard::Gimlet {
-            model: "model1".into(),
-            revision: 3,
-            identifier: "serial 1 2 3".into(),
+        let our_baseboard = BaseboardId {
+            part_number: "model1".into(),
+            serial_number: "serial 1 2 3".into(),
         };
 
         let mut sp0 =
@@ -110,10 +109,9 @@ impl ExampleRackSetupData {
         let ddm_discovered_sleds: BTreeMap<_, _> = [
             (our_baseboard.clone(), Ipv6Addr::LOCALHOST),
             (
-                Baseboard::Gimlet {
-                    model: "model2".into(),
-                    revision: 5,
-                    identifier: "serial 4 5 6".into(),
+                BaseboardId {
+                    part_number: "model2".into(),
+                    serial_number: "serial 4 5 6".into(),
                 },
                 Ipv6Addr::LOCALHOST,
             ),
@@ -124,15 +122,14 @@ impl ExampleRackSetupData {
         let bootstrap_sleds = id_ord_map! {
             BootstrapSledDescription {
                 id: SpIdentifier { slot: 1, typ: SpType::Sled },
-                baseboard: our_baseboard.clone(),
+                baseboard_id: our_baseboard.clone(),
                 bootstrap_ip: Some(Ipv6Addr::LOCALHOST)
             },
             BootstrapSledDescription {
                 id: SpIdentifier { slot: 5, typ: SpType::Sled },
-                baseboard: Baseboard::Gimlet {
-                    model: "model2".into(),
-                    revision: 5,
-                    identifier: "serial 4 5 6".into(),
+                baseboard_id: BaseboardId {
+                    part_number: "model2".into(),
+                    serial_number: "serial 4 5 6".into(),
                 },
                 bootstrap_ip: None
             },
@@ -141,10 +138,17 @@ impl ExampleRackSetupData {
         let dns_servers =
             vec!["1.1.1.1".parse().unwrap(), "2.2.2.2".parse().unwrap()];
         let external_dns_zone_name = "oxide.computer".to_owned();
-        let internal_services_ip_pool_ranges = vec![IpRange::V4(Ipv4Range {
-            first: "10.0.0.1".parse().unwrap(),
-            last: "10.0.0.5".parse().unwrap(),
-        })];
+        let service_ip_pools = id_ord_map! {
+            ServiceIpPoolConfig::new(
+                "oxide-service-pool-v4".parse().unwrap(),
+                "IPv4 IP Pool for Oxide Services".to_string(),
+                vec![IpRange::V4(Ipv4Range {
+                    first: "10.0.0.1".parse().unwrap(),
+                    last: "10.0.0.5".parse().unwrap(),
+                })],
+            )
+            .unwrap(),
+        };
         let external_dns_ips = vec!["10.0.0.1".parse().unwrap()];
         let ntp_servers = vec!["ntp1.com".into(), "ntp2.com".into()];
 
@@ -317,7 +321,7 @@ impl ExampleRackSetupData {
             bootstrap_sleds,
             dns_servers,
             external_dns_zone_name,
-            internal_services_ip_pool_ranges,
+            service_ip_pools,
             external_dns_ips,
             ntp_servers,
             rack_network_config: Some(rack_network_config),
@@ -347,9 +351,7 @@ impl ExampleRackSetupData {
             external_dns_zone_name: current_insensitive
                 .external_dns_zone_name
                 .clone(),
-            internal_services_ip_pool_ranges: current_insensitive
-                .internal_services_ip_pool_ranges
-                .clone(),
+            service_ip_pools: current_insensitive.service_ip_pools.clone(),
             external_dns_ips: current_insensitive.external_dns_ips.clone(),
             ntp_servers: current_insensitive.ntp_servers.clone(),
             rack_network_config: current_insensitive
@@ -361,7 +363,7 @@ impl ExampleRackSetupData {
         };
 
         Self {
-            our_baseboard: Some(our_baseboard),
+            our_baseboard_id: our_baseboard,
             current_insensitive,
             put_insensitive,
             bgp_auth_keys: bgp_auth_keys.into_iter().collect(),

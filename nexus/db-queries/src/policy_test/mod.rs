@@ -345,7 +345,7 @@ async fn authorize_one_resource(
 
         for ctx_tuple in user_contexts.iter() {
             let (ref username, ref opctx) = **ctx_tuple;
-            write!(out, "  {:32}", &username)?;
+            write!(out, "  {:32}", username)?;
             for action in authz::Action::iter() {
                 let result = resource.do_authorize(opctx, action).await;
                 trace!(

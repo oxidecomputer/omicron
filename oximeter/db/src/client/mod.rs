@@ -1087,7 +1087,14 @@ impl Client {
 
         // Skip the timeseries schema table, which doesn't have a TTL, and
         // prepend the database name.
-        let mut tables = Vec::with_capacity(oximeter_tables.len() - 1);
+        //
+        // NOTE: `oximeter_tables` may legitimately be empty, e.g., if this
+        // is called before the oximeter database schema has been created.
+        // Use `saturating_sub()` so that case doesn't panic; it's only used
+        // to size the output `Vec`, so being off by one costs at most one
+        // extra (unused) allocation slot.
+        let mut tables =
+            Vec::with_capacity(oximeter_tables.len().saturating_sub(1));
         for table in
             oximeter_tables.into_iter().filter(|n| n != "timeseries_schema")
         {
@@ -2114,6 +2121,29 @@ mod tests {
             ClickHouseDeployment::new_single_node(&logctx).await.unwrap();
         let client = Client::new(db.native_address().into(), &logctx.log);
         client.ping().await.expect("Should be able to ping existing server");
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn set_retention_policy_before_db_init_does_not_panic() {
+        let logctx = test_setup_log(
+            "set_retention_policy_before_db_init_does_not_panic",
+        );
+        let mut db =
+            ClickHouseDeployment::new_single_node(&logctx).await.unwrap();
+        let client = Client::new(db.native_address().into(), &logctx.log);
+
+        // Deliberately do *not* call `init_db()` here. The oximeter
+        // database (and its tables) don't exist yet, so
+        // `list_retention_policy_tables()` will see zero tables. This
+        // should be handled gracefully as a no-op, not panic on an
+        // integer underflow while sizing its output `Vec`.
+        let policy = RetentionPolicyRequest { days: Days::new(30).unwrap() };
+        client.set_retention_policy(policy, false).await.expect(
+            "setting a retention policy with no tables present yet should succeed as a no-op",
+        );
+
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -5037,7 +5067,7 @@ mod tests {
                 WHERE timeseries_name = '{}'",
                 crate::DATABASE_NAME,
                 table,
-                &to_delete[0].to_string(),
+                to_delete[0],
             );
             let count = client
                 .execute_with_block(&mut handle, &sql)

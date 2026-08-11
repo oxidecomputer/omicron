@@ -9,10 +9,10 @@ use crate::context::CommonConfigContainer;
 use crate::context::RssOrMultirackJoinConfig;
 use crate::http_helpers::ba_lockstep_client;
 use crate::http_helpers::ba_lockstep_error_to_http;
-use crate::http_helpers::inventory_err_to_http;
 use crate::http_helpers::mgs_inventory_or_unavail;
 use crate::http_helpers::start_update;
 use crate::mgs::GetInventoryResponse as GetMgsInventoryResponse;
+use crate::mgs::records_to_mgs_inventory;
 use crate::multirack_config::CurrentMultirackJoinConfig;
 use crate::transceivers::GetTransceiversResponse;
 use bootstrap_agent_lockstep_client::ClientInfo as _;
@@ -27,9 +27,7 @@ use dropshot::StreamingBody;
 use dropshot::TypedBody;
 use internal_dns_resolver::Resolver;
 use omicron_uuid_kinds::RackInitUuid;
-use omicron_uuid_kinds::RackResetUuid;
 use sled_agent_types::early_networking::SwitchSlot;
-use sled_hardware_types::Baseboard;
 use slog::o;
 use std::sync::Arc;
 use wicket_common::inventory::MgsV1InventorySnapshot;
@@ -142,7 +140,7 @@ impl WicketdApi for WicketdApiImpl {
         rss_config
             .update(
                 body.into_inner(),
-                ctx.baseboard.as_ref(),
+                &ctx.baseboard_id,
                 &inventory,
                 &ddm_discovered_sleds,
                 &ctx.log,
@@ -171,7 +169,7 @@ impl WicketdApi for WicketdApiImpl {
             join_config
                 .update(
                     body.into_inner(),
-                    ctx.baseboard.as_ref(),
+                    &ctx.baseboard_id,
                     &inventory,
                     &ddm_discovered_sleds,
                     &ctx.log,
@@ -181,7 +179,7 @@ impl WicketdApi for WicketdApiImpl {
             // Overwrite any non-multirack-join config
             *config = RssOrMultirackJoinConfig::MultirackJoin(
                 CurrentMultirackJoinConfig::new_with_inventory_and_peers(
-                    ctx.baseboard.as_ref(),
+                    &ctx.baseboard_id,
                     body.into_inner(),
                     &inventory,
                     &ddm_discovered_sleds,
@@ -302,8 +300,7 @@ impl WicketdApi for WicketdApiImpl {
     ) -> Result<HttpResponseOk<RackOperationStatus>, HttpError> {
         let ctx = rqctx.context();
 
-        let client = ba_lockstep_client(ctx)?;
-
+        let client = ba_lockstep_client(ctx);
         let op_status = client
             .rack_initialization_status()
             .await
@@ -319,8 +316,7 @@ impl WicketdApi for WicketdApiImpl {
         let ctx = rqctx.context();
         let log = &rqctx.log;
 
-        let client = ba_lockstep_client(ctx)?;
-
+        let client = ba_lockstep_client(ctx);
         let request = {
             let mut config = ctx.rss_or_multirack_join_config.lock().unwrap();
 
@@ -348,28 +344,6 @@ impl WicketdApi for WicketdApiImpl {
         Ok(HttpResponseOk(init_id))
     }
 
-    async fn post_run_rack_reset(
-        rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<RackResetUuid>, HttpError> {
-        let ctx = rqctx.context();
-
-        let client = ba_lockstep_client(ctx)?;
-
-        slog::info!(
-            ctx.log,
-            "Sending RSS reset request to {}",
-            client.baseurl()
-        );
-
-        let reset_id = client
-            .rack_reset()
-            .await
-            .map_err(|err| ba_lockstep_error_to_http(err, "rack reset"))?
-            .into_inner();
-
-        Ok(HttpResponseOk(reset_id))
-    }
-
     async fn get_inventory(
         rqctx: RequestContext<Self::Context>,
         body_params: TypedBody<GetInventoryParams>,
@@ -383,23 +357,51 @@ impl WicketdApi for WicketdApiImpl {
             .get_inventory_refreshing_sps(force_refresh)
             .await
         {
-            Ok(GetMgsInventoryResponse::Response {
-                inventory,
+            Ok(GetMgsInventoryResponse {
+                sps,
                 mgs_last_seen,
-            }) => Some((inventory, mgs_last_seen)),
-            Ok(GetMgsInventoryResponse::Unavailable) => None,
+                // The (currently frozen) wicketd API surfaces only the lossy
+                // `MgsV1Inventory` projection of the per-SP records.
+                //
+                // TODO: surface the richer per-SP records and fetch errors once
+                // rkdeploy is on the stable commissioning API.
+                last_ignition_fetch_error: _,
+            }) => records_to_mgs_inventory(&sps)
+                .map(|inventory| (inventory, mgs_last_seen)),
             Err(err) => {
-                return Err(inventory_err_to_http(err));
+                return Err(err.to_http_error());
             }
         };
 
         // Fetch the transceiver information from the SP.
         let maybe_transceiver_inventory =
             match rqctx.context().transceiver_handle.get_transceivers() {
-                GetTransceiversResponse::Response {
-                    transceivers,
-                    transceivers_last_seen,
-                } => Some((transceivers, transceivers_last_seen)),
+                GetTransceiversResponse::Response { transceivers } => {
+                    // transceivers tracks the last_seen for each switch
+                    // independently. But the (currently frozen) wicketd API
+                    // wire shape only has a single last_seen field. So we must
+                    // pick: min or max? We choose max here, so that if one of
+                    // the fetch tasks is wedged, the timestamp indicates that.
+                    //
+                    // TODO: clean this up (report per-switch last_seen) once
+                    // rkdeploy is on the stable commissioning API.
+                    let last_seen = transceivers
+                        .iter()
+                        .map(|switch| switch.updated_at.elapsed())
+                        .max();
+                    last_seen.map(|last_seen| {
+                        // The (currently frozen) wicketd API is a HashMap, so
+                        // collect into that.
+                        //
+                        // TODO: switch to IdOrdMap once rkdeploy is on the
+                        // stable commissioning API.
+                        let inventory = transceivers
+                            .into_iter()
+                            .map(|switch| (switch.switch, switch.transceivers))
+                            .collect();
+                        (inventory, last_seen)
+                    })
+                }
                 GetTransceiversResponse::Unavailable => None,
             };
 
@@ -449,55 +451,7 @@ impl WicketdApi for WicketdApiImpl {
     ) -> Result<HttpResponseOk<GetBaseboardResponse>, HttpError> {
         let rqctx = rqctx.context();
         Ok(HttpResponseOk(GetBaseboardResponse {
-            baseboard: rqctx.baseboard.clone(),
-        }))
-    }
-
-    async fn get_location(
-        rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<GetLocationResponse>, HttpError> {
-        let rqctx = rqctx.context();
-        let inventory = mgs_inventory_or_unavail(&rqctx.mgs_handle).await?;
-
-        // We don't error out in get_location on the local switch ID not being
-        // available, so discard the error here (it's already logged in
-        // local_switch_id).
-        let switch_id = rqctx.local_switch_id().await.ok();
-        let sled_baseboard = rqctx.baseboard.clone();
-
-        let mut switch_baseboard = None;
-        let mut sled_id = None;
-
-        // Safety: `inventory_or_unavail` returns an error if there is no
-        // MGS-derived inventory, so option is always `Some(_)`.
-        for sp in &inventory.sps {
-            if Some(sp.id) == switch_id {
-                switch_baseboard = sp.state.as_ref().map(|state| {
-                    // TODO-correctness `new_gimlet` isn't the right name: this is a
-                    // sidecar baseboard.
-                    Baseboard::new_gimlet(
-                        state.serial_number.clone(),
-                        state.model.clone(),
-                        state.revision,
-                    )
-                });
-            } else if let (Some(sled_baseboard), Some(state)) =
-                (sled_baseboard.as_ref(), sp.state.as_ref())
-            {
-                if sled_baseboard.identifier() == state.serial_number
-                    && sled_baseboard.model() == state.model
-                    && sled_baseboard.revision() == state.revision
-                {
-                    sled_id = Some(sp.id);
-                }
-            }
-        }
-
-        Ok(HttpResponseOk(GetLocationResponse {
-            sled_id,
-            sled_baseboard,
-            switch_baseboard,
-            switch_id,
+            baseboard: rqctx.baseboard_id.clone(),
         }))
     }
 
@@ -695,6 +649,13 @@ impl WicketdApi for WicketdApiImpl {
             return Err(HttpError::for_bad_request(
                 None,
                 "listening address cannot be reconfigured".to_string(),
+            ));
+        }
+        if rqctx.commission_bind_address != smf_values.commission_address {
+            return Err(HttpError::for_bad_request(
+                None,
+                "commission listening address cannot be reconfigured"
+                    .to_string(),
             ));
         }
 

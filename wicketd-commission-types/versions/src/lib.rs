@@ -30,3 +30,5 @@ mod impls;
 pub mod latest;
 #[path = "initial/mod.rs"]
 pub mod v1;
+#[path = "full_service_ip_pool_details/mod.rs"]
+pub mod v2;

@@ -10,27 +10,28 @@ use serde::Deserialize;
 use serde::Serialize;
 use sha2::Digest;
 use sha2::Sha256;
-use sled_hardware_types::Baseboard;
+use sled_hardware_types::BaseboardId;
 use std::collections::BTreeMap;
 use std::fmt;
 use std::net::IpAddr;
 use std::net::Ipv6Addr;
 use tufaceous_artifact::ArtifactHash;
 use wicketd_commission_types::rack_setup::AllowedSourceIps;
+use wicketd_commission_types::rack_setup::BgpAuthKey;
 use wicketd_commission_types::rack_setup::BgpAuthKeyId;
-use wicketd_commission_types::rack_setup::IpRange;
+use wicketd_commission_types::rack_setup::ServiceIpPoolConfig;
 use wicketd_commission_types::rack_setup::UserSpecifiedRackNetworkConfig;
 
 use crate::inventory::SpIdentifier;
 
 /// The subset of `RackInitializeRequest` that the user fills in as clear text
 /// (e.g., via an uploaded config file).
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
 pub struct CurrentRssUserConfigInsensitive {
     pub bootstrap_sleds: IdOrdMap<BootstrapSledDescription>,
     pub ntp_servers: Vec<String>,
     pub dns_servers: Vec<IpAddr>,
-    pub internal_services_ip_pool_ranges: Vec<IpRange>,
+    pub service_ip_pools: IdOrdMap<ServiceIpPoolConfig>,
     pub external_dns_ips: Vec<IpAddr>,
     pub external_dns_zone_name: String,
     pub rack_network_config: Option<UserSpecifiedRackNetworkConfig>,
@@ -44,7 +45,7 @@ pub struct CurrentRssUserConfigInsensitive {
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 pub struct BootstrapSledDescription {
     pub id: SpIdentifier,
-    pub baseboard: Baseboard,
+    pub baseboard_id: BaseboardId,
     /// The sled's bootstrap address, if the host is on and we've discovered it
     /// on the bootstrap network.
     pub bootstrap_ip: Option<Ipv6Addr>,
@@ -79,43 +80,6 @@ impl<T: fmt::Display> fmt::Display for DisplaySlice<'_, T> {
     }
 }
 
-/// Describes the actual authentication key to use with a BGP peer.
-///
-/// Currently, only TCP-MD5 authentication is supported.
-#[derive(Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum BgpAuthKey {
-    /// TCP-MD5 authentication.
-    TcpMd5 {
-        /// The pre-shared key.
-        key: String,
-    },
-}
-
-impl BgpAuthKey {
-    /// Returns information about the key that is safe to display in the UI.
-    pub fn info(&self) -> BgpAuthKeyInfo {
-        match self {
-            BgpAuthKey::TcpMd5 { key } => {
-                let sha256 =
-                    ArtifactHash(Sha256::digest(key.as_bytes()).into());
-                BgpAuthKeyInfo::TcpMd5 { sha256 }
-            }
-        }
-    }
-}
-
-// Ensure that the key is not displayed in debug output.
-impl fmt::Debug for BgpAuthKey {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            BgpAuthKey::TcpMd5 { key: _ } => {
-                f.debug_struct("TcpMd5").field("key", &"********").finish()
-            }
-        }
-    }
-}
-
 /// Describes insensitive information about a BGP authentication key.
 ///
 /// This information is considered okay to display in the UI.
@@ -142,6 +106,17 @@ pub enum BgpAuthKeyInfo {
 }
 
 impl BgpAuthKeyInfo {
+    /// Returns information about a key that is safe to display in the UI.
+    pub fn for_key(key: &BgpAuthKey) -> Self {
+        match key {
+            BgpAuthKey::TcpMd5 { key } => {
+                let sha256 =
+                    ArtifactHash(Sha256::digest(key.as_bytes()).into());
+                BgpAuthKeyInfo::TcpMd5 { sha256 }
+            }
+        }
+    }
+
     pub fn to_string_styled(&self, label_style: Style) -> String {
         match self {
             BgpAuthKeyInfo::TcpMd5 { sha256 } => {

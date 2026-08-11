@@ -12,6 +12,7 @@ use crate::nexus::{ConvertInto, NexusClient};
 use crate::sim::SimulatedUpstairs;
 use anyhow::{Context, anyhow, bail};
 use bootstrap_agent_lockstep_types::RecoverySiloConfig;
+use bootstrap_agent_lockstep_types::ServiceIpPoolConfig;
 use crucible_agent_client::types::State as RegionState;
 use iddqd::IdOrdMap;
 use illumos_utils::zpool::ZpoolName;
@@ -21,8 +22,8 @@ use internal_dns_types::names::ServiceName;
 use nexus_client::types as NexusTypes;
 use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
 use nexus_lockstep_client::types::{
-    AllowedSourceIps, CrucibleDatasetCreateRequest, IpRange, Ipv4Range,
-    Ipv6Range, RackInitializationRequest, RackNetworkConfig,
+    AllowedSourceIps, CrucibleDatasetCreateRequest, RackInitializationRequest,
+    RackNetworkConfig,
 };
 use nexus_types::deployment::{
     BlueprintPhysicalDiskConfig, BlueprintPhysicalDiskDisposition,
@@ -32,6 +33,9 @@ use nexus_types::deployment::{
     BlueprintZoneConfig, BlueprintZoneDisposition, BlueprintZoneType,
 };
 use omicron_common::FileKv;
+use omicron_common::address::IpRange;
+use omicron_common::address::Ipv4Range;
+use omicron_common::address::Ipv6Range;
 use omicron_common::address::NEXUS_OPTE_IPV4_SUBNET;
 use omicron_common::address::{DNS_OPTE_IPV4_SUBNET, Ipv6Subnet};
 use omicron_common::api::external::Generation;
@@ -69,6 +73,11 @@ use std::net::SocketAddrV6;
 use std::sync::Arc;
 use transient_dns_server::TransientDnsServer;
 use uuid::Uuid;
+
+// Well-known service IP pool names the simulated sled-agent creates, mirroring
+// what real rack setup produces.
+const SERVICE_POOL_IPV4_NAME: &str = "oxide-service-pool-v4";
+const SERVICE_POOL_IPV6_NAME: &str = "oxide-service-pool-v6";
 
 /// Packages up a [`SledAgent`], running the sled agent API under a Dropshot
 /// server wired up to the sled agent
@@ -435,7 +444,8 @@ pub async fn run_standalone_server(
         })
         .expect("freshly generated zone IDs are unique");
 
-    let mut internal_services_ip_pool_ranges = vec![];
+    let mut internal_services_ipv4_ranges = vec![];
+    let mut internal_services_ipv6_ranges = vec![];
     let mut macs = MacAddr::iter_system();
     if let Some(nexus_external_addr) = rss_args.nexus_external_addr {
         let external_ip = nexus_external_addr.ip();
@@ -485,14 +495,16 @@ pub async fn run_standalone_server(
             })
             .expect("freshly generated zone IDs are unique");
 
-        internal_services_ip_pool_ranges.push(match external_ip {
+        match external_ip {
             IpAddr::V4(addr) => {
-                IpRange::V4(Ipv4Range { first: addr, last: addr })
+                internal_services_ipv4_ranges
+                    .push(IpRange::V4(Ipv4Range { first: addr, last: addr }));
             }
             IpAddr::V6(addr) => {
-                IpRange::V6(Ipv6Range { first: addr, last: addr })
+                internal_services_ipv6_ranges
+                    .push(IpRange::V6(Ipv6Range { first: addr, last: addr }));
             }
-        });
+        }
     }
 
     if let Some(external_dns_internal_addr) =
@@ -538,7 +550,7 @@ pub async fn run_standalone_server(
             })
             .expect("freshly generated zone IDs are unique");
 
-        internal_services_ip_pool_ranges
+        internal_services_ipv6_ranges
             .push(IpRange::V6(Ipv6Range { first: ip, last: ip }));
     }
 
@@ -644,12 +656,36 @@ pub async fn run_standalone_server(
             .context("could not construct initial blueprint")?
     };
 
+    let mut service_ip_pools = IdOrdMap::new();
+    if let Ok(service_ipv4_pool) = ServiceIpPoolConfig::new(
+        SERVICE_POOL_IPV4_NAME.parse().unwrap(),
+        String::from("IPv4 IP Pool for Oxide Services"),
+        internal_services_ipv4_ranges,
+    ) {
+        if service_ip_pools.insert_unique(service_ipv4_pool).is_err() {
+            anyhow::bail!(
+                "duplicate IPv4 service pool name: '{SERVICE_POOL_IPV4_NAME}'"
+            );
+        }
+    }
+    if let Ok(service_ipv6_pool) = ServiceIpPoolConfig::new(
+        SERVICE_POOL_IPV6_NAME.parse().unwrap(),
+        String::from("IPv6 IP Pool for Oxide Services"),
+        internal_services_ipv6_ranges,
+    ) {
+        if service_ip_pools.insert_unique(service_ipv6_pool).is_err() {
+            anyhow::bail!(
+                "duplicate IPv6 service pool name: '{SERVICE_POOL_IPV6_NAME}'"
+            );
+        }
+    }
+
     let rack_init_request = RackInitializationRequest {
         blueprint,
         physical_disks,
         zpools,
         crucible_datasets,
-        internal_services_ip_pool_ranges,
+        service_ip_pools,
         certs,
         internal_dns_zone_config: dns_config,
         external_dns_zone_name: DNS_ZONE_EXTERNAL_TESTING.to_owned(),

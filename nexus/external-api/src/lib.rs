@@ -86,6 +86,8 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyy_mm_dd_nn, IDENT),
+    (2026_07_31_00, SET_TARGET_RELEASE_UPDATE_RECOVERY_DOCS),
+    (2026_07_28_00, INTERNET_GATEWAY_CASCADE_DOCS),
     (2026_06_11_00, ADD_SYSTEM_IP_POOL_APIS),
     (2026_06_10_00, BGP_CONFIGURATION_UPDATE),
     (2026_06_08_00, INSTANCE_CPU_TYPE_TURIN_V2),
@@ -8003,7 +8005,12 @@ pub trait NexusExternalApi {
     /// instructing it that the specified software (which is also what's
     /// currently running) is what's supposed to be deployed.
     ///
-    /// If the provided version does not match what's currently running, the
+    /// If the control plane knows the version of all running software (e.g., a
+    /// single sled was recovered to the same version as the rest of the rack),
+    /// requests where the provided version does not match what's currently
+    /// running will fail. If the control plane does not know the version of all
+    /// running software (e.g., the entire rack was mupdated to a new release),
+    /// requests with an incorrect provided version will succeed, but the
     /// control plane will continue to avoid changing deployed software until
     /// this operation is invoked with the correct version.
     ///

@@ -28,7 +28,9 @@ use nexus_types::external_api::silo;
 use nexus_types::external_api::sled as sled_types;
 use nexus_types::inventory::SpType;
 use nexus_types::silo::silo_dns_name;
-use omicron_common::address::{Ipv6Subnet, RACK_PREFIX_LENGTH, get_64_subnet};
+use omicron_common::address::{
+    Ipv6Subnet, RACK_PREFIX_LENGTH, UnderlaySubnets, get_64_subnet,
+};
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::IdentityMetadataCreateParams;
@@ -638,7 +640,6 @@ impl super::Nexus {
         } // TODO - https://github.com/oxidecomputer/omicron/issues/3277
         // record port speed
 
-        let service_ip_pool_ranges = request.internal_services_ip_pool_ranges;
         self.db_datastore
             .rack_set_initialized(
                 opctx,
@@ -651,7 +652,7 @@ impl super::Nexus {
                     physical_disks,
                     zpools,
                     datasets,
-                    service_ip_pool_ranges,
+                    service_ip_pools: request.service_ip_pools,
                     internal_dns,
                     external_dns,
                     recovery_silo,
@@ -716,8 +717,28 @@ impl super::Nexus {
             match result {
                 Ok(rack) => {
                     if rack.initialized {
-                        info!(self.log, "Rack initialized");
-                        return;
+                        match rack_subnet(rack.rack_subnet) {
+                            Ok(subnet) => {
+                                info!(self.log, "Rack initialized");
+                                let subnet =
+                                    Ipv6Subnet::<RACK_PREFIX_LENGTH>::from(
+                                        subnet,
+                                    );
+                                // If the subnets were already set, the new
+                                // value is identical, so the `Err` is benign.
+                                let _ = self
+                                    .underlay_subnets
+                                    .set(UnderlaySubnets::new(subnet));
+                                return;
+                            }
+                            Err(e) => {
+                                error!(
+                                    self.log,
+                                    "Rack claims to be initialized, but rack subnet is invalid!: {}",
+                                    e
+                                );
+                            }
+                        }
                     }
                     info!(
                         self.log,
