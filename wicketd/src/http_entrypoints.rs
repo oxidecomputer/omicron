@@ -15,7 +15,6 @@ use crate::mgs::GetInventoryResponse as GetMgsInventoryResponse;
 use crate::mgs::records_to_mgs_inventory;
 use crate::multirack_config::CurrentMultirackJoinConfig;
 use crate::transceivers::GetTransceiversResponse;
-use bootstrap_agent_lockstep_client::ClientInfo as _;
 use bootstrap_agent_lockstep_types::RackOperationStatus;
 use dropshot::ApiDescription;
 use dropshot::HttpError;
@@ -23,10 +22,8 @@ use dropshot::HttpResponseOk;
 use dropshot::HttpResponseUpdatedNoContent;
 use dropshot::Path;
 use dropshot::RequestContext;
-use dropshot::StreamingBody;
 use dropshot::TypedBody;
 use internal_dns_resolver::Resolver;
-use omicron_uuid_kinds::RackInitUuid;
 use sled_agent_types::early_networking::SwitchSlot;
 use slog::o;
 use std::sync::Arc;
@@ -42,7 +39,7 @@ use wicket_common::rack_update::AbortUpdateOptions;
 use wicket_common::update_events::EventReport;
 use wicketd_api::*;
 use wicketd_commission_types::rack_setup::CertificateUploadResponse;
-use wicketd_commission_types::rack_setup::PutRssUserConfigInsensitive;
+use wicketd_commission_types::rack_setup::PrivateKeyPem;
 use wicketd_commission_types::update::ClearUpdateStateResponse;
 
 use crate::ServerContext;
@@ -121,35 +118,6 @@ impl WicketdApi for WicketdApiImpl {
         Ok(HttpResponseOk(config.into()))
     }
 
-    async fn put_rss_config(
-        rqctx: RequestContext<Self::Context>,
-        body: TypedBody<PutRssUserConfigInsensitive>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        let ctx = rqctx.context();
-
-        // We can't run RSS if we don't have an inventory from MGS yet; we always
-        // need to fill in the bootstrap sleds first.
-        let inventory = mgs_inventory_or_unavail(&ctx.mgs_handle).await?;
-
-        let mut config = ctx.rss_or_multirack_join_config.lock().unwrap();
-
-        // Overwrite any non-rss config
-        let rss_config = config.rss_config_mut_or_default();
-
-        let ddm_discovered_sleds = &ctx.bootstrap_peers.sleds();
-        rss_config
-            .update(
-                body.into_inner(),
-                &ctx.baseboard_id,
-                &inventory,
-                &ddm_discovered_sleds,
-                &ctx.log,
-            )
-            .map_err(|err| HttpError::for_bad_request(None, err))?;
-
-        Ok(HttpResponseUpdatedNoContent())
-    }
-
     async fn put_multirack_join_config(
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<MultirackJoinConfigBaseUserInput>,
@@ -192,25 +160,6 @@ impl WicketdApi for WicketdApiImpl {
         Ok(HttpResponseUpdatedNoContent())
     }
 
-    async fn post_rss_config_cert(
-        rqctx: RequestContext<Self::Context>,
-        body: TypedBody<String>,
-    ) -> Result<HttpResponseOk<CertificateUploadResponse>, HttpError> {
-        let ctx = rqctx.context();
-
-        let mut config = ctx.rss_or_multirack_join_config.lock().unwrap();
-
-        let rss_config = config.rss_config_mut_or_conflict(
-            "cannot post certificates when not preparing for RSS",
-        )?;
-
-        let response = rss_config
-            .push_cert(body.into_inner())
-            .map_err(|err| HttpError::for_bad_request(None, err))?;
-
-        Ok(HttpResponseOk(response))
-    }
-
     async fn post_rss_config_key(
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<String>,
@@ -223,7 +172,7 @@ impl WicketdApi for WicketdApiImpl {
         )?;
 
         let response = rss_config
-            .push_key(body.into_inner())
+            .push_key(PrivateKeyPem(body.into_inner().into()))
             .map_err(|err| HttpError::for_bad_request(None, err))?;
 
         Ok(HttpResponseOk(response))
@@ -310,40 +259,6 @@ impl WicketdApi for WicketdApiImpl {
         Ok(HttpResponseOk(op_status))
     }
 
-    async fn post_run_rack_setup(
-        rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<RackInitUuid>, HttpError> {
-        let ctx = rqctx.context();
-        let log = &rqctx.log;
-
-        let client = ba_lockstep_client(ctx);
-        let request = {
-            let mut config = ctx.rss_or_multirack_join_config.lock().unwrap();
-
-            let rss_config = config.rss_config_mut_or_conflict(
-                "cannot run rack setup when not preparing for RSS",
-            )?;
-
-            rss_config.start_rss_request(&ctx.bootstrap_peers, log).map_err(
-                |err| HttpError::for_bad_request(None, format!("{err:#}")),
-            )?
-        };
-
-        slog::info!(
-            ctx.log,
-            "Sending RSS initialize request to {}",
-            client.baseurl()
-        );
-
-        let init_id = client
-            .rack_initialize(&request)
-            .await
-            .map_err(|err| ba_lockstep_error_to_http(err, "rack setup"))?
-            .into_inner();
-
-        Ok(HttpResponseOk(init_id))
-    }
-
     async fn get_inventory(
         rqctx: RequestContext<Self::Context>,
         body_params: TypedBody<GetInventoryParams>,
@@ -424,17 +339,6 @@ impl WicketdApi for WicketdApiImpl {
             });
         let inventory = RackV1Inventory { mgs, transceivers };
         Ok(HttpResponseOk(GetInventoryResponse::Response { inventory }))
-    }
-
-    async fn put_repository(
-        rqctx: RequestContext<Self::Context>,
-        body: StreamingBody,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        let rqctx = rqctx.context();
-
-        rqctx.update_tracker.put_repository(body.into_stream()).await?;
-
-        Ok(HttpResponseUpdatedNoContent())
     }
 
     async fn get_artifacts_and_event_reports(
