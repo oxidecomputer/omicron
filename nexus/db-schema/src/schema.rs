@@ -1546,8 +1546,6 @@ table! {
         id -> Uuid,
         time_created -> Timestamptz,
         sha256 -> Text,
-        targets_role_version -> Int8,
-        valid_until -> Timestamptz,
         system_version -> Text,
         file_name -> Text,
         time_pruned -> Nullable<Timestamptz>,
@@ -1555,17 +1553,35 @@ table! {
 }
 
 table! {
+    tuf_repo_metadata (tuf_repo_id, key) {
+        tuf_repo_id -> Uuid,
+        key -> Text,
+        value -> Text,
+    }
+}
+
+table! {
     tuf_artifact (id) {
         id -> Uuid,
-        name -> Text,
-        version -> Text,
-        kind -> Text,
         time_created -> Timestamptz,
         sha256 -> Text,
-        artifact_size -> Int8,
         generation_added -> Int8,
-        sign -> Nullable<Binary>,
-        board -> Nullable<Text>,
+    }
+}
+
+table! {
+    tuf_artifact_file (sha256) {
+        sha256 -> Text,
+        version -> Text,
+        artifact_size -> Int8,
+    }
+}
+
+table! {
+    tuf_artifact_tag (tuf_artifact_id, key) {
+        tuf_artifact_id -> Uuid,
+        key -> Text,
+        value -> Text,
     }
 }
 
@@ -1577,10 +1593,11 @@ table! {
 }
 
 allow_tables_to_appear_in_same_query!(
-    tuf_repo,
-    tuf_repo_artifact,
-    tuf_artifact
+    tuf_artifact,
+    tuf_artifact_file,
+    tuf_repo_artifact
 );
+allow_tables_to_appear_in_same_query!(tuf_artifact_tag, tuf_repo_artifact);
 joinable!(tuf_repo_artifact -> tuf_repo (tuf_repo_id));
 joinable!(tuf_repo_artifact -> tuf_artifact (tuf_artifact_id));
 
@@ -2160,12 +2177,17 @@ table! {
         sled_config_id -> Uuid,
         id -> Uuid,
         name -> Text,
-        ip -> Inet,
+        // NOTE: `ip` and `subnet` hold the IPv4 address and subnet, despite
+        // the names. We kept the original names because renaming columns is
+        // not idempotent in CRDB as of today.
+        ip -> Nullable<Inet>,
         mac -> Int8,
-        subnet -> Inet,
+        subnet -> Nullable<Inet>,
         vni -> Int8,
         is_primary -> Bool,
         slot -> Int2,
+        ipv6 -> Nullable<Inet>,
+        ipv6_subnet -> Nullable<Inet>,
     }
 }
 
@@ -2300,7 +2322,7 @@ table! {
     }
 }
 
-allow_tables_to_appear_in_same_query!(bp_sled_metadata, tuf_artifact);
+allow_tables_to_appear_in_same_query!(bp_sled_metadata, tuf_artifact_file);
 
 table! {
     bp_omicron_physical_disk (blueprint_id, id) {
@@ -2349,7 +2371,10 @@ table! {
     }
 }
 
-allow_tables_to_appear_in_same_query!(bp_single_measurements, tuf_artifact);
+allow_tables_to_appear_in_same_query!(
+    bp_single_measurements,
+    tuf_artifact_file
+);
 
 table! {
     bp_omicron_zone (blueprint_id, id) {
@@ -2387,19 +2412,24 @@ table! {
     }
 }
 
-allow_tables_to_appear_in_same_query!(bp_omicron_zone, tuf_artifact);
+allow_tables_to_appear_in_same_query!(bp_omicron_zone, tuf_artifact_file);
 
 table! {
     bp_omicron_zone_nic (blueprint_id, id) {
         blueprint_id -> Uuid,
         id -> Uuid,
         name -> Text,
-        ip -> Inet,
+        // NOTE: `ip` and `subnet` hold the IPv4 address and subnet, despite
+        // the names. We kept the original names because renaming columns is
+        // not idempotent in CRDB as of today.
+        ip -> Nullable<Inet>,
         mac -> Int8,
-        subnet -> Inet,
+        subnet -> Nullable<Inet>,
         vni -> Int8,
         is_primary -> Bool,
         slot -> Int2,
+        ipv6 -> Nullable<Inet>,
+        ipv6_subnet -> Nullable<Inet>,
     }
 }
 
@@ -3208,6 +3238,17 @@ allow_tables_to_appear_in_same_query!(
     physical_disk,
     rendezvous_local_storage_unencrypted_dataset
 );
+
+table! {
+    fm_config (version) {
+        version -> Int8,
+        comment -> Text,
+        time_modified -> Timestamptz,
+        analysis_enabled -> Nullable<Bool>,
+        sitrep_limit -> Nullable<Int8>,
+        history_pruning_threshold -> Nullable<Int8>,
+    }
+}
 
 table! {
     fm_sitrep (id) {

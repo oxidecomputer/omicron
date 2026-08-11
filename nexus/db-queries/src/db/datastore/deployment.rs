@@ -21,7 +21,6 @@ use clickhouse_admin_types::keeper::KeeperId;
 use clickhouse_admin_types::server::ServerId;
 use core::future::Future;
 use core::pin::Pin;
-use diesel::BoolExpressionMethods;
 use diesel::ExpressionMethods;
 use diesel::Insertable;
 use diesel::IntoSql;
@@ -72,7 +71,7 @@ use nexus_db_model::Ipv6Addr;
 use nexus_db_model::SpMgsSlot;
 use nexus_db_model::SpType;
 use nexus_db_model::SqlU16;
-use nexus_db_model::TufArtifact;
+use nexus_db_model::TufArtifactFile;
 use nexus_db_model::to_db_typed_uuid;
 use nexus_db_schema::enums::HwM2SlotEnum;
 use nexus_db_schema::enums::HwRotSlotEnum;
@@ -119,8 +118,6 @@ use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::sync::Arc;
 use thiserror::Error;
-use tufaceous_artifact::ArtifactKind;
-use tufaceous_artifact::KnownArtifactKind;
 use uuid::Uuid;
 
 mod external_networking;
@@ -696,11 +693,13 @@ impl DataStore {
             Option<DbArtifactVersion>,
         )> = {
             use nexus_db_schema::schema::bp_sled_metadata::dsl;
-            use nexus_db_schema::schema::tuf_artifact::dsl as tuf_artifact_dsl;
+            use nexus_db_schema::schema::tuf_artifact_file::dsl as tuf_artifact_file_dsl;
 
             let (tuf1, tuf2) = diesel::alias!(
-                nexus_db_schema::schema::tuf_artifact as tuf_artifact_1,
-                nexus_db_schema::schema::tuf_artifact as tuf_artifact_2,
+                nexus_db_schema::schema::tuf_artifact_file
+                    as tuf_artifact_file_1,
+                nexus_db_schema::schema::tuf_artifact_file
+                    as tuf_artifact_file_2,
             );
 
             let mut rows = Vec::new();
@@ -720,28 +719,20 @@ impl DataStore {
                 // which is non-fatal.
                 .left_join(
                     tuf1.on(tuf1
-                        .field(tuf_artifact_dsl::kind)
-                        .eq(ArtifactKind::HOST_PHASE_2.to_string())
-                        .and(
-                            tuf1.field(tuf_artifact_dsl::sha256)
-                                .nullable()
-                                .eq(dsl::host_phase_2_desired_slot_a),
-                        )),
+                        .field(tuf_artifact_file_dsl::sha256)
+                        .nullable()
+                        .eq(dsl::host_phase_2_desired_slot_a)),
                 )
                 .left_join(
                     tuf2.on(tuf2
-                        .field(tuf_artifact_dsl::kind)
-                        .eq(ArtifactKind::HOST_PHASE_2.to_string())
-                        .and(
-                            tuf2.field(tuf_artifact_dsl::sha256)
-                                .nullable()
-                                .eq(dsl::host_phase_2_desired_slot_b),
-                        )),
+                        .field(tuf_artifact_file_dsl::sha256)
+                        .nullable()
+                        .eq(dsl::host_phase_2_desired_slot_b)),
                 )
                 .select((
                     BpSledMetadata::as_select(),
-                    tuf1.fields(tuf_artifact_dsl::version).nullable(),
-                    tuf2.fields(tuf_artifact_dsl::version).nullable(),
+                    tuf1.fields(tuf_artifact_file_dsl::version).nullable(),
+                    tuf2.fields(tuf_artifact_file_dsl::version).nullable(),
                 ))
                 .load_async::<(
                     BpSledMetadata,
@@ -789,9 +780,9 @@ impl DataStore {
         };
 
         // Load zone rows
-        let raw_zones: Vec<(BpOmicronZone, Option<TufArtifact>)> = {
+        let raw_zones: Vec<(BpOmicronZone, Option<TufArtifactFile>)> = {
             use nexus_db_schema::schema::bp_omicron_zone::dsl;
-            use nexus_db_schema::schema::tuf_artifact::dsl as tuf_artifact_dsl;
+            use nexus_db_schema::schema::tuf_artifact_file::dsl as tuf_artifact_file_dsl;
 
             let mut rows = Vec::new();
             let mut paginator = Paginator::new(
@@ -808,21 +799,19 @@ impl DataStore {
                 )
                 .filter(dsl::blueprint_id.eq(to_db_typed_uuid(blueprint_id)))
                 // Left join in case the artifact is missing from the
-                // tuf_artifact table, which is non-fatal.
+                // tuf_artifact_file table, which is non-fatal.
                 .left_join(
-                    tuf_artifact_dsl::tuf_artifact.on(tuf_artifact_dsl::kind
-                        .eq(KnownArtifactKind::Zone.to_string())
-                        .and(
-                            tuf_artifact_dsl::sha256
-                                .nullable()
-                                .eq(dsl::image_artifact_sha256),
-                        )),
+                    tuf_artifact_file_dsl::tuf_artifact_file.on(
+                        tuf_artifact_file_dsl::sha256
+                            .nullable()
+                            .eq(dsl::image_artifact_sha256),
+                    ),
                 )
                 .select((
                     BpOmicronZone::as_select(),
-                    Option::<TufArtifact>::as_select(),
+                    Option::<TufArtifactFile>::as_select(),
                 ))
-                .load_async::<(BpOmicronZone, Option<TufArtifact>)>(&*conn)
+                .load_async::<(BpOmicronZone, Option<TufArtifactFile>)>(&*conn)
                 .await
                 .map_err(|e| {
                     public_error_from_diesel(e, ErrorHandler::Server)
@@ -1156,9 +1145,12 @@ impl DataStore {
             bbs
         };
 
-        let raw_measurements: Vec<(BpSingleMeasurement, Option<TufArtifact>)> = {
+        let raw_measurements: Vec<(
+            BpSingleMeasurement,
+            Option<TufArtifactFile>,
+        )> = {
             use nexus_db_schema::schema::bp_single_measurements::dsl;
-            use nexus_db_schema::schema::tuf_artifact::dsl as tuf_artifact_dsl;
+            use nexus_db_schema::schema::tuf_artifact_file::dsl as tuf_artifact_file_dsl;
 
             let mut rows = Vec::new();
             let mut paginator = Paginator::new(
@@ -1175,18 +1167,15 @@ impl DataStore {
                 // Left join in case the artifact is missing from the
                 // tuf_artifact table, which is non-fatal.
                 .left_join(
-                    tuf_artifact_dsl::tuf_artifact.on(tuf_artifact_dsl::kind
-                        .eq(ArtifactKind::MEASUREMENT_CORPUS.to_string())
-                        .and(
-                            tuf_artifact_dsl::sha256
-                                .eq(dsl::image_artifact_sha256),
-                        )),
+                    tuf_artifact_file_dsl::tuf_artifact_file
+                        .on(tuf_artifact_file_dsl::sha256
+                            .eq(dsl::image_artifact_sha256)),
                 )
                 .select((
                     BpSingleMeasurement::as_select(),
-                    Option::<TufArtifact>::as_select(),
+                    Option::<TufArtifactFile>::as_select(),
                 ))
-                .load_async::<(BpSingleMeasurement, Option<TufArtifact>)>(
+                .load_async::<(BpSingleMeasurement, Option<TufArtifactFile>)>(
                     &*conn,
                 )
                 .await
@@ -3145,36 +3134,47 @@ mod tests {
     use nexus_types::deployment::BlueprintHostPhase2DesiredContents;
     use nexus_types::deployment::BlueprintHostPhase2DesiredSlots;
     use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
+    use nexus_types::deployment::BlueprintZoneConfig;
+    use nexus_types::deployment::BlueprintZoneDisposition;
     use nexus_types::deployment::BlueprintZoneImageSource;
+    use nexus_types::deployment::BlueprintZoneType;
     use nexus_types::deployment::ExpectedActiveRotSlot;
+    use nexus_types::deployment::OmicronZoneExternalFloatingIp;
     use nexus_types::deployment::PendingMgsUpdate;
     use nexus_types::deployment::PlanningInput;
     use nexus_types::deployment::SledDetails;
     use nexus_types::deployment::SledDisk;
     use nexus_types::deployment::SledFilter;
     use nexus_types::deployment::SledResources;
+    use nexus_types::deployment::blueprint_zone_type;
     use nexus_types::external_api::physical_disk::{
         PhysicalDiskPolicy, PhysicalDiskState,
     };
     use nexus_types::external_api::sled::{SledPolicy, SledState};
     use nexus_types::inventory::Collection;
+    use nexus_types::tuf_repo::TufRepoDescription;
     use omicron_common::address::IpRange;
     use omicron_common::address::Ipv6Subnet;
-    use omicron_common::api::external::TufArtifactMeta;
-    use omicron_common::api::external::TufRepoDescription;
-    use omicron_common::api::external::TufRepoMeta;
+    use omicron_common::api::external::Vni;
+    use omicron_common::api::internal::shared::PrivateIpConfig;
+    use omicron_common::api::internal::shared::PrivateIpv4Config;
+    use omicron_common::api::internal::shared::PrivateIpv6Config;
     use omicron_common::disk::DiskIdentity;
     use omicron_common::disk::M2Slot;
-    use omicron_common::update::ArtifactId;
+    use omicron_common::zpool_name::ZpoolName;
     use omicron_test_utils::dev;
     use omicron_test_utils::dev::poll::CondCheckError;
     use omicron_test_utils::dev::poll::wait_for_condition;
+    use omicron_uuid_kinds::ExternalIpUuid;
     use omicron_uuid_kinds::OmicronZoneUuid;
     use omicron_uuid_kinds::PhysicalDiskUuid;
     use omicron_uuid_kinds::SledUuid;
     use omicron_uuid_kinds::ZpoolUuid;
     use pretty_assertions::assert_eq;
     use rand::Rng;
+    use sled_agent_types::inventory::NetworkInterface;
+    use sled_agent_types::inventory::NetworkInterfaceKind;
+    use std::collections::BTreeMap;
     use std::collections::BTreeSet;
     use std::mem;
     use std::net::Ipv6Addr;
@@ -3182,8 +3182,15 @@ mod tests {
     use std::sync::atomic::AtomicBool;
     use std::sync::atomic::Ordering;
     use std::time::Duration;
+    use tufaceous_artifact::Artifact;
     use tufaceous_artifact::ArtifactHash;
+    use tufaceous_artifact::ArtifactSet;
     use tufaceous_artifact::ArtifactVersion;
+    use tufaceous_artifact::KnownArtifactTags;
+    use tufaceous_artifact::OsPhase2Tags;
+    use tufaceous_artifact::OsVariant;
+    use tufaceous_artifact::ZoneTags;
+    use uuid::Uuid;
 
     #[derive(Default)]
     pub struct NetworkResourceControlFlow {
@@ -3373,48 +3380,36 @@ mod tests {
         const SYSTEM_HASH: ArtifactHash = ArtifactHash([6; 32]);
 
         let tuf_repo = TufRepoDescription {
-            repo: TufRepoMeta {
-                hash: SYSTEM_HASH,
-                targets_role_version: 0,
-                valid_until: Utc::now(),
-                system_version: SYSTEM_VERSION,
-                file_name: String::new(),
-            },
-            artifacts: vec![
-                TufArtifactMeta {
-                    id: ArtifactId {
-                        name: "measurement1".into(),
-                        version: ARTIFACT_VERSION_1,
-                        kind: ArtifactKind::MEASUREMENT_CORPUS,
-                    },
+            artifacts: ArtifactSet::from([
+                Artifact {
+                    version: ARTIFACT_VERSION_1,
+                    tags: KnownArtifactTags::MeasurementCorpus
+                        .to_tags()
+                        .unwrap(),
                     hash: MEASUREMENT_ARTIFACT_HASH_1,
-                    size: 0,
-                    board: None,
-                    sign: None,
+                    length: 0,
                 },
-                TufArtifactMeta {
-                    id: ArtifactId {
-                        name: "measurement2".into(),
-                        version: ARTIFACT_VERSION_1,
-                        kind: ArtifactKind::MEASUREMENT_CORPUS,
-                    },
+                Artifact {
+                    version: ARTIFACT_VERSION_1,
+                    tags: KnownArtifactTags::MeasurementCorpus
+                        .to_tags()
+                        .unwrap(),
                     hash: MEASUREMENT_ARTIFACT_HASH_2,
-                    size: 0,
-                    board: None,
-                    sign: None,
+                    length: 0,
                 },
-                TufArtifactMeta {
-                    id: ArtifactId {
-                        name: "measurement3".into(),
-                        version: ARTIFACT_VERSION_2,
-                        kind: ArtifactKind::MEASUREMENT_CORPUS,
-                    },
+                Artifact {
+                    version: ARTIFACT_VERSION_2,
+                    tags: KnownArtifactTags::MeasurementCorpus
+                        .to_tags()
+                        .unwrap(),
                     hash: MEASUREMENT_ARTIFACT_HASH_3,
-                    size: 0,
-                    board: None,
-                    sign: None,
+                    length: 0,
                 },
-            ],
+            ]),
+            metadata: BTreeMap::new(),
+            system_version: SYSTEM_VERSION,
+            hash: SYSTEM_HASH,
+            file_name: String::new(),
         };
 
         // Add rows to the tuf_artifact table to test version lookups.
@@ -3434,18 +3429,17 @@ mod tests {
         )
         .expect("failed to create builder");
 
-        let mut measurements = BTreeSet::new();
-
-        for artifact in &tuf_repo.artifacts {
-            if artifact.id.kind == ArtifactKind::MEASUREMENT_CORPUS {
-                measurements.insert(BlueprintSingleMeasurement {
-                    version: BlueprintArtifactVersion::Available {
-                        version: artifact.id.version.clone(),
-                    },
-                    hash: artifact.hash,
-                });
-            }
-        }
+        let measurements = tuf_repo
+            .artifacts
+            .get_all(&KnownArtifactTags::MeasurementCorpus)
+            .iter()
+            .map(|artifact| BlueprintSingleMeasurement {
+                version: BlueprintArtifactVersion::Available {
+                    version: artifact.version.clone(),
+                },
+                hash: artifact.hash,
+            })
+            .collect::<BTreeSet<_>>();
 
         assert_eq!(measurements.len(), 3);
 
@@ -3673,48 +3667,46 @@ mod tests {
                 .tuf_repo_insert(
                     opctx,
                     &TufRepoDescription {
-                        repo: TufRepoMeta {
-                            hash: SYSTEM_HASH,
-                            targets_role_version: 0,
-                            valid_until: Utc::now(),
-                            system_version: SYSTEM_VERSION,
-                            file_name: String::new(),
-                        },
-                        artifacts: vec![
-                            TufArtifactMeta {
-                                id: ArtifactId {
-                                    name: String::new(),
-                                    version: ARTIFACT_VERSION_1,
-                                    kind: KnownArtifactKind::Zone.into(),
-                                },
+                        artifacts: ArtifactSet::from([
+                            Artifact {
+                                version: ARTIFACT_VERSION_1,
+                                tags: KnownArtifactTags::Zone(ZoneTags {
+                                    zone_name: String::new(),
+                                })
+                                .to_tags()
+                                .unwrap(),
                                 hash: ZONE_ARTIFACT_HASH_1,
-                                size: 0,
-                                board: None,
-                                sign: None,
+                                length: 0,
                             },
-                            TufArtifactMeta {
-                                id: ArtifactId {
-                                    name: "host-1".into(),
-                                    version: ARTIFACT_VERSION_2,
-                                    kind: ArtifactKind::HOST_PHASE_2,
-                                },
+                            Artifact {
+                                version: ARTIFACT_VERSION_2,
+                                tags: KnownArtifactTags::OsPhase2(
+                                    OsPhase2Tags {
+                                        os_variant: OsVariant::Host,
+                                    },
+                                )
+                                .to_tags()
+                                .unwrap(),
                                 hash: HOST_ARTIFACT_HASH_1,
-                                size: 0,
-                                board: None,
-                                sign: None,
+                                length: 0,
                             },
-                            TufArtifactMeta {
-                                id: ArtifactId {
-                                    name: "host-2".into(),
-                                    version: ARTIFACT_VERSION_3,
-                                    kind: ArtifactKind::HOST_PHASE_2,
-                                },
+                            Artifact {
+                                version: ARTIFACT_VERSION_3,
+                                tags: KnownArtifactTags::OsPhase2(
+                                    OsPhase2Tags {
+                                        os_variant: OsVariant::Host,
+                                    },
+                                )
+                                .to_tags()
+                                .unwrap(),
                                 hash: HOST_ARTIFACT_HASH_2,
-                                size: 0,
-                                board: None,
-                                sign: None,
+                                length: 0,
                             },
-                        ],
+                        ]),
+                        metadata: BTreeMap::new(),
+                        system_version: SYSTEM_VERSION,
+                        hash: SYSTEM_HASH,
+                        file_name: String::new(),
                     },
                 )
                 .await
@@ -4434,9 +4426,13 @@ mod tests {
             // Create (idempotently) the service pool of the appropriate version
             // for each range. We only need at most two (one V4, one V6), but our
             // example system doesn't have many ranges so this should be fine.
-            let service_pool =
-                create_service_ip_pool(&opctx, datastore, pool_range.version())
-                    .await;
+            let service_pool = create_service_ip_pool(
+                &opctx,
+                datastore,
+                "oxide-service-pool-v4",
+                pool_range.version(),
+            )
+            .await;
             datastore
                 .ip_pool_add_range(
                     &opctx,
@@ -4523,6 +4519,7 @@ mod tests {
         let service_pool = create_service_ip_pool(
             &opctx,
             datastore,
+            "oxide-service-pool-v4",
             omicron_common::api::external::IpVersion::V4,
         )
         .await;
@@ -5168,5 +5165,135 @@ mod tests {
 
         db.terminate().await;
         logctx.cleanup_successful();
+    }
+
+    // Roundtrip an Omicron zone NIC through the database. This exercises
+    // the columns and constraints that ensure we can handle single- and
+    // dual-stack NICs.
+    async fn round_trip_zone_nic_through_blueprint_db(
+        test_name: &'static str,
+        ip_config: PrivateIpConfig,
+    ) {
+        let logctx = dev::test_setup_log(test_name);
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let datastore = db.datastore();
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+
+        let zone_id = OmicronZoneUuid::new_v4();
+        let nic = NetworkInterface {
+            id: Uuid::new_v4(),
+            kind: NetworkInterfaceKind::Service {
+                id: zone_id.into_untyped_uuid(),
+            },
+            name: "test-service-nic".parse().unwrap(),
+            ip_config,
+            mac: "a8:40:25:ff:00:01".parse().unwrap(),
+            vni: Vni::try_from(100).unwrap(),
+            primary: true,
+            slot: 0,
+        };
+        let zone = BlueprintZoneConfig {
+            disposition: BlueprintZoneDisposition::InService,
+            id: zone_id,
+            filesystem_pool: ZpoolName::new_external(ZpoolUuid::new_v4()),
+            zone_type: BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
+                internal_address: "[::1]:12345".parse().unwrap(),
+                lockstep_port: 12346,
+                external_ip: OmicronZoneExternalFloatingIp {
+                    id: ExternalIpUuid::new_v4(),
+                    ip: "192.0.2.1".parse().unwrap(),
+                },
+                nic: nic.clone(),
+                external_tls: false,
+                external_dns_servers: Vec::new(),
+                nexus_generation: Generation::new(),
+            }),
+            image_source: BlueprintZoneImageSource::InstallDataset,
+        };
+
+        let blueprint_id = BlueprintUuid::new_v4();
+        let row = BpOmicronZoneNic::new(blueprint_id, &zone)
+            .expect("built blueprint NIC row")
+            .expect("zone has a service NIC");
+
+        {
+            use nexus_db_schema::schema::bp_omicron_zone_nic::dsl;
+            diesel::insert_into(dsl::bp_omicron_zone_nic)
+                .values(row)
+                .execute_async(&*conn)
+                .await
+                .expect("inserted blueprint zone NIC");
+        }
+        let read: BpOmicronZoneNic = {
+            use nexus_db_schema::schema::bp_omicron_zone_nic::dsl;
+            dsl::bp_omicron_zone_nic
+                .filter(dsl::blueprint_id.eq(to_db_typed_uuid(blueprint_id)))
+                .filter(dsl::id.eq(nic.id))
+                .select(BpOmicronZoneNic::as_select())
+                .first_async(&*conn)
+                .await
+                .expect("read back blueprint zone NIC")
+        };
+
+        // The persisted row rebuilds the exact NIC we started with.
+        let round_tripped =
+            read.into_network_interface_for_zone(zone_id).unwrap();
+        assert_eq!(nic, round_tripped);
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_bp_zone_nic_dual_stack_round_trips_through_db() {
+        let ip_config = PrivateIpConfig::DualStack {
+            v4: PrivateIpv4Config::new(
+                "172.30.2.5".parse().unwrap(),
+                "172.30.2.0/24".parse().unwrap(),
+            )
+            .unwrap(),
+            v6: PrivateIpv6Config::new(
+                "fd00:1122:3344:100::5".parse().unwrap(),
+                "fd00:1122:3344:100::/64".parse().unwrap(),
+            )
+            .unwrap(),
+        };
+        round_trip_zone_nic_through_blueprint_db(
+            "test_bp_zone_nic_dual_stack_round_trips_through_db",
+            ip_config,
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_bp_zone_nic_ipv6_only_round_trips_through_db() {
+        let ip_config = PrivateIpConfig::V6(
+            PrivateIpv6Config::new(
+                "fd00:1122:3344:100::5".parse().unwrap(),
+                "fd00:1122:3344:100::/64".parse().unwrap(),
+            )
+            .unwrap(),
+        );
+        round_trip_zone_nic_through_blueprint_db(
+            "test_bp_zone_nic_ipv6_only_round_trips_through_db",
+            ip_config,
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_bp_zone_nic_ipv4_only_round_trips_through_db() {
+        let ip_config = PrivateIpConfig::V4(
+            PrivateIpv4Config::new(
+                "172.30.2.5".parse().unwrap(),
+                "172.30.2.0/24".parse().unwrap(),
+            )
+            .unwrap(),
+        );
+        round_trip_zone_nic_through_blueprint_db(
+            "test_bp_zone_nic_ipv4_only_round_trips_through_db",
+            ip_config,
+        )
+        .await;
     }
 }

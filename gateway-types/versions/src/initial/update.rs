@@ -8,7 +8,7 @@ use omicron_uuid_kinds::MupdateUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
-use tufaceous_artifact_v2::ArtifactHash;
+use tufaceous_artifact::ArtifactHash;
 use uuid::Uuid;
 
 /// The error type returned by the `sp_component_reset()` MGS endpoint.

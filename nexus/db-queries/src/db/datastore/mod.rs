@@ -96,6 +96,7 @@ mod ereport;
 mod external_ip;
 mod external_subnet;
 pub mod fm;
+mod fm_config;
 mod fm_rendezvous_gc;
 mod identity_provider;
 mod image;
@@ -213,12 +214,6 @@ pub use webhook_delivery::WebhookDeliveryFilters;
 // Number of unique datasets required to back a region.
 // TODO: This should likely turn into a configuration option.
 pub const REGION_REDUNDANCY_THRESHOLD: usize = 3;
-
-/// The name of the built-in IPv4 IP pool for Oxide services.
-pub const SERVICE_IPV4_POOL_NAME: &str = "oxide-service-pool-v4";
-
-/// The name of the built-in IPv6 IP pool for Oxide services.
-pub const SERVICE_IPV6_POOL_NAME: &str = "oxide-service-pool-v6";
 
 /// "limit" to be used in SQL queries that paginate through large result sets
 ///

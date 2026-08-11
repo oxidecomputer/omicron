@@ -7,8 +7,8 @@ use std::collections::BTreeMap;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
-use tufaceous_artifact_v2::Artifact;
-use tufaceous_artifact_v2::ArtifactVersion;
+use tufaceous_artifact::Artifact;
+use tufaceous_artifact::ArtifactVersion;
 
 /// The identifying components of an [`Artifact`], sent over the wire from
 /// wicketd to the wicket client to show versions of artifacts we will be

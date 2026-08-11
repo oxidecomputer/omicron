@@ -39,7 +39,7 @@ use tokio::{
     fs::File,
     io::{AsyncWrite, AsyncWriteExt},
 };
-use tufaceous_artifact_v2::ArtifactHash;
+use tufaceous_artifact::ArtifactHash;
 
 use crate::{async_temp_file::AsyncNamedTempFile, hardware::Hardware};
 
@@ -652,11 +652,11 @@ pub(crate) struct ArtifactToWrite {
 impl ArtifactToWrite {
     fn to_install_metadata(&self) -> OmicronInstallMetadata {
         let file_size: usize = self.data.num_bytes();
-        OmicronInstallMetadata::new_v2(
-            self.file_name.clone(),
-            u64::try_from(file_size).expect("usize fits in u64"),
-            self.hash,
-        )
+        OmicronInstallMetadata {
+            file_name: self.file_name.clone(),
+            file_size: u64::try_from(file_size).expect("usize fits in u64"),
+            hash: self.hash,
+        }
     }
 }
 
