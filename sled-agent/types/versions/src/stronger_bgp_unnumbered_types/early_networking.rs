@@ -37,6 +37,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use slog_error_chain::InlineErrorChain;
 use std::net::IpAddr;
+use std::net::Ipv4Addr;
 
 #[derive(Clone, Copy, Debug, thiserror::Error, PartialEq, Eq)]
 pub enum InvalidIpAddrError {
@@ -68,6 +69,7 @@ pub enum InvalidIpAddrError {
     Ord,
 )]
 #[serde(tag = "type", rename_all = "snake_case")]
+#[cfg_attr(any(test, feature = "testing"), derive(test_strategy::Arbitrary))]
 pub enum UplinkAddress {
     // `#[serde(rename)]` this to `addrconf` so when this shows up in
     // config-rss.toml development files, it's not phrased as `addr_conf`. This
@@ -94,6 +96,7 @@ pub enum UplinkAddress {
     Ord,
 )]
 #[serde(tag = "type", rename_all = "snake_case")]
+#[cfg_attr(any(test, feature = "testing"), derive(test_strategy::Arbitrary))]
 pub enum RouterPeerType {
     Unnumbered {
         /// Router lifetime in seconds for unnumbered BGP peers.
@@ -103,6 +106,36 @@ pub enum RouterPeerType {
         /// IP address for numbered BGP peers.
         ip: RouterPeerIpAddr,
     },
+}
+
+// These impls live here instead of in `crate::impls` because they're only used
+// for conversions in this particular version. All these are private to ensure
+// they don't leak out beyond this module.
+impl RouterPeerType {
+    /// In contexts where we cannot use this strong type to describe
+    /// "unnumbered" addresses, we have two or three possible representations:
+    ///
+    /// * In a context where we need a non-optional `IpAddr`, we could use
+    ///   `Ipv4Addr::UNSPECIFIED` or `Ipv6Addr::UNSPECIFIED`.
+    /// * In a context where we need `Option<IpAddr>`, we could use `None`,
+    ///   Some(`Ipv4Addr::UNSPECIFIED`), or Some(`Ipv6Addr::UNSPECIFIED`).
+    ///
+    /// In the optional case, we always prefer `None`. In the non-optional case,
+    /// we choose this sentinel value.
+    const UNNUMBERED_SENTINEL: IpAddr = IpAddr::V4(Ipv4Addr::UNSPECIFIED);
+
+    /// Squash this address down to an [`IpAddr`] by converting
+    /// [`RouterPeerType::Unnumbered`] to
+    /// [`RouterPeerType::UNNUMBERED_SENTINEL`].
+    ///
+    /// Uses of this function probably indicate places where we could consider
+    /// using stronger types.
+    fn ip_squashing_unnumbered_to_sentinel(&self) -> IpAddr {
+        match *self {
+            Self::Unnumbered { .. } => Self::UNNUMBERED_SENTINEL,
+            Self::Numbered { ip } => ip.into(),
+        }
+    }
 }
 
 #[derive(
@@ -266,8 +299,19 @@ impl TryFrom<IpAddr> for RouterPeerIpAddr {
 }
 
 #[derive(
-    Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq, JsonSchema, Hash,
+    Clone,
+    Copy,
+    Debug,
+    Deserialize,
+    Serialize,
+    PartialEq,
+    Eq,
+    JsonSchema,
+    Hash,
+    PartialOrd,
+    Ord,
 )]
+#[cfg_attr(any(test, feature = "testing"), derive(test_strategy::Arbitrary))]
 pub struct UplinkAddressConfig {
     /// The address to be used on the uplink.
     pub address: UplinkAddress,
@@ -329,9 +373,9 @@ pub struct PortConfig {
     /// Name of the port this config applies to.
     pub port: String,
     /// Port speed.
-    pub uplink_port_speed: v1::PortSpeed,
+    pub uplink_port_speed: v1::LinkSpeed,
     /// Port forward error correction type.
-    pub uplink_port_fec: Option<v1::PortFec>,
+    pub uplink_port_fec: Option<v1::LinkFec>,
     /// BGP peers on this port
     pub bgp_peers: Vec<BgpPeerConfig>,
     /// Whether or not to set autonegotiation
@@ -341,6 +385,24 @@ pub struct PortConfig {
     pub lldp: Option<v1::LldpPortConfig>,
     /// TX-EQ configuration for this port
     pub tx_eq: Option<v1::TxEqConfig>,
+}
+
+impl PortConfig {
+    /// Create a placeholder `PortConfig` for use in tests.
+    pub fn empty_for_tests(port: &str) -> Self {
+        Self {
+            routes: Vec::new(),
+            addresses: Vec::new(),
+            switch: v1::SwitchSlot::Switch0,
+            port: port.to_string(),
+            uplink_port_speed: v1::LinkSpeed::Speed100G,
+            uplink_port_fec: None,
+            bgp_peers: Vec::new(),
+            autoneg: false,
+            lldp: None,
+            tx_eq: None,
+        }
+    }
 }
 
 #[derive(Debug, thiserror::Error)]

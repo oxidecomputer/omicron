@@ -37,10 +37,18 @@ rack_id = "c19a698f-c6f9-4a17-ae30-20d711b8f7dc"
 # These are the DNS servers it should use.
 external_dns_servers = ["1.1.1.1", "9.9.9.9"]
 
+# Simulated/development deployments run "external" servers (e.g. webhook
+# receivers) on localhost, so external HTTP clients must be permitted to
+# connect to loopback addresses. This must never be enabled in production
+# configs.
+[deployment.external_http_clients]
+treat_loopback_as_external = "yes_for_test_purposes_only"
+
 [deployment.dropshot_external]
 # IP Address and TCP port on which to listen for the external API
 bind_address = "127.0.0.1:12220"
 default_request_body_max_bytes = 1048576
+compression = "gzip"
 # To have Nexus's external HTTP endpoint use TLS, uncomment the line below.  You
 # will also need to provide an initial TLS certificate during rack
 # initialization.  If you're using this config file, you're probably running a
@@ -97,7 +105,6 @@ metrics_producer_gc.period_secs = 60
 # them (on a sunny day).
 external_endpoints.period_secs = 60
 nat_cleanup.period_secs = 30
-bfd_manager.period_secs = 30
 # How frequently to check for a new inventory collection (made by any Nexus).
 # This is cheap, so we should check frequently.
 inventory.period_secs_load = 15
@@ -118,7 +125,6 @@ blueprints.period_secs_execute = 60
 blueprints.period_secs_rendezvous = 300
 blueprints.period_secs_collect_crdb_node_ids = 180
 blueprints.period_secs_load_reconfigurator_config = 5
-sync_service_zone_nat.period_secs = 30
 switch_port_settings_manager.period_secs = 30
 region_replacement.period_secs = 30
 region_replacement_driver.period_secs = 30
@@ -158,6 +164,10 @@ sp_ereport_ingester.period_secs = 30
 # Nexus).
 # This is cheap, so we should check frequently.
 fm.sitrep_load_period_secs = 15
+# How frequently to reload the fault management configuration from the
+# database. This is cheap, and operators expect config changes to take effect
+# promptly.
+fm.config_load_period_secs = 15
 # How frequently to run analysis from the current sitrep.
 fm.analysis_period_secs = 120
 # Sitrep GC, on the other hand, does not need to be activated very frequently,
@@ -165,6 +175,10 @@ fm.analysis_period_secs = 120
 # is activated every time the current sitrep changes. Periodic activations are
 # only necessary to ensure that it always happens eventually.
 fm.sitrep_gc_period_secs = 600
+# The sitrep history pruning task is explicitly activated when the sitrep
+# capacity in the database is reaching the limit. Periodic activations are
+# necessary only as a backstop, so they need not be frequent.
+fm.sitrep_history_prune_period_secs = 600
 # Updating database state to match the current sitrep is triggered whenever a
 # new sitrep is loaded, so we need not set the periodic activation interval
 # too high.
@@ -187,6 +201,7 @@ audit_log_timeout_incomplete.max_timed_out_per_activation = 1000
 audit_log_cleanup.period_secs = 600
 audit_log_cleanup.retention_days = 90
 audit_log_cleanup.max_deleted_per_activation = 10000
+populate_switch_ports.period_secs = 30
 
 [default_region_allocation_strategy]
 # allocate region on 3 random distinct zpools, on 3 random distinct sleds.

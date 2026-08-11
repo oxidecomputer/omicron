@@ -554,7 +554,7 @@ async fn test_multicast_with_floating_ip_basic(
             if group.state == "Active" {
                 Ok(())
             } else {
-                Err(CondCheckError::<String>::NotYet)
+                Err(CondCheckError::<String>::NotYet { status: None })
             }
         },
         &POLL_INTERVAL,
@@ -634,7 +634,7 @@ async fn test_multicast_with_floating_ip_basic(
             if has_floating_ip {
                 Ok(())
             } else {
-                Err(CondCheckError::<String>::NotYet)
+                Err(CondCheckError::<String>::NotYet { status: None })
             }
         },
         &Duration::from_millis(200),
@@ -691,7 +691,7 @@ async fn test_multicast_with_floating_ip_basic(
             if !still_has_floating_ip {
                 Ok(())
             } else {
-                Err(CondCheckError::<String>::NotYet)
+                Err(CondCheckError::<String>::NotYet { status: None })
             }
         },
         &Duration::from_millis(200),

@@ -11,6 +11,8 @@ use super::BlueprintZoneImageSource;
 use super::OmicronZoneExternalIp;
 use super::OmicronZoneNetworkResources;
 use super::OmicronZoneNic;
+use super::OperatorNexusConfig;
+use super::UpstreamNtpConfig;
 use super::blueprint_display::BpDiffState;
 use super::blueprint_display::KvList;
 use super::blueprint_display::KvPair;
@@ -22,6 +24,7 @@ use crate::external_api::physical_disk::PhysicalDiskState;
 use crate::external_api::sled::SledPolicy;
 use crate::external_api::sled::SledProvisionPolicy;
 use crate::external_api::sled::SledState;
+use crate::tuf_repo::TufRepoDescription;
 use chrono::DateTime;
 use chrono::TimeDelta;
 use chrono::Utc;
@@ -32,12 +35,10 @@ use omicron_common::address::IpRange;
 use omicron_common::address::Ipv4Range;
 use omicron_common::address::Ipv6Range;
 use omicron_common::address::Ipv6Subnet;
-use omicron_common::address::SLED_PREFIX;
+use omicron_common::address::SLED_PREFIX_LENGTH;
 use omicron_common::api::external::Generation;
-use omicron_common::api::external::TufRepoDescription;
 use omicron_common::disk::DiskIdentity;
 use omicron_common::policy::SINGLE_NODE_CLICKHOUSE_REDUNDANCY;
-use omicron_common::update::ArtifactId;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
@@ -57,6 +58,7 @@ use std::net::IpAddr;
 use std::sync::Arc;
 use strum::Display;
 use strum::IntoEnumIterator;
+use tufaceous_artifact::ZoneTags;
 
 /// Amount of time we're willing to let an MGS-managed update sit in an
 /// "impossible preconditions" state waiting for it to settle.
@@ -100,7 +102,7 @@ const MGS_UPDATE_SETTLE_TIMEOUT: TimeDelta = TimeDelta::minutes(5);
 /// - Each Omicron zone has at most one external IP and at most one vNIC.
 /// - A given external IP or vNIC is only associated with a single Omicron
 ///   zone.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PlanningInput {
     /// current target blueprint, used as the parent in the next planning run
     parent_blueprint: Arc<Blueprint>,
@@ -241,8 +243,14 @@ impl PlanningInput {
         &self.policy.planner_config
     }
 
+    pub fn external_service_networking_policy(
+        &self,
+    ) -> &ExternalServiceNetworkingPolicy {
+        &self.policy.external_service_networking
+    }
+
     pub fn external_ip_policy(&self) -> &ExternalIpPolicy {
-        &self.policy.external_ips
+        &self.policy.external_service_networking.external_ips
     }
 
     pub fn clickhouse_cluster_enabled(&self) -> bool {
@@ -719,7 +727,7 @@ impl From<CockroachDbClusterVersion> for CockroachDbPreserveDowngrade {
 }
 
 /// Describes a single disk already managed by the sled.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SledDisk {
     pub disk_identity: DiskIdentity,
     pub disk_id: PhysicalDiskUuid,
@@ -835,7 +843,7 @@ impl ZpoolFilter {
 }
 
 /// Describes the resources available on each sled for the planner
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SledResources {
     /// zpools (and their backing disks) on this sled
     ///
@@ -849,7 +857,7 @@ pub struct SledResources {
     ///
     /// (implicitly specifies the whole range of addresses that the planner can
     /// use for control plane components)
-    pub subnet: Ipv6Subnet<SLED_PREFIX>,
+    pub subnet: Ipv6Subnet<SLED_PREFIX_LENGTH>,
 }
 
 impl SledResources {
@@ -1100,11 +1108,14 @@ impl SledFilter {
 /// supposed to be part of the system and their individual [`SledPolicy`]s;
 /// however, those are tracked as a separate part of [`PlanningInput`] as each
 /// sled additionally has non-policy [`SledResources`] needed for planning.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Policy {
-    /// description of IP addresses for externally-visible control plane
-    /// services (e.g., external DNS, Nexus, boundary NTP)
-    pub external_ips: ExternalIpPolicy,
+    /// configuration for externally-visible control plane services (IP
+    /// pools, upstream NTP / DNS servers, Nexus TLS).
+    ///
+    /// Fleet-scoped today; tracked at #8255, #10574, #3732 for future
+    /// operator-updatable storage.
+    pub external_service_networking: ExternalServiceNetworkingPolicy,
 
     /// desired total number of deployed Boundary NTP zones
     pub target_boundary_ntp_zone_count: usize,
@@ -1188,7 +1199,7 @@ pub struct Policy {
 // NOTE: The fields of the struct are private and we manually implement
 // `Deserialize` to maintain invariants (e.g., that every `external_dns_ip` is
 // contained in one of the service pool ranges).
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ExternalIpPolicy {
     service_pool_ipv4_ranges: Vec<Ipv4Range>,
     service_pool_ipv6_ranges: Vec<Ipv6Range>,
@@ -1463,7 +1474,86 @@ pub enum ExternalIpPolicyError {
     ExternalDnsOutsideServiceIpPools(IpAddr),
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+/// Operator-supplied configuration for the rack's externally-facing service
+/// networking.
+///
+/// This includes the [`ExternalIpPolicy`], upstream NTP / DNS servers, and
+/// whether Nexus serves its API over TLS.
+///
+/// This is fleet-scoped today. It's lifted from the parent blueprint's
+/// boundary NTP and Nexus zones at `PlanningInput` construction time, since
+/// those values are still effectively set once at rack setup and never
+/// changed. Operator-updatable storage is tracked at
+/// <https://github.com/oxidecomputer/omicron/issues/8255> (external DNS
+/// configurability), <https://github.com/oxidecomputer/omicron/issues/10574>
+/// (per-service IP pool assignment), and
+/// <https://github.com/oxidecomputer/omicron/issues/3732> (upstream NTP /
+/// DNS server lists).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExternalServiceNetworkingPolicy {
+    /// IP pools available for Oxide-managed services, plus the addresses that
+    /// external DNS zones listen on.
+    pub external_ips: ExternalIpPolicy,
+
+    /// Upstream NTP servers used by boundary NTP zones as time sources.
+    pub upstream_ntp_servers: Vec<String>,
+
+    /// Optional resolver search-suffix for the boundary NTP zone, used when
+    /// `upstream_ntp_servers` contains bare (unqualified) hostnames.
+    //
+    // NOTE: This is always `None` in production today. There is no way to
+    // specify it at RSS-time, and the sled-agent hard-codes it to `None` when
+    // implementing the service plan.
+    //
+    // The fate of this is tracked by:
+    // https://github.com/oxidecomputer/omicron/issues/10588.
+    pub upstream_ntp_domain: Option<String>,
+
+    /// Operator-supplied upstream DNS servers. Used by boundary NTP zones to
+    /// resolve upstream NTP server names, and surfaced to Nexus zones as
+    /// their `external_dns_servers`.
+    pub upstream_dns_servers: Vec<IpAddr>,
+
+    /// Whether Nexus serves its external API over TLS.
+    pub nexus_external_tls: bool,
+}
+
+impl ExternalServiceNetworkingPolicy {
+    /// Construct an empty policy with no IP pools, no upstream servers, and
+    /// TLS disabled. Primarily for tests.
+    pub fn empty() -> Self {
+        Self {
+            external_ips: ExternalIpPolicy::empty(),
+            upstream_ntp_servers: Vec::new(),
+            upstream_ntp_domain: None,
+            upstream_dns_servers: Vec::new(),
+            nexus_external_tls: false,
+        }
+    }
+
+    /// Configuration values for constructing a new boundary NTP zone.
+    ///
+    /// Always returns a value. In real systems the underlying data is
+    /// populated at rack setup. In tests, the lists it contains may be empty,
+    /// but we still return a value so the callers have the same shape.
+    pub fn upstream_ntp_config(&self) -> UpstreamNtpConfig<'_> {
+        UpstreamNtpConfig {
+            ntp_servers: self.upstream_ntp_servers.as_slice(),
+            dns_servers: self.upstream_dns_servers.as_slice(),
+            domain: self.upstream_ntp_domain.as_deref(),
+        }
+    }
+
+    /// Configuration values for constructing a new Nexus zone.
+    pub fn operator_nexus_config(&self) -> OperatorNexusConfig<'_> {
+        OperatorNexusConfig {
+            external_tls: self.nexus_external_tls,
+            external_dns_servers: self.upstream_dns_servers.as_slice(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct OximeterReadPolicy {
     // We set the version as `u32` instead of `Generation` because we later need
     // to convert to `SqlU32` and the value of `Generation` is u64.
@@ -1538,23 +1628,13 @@ impl TargetReleaseDescription {
         match self {
             Self::Initial => Ok(BlueprintZoneImageSource::InstallDataset),
             Self::TufRepo(tuf_repo) => {
-                // We should have exactly one artifact for a given zone kind in
-                // every TUF repo; return an error if we have 0 or more than 1.
-                let mut matching_artifacts =
-                    tuf_repo.artifacts.iter().filter(|artifact| {
-                        zone_kind.is_control_plane_zone_artifact(&artifact.id)
-                    });
-                let artifact = matching_artifacts
-                    .next()
-                    .ok_or(TufRepoContentsError::MissingZoneKind(zone_kind))?;
-                if let Some(extra_artifact) = matching_artifacts.next() {
-                    return Err(
-                        TufRepoContentsError::MultipleArtifactsSameZoneKind {
-                            artifact1: artifact.id.clone(),
-                            artifact2: extra_artifact.id.clone(),
-                        },
-                    );
-                }
+                let tags = ZoneTags {
+                    zone_name: zone_kind.artifact_id_name().to_owned(),
+                };
+                let artifact =
+                    tuf_repo.artifacts.get_only(&tags.into()).map_err(
+                        |source| TufRepoContentsError { zone_kind, source },
+                    )?;
                 Ok(BlueprintZoneImageSource::from_available_artifact(artifact))
             }
         }
@@ -1562,17 +1642,12 @@ impl TargetReleaseDescription {
 }
 
 #[derive(Debug, thiserror::Error)]
-pub enum TufRepoContentsError {
-    #[error("TUF repo is missing an artifact for zone kind {0:?}")]
-    MissingZoneKind(ZoneKind),
-    #[error(
-        "TUF repo contains 2 or more artifacts for the same zone kind: \
-         {artifact1:?}, {artifact2:?}"
-    )]
-    MultipleArtifactsSameZoneKind {
-        artifact1: ArtifactId,
-        artifact2: ArtifactId,
-    },
+#[error(
+    "TUF repo does not contain exactly 1 artifact for zone kind {zone_kind:?}"
+)]
+pub struct TufRepoContentsError {
+    zone_kind: ZoneKind,
+    source: tufaceous_artifact::artifact_set::GetError,
 }
 
 /// Where oximeter should read from
@@ -1610,7 +1685,7 @@ impl OximeterReadMode {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ClickhousePolicy {
     pub version: u32,
     pub mode: ClickhouseMode,
@@ -1618,7 +1693,7 @@ pub struct ClickhousePolicy {
 }
 
 /// How to deploy clickhouse nodes
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case", tag = "type", content = "value")]
 pub enum ClickhouseMode {
     SingleNodeOnly,
@@ -1665,7 +1740,7 @@ impl ClickhouseMode {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SledDetails {
     /// current sled policy
     pub policy: SledPolicy,

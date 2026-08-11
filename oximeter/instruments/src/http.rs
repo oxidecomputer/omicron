@@ -4,8 +4,6 @@
 
 //! Instrumentation tools for HTTP services.
 
-// Copyright 2024 Oxide Computer Company
-
 use dropshot::{
     HttpResponse, HttpResponseError, RequestContext, ServerContext,
 };

@@ -9,15 +9,10 @@ use super::http_entrypoints::api as http_api;
 use super::sled_agent::SledAgent;
 use super::storage::PantryServer;
 use crate::nexus::{ConvertInto, NexusClient};
-use crate::rack_setup::SledConfig;
-use crate::rack_setup::service::{PlannedSledDescription, ServicePlan};
-use crate::rack_setup::{
-    from_ipaddr_to_external_floating_ip,
-    from_sockaddr_to_external_floating_addr,
-};
 use crate::sim::SimulatedUpstairs;
 use anyhow::{Context, anyhow, bail};
 use bootstrap_agent_lockstep_types::RecoverySiloConfig;
+use bootstrap_agent_lockstep_types::ServiceIpPoolConfig;
 use crucible_agent_client::types::State as RegionState;
 use iddqd::IdOrdMap;
 use illumos_utils::zpool::ZpoolName;
@@ -27,8 +22,8 @@ use internal_dns_types::names::ServiceName;
 use nexus_client::types as NexusTypes;
 use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
 use nexus_lockstep_client::types::{
-    AllowedSourceIps, CrucibleDatasetCreateRequest, IpRange, Ipv4Range,
-    Ipv6Range, RackInitializationRequest, RackNetworkConfig,
+    AllowedSourceIps, CrucibleDatasetCreateRequest, RackInitializationRequest,
+    RackNetworkConfig,
 };
 use nexus_types::deployment::{
     BlueprintPhysicalDiskConfig, BlueprintPhysicalDiskDisposition,
@@ -37,8 +32,10 @@ use nexus_types::deployment::{
 use nexus_types::deployment::{
     BlueprintZoneConfig, BlueprintZoneDisposition, BlueprintZoneType,
 };
-use nexus_types::internal_api::params::ExternalPortDiscovery;
 use omicron_common::FileKv;
+use omicron_common::address::IpRange;
+use omicron_common::address::Ipv4Range;
+use omicron_common::address::Ipv6Range;
 use omicron_common::address::NEXUS_OPTE_IPV4_SUBNET;
 use omicron_common::address::{DNS_OPTE_IPV4_SUBNET, Ipv6Subnet};
 use omicron_common::api::external::Generation;
@@ -57,11 +54,17 @@ use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use oxnet::Ipv6Net;
 use rand::seq::IndexedRandom;
+use sled_agent_rack_setup::{
+    PlannedSledDescription, ServicePlan, SledConfig,
+    from_ipaddr_to_external_floating_ip,
+    from_sockaddr_to_external_floating_addr,
+};
+use sled_agent_types::early_networking::PortConfig;
+use sled_agent_types::early_networking::UplinkPorts;
 use sled_agent_types::inventory::NetworkInterface;
 use sled_agent_types::inventory::NetworkInterfaceKind;
 use sled_agent_types::inventory::OmicronZoneDataset;
 use slog::{Drain, Logger, info};
-use std::collections::HashMap;
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
@@ -70,6 +73,11 @@ use std::net::SocketAddrV6;
 use std::sync::Arc;
 use transient_dns_server::TransientDnsServer;
 use uuid::Uuid;
+
+// Well-known service IP pool names the simulated sled-agent creates, mirroring
+// what real rack setup produces.
+const SERVICE_POOL_IPV4_NAME: &str = "oxide-service-pool-v4";
+const SERVICE_POOL_IPV6_NAME: &str = "oxide-service-pool-v6";
 
 /// Packages up a [`SledAgent`], running the sled agent API under a Dropshot
 /// server wired up to the sled agent
@@ -436,7 +444,8 @@ pub async fn run_standalone_server(
         })
         .expect("freshly generated zone IDs are unique");
 
-    let mut internal_services_ip_pool_ranges = vec![];
+    let mut internal_services_ipv4_ranges = vec![];
+    let mut internal_services_ipv6_ranges = vec![];
     let mut macs = MacAddr::iter_system();
     if let Some(nexus_external_addr) = rss_args.nexus_external_addr {
         let external_ip = nexus_external_addr.ip();
@@ -486,14 +495,16 @@ pub async fn run_standalone_server(
             })
             .expect("freshly generated zone IDs are unique");
 
-        internal_services_ip_pool_ranges.push(match external_ip {
+        match external_ip {
             IpAddr::V4(addr) => {
-                IpRange::V4(Ipv4Range { first: addr, last: addr })
+                internal_services_ipv4_ranges
+                    .push(IpRange::V4(Ipv4Range { first: addr, last: addr }));
             }
             IpAddr::V6(addr) => {
-                IpRange::V6(Ipv6Range { first: addr, last: addr })
+                internal_services_ipv6_ranges
+                    .push(IpRange::V6(Ipv6Range { first: addr, last: addr }));
             }
-        });
+        }
     }
 
     if let Some(external_dns_internal_addr) =
@@ -539,7 +550,7 @@ pub async fn run_standalone_server(
             })
             .expect("freshly generated zone IDs are unique");
 
-        internal_services_ip_pool_ranges
+        internal_services_ipv6_ranges
             .push(IpRange::V6(Ipv6Range { first: ip, last: ip }));
     }
 
@@ -586,8 +597,8 @@ pub async fn run_standalone_server(
     };
 
     let blueprint = {
-        let omicron_physical_disks_config =
-            server.sled_agent.omicron_physical_disks_list()?;
+        let sled_config =
+            server.sled_agent.omicron_sled_config().unwrap_or_default();
         let underlay_address = match server.http_server.local_addr() {
             SocketAddr::V4(_) => {
                 bail!("sled_agent_ip must be v6")
@@ -614,7 +625,7 @@ pub async fn run_standalone_server(
             subnet,
             last_allocated_ip_subnet_offset,
             config: SledConfig {
-                disks: omicron_physical_disks_config
+                disks: sled_config
                     .disks
                     .into_iter()
                     .map(|config| BlueprintPhysicalDiskConfig {
@@ -625,7 +636,11 @@ pub async fn run_standalone_server(
                         pool_id: config.pool_id,
                     })
                     .collect(),
-                datasets: server.sled_agent.datasets_config_list()?.datasets,
+                datasets: sled_config
+                    .datasets
+                    .into_iter()
+                    .map(|config| (config.id, config))
+                    .collect(),
                 zones,
             },
         });
@@ -641,27 +656,54 @@ pub async fn run_standalone_server(
             .context("could not construct initial blueprint")?
     };
 
+    let mut service_ip_pools = IdOrdMap::new();
+    if let Ok(service_ipv4_pool) = ServiceIpPoolConfig::new(
+        SERVICE_POOL_IPV4_NAME.parse().unwrap(),
+        String::from("IPv4 IP Pool for Oxide Services"),
+        internal_services_ipv4_ranges,
+    ) {
+        if service_ip_pools.insert_unique(service_ipv4_pool).is_err() {
+            anyhow::bail!(
+                "duplicate IPv4 service pool name: '{SERVICE_POOL_IPV4_NAME}'"
+            );
+        }
+    }
+    if let Ok(service_ipv6_pool) = ServiceIpPoolConfig::new(
+        SERVICE_POOL_IPV6_NAME.parse().unwrap(),
+        String::from("IPv6 IP Pool for Oxide Services"),
+        internal_services_ipv6_ranges,
+    ) {
+        if service_ip_pools.insert_unique(service_ipv6_pool).is_err() {
+            anyhow::bail!(
+                "duplicate IPv6 service pool name: '{SERVICE_POOL_IPV6_NAME}'"
+            );
+        }
+    }
+
     let rack_init_request = RackInitializationRequest {
         blueprint,
         physical_disks,
         zpools,
         crucible_datasets,
-        internal_services_ip_pool_ranges,
+        service_ip_pools,
         certs,
         internal_dns_zone_config: dns_config,
         external_dns_zone_name: DNS_ZONE_EXTERNAL_TESTING.to_owned(),
         recovery_silo,
-        external_port_count: ExternalPortDiscovery::Static(HashMap::new()),
         rack_network_config: RackNetworkConfig {
             rack_subnet: Ipv6Net::host_net(Ipv6Addr::LOCALHOST),
             infra_ip_first: IpAddr::V4(Ipv4Addr::LOCALHOST),
             infra_ip_last: IpAddr::V4(Ipv4Addr::LOCALHOST),
-            ports: Vec::new(),
+            // `UplinkPorts` must be non-empty; the simulated rack doesn't
+            // exercise uplinks, so use a single placeholder port.
+            ports: UplinkPorts::new(vec![PortConfig::empty_for_tests("qsfp0")])
+                .expect("placeholder port list is non-empty"),
             bgp: Vec::new(),
             bfd: Vec::new(),
         },
         allowed_source_ips: AllowedSourceIps::Any,
         initial_trust_quorum_configuration: None,
+        external_jumbo_frames_opt_in_enabled: false,
     };
 
     let mut nexus_lockstep_address = config.nexus_address;

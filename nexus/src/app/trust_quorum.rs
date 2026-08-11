@@ -10,7 +10,7 @@ use nexus_types::trust_quorum::{
     IsLrtqUpgrade, ProposedTrustQuorumConfig, TrustQuorumConfig,
 };
 use omicron_common::api::external::Error;
-use omicron_uuid_kinds::{GenericUuid, RackUuid, SledUuid};
+use omicron_uuid_kinds::RackUuid;
 use sled_hardware_types::BaseboardId;
 use std::collections::BTreeSet;
 use std::time::Duration;
@@ -28,7 +28,7 @@ impl super::Nexus {
         authz_tq: authz::TrustQuorumConfig,
         new_sleds: BTreeSet<BaseboardId>,
     ) -> Result<TrustQuorumConfig, Error> {
-        let rack_id = RackUuid::from_untyped_uuid(authz_tq.rack().id());
+        let rack_id = authz_tq.rack().id();
         let (latest_committed_config, latest_epoch) = self
             .tq_load_latest_possible_committed_config(opctx, authz_tq.clone())
             .await?;
@@ -90,16 +90,10 @@ impl super::Nexus {
     pub(crate) async fn tq_remove_sled(
         &self,
         opctx: &OpContext,
-        sled_id: SledUuid,
+        rack_id: RackUuid,
+        sled_to_remove: BaseboardId,
     ) -> Result<Epoch, Error> {
-        // Look up the sled to get its rack_id and baseboard_id
-        let (.., sled) = self.sled_lookup(opctx, &sled_id)?.fetch().await?;
-        let rack_id = RackUuid::from_untyped_uuid(sled.rack_id);
         let authz_tq = authz::TrustQuorumConfig::for_rack_id(rack_id);
-        let sled_to_remove = BaseboardId {
-            part_number: sled.part_number().to_string(),
-            serial_number: sled.serial_number().to_string(),
-        };
 
         let (latest_committed_config, latest_epoch) = self
             .tq_load_latest_possible_committed_config(opctx, authz_tq.clone())
@@ -203,7 +197,7 @@ impl super::Nexus {
         opctx: &OpContext,
     ) -> Result<Epoch, Error> {
         // We are only operating on a single rack here.
-        let rack_id = RackUuid::from_untyped_uuid(self.rack_id());
+        let rack_id = self.rack_id();
         let authz_tq = authz::TrustQuorumConfig::for_rack_id(rack_id);
 
         // Let's first see if a configuration exists.
@@ -315,7 +309,7 @@ impl super::Nexus {
         epoch: Epoch,
         coordinator: &BaseboardId,
     ) -> Result<sled_agent_client::Client, Error> {
-        let rack_id = RackUuid::from_untyped_uuid(authz_tq.rack().id());
+        let rack_id = authz_tq.rack().id();
         // Retrieve the sled for the coordinator
         let Some(sled) = self
             .db_datastore

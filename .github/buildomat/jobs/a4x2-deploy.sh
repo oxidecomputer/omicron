@@ -1,8 +1,11 @@
 #!/bin/bash
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
 #:
 #: name = "a4x2-deploy"
 #: variety = "basic"
-#: target = "lab-2.0-opte-0.31"
+#: target = "lab-3.0-opte-0.40"
 #: output_rules = [
 #:	"/out/falcon/*.log",
 #:	"/out/falcon/*.err",
@@ -129,7 +132,7 @@ chmod +x a4x2
 # Install falcon base images
 #
 export FALCON_DATASET=cpool/falcon
-images="debian-11.0_0 helios-2.0_0"
+images="debian-11.0_0 helios-3.0_0"
 for img in $images; do
     file=$img.raw.xz
     curl -OL http://catacomb.eng.oxide.computer:12346/falcon/$file

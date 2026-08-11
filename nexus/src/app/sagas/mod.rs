@@ -10,6 +10,12 @@
 // easier it will be to test, version, and update in deployed systems.
 
 use crate::saga_interface::SagaContext;
+use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db::DataStore;
+use omicron_common::api::external::Error;
+use omicron_uuid_kinds::SledUuid;
+use omicron_uuid_kinds::ZpoolUuid;
+use progenitor_extras::retry::GoneCheckResult;
 use serde::Serialize;
 use std::sync::Arc;
 use std::sync::LazyLock;
@@ -526,4 +532,41 @@ fn subsaga_append<S: Serialize>(
     ));
 
     Ok(())
+}
+
+/// Returns a GoneCheckResult corresponding to if a sled is still exists and is
+/// in-service. Will return an error if the associated query fails.
+async fn sled_out_of_service_gone_check(
+    datastore: &DataStore,
+    opctx: &OpContext,
+    sled_id: SledUuid,
+) -> Result<GoneCheckResult, Error> {
+    datastore.check_sled_in_service(&opctx, sled_id).await.map(
+        |sled_in_service| {
+            if sled_in_service {
+                GoneCheckResult::StillAvailable
+            } else {
+                GoneCheckResult::Gone
+            }
+        },
+    )
+}
+
+/// Returns a GoneCheckResult corresponding to if a zpool is still exists and
+/// the backing physical disk is still in-service. Will return an error if the
+/// associated query fails.
+async fn zpool_out_of_service_gone_check(
+    datastore: &DataStore,
+    opctx: &OpContext,
+    zpool_id: ZpoolUuid,
+) -> Result<GoneCheckResult, Error> {
+    datastore.check_zpool_in_service(&opctx, zpool_id).await.map(
+        |zpool_in_service| {
+            if zpool_in_service {
+                GoneCheckResult::StillAvailable
+            } else {
+                GoneCheckResult::Gone
+            }
+        },
+    )
 }

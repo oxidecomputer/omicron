@@ -4,8 +4,6 @@
 
 //! Tools for interacting with the control plane telemetry database.
 
-// Copyright 2025 Oxide Computer Company
-
 use crate::query::StringFieldSelector;
 use anyhow::Context as _;
 use chrono::DateTime;
@@ -78,13 +76,6 @@ pub enum Error {
     /// An error interacting with the telemetry database
     #[error("Error interacting with telemetry database: {0}")]
     Database(String),
-
-    /// A schema provided when collecting samples did not match the expected schema
-    #[error("Schema mismatch for timeseries '{0}'", expected.timeseries_name)]
-    SchemaMismatch {
-        expected: Box<TimeseriesSchema>,
-        actual: Box<TimeseriesSchema>,
-    },
 
     #[error("Timeseries not found for: {0}")]
     TimeseriesNotFound(String),

@@ -48,7 +48,7 @@ impl std::fmt::Display for IpRangeConversionError {
 impl std::error::Error for IpRangeConversionError {}
 
 impl_enum_type!(
-    IpPoolReservationTypeEnum:
+    IpPoolAssignmentEnum:
 
     #[derive(
         AsExpression,
@@ -62,17 +62,17 @@ impl_enum_type!(
         serde::Deserialize,
         serde::Serialize,
     )]
-    pub enum IpPoolReservationType;
+    pub enum IpPoolAssignment;
 
-    ExternalSilos => b"external_silos"
-    OxideInternal => b"oxide_internal"
+    Silos => b"silos"
+    SystemServices => b"system_services"
 );
 
-impl ::std::fmt::Display for IpPoolReservationType {
+impl ::std::fmt::Display for IpPoolAssignment {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let s = match self {
-            IpPoolReservationType::ExternalSilos => "external_silos",
-            IpPoolReservationType::OxideInternal => "oxide_internal",
+            IpPoolAssignment::Silos => "silos",
+            IpPoolAssignment::SystemServices => "system_services",
         };
         f.write_str(s)
     }
@@ -145,6 +145,26 @@ impl From<IpPoolType> for ip_pool_types::IpPoolType {
     }
 }
 
+impl From<ip_pool_types::IpPoolAssignment> for IpPoolAssignment {
+    fn from(value: ip_pool_types::IpPoolAssignment) -> Self {
+        match value {
+            ip_pool_types::IpPoolAssignment::Silos => Self::Silos,
+            ip_pool_types::IpPoolAssignment::SystemServices => {
+                Self::SystemServices
+            }
+        }
+    }
+}
+
+impl From<IpPoolAssignment> for ip_pool_types::IpPoolAssignment {
+    fn from(value: IpPoolAssignment) -> Self {
+        match value {
+            IpPoolAssignment::Silos => Self::Silos,
+            IpPoolAssignment::SystemServices => Self::SystemServices,
+        }
+    }
+}
+
 /// An IP Pool is a collection of IP addresses external to the rack.
 ///
 /// IP pools can be external or internal. External IP pools can be associated
@@ -163,8 +183,8 @@ pub struct IpPool {
     /// the contained ranges.
     pub rcgen: i64,
 
-    /// Indicates what the pool is reserved for.
-    pub reservation_type: IpPoolReservationType,
+    /// Indicates what the pool is assigned for.
+    pub assignment: IpPoolAssignment,
     /// Pool type for unicast (default) vs multicast pools.
     pub pool_type: IpPoolType,
 }
@@ -176,7 +196,7 @@ impl IpPool {
     pub fn new(
         pool_identity: &external::IdentityMetadataCreateParams,
         ip_version: IpVersion,
-        reservation_type: IpPoolReservationType,
+        assignment: IpPoolAssignment,
     ) -> Self {
         Self {
             identity: IpPoolIdentity::new(
@@ -186,7 +206,7 @@ impl IpPool {
             ip_version,
             pool_type: IpPoolType::Unicast,
             rcgen: 0,
-            reservation_type,
+            assignment,
         }
     }
 
@@ -194,7 +214,7 @@ impl IpPool {
     pub fn new_multicast(
         pool_identity: &external::IdentityMetadataCreateParams,
         ip_version: IpVersion,
-        reservation_type: IpPoolReservationType,
+        assignment: IpPoolAssignment,
     ) -> Self {
         Self {
             identity: IpPoolIdentity::new(
@@ -204,36 +224,35 @@ impl IpPool {
             ip_version,
             pool_type: IpPoolType::Multicast,
             rcgen: 0,
-            reservation_type,
+            assignment,
         }
     }
 
     /// Create a new IPv4 IP Pool.
     pub fn new_v4(
         pool_identity: &external::IdentityMetadataCreateParams,
-        reservation_type: IpPoolReservationType,
+        assignment: IpPoolAssignment,
     ) -> Self {
-        Self::new(pool_identity, IpVersion::V4, reservation_type)
+        Self::new(pool_identity, IpVersion::V4, assignment)
     }
 
     /// Create a new IPv6 IP Pool.
     pub fn new_v6(
         pool_identity: &external::IdentityMetadataCreateParams,
-        reservation_type: IpPoolReservationType,
+        assignment: IpPoolAssignment,
     ) -> Self {
-        Self::new(pool_identity, IpVersion::V6, reservation_type)
+        Self::new(pool_identity, IpVersion::V6, assignment)
     }
 }
 
 impl From<IpPool> for ip_pool_types::IpPool {
     fn from(pool: IpPool) -> Self {
         let identity = pool.identity();
-        let pool_type = pool.pool_type;
-
         Self {
             identity,
-            pool_type: pool_type.into(),
+            pool_type: pool.pool_type.into(),
             ip_version: pool.ip_version.into(),
+            assignment: pool.assignment.into(),
         }
     }
 }

@@ -309,9 +309,9 @@ pub struct PortConfig {
     /// Nmae of the port this config applies to.
     pub port: String,
     /// Port speed.
-    pub uplink_port_speed: v1::PortSpeed,
+    pub uplink_port_speed: v1::LinkSpeed,
     /// Port forward error correction type.
-    pub uplink_port_fec: Option<v1::PortFec>,
+    pub uplink_port_fec: Option<v1::LinkFec>,
     /// BGP peers on this port
     pub bgp_peers: Vec<BgpPeerConfig>,
     /// Whether or not to set autonegotiation
@@ -371,8 +371,17 @@ pub struct BgpConfig {
     pub max_paths: MaxPathConfig,
 }
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, Serialize)]
-pub struct MaxPathConfig(u8);
+#[derive(
+    Debug, Copy, Clone, Eq, PartialEq, Hash, Serialize, daft::Diffable,
+)]
+#[cfg_attr(any(test, feature = "testing"), derive(test_strategy::Arbitrary))]
+pub struct MaxPathConfig(
+    #[cfg_attr(
+        any(test, feature = "testing"),
+        strategy(MaxPathConfig::MIN..=MaxPathConfig::MAX)
+    )]
+    u8,
+);
 
 impl MaxPathConfig {
     const MIN: u8 = 1;
@@ -388,6 +397,17 @@ impl MaxPathConfig {
         }
 
         Ok(Self(v))
+    }
+
+    pub fn new_saturating(v: NonZeroU8) -> Self {
+        let mut v = v.get();
+        // We know v >= Self::MIN because it's from a NonZeroU8. Explicitly
+        // document that via an assertion.
+        debug_assert!(v >= Self::MIN);
+        if v > Self::MAX {
+            v = Self::MAX;
+        }
+        Self(v)
     }
 
     pub fn as_u8(&self) -> u8 {
@@ -459,7 +479,14 @@ pub enum MaxPathConfigError {
 #[derive(
     Debug, Copy, Clone, Eq, PartialEq, Hash, PartialOrd, Ord, Serialize,
 )]
-pub struct RouterLifetimeConfig(u16);
+#[cfg_attr(any(test, feature = "testing"), derive(test_strategy::Arbitrary))]
+pub struct RouterLifetimeConfig(
+    #[cfg_attr(
+        any(test, feature = "testing"),
+        strategy(0..=RouterLifetimeConfig::MAX)
+    )]
+    u16,
+);
 
 impl RouterLifetimeConfig {
     /// Default router lifetime: 0 seconds (disabled)

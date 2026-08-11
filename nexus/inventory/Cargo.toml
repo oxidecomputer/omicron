@@ -3,9 +3,13 @@ name = "nexus-inventory"
 version = "0.1.0"
 edition.workspace = true
 license = "MPL-2.0"
+build = "build.rs"
 
 [lints]
 workspace = true
+
+[build-dependencies]
+omicron-rpaths.workspace = true
 
 [dependencies]
 anyhow.workspace = true
@@ -45,6 +49,10 @@ typed-rng.workspace = true
 uuid.workspace = true
 omicron-cockroach-metrics.workspace = true
 omicron-workspace-hack.workspace = true
+
+[target.'cfg(target_os = "illumos")'.dependencies]
+# See omicron-rpaths for more about the "fmd-adm-sys" dependency.
+fmd-adm-sys.workspace = true
 
 [dev-dependencies]
 expectorate.workspace = true

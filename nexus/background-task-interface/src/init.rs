@@ -15,7 +15,6 @@ pub struct BackgroundTasks {
     pub task_metrics_producer_gc: Activator,
     pub task_external_endpoints: Activator,
     pub task_nat_cleanup: Activator,
-    pub task_bfd_manager: Activator,
     pub task_inventory_collection: Activator,
     pub task_inventory_loader: Activator,
     pub task_support_bundle_collector: Activator,
@@ -27,7 +26,6 @@ pub struct BackgroundTasks {
     pub task_blueprint_executor: Activator,
     pub task_blueprint_rendezvous: Activator,
     pub task_crdb_node_id_collector: Activator,
-    pub task_service_zone_nat_tracker: Activator,
     pub task_switch_port_settings_manager: Activator,
     pub task_v2p_manager: Activator,
     pub task_region_replacement: Activator,
@@ -54,14 +52,17 @@ pub struct BackgroundTasks {
     pub task_sp_ereport_ingester: Activator,
     pub task_reconfigurator_config_loader: Activator,
     pub task_fm_analysis: Activator,
+    pub task_fm_config_loader: Activator,
     pub task_fm_rendezvous: Activator,
     pub task_fm_sitrep_loader: Activator,
     pub task_fm_sitrep_gc: Activator,
+    pub task_fm_sitrep_history_pruner: Activator,
     pub task_probe_distributor: Activator,
     pub task_multicast_reconciler: Activator,
     pub task_trust_quorum_manager: Activator,
     pub task_attached_subnet_manager: Activator,
     pub task_session_cleanup: Activator,
+    pub task_populate_switch_ports: Activator,
 
     // Handles to activate background tasks that do not get used by Nexus
     // at-large.  These background tasks are implementation details as far as

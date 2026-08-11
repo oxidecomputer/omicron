@@ -17,6 +17,7 @@ use nexus_db_model::{
 };
 use nexus_db_queries::authz;
 use nexus_db_queries::db::datastore::ExternalSubnetBeginOpResult;
+use nexus_db_queries::db::datastore::sled::SledReservationReason;
 use nexus_db_queries::{authn, context::OpContext, db, db::DataStore};
 use nexus_types::saga::saga_action_failed;
 use omicron_common::api::external::{Error, IpVersion, NameOrId};
@@ -46,6 +47,7 @@ pub async fn reserve_vmm_resources(
     ncpus: u32,
     guest_memory: ByteCount,
     constraints: SledReservationConstraints,
+    reservation_reason: SledReservationReason,
 ) -> Result<SledResourceVmm, ActionError> {
     // ALLOCATION POLICY
     //
@@ -77,6 +79,7 @@ pub async fn reserve_vmm_resources(
             propolis_id,
             resources,
             constraints,
+            reservation_reason,
         )
         .await
         .map_err(saga_action_failed)?;

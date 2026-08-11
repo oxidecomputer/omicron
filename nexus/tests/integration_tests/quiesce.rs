@@ -83,7 +83,9 @@ async fn test_quiesce(cptestctx: &ControlPlaneTestContext) {
                          test started"
                     )))
                 }
-                QuiesceState::Running => Err(CondCheckError::NotYet),
+                QuiesceState::Running => {
+                    Err(CondCheckError::NotYet { status: None })
+                }
                 QuiesceState::DrainingSagas { .. }
                 | QuiesceState::DrainingDb { .. }
                 | QuiesceState::RecordingQuiesce { .. }

@@ -31,6 +31,7 @@
 //! [`app::webhook`]: crate::app::webhook
 
 use crate::app::background::BackgroundTask;
+use crate::app::external_client::ExternalHttpClient;
 use crate::app::webhook::ReceiverClient;
 use futures::future::BoxFuture;
 use nexus_db_queries::context::OpContext;
@@ -102,7 +103,7 @@ use std::sync::Arc;
 pub struct WebhookDeliverator {
     datastore: Arc<DataStore>,
     nexus_id: OmicronZoneUuid,
-    client: reqwest::Client,
+    client: ExternalHttpClient,
     cfg: DeliveryConfig,
 }
 
@@ -135,7 +136,7 @@ impl WebhookDeliverator {
         datastore: Arc<DataStore>,
         cfg: DeliveryConfig,
         nexus_id: OmicronZoneUuid,
-        client: reqwest::Client,
+        client: ExternalHttpClient,
     ) -> Self {
         Self { datastore, nexus_id, cfg, client }
     }
@@ -233,7 +234,9 @@ impl WebhookDeliverator {
             ..Default::default()
         };
 
-        for DeliveryAndEvent { delivery, alert_class, event } in deliveries {
+        for DeliveryAndEvent { delivery, alert_class, alert_version, event } in
+            deliveries
+        {
             let attempt = (*delivery.attempts) + 1;
             let delivery_id = WebhookDeliveryUuid::from(delivery.id);
             match self
@@ -301,7 +304,13 @@ impl WebhookDeliverator {
 
             // okay, actually do the thing...
             let delivery_attempt = match client
-                .send_delivery_request(opctx, &delivery, alert_class, &event)
+                .send_delivery_request(
+                    opctx,
+                    &delivery,
+                    alert_class,
+                    alert_version.into(),
+                    &event,
+                )
                 .await
             {
                 Ok(delivery) => delivery,

@@ -3,13 +3,17 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 mod artifacts;
+mod bgp_auth_keys;
 mod bootstrap_addrs;
+mod commission;
 mod config;
 mod context;
 mod helpers;
 mod http_entrypoints;
+mod http_helpers;
 mod installinator_progress;
 pub mod mgs;
+mod multirack_config;
 mod nexus_proxy;
 mod preflight_check;
 mod rss_config;
@@ -21,27 +25,31 @@ use artifacts::{
     WicketdArtifactStore, WicketdInstallinatorApiImpl,
     WicketdInstallinatorContext,
 };
-use bootstrap_addrs::BootstrapPeers;
+use bootstrap_addrs::BootstrapPeersFromDdm;
 pub use config::Config;
+pub(crate) use context::RssOrMultirackJoinConfigCommon;
 pub(crate) use context::ServerContext;
 use display_error_chain::DisplayErrorChain;
 use dropshot::{ConfigDropshot, HandlerTaskMode, HttpServer};
+use helpers::SpIdentifierDisplay;
 pub use installinator_progress::{IprUpdateTracker, RunningUpdateState};
 use internal_dns_resolver::Resolver;
 use mgs::make_mgs_client;
 pub(crate) use mgs::{MgsHandle, MgsManager};
 use nexus_proxy::NexusTcpProxy;
 use omicron_common::FileKv;
-use omicron_common::address::{AZ_PREFIX, Ipv6Subnet};
+use omicron_common::address::{AZ_PREFIX_LENGTH, Ipv6Subnet};
+use oxide_update_engine_types::spec::merge_anyhow_list;
 use preflight_check::PreflightCheckerHandler;
-use sled_hardware_types::Baseboard;
-use slog::{Drain, debug, error, o};
+use sled_hardware_types::BaseboardId;
+use slog::{Drain, debug, error, info, o};
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 use std::{
     net::{SocketAddr, SocketAddrV6},
     sync::Arc,
 };
+use tokio::task::JoinHandle;
 use transceivers::Manager as TransceiverManager;
 pub use update_tracker::{StartUpdateError, UpdateTracker};
 use wicketd_client::ClientInfo as _;
@@ -50,15 +58,18 @@ use wicketd_client::ClientInfo as _;
 pub struct Args {
     pub address: SocketAddrV6,
     pub artifact_address: SocketAddrV6,
+    pub commission_address: SocketAddrV6,
     pub mgs_address: SocketAddrV6,
     pub nexus_proxy_address: SocketAddrV6,
-    pub baseboard: Option<Baseboard>,
-    pub rack_subnet: Option<Ipv6Subnet<AZ_PREFIX>>,
+    pub baseboard_id: BaseboardId,
+    pub rack_subnet: Option<Ipv6Subnet<AZ_PREFIX_LENGTH>>,
+    pub bootstrap_agent_lockstep_address: SocketAddrV6,
 }
 
 pub struct SmfConfigValues {
     pub address: SocketAddrV6,
-    pub rack_subnet: Option<Ipv6Subnet<AZ_PREFIX>>,
+    pub commission_address: SocketAddrV6,
+    pub rack_subnet: Option<Ipv6Subnet<AZ_PREFIX_LENGTH>>,
 }
 
 impl SmfConfigValues {
@@ -69,6 +80,7 @@ impl SmfConfigValues {
         const CONFIG_PG: &str = "config";
         const PROP_RACK_SUBNET: &str = "rack-subnet";
         const PROP_ADDRESS: &str = "address";
+        const PROP_COMMISSION_ADDRESS: &str = "commission-address";
 
         let scf = ScfHandle::new()?;
         let instance = scf.self_instance()?;
@@ -99,7 +111,18 @@ impl SmfConfigValues {
             })?
         };
 
-        Ok(Self { address, rack_subnet })
+        let commission_address = {
+            let commission_address =
+                config.value_as_string(PROP_COMMISSION_ADDRESS)?;
+            commission_address.parse().with_context(|| {
+                format!(
+                    "failed to parse {CONFIG_PG}/{PROP_COMMISSION_ADDRESS} \
+                     value {commission_address:?} as a socket address"
+                )
+            })?
+        };
+
+        Ok(Self { address, commission_address, rack_subnet })
     }
 
     #[cfg(not(target_os = "illumos"))]
@@ -109,12 +132,16 @@ impl SmfConfigValues {
 }
 
 pub struct Server {
-    pub wicketd_server: HttpServer<ServerContext>,
+    pub wicketd_server: HttpServer<Arc<ServerContext>>,
+    pub commission_server: HttpServer<Arc<ServerContext>>,
     pub installinator_server: HttpServer<WicketdInstallinatorContext>,
     pub artifact_store: WicketdArtifactStore,
     pub update_tracker: Arc<UpdateTracker>,
     pub ipr_update_tracker: IprUpdateTracker,
     nexus_tcp_proxy: NexusTcpProxy,
+    // The local switch ID resolver task owns an Arc<ServerContext>, and letting
+    // it outlive the server would keep the context alive.
+    local_switch_id_resolver: JoinHandle<()>,
 }
 
 impl Server {
@@ -136,6 +163,7 @@ impl Server {
             default_request_body_max_bytes: 8 * 1024 * 1024,
             default_handler_task_mode: HandlerTaskMode::Detached,
             log_headers: vec![],
+            compression: dropshot::CompressionConfig::None,
         };
 
         let mgs_manager = MgsManager::new(&log, args.mgs_address);
@@ -161,7 +189,10 @@ impl Server {
             ipr_update_tracker.clone(),
         ));
 
-        let bootstrap_peers = BootstrapPeers::new(&log);
+        let bootstrap_peers = BootstrapPeersFromDdm::new(
+            &log,
+            args.bootstrap_agent_lockstep_address,
+        );
         let internal_dns_resolver = args
             .rack_subnet
             .map(|addr| {
@@ -187,30 +218,64 @@ impl Server {
             anyhow!(err).context("failed to start Nexus TCP proxy")
         })?;
 
+        let mgs_client = make_mgs_client(log.clone(), args.mgs_address);
+
+        let preflight_checker = PreflightCheckerHandler::new(&log);
+
+        // Shared server context across the wicketd and commission API servers.
+        let server_context = Arc::new(ServerContext {
+            bind_address: args.address,
+            commission_bind_address: args.commission_address,
+            mgs_handle,
+            mgs_client,
+            transceiver_handle,
+            log: log.clone(),
+            local_switch_id: OnceLock::new(),
+            bootstrap_agent_lockstep_address: args
+                .bootstrap_agent_lockstep_address,
+            bootstrap_peers,
+            update_tracker: update_tracker.clone(),
+            baseboard_id: args.baseboard_id,
+            rss_or_multirack_join_config: Default::default(),
+            preflight_checker,
+            internal_dns_resolver,
+        });
+
         let wicketd_server = {
             let ds_log = log.new(o!("component" => "dropshot (wicketd)"));
-            let mgs_client = make_mgs_client(log.clone(), args.mgs_address);
             dropshot::ServerBuilder::new(
                 http_entrypoints::api(),
-                ServerContext {
-                    bind_address: args.address,
-                    mgs_handle,
-                    mgs_client,
-                    transceiver_handle,
-                    log: log.clone(),
-                    local_switch_id: OnceLock::new(),
-                    bootstrap_peers,
-                    update_tracker: update_tracker.clone(),
-                    baseboard: args.baseboard,
-                    rss_config: Default::default(),
-                    preflight_checker: PreflightCheckerHandler::new(&log),
-                    internal_dns_resolver,
-                },
+                Arc::clone(&server_context),
                 ds_log,
             )
-            .config(dropshot_config)
+            .config(dropshot_config.clone())
             .start()
             .map_err(|err| anyhow!(err).context("initializing http server"))?
+        };
+
+        let commission_server = {
+            let ds_log =
+                log.new(o!("component" => "dropshot (wicketd-commission)"));
+            let commission_config = ConfigDropshot {
+                bind_address: SocketAddr::V6(args.commission_address),
+                ..dropshot_config
+            };
+            dropshot::ServerBuilder::new(
+                commission::api(),
+                Arc::clone(&server_context),
+                ds_log,
+            )
+            .config(commission_config)
+            .version_policy(dropshot::VersionPolicy::Dynamic(Box::new(
+                dropshot::ClientSpecifiesVersionInHeader::new(
+                    omicron_common::api::VERSION_HEADER,
+                    wicketd_commission_api::latest_version(),
+                ),
+            )))
+            .start()
+            .map_err(|err| {
+                anyhow!(err).context("initializing commission http server")
+            })?
         };
 
         let installinator_server = {
@@ -245,36 +310,76 @@ impl Server {
             })?
         };
 
+        // Spin up a small task to ensure the local switch ID is populated.
+        //
+        // Without this task, the transceiver manager stays blocked until
+        // get_location is polled or someone starts a preflight check.
+        //
+        // (Do this at the end, after fallible ? returns, so that we don't leak
+        // a task in case of failure.)
+        let local_switch_id_resolver =
+            tokio::spawn(resolve_local_switch_id(Arc::clone(&server_context)));
+
         Ok(Self {
             wicketd_server,
+            commission_server,
             installinator_server,
             artifact_store: store,
             update_tracker,
             ipr_update_tracker,
             nexus_tcp_proxy,
+            local_switch_id_resolver,
         })
     }
 
     /// Close all running dropshot servers.
     pub async fn close(mut self) -> Result<()> {
-        self.wicketd_server.close().await.map_err(|error| {
-            anyhow!("error closing wicketd server: {error}")
-        })?;
-        self.installinator_server.close().await.map_err(|error| {
-            anyhow!("error closing artifact server: {error}")
-        })?;
+        // (Aborting a task that already exited is a no-op. Also, the only thing
+        // the local switch ID task does is set the switch slot, which is being
+        // torn down here anyway, so cancelling it is RFD 400 cancel-_correct_
+        // even though it isn't cancel-safe.)
+        self.local_switch_id_resolver.abort();
+
+        // Close the servers concurrently and shut down the proxy, then report
+        // every error that occurred.
+        let (wicketd, commission, installinator) = tokio::join!(
+            self.wicketd_server.close(),
+            self.commission_server.close(),
+            self.installinator_server.close(),
+        );
         self.nexus_tcp_proxy.shutdown();
-        Ok(())
+
+        let errors: Vec<anyhow::Error> = [
+            wicketd.map_err(|error| {
+                anyhow!("error closing wicketd server: {error}")
+            }),
+            commission.map_err(|error| {
+                anyhow!("error closing commission server: {error}")
+            }),
+            installinator.map_err(|error| {
+                anyhow!("error closing artifact server: {error}")
+            }),
+        ]
+        .into_iter()
+        .filter_map(Result::err)
+        .collect();
+        if errors.is_empty() { Ok(()) } else { Err(merge_anyhow_list(errors)) }
     }
 
     pub async fn wait_for_finish(self) -> Result<(), String> {
-        // Both servers should keep running indefinitely unless close() is
-        // called. Bail if either server exits.
+        // All servers should keep running indefinitely unless close() is
+        // called. Bail if any server exits.
         tokio::select! {
             res = self.wicketd_server => {
                 match res {
                     Ok(()) => Err("wicketd server exited unexpectedly".to_owned()),
                     Err(err) => Err(format!("running wicketd server: {err}")),
+                }
+            }
+            res = self.commission_server => {
+                match res {
+                    Ok(()) => Err("commission server exited unexpectedly".to_owned()),
+                    Err(err) => Err(format!("running commission server: {err}")),
                 }
             }
             res = self.installinator_server => {
@@ -345,5 +450,49 @@ impl Server {
                 return Err(err).context("failed to contact wicketd");
             }
         }
+    }
+}
+
+/// A small task to ensure local_switch_id is populated.
+async fn resolve_local_switch_id(server_context: Arc<ServerContext>) {
+    // The escalation threshold times the fast retry interval matches
+    // MgsManager. Past that threshold, something is genuinely wrong, so back
+    // off.
+    const FAST_RETRY_INTERVAL: Duration = Duration::from_secs(1);
+    const SLOW_RETRY_INTERVAL: Duration = Duration::from_secs(30);
+    const ESCALATION_THRESHOLD: u64 = 60;
+
+    let mut failures: u64 = 0;
+    loop {
+        if let Ok(switch_id) = server_context.local_switch_id().await {
+            info!(
+                server_context.log,
+                "resolved local switch ID";
+                "switch_id" => %SpIdentifierDisplay(switch_id),
+            );
+            return;
+        }
+
+        failures += 1;
+        if failures == ESCALATION_THRESHOLD {
+            error!(
+                server_context.log,
+                "cannot resolve the local switch ID from MGS; transceiver \
+                 inventory and wicketd's rack location remain unavailable \
+                 until this succeeds (see the preceding warnings for the \
+                 underlying error); retrying every {}s from now on",
+                SLOW_RETRY_INTERVAL.as_secs();
+                "attempts" => failures,
+            );
+        }
+
+        // (local_switch_id warns on every failure, so logging each attempt here
+        // too would be unhelpful.)
+        let interval = if failures < ESCALATION_THRESHOLD {
+            FAST_RETRY_INTERVAL
+        } else {
+            SLOW_RETRY_INTERVAL
+        };
+        tokio::time::sleep(interval).await;
     }
 }

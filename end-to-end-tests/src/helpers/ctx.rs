@@ -99,10 +99,11 @@ fn external_dns_addr(config: &RackInitializeRequest) -> Result<SocketAddr> {
     // From the RSS config, grab the first address from the configured services
     // IP pool as the DNS server's IP address.
     let dns_ip = config
-        .internal_services_ip_pool_ranges
-        .iter()
-        .flat_map(|range| range.iter())
-        .next()
+        .service_ip_pools
+        .first()
+        .and_then(|pool| {
+            pool.ranges().first().expect("guaranteed non-empty").iter().next()
+        })
         .ok_or_else(|| {
             anyhow!(
                 "failed to get first IP from internal service \
@@ -168,11 +169,11 @@ impl ClientParams {
             Err(_) => ("http", None),
             Ok(path) => {
                 let cert_bytes = std::fs::read(&path).with_context(|| {
-                    format!("reading certificate from {:?}", &path)
+                    format!("reading certificate from {:?}", path)
                 })?;
                 let cert = reqwest::tls::Certificate::from_pem(&cert_bytes)
                     .with_context(|| {
-                        format!("parsing certificate from {:?}", &path)
+                        format!("parsing certificate from {:?}", path)
                     })?;
                 ("https", Some(cert))
             }
@@ -267,7 +268,7 @@ impl ClientParams {
                     );
                     if let oxide_client::LoginError::RequestError(e) = &e {
                         if e.is_connect() {
-                            return CondCheckError::NotYet;
+                            return CondCheckError::NotYet { status: None };
                         }
                     }
 
@@ -317,7 +318,9 @@ async fn wait_for_records(
                 .await
                 .map_err(|e| match resolve_error_proto_kind(&e) {
                     Some(ProtoErrorKind::NoRecordsFound { .. })
-                    | Some(ProtoErrorKind::Timeout) => CondCheckError::NotYet,
+                    | Some(ProtoErrorKind::Timeout) => {
+                        CondCheckError::NotYet { status: None }
+                    }
                     _ => CondCheckError::Failed(anyhow::Error::new(e).context(
                         format!(
                             "resolving {:?} from {}",
@@ -328,7 +331,7 @@ async fn wait_for_records(
                 })?
                 .iter()
                 .next()
-                .ok_or(CondCheckError::NotYet)
+                .ok_or(CondCheckError::NotYet { status: None })
         },
         &check_period,
         &max,

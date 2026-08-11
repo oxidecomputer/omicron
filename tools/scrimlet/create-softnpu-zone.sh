@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 
 set -x
 set -e
@@ -12,7 +16,7 @@ cp out/softnpu/scadm /opt/oxide/softnpu/stuff/
 
 zfs create -p -o mountpoint=/softnpu-zone rpool/softnpu-zone
 
-pkg set-publisher --search-first helios-dev
+pkg set-publisher --search-first helios
 
 zonecfg -z softnpu -f tools/scrimlet/softnpu-zone.txt
 zoneadm -z softnpu install

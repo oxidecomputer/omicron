@@ -1,0 +1,20 @@
+[package]
+name = "sled-agent-early-networking"
+version = "0.1.0"
+edition.workspace = true
+license = "MPL-2.0"
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow.workspace = true
+futures.workspace = true
+gateway-client.workspace = true
+internal-dns-resolver.workspace = true
+internal-dns-types.workspace = true
+omicron-common.workspace = true
+omicron-workspace-hack.workspace = true
+sled-agent-types.workspace = true
+slog.workspace = true
+tokio = { workspace = true, features = ["full"] }

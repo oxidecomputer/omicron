@@ -50,6 +50,7 @@ nexus-client.workspace = true
 expectorate.workspace = true
 httpmock.workspace = true
 omicron-test-utils.workspace = true
+oximeter-test-utils.workspace = true
 openapi-lint.workspace = true
 openapiv3.workspace = true
 proptest.workspace = true

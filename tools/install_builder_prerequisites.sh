@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 
 set -eu
 
@@ -164,9 +168,7 @@ function install_packages {
     # latest.
     RTVER=13
     for p in system/library/gcc-runtime system/library/g++-runtime; do
-        # buildmat runners do not yet have a new enough `pkg` for -o
-        #v=$(pkg list -Ho release $p)
-        v=$(pkg list -H -F tsv $p | awk '{split($2, a, "-"); print a[1]}')
+        v=$(pkg list -Ho release "$p")
         ((v < RTVER)) && packages+=($p@latest)
     done
 
@@ -230,6 +232,7 @@ retry xtask download \
     console \
     dendrite-stub \
     maghemite-mgd \
+    maghemite-ddmd \
     transceiver-control
 
 # Validate the PATH:
