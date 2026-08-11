@@ -36,8 +36,8 @@ pub(crate) async fn build_tuf_repo(
     extra_manifest: Option<Utf8PathBuf>,
     threads: usize,
 ) -> Result<()> {
-    let repo_path = output_dir.join("repo.zip");
-    let sha256_path = output_dir.join("repo.zip.sha256.txt");
+    let repo_path = output_dir.join("repo-v1.zip");
+    let sha256_path = output_dir.join("repo-v1.zip.sha256.txt");
 
     // We currently go about this somewhat strangely; the old release
     // engineering process produced a Tufaceous manifest, and (the now very many
