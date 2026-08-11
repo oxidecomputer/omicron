@@ -6,7 +6,7 @@ use super::rng;
 use anyhow::Context;
 use fm::analysis_reports;
 use iddqd::id_ord_map::{self, IdOrdMap};
-use nexus_types::alert::AsAlert;
+use nexus_types::alert::AlertPayload;
 use nexus_types::fm;
 use nexus_types::support_bundle::BundleDataSelection;
 use omicron_uuid_kinds::CaseUuid;
@@ -156,13 +156,13 @@ impl CaseBuilder {
         }
     }
 
-    pub fn request_alert<A: AsAlert>(
+    pub fn request_alert<A: AlertPayload>(
         &mut self,
         alert: &A,
         comment: impl ToString,
     ) -> anyhow::Result<()> {
-        let class = alert.class();
-        let version = alert.version();
+        let class = A::CLASS;
+        let version = A::VERSION;
         let payload_type = std::any::type_name::<A>();
 
         let id = loop {

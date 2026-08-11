@@ -7195,20 +7195,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "nexus-alert-types"
-version = "0.1.0"
-dependencies = [
- "camino",
- "expectorate",
- "omicron-rpaths",
- "schemars 0.8.22",
- "serde",
- "serde_json",
- "serde_with 3.21.0",
- "strum 0.27.2",
-]
-
-[[package]]
 name = "nexus-auth"
 version = "0.1.0"
 dependencies = [
@@ -8267,7 +8253,6 @@ dependencies = [
  "itertools 0.14.0",
  "newtype-uuid",
  "newtype_derive",
- "nexus-alert-types",
  "nexus-types-versions",
  "omicron-common",
  "omicron-passwords",
@@ -8324,7 +8309,6 @@ dependencies = [
  "http",
  "mg-admin-client",
  "mg-api-types",
- "nexus-alert-types",
  "omicron-common",
  "omicron-passwords",
  "omicron-uuid-kinds",

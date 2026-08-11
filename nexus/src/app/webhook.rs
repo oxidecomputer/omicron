@@ -55,6 +55,7 @@ use nexus_db_queries::db::model::WebhookReceiverConfig;
 use nexus_db_queries::db::model::WebhookSecret;
 use nexus_types::alert as alert_types;
 use nexus_types::alert::AlertClass;
+use nexus_types::alert::AlertPayload;
 use nexus_types::external_api::alert;
 use nexus_types::identity::Asset;
 use nexus_types::identity::Resource;
@@ -217,6 +218,8 @@ impl Nexus {
         )?;
         let mut delivery = WebhookDelivery::new_probe(&rx_id, &self.id);
 
+        const CLASS: AlertClass = <alert_types::Probe as AlertPayload>::CLASS;
+        const VERSION: u32 = <alert_types::Probe as AlertPayload>::VERSION;
         static DATA: LazyLock<serde_json::Value> = LazyLock::new(|| {
             serde_json::to_value(&alert_types::Probe {}).expect(
                 "a struct with no fields should always serialize properly",
@@ -224,13 +227,7 @@ impl Nexus {
         });
 
         let attempt = match client
-            .send_delivery_request(
-                opctx,
-                &delivery,
-                alert_types::Probe::CLASS,
-                alert_types::Probe::VERSION,
-                &DATA,
-            )
+            .send_delivery_request(opctx, &delivery, CLASS, VERSION, &DATA)
             .await
         {
             Ok(attempt) => attempt,
@@ -337,8 +334,7 @@ impl Nexus {
         };
 
         Ok(alert::AlertProbeResult {
-            probe: delivery
-                .to_api_delivery(alert_types::Probe::CLASS, &[attempt]),
+            probe: delivery.to_api_delivery(CLASS, &[attempt]),
             resends_started,
         })
     }

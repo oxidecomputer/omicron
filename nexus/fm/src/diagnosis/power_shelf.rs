@@ -9,8 +9,8 @@ use crate::ereport::Ereport;
 use anyhow::Context;
 use iddqd::{IdOrdItem, IdOrdMap, id_upcast};
 use nexus_db_model::EreporterRestart;
+use nexus_types::alert::power_shelf as alert_types;
 use nexus_types::external_api;
-use nexus_types::external_api::alert::power_shelf as alert_types;
 use nexus_types::fm::DiagnosisEngineKind;
 use nexus_types::inventory;
 use omicron_uuid_kinds::CaseUuid;
@@ -768,7 +768,7 @@ mod tests {
     use crate::builder::SitrepBuilderRng;
     use crate::test_util::FmTest;
     use chrono::{Duration, Utc};
-    use nexus_types::alert::AlertClass;
+    use nexus_types::alert::{AlertClass, AlertPayload};
     use nexus_types::fm::case::{AlertRequest, CaseEreport};
     use nexus_types::fm::{self, Sitrep, SitrepVersion};
     use nexus_types::inventory::SpType;
@@ -1429,7 +1429,7 @@ mod tests {
         let remove_alert = AlertRequest {
             id: AlertUuid::new_v4(),
             class: AlertClass::PsuRemoved,
-            version: 0,
+            version: alert_types::PsuRemovedV0::VERSION,
             payload: serde_json::json!({}),
             requested_sitrep_id: SitrepUuid::new_v4(),
             comment: "removed earlier".to_string(),

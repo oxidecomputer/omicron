@@ -72,12 +72,12 @@ impl Alert {
     /// The alert's class and schema version are taken from the [`AlertPayload`]
     /// trait implementation of the provided `alert` value, and the value itself
     /// is serialized to form the alert's JSON data payload.
-    pub fn new<A: AsAlert>(
+    pub fn new<A: AlertPayload>(
         id: impl Into<AlertUuid>,
         alert: &A,
     ) -> Result<Self, Error> {
-        let class = alert.class();
-        let version = alert.version();
+        let class = A::CLASS;
+        let version = A::VERSION;
         let payload =
             serde_json::to_value(alert).map_err(|e| Error::InternalError {
                 internal_message: format!(
