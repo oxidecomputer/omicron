@@ -39,6 +39,7 @@ use wicket_common::rack_update::AbortUpdateOptions;
 use wicket_common::update_events::EventReport;
 use wicketd_api::*;
 use wicketd_commission_types::rack_setup::CertificateUploadResponse;
+use wicketd_commission_types::rack_setup::PrivateKeyPem;
 use wicketd_commission_types::update::ClearUpdateStateResponse;
 
 use crate::ServerContext;
@@ -171,7 +172,7 @@ impl WicketdApi for WicketdApiImpl {
         )?;
 
         let response = rss_config
-            .push_key(body.into_inner())
+            .push_key(PrivateKeyPem(body.into_inner().into()))
             .map_err(|err| HttpError::for_bad_request(None, err))?;
 
         Ok(HttpResponseOk(response))
