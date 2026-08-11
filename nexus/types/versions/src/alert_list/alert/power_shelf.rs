@@ -25,7 +25,7 @@ pub struct PsuInsertedV0 {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[serde(tag = "version", content = "alert")]
+#[serde(tag = "version")]
 #[serde(rename_all = "snake_case")]
 pub enum PsuInsertedVersions {
     V0(PsuInsertedV0),
@@ -44,7 +44,7 @@ pub struct PsuRemovedV0 {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[serde(tag = "version", content = "alert")]
+#[serde(tag = "version")]
 #[serde(rename_all = "snake_case")]
 pub enum PsuRemovedVersions {
     V0(PsuRemovedV0),
