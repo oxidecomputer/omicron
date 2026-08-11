@@ -4,10 +4,13 @@
 
 //! Functional code for alert types.
 
-use crate::latest::alert::power_shelf::{PsuInsertedV0, PsuRemovedV0};
+use crate::latest::alert::power_shelf::{
+    PsuInsertedV0, PsuInsertedVersions, PsuRemovedV0, PsuRemovedVersions,
+};
 use crate::latest::alert::{
     AlertClass, AlertDeliveryState, AlertDeliveryStateFilter,
-    AlertDeliveryTrigger, AlertSubscription, WebhookDeliveryAttemptResult,
+    AlertDeliveryTrigger, AlertPayload, AlertSubscription,
+    WebhookDeliveryAttemptResult,
 };
 use nexus_alert_types::AsAlert;
 use omicron_common::api::external::Error;
@@ -240,6 +243,74 @@ impl AsAlert for PsuRemovedV0 {
 
     fn version(&self) -> u32 {
         0
+    }
+}
+
+impl AlertPayload {
+    pub fn try_from_class_and_version(
+        class: nexus_alert_types::AlertClass,
+        version: u32,
+        payload: serde_json::Value,
+    ) -> Result<Self, Error> {
+        use nexus_alert_types::AlertClass;
+        match class {
+            AlertClass::Probe => Err(Error::internal_error(
+                "probes should not appear in the alert list",
+            )),
+            AlertClass::TestFoo
+            | AlertClass::TestFooBar
+            | AlertClass::TestFooBaz
+            | AlertClass::TestQuuxBar
+            | AlertClass::TestQuuxBarBaz => Err(Error::internal_error(
+                "test alerts should not appear in the alert list",
+            )),
+            AlertClass::PsuInserted => {
+                PsuInsertedVersions::try_from_version(version, payload)
+                    .map(Self::PsuInserted)
+            }
+            AlertClass::PsuRemoved => {
+                PsuRemovedVersions::try_from_version(version, payload)
+                    .map(Self::PsuRemoved)
+            }
+        }
+    }
+}
+
+impl PsuInsertedVersions {
+    pub fn try_from_version(
+        version: u32,
+        payload: serde_json::Value,
+    ) -> Result<Self, Error> {
+        match version {
+            0 => {
+                let v = serde_json::from_value(payload).map_err(|e| {
+                    Error::InternalError { internal_message: e.to_string() }
+                })?;
+                Ok(Self::V0(v))
+            }
+            v => Err(Error::InternalError {
+                internal_message: format!("unknown PsuInserted version {v}"),
+            }),
+        }
+    }
+}
+
+impl PsuRemovedVersions {
+    pub fn try_from_version(
+        version: u32,
+        payload: serde_json::Value,
+    ) -> Result<Self, Error> {
+        match version {
+            0 => {
+                let v = serde_json::from_value(payload).map_err(|e| {
+                    Error::InternalError { internal_message: e.to_string() }
+                })?;
+                Ok(Self::V0(v))
+            }
+            v => Err(Error::InternalError {
+                internal_message: format!("unknown PsuRemoved version {v}"),
+            }),
+        }
     }
 }
 

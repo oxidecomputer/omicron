@@ -9,7 +9,10 @@ use chrono::{DateTime, Utc};
 use db_macros::Asset;
 use nexus_db_schema::schema::alert;
 use nexus_types::alert::AsAlert;
+use nexus_types::external_api;
+use nexus_types::external_api::alert::AlertPayload;
 use nexus_types::fm::case;
+use nexus_types::identity::Asset;
 use omicron_common::api::external::Error;
 use omicron_uuid_kinds::AlertUuid;
 use omicron_uuid_kinds::CaseKind;
@@ -123,5 +126,19 @@ impl Alert {
             num_dispatched: 0,
             case_id: Some(case_id.into()),
         }
+    }
+}
+
+impl TryFrom<Alert> for external_api::alert::Alert {
+    type Error = Error;
+
+    fn try_from(alert: Alert) -> Result<Self, Self::Error> {
+        let identity = alert.identity();
+        let alert = AlertPayload::try_from_class_and_version(
+            alert.class.into(),
+            alert.version.into(),
+            alert.payload,
+        )?;
+        Ok(Self { identity, alert })
     }
 }

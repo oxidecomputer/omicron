@@ -28,7 +28,7 @@ pub struct PsuInsertedV0 {
 #[serde(tag = "version", content = "alert")]
 #[serde(rename_all = "snake_case")]
 pub enum PsuInsertedVersions {
-    V0(PsuRemovedV0),
+    V0(PsuInsertedV0),
 }
 
 /// An alert indicating that a power supply unit (PSU) has been removed from a
