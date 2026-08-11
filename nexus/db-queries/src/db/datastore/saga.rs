@@ -412,6 +412,10 @@ impl DataStore {
 
         let conn = self.pool_connection_authorized(opctx).await?;
 
+        // It would be more robust to do this in batches.  However, Diesel does
+        // not appear to support the UPDATE ... LIMIT syntax using the normal
+        // builder.  In practice, it's extremely unlikely we'd have so many
+        // orphaned sagas that this would be a problem.
         use nexus_db_schema::schema::saga::dsl;
         diesel::update(
             dsl::saga
@@ -445,11 +449,13 @@ mod test {
     use db::queries::ALLOW_FULL_TABLE_SCAN_SQL;
     use nexus_db_model::Saga;
     use nexus_db_model::SagaExecState;
+    use nexus_db_model::SagaId;
     use nexus_db_model::SagaReasonAbandoned;
     use nexus_db_model::{SagaNodeEvent, SecId};
     use omicron_common::api::external::Generation;
     use omicron_test_utils::dev;
     use rand::seq::SliceRandom;
+    use std::collections::BTreeMap;
     use std::collections::BTreeSet;
     use uuid::Uuid;
 
@@ -1013,19 +1019,24 @@ mod test {
         // Populate the database with a few different sagas: each SEC gets one
         // saga in each of the running, unwinding, and done states.
         //
-        // Then we'll pass *all* of the SECs through sagas_abandon_orphans()
-        // and check exactly which sagas were changed by this.
+        // We abandon for every SEC *except* sec_e. So sec_e's sagas (in every
+        // state) must be left untouched, along with every "done" saga.
         //
         // This exercises:
         // - that we abandon both running and unwinding sagas
         // - that we do NOT touch any "done" sagas
-        let mut sagas_to_insert = Vec::new();
+        // - that we do NOT touch sagas of a SEC we didn't pass in
         let sec_a = SecId(Uuid::new_v4());
         let sec_b = SecId(Uuid::new_v4());
         let sec_c = SecId(Uuid::new_v4());
         let sec_d = SecId(Uuid::new_v4());
-        let all_sec_ids = [sec_a, sec_b, sec_c, sec_d];
+        let sec_e = SecId(Uuid::new_v4());
+        let all_sec_ids = [sec_a, sec_b, sec_c, sec_d, sec_e];
+        // The SECs we actually pass to sagas_abandon_orphans(). Everything
+        // except sec_e.
+        let subset_sec_ids = [sec_a, sec_b, sec_c, sec_d];
 
+        let mut sagas_to_insert = Vec::new();
         for sec_id in all_sec_ids {
             for state in [
                 steno::SagaCachedState::Running,
@@ -1044,20 +1055,23 @@ mod test {
             }
         }
 
-        // Running and unwinding sagas should be abandoned. Done sagas should be
-        // left untouched.
+        // Affected: running/unwinding sagas belonging to the SECs we pass in.
+        // Unaffected: everything else: all "done" sagas, plus every saga owned
+        // by sec_e (which we don't pass in).
+        let subset: BTreeSet<_> = subset_sec_ids.iter().copied().collect();
         let sagas_affected: BTreeSet<_> = sagas_to_insert
             .iter()
             .filter_map(|saga| {
-                (saga.saga_state == SagaExecState::Running
-                    || saga.saga_state == SagaExecState::Unwinding)
+                (subset.contains(&saga.creator)
+                    && (saga.saga_state == SagaExecState::Running
+                        || saga.saga_state == SagaExecState::Unwinding))
                     .then(|| saga.id)
             })
             .collect();
         let sagas_unaffected: BTreeSet<_> = sagas_to_insert
             .iter()
             .filter_map(|saga| {
-                (saga.saga_state == SagaExecState::Done).then(|| saga.id)
+                (!sagas_affected.contains(&saga.id)).then(|| saga.id)
             })
             .collect();
 
@@ -1065,6 +1079,13 @@ mod test {
             sagas_affected.len() + sagas_unaffected.len(),
             sagas_to_insert.len()
         );
+
+        // Record each saga's original state so we can confirm that the
+        // only the sagas that are intended to be changed are.
+        let initial_states: BTreeMap<SagaId, SagaExecState> = sagas_to_insert
+            .iter()
+            .map(|saga| (saga.id, saga.saga_state.clone()))
+            .collect();
 
         // Insert the sagas.
         let count = {
@@ -1079,12 +1100,24 @@ mod test {
         };
         assert_eq!(count, sagas_affected.len() + sagas_unaffected.len());
 
-        // Abandon uncompleted sagas for all of the SECs.
+        // Passing zero SECs should abandon nothing.
+        let nabandoned = datastore
+            .sagas_abandon_orphans(
+                &opctx,
+                &[],
+                SagaReasonAbandoned::Unrecoverable,
+                "test abandonment".to_string(),
+            )
+            .await
+            .expect("failed to abandon sagas");
+        assert_eq!(nabandoned, 0);
+
+        // Abandon uncompleted sagas for the subset of SECs (i.e. not sec_e).
         let comment = "test abandonment".to_string();
         let nabandoned = datastore
             .sagas_abandon_orphans(
                 &opctx,
-                &all_sec_ids,
+                &subset_sec_ids,
                 SagaReasonAbandoned::Unrecoverable,
                 comment.clone(),
             )
@@ -1113,7 +1146,7 @@ mod test {
         let mut unwinding_ids = BTreeSet::new();
         let mut abandoned_ids = BTreeSet::new();
         let mut done_ids = BTreeSet::new();
-        for saga in all_sagas {
+        for saga in &all_sagas {
             match &saga.saga_state {
                 SagaExecState::Running => {
                     running_ids.insert(saga.id);
@@ -1130,21 +1163,40 @@ mod test {
             }
         }
 
-        // The abandoned sagas are exactly those that started out running or
-        // unwinding, and the done sagas are exactly those left untouched. No
-        // running or unwinding sagas should remain.
+        // The abandoned sagas are exactly the passed-in SECs' running/unwinding
+        // sagas.
         assert_eq!(abandoned_ids, sagas_affected);
-        assert_eq!(done_ids, sagas_unaffected);
-        assert!(running_ids.is_empty());
-        assert!(unwinding_ids.is_empty());
         assert_eq!(nabandoned, sagas_affected.len());
+
+        // Everything that wasn't abandoned is exactly the unaffected set (all
+        // "done" sagas plus every one of sec_e's sagas).
+        let non_abandoned_ids: BTreeSet<_> = running_ids
+            .iter()
+            .chain(unwinding_ids.iter())
+            .chain(done_ids.iter())
+            .copied()
+            .collect();
+        assert_eq!(non_abandoned_ids, sagas_unaffected);
+
+        // Each unaffected saga is genuinely untouched. Its final state is
+        // exactly what we inserted (e.g. sec_e's running saga is still running)
+        for saga in &all_sagas {
+            if sagas_unaffected.contains(&saga.id) {
+                assert_eq!(
+                    saga.saga_state,
+                    initial_states[&saga.id],
+                    "unaffected saga {} changed state",
+                    saga.id,
+                );
+            }
+        }
 
         // If we do it again, we should make no changes: the running/unwinding
         // sagas are now abandoned, and abandoned sagas aren't touched.
         let nabandoned = datastore
             .sagas_abandon_orphans(
                 &opctx,
-                &all_sec_ids,
+                &subset_sec_ids,
                 SagaReasonAbandoned::Unrecoverable,
                 comment,
             )
