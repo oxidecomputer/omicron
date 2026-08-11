@@ -1462,6 +1462,7 @@ impl ControlPlaneTestContextSledAgent {
 
     pub async fn teardown(self) {
         self.server.http_server.close().await.unwrap();
+        self.server.sled_agent.repo_depot.app_private().stop_writers().await;
     }
 }
 
