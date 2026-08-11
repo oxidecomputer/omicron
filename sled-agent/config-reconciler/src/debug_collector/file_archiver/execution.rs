@@ -112,8 +112,12 @@ mod test {
     use chrono::Utc;
     use file_archiver::planning::ArchiveKind;
     use file_archiver::planning::ArchivePlanner;
+    use filetime::FileTime;
     use omicron_test_utils::dev::test_setup_log;
     use slog::info;
+
+    /// Fixed mtime assigned to all of this test's input files
+    const FIXED_MTIME: FileTime = FileTime::from_unix_time(1_700_000_000, 0);
 
     #[tokio::test]
     async fn test_real_archival() {
@@ -157,6 +161,12 @@ mod test {
                 let contents =
                     format!("{}-{contents}", file.file_name().unwrap());
                 std::fs::write(&file, contents).unwrap();
+                // The naming rules derive output filenames from the input
+                // file's mtime and disambiguate collisions with a counter.  Pin
+                // the mtime so that a file rewritten later in this test lands
+                // on the same timestamp as before and so exercises the
+                // collision path deterministically.
+                filetime::set_file_mtime(file, FIXED_MTIME).unwrap();
             }
         };
 
