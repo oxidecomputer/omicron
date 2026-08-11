@@ -290,10 +290,10 @@ impl WicketdManager {
 
     fn start_rack_initialization(&self) {
         let log = self.log.clone();
-        let addr = self.wicketd_addr;
+        let addr = self.commission_addr;
         let events_tx = self.events_tx.clone();
         tokio::spawn(async move {
-            let client = create_wicketd_client(&log, addr, WICKETD_TIMEOUT);
+            let client = create_commission_client(&log, addr, WICKETD_TIMEOUT);
             let response = match client.post_run_rack_setup().await {
                 Ok(_) => Ok(()),
                 Err(error) => Err(error.to_string()),
