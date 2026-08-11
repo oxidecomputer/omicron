@@ -19,13 +19,15 @@ use slog::Drain;
 use crate::{
     Runner,
     cli::{CommandOutput, ShellApp},
+    wicketd::WicketdAddrs,
 };
 
 pub fn exec() -> Result<ExitCode> {
-    let wicketd_addr =
-        SocketAddrV6::new(Ipv6Addr::LOCALHOST, WICKETD_PORT, 0, 0);
-    let commission_addr =
-        SocketAddrV6::new(Ipv6Addr::LOCALHOST, WICKETD_COMMISSION_PORT, 0, 0);
+    let localhost = Ipv6Addr::LOCALHOST;
+    let addrs = WicketdAddrs {
+        wicketd: SocketAddrV6::new(localhost, WICKETD_PORT, 0, 0),
+        commission: SocketAddrV6::new(localhost, WICKETD_COMMISSION_PORT, 0, 0),
+    };
 
     // SSH_ORIGINAL_COMMAND contains additional arguments, if any.
     match std::env::var("SSH_ORIGINAL_COMMAND") {
@@ -37,7 +39,7 @@ pub fn exec() -> Result<ExitCode> {
             let runtime = tokio::runtime::Runtime::new()
                 .context("creating tokio runtime")?;
             runtime.block_on(exec_with_args(
-                wicketd_addr,
+                addrs.wicketd,
                 args,
                 OutputKind::Terminal,
             ))
@@ -46,7 +48,7 @@ pub fn exec() -> Result<ExitCode> {
             // Do not expose log messages via standard error since they'll show up
             // on top of the TUI.
             let log = setup_log(&log_path()?, WithStderr::No)?;
-            Runner::new(log, wicketd_addr, commission_addr).run()?;
+            Runner::new(log, addrs).run()?;
             Ok(ExitCode::SUCCESS)
         }
     }
