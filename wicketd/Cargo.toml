@@ -110,3 +110,4 @@ subprocess.workspace = true
 tar.workspace = true
 tokio = { workspace = true, features = ["test-util"] }
 wicket.workspace = true
+zeroize.workspace = true
