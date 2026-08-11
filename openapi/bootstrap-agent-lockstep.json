@@ -2523,7 +2523,7 @@
         "type": "object",
         "properties": {
           "activation_count": {
-            "description": "The 0-based index of this reconciler's activation since the last time sled-agent started.",
+            "description": "0-based counter of the number of times this reconciler has activated since the last time sled-agent started.",
             "type": "integer",
             "format": "uint64",
             "minimum": 0
@@ -2571,7 +2571,7 @@
         "type": "object",
         "properties": {
           "activation_count": {
-            "description": "The 0-based index of this reconciler's activation since the last time sled-agent started.",
+            "description": "0-based counter of the number of times this reconciler has activated since the last time sled-agent started.",
             "type": "integer",
             "format": "uint64",
             "minimum": 0
@@ -2619,7 +2619,7 @@
         "type": "object",
         "properties": {
           "activation_count": {
-            "description": "The 0-based index of this reconciler's activation since the last time sled-agent started.",
+            "description": "0-based counter of the number of times this reconciler has activated since the last time sled-agent started.",
             "type": "integer",
             "format": "uint64",
             "minimum": 0
@@ -2667,7 +2667,7 @@
         "type": "object",
         "properties": {
           "activation_count": {
-            "description": "The 0-based index of this reconciler's activation since the last time sled-agent started.",
+            "description": "0-based counter of the number of times this reconciler has activated since the last time sled-agent started.",
             "type": "integer",
             "format": "uint64",
             "minimum": 0
