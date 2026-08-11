@@ -104,8 +104,8 @@ async fn archive_one(
 
 #[cfg(test)]
 mod test {
-    use crate::debug_collector::file_archiver::test_helpers::TestDir;
     use crate::debug_collector::file_archiver;
+    use crate::debug_collector::file_archiver::test_helpers::TestDir;
     use anyhow::Context;
     use camino::Utf8Path;
     use chrono::DateTime;
