@@ -4,7 +4,6 @@
 
 //! Code that manages command dispatch from a shell for wicket.
 
-use std::net::SocketAddrV6;
 use std::process::ExitCode;
 
 use anyhow::Result;
@@ -14,6 +13,7 @@ use super::{
     inventory::InventoryArgs, preflight::PreflightArgs, rack_setup::SetupArgs,
     rack_update::RackUpdateArgs, upload::UploadArgs,
 };
+use crate::wicketd::WicketdAddrs;
 
 pub(crate) struct CommandOutput<'a> {
     pub(crate) stdout: &'a mut dyn std::io::Write,
@@ -36,27 +36,27 @@ impl ShellApp {
     pub(crate) async fn exec(
         self,
         log: slog::Logger,
-        wicketd_addr: SocketAddrV6,
+        addrs: WicketdAddrs,
         output: CommandOutput<'_>,
     ) -> Result<ExitCode> {
         match self.command {
             ShellCommand::UploadRepo(args) => {
-                args.exec(log, wicketd_addr).await?;
+                args.exec(log, addrs.commission).await?;
                 Ok(ExitCode::SUCCESS)
             }
             ShellCommand::RackUpdate(args) => {
-                args.exec(log, wicketd_addr, self.global_opts, output).await
+                args.exec(log, addrs.wicketd, self.global_opts, output).await
             }
             ShellCommand::Setup(args) => {
-                args.exec(log, wicketd_addr, self.global_opts).await?;
+                args.exec(log, addrs, self.global_opts).await?;
                 Ok(ExitCode::SUCCESS)
             }
             ShellCommand::Preflight(args) => {
-                args.exec(log, wicketd_addr).await?;
+                args.exec(log, addrs.wicketd).await?;
                 Ok(ExitCode::SUCCESS)
             }
             ShellCommand::Inventory(args) => {
-                args.exec(log, wicketd_addr, output).await?;
+                args.exec(log, addrs.wicketd, output).await?;
                 Ok(ExitCode::SUCCESS)
             }
         }
