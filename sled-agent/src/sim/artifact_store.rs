@@ -43,10 +43,12 @@ pub struct SimArtifactStorage {
 impl SimArtifactStorage {
     pub(super) fn new() -> SimArtifactStorage {
         SimArtifactStorage {
-            dirs: Arc::new([
-                camino_tempfile::tempdir().unwrap(),
-                camino_tempfile::tempdir().unwrap(),
-            ]),
+            dirs: Arc::new(std::array::from_fn(|_| {
+                camino_tempfile::Builder::new()
+                    .prefix("artifact-store")
+                    .tempdir()
+                    .unwrap()
+            })),
             write_semaphore: Arc::new(
                 const { Semaphore::const_new(MAX_PERMITS as usize) },
             ),
