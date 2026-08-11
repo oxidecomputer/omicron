@@ -12,7 +12,7 @@ use nexus_types::deployment::{Blueprint, BlueprintExpungedZoneAccessReason};
 use omicron_common::api::external::Error;
 use omicron_uuid_kinds::{GenericUuid, OmicronZoneUuid};
 use slog::Logger;
-use slog::{debug, info, warn};
+use slog::{debug, error, info, warn};
 
 /// For each expunged Nexus zone in the same generation as the current Nexus,
 /// re-assign sagas owned by that Nexus to the specified nexus (`nexus_id`).
@@ -115,9 +115,25 @@ fn find_expunged_same_generation(
 ///
 /// To be conservative, we only abandon sagas whose `current_sec` is an expunged
 /// (and ready-for-cleanup) Nexus zone in the target blueprint whose generation
-/// is strictly older than the oldest in-service Nexus generation. Any Nexus
-/// that isn't in the target blueprint is left untouched, since we can't
-/// confirm its state.
+/// is strictly older than the oldest in-service Nexus generation.
+///
+/// For a brief moment during an update, after deploying a new-generation Nexus,
+/// and immediately after handoff, there will effectively be zones at generation
+/// N and N + 1. By retrieving all in-service Nexus zones and choosing the
+/// oldest generation, we handle the case where for some reason we end up in
+/// this state for a "longer than expected" amount of time. In this scenario, we
+/// give any saga that could still finish gracefully a chance to do so. If they
+/// really should be abandoned, then they will be the next time a blueprint is
+/// executed.
+///
+/// Any Nexus that isn't in the target blueprint is left untouched, since we
+/// can't confirm its state.
+///
+/// This is all safe even if we're currently executing an old blueprint because:
+/// - A zone can never become un-expunged.
+/// - The generation never goes backwards.
+///
+/// The combination means that no other Nexus can ever assign this saga.
 pub(crate) async fn abandon_orphan_sagas(
     opctx: &OpContext,
     datastore: &DataStore,
@@ -126,7 +142,7 @@ pub(crate) async fn abandon_orphan_sagas(
     let log = &opctx.log;
 
     // Find ids of stale expunged Nexus zones
-    let stale_sec_ids = find_expunged_older_generation(log, blueprint);
+    let stale_sec_ids = find_expunged_older_than_all_in_service(log, blueprint);
 
     debug!(
         log,
@@ -140,18 +156,22 @@ pub(crate) async fn abandon_orphan_sagas(
             opctx,
             &stale_sec_ids,
             SagaReasonAbandoned::Unrecoverable,
-            "orphan: current_sec Nexus is expunged and unreassignable \
-            (older than all in-service generations)"
+            "orphan: current_sec is expunged and too old for this saga to be \
+            re-assigned"
                 .to_string(),
         )
         .await;
 
     match result {
         Ok(count) => {
-            info!(log, "abandoned orphan sagas";
-                "nexus_zone_ids" => ?stale_sec_ids,
-                "count" => count,
-            );
+            if count == 0 {
+                info!(log, "no orphaned sagas to abandon");
+            } else {
+                error!(log, "abandoned orphan sagas";
+                    "nexus_zone_ids" => ?stale_sec_ids,
+                    "count" => count,
+                );
+            };
 
             Ok(())
         }
@@ -169,7 +189,7 @@ pub(crate) async fn abandon_orphan_sagas(
 /// Returns the ids of expunged (and ready-for-cleanup) Nexus zones whose
 /// generation is older than the oldest in-service Nexus generation in the
 /// blueprint.
-fn find_expunged_older_generation(
+fn find_expunged_older_than_all_in_service(
     log: &Logger,
     blueprint: &Blueprint,
 ) -> Vec<SecId> {
@@ -723,9 +743,8 @@ mod test {
                     SagaState::Abandoned,
                     Some((
                         SagaReasonAbandoned::Unrecoverable,
-                        "orphan: current_sec Nexus is expunged and \
-                         unreassignable (older than all in-service \
-                         generations)"
+                        "orphan: current_sec is expunged and too old for this \
+                        saga to be re-assigned"
                             .to_string(),
                     )),
                 ),

@@ -868,8 +868,8 @@ pub enum BlueprintExpungedZoneAccessReason {
     /// The planner does not need to account for this when pruning Nexus zones.
     NexusSelfIsQuiescing,
 
-    /// Sagas assigneed to any expunged Nexus must be reassigned to an
-    /// in-service Nexus.
+    /// Sagas assigned to any expunged Nexus must be reassigned to an in-service
+    /// Nexus.
     ///
     /// The planner must not prune a Nexus zone if it still has any sagas
     /// assigned to it.

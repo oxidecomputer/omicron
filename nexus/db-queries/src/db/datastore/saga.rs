@@ -1183,8 +1183,7 @@ mod test {
         for saga in &all_sagas {
             if sagas_unaffected.contains(&saga.id) {
                 assert_eq!(
-                    saga.saga_state,
-                    initial_states[&saga.id],
+                    saga.saga_state, initial_states[&saga.id],
                     "unaffected saga {} changed state",
                     saga.id,
                 );
