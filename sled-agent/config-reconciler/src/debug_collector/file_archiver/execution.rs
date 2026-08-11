@@ -21,11 +21,15 @@ pub(crate) async fn execute_archive_step<'a>(
     match step {
         ArchiveStep::Mkdir { output_directory } => {
             // We assume that the parent of all output directories
-            // already exists.  That's because in practice it should be
-            // true: all of the output directories are one level below
-            // the debug dataset itself.  (The test suite verifies
-            // this.)  So if we find at runtime that this isn't true,
-            // that's a bad sign.  Maybe somebody has unmounted the
+            // already exists.  That's because in practice, either:
+            //
+            // 1. the output directory is directly inside the debug dataset
+            //    itself, or
+            // 2. the parent of this output directory was created by a previous
+            //    `Mkdir` step
+            //
+            // The test suite verifies this.  So if we find at runtime that this
+            // isn't true, that's a bad sign.  Maybe somebody has unmounted the
             // debug dataset and deleted its mountpoint?  We don't want
             // to start spewing stuff to the wrong place.  That's why we
             // don't use create_dir_all() here.

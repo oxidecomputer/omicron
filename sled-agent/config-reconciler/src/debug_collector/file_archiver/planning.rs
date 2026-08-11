@@ -349,8 +349,8 @@ fn flat_file_steps<'a>(
 /// steps (for the top-level container and the subdir) followed by one
 /// `ArchiveFile` step per file in that subdirectory.
 ///
-/// Non-regular-file entries within subdirectories are warned about and skipped
-/// (they do not appear as `ArchiveFile` steps).
+/// Non-regular-file entries within subdirectories are skipped (they do not
+/// appear as `ArchiveFile` steps).
 fn nested_file_steps<'a>(
     log: &'a Logger,
     group: &'a ArchiveGroup<'static>,

@@ -33,11 +33,10 @@ pub(crate) struct Source {
 /// Describes debug data to be archived from within some `Source`.
 ///
 /// Rules specify a path within the source where the files are found (e.g.,
-/// "var/svc/log") and a pattern for specifying files within that directory that
-/// should be covered by the rule (e.g., "*.log").  The rule is applied across
-/// several sources (in this case: illumos zones).  A rule might cover "all the
-/// files in a given cores dataset" or "the rotated SMF log files for a given
-/// zone".
+/// "var/svc/log") and which files within that path should be included.
+/// The rule is applied across several sources (in this case: illumos zones).  A
+/// rule might cover "all the files in a given cores dataset" or "the rotated
+/// SMF log files for a given zone".
 ///
 /// It may be easiest to understand this by example.  See [`ALL_RULES`] for all
 /// of the rules.
@@ -81,12 +80,13 @@ impl IdOrdItem for Rule {
 
 /// Describes how to scan `Rule::directory` for files to archive
 pub(crate) enum RuleScanning {
-    /// Archive files directly in `directory` whose names match `regex`
+    /// Archive files directly in `directory` whose names match the
+    /// `include_files_matching` regex
     Flat { include_files_matching: Regex },
     /// Archive files in immediate subdirectories of `directory`, skipping
     /// subdirectories whose names match `exclude_subdirs`
     Nested {
-        /// outputs should go in this subdirectory of the source's output \
+        /// outputs should go in this subdirectory of the source's output
         /// directory
         output_subdir: Filename,
         exclude_subdirs: Regex,
