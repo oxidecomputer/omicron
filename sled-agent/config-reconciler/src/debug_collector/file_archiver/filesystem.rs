@@ -165,47 +165,7 @@ mod test {
     use super::FileLister;
     use super::Filename;
     use super::FilesystemLister;
-    use camino::Utf8Path;
-    use camino_tempfile::Utf8TempDir;
-
-    /// Temporary directory that is preserved on test failure.
-    ///
-    /// The path is printed to stderr on creation.  Call `cleanup()` at the end
-    /// of a successful test to delete it.  If `cleanup()` is never called
-    /// (e.g., the test panicked), the directory is preserved for inspection.
-    struct TestDir {
-        dir: Option<Utf8TempDir>,
-    }
-
-    impl TestDir {
-        fn new() -> Self {
-            let dir =
-                camino_tempfile::tempdir().expect("failed to create temp dir");
-            eprintln!("test directory: {}", dir.path());
-            TestDir { dir: Some(dir) }
-        }
-
-        fn path(&self) -> &Utf8Path {
-            // unwrap(): this is only `None` after `cleanup()`, but it's
-            // immediately dropped at that point.
-            self.dir.as_ref().unwrap().path()
-        }
-
-        fn cleanup(mut self) {
-            drop(self.dir.take());
-        }
-    }
-
-    impl Drop for TestDir {
-        fn drop(&mut self) {
-            if let Some(dir) = self.dir.take() {
-                let path = dir.keep();
-                eprintln!(
-                    "test directory preserved (test may have failed): {path}"
-                );
-            }
-        }
-    }
+    use crate::debug_collector::file_archiver::test_helpers::TestDir;
 
     #[test]
     fn test_filename() {

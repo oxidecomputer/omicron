@@ -104,10 +104,10 @@ async fn archive_one(
 
 #[cfg(test)]
 mod test {
+    use crate::debug_collector::file_archiver::test_helpers::TestDir;
     use crate::debug_collector::file_archiver;
     use anyhow::Context;
     use camino::Utf8Path;
-    use camino_tempfile::Utf8TempDir;
     use chrono::DateTime;
     use chrono::Utc;
     use file_archiver::planning::ArchiveKind;
@@ -122,7 +122,7 @@ mod test {
         let log = &logctx.log;
 
         // Create a temporary directory in which to store some output files.
-        let tempdir = Utf8TempDir::new().unwrap();
+        let tempdir = TestDir::new();
         info!(log, "temporary directory"; "tempdir" => %tempdir.path());
 
         // Populate it with a couple of files.
