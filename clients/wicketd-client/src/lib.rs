@@ -66,7 +66,6 @@ progenitor::generate_api!(
         ProgressEventForInstallinatorSpec = installinator_common::ProgressEvent,
         ProgressEventForUplinkPreflightSpec = wicket_common::preflight_check::ProgressEvent,
         ProgressEventForWicketdEngineSpec = wicket_common::update_events::ProgressEvent,
-        PutRssUserConfigInsensitive = wicketd_commission_types_versions::latest::rack_setup::PutRssUserConfigInsensitive,
         RackV1Inventory = wicket_common::inventory::RackV1Inventory,
         RotInventory = wicket_common::inventory::RotInventory,
         RotSlot = wicket_common::inventory::RotSlot,
