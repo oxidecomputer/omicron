@@ -7984,7 +7984,7 @@ dependencies = [
  "tokio",
  "toml 0.8.23",
  "transient-dns-server",
- "tufaceous 0.2.0",
+ "tufaceous",
  "tufaceous-artifact 0.2.0",
  "typed-rng",
  "uuid",
@@ -9296,7 +9296,7 @@ dependencies = [
  "tokio-util",
  "transient-dns-server",
  "trust-quorum-types",
- "tufaceous 0.2.0",
+ "tufaceous",
  "tufaceous-artifact 0.2.0",
  "url",
  "usdt 0.5.0",
@@ -9581,11 +9581,10 @@ dependencies = [
  "tar",
  "tokio",
  "toml 0.8.23",
- "tufaceous 0.2.0",
+ "tufaceous",
  "tufaceous-artifact 0.1.0",
  "tufaceous-artifact 0.2.0",
  "tufaceous-lib",
- "update-common",
 ]
 
 [[package]]
@@ -9623,7 +9622,7 @@ dependencies = [
  "slog-error-chain",
  "tokio",
  "tokio-util",
- "tufaceous 0.2.0",
+ "tufaceous",
  "tufaceous-artifact 0.2.0",
 ]
 
@@ -12393,7 +12392,7 @@ dependencies = [
  "tabled 0.15.0",
  "tokio",
  "toml 0.8.23",
- "tufaceous 0.2.0",
+ "tufaceous",
  "tufaceous-artifact 0.2.0",
  "uuid",
 ]
@@ -16488,27 +16487,6 @@ dependencies = [
 
 [[package]]
 name = "tufaceous"
-version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/tufaceous?branch=v1#95395cecb019b851519232468472212efce1e42d"
-dependencies = [
- "anyhow",
- "camino",
- "chrono",
- "clap",
- "console 0.15.11",
- "humantime",
- "semver 1.0.28",
- "slog",
- "slog-async",
- "slog-envlogger",
- "slog-term",
- "tokio",
- "tufaceous-artifact 0.1.0",
- "tufaceous-lib",
-]
-
-[[package]]
-name = "tufaceous"
 version = "0.2.0"
 source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#38730b689596098c61c2c683fe4848712f2e40da"
 dependencies = [
@@ -16902,44 +16880,6 @@ name = "untrusted"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8ecb6da28b8a351d773b68d5825ac39017e680750f980f3a1a85cd8dd28a47c1"
-
-[[package]]
-name = "update-common"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "bytes",
- "camino",
- "camino-tempfile",
- "chrono",
- "clap",
- "debug-ignore",
- "display-error-chain",
- "dropshot",
- "flate2",
- "fs-err 3.3.0",
- "futures",
- "hex",
- "hubtools 0.4.7 (git+https://github.com/oxidecomputer/hubtools.git?rev=2b1ef9b38d75563ea800baa3b17327eec17b1b7a)",
- "omicron-common",
- "omicron-test-utils",
- "omicron-workspace-hack",
- "rand 0.9.2",
- "schemars 0.8.22",
- "semver 1.0.28",
- "serde",
- "sha2 0.10.9",
- "slog",
- "tar",
- "thiserror 2.0.18",
- "tokio",
- "tokio-util",
- "tough 0.22.0",
- "tufaceous 0.1.0",
- "tufaceous-artifact 0.1.0",
- "tufaceous-brand-metadata 0.1.0",
- "tufaceous-lib",
-]
 
 [[package]]
 name = "url"
@@ -17686,7 +17626,7 @@ dependencies = [
  "toml 0.8.23",
  "tough 0.22.0",
  "transceiver-controller 0.1.1 (git+https://github.com/oxidecomputer/transceiver-control)",
- "tufaceous 0.2.0",
+ "tufaceous",
  "tufaceous-artifact 0.2.0",
  "uuid",
  "wicket",
