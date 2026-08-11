@@ -21,8 +21,8 @@ pub(crate) async fn build_tuf_repo(
     editor: SharedEditor,
     threads: usize,
 ) -> Result<()> {
-    let repo_path = output_dir.join("repo-v2.zip");
-    let sha256_path = output_dir.join("repo-v2.zip.sha256.txt");
+    let repo_path = output_dir.join("repo.zip");
+    let sha256_path = output_dir.join("repo.zip.sha256.txt");
 
     editor
         .take_editor()
