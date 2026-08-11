@@ -17623,6 +17623,7 @@ dependencies = [
  "wicketd-commission-client",
  "wicketd-commission-types",
  "wicketd-commission-types-versions",
+ "zeroize",
 ]
 
 [[package]]
@@ -17633,7 +17634,6 @@ dependencies = [
  "dropshot",
  "gateway-client",
  "omicron-common",
- "omicron-passwords",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "schemars 0.8.22",
@@ -17730,6 +17730,7 @@ dependencies = [
  "thiserror 2.0.18",
  "toml 0.8.23",
  "uuid",
+ "zeroize",
 ]
 
 [[package]]
@@ -18550,6 +18551,7 @@ version = "1.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e13c156562582aa81c60cb29407084cdb54c4164760106ab78e6c5b0858cf64e"
 dependencies = [
+ "serde",
  "zeroize_derive",
 ]
 

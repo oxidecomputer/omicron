@@ -11,7 +11,6 @@ bootstrap-agent-lockstep-types.workspace = true
 dropshot.workspace = true
 gateway-client.workspace = true
 omicron-common.workspace = true
-omicron-passwords.workspace = true
 omicron-uuid-kinds.workspace = true
 omicron-workspace-hack.workspace = true
 schemars.workspace = true
