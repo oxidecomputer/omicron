@@ -7,6 +7,8 @@
 use crate::ui::defaults::style::BULLET_ICON;
 use crate::ui::defaults::style::CHECK_ICON;
 use crate::ui::defaults::style::WARN_ICON;
+use crate::wicketd::WicketdAddrs;
+use crate::wicketd::create_commission_client;
 use crate::wicketd::create_wicketd_client;
 use anyhow::Context;
 use anyhow::Result;
@@ -24,7 +26,6 @@ use std::fmt;
 use std::io;
 use std::io::Read;
 use std::mem;
-use std::net::SocketAddrV6;
 use std::time::Duration;
 use wicket_common::rack_setup::BgpAuthKeyInfo;
 use wicket_common::rack_setup::BgpAuthKeyStatus;
@@ -87,10 +88,13 @@ impl SetupArgs {
     pub(crate) async fn exec(
         self,
         log: Logger,
-        wicketd_addr: SocketAddrV6,
+        addrs: WicketdAddrs,
         global_opts: GlobalOpts,
     ) -> Result<()> {
-        let client = create_wicketd_client(&log, wicketd_addr, WICKETD_TIMEOUT);
+        let client =
+            create_wicketd_client(&log, addrs.wicketd, WICKETD_TIMEOUT);
+        let commission_client =
+            create_commission_client(&log, addrs.commission, WICKETD_TIMEOUT);
 
         match self {
             SetupArgs::GetConfig => {
@@ -119,7 +123,7 @@ impl SetupArgs {
                         .context("failed to parse config TOML")?;
 
                 slog::info!(log, "uploading config to wicketd...");
-                client
+                commission_client
                     .put_rss_config(&config)
                     .await
                     .context("error uploading config to wicketd")?;
