@@ -610,10 +610,38 @@ struct TrustQuorumConfigArgs {
 #[derive(Debug, Args)]
 struct TrustQuorumRemoveSledArgs {
     // remove is _extremely_ dangerous, so we also require a database
-    // connection to perform some safety checks
+    // connection to perform some safety checks. These are only possible when
+    // removing by sled ID; a sled identified by baseboard may have no database
+    // record at all.
     #[clap(flatten)]
     db_url_opts: DbUrlOptions,
-    sled_id: SledUuid,
+
+    /// ID of the rack to remove the sled from
+    rack_id: RackUuid,
+
+    /// ID of the sled to remove
+    #[clap(
+        long,
+        conflicts_with_all = ["part_number", "serial_number"],
+        required_unless_present_any = ["part_number", "serial_number"],
+    )]
+    sled_id: Option<SledUuid>,
+
+    /// part number of the sled to remove, for a sled with no database record
+    #[clap(long, requires = "serial_number")]
+    part_number: Option<String>,
+
+    /// serial number of the sled to remove, for a sled with no database record
+    #[clap(long, requires = "part_number")]
+    serial_number: Option<String>,
+}
+
+impl TrustQuorumRemoveSledArgs {
+    fn baseboard_id(&self) -> Option<BaseboardId> {
+        let part_number = self.part_number.clone()?;
+        let serial_number = self.serial_number.clone()?;
+        Some(BaseboardId { part_number, serial_number })
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -5471,39 +5499,38 @@ async fn cmd_nexus_trust_quorum_remove_sled(
     args: &TrustQuorumRemoveSledArgs,
     omdb: &Omdb,
     log: &slog::Logger,
-    destruction_token: DestructiveOperationToken,
-) -> Result<(), anyhow::Error> {
-    let datastore = args.db_url_opts.connect(omdb, log).await?;
-    let result = cmd_nexus_trust_quorum_remove_sled_with_datastore(
-        &datastore,
-        client,
-        args,
-        log,
-        destruction_token,
-    )
-    .await;
-    datastore.terminate().await;
-    result
-}
-
-// `omdb nexus trust-quorum remove-sled`, but borrowing a datastore
-async fn cmd_nexus_trust_quorum_remove_sled_with_datastore(
-    datastore: &Arc<DataStore>,
-    client: &nexus_lockstep_client::Client,
-    args: &TrustQuorumRemoveSledArgs,
-    log: &slog::Logger,
     _destruction_token: DestructiveOperationToken,
 ) -> Result<(), anyhow::Error> {
-    use nexus_db_queries::context::OpContext;
-    let opctx = OpContext::for_omdb(log.clone(), datastore.clone());
-    let opctx = &opctx;
-
-    // First, we need to look up the sled so we know its serial number.
-    let (_authz_sled, sled) = LookupPath::new(opctx, datastore)
-        .sled_id(args.sled_id)
-        .fetch()
-        .await
-        .with_context(|| format!("failed to find sled {}", args.sled_id))?;
+    // Trust quorum membership is tracked by baseboard, so a sled ID has to be
+    // resolved into one. A sled given by baseboard may have no database record
+    // to resolve, which is the reason for accepting one.
+    let (baseboard_id, description) = match args.baseboard_id() {
+        Some(baseboard_id) => {
+            let description = format!(
+                "sled {baseboard_id} from the trust-quorum for rack {}",
+                args.rack_id,
+            );
+            (baseboard_id, description)
+        }
+        None => {
+            let sled_id =
+                args.sled_id.expect("clap requires a sled ID or a baseboard");
+            let datastore = args.db_url_opts.connect(omdb, log).await?;
+            let sled = lookup_sled_by_id(&datastore, sled_id, log).await;
+            datastore.terminate().await;
+            let sled = sled?;
+            let description = format!(
+                "sled {sled_id} ({}) from the trust-quorum for rack {}",
+                sled.serial_number(),
+                args.rack_id,
+            );
+            let baseboard_id = BaseboardId {
+                part_number: sled.part_number().to_string(),
+                serial_number: sled.serial_number().to_string(),
+            };
+            (baseboard_id, description)
+        }
+    };
 
     // Helper to get confirmation messages from the user.
     let mut prompt = ConfirmationPrompt::new();
@@ -5528,14 +5555,11 @@ async fn cmd_nexus_trust_quorum_remove_sled_with_datastore(
     );
 
     println!(
-        "WARNING: This operation will PERMANENTLY and IRRECOVABLY remove sled \
-        {} ({}) from the trust-quorum for rack {}. To proceed, type the \
-        sled's serial number.",
-        args.sled_id,
-        sled.serial_number(),
-        sled.rack_id
+        "WARNING: This operation will PERMANENTLY and IRRECOVABLY remove \
+        {description}. To proceed, type the sled's serial number."
     );
-    prompt.read_and_validate("sled serial number", sled.serial_number())?;
+    prompt
+        .read_and_validate("sled serial number", &baseboard_id.serial_number)?;
 
     println!(
         "About to start the trust quorum reconfiguration to remove the sled."
@@ -5558,7 +5582,7 @@ async fn cmd_nexus_trust_quorum_remove_sled_with_datastore(
     );
 
     let epoch = client
-        .trust_quorum_remove_sled(&args.sled_id.into_untyped_uuid())
+        .trust_quorum_remove_sled(args.rack_id.as_untyped_uuid(), &baseboard_id)
         .await
         .context("trust quorum remove sled")?
         .into_inner();
@@ -5566,6 +5590,24 @@ async fn cmd_nexus_trust_quorum_remove_sled_with_datastore(
     println!("Started trust quorum reconfiguration at epoch {epoch}\n");
 
     Ok(())
+}
+
+// Look up a sled by ID, for the safety checks in `omdb nexus trust-quorum
+// remove-sled`.
+async fn lookup_sled_by_id(
+    datastore: &Arc<DataStore>,
+    sled_id: SledUuid,
+    log: &slog::Logger,
+) -> Result<nexus_db_model::Sled, anyhow::Error> {
+    let opctx = OpContext::for_omdb(log.clone(), datastore.clone());
+
+    let (_authz_sled, sled) = LookupPath::new(&opctx, datastore)
+        .sled_id(sled_id)
+        .fetch()
+        .await
+        .with_context(|| format!("failed to find sled {sled_id}"))?;
+
+    Ok(sled)
 }
 
 /// Runs `omdb nexus support-bundles create`

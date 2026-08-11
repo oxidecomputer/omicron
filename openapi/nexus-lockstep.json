@@ -1539,16 +1539,15 @@
         }
       }
     },
-    "/trust-quorum/remove/{sled}": {
+    "/trust-quorum/remove/{rack_id}": {
       "post": {
         "summary": "Remove a sled from the trust quorum",
-        "description": "This is a required first step towards expunging a sled\n\nReturn the epoch of the proposed configuration so it can be polled asynchronously.",
+        "description": "This is a required first step towards expunging a sled\n\nThe sled is identified by its baseboard, since trust quorum membership is tracked by baseboard and the sled may have no database record.\n\nReturn the epoch of the proposed configuration so it can be polled asynchronously.",
         "operationId": "trust_quorum_remove_sled",
         "parameters": [
           {
             "in": "path",
-            "name": "sled",
-            "description": "ID of the sled",
+            "name": "rack_id",
             "required": true,
             "schema": {
               "type": "string",
@@ -1556,6 +1555,16 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BaseboardId"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
             "description": "successful operation",
