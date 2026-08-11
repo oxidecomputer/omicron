@@ -16225,7 +16225,11 @@
         "type": "object",
         "properties": {
           "alert": {
-            "$ref": "#/components/schemas/AlertPayload"
+            "description": "The alert's data payload."
+          },
+          "class": {
+            "description": "The alert's class.",
+            "type": "string"
           },
           "id": {
             "description": "Unique, immutable, system-controlled identifier for each resource",
@@ -16241,13 +16245,21 @@
             "description": "Timestamp when this resource was last modified",
             "type": "string",
             "format": "date-time"
+          },
+          "version": {
+            "description": "The schema version of the payload for this alert class.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
           }
         },
         "required": [
           "alert",
+          "class",
           "id",
           "time_created",
-          "time_modified"
+          "time_modified",
+          "version"
         ]
       },
       "AlertClass": {
@@ -16455,46 +16467,6 @@
             "type": "string",
             "enum": [
               "probe"
-            ]
-          }
-        ]
-      },
-      "AlertPayload": {
-        "oneOf": [
-          {
-            "type": "object",
-            "properties": {
-              "alert": {
-                "$ref": "#/components/schemas/PsuInsertedVersions"
-              },
-              "class": {
-                "type": "string",
-                "enum": [
-                  "psu_inserted"
-                ]
-              }
-            },
-            "required": [
-              "alert",
-              "class"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "alert": {
-                "$ref": "#/components/schemas/PsuRemovedVersions"
-              },
-              "class": {
-                "type": "string",
-                "enum": [
-                  "psu_removed"
-                ]
-              }
-            },
-            "required": [
-              "alert",
-              "class"
             ]
           }
         ]
@@ -25962,31 +25934,6 @@
           }
         ]
       },
-      "PowerShelf": {
-        "description": "Describes the power shelf involved in an alert.",
-        "type": "object",
-        "properties": {
-          "baseboard": {
-            "nullable": true,
-            "description": "The baseboard FRU identity of the power shelf controller that was installed in the power shelf at the time the event occurred.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Baseboard"
-              }
-            ]
-          },
-          "shelf": {
-            "description": "The physical shelf number of the power shelf involved in the alert.\n\nThis will always be either 0 or 1.",
-            "type": "integer",
-            "format": "uint8",
-            "minimum": 0,
-            "maximum": 1
-          }
-        },
-        "required": [
-          "shelf"
-        ]
-      },
       "PrivateIpConfig": {
         "description": "VPC-private IP address configuration for a network interface.",
         "oneOf": [
@@ -26682,131 +26629,6 @@
             ]
           }
         }
-      },
-      "Psu": {
-        "description": "Describes a power supply unit (PSU) involved in an alert.",
-        "type": "object",
-        "properties": {
-          "identity": {
-            "nullable": true,
-            "description": "The FRU identity of the PSU, if it could be determined.\n\nThis value may be NULL if the identity of the PSU could not be read due to a hardware failure.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/PsuIdentity"
-              }
-            ]
-          },
-          "slot": {
-            "description": "The slot number of the PSU within the power shelf.\n\nThis will always be an integer between 0 and 5 (inclusive), since each power shelf can contain up to 6 PSUs.",
-            "type": "integer",
-            "format": "uint8",
-            "minimum": 0,
-            "maximum": 5
-          }
-        },
-        "required": [
-          "slot"
-        ]
-      },
-      "PsuIdentity": {
-        "description": "Describes the FRU identity of a power supply unit (PSU).\n\nNote that this is *not* in the same format as Oxide FRU identities.",
-        "type": "object",
-        "properties": {
-          "firmware_revision": {
-            "type": "string"
-          },
-          "manufacturer": {
-            "type": "string"
-          },
-          "part": {
-            "type": "string"
-          },
-          "serial": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "firmware_revision",
-          "manufacturer",
-          "part",
-          "serial"
-        ]
-      },
-      "PsuInsertedVersions": {
-        "oneOf": [
-          {
-            "description": "An alert indicating that a power supply unit (PSU) has been inserted into a power shelf.",
-            "type": "object",
-            "properties": {
-              "power_shelf": {
-                "$ref": "#/components/schemas/PowerShelf"
-              },
-              "psu": {
-                "$ref": "#/components/schemas/Psu"
-              },
-              "rack_id": {
-                "description": "The ID of the rack containing the power shelf.",
-                "type": "string",
-                "format": "uuid"
-              },
-              "time": {
-                "type": "string",
-                "format": "date-time"
-              },
-              "version": {
-                "type": "string",
-                "enum": [
-                  "v0"
-                ]
-              }
-            },
-            "required": [
-              "power_shelf",
-              "psu",
-              "rack_id",
-              "time",
-              "version"
-            ]
-          }
-        ]
-      },
-      "PsuRemovedVersions": {
-        "oneOf": [
-          {
-            "description": "An alert indicating that a power supply unit (PSU) has been removed from a power shelf.",
-            "type": "object",
-            "properties": {
-              "power_shelf": {
-                "$ref": "#/components/schemas/PowerShelf"
-              },
-              "psu": {
-                "$ref": "#/components/schemas/Psu"
-              },
-              "rack_id": {
-                "description": "The ID of the rack containing the power shelf.",
-                "type": "string",
-                "format": "uuid"
-              },
-              "time": {
-                "type": "string",
-                "format": "date-time"
-              },
-              "version": {
-                "type": "string",
-                "enum": [
-                  "v0"
-                ]
-              }
-            },
-            "required": [
-              "power_shelf",
-              "psu",
-              "rack_id",
-              "time",
-              "version"
-            ]
-          }
-        ]
       },
       "Quantile": {
         "description": "Structure for estimating the p-quantile of a population.\n\nThis is based on the P² algorithm for estimating quantiles using constant space.\n\nThe algorithm consists of maintaining five markers: the minimum, the p/2-, p-, and (1 + p)/2 quantiles, and the maximum.",
