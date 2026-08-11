@@ -317,6 +317,7 @@ mod test {
             .unwrap();
         assert_eq!(contents, "core.123-second");
 
+        tempdir.cleanup();
         logctx.cleanup_successful();
     }
 }
