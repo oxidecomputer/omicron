@@ -301,14 +301,9 @@ async fn test_updates() {
             stderr: &mut stderr,
         };
 
-        wicket::exec_with_args(
-            wicketd_testctx.wicketd_addr,
-            wicketd_testctx.commission_addr,
-            args,
-            output,
-        )
-        .await
-        .expect("wicket rack-update clear failed");
+        wicket::exec_with_args(wicketd_testctx.wicketd_addrs, args, output)
+            .await
+            .expect("wicket rack-update clear failed");
 
         // stdout should contain a JSON object.
         let response: Result<ClearUpdateStateResponse, SerializableError> =
@@ -376,14 +371,9 @@ async fn get_rack_update_status(
         stdout: &mut stdout,
         stderr: &mut stderr,
     };
-    wicket::exec_with_args(
-        wicketd_testctx.wicketd_addr,
-        wicketd_testctx.commission_addr,
-        args,
-        output,
-    )
-    .await
-    .expect("wicket rack-update status failed to run");
+    wicket::exec_with_args(wicketd_testctx.wicketd_addrs, args, output)
+        .await
+        .expect("wicket rack-update status failed to run");
     serde_json::from_slice(&stdout)
         .expect("rack-update status --json output is valid JSON")
 }
