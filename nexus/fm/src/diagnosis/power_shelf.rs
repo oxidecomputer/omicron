@@ -1016,14 +1016,12 @@ mod tests {
         new_ereports: impl IntoIterator<Item = Ereport>,
     ) -> Input {
         let parent = parent_sitrep.map(|s| {
-            Arc::new((
-                SitrepVersion {
-                    id: s.id(),
-                    version: 1,
-                    time_made_current: Utc::now(),
-                },
-                s,
-            ))
+            let version = SitrepVersion {
+                id: s.id(),
+                version: 1,
+                time_made_current: Utc::now(),
+            };
+            Arc::new(fm::CommittedSitrep::new(version, s).unwrap())
         });
         let mut builder = fmtest
             .input_builder(parent, collection.into(), Arc::new(IdOrdMap::new()))

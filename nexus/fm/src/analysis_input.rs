@@ -8,7 +8,7 @@ use chrono::{DateTime, Utc};
 use iddqd::IdOrdMap;
 use nexus_db_model::EreporterRestart;
 use nexus_types::fm::analysis_reports::ClosedCaseReport;
-use nexus_types::fm::{self, Sitrep, SitrepVersion};
+use nexus_types::fm::{self, Sitrep};
 use nexus_types::in_service_disk::InServiceDisk;
 use nexus_types::inventory;
 use omicron_uuid_kinds::AlertUuid;
@@ -38,7 +38,7 @@ pub use nexus_types::fm::analysis_reports::InputReport as Report;
 /// [`Input::builder`].
 #[derive(Debug)]
 pub struct Input {
-    parent_sitrep: Option<Arc<(SitrepVersion, Sitrep)>>,
+    parent_sitrep: Option<Arc<fm::CommittedSitrep>>,
     inv: Arc<inventory::Collection>,
     /// Ereports which are new and should be input to analysis in the next
     /// sitrep.
@@ -64,7 +64,7 @@ pub struct Input {
 
 impl Input {
     pub fn parent_sitrep(&self) -> Option<&Sitrep> {
-        self.parent_sitrep.as_ref().map(|s| &s.1)
+        self.parent_sitrep.as_ref().map(|s| &s.sitrep)
     }
 
     pub fn inventory(&self) -> &inventory::Collection {
@@ -107,15 +107,15 @@ impl Input {
     /// Returns a [`Builder`] for constructing a new `Input` from the provided
     /// `parent_sitrep`, inventory collection, and in-service disks.
     pub fn builder(
-        parent_sitrep: Option<Arc<(SitrepVersion, Sitrep)>>,
+        parent_sitrep: Option<Arc<fm::CommittedSitrep>>,
         inv: Arc<inventory::Collection>,
         in_service_disks: Arc<IdOrdMap<InServiceDisk>>,
     ) -> Result<Builder, InvalidInputs> {
         // Before preparing analysis inputs, check that the proposed input
         // inventory collection is at least as new as the parent sitrep's
         // inventory collection.
-        if let Some((_, ref parent)) = parent_sitrep.as_deref() {
-            let parent = &parent.metadata;
+        if let Some(ref committed) = parent_sitrep.as_deref() {
+            let parent = &committed.sitrep.metadata;
             // It is always okay to produce a new sitrep based on the same
             // inventory collection as the parent sitrep...
             if parent.inv_collection_id != inv.id
@@ -159,7 +159,7 @@ pub enum InvalidInputs {
 
 #[must_use]
 pub struct Builder {
-    parent_sitrep: Option<Arc<(SitrepVersion, Sitrep)>>,
+    parent_sitrep: Option<Arc<fm::CommittedSitrep>>,
     inv: Arc<inventory::Collection>,
     in_service_disks: Arc<IdOrdMap<InServiceDisk>>,
     /// Ereports which are new and should be input to analysis in the next
@@ -212,7 +212,7 @@ impl Builder {
         &mut self,
         ereports: impl IntoIterator<Item = fm::Ereport>,
     ) {
-        let parent_sitrep = self.parent_sitrep.as_ref().map(|s| &s.1);
+        let parent_sitrep = self.parent_sitrep.as_ref().map(|s| &s.sitrep);
         self.new_ereports.extend(ereports.into_iter().filter_map(|ereport| {
             if let Some(sitrep) = parent_sitrep {
                 let id = ereport.id;
@@ -272,7 +272,7 @@ impl Builder {
     /// that provides a human-readable summary of how the inputs were
     /// constructed.
     pub fn build(self) -> (Input, Report) {
-        let parent_sitrep = self.parent_sitrep.as_ref().map(|s| &s.1);
+        let parent_sitrep = self.parent_sitrep.as_ref().map(|s| &s.sitrep);
         let (parent_sitrep_id, parent_inv_id) = match parent_sitrep {
             Some(sitrep) => {
                 let id = sitrep.id();
@@ -621,14 +621,17 @@ mod tests {
                 cases,
                 ereports_by_id,
             };
-            Arc::new((
-                SitrepVersion {
-                    id: parent_sitrep_id,
-                    version: 420,
-                    time_made_current: chrono::Utc::now(),
-                },
-                sitrep,
-            ))
+            Arc::new(
+                fm::CommittedSitrep::new(
+                    SitrepVersion {
+                        id: parent_sitrep_id,
+                        version: 420,
+                        time_made_current: chrono::Utc::now(),
+                    },
+                    sitrep,
+                )
+                .unwrap(),
+            )
         };
 
         // Build analysis input
@@ -893,7 +896,9 @@ mod tests {
             time_made_current: chrono::Utc::now(),
         };
         Input::builder(
-            Some(Arc::new((parent_version, parent))),
+            Some(Arc::new(
+                fm::CommittedSitrep::new(parent_version, parent).unwrap(),
+            )),
             inv,
             Arc::new(IdOrdMap::new()),
         )

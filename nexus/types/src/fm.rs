@@ -24,6 +24,7 @@ pub mod display;
 use case::AlertRequest;
 use chrono::{DateTime, Utc};
 use iddqd::IdOrdMap;
+use omicron_common::api::external::Error;
 use omicron_common::api::external::Generation;
 use omicron_uuid_kinds::{
     CaseUuid, CollectionUuid, OmicronZoneUuid, SitrepUuid,
@@ -122,6 +123,42 @@ impl Sitrep {
     /// timestamp, etc) can still represent identical states.
     pub fn compare_state(&self) -> SitrepStateComparison<'_> {
         SitrepStateComparison { sitrep: self }
+    }
+}
+
+/// Represents a sitrep that has been committed to the sitrep history, and which
+/// was read from the sitrep history. This is a wrapper for a [`Sitrep`] along
+/// with its version metadata.
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
+pub struct CommittedSitrep {
+    pub version: u32,
+    pub time_made_current: DateTime<Utc>,
+    pub sitrep: Sitrep,
+}
+
+impl CommittedSitrep {
+    pub fn new(version: SitrepVersion, sitrep: Sitrep) -> Result<Self, Error> {
+        let SitrepVersion { version, time_made_current, id } = version;
+        if id != sitrep.id() {
+            return Err(Error::invalid_value(
+                "version",
+                format!(
+                    "version v{version} refers to sitrep {id}, not sitrep {}",
+                    sitrep.id()
+                ),
+            ));
+        }
+        Ok(Self { version, time_made_current, sitrep })
+    }
+}
+
+impl TryFrom<(SitrepVersion, Sitrep)> for CommittedSitrep {
+    type Error = Error;
+
+    fn try_from(
+        (version, sitrep): (SitrepVersion, Sitrep),
+    ) -> Result<Self, Self::Error> {
+        Self::new(version, sitrep)
     }
 }
 

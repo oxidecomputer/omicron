@@ -127,7 +127,7 @@ impl FmRendezvous {
         ";
 
         let status = Status {
-            sitrep_id: Some(sitrep.1.id()),
+            sitrep_id: Some(sitrep.sitrep.id()),
             alerts: alerts.await.expect(TASKS_SHOULDNT_FAIL),
             support_bundles: support_bundles.await.expect(TASKS_SHOULDNT_FAIL),
             ereport_marking: marking.await.expect(TASKS_SHOULDNT_FAIL),
@@ -164,7 +164,7 @@ impl FmRendezvous {
         let sitrep = sitrep.clone();
         let opctx = opctx.child(
             [
-                ("sitrep_id".to_string(), sitrep.1.id().to_string()),
+                ("sitrep_id".to_string(), sitrep.sitrep.id().to_string()),
                 ("rendezvous_op".to_string(), opname.to_string()),
             ]
             .into_iter()
@@ -184,7 +184,7 @@ impl FmRendezvous {
         sitrep: CurrentSitrep,
         opctx: OpContext,
     ) -> AlertCreationStatus {
-        let (_, ref sitrep) = *sitrep;
+        let sitrep = &sitrep.sitrep;
         let mut status = AlertCreationStatus::default();
         let expected_alert_generation = sitrep.metadata.alert_generation;
 
@@ -317,7 +317,7 @@ impl FmRendezvous {
     ) -> EreportMarkingStatus {
         const BATCH_SIZE: usize = 1000;
 
-        let (_, ref sitrep) = *sitrep;
+        let sitrep = &sitrep.sitrep;
         let mut status = EreportMarkingStatus {
             batch_size: BATCH_SIZE,
             total_ereports_in_sitrep: sitrep.ereports_by_id.len(),
@@ -390,7 +390,7 @@ impl FmRendezvous {
         sitrep: CurrentSitrep,
         opctx: OpContext,
     ) -> SupportBundleCreationStatus {
-        let (_, ref sitrep) = *sitrep;
+        let sitrep = &sitrep.sitrep;
         let mut status = SupportBundleCreationStatus::default();
 
         let expected_support_bundle_generation =
@@ -565,7 +565,7 @@ impl FmRendezvous {
         sitrep: CurrentSitrep,
         opctx: OpContext,
     ) -> MarkerGcStatus {
-        let (_, ref sitrep) = *sitrep;
+        let sitrep = &sitrep.sitrep;
         let result = self
             .datastore
             .fm_rendezvous_alert_marker_gc(
@@ -584,7 +584,7 @@ impl FmRendezvous {
         sitrep: CurrentSitrep,
         opctx: OpContext,
     ) -> MarkerGcStatus {
-        let (_, ref sitrep) = *sitrep;
+        let sitrep = &sitrep.sitrep;
         let result = self
             .datastore
             .fm_rendezvous_support_bundle_marker_gc(
@@ -770,14 +770,17 @@ mod tests {
             .expect("inserted sitrep1");
 
         sitrep_tx
-            .send(Some(Arc::new((
-                fm::SitrepVersion {
-                    id: sitrep1_id,
-                    version: 1,
-                    time_made_current: Utc::now(),
-                },
-                sitrep1,
-            ))))
+            .send(Some(Arc::new(
+                fm::CommittedSitrep::new(
+                    fm::SitrepVersion {
+                        id: sitrep1_id,
+                        version: 1,
+                        time_made_current: Utc::now(),
+                    },
+                    sitrep1,
+                )
+                .unwrap(),
+            )))
             .unwrap();
 
         let Status { sitrep_id, alerts, alert_marker_gc, .. } =
@@ -883,14 +886,17 @@ mod tests {
             .expect("inserted sitrep2");
 
         sitrep_tx
-            .send(Some(Arc::new((
-                fm::SitrepVersion {
-                    id: sitrep2_id,
-                    version: 2,
-                    time_made_current: Utc::now(),
-                },
-                sitrep2,
-            ))))
+            .send(Some(Arc::new(
+                fm::CommittedSitrep::new(
+                    fm::SitrepVersion {
+                        id: sitrep2_id,
+                        version: 2,
+                        time_made_current: Utc::now(),
+                    },
+                    sitrep2,
+                )
+                .unwrap(),
+            )))
             .unwrap();
 
         let status = dbg!(task.actually_activate(opctx).await);
@@ -1072,14 +1078,16 @@ mod tests {
         // of date, and rendezvous execution should be aborted before
         // attempting to insert the other alert.
         sitrep_tx
-            .send(Some(Arc::new((
-                fm::SitrepVersion {
-                    id: stale_sitrep_id,
-                    version: 1,
-                    time_made_current: Utc::now(),
-                },
-                stale_sitrep,
-            ))))
+            .send(Some(Arc::new(
+                fm::CommittedSitrep::new(
+                    fm::SitrepVersion {
+                        id: stale_sitrep_id,
+                        version: 1,
+                        time_made_current: Utc::now(),
+                    },
+                    stale_sitrep,
+                ).unwrap()
+            )))
             .unwrap();
 
         let status = dbg!(task.actually_activate(opctx).await);
@@ -1248,14 +1256,16 @@ mod tests {
         // and breaks out of the bundle loop before the second request is
         // attempted.
         sitrep_tx
-            .send(Some(Arc::new((
-                fm::SitrepVersion {
-                    id: stale_sitrep_id,
-                    version: 1,
-                    time_made_current: Utc::now(),
-                },
-                stale_sitrep,
-            ))))
+            .send(Some(Arc::new(
+                fm::CommittedSitrep::new(
+                    fm::SitrepVersion {
+                        id: stale_sitrep_id,
+                        version: 1,
+                        time_made_current: Utc::now(),
+                    },
+                    stale_sitrep,
+                ).unwrap()
+            )))
             .unwrap();
 
         let status = dbg!(task.actually_activate(opctx).await);
@@ -1531,14 +1541,16 @@ mod tests {
         };
 
         sitrep_tx
-            .send(Some(Arc::new((
-                fm::SitrepVersion {
-                    id: sitrep1_id,
-                    version: 1,
-                    time_made_current: Utc::now(),
-                },
-                sitrep1,
-            ))))
+            .send(Some(Arc::new(
+                fm::CommittedSitrep::new(
+                    fm::SitrepVersion {
+                        id: sitrep1_id,
+                        version: 1,
+                        time_made_current: Utc::now(),
+                    },
+                    sitrep1,
+                ).unwrap()
+            )))
             .unwrap();
 
         // First activation should mark ereport1 and ereport2 as seen
@@ -1744,14 +1756,16 @@ mod tests {
         };
 
         sitrep_tx
-            .send(Some(Arc::new((
-                fm::SitrepVersion {
-                    id: sitrep1_id,
-                    version: 1,
-                    time_made_current: Utc::now(),
-                },
-                sitrep1,
-            ))))
+            .send(Some(Arc::new(
+                fm::CommittedSitrep::new(
+                    fm::SitrepVersion {
+                        id: sitrep1_id,
+                        version: 1,
+                        time_made_current: Utc::now(),
+                    },
+                    sitrep1,
+                ).unwrap()
+            )))
             .unwrap();
 
         // Activate with sitrep 1 --- should mark only ereport1.
@@ -1856,14 +1870,16 @@ mod tests {
         };
 
         sitrep_tx
-            .send(Some(Arc::new((
-                fm::SitrepVersion {
-                    id: sitrep2_id,
-                    version: 2,
-                    time_made_current: Utc::now(),
-                },
-                sitrep2,
-            ))))
+            .send(Some(Arc::new(
+                fm::CommittedSitrep::new(
+                    fm::SitrepVersion {
+                        id: sitrep2_id,
+                        version: 2,
+                        time_made_current: Utc::now(),
+                    },
+                    sitrep2,
+                ).unwrap()
+            )))
             .unwrap();
 
         // Activate with sitrep 2 --- should mark ereport2 and ereport3, but
@@ -2064,14 +2080,16 @@ mod tests {
             .expect("inserted sitrep1");
 
         sitrep_tx
-            .send(Some(Arc::new((
-                fm::SitrepVersion {
-                    id: sitrep1_id,
-                    version: 1,
-                    time_made_current: Utc::now(),
-                },
-                sitrep1,
-            ))))
+            .send(Some(Arc::new(
+                fm::CommittedSitrep::new(
+                    fm::SitrepVersion {
+                        id: sitrep1_id,
+                        version: 1,
+                        time_made_current: Utc::now(),
+                    },
+                    sitrep1,
+                ).unwrap()
+            )))
             .unwrap();
 
         // First activation: should create the support bundle.
@@ -2157,14 +2175,16 @@ mod tests {
             .expect("inserted sitrep2");
 
         sitrep_tx
-            .send(Some(Arc::new((
-                fm::SitrepVersion {
-                    id: sitrep2_id,
-                    version: 2,
-                    time_made_current: Utc::now(),
-                },
-                sitrep2,
-            ))))
+            .send(Some(Arc::new(
+                fm::CommittedSitrep::new(
+                    fm::SitrepVersion {
+                        id: sitrep2_id,
+                        version: 2,
+                        time_made_current: Utc::now(),
+                    },
+                    sitrep2,
+                ).unwrap()
+            )))
             .unwrap();
 
         // Activation with sitrep2: should create only the new bundle. The
@@ -2274,14 +2294,16 @@ mod tests {
             .expect("inserted sitrep");
 
         sitrep_tx
-            .send(Some(Arc::new((
-                fm::SitrepVersion {
-                    id: sitrep_id,
-                    version: 1,
-                    time_made_current: Utc::now(),
-                },
-                sitrep,
-            ))))
+            .send(Some(Arc::new(
+                fm::CommittedSitrep::new(
+                    fm::SitrepVersion {
+                        id: sitrep_id,
+                        version: 1,
+                        time_made_current: Utc::now(),
+                    },
+                    sitrep,
+                ).unwrap()
+            )))
             .unwrap();
 
         let status = dbg!(task.actually_activate(opctx).await);

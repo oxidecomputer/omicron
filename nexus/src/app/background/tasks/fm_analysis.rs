@@ -126,7 +126,7 @@ impl FmAnalysis {
             .collect();
 
         let parent_sitrep = self.sitrep_rx.borrow_and_update().clone();
-        let parent_sitrep_id = parent_sitrep.as_ref().map(|s| s.1.id());
+        let parent_sitrep_id = parent_sitrep.as_ref().map(|s| s.sitrep.id());
 
         let cfg = {
             let cfg_view = self.cfg_rx.borrow_and_update();
@@ -313,14 +313,14 @@ impl FmAnalysis {
             .context("failed to load new ereports")?;
         self.load_existing_alert_markers(
             opctx,
-            parent_sitrep.as_ref().map(|s| &s.1),
+            parent_sitrep.as_ref().map(|s| &s.sitrep),
             &mut builder,
         )
         .await
         .context("failed to load existing alert markers")?;
         self.load_existing_support_bundle_markers(
             opctx,
-            parent_sitrep.as_ref().map(|s| &s.1),
+            parent_sitrep.as_ref().map(|s| &s.sitrep),
             &mut builder,
         )
         .await
@@ -867,24 +867,24 @@ mod tests {
     /// inventory collection.
     fn make_current_sitrep(inv: &inventory::Collection) -> CurrentSitrep {
         let id = SitrepUuid::new_v4();
-        Arc::new((
-            SitrepVersion { id, version: 1, time_made_current: Utc::now() },
-            Sitrep {
-                metadata: SitrepMetadata {
-                    id,
-                    parent_sitrep_id: None,
-                    inv_collection_id: inv.id,
-                    next_inv_min_time_started: inv.time_done,
-                    creator_id: OmicronZoneUuid::new_v4(),
-                    comment: "test sitrep".to_string(),
-                    time_created: Utc::now(),
-                    alert_generation: Generation::new(),
-                    support_bundle_generation: Generation::new(),
-                },
-                cases: Default::default(),
-                ereports_by_id: Default::default(),
+        let version =
+            SitrepVersion { id, version: 1, time_made_current: Utc::now() };
+        let sitrep = Sitrep {
+            metadata: SitrepMetadata {
+                id,
+                parent_sitrep_id: None,
+                inv_collection_id: inv.id,
+                next_inv_min_time_started: inv.time_done,
+                creator_id: OmicronZoneUuid::new_v4(),
+                comment: "test sitrep".to_string(),
+                time_created: Utc::now(),
+                alert_generation: Generation::new(),
+                support_bundle_generation: Generation::new(),
             },
-        ))
+            cases: Default::default(),
+            ereports_by_id: Default::default(),
+        };
+        Arc::new(fm::CommittedSitrep::new(version, sitrep).unwrap())
     }
 
     #[tokio::test]
@@ -1196,14 +1196,17 @@ mod tests {
             .await
             .expect("created the satisfied case's alert");
 
-        let parent: CurrentSitrep = Arc::new((
-            SitrepVersion {
-                id: sitrep_id,
-                version: 1,
-                time_made_current: Utc::now(),
-            },
-            sitrep,
-        ));
+        let parent: CurrentSitrep = Arc::new(
+            fm::CommittedSitrep::new(
+                SitrepVersion {
+                    id: sitrep_id,
+                    version: 1,
+                    time_made_current: Utc::now(),
+                },
+                sitrep,
+            )
+            .unwrap(),
+        );
 
         let (_sitrep_tx, sitrep_rx) = watch::channel(None);
         let (_inv_tx, inv_rx) = watch::channel(None);

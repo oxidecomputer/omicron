@@ -9,10 +9,10 @@ use chrono::Utc;
 use iddqd::IdOrdMap;
 use nexus_db_model::EreporterRestart;
 use nexus_reconfigurator_planning::example;
+use nexus_types::fm;
 use nexus_types::fm::ereport::{
     Ena, Ereport, EreportData, EreportId, Reporter,
 };
-use nexus_types::fm::{Sitrep, SitrepVersion};
 use nexus_types::in_service_disk::InServiceDisk;
 use nexus_types::inventory;
 use omicron_test_utils::dev;
@@ -66,7 +66,7 @@ impl FmTest {
     // somehow...
     pub fn input_builder(
         &self,
-        parent_sitrep: Option<Arc<(SitrepVersion, Sitrep)>>,
+        parent_sitrep: Option<Arc<fm::CommittedSitrep>>,
         inv: Arc<inventory::Collection>,
         in_service_disks: Arc<IdOrdMap<InServiceDisk>>,
     ) -> Result<Builder, InvalidInputs> {
