@@ -155,7 +155,7 @@ pub(crate) async fn abandon_orphan_sagas(
         .sagas_abandon_orphans(
             opctx,
             &stale_sec_ids,
-            SagaReasonAbandoned::Unrecoverable,
+            SagaReasonAbandoned::Orphaned,
             "orphan: current_sec is expunged and too old for this saga to be \
             re-assigned"
                 .to_string(),
@@ -735,21 +735,20 @@ mod test {
         assert_eq!(unchanged.len(), expected_unchanged_count);
 
         // `orphan_sec`'s running/unwinding sagas should now be abandoned as
-        // unrecoverable.
+        // orphaned.
         for saga in abandoned {
             assert_eq!(
                 state_summary(&saga.saga_state),
                 (
                     SagaState::Abandoned,
                     Some((
-                        SagaReasonAbandoned::Unrecoverable,
+                        SagaReasonAbandoned::Orphaned,
                         "orphan: current_sec is expunged and too old for this \
                         saga to be re-assigned"
                             .to_string(),
                     )),
                 ),
-                "saga {} should have been abandoned as unrecoverable, but is \
-                 {:?}",
+                "saga {} should have been abandoned as orphaned, but is {:?}",
                 saga.id,
                 saga.saga_state,
             );

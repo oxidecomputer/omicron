@@ -178,6 +178,7 @@ impl_enum_type!(
 
     Omdb => b"omdb"
     Unrecoverable => b"unrecoverable"
+    Orphaned => b"orphaned"
 );
 
 impl_enum_type!(
