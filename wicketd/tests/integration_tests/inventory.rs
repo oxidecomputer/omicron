@@ -98,9 +98,14 @@ async fn test_inventory() {
             stderr: &mut stderr,
         };
 
-        wicket::exec_with_args(wicketd_testctx.wicketd_addr, args, output)
-            .await
-            .expect("wicket inventory configured-bootstrap-sleds failed");
+        wicket::exec_with_args(
+            wicketd_testctx.wicketd_addr,
+            wicketd_testctx.commission_addr,
+            args,
+            output,
+        )
+        .await
+        .expect("wicket inventory configured-bootstrap-sleds failed");
 
         // stdout should contain a JSON object.
         let response: Vec<BootstrapSledDescription> =

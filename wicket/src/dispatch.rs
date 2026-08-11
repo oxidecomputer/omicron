@@ -38,6 +38,7 @@ pub fn exec() -> Result<ExitCode> {
                 .context("creating tokio runtime")?;
             runtime.block_on(exec_with_args(
                 wicketd_addr,
+                commission_addr,
                 args,
                 OutputKind::Terminal,
             ))
@@ -67,6 +68,7 @@ pub enum OutputKind<'a> {
 
 pub async fn exec_with_args<S>(
     wicketd_addr: SocketAddrV6,
+    commission_addr: SocketAddrV6,
     args: Vec<S>,
     output: OutputKind<'_>,
 ) -> Result<ExitCode>
@@ -82,7 +84,7 @@ where
     match output {
         OutputKind::Captured { log, stdout, stderr } => {
             let output = CommandOutput { stdout, stderr };
-            app.exec(log, wicketd_addr, output).await
+            app.exec(log, wicketd_addr, commission_addr, output).await
         }
         OutputKind::Terminal => {
             let log = setup_log(
@@ -93,7 +95,7 @@ where
             let mut stderr = std::io::stderr();
             let output =
                 CommandOutput { stdout: &mut stdout, stderr: &mut stderr };
-            app.exec(log, wicketd_addr, output).await
+            app.exec(log, wicketd_addr, commission_addr, output).await
         }
     }
 }

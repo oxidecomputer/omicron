@@ -28,6 +28,7 @@ pub struct WicketdTestContext {
     // this way.
     #[allow(dead_code)]
     pub artifact_client: installinator_client::Client,
+    pub commission_addr: SocketAddrV6,
     pub commission_client: wicketd_commission_client::Client,
     pub server: wicketd::Server,
     pub gateway: GatewayTestContext,
@@ -119,6 +120,7 @@ impl WicketdTestContext {
             wicketd_raw_client,
             artifact_addr,
             artifact_client,
+            commission_addr,
             commission_client,
             server,
             gateway,

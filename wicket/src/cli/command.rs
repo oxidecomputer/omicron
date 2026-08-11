@@ -37,11 +37,12 @@ impl ShellApp {
         self,
         log: slog::Logger,
         wicketd_addr: SocketAddrV6,
+        commission_addr: SocketAddrV6,
         output: CommandOutput<'_>,
     ) -> Result<ExitCode> {
         match self.command {
             ShellCommand::UploadRepo(args) => {
-                args.exec(log, wicketd_addr).await?;
+                args.exec(log, commission_addr).await?;
                 Ok(ExitCode::SUCCESS)
             }
             ShellCommand::RackUpdate(args) => {
