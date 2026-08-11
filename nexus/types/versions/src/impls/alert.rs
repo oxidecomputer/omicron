@@ -4,10 +4,12 @@
 
 //! Functional code for alert types.
 
+use crate::latest::alert::power_shelf::{PsuInsertedV0, PsuRemovedV0};
 use crate::latest::alert::{
-    AlertDeliveryState, AlertDeliveryStateFilter, AlertDeliveryTrigger,
-    AlertSubscription, WebhookDeliveryAttemptResult,
+    AlertClass, AlertDeliveryState, AlertDeliveryStateFilter,
+    AlertDeliveryTrigger, AlertSubscription, WebhookDeliveryAttemptResult,
 };
+use nexus_alert_types::AsAlert;
 use omicron_common::api::external::Error;
 use std::fmt;
 use std::sync::LazyLock;
@@ -210,6 +212,35 @@ fn expected_one_of<T: strum::VariantArray + fmt::Display>() -> String {
         }
     }
     msg
+}
+
+impl From<nexus_alert_types::AlertClass> for AlertClass {
+    fn from(class: nexus_alert_types::AlertClass) -> Self {
+        Self {
+            name: class.to_string(),
+            description: class.description().to_string(),
+        }
+    }
+}
+
+impl AsAlert for PsuInsertedV0 {
+    fn class(&self) -> nexus_alert_types::AlertClass {
+        nexus_alert_types::AlertClass::PsuInserted
+    }
+
+    fn version(&self) -> u32 {
+        0
+    }
+}
+
+impl AsAlert for PsuRemovedV0 {
+    fn class(&self) -> nexus_alert_types::AlertClass {
+        nexus_alert_types::AlertClass::PsuRemoved
+    }
+
+    fn version(&self) -> u32 {
+        0
+    }
 }
 
 #[cfg(test)]

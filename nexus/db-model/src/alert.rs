@@ -8,7 +8,7 @@ use crate::SqlU32;
 use chrono::{DateTime, Utc};
 use db_macros::Asset;
 use nexus_db_schema::schema::alert;
-use nexus_types::alert::AlertPayload;
+use nexus_types::alert::AsAlert;
 use nexus_types::fm::case;
 use omicron_common::api::external::Error;
 use omicron_uuid_kinds::AlertUuid;
@@ -69,12 +69,12 @@ impl Alert {
     /// The alert's class and schema version are taken from the [`AlertPayload`]
     /// trait implementation of the provided `alert` value, and the value itself
     /// is serialized to form the alert's JSON data payload.
-    pub fn new<A: AlertPayload>(
+    pub fn new<A: AsAlert>(
         id: impl Into<AlertUuid>,
         alert: &A,
     ) -> Result<Self, Error> {
-        let class = A::CLASS;
-        let version = A::VERSION;
+        let class = alert.class();
+        let version = alert.version();
         let payload =
             serde_json::to_value(alert).map_err(|e| Error::InternalError {
                 internal_message: format!(

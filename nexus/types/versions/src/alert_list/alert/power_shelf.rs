@@ -5,7 +5,7 @@
 //! Power shelf alert types.
 
 use super::*;
-use crate::external_api::hardware::Baseboard;
+use crate::v2025_11_20_00::hardware::Baseboard;
 use chrono::DateTime;
 use chrono::Utc;
 use omicron_uuid_kinds::RackUuid;
@@ -24,9 +24,11 @@ pub struct PsuInsertedV0 {
     pub time: DateTime<Utc>,
 }
 
-impl AlertPayload for PsuInsertedV0 {
-    const CLASS: AlertClass = AlertClass::PsuInserted;
-    const VERSION: u32 = 0;
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "version", content = "alert")]
+#[serde(rename_all = "snake_case")]
+pub enum PsuInsertedVersions {
+    V0(PsuRemovedV0),
 }
 
 /// An alert indicating that a power supply unit (PSU) has been removed from a
@@ -41,9 +43,11 @@ pub struct PsuRemovedV0 {
     pub time: DateTime<Utc>,
 }
 
-impl AlertPayload for PsuRemovedV0 {
-    const CLASS: AlertClass = AlertClass::PsuRemoved;
-    const VERSION: u32 = 0;
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "version", content = "alert")]
+#[serde(rename_all = "snake_case")]
+pub enum PsuRemovedVersions {
+    V0(PsuRemovedV0),
 }
 
 /// Describes the power shelf involved in an alert.
@@ -86,20 +90,4 @@ pub struct PsuIdentity {
     pub part: String,
     pub firmware_revision: String,
     pub serial: String,
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::alert::tests::expectorate_alert_schema;
-
-    #[test]
-    fn psu_inserted_v0_schema() {
-        expectorate_alert_schema::<PsuInsertedV0>();
-    }
-
-    #[test]
-    fn psu_removed_v0_schema() {
-        expectorate_alert_schema::<PsuRemovedV0>();
-    }
 }

@@ -1289,7 +1289,7 @@ mod test {
         logctx.cleanup_successful();
     }
 
-    async fn create_alert<A: nexus_types::alert::AlertPayload>(
+    async fn create_alert<A: nexus_types::alert::AsAlert>(
         datastore: &DataStore,
         opctx: &OpContext,
         alert: &A,

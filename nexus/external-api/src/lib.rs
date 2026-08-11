@@ -86,6 +86,7 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyy_mm_dd_nn, IDENT),
+    (2026_08_11_00, ALERT_LIST),
     (2026_07_31_00, SET_TARGET_RELEASE_UPDATE_RECOVERY_DOCS),
     (2026_07_28_00, INTERNET_GATEWAY_CASCADE_DOCS),
     (2026_06_11_00, ADD_SYSTEM_IP_POOL_APIS),

@@ -156,6 +156,7 @@ use nexus_db_queries::db::model::AlertDeliveryState;
 use nexus_db_queries::db::model::AlertDeliveryTrigger;
 use nexus_db_queries::db::model::WebhookDelivery;
 use nexus_db_queries::db::model::WebhookReceiverConfig;
+use nexus_types::alert::AsAlert;
 use nexus_types::external_api::alert;
 use nexus_types::identity::Asset;
 use omicron_common::api::external::CreateResult;
@@ -186,11 +187,11 @@ impl Nexus {
     /// event to receivers.  However, if (for whatever reason) this Nexus fails
     /// to do that, the event remains durably in the database to be dispatched
     /// and delivered by someone else.
-    pub async fn alert_publish<A: nexus_types::alert::AlertPayload>(
+    pub async fn alert_publish(
         &self,
         opctx: &OpContext,
         id: AlertUuid,
-        alert: &A,
+        alert: &impl AsAlert,
     ) -> Result<Alert, Error> {
         let alert = Alert::new(id, alert)?;
         let alert = self.datastore().alert_create(opctx, alert).await?;

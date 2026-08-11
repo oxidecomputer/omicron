@@ -88,6 +88,7 @@ members = [
     "live-tests/macros",
     "nexus",
     "nexus-config",
+    "nexus/alert-types",
     "nexus/authz-macros",
     "nexus/auth",
     "nexus/background-task-interface",
@@ -283,6 +284,7 @@ default-members = [
     "live-tests/macros",
     "nexus",
     "nexus-config",
+    "nexus/alert-types",
     "nexus/authz-macros",
     "nexus/auth",
     "nexus/background-task-interface",
@@ -628,6 +630,7 @@ ntp-admin-types-versions = { path = "ntp-admin/types/versions" }
 mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "ce015cde17a1ebc839ae482026d522cf0e369a3b" }
 ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "ce015cde17a1ebc839ae482026d522cf0e369a3b" }
 multimap = "0.10.1"
+nexus-alert-types = { path = "nexus/alert-types" }
 nexus-auth = { path = "nexus/auth" }
 nexus-background-task-interface = { path = "nexus/background-task-interface" }
 nexus-switch-config = { path = "nexus/switch-config" }
