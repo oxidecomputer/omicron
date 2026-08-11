@@ -8908,6 +8908,48 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
+    async fn alert_list(
+        rqctx: RequestContext<Self::Context>,
+        class_filter: Query<alert::AlertClassFilter>,
+        pag_params: Query<PaginatedByTimeAndId>,
+    ) -> Result<HttpResponseOk<ResultsPage<alert::Alert>>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let opctx = nexus.opctx_external_authn();
+            let pag_params = pag_params.into_inner();
+            let class_filter = class_filter.into_inner();
+            Err(HttpError::for_internal_error(
+                "TODO ELIZA IMPLEMENT THIS".to_string(),
+            ))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn alert_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<alert::AlertSelector>,
+    ) -> Result<HttpResponseOk<alert::Alert>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let opctx = nexus.opctx_external_authn();
+            let alert_selector = path_params.into_inner();
+            Err(HttpError::for_internal_error(
+                "TODO ELIZA IMPLEMENT THIS".to_string(),
+            ))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
     async fn alert_class_list(
         rqctx: RequestContext<Self::Context>,
         pag_params: Query<

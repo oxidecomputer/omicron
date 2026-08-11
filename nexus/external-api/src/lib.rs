@@ -9027,6 +9027,37 @@ pub trait NexusExternalApi {
 
     // Alerts
 
+    /// List alerts
+    ///
+    /// An optional alert class glob can be provided to filter which alert
+    /// classes are returned.
+    #[endpoint {
+        method = GET,
+        path = "/v1/alerts",
+        tags = ["system/alerts"],
+        versions = VERSION_ALERT_LIST..
+    }]
+    async fn alert_list(
+        rqctx: RequestContext<Self::Context>,
+        class_filter: Query<latest::alert::AlertClassFilter>,
+        pagination: Query<PaginatedByTimeAndId>,
+    ) -> Result<HttpResponseOk<ResultsPage<latest::alert::Alert>>, HttpError>;
+
+    /// Fetch alert
+    ///
+    /// An optional alert class glob can be provided to filter which alert
+    /// classes are returned.
+    #[endpoint {
+        method = GET,
+        path = "/v1/alerts/{alert_id}",
+        tags = ["system/alerts"],
+        versions = VERSION_ALERT_LIST..
+    }]
+    async fn alert_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::alert::AlertSelector>,
+    ) -> Result<HttpResponseOk<latest::alert::Alert>, HttpError>;
+
     /// List alert classes
     #[endpoint {
         method = GET,
