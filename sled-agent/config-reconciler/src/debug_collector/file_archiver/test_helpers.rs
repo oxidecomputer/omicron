@@ -210,6 +210,14 @@ pub(crate) enum TestFileKind {
         zone_name: String,
         zone_root: String,
     },
+    /// a debug dropbox deposit that's still being staged
+    ///
+    /// These files may be only partially written, so they must never be
+    /// archived.
+    DebugDropboxStaged {
+        zone_name: String,
+        zone_root: String,
+    },
     GlobalLogSmfRotated,
     GlobalLogSmfLive,
     GlobalLogSyslogRotated,
@@ -231,6 +239,7 @@ impl TestFileKind {
             | TestFileKind::LogSyslogRotated { .. }
             | TestFileKind::LogSyslogLive { .. }
             | TestFileKind::DebugDropbox { .. }
+            | TestFileKind::DebugDropboxStaged { .. }
             | TestFileKind::GlobalLogSmfRotated
             | TestFileKind::GlobalLogSmfLive
             | TestFileKind::GlobalLogSyslogRotated
@@ -249,7 +258,8 @@ impl TestFileKind {
             | TestFileKind::LogSmfLive { zone_name, zone_root }
             | TestFileKind::LogSyslogRotated { zone_name, zone_root }
             | TestFileKind::LogSyslogLive { zone_name, zone_root }
-            | TestFileKind::DebugDropbox { zone_name, zone_root } => {
+            | TestFileKind::DebugDropbox { zone_name, zone_root }
+            | TestFileKind::DebugDropboxStaged { zone_name, zone_root } => {
                 Some((zone_name, Utf8Path::new(zone_root)))
             }
             TestFileKind::GlobalLogSmfRotated
@@ -258,6 +268,29 @@ impl TestFileKind {
             | TestFileKind::GlobalLogSyslogLive => {
                 Some(("global", Utf8Path::new("/")))
             }
+        }
+    }
+
+    /// Returns whether the archiver is allowed to leave this file unarchived
+    ///
+    /// Most kinds of files are expected to be archived on a "final" pass.  The
+    /// exceptions are files that we don't care about either way and files that
+    /// must never be archived.
+    pub fn is_not_archived(&self) -> bool {
+        match self {
+            TestFileKind::Ignored | TestFileKind::DebugDropboxStaged { .. } => {
+                true
+            }
+            TestFileKind::ProcessCoreDump { .. }
+            | TestFileKind::LogSmfRotated { .. }
+            | TestFileKind::LogSmfLive { .. }
+            | TestFileKind::LogSyslogRotated { .. }
+            | TestFileKind::LogSyslogLive { .. }
+            | TestFileKind::DebugDropbox { .. }
+            | TestFileKind::GlobalLogSmfRotated
+            | TestFileKind::GlobalLogSmfLive
+            | TestFileKind::GlobalLogSyslogRotated
+            | TestFileKind::GlobalLogSyslogLive => false,
         }
     }
 }
@@ -299,6 +332,11 @@ impl TryFrom<&Utf8Path> for TestFileKind {
                 } else {
                     Ok(TestFileKind::LogSmfRotated { zone_name, zone_root })
                 }
+            } else if s.contains(&format!(
+                "{}/tmp/",
+                omicron_debug_dropbox::DEBUG_DROPBOX_PATH
+            )) {
+                Ok(TestFileKind::DebugDropboxStaged { zone_name, zone_root })
             } else if s.contains(omicron_debug_dropbox::DEBUG_DROPBOX_PATH) {
                 Ok(TestFileKind::DebugDropbox { zone_name, zone_root })
             } else {

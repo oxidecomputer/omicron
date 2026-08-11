@@ -150,17 +150,24 @@ mod test {
         let producer_dir =
             zone_root.join("var/debug_dropbox").join("test-producer");
         let file5_dropbox = producer_dir.join("test-file.dat");
+        // A deposit that's still being staged.  This must never be archived nor
+        // deleted.
+        let staging_dir =
+            zone_root.join("var/debug_dropbox/tmp").join("test-producer");
+        let file6_staged = staging_dir.join("partial.dat");
 
         let populate_input = |contents: &str| {
             std::fs::create_dir_all(&logdir).unwrap();
             std::fs::create_dir_all(&coredir).unwrap();
             std::fs::create_dir_all(&producer_dir).unwrap();
+            std::fs::create_dir_all(&staging_dir).unwrap();
             for file in [
                 &file1_live,
                 &file2_rotated,
                 &file3_rotated,
                 &file4_core,
                 &file5_dropbox,
+                &file6_staged,
             ] {
                 let contents =
                     format!("{}-{contents}", file.file_name().unwrap());
@@ -239,11 +246,9 @@ mod test {
 
         // Check the dropbox file at the expected nested output path.
         let verify_dropbox = |expected_name: &str, expected_contents: &str| {
-            let expected_path = outdir
-                .join(zone_name)
-                .join("debug_dropbox")
-                .join("test-producer")
-                .join(expected_name);
+            let dropbox_outdir = outdir.join(zone_name).join("debug_dropbox");
+            let expected_path =
+                dropbox_outdir.join("test-producer").join(expected_name);
             let contents = std::fs::read_to_string(&expected_path)
                 .with_context(|| {
                     format!("read expected output file {expected_path:?}")
@@ -252,6 +257,18 @@ mod test {
             assert_eq!(contents, expected_contents);
             // The original input file should be gone (delete_original: true).
             assert!(!file5_dropbox.exists());
+
+            // The still-being-staged deposit should have been left alone
+            // entirely: neither archived nor deleted.
+            assert!(
+                file6_staged.exists(),
+                "archiver removed a deposit that was still being staged",
+            );
+            assert!(
+                !dropbox_outdir.join("tmp").exists(),
+                "archiver created an output directory for the dropbox's \
+                 staging directory",
+            );
         };
 
         verify_logs(true);

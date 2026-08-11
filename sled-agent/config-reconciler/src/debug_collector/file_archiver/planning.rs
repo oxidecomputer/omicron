@@ -513,6 +513,13 @@ mod test {
     use slog_error_chain::InlineErrorChain;
     use std::collections::BTreeSet;
 
+    /// Name of the subdirectory of the debug dropbox in which deposits are
+    /// staged before being renamed into place
+    ///
+    /// This is part of the dropbox's on-disk protocol.  See
+    /// `omicron_debug_dropbox`.
+    const DROPBOX_STAGING_DIR: &str = "tmp";
+
     /// Fully tests archive planning with a bunch of real-world file paths
     #[test]
     fn test_archiving_basic() {
@@ -623,6 +630,14 @@ mod test {
                                 test_file.kind,
                             );
                         }
+
+                        TestFileKind::DebugDropboxStaged { .. } => {
+                            panic!(
+                                "archived a file that must never be archived \
+                                 (kind {:?}): {:?}",
+                                test_file.kind, test_file.path,
+                            );
+                        }
                     }
 
                     // The output directory must either match the overall output
@@ -656,12 +671,23 @@ mod test {
         println!("files that were not archived: {}", unarchived_files.len());
         for test_file in unarchived_files {
             println!("    {}", test_file.path);
-            if !matches!(test_file.kind, TestFileKind::Ignored) {
+            if !test_file.kind.is_not_archived() {
                 panic!(
-                    "non-ignored test file was not archived: {:?}",
-                    test_file.path
+                    "test file of kind {:?} was not archived: {:?}",
+                    test_file.kind, test_file.path,
                 );
             }
+        }
+
+        // Verify that we never created an output directory corresponding to the
+        // debug dropbox's staging directory.
+        for directory in &directories_created {
+            assert_ne!(
+                directory.file_name(),
+                Some(DROPBOX_STAGING_DIR),
+                "archiver created an output directory for the debug dropbox's \
+                 staging directory: {directory:?}",
+            );
         }
 
         logctx.cleanup_successful();
@@ -704,6 +730,7 @@ mod test {
                     | TestFileKind::LogSyslogLive { .. }
                     | TestFileKind::GlobalLogSmfLive
                     | TestFileKind::GlobalLogSyslogLive
+                    | TestFileKind::DebugDropboxStaged { .. }
                     | TestFileKind::Ignored => false,
                 };
 
@@ -822,14 +849,14 @@ mod test {
         let fail_dir = files
             .iter()
             .find_map(|test_file| {
-                if matches!(&test_file.kind, TestFileKind::Ignored) {
+                if test_file.kind.is_not_archived() {
                     None
                 } else {
                     let parent = test_file.path.parent().unwrap();
                     Some(Utf8Path::new(parent))
                 }
             })
-            .expect("at least one non-ignored file in test data");
+            .expect("at least one always-archived file in test data");
         info!(
             log,
             "injecting error for directory";
@@ -895,7 +922,7 @@ mod test {
 
         for file in unarchived_files {
             assert!(
-                file.path.starts_with(fail_dir),
+                file.path.starts_with(fail_dir) || file.kind.is_not_archived(),
                 "missed file: {:?}",
                 file.path
             );
@@ -921,7 +948,7 @@ mod test {
         {
             let mut dirs_with_files: BTreeSet<_> = BTreeSet::new();
             for test_file in &files {
-                if matches!(&test_file.kind, TestFileKind::Ignored) {
+                if test_file.kind.is_not_archived() {
                     continue;
                 }
                 let file = &test_file.path;
@@ -938,7 +965,7 @@ mod test {
         };
         let Some(fail_file) = fail_file else {
             panic!(
-                "test data had no directory with multiple non-ignored files"
+                "test data had no directory with multiple always-archived files"
             );
         };
 
@@ -1000,9 +1027,14 @@ mod test {
              on a file path",
         );
 
-        // There should be exactly one file that was not archived.
-        assert_eq!(unarchived_files.len(), 1);
-        assert!(unarchived_files.contains_key(fail_file.as_path()));
+        // Aside from the files that are never expected to be archived, there
+        // should be exactly one file that was not archived.
+        let unarchived_files: Vec<_> = unarchived_files
+            .iter()
+            .filter(|test_file| !test_file.kind.is_not_archived())
+            .map(|test_file| test_file.path.as_path())
+            .collect();
+        assert_eq!(unarchived_files, [fail_file.as_path()]);
 
         logctx.cleanup_successful();
     }
