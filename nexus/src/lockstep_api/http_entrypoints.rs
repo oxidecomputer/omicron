@@ -54,7 +54,6 @@ use nexus_types::internal_api::views::SupportBundleInfo;
 use nexus_types::internal_api::views::UpdateStatus;
 use nexus_types::internal_api::views::to_list;
 use nexus_types::trust_quorum::TrustQuorumConfig;
-use nexus_types::trust_quorum::TrustQuorumSledSelector;
 use nexus_types_versions::latest::headers::RangeRequest;
 use nexus_types_versions::latest::instance::Instance;
 use omicron_common::api::external::Error;
@@ -66,6 +65,7 @@ use omicron_common::api::external::http_pagination::ScanParams;
 use omicron_common::api::external::http_pagination::data_page_params_for;
 use omicron_uuid_kinds::*;
 use range_requests::PotentialRange;
+use sled_hardware_types::BaseboardId;
 use slog_error_chain::InlineErrorChain;
 use trust_quorum_types::types::Epoch;
 
@@ -1132,15 +1132,18 @@ impl NexusLockstepApi for NexusLockstepApiImpl {
 
     async fn trust_quorum_remove_sled(
         rqctx: RequestContext<Self::Context>,
-        sled: TypedBody<TrustQuorumSledSelector>,
+        path_params: Path<RackMembershipConfigPathParams>,
+        sled: TypedBody<BaseboardId>,
     ) -> Result<HttpResponseOk<Epoch>, HttpError> {
         let apictx = &rqctx.context().context;
         let nexus = &apictx.nexus;
+        let rack_id =
+            RackUuid::from_untyped_uuid(path_params.into_inner().rack_id);
         let sled = sled.into_inner();
         let handler = async {
             let opctx =
                 crate::context::op_context_for_internal_api(&rqctx).await;
-            let epoch = nexus.tq_remove_sled(&opctx, sled).await?;
+            let epoch = nexus.tq_remove_sled(&opctx, rack_id, sled).await?;
             Ok(HttpResponseOk(epoch))
         };
         apictx

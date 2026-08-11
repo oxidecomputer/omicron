@@ -8,7 +8,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use anyhow::bail;
 use chrono::{DateTime, Utc};
-use omicron_uuid_kinds::{RackUuid, SledUuid};
+use omicron_uuid_kinds::RackUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_with::{DisplayFromStr, serde_as};
@@ -240,17 +240,6 @@ impl TrustQuorumConfig {
             _ => 4,
         }
     }
-}
-
-/// Identifies a sled to remove from the trust quorum.
-///
-/// Selecting by baseboard is necessary to remove a sled that has no database
-/// record, since in that case there is no sled ID to resolve to a baseboard.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case", tag = "type", content = "value")]
-pub enum TrustQuorumSledSelector {
-    SledId(SledUuid),
-    Baseboard(BaseboardId),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

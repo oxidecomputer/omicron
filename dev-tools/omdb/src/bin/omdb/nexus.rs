@@ -46,7 +46,6 @@ use nexus_lockstep_client::types::LastResult;
 use nexus_lockstep_client::types::PhysicalDiskPath;
 use nexus_lockstep_client::types::SagaState;
 use nexus_lockstep_client::types::SledSelector;
-use nexus_lockstep_client::types::TrustQuorumSledSelector;
 use nexus_saga_recovery::LastPass;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::ClickhouseMode;
@@ -616,6 +615,9 @@ struct TrustQuorumRemoveSledArgs {
     // record at all.
     #[clap(flatten)]
     db_url_opts: DbUrlOptions,
+
+    /// ID of the rack to remove the sled from
+    rack_id: RackUuid,
 
     /// ID of the sled to remove
     #[clap(
@@ -5499,20 +5501,16 @@ async fn cmd_nexus_trust_quorum_remove_sled(
     log: &slog::Logger,
     _destruction_token: DestructiveOperationToken,
 ) -> Result<(), anyhow::Error> {
-    // Identify the sled being removed: the selector we send to Nexus, the
-    // serial number the operator must type to confirm, and a description of the
-    // sled for the warning below. A sled identified by its baseboard may have
-    // no database record, so we only look one up when given a sled ID.
-    let (selector, serial_number, description) = match args.baseboard_id() {
+    // Trust quorum membership is tracked by baseboard, so a sled ID has to be
+    // resolved into one. A sled given by baseboard may have no database record
+    // to resolve, which is the reason for accepting one.
+    let (baseboard_id, description) = match args.baseboard_id() {
         Some(baseboard_id) => {
-            let serial_number = baseboard_id.serial_number.clone();
-            let description =
-                format!("sled {baseboard_id} from the trust-quorum");
-            (
-                TrustQuorumSledSelector::Baseboard(baseboard_id),
-                serial_number,
-                description,
-            )
+            let description = format!(
+                "sled {baseboard_id} from the trust-quorum for rack {}",
+                args.rack_id,
+            );
+            (baseboard_id, description)
         }
         None => {
             let sled_id =
@@ -5521,15 +5519,16 @@ async fn cmd_nexus_trust_quorum_remove_sled(
             let sled = lookup_sled_by_id(&datastore, sled_id, log).await;
             datastore.terminate().await;
             let sled = sled?;
-            (
-                TrustQuorumSledSelector::SledId(sled_id),
-                sled.serial_number().to_string(),
-                format!(
-                    "sled {sled_id} ({}) from the trust-quorum for rack {}",
-                    sled.serial_number(),
-                    sled.rack_id,
-                ),
-            )
+            let description = format!(
+                "sled {sled_id} ({}) from the trust-quorum for rack {}",
+                sled.serial_number(),
+                args.rack_id,
+            );
+            let baseboard_id = BaseboardId {
+                part_number: sled.part_number().to_string(),
+                serial_number: sled.serial_number().to_string(),
+            };
+            (baseboard_id, description)
         }
     };
 
@@ -5559,7 +5558,8 @@ async fn cmd_nexus_trust_quorum_remove_sled(
         "WARNING: This operation will PERMANENTLY and IRRECOVABLY remove \
         {description}. To proceed, type the sled's serial number."
     );
-    prompt.read_and_validate("sled serial number", &serial_number)?;
+    prompt
+        .read_and_validate("sled serial number", &baseboard_id.serial_number)?;
 
     println!(
         "About to start the trust quorum reconfiguration to remove the sled."
@@ -5582,7 +5582,7 @@ async fn cmd_nexus_trust_quorum_remove_sled(
     );
 
     let epoch = client
-        .trust_quorum_remove_sled(&selector)
+        .trust_quorum_remove_sled(args.rack_id.as_untyped_uuid(), &baseboard_id)
         .await
         .context("trust quorum remove sled")?
         .into_inner();
