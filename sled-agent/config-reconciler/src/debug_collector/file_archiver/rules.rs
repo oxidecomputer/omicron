@@ -274,10 +274,7 @@ impl NamingRule for NameRotatedLogFile {
         lister: &dyn FileLister,
         output_directory: &Utf8Path,
     ) -> Result<Filename, anyhow::Error> {
-        let filename_base = match source_file_name.as_ref().rsplit_once('.') {
-            Some((base, _extension)) => base,
-            None => source_file_name.as_ref(),
-        };
+        let filename_base = source_file_name.strip_extension();
 
         choose_unused_filename(
             source_file_name,
@@ -285,7 +282,8 @@ impl NamingRule for NameRotatedLogFile {
             lister,
             output_directory,
             |mtime_as_seconds, i| {
-                format!("{filename_base}.{}", mtime_as_seconds + i64::from(i))
+                filename_base
+                    .with_numeric_suffix(mtime_as_seconds + i64::from(i))
             },
         )
     }
@@ -349,7 +347,9 @@ impl NamingRule for NameDropbox {
             lister,
             output_directory,
             |mtime_as_seconds, i| {
-                format!("{}.{mtime_as_seconds}.{i}", source_file_name.as_ref())
+                source_file_name
+                    .with_numeric_suffix(mtime_as_seconds)
+                    .with_numeric_suffix(i64::from(i))
             },
         )
     }
@@ -362,23 +362,20 @@ impl NamingRule for NameDropbox {
 /// name to try.  This function returns the first candidate that does not
 /// already exist, giving up after `MAX_COLLIDING_FILENAMES` attempts.  If the
 /// source file has no `mtime`, the current time is used instead.
-///
-/// `make_candidate` must not produce a name containing a slash.
 fn choose_unused_filename(
     source_file_name: &Filename,
     source_file_mtime: Option<DateTime<Utc>>,
     lister: &dyn FileLister,
     output_directory: &Utf8Path,
-    make_candidate: impl Fn(i64, u16) -> String,
+    make_candidate: impl Fn(i64, u16) -> Filename,
 ) -> Result<Filename, anyhow::Error> {
     let mtime_as_seconds =
         source_file_mtime.unwrap_or_else(|| Utc::now()).timestamp();
     for i in 0..MAX_COLLIDING_FILENAMES {
         let rv = make_candidate(mtime_as_seconds, i);
-        let dest = output_directory.join(&rv);
+        let dest = output_directory.join(rv.as_ref());
         if !lister.file_exists(&dest)? {
-            // unwrap(): callers are required not to introduce slashes.
-            return Ok(Filename::try_from(rv).unwrap());
+            return Ok(rv);
         }
     }
 

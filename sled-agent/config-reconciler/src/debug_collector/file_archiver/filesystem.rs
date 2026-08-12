@@ -30,6 +30,27 @@ impl TryFrom<String> for Filename {
     }
 }
 
+impl Filename {
+    /// Returns this filename with its last `.`-delimited extension removed
+    ///
+    /// Returns a copy of this filename if it has no extension.  This cannot
+    /// fail because a prefix of a valid filename is itself a valid filename.
+    pub(crate) fn strip_extension(&self) -> Filename {
+        match self.0.rsplit_once('.') {
+            Some((base, _extension)) => Filename(base.to_owned()),
+            None => self.clone(),
+        }
+    }
+
+    /// Returns this filename with `.` and `number` appended to it
+    ///
+    /// This cannot fail because the decimal representation of an integer
+    /// contains no `/`, so it cannot turn a valid filename into an invalid one.
+    pub(crate) fn with_numeric_suffix(&self, number: i64) -> Filename {
+        Filename(format!("{}.{number}", self.0))
+    }
+}
+
 /// Helper trait used to swap out basic filesystem functionality for testing
 pub(crate) trait FileLister {
     /// List the files within a directory
