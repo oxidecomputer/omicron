@@ -102,7 +102,6 @@ impl SvcsResult {
                         | SvcState::Offline
                         | SvcState::Online
                         | SvcState::Uninitialized
-                        | SvcState::InTransition
                         | SvcState::Unrecognized => {
                             let fmri = if let Some(fmri) = svc.next() {
                                 fmri.to_string()
@@ -189,8 +188,7 @@ impl SvcsResult {
                     SvcState::Online
                     | SvcState::Uninitialized
                     | SvcState::Disabled
-                    | SvcState::LegacyRun
-                    | SvcState::InTransition => return None,
+                    | SvcState::LegacyRun => return None,
                 };
                 Some(SvcEnabledNotOnline {
                     fmri: svc.fmri,
@@ -210,11 +208,13 @@ impl SvcsResult {
 
 fn parse_svc_state(state: &str) -> Option<SvcState> {
     // Per `man svcs`, an asterisk (*) is appended to the state of instances
-    // that are in transition from one state to another.
-    if state.ends_with('*') {
-        return Some(SvcState::InTransition);
-    }
-    match state {
+    // that are in transition from one state to another. For now we will
+    // consider the service state to be in the state that it reports even if it
+    // is transitioning to something else.
+    let svc_state =
+        if let Some(s) = state.strip_suffix('*') { s } else { state };
+
+    match svc_state {
         "uninitialized" => Some(SvcState::Uninitialized),
         "offline" => Some(SvcState::Offline),
         "online" => Some(SvcState::Online),
@@ -476,7 +476,7 @@ disabled       svc:/network/tcpkey:default                      global
             Svc {
                 fmri: "svc:/milestone/sysconfig:default".to_string(),
                 zone: "global".to_string(),
-                state: SvcState::InTransition,
+                state: SvcState::Online,
             }
         );
         assert_eq!(
@@ -524,7 +524,6 @@ disabled       svc:/network/tcpkey:default                      global
             mk_svc(8, SvcState::Maintenance),
             mk_svc(9, SvcState::Uninitialized),
             mk_svc(10, SvcState::Unrecognized),
-            mk_svc(11, SvcState::InTransition),
         ];
         let result = SvcsResult {
             services,

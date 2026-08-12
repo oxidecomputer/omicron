@@ -577,6 +577,12 @@ impl SvcsEnabledNotOnline {
         let SvcsEnabledNotOnline { services, errors, time_of_status: _ } = self;
         services.is_empty() && errors.is_empty()
     }
+
+    /// Removes all services that are not in the `Maintenance` state.
+    pub fn retain_in_maintenance(&mut self) {
+        self.services
+            .retain(|svc| svc.state == SvcEnabledNotOnlineState::Maintenance);
+    }
 }
 
 /// Display helper for [`OmicronFileSourceResolverInventory`].
@@ -1070,7 +1076,6 @@ impl fmt::Display for SvcState {
             SvcState::Maintenance => "maintenance",
             SvcState::Disabled => "disabled",
             SvcState::LegacyRun => "legacy_run",
-            SvcState::InTransition => "in_transition",
             SvcState::Unrecognized => "unrecognized",
         };
 

@@ -55,10 +55,6 @@ pub enum SvcState {
     /// Represents a legacy instance that is not managed by the service
     /// management facility.
     LegacyRun,
-    /// An instance whose state is in transition from one to another. Note: as
-    /// per `man svcs`, "An asterisk (*) is appended for instances in
-    /// transition". So there is not an "in-transition" state per se in svcs.
-    InTransition,
     /// An instance whose state is absent or unrecognized. Like `InTransition`,
     /// this state does not explicitly exist in `svcs`. Per `man svcs`: Absent
     /// or unrecognized states are denoted by a question mark (?) character.
@@ -77,11 +73,9 @@ impl TryFrom<SvcState> for v34::inventory::SvcState {
             SvcState::Disabled => Ok(Self::Disabled),
             SvcState::LegacyRun => Ok(Self::LegacyRun),
             SvcState::Online => Ok(Self::Online),
-            SvcState::InTransition | SvcState::Unrecognized => {
-                Err(external::Error::InternalError {
-                    internal_message: format!("unknown state {:?}", value),
-                })
-            }
+            SvcState::Unrecognized => Err(external::Error::InternalError {
+                internal_message: format!("unknown state {:?}", value),
+            }),
         }
     }
 }
