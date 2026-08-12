@@ -634,7 +634,8 @@ mod test {
                             );
                         }
 
-                        TestFileKind::DebugDropboxStaged { .. } => {
+                        TestFileKind::DebugDropboxStaged { .. }
+                        | TestFileKind::DebugDropboxTooDeep { .. } => {
                             panic!(
                                 "archived a file that must never be archived \
                                  (kind {:?}): {:?}",
@@ -734,6 +735,7 @@ mod test {
                     | TestFileKind::GlobalLogSmfLive
                     | TestFileKind::GlobalLogSyslogLive
                     | TestFileKind::DebugDropboxStaged { .. }
+                    | TestFileKind::DebugDropboxTooDeep { .. }
                     | TestFileKind::Ignored => false,
                 };
 

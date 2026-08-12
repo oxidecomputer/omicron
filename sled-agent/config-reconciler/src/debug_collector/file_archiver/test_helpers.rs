@@ -218,6 +218,15 @@ pub(crate) enum TestFileKind {
         zone_name: String,
         zone_root: String,
     },
+    /// a file nested more deeply than the debug dropbox's on-disk protocol
+    /// allows (i.e., below a producer's directory rather than in it)
+    ///
+    /// The archiver only looks one level below the dropbox root, so these files
+    /// are not archived.
+    DebugDropboxTooDeep {
+        zone_name: String,
+        zone_root: String,
+    },
     GlobalLogSmfRotated,
     GlobalLogSmfLive,
     GlobalLogSyslogRotated,
@@ -240,6 +249,7 @@ impl TestFileKind {
             | TestFileKind::LogSyslogLive { .. }
             | TestFileKind::DebugDropbox { .. }
             | TestFileKind::DebugDropboxStaged { .. }
+            | TestFileKind::DebugDropboxTooDeep { .. }
             | TestFileKind::GlobalLogSmfRotated
             | TestFileKind::GlobalLogSmfLive
             | TestFileKind::GlobalLogSyslogRotated
@@ -259,7 +269,8 @@ impl TestFileKind {
             | TestFileKind::LogSyslogRotated { zone_name, zone_root }
             | TestFileKind::LogSyslogLive { zone_name, zone_root }
             | TestFileKind::DebugDropbox { zone_name, zone_root }
-            | TestFileKind::DebugDropboxStaged { zone_name, zone_root } => {
+            | TestFileKind::DebugDropboxStaged { zone_name, zone_root }
+            | TestFileKind::DebugDropboxTooDeep { zone_name, zone_root } => {
                 Some((zone_name, Utf8Path::new(zone_root)))
             }
             TestFileKind::GlobalLogSmfRotated
@@ -278,9 +289,9 @@ impl TestFileKind {
     /// must never be archived.
     pub fn is_not_archived(&self) -> bool {
         match self {
-            TestFileKind::Ignored | TestFileKind::DebugDropboxStaged { .. } => {
-                true
-            }
+            TestFileKind::Ignored
+            | TestFileKind::DebugDropboxStaged { .. }
+            | TestFileKind::DebugDropboxTooDeep { .. } => true,
             TestFileKind::ProcessCoreDump { .. }
             | TestFileKind::LogSmfRotated { .. }
             | TestFileKind::LogSmfLive { .. }
@@ -337,8 +348,22 @@ impl TryFrom<&Utf8Path> for TestFileKind {
                 omicron_debug_dropbox::DEBUG_DROPBOX_PATH
             )) {
                 Ok(TestFileKind::DebugDropboxStaged { zone_name, zone_root })
-            } else if s.contains(omicron_debug_dropbox::DEBUG_DROPBOX_PATH) {
-                Ok(TestFileKind::DebugDropbox { zone_name, zone_root })
+            } else if let Some((_, dropbox_relative)) =
+                s.split_once(omicron_debug_dropbox::DEBUG_DROPBOX_PATH)
+            {
+                // The dropbox's on-disk protocol puts each deposit directly
+                // inside a producer's directory, so a deposit is exactly two
+                // components below the dropbox root.
+                let ncomponents =
+                    dropbox_relative.trim_start_matches('/').split('/').count();
+                if ncomponents > 2 {
+                    Ok(TestFileKind::DebugDropboxTooDeep {
+                        zone_name,
+                        zone_root,
+                    })
+                } else {
+                    Ok(TestFileKind::DebugDropbox { zone_name, zone_root })
+                }
             } else {
                 Err(anyhow!("unknown non-global zone test file kind"))
             }
