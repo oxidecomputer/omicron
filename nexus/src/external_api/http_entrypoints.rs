@@ -6721,10 +6721,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 crate::context::op_context_for_external_api(&rqctx).await?;
             let sleds = nexus
                 .sled_list(&opctx, &data_page_params_for(&rqctx, &query)?)
-                .await?
-                .into_iter()
-                .map(|s| s.into())
-                .collect();
+                .await?;
             Ok(HttpResponseOk(ScanById::results_page(
                 &query,
                 sleds,
