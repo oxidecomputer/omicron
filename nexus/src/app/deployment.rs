@@ -5,6 +5,7 @@
 //! Configuration of the deployment system
 
 use anyhow::Context;
+use iddqd::IdOrdMap;
 use nexus_db_model::TargetReleaseSource;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
@@ -122,8 +123,8 @@ impl super::Nexus {
             opctx,
             datastore,
             planning_context.planning_input,
-            vec![inventory],
-            vec![blueprint.clone()],
+            IdOrdMap::from_iter([inventory]),
+            IdOrdMap::from_iter([blueprint.clone()]),
             new_target,
         )
         .await
@@ -161,7 +162,7 @@ impl super::Nexus {
             blueprint_debug_filename(&blueprint, BlueprintDebugAction::Target);
         let deposit = self
             .debug_dropbox_reconfigurator
-            .deposit_file_str(&debug_name, &debug)
+            .deposit_file(&debug_name, &debug)
             .await
             .map_err(|error| {
                 Error::internal_error(&format!(
@@ -306,8 +307,8 @@ impl super::Nexus {
             opctx,
             self.datastore(),
             planning_context.planning_input,
-            vec![inventory],
-            vec![parent, blueprint.clone()],
+            IdOrdMap::from_iter([inventory]),
+            IdOrdMap::from_iter([parent, blueprint.clone()]),
             planning_context.target,
         )
         .await
@@ -327,7 +328,7 @@ impl super::Nexus {
             blueprint_debug_filename(&blueprint, BlueprintDebugAction::Plan);
         let deposit = self
             .debug_dropbox_reconfigurator
-            .deposit_file_str(&debug_name, &debug)
+            .deposit_file(&debug_name, &debug)
             .await
             .map_err(|error| {
                 Error::internal_error(&format!(

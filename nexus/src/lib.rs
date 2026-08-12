@@ -58,6 +58,7 @@ use sled_agent_types::early_networking::SwitchSlot;
 use sled_agent_types::early_networking::UplinkPorts;
 use sled_hardware_types::BaseboardId;
 use slog::Logger;
+use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeSet;
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV6};
 use std::sync::Arc;

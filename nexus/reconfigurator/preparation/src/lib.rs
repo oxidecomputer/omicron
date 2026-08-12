@@ -625,8 +625,8 @@ pub async fn reconfigurator_state_assemble(
     opctx: &OpContext,
     datastore: &DataStore,
     planning_input: PlanningInput,
-    collections: Vec<Collection>,
-    blueprints: Vec<Blueprint>,
+    collections: IdOrdMap<Collection>,
+    blueprints: IdOrdMap<Blueprint>,
     target_blueprint: BlueprintTarget,
 ) -> Result<UnstableReconfiguratorState, anyhow::Error> {
     // It's also useful to include information about any DNS generations

@@ -12,6 +12,7 @@ use crate::app::blueprint_debug_filename;
 use anyhow::Context;
 use chrono::Utc;
 use futures::future::BoxFuture;
+use iddqd::IdOrdMap;
 use nexus_auth::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
@@ -308,8 +309,8 @@ impl BlueprintPlanner {
             opctx,
             &self.datastore,
             input,
-            vec![(*collection).clone()],
-            vec![(*parent).clone(), blueprint.clone()],
+            IdOrdMap::from_iter([(*collection).clone()]),
+            IdOrdMap::from_iter([(*parent).clone(), blueprint.clone()]),
             target,
         )
         .await
@@ -331,7 +332,7 @@ impl BlueprintPlanner {
             BlueprintDebugAction::Autoplan,
         );
         let deposit =
-            self.debug_dropbox.deposit_file_str(&debug_name, &debug).await?;
+            self.debug_dropbox.deposit_file(&debug_name, &debug).await?;
 
         // Try to make it the current target.
         let target = BlueprintTarget {
