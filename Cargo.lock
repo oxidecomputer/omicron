@@ -15546,7 +15546,7 @@ checksum = "b7401a30af6cb5818bb64852270bb722533397edcfc7344954a38f420819ece2"
 [[package]]
 name = "sush-api"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/sush?branch=omicron-integration#0b0051ab4ed2d3a27d62f29b53202adc3cf90af6"
+source = "git+https://github.com/oxidecomputer/sush?rev=999387953e55c732ba66f37d1e6121bf5e3c6b8e#999387953e55c732ba66f37d1e6121bf5e3c6b8e"
 dependencies = [
  "borsh",
  "chrono",
@@ -15563,7 +15563,7 @@ dependencies = [
 [[package]]
 name = "sush-common"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/sush?branch=omicron-integration#0b0051ab4ed2d3a27d62f29b53202adc3cf90af6"
+source = "git+https://github.com/oxidecomputer/sush?rev=999387953e55c732ba66f37d1e6121bf5e3c6b8e#999387953e55c732ba66f37d1e6121bf5e3c6b8e"
 dependencies = [
  "blake3",
  "borsh",
@@ -15624,7 +15624,7 @@ dependencies = [
 [[package]]
 name = "sush-server"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/sush?branch=omicron-integration#0b0051ab4ed2d3a27d62f29b53202adc3cf90af6"
+source = "git+https://github.com/oxidecomputer/sush?rev=999387953e55c732ba66f37d1e6121bf5e3c6b8e#999387953e55c732ba66f37d1e6121bf5e3c6b8e"
 dependencies = [
  "blake3",
  "borsh",

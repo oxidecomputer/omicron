@@ -855,14 +855,9 @@ subtle = "2.6.1"
 supports-color = "3.0.2"
 support-bundle-collection = { path = "support-bundle-collection" }
 support-bundle-viewer = "0.1.2"
-# TODO: pin to a rev before this merges, once the sush repo is public:
-#   sush-server = { git = "https://github.com/oxidecomputer/sush", rev = "..." }
-# The branch form is for integration work only. Either form exercises the
-# sled-hardware-types patch directive below identically, since that directive
-# keys off the source URL in sush's own manifest, not off how we pull sush in.
-sush-api = { git = "https://github.com/oxidecomputer/sush", branch = "omicron-integration" }
-sush-common = { git = "https://github.com/oxidecomputer/sush", branch = "omicron-integration" }
-sush-server = { git = "https://github.com/oxidecomputer/sush", branch = "omicron-integration", features = ["embedded"] }
+sush-api = { git = "https://github.com/oxidecomputer/sush", rev = "999387953e55c732ba66f37d1e6121bf5e3c6b8e" }
+sush-common = { git = "https://github.com/oxidecomputer/sush", rev = "999387953e55c732ba66f37d1e6121bf5e3c6b8e" }
+sush-server = { git = "https://github.com/oxidecomputer/sush", rev = "999387953e55c732ba66f37d1e6121bf5e3c6b8e", features = ["embedded"] }
 swrite = "0.1.0"
 sync-ptr = "0.1.4"
 libsw = { version = "3.5.0", features = ["tokio"] }
