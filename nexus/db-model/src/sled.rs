@@ -17,7 +17,6 @@ use nexus_types::{
     identity::Asset,
     internal_api::params,
 };
-use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::RackKind;
 use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::SledKind;
@@ -61,9 +60,9 @@ pub struct Sled {
     pub rack_id: DbTypedUuid<RackKind>,
 
     is_scrimlet: bool,
-    serial_number: String,
-    part_number: String,
-    revision: SqlU32,
+    pub serial_number: String,
+    pub part_number: String,
+    pub revision: SqlU32,
 
     pub usable_hardware_threads: SqlU32,
     pub usable_physical_ram: ByteCount,
@@ -77,10 +76,10 @@ pub struct Sled {
     pub last_used_address: ipv6::Ipv6Addr,
 
     #[diesel(column_name = sled_policy)]
-    policy: DbSledPolicy,
+    pub policy: DbSledPolicy,
 
     #[diesel(column_name = sled_state)]
-    state: SledState,
+    pub state: SledState,
 
     /// A generation number owned and incremented by sled-agent
     ///
@@ -148,24 +147,6 @@ impl Sled {
 
     pub fn rack_id(&self) -> RackUuid {
         self.rack_id.into()
-    }
-}
-
-impl From<Sled> for sled_types::Sled {
-    fn from(sled: Sled) -> Self {
-        Self {
-            identity: sled.identity(),
-            rack_id: sled.rack_id.into_untyped_uuid(),
-            baseboard: hardware::Baseboard {
-                serial: sled.serial_number,
-                part: sled.part_number,
-                revision: *sled.revision,
-            },
-            policy: sled.policy.into(),
-            state: sled.state.into(),
-            usable_hardware_threads: sled.usable_hardware_threads.0,
-            usable_physical_ram: *sled.usable_physical_ram,
-        }
     }
 }
 

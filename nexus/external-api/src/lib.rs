@@ -86,6 +86,7 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyy_mm_dd_nn, IDENT),
+    (2026_08_12_00, SLED_SLOT),
     (2026_07_31_00, SET_TARGET_RELEASE_UPDATE_RECOVERY_DOCS),
     (2026_07_28_00, INTERNET_GATEWAY_CASCADE_DOCS),
     (2026_06_11_00, ADD_SYSTEM_IP_POOL_APIS),
@@ -7547,22 +7548,58 @@ pub trait NexusExternalApi {
         method = GET,
         path = "/v1/system/hardware/sleds",
         tags = ["system/hardware"],
+        versions = VERSION_SLED_SLOT..,
     }]
     async fn sled_list(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<PaginatedById>,
     ) -> Result<HttpResponseOk<ResultsPage<latest::sled::Sled>>, HttpError>;
 
+    #[endpoint {
+        operation_id = "sled_list",
+        method = GET,
+        path = "/v1/system/hardware/sleds",
+        tags = ["system/hardware"],
+        versions = ..VERSION_SLED_SLOT,
+    }]
+    async fn sled_list_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedById>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<v2025_11_20_00::sled::Sled>>,
+        HttpError,
+    > {
+        let HttpResponseOk(ResultsPage { items, next_page }) =
+            Self::sled_list(rqctx, query_params).await?;
+        let items = items.into_iter().map(Into::into).collect();
+        Ok(HttpResponseOk(ResultsPage { items, next_page }))
+    }
+
     /// Fetch sled
     #[endpoint {
         method = GET,
         path = "/v1/system/hardware/sleds/{sled_id}",
         tags = ["system/hardware"],
+        versions = VERSION_SLED_SLOT..,
     }]
     async fn sled_view(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<latest::path_params::SledPath>,
     ) -> Result<HttpResponseOk<latest::sled::Sled>, HttpError>;
+
+    #[endpoint {
+        operation_id = "sled_view",
+        method = GET,
+        path = "/v1/system/hardware/sleds/{sled_id}",
+        tags = ["system/hardware"],
+        versions = ..VERSION_SLED_SLOT,
+    }]
+    async fn sled_view_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v2025_11_20_00::path_params::SledPath>,
+    ) -> Result<HttpResponseOk<v2025_11_20_00::sled::Sled>, HttpError> {
+        Ok(Self::sled_view(rqctx, path_params).await?.map(Into::into))
+    }
 
     /// Set sled provision policy
     #[endpoint {

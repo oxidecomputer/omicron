@@ -25,7 +25,6 @@ use nexus_types::external_api::hardware;
 use nexus_types::external_api::networking;
 use nexus_types::external_api::policy;
 use nexus_types::external_api::silo;
-use nexus_types::external_api::sled as sled_types;
 use nexus_types::inventory::SpType;
 use nexus_types::silo::silo_dns_name;
 use omicron_common::address::{
@@ -809,7 +808,11 @@ impl super::Nexus {
 
         let sled_baseboards: BTreeSet<hardware::Baseboard> = sleds
             .into_iter()
-            .map(|s| sled_types::Sled::from(s).baseboard)
+            .map(|s| hardware::Baseboard {
+                serial: s.serial_number,
+                part: s.part_number,
+                revision: s.revision.into(),
+            })
             .collect();
 
         // Retain all sleds that exist but are not in the sled table
@@ -918,7 +921,12 @@ impl super::Nexus {
         opctx: &OpContext,
     ) -> Result<String, Error> {
         let addr = self
-            .sled_list(opctx, &DataPageParams::max_page())
+            .db_datastore
+            .sled_list(
+                opctx,
+                &DataPageParams::max_page(),
+                SledFilter::InService,
+            )
             .await?
             .get(0)
             .ok_or(Error::InternalError {

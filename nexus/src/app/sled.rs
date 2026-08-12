@@ -15,9 +15,12 @@ use nexus_db_queries::db;
 use nexus_db_queries::db::datastore::sled::SledReservationReason;
 use nexus_types::deployment::DiskFilter;
 use nexus_types::deployment::SledFilter;
+use nexus_types::external_api;
 use nexus_types::external_api::path_params;
 use nexus_types::external_api::physical_disk::PhysicalDiskPolicy;
 use nexus_types::external_api::sled::{SledPolicy, SledProvisionPolicy};
+use nexus_types::identity::Asset;
+use nexus_types::inventory;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
@@ -170,10 +173,16 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
-    ) -> ListResultVec<db::model::Sled> {
-        self.db_datastore
+    ) -> ListResultVec<external_api::sled::Sled> {
+        let inv = self.inventory_load_rx().borrow().clone();
+        let sleds = self
+            .db_datastore
             .sled_list(&opctx, &pagparams, SledFilter::InService)
-            .await
+            .await?
+            .into_iter()
+            .map(|sled| db_sled_to_external(sled, &inv))
+            .collect::<Vec<_>>();
+        Ok(sleds)
     }
 
     pub async fn sled_client(
@@ -453,5 +462,38 @@ impl super::Nexus {
         let dataset = db::model::CrucibleDataset::new(id, zpool_id, address);
         self.db_datastore.crucible_dataset_upsert(dataset).await?;
         Ok(())
+    }
+}
+
+pub(crate) fn db_sled_to_external(
+    sled: db::model::Sled,
+    inv: &Option<Arc<inventory::Collection>>,
+) -> external_api::sled::Sled {
+    let slot = inv.as_ref().and_then(|inv| {
+        // TODO(eliza): it's quite sad that we must clone the serial and part
+        // number strings out of the `sled` just to perform this lookup against
+        // the inventory, but sadly, `BaseboardId` and `Baseboard` are different
+        // types, so we cannot just make the `Baseboard` and borrow it into the
+        // lookup. 'twould be nice to figure out a nicer way of doing this.
+        let bbid = BaseboardId {
+            serial_number: sled.serial_number.clone(),
+            part_number: sled.part_number.clone(),
+        };
+        let sp = inv.sps.get(&bbid)?;
+        Some(sp.sp_slot as u8)
+    });
+    external_api::sled::Sled {
+        identity: sled.identity(),
+        rack_id: sled.rack_id.into_untyped_uuid(),
+        slot,
+        baseboard: external_api::hardware::Baseboard {
+            serial: sled.serial_number,
+            part: sled.part_number,
+            revision: *sled.revision,
+        },
+        policy: sled.policy.into(),
+        state: sled.state.into(),
+        usable_hardware_threads: sled.usable_hardware_threads.0,
+        usable_physical_ram: *sled.usable_physical_ram,
     }
 }

@@ -547,7 +547,6 @@ pub mod external_subnet {
 }
 
 pub mod sled {
-    pub use crate::v2025_11_20_00::sled::Sled;
     pub use crate::v2025_11_20_00::sled::SledId;
     pub use crate::v2025_11_20_00::sled::SledInstance;
     pub use crate::v2025_11_20_00::sled::SledPolicy;
@@ -557,6 +556,7 @@ pub mod sled {
     pub use crate::v2025_11_20_00::sled::SledSelector;
     pub use crate::v2025_11_20_00::sled::SledState;
     pub use crate::v2025_11_20_00::sled::SwitchSelector;
+    pub use crate::v2026_08_12_00::sled::Sled;
 }
 
 pub mod ssh_key {
