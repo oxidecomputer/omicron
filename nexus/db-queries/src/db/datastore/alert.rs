@@ -27,6 +27,7 @@ use diesel::result::OptionalExtension;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_schema::schema::alert::dsl as alert_dsl;
+use nexus_types::external_api::alert as external_api;
 use nexus_types::fm::case::AlertRequest;
 use nexus_types::identity::Asset;
 use omicron_common::api::external::CreateResult;
@@ -88,7 +89,13 @@ pub struct AlertFilters {
     cases: Vec<DbTypedUuid<CaseKind>>,
 
     /// Include only alerts with the specified alert classes.
-    classes: Vec<model::AlertClass>,
+    ///
+    /// This is an `Option` to distinguish between the case where no class
+    /// filtering was requested, and the case where the `AlertFilters` was
+    /// generated from a glob that matched no extant alert classes. If this is
+    /// `None`, then *all* alerts will be matched, but if it is `Some([])`, then
+    /// *no* alerts will be matched.
+    classes: Option<Vec<model::AlertClass>>,
 
     /// If `true`, include only alerts that have been fully dispatched.
     /// If `false`, include only alerts that have not been fully dispatched.
@@ -213,7 +220,9 @@ impl AlertFilters {
     where
         I: Into<model::AlertClass>,
     {
-        self.classes.extend(classes.into_iter().map(Into::into));
+        self.classes
+            .get_or_insert_default()
+            .extend(classes.into_iter().map(Into::into));
         self
     }
 
@@ -236,6 +245,29 @@ impl AlertFilters {
         }
         self.dispatched = Some(dispatched);
         Ok(self)
+    }
+}
+
+impl TryFrom<external_api::AlertListParams> for AlertFilters {
+    type Error = Error;
+    fn try_from(
+        params: external_api::AlertListParams,
+    ) -> Result<Self, Self::Error> {
+        let external_api::AlertListParams { classes, start_time, end_time } =
+            params;
+
+        let mut filters = Self::default();
+        if let Some(start_time) = start_time {
+            filters = filters.after(start_time)?;
+        }
+        if let Some(end_time) = end_time {
+            filters = filters.before(end_time)?;
+        }
+        if let Some(classes) = classes {
+            let classes = model::AlertSubscriptionKind::try_from(classes)?;
+            filters = filters.with_classes(classes.matching_classes()?);
+        }
+        Ok(filters)
     }
 }
 
@@ -464,6 +496,13 @@ impl DataStore {
         pagparams: &DataPageParams<'_, (DateTime<Utc>, Uuid)>,
     ) -> ListResultVec<(Alert, Option<fm::RendezvousAlertCreated>)> {
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
+
+        // If we were asked to filter by an alert glob, and the glob matched no
+        // extant classes, we can just give up without hitting the DB.
+        if let Some([]) = filters.classes.as_deref() {
+            return Ok(Vec::new());
+        }
+
         Self::alert_list_matching_query(filters, pagparams)
             .load_async(&*self.pool_connection_authorized(opctx).await?)
             .await
@@ -525,7 +564,7 @@ impl DataStore {
             query = query.filter(alert_dsl::case_id.eq_any(cases.clone()));
         }
 
-        if !classes.is_empty() {
+        if let Some(classes) = classes {
             query =
                 query.filter(alert_dsl::alert_class.eq_any(classes.clone()));
         }

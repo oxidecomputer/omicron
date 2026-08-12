@@ -57,6 +57,7 @@ pub mod alert {
     pub use crate::v2025_11_20_00::alert::WebhookSecretSelector;
     pub use crate::v2025_11_20_00::alert::WebhookSecrets;
     pub use crate::v2026_08_11_00::alert::Alert;
+    pub use crate::v2026_08_11_00::alert::AlertListParams;
 }
 
 pub mod audit {

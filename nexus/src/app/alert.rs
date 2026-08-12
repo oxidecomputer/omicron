@@ -238,6 +238,26 @@ impl Nexus {
     }
 
     //
+    // Alerts
+    //
+
+    pub async fn alert_list(
+        &self,
+        opctx: &OpContext,
+        params: &alert::AlertListParams,
+        pagparams: &DataPageParams<'_, (DateTime<Utc>, Uuid)>,
+    ) -> ListResultVec<alert::Alert> {
+        let filters = params.clone().try_into()?;
+        Ok(self
+            .datastore()
+            .alert_list_matching(opctx, &filters, pagparams)
+            .await?
+            .into_iter()
+            .map(|(alert, _)| alert.into())
+            .collect())
+    }
+
+    //
     // Alert class API
     //
     pub async fn alert_class_list(

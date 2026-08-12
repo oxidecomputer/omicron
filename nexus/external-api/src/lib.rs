@@ -9029,8 +9029,8 @@ pub trait NexusExternalApi {
 
     /// List alerts
     ///
-    /// An optional alert class glob can be provided to filter which alert
-    /// classes are returned.
+    /// Alerts may be filtered by alert class or alert class glob and by an
+    /// inclusive creation time range.
     #[endpoint {
         method = GET,
         path = "/v1/alerts",
@@ -9039,14 +9039,10 @@ pub trait NexusExternalApi {
     }]
     async fn alert_list(
         rqctx: RequestContext<Self::Context>,
-        class_filter: Query<latest::alert::AlertClassFilter>,
-        pagination: Query<PaginatedByTimeAndId>,
+        pagination: Query<PaginatedByTimeAndId<latest::alert::AlertListParams>>,
     ) -> Result<HttpResponseOk<ResultsPage<latest::alert::Alert>>, HttpError>;
 
     /// Fetch alert
-    ///
-    /// An optional alert class glob can be provided to filter which alert
-    /// classes are returned.
     #[endpoint {
         method = GET,
         path = "/v1/alerts/{alert_id}",

@@ -97,6 +97,37 @@ impl AlertSubscriptionKind {
 
         Ok(Self::Exact(class))
     }
+
+    /// Returns an iterator over the alert classes that match this subscription.
+    ///
+    /// If this is an exact subscription, the iterator contains only the single
+    /// alert class. Otherwise, if the subscription is a glob, this returns any
+    /// currently existing alert classes that match the glob.
+    pub fn matching_classes(
+        &self,
+    ) -> Result<impl Iterator<Item = AlertClass>, Error> {
+        use itertools::Either;
+
+        match self {
+            Self::Exact(class) => Ok(Either::Left(std::iter::once(*class))),
+            Self::Glob(glob) => {
+                let regex = regex::Regex::new(&glob.regex).map_err(
+                    |error| Error::InternalError {
+                        internal_message: format!(
+                            "valid alert class glob {:?} produced an invalid \
+                             regular expression: {error}",
+                            glob.glob,
+                        ),
+                    },
+                )?;
+                let iter = AlertClass::ALL_CLASSES
+                    .iter()
+                    .copied()
+                    .filter(move |class| regex.is_match(class.as_str()));
+                Ok(Either::Right(iter))
+            }
+        }
+    }
 }
 
 impl TryFrom<AlertSubscriptionKind> for alert::AlertSubscription {

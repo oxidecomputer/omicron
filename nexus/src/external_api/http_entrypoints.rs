@@ -8910,18 +8910,27 @@ impl NexusExternalApi for NexusExternalApiImpl {
 
     async fn alert_list(
         rqctx: RequestContext<Self::Context>,
-        class_filter: Query<alert::AlertClassFilter>,
-        pag_params: Query<PaginatedByTimeAndId>,
+        pag_params: Query<PaginatedByTimeAndId<alert::AlertListParams>>,
     ) -> Result<HttpResponseOk<ResultsPage<alert::Alert>>, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;
-            let opctx = nexus.opctx_external_authn();
-            let pag_params = pag_params.into_inner();
-            let class_filter = class_filter.into_inner();
-            Err(HttpError::for_internal_error(
-                "TODO ELIZA IMPLEMENT THIS".to_string(),
-            ))
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let query = pag_params.into_inner();
+            let scan_params = ScanByTimeAndId::from_query(&query)?;
+            let pag_params = data_page_params_for(&rqctx, &query)?;
+            let alerts = nexus
+                .alert_list(&opctx, &scan_params.selector, &pag_params)
+                .await?;
+
+            Ok(HttpResponseOk(ScanByTimeAndId::results_page(
+                &query,
+                alerts,
+                &|_, alert: &alert::Alert| {
+                    (alert.identity.time_created, alert.identity.id)
+                },
+            )?))
         };
         apictx
             .context
@@ -8937,11 +8946,12 @@ impl NexusExternalApi for NexusExternalApiImpl {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;
-            let opctx = nexus.opctx_external_authn();
-            let alert_selector = path_params.into_inner();
-            Err(HttpError::for_internal_error(
-                "TODO ELIZA IMPLEMENT THIS".to_string(),
-            ))
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let selector = path_params.into_inner();
+            let (_, alert) =
+                nexus.alert_lookup(&opctx, selector)?.fetch().await?;
+            Ok(HttpResponseOk(alert.into()))
         };
         apictx
             .context

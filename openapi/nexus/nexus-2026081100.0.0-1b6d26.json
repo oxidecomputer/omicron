@@ -1679,15 +1679,25 @@
           "system/alerts"
         ],
         "summary": "List alerts",
-        "description": "An optional alert class glob can be provided to filter which alert classes are returned.",
+        "description": "Alerts may be filtered by alert class or alert class glob and by an inclusive creation time range.",
         "operationId": "alert_list",
         "parameters": [
           {
             "in": "query",
-            "name": "filter",
-            "description": "An optional glob pattern for filtering alert class names.\n\nIf provided, only alert classes which match this glob pattern will be included in the response.",
+            "name": "classes",
+            "description": "Optional alert class or glob pattern used to filter alerts",
             "schema": {
               "$ref": "#/components/schemas/AlertSubscription"
+            }
+          },
+          {
+            "in": "query",
+            "name": "end_time",
+            "description": "Inclusive upper bound on the alert creation time",
+            "schema": {
+              "nullable": true,
+              "type": "string",
+              "format": "date-time"
             }
           },
           {
@@ -1715,6 +1725,16 @@
             "name": "sort_by",
             "schema": {
               "$ref": "#/components/schemas/TimeAndIdSortMode"
+            }
+          },
+          {
+            "in": "query",
+            "name": "start_time",
+            "description": "Inclusive lower bound on the alert creation time",
+            "schema": {
+              "nullable": true,
+              "type": "string",
+              "format": "date-time"
             }
           }
         ],
@@ -1747,7 +1767,6 @@
           "system/alerts"
         ],
         "summary": "Fetch alert",
-        "description": "An optional alert class glob can be provided to filter which alert classes are returned.",
         "operationId": "alert_view",
         "parameters": [
           {
