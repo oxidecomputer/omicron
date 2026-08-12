@@ -544,17 +544,6 @@ fn choose_local_storage_allocations(
     pair_local_storage_requests_to_pools(requests, pools)
 }
 
-/// The number of times to try allocating local storage on a single sled
-/// before moving on to another sled.
-///
-/// Each attempt reads a fresh snapshot of the sled's zpools, chooses an
-/// assignment, and runs the insert query. The insert can still fail if
-/// another reservation claims the space after the snapshot is read but
-/// before the insert runs. Retrying with a new snapshot handles that, and
-/// losing the race several times in a row takes increasingly bad luck, so a
-/// small number of attempts is enough.
-const LOCAL_STORAGE_ATTEMPTS_PER_SLED: usize = 4;
-
 /// Return true if any local storage disk still requiring an allocation has
 /// been deleted, or is no longer attached to the given instance.
 ///
@@ -1438,9 +1427,11 @@ impl DataStore {
 
         info!(&log, "sled targets: {sled_targets:?}");
 
-        let local_storage_allocation_required = local_storage_disks
+        let disks_needing_allocation = local_storage_disks
             .iter()
-            .any(|disk| disk.local_storage_dataset_allocation.is_none());
+            .filter(|disk| disk.local_storage_dataset_allocation.is_none())
+            .count();
+        let local_storage_allocation_required = disks_needing_allocation > 0;
 
         info!(
             &log,
@@ -1564,14 +1555,46 @@ impl DataStore {
                 // pool and dataset policy changes): take a new snapshot and
                 // try again, a bounded number of times, before moving to the
                 // next sled.
-                'attempts: for _ in 0..LOCAL_STORAGE_ATTEMPTS_PER_SLED {
-                    let zpools_for_sled =
-                        DataStore::zpool_get_for_sled_reservation_on_conn(
-                            &conn,
-                            &opctx,
-                            sled_target,
-                        )
-                        .await?;
+                let mut zpools_for_sled =
+                    DataStore::zpool_get_for_sled_reservation_on_conn(
+                        &conn,
+                        &opctx,
+                        sled_target,
+                    )
+                    .await?;
+
+                // We only retry here when we fail due to a concurrent
+                // reservation making our proposed allocation invalid. When this
+                // happens, at least one of our proposed (disk, zpool) pairings
+                // must no longer fit.
+                //
+                // In scenarios where concurrent actors are performing
+                // allocations (and not freeing anything!), a pairing that stops
+                // fitting never fits again. Since we'll only propose pairings
+                // that fit on a newer snapshot, each failed attempt removes
+                // one of these pairings.
+                // There are only disks * zpools pairings, so the sled runs out
+                // of pairings before this budget runs out.
+                //
+                // Admittedly: concurrent frees can revive pairings; under
+                // sustained free-and-reallocate churn we may give up on the
+                // sled before it theoretically could satisfy an allocation
+                // request.
+                let max_attempts =
+                    disks_needing_allocation * zpools_for_sled.len();
+
+                'attempts: for attempt in 0..max_attempts {
+                    if attempt > 0 {
+                        // The previous insert lost its race; take a fresh
+                        // snapshot.
+                        zpools_for_sled =
+                            DataStore::zpool_get_for_sled_reservation_on_conn(
+                                &conn,
+                                &opctx,
+                                sled_target,
+                            )
+                            .await?;
+                    }
 
                     let allocations = match choose_local_storage_allocations(
                         &zpools_for_sled,
