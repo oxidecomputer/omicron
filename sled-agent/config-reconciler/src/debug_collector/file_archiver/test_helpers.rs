@@ -344,8 +344,9 @@ impl TryFrom<&Utf8Path> for TestFileKind {
                     Ok(TestFileKind::LogSmfRotated { zone_name, zone_root })
                 }
             } else if s.contains(&format!(
-                "{}/tmp/",
-                omicron_debug_dropbox::DEBUG_DROPBOX_PATH
+                "{}/{}/",
+                omicron_debug_dropbox::DEBUG_DROPBOX_PATH,
+                omicron_debug_dropbox::RESERVED_PRODUCER_NAME,
             )) {
                 Ok(TestFileKind::DebugDropboxStaged { zone_name, zone_root })
             } else if let Some((_, dropbox_relative)) =

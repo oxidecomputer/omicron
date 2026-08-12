@@ -128,6 +128,10 @@ pub(crate) static ALL_RULES: LazyLock<IdOrdMap<Rule>> = LazyLock::new(|| {
             .unwrap()
             .to_owned();
     assert!(debug_dropbox.is_relative());
+    let debug_dropbox_reserved: Regex =
+        format!("^{}$", omicron_debug_dropbox::RESERVED_PRODUCER_NAME)
+            .parse()
+            .unwrap();
     let rules = [
         Rule {
             label: "process core files",
@@ -188,7 +192,7 @@ pub(crate) static ALL_RULES: LazyLock<IdOrdMap<Rule>> = LazyLock::new(|| {
                     "debug_dropbox",
                 ))
                 .unwrap(),
-                exclude_subdirs: "^tmp$".parse().unwrap(),
+                exclude_subdirs: debug_dropbox_reserved,
             },
             delete_original: true,
             naming: &NameDropbox,

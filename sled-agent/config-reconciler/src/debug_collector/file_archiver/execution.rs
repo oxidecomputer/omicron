@@ -156,8 +156,12 @@ mod test {
         let file5_dropbox = producer_dir.join("test-file.dat");
         // A dropbox deposit that's still being staged.  This must never be
         // archived nor deleted.
-        let staging_dir =
-            zone_root.join("var/debug_dropbox/tmp").join("test-producer");
+        let staging_dir = zone_root
+            .join(format!(
+                "var/debug_dropbox/{}",
+                omicron_debug_dropbox::RESERVED_PRODUCER_NAME
+            ))
+            .join("test-producer");
         let file6_staged = staging_dir.join("partial.dat");
 
         let populate_input = |contents: &str| {
@@ -269,7 +273,9 @@ mod test {
                 "archiver removed a deposit that was still being staged",
             );
             assert!(
-                !dropbox_outdir.join("tmp").exists(),
+                !dropbox_outdir
+                    .join(omicron_debug_dropbox::RESERVED_PRODUCER_NAME)
+                    .exists(),
                 "archiver created an output directory for the dropbox's \
                  staging directory",
             );

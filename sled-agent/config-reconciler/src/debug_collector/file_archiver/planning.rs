@@ -516,13 +516,6 @@ mod test {
     use slog_error_chain::InlineErrorChain;
     use std::collections::BTreeSet;
 
-    /// Name of the subdirectory of the debug dropbox in which deposits are
-    /// staged before being renamed into place
-    ///
-    /// This is part of the dropbox's on-disk protocol.  See
-    /// `omicron_debug_dropbox`.
-    const DROPBOX_STAGING_DIR: &str = "tmp";
-
     /// Fully tests archive planning with a bunch of real-world file paths
     #[test]
     fn test_archiving_basic() {
@@ -688,7 +681,7 @@ mod test {
         for directory in &directories_created {
             assert_ne!(
                 directory.file_name(),
-                Some(DROPBOX_STAGING_DIR),
+                Some(omicron_debug_dropbox::RESERVED_PRODUCER_NAME),
                 "archiver created an output directory for the debug dropbox's \
                  staging directory: {directory:?}",
             );
