@@ -100,11 +100,15 @@ use crate::app::multicast::sled::MulticastSledClient;
 use crate::app::saga::create_saga_dag;
 use crate::app::sagas;
 
-/// Minimum age before an orphaned group in "Creating" state can be cleaned up.
+/// Minimum age before a memberless group can be cleaned up.
 ///
-/// This grace period avoids racing with in-progress member attachment operations
-/// that occur immediately after group creation.
-const ORPHAN_GROUP_MIN_AGE: chrono::TimeDelta = chrono::TimeDelta::seconds(10);
+/// This grace period avoids racing with in-progress member attachment
+/// operations that occur immediately after group creation. It applies both to
+/// orphaned groups still in "Creating" state and to the empty-group sweep of
+/// "Active" groups, since an implicitly created group can be activated before
+/// its first member attach lands.
+pub(super) const ORPHAN_GROUP_MIN_AGE: chrono::TimeDelta =
+    chrono::TimeDelta::seconds(10);
 
 /// Check if DPD tag matches the database group's tag.
 ///
@@ -616,43 +620,54 @@ impl MulticastGroupReconciler {
             "underlay_linked" => group.underlay_group_id.is_some()
         );
 
-        // Clean up orphaned groups stuck in "Creating" state with no members.
-        // This handles cases where implicit group creation succeeded but member
-        // attachment failed (e.g., SSM validation error, transient failures).
-        //
-        // We only clean up groups that have been in "Creating" for at least
-        // ORPHAN_GROUP_MIN_AGE to avoid racing with in-progress member
-        // attachment operations.
-        let age = Utc::now() - group.time_created();
-        if age > ORPHAN_GROUP_MIN_AGE {
-            let group_id = MulticastGroupUuid::from_untyped_uuid(group.id());
-            match self
-                .datastore
-                .mark_multicast_group_for_removal_if_no_members(opctx, group_id)
-                .await
-            {
-                Ok(true) => {
-                    info!(
-                        opctx.log,
-                        "cleaned up orphaned multicast group in \"Creating\" state with no members";
-                        "group_id" => %group.id(),
-                        "group_name" => group.name().as_str(),
-                        "age_seconds" => age.num_seconds(),
-                    );
-                    return Ok(StateTransition::NeedsCleanup);
-                }
-                Ok(false) => {
-                    // Group has members, continue with normal processing
-                }
-                Err(e) => {
-                    warn!(
-                        opctx.log,
-                        "failed to check/cleanup orphaned group";
-                        "group_id" => %group.id(),
-                        "error" => ?e,
-                    );
+        // A memberless group is never activated. An implicit creation whose
+        // first attach has not landed, or whose attach failed, stays in
+        // "Creating" until it gains a member or is reaped below. This keeps
+        // failed creations out of the dataplane entirely.
+        let members = self
+            .get_group_members(opctx, group.id())
+            .await
+            .context("failed to list members for group in 'Creating' state")?;
+
+        if members.is_empty() {
+            // Reap orphans past the grace window. The grace avoids racing
+            // an in-progress first attach, such as implicit group creation
+            // whose member attachment failed transiently (e.g., SSM
+            // validation error). The NOT EXISTS guard in the datastore
+            // method declines if a member attached since the list above.
+            let age = Utc::now() - group.time_created();
+            if age > ORPHAN_GROUP_MIN_AGE {
+                let group_id =
+                    MulticastGroupUuid::from_untyped_uuid(group.id());
+                match self
+                    .datastore
+                    .multicast_group_mark_removal_if_empty(opctx, group_id)
+                    .await
+                {
+                    Ok(true) => {
+                        info!(
+                            opctx.log,
+                            "cleaned up orphaned multicast group in 'Creating' state with no members";
+                            "group_id" => %group.id(),
+                            "group_name" => group.name().as_str(),
+                            "age_seconds" => age.num_seconds(),
+                        );
+                        return Ok(StateTransition::NeedsCleanup);
+                    }
+                    Ok(false) => {
+                        // Lost the race to an attach, activate next pass.
+                    }
+                    Err(e) => {
+                        warn!(
+                            opctx.log,
+                            "failed to check/cleanup orphaned group";
+                            "group_id" => %group.id(),
+                            "error" => ?e,
+                        );
+                    }
                 }
             }
+            return Ok(StateTransition::NoChange);
         }
 
         // TODO: Add front port selection for egress traffic (instances →
@@ -960,32 +975,36 @@ impl MulticastGroupReconciler {
         let tag = Self::get_multicast_tag(group)
             .context("multicast group missing tag")?;
 
-        debug!(
-            opctx.log,
-            "executing DPD multicast group cleanup by tag";
-            "group_id" => %group.id(),
-            "multicast_ip" => %group.multicast_ip,
-            "dpd_tag" => %tag,
-            "cleanup_scope" => "all_switches_in_rack",
-            "dpd_operation" => "multicast_reset_by_tag",
-            "cleanup_includes" => "[external_group, underlay_group, forwarding_rules, member_ports]"
-        );
+        // Skip dataplane teardown when the group never reached it. The
+        // reconciler writes `underlay_group_id` before any switch
+        // programming and never clears it, so an absent link proves there
+        // is no DPD state to remove.
+        if group.underlay_group_id.is_some() {
+            debug!(
+                opctx.log,
+                "executing DPD multicast group cleanup by tag";
+                "group_id" => %group.id(),
+                "multicast_ip" => %group.multicast_ip,
+                "dpd_tag" => %tag,
+                "cleanup_scope" => "all_switches_in_rack",
+                "dpd_operation" => "multicast_reset_by_tag",
+                "cleanup_includes" => "[external_group, underlay_group, forwarding_rules, member_ports]"
+            );
 
-        // Clear M2P/forwarding from all sleds before DPD cleanup.
-        // This must succeed before deleting DB records, otherwise
-        // stale OPTE state would persist on sleds where the clear
-        // failed, with no DB record to drive a retry on a later pass.
-        sled_client
-            .clear_m2p_and_forwarding(opctx, group)
-            .await
-            .context("failed to clear M2P/forwarding from sleds")?;
+            // Clear M2P/forwarding from all sleds before DPD cleanup.
+            // This must succeed before deleting DB records, otherwise
+            // stale OPTE state would persist on sleds where the clear
+            // failed, with no DB record to drive a retry on a later pass.
+            sled_client
+                .clear_m2p_and_forwarding(opctx, group)
+                .await
+                .context("failed to clear M2P/forwarding from sleds")?;
 
-        // Use dataplane client from reconciliation pass to cleanup switch(es)
-        // state by tag
-        dataplane_client
-            .remove_groups(&tag)
-            .await
-            .context("failed to cleanup dataplane switch configuration")?;
+            dataplane_client
+                .remove_groups(&tag)
+                .await
+                .context("failed to cleanup dataplane switch configuration")?;
+        }
 
         // Delete underlay group record
         if let Some(underlay_group_id) = group.underlay_group_id {

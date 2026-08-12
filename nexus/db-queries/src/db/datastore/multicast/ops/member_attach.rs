@@ -11,7 +11,8 @@
 //! - **No existing member**: Insert new row in "Joining" state
 //! - **Member in "Left" (time_deleted=NULL)**: Transition to "Joining", update sled_id
 //! - **Member in "Left" (time_deleted set)**: Insert new row (soft-delete ignored / not reactivated)
-//! - **Member in "Joining"/"Joined"**: No-op (already attached)
+//! - **Member in "Joining"/"Joined"**: Stays attached, source filter rewritten
+//!   when the caller supplies one
 //!
 //! Upsert only runs if group exists ("Creating" or "Active") and instance exists
 //! (validated by `valid_group` and `instance_sled` CTEs). The operation returns
@@ -50,11 +51,33 @@ const GROUP_NOT_FOUND_SENTINEL: &str = "group-not-found";
 const INSTANCE_NOT_FOUND_SENTINEL: &str = "instance-not-found";
 const UNION_EXCEEDED_SENTINEL: &str = "source-union-exceeded";
 
+/// Which branch of the member upsert a given attach took.
+///
+/// This is not an ownership marker for compensation. A retried saga action
+/// sees [`AttachOutcome::Existing`] for a row it created on an earlier
+/// invocation, so callers that need ownership must supply a stable member ID
+/// and compare it against `member.id`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AttachOutcome {
+    /// The upsert inserted a new member row.
+    Created,
+    /// The upsert landed on a live row for this (group, instance) pair.
+    ///
+    /// Covers a member left untouched, one reactivated from "Left", and one
+    /// whose source filter this call rewrote. The branches are not
+    /// distinguishable from the returned row, which carries post-update
+    /// state. Compensation does not restore a rewritten filter or undo a
+    /// reactivation.
+    Existing,
+}
+
 /// Result of attaching an instance to a multicast group.
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct AttachMemberResult {
+pub struct AttachMemberResult {
     /// Full member record for this (group, instance) pair.
     pub member: MulticastGroupMember,
+    /// Which upsert branch produced [`Self::member`].
+    pub outcome: AttachOutcome,
 }
 
 /// Errors from attaching an instance to a multicast group.
@@ -120,11 +143,13 @@ impl AttachMemberError {
 impl From<AttachMemberError> for external::Error {
     fn from(err: AttachMemberError) -> Self {
         match err {
-            AttachMemberError::GroupNotFound => {
-                external::Error::invalid_request(
-                    "Multicast group not found or is being deleted",
-                )
-            }
+            // Callers resolve the group before attaching, so the validation
+            // CTE only rejects a group that was torn down in between, such as
+            // an implicit deletion triggered by a concurrent last-member
+            // leave. That is a conflict, not a malformed request.
+            AttachMemberError::GroupNotFound => external::Error::conflict(
+                "Multicast group was deleted while attaching the instance",
+            ),
             AttachMemberError::InstanceNotFound => {
                 external::Error::invalid_request(
                     "Instance does not exist or has been deleted",
@@ -158,7 +183,8 @@ impl From<AttachMemberError> for external::Error {
 /// - **Reactivate**: Member in "Left" (time_deleted=NULL) → transition to
 ///   "Joining", update `sled_id`
 /// - **Insert new**: Member in "Left" (time_deleted set) → create new row
-/// - **Idempotent**: Member already "Joining" or "Joined" → no-op
+/// - **Rewrite**: Member already "Joining" or "Joined" → stays attached,
+///   source filter rewritten when the caller supplies one
 ///
 /// Atomically validates group and instance exist, retrieves instance's current
 /// sled_id, and performs member upsert. Returns member ID.
@@ -178,8 +204,8 @@ pub(crate) struct AttachMemberToGroupStatement {
     new_member_id: Uuid,
     time_created: DateTime<Utc>,
     time_modified: DateTime<Utc>,
-    /// Whether (or not) to update `source_ips` on reactivation
-    update_source_ips_on_reactivation: bool,
+    /// Whether (or not) to rewrite `source_ips` on conflict
+    update_source_ips: bool,
     /// Source IPs for INSERT operation
     source_ips_for_insert: Vec<IpNetwork>,
 }
@@ -206,14 +232,25 @@ impl AttachMemberToGroupStatement {
         source_ips: Option<Vec<IpNetwork>>,
     ) -> Self {
         let now = Utc::now();
+        // A source filter is a set, but it is stored as an array and compared
+        // on conflict with IS DISTINCT FROM, which is order-sensitive. Writing
+        // a canonical form keeps a caller that restates the same sources in a
+        // different order from rewriting the row.
+        let source_ips_for_insert =
+            source_ips.as_ref().map_or_else(Vec::new, |ips| {
+                let mut ips = ips.clone();
+                ips.sort();
+                ips.dedup();
+                ips
+            });
         Self {
             group_id,
             instance_id,
             new_member_id,
             time_created: now,
             time_modified: now,
-            update_source_ips_on_reactivation: source_ips.is_some(),
-            source_ips_for_insert: source_ips.unwrap_or_default(),
+            update_source_ips: source_ips.is_some(),
+            source_ips_for_insert,
         }
     }
 
@@ -222,10 +259,20 @@ impl AttachMemberToGroupStatement {
         self,
         conn: &async_bb8_diesel::Connection<DbConnection>,
     ) -> Result<AttachMemberResult, AttachMemberError> {
+        // A fresh insert returns the row keyed by `new_member_id`. Any other
+        // ID means the upsert hit an existing active row.
+        let new_member_id = self.new_member_id;
         self.get_result_async::<MulticastGroupMember>(conn)
             .await
             .map_err(AttachMemberError::from_diesel)
-            .map(|member| AttachMemberResult { member })
+            .map(|member| AttachMemberResult {
+                outcome: if member.id == new_member_id {
+                    AttachOutcome::Created
+                } else {
+                    AttachOutcome::Existing
+                },
+                member,
+            })
     }
 }
 
@@ -245,8 +292,10 @@ impl RunQueryDsl<DbConnection> for AttachMemberToGroupStatement {}
 ///
 /// CTEs validate group and instance exist (triggering sentinel errors on failure),
 /// retrieve instance's current sled_id, then perform unconditional upsert
-/// (handles insert, reactivation, and idempotent cases). ON CONFLICT DO UPDATE
-/// only modifies rows in "Left" state.
+/// (handles insert, reactivation, and filter rewrite). ON CONFLICT DO UPDATE
+/// touches every live conflicting row, rewriting `source_ips` when the caller
+/// supplies a filter and advancing `time_modified` only when the stored filter
+/// actually changes.
 ///
 /// Prevents TOCTOU races by performing all validation and updates in one atomic
 /// database operation.
@@ -329,8 +378,7 @@ impl AttachMemberToGroupStatement {
     /// (`None`) or explicitly clearing them (empty list), since neither path
     /// grows the union.
     fn check_union_size(&self) -> bool {
-        self.update_source_ips_on_reactivation
-            && !self.source_ips_for_insert.is_empty()
+        self.update_source_ips && !self.source_ips_for_insert.is_empty()
     }
 
     /// Generates the `proposed_union_size` CTE.
@@ -374,8 +422,20 @@ impl AttachMemberToGroupStatement {
     /// - UPDATE path preserves time_deleted=NULL for reactivated members
     ///
     /// Source IPs handling on conflict:
-    /// - If `update_source_ips_on_reactivation` → use EXCLUDED.source_ips
+    /// - If `update_source_ips` → use EXCLUDED.source_ips
     /// - Otherwise → preserve existing (no update)
+    ///
+    /// Unlike the state and sled columns, the source filter is rewritten for
+    /// any live member, not just a reactivated "Left" one, so that a new
+    /// filter named for a membership the caller already holds can take
+    /// effect.
+    ///
+    /// A rewrite on a member already "Joined" changes no member state, so no
+    /// member-level reconciler event fires. The new filter reaches the
+    /// dataplane through the group reconciler's drift comparison, which
+    /// recomputes the union filter for "Active" groups each cycle. For a
+    /// group still in "Creating", the filter lands when the group is first
+    /// programmed on activation.
     fn push_upserted_member_cte<'a>(
         &'a self,
         mut out: AstPass<'_, 'a, Pg>,
@@ -424,28 +484,25 @@ impl AttachMemberToGroupStatement {
         out.push_sql(super::member_state_as_sql_literal(
             MulticastGroupMemberState::Left,
         ));
+        if self.update_source_ips {
+            // A source filter rewrite modifies a live member, so it advances
+            // time_modified even though the state and sled columns hold.
+            out.push_sql(
+                " OR multicast_group_member.source_ips IS DISTINCT FROM \
+                 EXCLUDED.source_ips",
+            );
+        }
         out.push_sql(" THEN EXCLUDED.time_modified ELSE multicast_group_member.time_modified END, time_deleted = CASE WHEN multicast_group_member.state = ");
         out.push_sql(super::member_state_as_sql_literal(
             MulticastGroupMemberState::Left,
         ));
         out.push_sql(" THEN NULL ELSE multicast_group_member.time_deleted END");
 
-        // source_ips: update on reactivation only if caller provided source_ips
-        out.push_sql(
-            ", source_ips = CASE WHEN multicast_group_member.state = ",
-        );
-        out.push_sql(super::member_state_as_sql_literal(
-            MulticastGroupMemberState::Left,
-        ));
-        out.push_sql(" THEN ");
-        if self.update_source_ips_on_reactivation {
-            // source_ips was provided → use the new value
-            out.push_sql("EXCLUDED.source_ips");
-        } else {
-            // source_ips was `None` → preserve existing
-            out.push_sql("multicast_group_member.source_ips");
+        // source_ips: replace whenever the caller named a filter, regardless
+        // of the member's current state
+        if self.update_source_ips {
+            out.push_sql(", source_ips = EXCLUDED.source_ips");
         }
-        out.push_sql(" ELSE multicast_group_member.source_ips END");
 
         // Return all columns so caller gets full member record
         // Column order must match schema: id, time_created, time_modified, time_deleted,

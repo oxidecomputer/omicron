@@ -531,6 +531,9 @@ impl MulticastDataplaneClient {
     }
 
     /// Update a multicast group's tag (name) and/or sources in the dataplane.
+    ///
+    /// Membership is left untouched: the underlay member list is written only
+    /// by the member add and remove paths.
     pub(crate) async fn update_groups(
         &self,
         params: GroupUpdateParams<'_>,
@@ -583,15 +586,20 @@ impl MulticastDataplaneClient {
                 let sources = sources_dpd.clone();
                 let underlay_ip_admin = underlay_ip_admin.clone();
                 async move {
-                    // Ensure/get underlay members, create if missing
-                    let (members, existing_tag) = match client
+                    // Read the underlay group, creating it if absent.
+                    //
+                    // The member list is never written back from here. A tag
+                    // and source update does not change membership, and
+                    // `multicast_group_update_underlay` is a full-list
+                    // replace whose only concurrency control is the tag,
+                    // which is per-group rather than per-version, so a write
+                    // would silently revert a member add or remove that
+                    // landed since the read.
+                    let underlay = match client
                         .multicast_group_get_underlay(&underlay_ip_admin)
                         .await
                     {
-                        Ok(r) => {
-                            let inner = r.into_inner();
-                            (inner.members, inner.tag)
-                        }
+                        Ok(r) => r.into_inner(),
                         Err(DpdError::ErrorResponse(resp))
                             if resp.status()
                                 == reqwest::StatusCode::NOT_FOUND =>
@@ -606,15 +614,13 @@ impl MulticastDataplaneClient {
                                     "underlay multicast group missing tag",
                                 )
                             })?;
-                            let created = self
-                                .dpd_ensure_underlay_created(
-                                    client,
-                                    underlay_ip_admin.clone(),
-                                    db_tag,
-                                    switch_slot,
-                                )
-                                .await?;
-                            (created.members, created.tag)
+                            self.dpd_ensure_underlay_created(
+                                client,
+                                underlay_ip_admin.clone(),
+                                db_tag,
+                                switch_slot,
+                            )
+                            .await?
                         }
                         Err(e) => {
                             error!(
@@ -630,32 +636,12 @@ impl MulticastDataplaneClient {
                         }
                     };
 
-                    // Update underlay preserving members, using existing
-                    // tag for authorization
-                    let underlay_entry =
-                        MulticastGroupUpdateUnderlayEntry { members };
+                    // The existing tag authorizes the external update below.
                     let tag: MulticastTag =
-                        existing_tag.try_into().map_err(|e| {
+                        underlay.tag.clone().try_into().map_err(|e| {
                             Error::internal_error(&format!(
                                 "invalid multicast tag: {e}"
                             ))
-                        })?;
-                    let underlay_response = client
-                        .multicast_group_update_underlay(
-                            &underlay_ip_admin,
-                            &tag,
-                            &underlay_entry,
-                        )
-                        .await
-                        .map_err(|e| {
-                            error!(
-                                self.log,
-                                "failed to update underlay";
-                                "underlay_ip" => %underlay_ip_admin,
-                                "switch" => ?switch_slot,
-                                "error" => %e
-                            );
-                            Error::internal_error("failed to update underlay")
                         })?;
 
                     // Prepare external update/create entries with pre-computed data.
@@ -692,11 +678,7 @@ impl MulticastDataplaneClient {
                         )
                         .await?;
 
-                    Ok::<_, Error>((
-                        switch_slot,
-                        underlay_response.into_inner(),
-                        external_response,
-                    ))
+                    Ok::<_, Error>((switch_slot, underlay, external_response))
                 }
             });
 

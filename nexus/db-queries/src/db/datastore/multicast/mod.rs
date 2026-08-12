@@ -22,13 +22,42 @@
 //!
 //! [`UNDERLAY_MULTICAST_SUBNET`]: omicron_common::address::UNDERLAY_MULTICAST_SUBNET
 
+use std::net::IpAddr;
+
 use crate::db::model::UnderlayMulticastGroup;
+use omicron_uuid_kinds::MulticastGroupUuid;
 
 pub mod groups;
 pub mod members;
 pub mod ops;
 
 pub use groups::ExternalMulticastGroupWithSources;
+pub use ops::member_attach::{AttachMemberResult, AttachOutcome};
+
+/// A database-level multicast membership mutation to apply with an instance
+/// reconfiguration.
+#[derive(Debug, Clone)]
+pub enum MulticastMembershipChange {
+    /// Remove the instance's active membership from a group.
+    Leave { group_id: MulticastGroupUuid },
+    /// Add the instance's membership with the requested source filter.
+    Join { group_id: MulticastGroupUuid, source_ips: Option<Vec<IpAddr>> },
+}
+
+/// A membership observed while planning an instance reconfiguration.
+///
+/// The full set of these values is the snapshot the plan was built from, and
+/// is re-checked once the reconfiguration transaction holds the instance row.
+#[derive(Debug, Clone)]
+pub struct ExpectedMulticastMembership {
+    pub group_id: MulticastGroupUuid,
+    /// Sources observed while planning, carried only when the plan rewrites
+    /// this group's filter.
+    ///
+    /// A plan that preserves the stored filter writes no filter of its own, so
+    /// it leaves this `None` and tolerates concurrent source changes.
+    pub source_ips: Option<Vec<IpAddr>>,
+}
 
 /// Result of attempting to ensure an underlay multicast group exists.
 #[derive(Debug)]

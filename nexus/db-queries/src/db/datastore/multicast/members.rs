@@ -19,6 +19,7 @@ use slog::debug;
 use uuid::Uuid;
 
 use nexus_db_errors::{ErrorHandler, public_error_from_diesel};
+use nexus_db_lookup::DbConnection;
 use omicron_common::api::external::{
     self, CreateResult, DataPageParams, DeleteResult, ListResultVec,
     LookupType, ResourceType, UpdateResult,
@@ -30,8 +31,10 @@ use omicron_uuid_kinds::{
 use crate::context::OpContext;
 use crate::db::datastore::DataStore;
 use crate::db::datastore::multicast::ops;
+use crate::db::datastore::multicast::ops::member_attach::AttachMemberResult;
 use crate::db::model::{
     DbTypedUuid, MulticastGroupMember, MulticastGroupMemberState,
+    MulticastGroupState,
 };
 use crate::db::pagination::paginated;
 
@@ -91,7 +94,8 @@ impl DataStore {
     /// Handles reactivation of "Left" members and preserves "Joined" state for
     /// idempotency.
     ///
-    /// Source IPs handling on reactivation:
+    /// Source IPs handling, applied to a reactivated member and to one that is
+    /// already live:
     /// - `None` → preserve existing `source_ips` (rejoin without changes)
     /// - `Some([])` → clear `source_ips` (switch to ASM)
     /// - `Some([a,b])` → replace with new `source_ips` (update sources)
@@ -99,15 +103,82 @@ impl DataStore {
     /// Atomically enforces the per-group source IP union cap
     /// ([`omicron_common::address::MAX_SOURCE_IPS_PER_GROUP`]) when a
     /// non-empty source list is being applied.
+    ///
+    /// The returned [`AttachMemberResult`] carries an
+    /// [`AttachOutcome`](ops::member_attach::AttachOutcome) naming which
+    /// upsert branch ran, so callers compensating for a failure can
+    /// distinguish a row this call created from one that already existed.
     pub async fn multicast_group_member_attach_to_instance(
         &self,
         opctx: &OpContext,
         group_id: MulticastGroupUuid,
         instance_id: InstanceUuid,
         source_ips: Option<&[IpAddr]>,
+    ) -> CreateResult<AttachMemberResult> {
+        let conn = self.pool_connection_authorized(opctx).await?;
+        self.multicast_group_member_attach_to_instance_on_conn(
+            &conn,
+            group_id,
+            instance_id,
+            source_ips,
+        )
+        .await
+        .map_err(external::Error::from)
+    }
+
+    /// Attach an instance using a caller-supplied member ID.
+    ///
+    /// Saga actions use a stable ID here so a repeated forward invocation can
+    /// identify the member it established and compensate it safely.
+    pub async fn multicast_group_member_attach_to_instance_with_id(
+        &self,
+        opctx: &OpContext,
+        group_id: MulticastGroupUuid,
+        instance_id: InstanceUuid,
+        member_id: Uuid,
+        source_ips: Option<&[IpAddr]>,
     ) -> CreateResult<MulticastGroupMember> {
         let conn = self.pool_connection_authorized(opctx).await?;
+        self.multicast_group_member_attach_to_instance_on_conn_with_id(
+            &conn,
+            group_id,
+            instance_id,
+            member_id,
+            source_ips,
+        )
+        .await
+        .map(|result| result.member)
+        .map_err(external::Error::from)
+    }
 
+    /// Attach an instance using an existing database connection.
+    pub(crate) async fn multicast_group_member_attach_to_instance_on_conn(
+        &self,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        group_id: MulticastGroupUuid,
+        instance_id: InstanceUuid,
+        source_ips: Option<&[IpAddr]>,
+    ) -> Result<AttachMemberResult, ops::member_attach::AttachMemberError> {
+        self.multicast_group_member_attach_to_instance_on_conn_with_id(
+            conn,
+            group_id,
+            instance_id,
+            Uuid::new_v4(),
+            source_ips,
+        )
+        .await
+    }
+
+    /// Attach an instance using an existing connection and caller-supplied
+    /// member ID.
+    pub(crate) async fn multicast_group_member_attach_to_instance_on_conn_with_id(
+        &self,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        group_id: MulticastGroupUuid,
+        instance_id: InstanceUuid,
+        member_id: Uuid,
+        source_ips: Option<&[IpAddr]>,
+    ) -> Result<AttachMemberResult, ops::member_attach::AttachMemberError> {
         // Convert IpAddr to IpNetwork for storage
         let source_networks: Option<Vec<IpNetwork>> = source_ips
             .map(|ips| ips.iter().copied().map(IpNetwork::from).collect());
@@ -115,35 +186,53 @@ impl DataStore {
         // Execute atomic CTE that validates group (not "Deleting"), validates
         // instance, gets `sled_id`, performs upsert, and returns full member
         // record
-        let attach_result =
-            ops::member_attach::AttachMemberToGroupStatement::new(
-                group_id.into_untyped_uuid(),
-                instance_id.into_untyped_uuid(),
-                Uuid::new_v4(),
-                source_networks,
-            )
-            .execute(&conn)
-            .await
-            .map_err(external::Error::from)?;
-
-        Ok(attach_result.member)
+        ops::member_attach::AttachMemberToGroupStatement::new(
+            group_id.into_untyped_uuid(),
+            instance_id.into_untyped_uuid(),
+            member_id,
+            source_networks,
+        )
+        .execute(conn)
+        .await
     }
 
-    /// Delete a multicast group member by group ID.
+    /// Hard delete every member of a group that is still marked for removal.
     ///
-    /// This performs a hard delete of all members (both active and soft-deleted)
-    /// for the specified group. Used during group cleanup operations.
+    /// Covers both active and soft-deleted member rows, and is used by the
+    /// reconciler when tearing a group down.
+    ///
+    /// The delete declines unless the parent group is still soft-deleted in
+    /// "Deleting" state. A reaped group can come back to life through
+    /// [`DataStore::multicast_group_resurrect_if_unactivated`] while a teardown
+    /// pass is blocked on its dataplane call, and the members attached to the
+    /// restored group after that point belong to the saga that owns it, not to
+    /// the teardown that is still unwinding. Without the guard the resumed pass
+    /// would sweep those rows and leave a live but memberless group, which the
+    /// orphan pass then reaps again.
     pub async fn multicast_group_members_delete_by_group(
         &self,
         opctx: &OpContext,
         group_id: MulticastGroupUuid,
     ) -> DeleteResult {
-        use nexus_db_schema::schema::multicast_group_member::dsl;
+        use nexus_db_schema::schema::multicast_group;
+        use nexus_db_schema::schema::multicast_group_member;
 
-        // Delete all members for this group, including soft-deleted ones
-        // We use a targeted query to leverage existing indexes
-        diesel::delete(dsl::multicast_group_member)
-            .filter(dsl::external_group_id.eq(group_id.into_untyped_uuid()))
+        diesel::delete(multicast_group_member::table)
+            .filter(
+                multicast_group_member::external_group_id
+                    .eq(group_id.into_untyped_uuid()),
+            )
+            .filter(diesel::dsl::exists(
+                multicast_group::table
+                    .filter(
+                        multicast_group::id.eq(group_id.into_untyped_uuid()),
+                    )
+                    .filter(
+                        multicast_group::state
+                            .eq(MulticastGroupState::Deleting),
+                    )
+                    .filter(multicast_group::time_deleted.is_not_null()),
+            ))
             .execute_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
@@ -345,15 +434,34 @@ impl DataStore {
         instance_id: InstanceUuid,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<MulticastGroupMember> {
+        let conn = self.pool_connection_authorized(opctx).await?;
+        self.multicast_group_members_list_by_instance_on_conn(
+            &conn,
+            instance_id,
+            pagparams,
+        )
+        .await
+        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// List instance memberships using an existing database connection.
+    ///
+    /// Returns the raw diesel error so transactional callers can hand
+    /// retryable errors back to the retry wrapper.
+    pub(crate) async fn multicast_group_members_list_by_instance_on_conn(
+        &self,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        instance_id: InstanceUuid,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> Result<Vec<MulticastGroupMember>, diesel::result::Error> {
         use nexus_db_schema::schema::multicast_group_member::dsl;
 
         paginated(dsl::multicast_group_member, dsl::id, pagparams)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::parent_id.eq(instance_id.into_untyped_uuid()))
             .select(MulticastGroupMember::as_select())
-            .get_results_async(&*self.pool_connection_authorized(opctx).await?)
+            .get_results_async(conn)
             .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     /// Compute source filtering state for one or more groups in a single query.
@@ -364,6 +472,11 @@ impl DataStore {
     ///
     /// Groups with no members will have empty `specific_sources` and
     /// `has_any_source_member: false`.
+    ///
+    /// Members in every state contribute, including "Left". Membership
+    /// persists across instance stop, so a stopped member's source
+    /// preferences stay in the switch filter rather than flapping on
+    /// stop/start. Only soft-deleted rows are excluded.
     ///
     /// # Batch Usage
     ///
@@ -505,6 +618,7 @@ impl DataStore {
     ) -> Result<(), external::Error> {
         use nexus_db_schema::schema::multicast_group_member::dsl;
 
+        let conn = self.pool_connection_authorized(opctx).await?;
         let now = Utc::now();
 
         // Transition members from "Joined/Joining" to "Left" state and clear
@@ -518,7 +632,7 @@ impl DataStore {
                 dsl::sled_id.eq(Option::<DbTypedUuid<SledKind>>::None),
                 dsl::time_modified.eq(now),
             ))
-            .execute_async(&*self.pool_connection_authorized(opctx).await?)
+            .execute_async(&*conn)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
             .map(|_| ())
@@ -589,6 +703,26 @@ impl DataStore {
         group_id: MulticastGroupUuid,
         instance_id: InstanceUuid,
     ) -> Result<bool, external::Error> {
+        let conn = self.pool_connection_authorized(opctx).await?;
+        self.multicast_group_member_detach_by_group_and_instance_on_conn(
+            &conn,
+            group_id,
+            instance_id,
+        )
+        .await
+        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// Detach an instance membership using an existing database connection.
+    ///
+    /// Returns the raw diesel error so transactional callers can hand
+    /// retryable errors back to the retry wrapper.
+    pub(crate) async fn multicast_group_member_detach_by_group_and_instance_on_conn(
+        &self,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        group_id: MulticastGroupUuid,
+        instance_id: InstanceUuid,
+    ) -> Result<bool, diesel::result::Error> {
         use nexus_db_schema::schema::multicast_group_member::dsl;
 
         let now = Utc::now();
@@ -605,9 +739,8 @@ impl DataStore {
                 dsl::time_deleted.eq(Some(now)), // Mark for deletion
                 dsl::time_modified.eq(now),
             ))
-            .execute_async(&*self.pool_connection_authorized(opctx).await?)
-            .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+            .execute_async(conn)
+            .await?;
 
         Ok(updated_rows > 0)
     }
@@ -708,9 +841,9 @@ impl DataStore {
     ///
     /// # State Transitions
     ///
-    /// - "Left" (sled_id=NULL) → "Joining" (sled_id=actual) - Instance restart
-    /// - "Joining" (sled_id=NULL) → "Joining" (sled_id=actual) - First-time start
-    /// - "Joined" - No change (already has sled_id, ignored)
+    /// - "Left" (sled_id=NULL) → "Joining" (sled_id=actual): instance restart
+    /// - "Joining" (sled_id=NULL) → "Joining" (sled_id=actual): first-time start
+    /// - "Joined": no change (already has sled_id, ignored)
     ///
     /// See also:
     /// - CAS-based reconciliation helpers for concurrent updates in
@@ -793,11 +926,14 @@ impl DataStore {
     /// This performs a soft delete by setting the member to "Left" state and
     /// setting `time_deleted`. The RPW reconciler will remove the member from
     /// DPD, and later cleanup will hard-delete the database record.
+    ///
+    /// `false` means the row was already deleted, either by a concurrent
+    /// request or by an earlier run of the same undo action.
     pub async fn multicast_group_member_delete_by_id(
         &self,
         opctx: &OpContext,
         member_id: Uuid,
-    ) -> DeleteResult {
+    ) -> Result<bool, external::Error> {
         use nexus_db_schema::schema::multicast_group_member::dsl;
 
         let now = Utc::now();
@@ -816,10 +952,7 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
         if updated_rows == 0 {
-            return Err(external::Error::not_found_by_id(
-                ResourceType::MulticastGroupMember,
-                &member_id,
-            ));
+            return Ok(false);
         }
 
         debug!(
@@ -829,7 +962,7 @@ impl DataStore {
             "rows_updated" => updated_rows
         );
 
-        Ok(())
+        Ok(true)
     }
 
     /// Complete deletion of multicast group members that are in
@@ -871,6 +1004,7 @@ mod tests {
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::SledUuid;
 
+    use crate::db::datastore::multicast::ops::member_attach::AttachOutcome;
     use crate::db::model::MulticastGroupMemberValues;
     use crate::db::pub_test_utils::helpers::{
         SledUpdateBuilder, attach_instance_to_vmm, create_instance_with_vmm,
@@ -959,7 +1093,7 @@ mod tests {
 
         // Attaching to "Creating" group should succeed (implicit lifecycle model)
         // Members start in "Joining" and wait for RPW to activate the group
-        let creating_member = datastore
+        let creating_attach = datastore
             .multicast_group_member_attach_to_instance(
                 &opctx,
                 MulticastGroupUuid::from_untyped_uuid(creating_group.id()),
@@ -968,10 +1102,16 @@ mod tests {
             )
             .await
             .expect("Should attach to 'Creating' group");
+        assert_eq!(
+            creating_attach.outcome,
+            AttachOutcome::Created,
+            "First attach to a 'Creating' group should create a member row"
+        );
+        let creating_member = creating_attach.member;
         assert_eq!(creating_member.state, MulticastGroupMemberState::Joining);
 
         // Attach to active group should also succeed
-        let member = datastore
+        let attach = datastore
             .multicast_group_member_attach_to_instance(
                 &opctx,
                 MulticastGroupUuid::from_untyped_uuid(active_group.id()),
@@ -980,6 +1120,8 @@ mod tests {
             )
             .await
             .expect("Should attach instance to active group");
+        assert_eq!(attach.outcome, AttachOutcome::Created);
+        let member = attach.member;
 
         assert_eq!(member.state, MulticastGroupMemberState::Joining);
         assert_eq!(member.sled_id, Some(setup.sled_id.into()));
@@ -995,7 +1137,7 @@ mod tests {
 
         // Second attach to same group with member in "Joining" state should be
         // idempotent
-        let member2 = datastore
+        let attach2 = datastore
             .multicast_group_member_attach_to_instance(
                 &opctx,
                 MulticastGroupUuid::from_untyped_uuid(active_group.id()),
@@ -1004,6 +1146,8 @@ mod tests {
             )
             .await
             .expect("Should handle duplicate attach to 'Joining' member");
+        assert_eq!(attach2.outcome, AttachOutcome::Existing);
+        let member2 = attach2.member;
 
         assert_eq!(member.id, member2.id, "Should return same member ID");
         assert_eq!(
@@ -1041,7 +1185,8 @@ mod tests {
                 Some(NO_SOURCE_IPS),
             )
             .await
-            .expect("Should handle attach to 'Joined' member");
+            .expect("Should handle attach to 'Joined' member")
+            .member;
 
         assert_eq!(member.id, member3.id, "Should return same member ID");
         assert_eq!(
@@ -1083,7 +1228,7 @@ mod tests {
         // Attach to member in "Left" state should reactivate it with new sources
         let reactivation_sources: Vec<IpAddr> =
             vec!["10.0.0.1".parse().unwrap(), "10.0.0.2".parse().unwrap()];
-        let reactivated_member = datastore
+        let reactivated_attach = datastore
             .multicast_group_member_attach_to_instance(
                 &opctx,
                 MulticastGroupUuid::from_untyped_uuid(active_group.id()),
@@ -1092,6 +1237,8 @@ mod tests {
             )
             .await
             .expect("Should reactivate 'Left' member");
+        assert_eq!(reactivated_attach.outcome, AttachOutcome::Existing);
+        let reactivated_member = reactivated_attach.member;
 
         assert_eq!(
             member.id, reactivated_member.id,
@@ -1113,6 +1260,50 @@ mod tests {
         assert_eq!(
             stored_ips, reactivation_sources,
             "Reactivation should update source_ips"
+        );
+
+        // A stale undo must not delete a replacement row for the same
+        // group/instance pair.
+        let original_member_id = reactivated_member.id;
+        let deleted = datastore
+            .multicast_group_member_delete_by_id(&opctx, original_member_id)
+            .await
+            .expect("Should delete original member row");
+        assert!(deleted, "Original member row should be deleted");
+        let replacement = datastore
+            .multicast_group_member_attach_to_instance(
+                &opctx,
+                MulticastGroupUuid::from_untyped_uuid(active_group.id()),
+                InstanceUuid::from_untyped_uuid(instance_id),
+                Some(NO_SOURCE_IPS),
+            )
+            .await
+            .expect("Should create replacement member row");
+        assert_eq!(replacement.outcome, AttachOutcome::Created);
+        assert_ne!(
+            replacement.member.id, original_member_id,
+            "Replacement attach should mint a new member row rather than \
+             reuse the deleted one"
+        );
+
+        let stale_delete = datastore
+            .multicast_group_member_delete_by_id(&opctx, original_member_id)
+            .await
+            .expect("Stale undo should not error");
+        assert!(!stale_delete, "Stale undo should not delete a row");
+
+        let current_member = datastore
+            .multicast_group_member_get_by_group_and_instance(
+                &opctx,
+                MulticastGroupUuid::from_untyped_uuid(active_group.id()),
+                InstanceUuid::from_untyped_uuid(instance_id),
+            )
+            .await
+            .expect("Should find replacement member")
+            .expect("Replacement member should exist");
+        assert_eq!(
+            current_member.id, replacement.member.id,
+            "Lookup should return the replacement member row"
         );
 
         db.terminate().await;
@@ -1213,7 +1404,8 @@ mod tests {
                 Some(NO_SOURCE_IPS),
             )
             .await
-            .expect("Should add instance1 to group1");
+            .expect("Should add instance1 to group1")
+            .member;
 
         let member1_2 = datastore
             .multicast_group_member_attach_to_instance(
@@ -1223,7 +1415,8 @@ mod tests {
                 Some(NO_SOURCE_IPS),
             )
             .await
-            .expect("Should add instance1 to group2");
+            .expect("Should add instance1 to group2")
+            .member;
 
         let member2_1 = datastore
             .multicast_group_member_attach_to_instance(
@@ -1233,7 +1426,8 @@ mod tests {
                 Some(NO_SOURCE_IPS),
             )
             .await
-            .expect("Should add instance2 to group1");
+            .expect("Should add instance2 to group1")
+            .member;
 
         // Verify all memberships exist
         assert_eq!(member1_1.parent_id, *instance1_id);
@@ -1379,7 +1573,8 @@ mod tests {
                 Some(NO_SOURCE_IPS),
             )
             .await
-            .expect("Should add instance as member");
+            .expect("Should add instance as member")
+            .member;
 
         // Verify member has correct parent_id
         assert_eq!(member.parent_id, *instance_id);
@@ -1468,7 +1663,8 @@ mod tests {
                 Some(NO_SOURCE_IPS),
             )
             .await
-            .expect("Should add instance as member first time");
+            .expect("Should add instance as member first time")
+            .member;
 
         // Try to add same instance again - should return existing member
         let member2 = datastore
@@ -1479,7 +1675,8 @@ mod tests {
                 Some(NO_SOURCE_IPS),
             )
             .await
-            .expect("Should handle duplicate add idempotently");
+            .expect("Should handle duplicate add idempotently")
+            .member;
 
         // Should return the same member
         assert_eq!(member1.id, member2.id);
@@ -1540,7 +1737,8 @@ mod tests {
                 Some(NO_SOURCE_IPS),
             )
             .await
-            .expect("Should create member record");
+            .expect("Should create member record")
+            .member;
 
         // Member initially has no sled_id (created in "Joining" state)
         assert_eq!(member.sled_id, None);
@@ -2167,7 +2365,8 @@ mod tests {
                 Some(NO_SOURCE_IPS),
             )
             .await
-            .expect("Should add member");
+            .expect("Should add member")
+            .member;
 
         // Verify initial state: "Joining" with no sled_id
         assert_eq!(member.state, MulticastGroupMemberState::Joining);
@@ -2376,7 +2575,8 @@ mod tests {
                 Some(NO_SOURCE_IPS),
             )
             .await
-            .expect("Should add instance1 to group1");
+            .expect("Should add instance1 to group1")
+            .member;
 
         let member1_2 = datastore
             .multicast_group_member_attach_to_instance(
@@ -2386,7 +2586,8 @@ mod tests {
                 Some(NO_SOURCE_IPS),
             )
             .await
-            .expect("Should add instance1 to group2");
+            .expect("Should add instance1 to group2")
+            .member;
 
         // Add instance2 to only group1
         let member2_1 = datastore
@@ -2397,7 +2598,8 @@ mod tests {
                 Some(NO_SOURCE_IPS),
             )
             .await
-            .expect("Should add instance2 to group1");
+            .expect("Should add instance2 to group1")
+            .member;
 
         // Verify all members exist and are not marked for removal
         assert!(member1_1.time_deleted.is_none());
@@ -2550,7 +2752,8 @@ mod tests {
                 Some(NO_SOURCE_IPS),
             )
             .await
-            .expect("Should add instance1 to group1");
+            .expect("Should add instance1 to group1")
+            .member;
 
         let member1_2 = datastore
             .multicast_group_member_attach_to_instance(
@@ -2560,7 +2763,8 @@ mod tests {
                 Some(NO_SOURCE_IPS),
             )
             .await
-            .expect("Should add instance2 to group1");
+            .expect("Should add instance2 to group1")
+            .member;
 
         // Add members to group2
         let member2_1 = datastore
@@ -2571,7 +2775,8 @@ mod tests {
                 Some(NO_SOURCE_IPS),
             )
             .await
-            .expect("Should add instance1 to group2");
+            .expect("Should add instance1 to group2")
+            .member;
 
         let member2_2 = datastore
             .multicast_group_member_attach_to_instance(
@@ -2581,7 +2786,8 @@ mod tests {
                 Some(NO_SOURCE_IPS),
             )
             .await
-            .expect("Should add instance3 to group2");
+            .expect("Should add instance3 to group2")
+            .member;
 
         // Verify all members exist
         assert!(
@@ -2611,6 +2817,37 @@ mod tests {
                 .await
                 .unwrap()
                 .is_some()
+        );
+
+        // Reach the state the reconciler sees when it tears a group down:
+        // every member soft-deleted, then the group itself marked for removal.
+        // The hard delete declines unless the group is still in that state.
+        for instance_id in [instance1_id, instance2_id] {
+            let detached = datastore
+                .multicast_group_member_detach_by_group_and_instance(
+                    &opctx,
+                    MulticastGroupUuid::from_untyped_uuid(group1.id()),
+                    instance_id,
+                )
+                .await
+                .expect("Should detach group1 member");
+            assert!(
+                detached,
+                "Received an untouched row instead of a soft-deleted \
+                 group1 member"
+            );
+        }
+
+        let marked = datastore
+            .multicast_group_mark_removal_if_empty(
+                &opctx,
+                MulticastGroupUuid::from_untyped_uuid(group1.id()),
+            )
+            .await
+            .expect("Should mark group1 for removal");
+        assert!(
+            marked,
+            "Received an unmarked group instead of group1 in 'Deleting'"
         );
 
         // Delete all members of group1
@@ -2695,6 +2932,67 @@ mod tests {
             .await
             .expect("Should handle deleting from nonexistent group");
 
+        // A resurrected group keeps its members. This is the interleaving where
+        // a teardown pass reads a group as "Deleting", blocks on its dataplane
+        // call, and resumes after a saga has restored the group and attached
+        // its own member.
+        let group3 = multicast::create_test_group_with_state(
+            &opctx,
+            &datastore,
+            "delete-group3",
+            "224.10.1.102",
+            false,
+        )
+        .await;
+        let group3_id = MulticastGroupUuid::from_untyped_uuid(group3.id());
+
+        let marked = datastore
+            .multicast_group_mark_removal_if_empty(&opctx, group3_id)
+            .await
+            .expect("Should mark empty group3 for removal");
+        assert!(
+            marked,
+            "Received an unmarked group instead of group3 in 'Deleting'"
+        );
+
+        let resurrected = datastore
+            .multicast_group_resurrect_if_unactivated(&opctx, group3_id)
+            .await
+            .expect("Should resurrect group3")
+            .expect("Received no row instead of a resurrected group3");
+        assert_eq!(
+            resurrected.state,
+            MulticastGroupState::Creating,
+            "Received '{:?}' instead of 'Creating' after resurrection",
+            resurrected.state
+        );
+
+        let member3 = datastore
+            .multicast_group_member_attach_to_instance(
+                &opctx,
+                group3_id,
+                instance1_id,
+                Some(NO_SOURCE_IPS),
+            )
+            .await
+            .expect("Should add instance1 to resurrected group3")
+            .member;
+
+        datastore
+            .multicast_group_members_delete_by_group(&opctx, group3_id)
+            .await
+            .expect("Should handle deleting from a group that is not deleting");
+
+        assert!(
+            datastore
+                .multicast_group_member_get_by_id(&opctx, member3.id, true)
+                .await
+                .unwrap()
+                .is_some(),
+            "Received a swept member instead of a member surviving on a \
+             resurrected 'Creating' group"
+        );
+
         db.terminate().await;
         logctx.cleanup_successful();
     }
@@ -2766,15 +3064,23 @@ mod tests {
 
         // Both operations should succeed
         let (result1, result2) = tokio::join!(handle1, handle2);
-        let member_id1 = result1
+        let result1 = result1
             .expect("Task 1 should complete")
             .expect("Attach 1 should succeed");
-        let member_id2 = result2
+        let result2 = result2
             .expect("Task 2 should complete")
             .expect("Attach 2 should succeed");
 
-        // Both should return the same member_id
-        assert_eq!(member_id1, member_id2);
+        // Both should return the same member row, and exactly one call should
+        // observe the insert. The partial unique index admits no second live
+        // row for a (group, instance) pair, so exactly-one is the invariant
+        // that matters.
+        assert_eq!(result1.member, result2.member);
+        assert!(
+            (result1.outcome == AttachOutcome::Created)
+                ^ (result2.outcome == AttachOutcome::Created),
+            "Exactly one concurrent attach should insert the member row"
+        );
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -2817,10 +3123,11 @@ mod tests {
             )
             .await;
 
-        // Should fail with GroupNotFound (group doesn't exist)
+        // Should fail with GroupNotFound (group doesn't exist), which the
+        // caller sees as a conflict with a concurrent teardown
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert!(matches!(err, external::Error::InvalidRequest { .. }));
+        assert!(matches!(err, external::Error::Conflict { .. }));
 
         // Create a valid active group
         let group = multicast::create_test_group_with_state(
@@ -2899,7 +3206,8 @@ mod tests {
                 Some(NO_SOURCE_IPS),
             )
             .await
-            .expect("Should allow attach to 'Creating' group");
+            .expect("Should allow attach to 'Creating' group")
+            .member;
         assert_eq!(member.state, MulticastGroupMemberState::Joining);
 
         // Create a separate group for testing "Deleting" state rejection
@@ -2913,10 +3221,10 @@ mod tests {
         .await;
 
         // Transition to "Deleting" state (works because group has no members yet)
-        // Note: `mark_multicast_group_for_removal_if_no_members` also sets time_deleted,
+        // Note: `multicast_group_mark_removal_if_empty` also sets time_deleted,
         // so the group becomes soft-deleted and cannot be fetched via normal methods.
         let marked = datastore
-            .mark_multicast_group_for_removal_if_no_members(
+            .multicast_group_mark_removal_if_empty(
                 &opctx,
                 MulticastGroupUuid::from_untyped_uuid(deleting_group.id()),
             )
@@ -2935,7 +3243,7 @@ mod tests {
             .await;
         assert!(res.is_err(), "Should reject attach to 'Deleting' group");
         let err = res.unwrap_err();
-        assert!(matches!(err, external::Error::InvalidRequest { .. }));
+        assert!(matches!(err, external::Error::Conflict { .. }));
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -2986,7 +3294,8 @@ mod tests {
                 Some(initial_sources.as_slice()),
             )
             .await
-            .expect("First attach should succeed");
+            .expect("First attach should succeed")
+            .member;
         let time_after_first = member1.time_modified;
 
         // Second attach (idempotent, should not update sources)
@@ -2998,7 +3307,8 @@ mod tests {
                 None, // None preserves existing sources
             )
             .await
-            .expect("Second attach should succeed");
+            .expect("Second attach should succeed")
+            .member;
 
         assert_eq!(member1.id, member2.id, "Should return same member ID");
         let member_after_second = datastore
@@ -3023,7 +3333,8 @@ mod tests {
             "Idempotent attach must preserve source_ips"
         );
 
-        // Third attach (still idempotent)
+        // Third attach names a different filter (empty), which rewrites
+        // source_ips on the live member and advances time_modified
         let member3 = datastore
             .multicast_group_member_attach_to_instance(
                 &opctx,
@@ -3032,7 +3343,8 @@ mod tests {
                 Some(NO_SOURCE_IPS),
             )
             .await
-            .expect("Third attach should succeed");
+            .expect("Third attach should succeed")
+            .member;
 
         assert_eq!(member1.id, member3.id, "Should return same member ID");
         let member_after_third = datastore
@@ -3044,9 +3356,41 @@ mod tests {
             .await
             .expect("Should fetch member after third attach")
             .expect("Member should exist");
+        assert!(
+            member_after_third.source_ips.is_empty(),
+            "Attach naming an empty filter must clear source_ips"
+        );
+        assert!(
+            member_after_third.time_modified > time_after_first,
+            "Filter rewrite must advance time_modified"
+        );
+
+        // Fourth attach repeats the same filter, so the row is unchanged
+        let time_after_third = member_after_third.time_modified;
+        let member4 = datastore
+            .multicast_group_member_attach_to_instance(
+                &opctx,
+                MulticastGroupUuid::from_untyped_uuid(group.id()),
+                InstanceUuid::from_untyped_uuid(instance_id),
+                Some(NO_SOURCE_IPS),
+            )
+            .await
+            .expect("Fourth attach should succeed")
+            .member;
+
+        assert_eq!(member1.id, member4.id, "Should return same member ID");
+        let member_after_fourth = datastore
+            .multicast_group_member_get_by_group_and_instance(
+                &opctx,
+                MulticastGroupUuid::from_untyped_uuid(group.id()),
+                InstanceUuid::from_untyped_uuid(instance_id),
+            )
+            .await
+            .expect("Should fetch member after fourth attach")
+            .expect("Member should exist");
         assert_eq!(
-            member_after_third.time_modified, time_after_first,
-            "Idempotent attach must not update time_modified (third call)"
+            member_after_fourth.time_modified, time_after_third,
+            "Attach repeating the same filter must not update time_modified"
         );
 
         db.terminate().await;
@@ -3099,7 +3443,8 @@ mod tests {
                     Some(original_sources.as_slice()),
                 )
                 .await
-                .expect("Should attach");
+                .expect("Should attach")
+                .member;
 
             datastore
                 .multicast_group_members_detach_by_instance(&opctx, instance)
@@ -3112,7 +3457,8 @@ mod tests {
                     None, // Preserve existing sources
                 )
                 .await
-                .expect("Reactivation should succeed");
+                .expect("Reactivation should succeed")
+                .member;
 
             assert_eq!(
                 member.id, reactivated.id,
@@ -3147,7 +3493,8 @@ mod tests {
                     Some(original_sources.as_slice()),
                 )
                 .await
-                .expect("Should attach");
+                .expect("Should attach")
+                .member;
 
             datastore
                 .multicast_group_members_detach_by_instance(&opctx, instance)
@@ -3164,7 +3511,8 @@ mod tests {
                     Some(replacement_sources.as_slice()),
                 )
                 .await
-                .expect("Reactivation should succeed");
+                .expect("Reactivation should succeed")
+                .member;
 
             assert_eq!(
                 member.id, reactivated.id,
@@ -3199,7 +3547,8 @@ mod tests {
                     Some(original_sources.as_slice()),
                 )
                 .await
-                .expect("Should attach");
+                .expect("Should attach")
+                .member;
 
             datastore
                 .multicast_group_members_detach_by_instance(&opctx, instance)
@@ -3214,7 +3563,8 @@ mod tests {
                     Some(NO_SOURCE_IPS), // Clear sources
                 )
                 .await
-                .expect("Reactivation should succeed");
+                .expect("Reactivation should succeed")
+                .member;
 
             assert_eq!(
                 member.id, reactivated.id,
@@ -3277,7 +3627,8 @@ mod tests {
                 Some(NO_SOURCE_IPS),
             )
             .await
-            .expect("Attach should succeed");
+            .expect("Attach should succeed")
+            .member;
 
         // Transition through states: "Joining" -> "Joined" -> "Left"
         datastore
@@ -3312,7 +3663,8 @@ mod tests {
                 Some(NO_SOURCE_IPS),
             )
             .await
-            .expect("Should allow reattach of Left member");
+            .expect("Should allow reattach of Left member")
+            .member;
 
         // Should reactivate the same member (not create a new one)
         assert_eq!(member1.id, member2.id);
@@ -3422,7 +3774,8 @@ mod tests {
                 Some(NO_SOURCE_IPS),
             )
             .await
-            .expect("Should attach stopped instance");
+            .expect("Should attach stopped instance")
+            .member;
 
         // Verify member created with sled_id = NULL (no active VMM)
         let member = datastore
