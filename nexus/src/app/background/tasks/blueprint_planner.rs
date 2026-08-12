@@ -14,8 +14,8 @@ use chrono::Utc;
 use futures::future::BoxFuture;
 use nexus_auth::authz;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db;
 use nexus_db_queries::db::DataStore;
-use nexus_db_queries::db::datastore::BlueprintLimitReachedOutput;
 use nexus_reconfigurator_planning::planner::Planner;
 use nexus_reconfigurator_planning::planner::PlannerRng;
 use nexus_reconfigurator_preparation::PlanningInputFromDb;
@@ -29,6 +29,7 @@ use omicron_common::api::external::Error;
 use omicron_common::api::external::LookupType;
 use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::GenericUuid as _;
+use omicron_uuid_kinds::OmicronZoneUuid;
 use serde_json::json;
 use slog_error_chain::InlineErrorChain;
 use std::sync::Arc;
@@ -71,6 +72,7 @@ pub struct BlueprintPlanner {
     tx_planned: Sender<Option<BlueprintUuid>>,
     blueprint_limit: u64,
     debug_dropbox: Arc<omicron_debug_dropbox::Producer>,
+    creator: String,
 }
 
 /// The default number of blueprints, beyond which the auto-planner will stop
@@ -96,6 +98,7 @@ impl BlueprintPlanner {
         rx_inventory: Receiver<Option<Arc<Collection>>>,
         rx_blueprint: Receiver<Option<LoadedTargetBlueprint>>,
         debug_dropbox: Arc<omicron_debug_dropbox::Producer>,
+        nexus_id: OmicronZoneUuid,
     ) -> Self {
         let (tx_planned, _) = watch::channel(None);
         Self {
@@ -106,6 +109,7 @@ impl BlueprintPlanner {
             tx_planned,
             blueprint_limit: DEFAULT_BLUEPRINT_LIMIT,
             debug_dropbox,
+            creator: format!("nexus {}", nexus_id),
         }
     }
 
@@ -218,7 +222,7 @@ impl BlueprintPlanner {
         let planner = Planner::new_based_on(
             opctx.log.clone(),
             &input,
-            "blueprint_planner",
+            &self.creator,
             &collection,
             PlannerRng::from_entropy(),
         )
@@ -403,7 +407,7 @@ impl BlueprintPlanner {
             .check_blueprint_limit_reached(opctx, self.blueprint_limit)
             .await
         {
-            Ok(BlueprintLimitReachedOutput::Yes) => {
+            Ok(db::IsLimitReached::Yes) => {
                 error!(
                     &opctx.log,
                     "blueprint count at or over limit, not running \
@@ -415,7 +419,7 @@ impl BlueprintPlanner {
                     report: report.clone(),
                 });
             }
-            Ok(BlueprintLimitReachedOutput::No { count }) => count,
+            Ok(db::IsLimitReached::No { count }) => count,
             Err(error) => {
                 error!(
                     &opctx.log,
@@ -577,6 +581,7 @@ mod test {
             rx_inventory,
             rx_loader.clone(),
             debug_dropbox,
+            nexus.id,
         );
 
         // On activation, the planner should run successfully and generate
@@ -610,6 +615,13 @@ mod test {
         assert_eq!(target.target_id, blueprint_id);
         assert!(
             blueprint.diff_since_blueprint(&initial_blueprint).has_changes()
+        );
+
+        // Verify the creator is the Nexus UUID, not the hardcoded string.
+        let expected_creator = format!("nexus {}", nexus.id);
+        assert_eq!(
+            blueprint.creator, expected_creator,
+            "blueprint creator should be the 'nexus UUID', not a hardcoded string"
         );
 
         // Planning again should not change the plan, because nothing has changed.
@@ -753,12 +765,14 @@ mod test {
                 .unwrap(),
         );
 
+        let test_nexus_id = OmicronZoneUuid::new_v4();
         let mut planner = BlueprintPlanner::new(
             datastore.clone(),
             rx_config_loader,
             rx_inventory,
             rx_blueprint,
             debug_dropbox,
+            test_nexus_id,
         );
 
         // This limit matches the loop above.

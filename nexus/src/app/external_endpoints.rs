@@ -436,7 +436,7 @@ impl TryFrom<Certificate> for TlsCertificate {
                 .expect("parsing private key PEM")
                 .expect("no private keys found");
             let rustls_signing_key =
-                rustls::crypto::ring::sign::any_supported_type(
+                rustls::crypto::aws_lc_rs::sign::any_supported_type(
                     &rustls_private_key,
                 )
                 .context("parsing DER private key")?;
@@ -513,7 +513,7 @@ pub(crate) async fn read_all_endpoints(
             )
             .await?;
         paginator = p.found_batch(&batch, &|s: &Silo| s.id());
-        silos.extend(batch.into_iter());
+        silos.extend(batch);
     }
 
     // Fetch all external DNS zones.  We should really only ever have one, but
@@ -526,7 +526,7 @@ pub(crate) async fn read_all_endpoints(
             .dns_zones_list(opctx, DnsGroup::External, &p.current_pagparams())
             .await?;
         paginator = p.found_batch(&batch, &|z: &DnsZone| z.zone_name.clone());
-        external_dns_zones.extend(batch.into_iter());
+        external_dns_zones.extend(batch);
     }
     bail_unless!(
         !external_dns_zones.is_empty(),

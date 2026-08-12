@@ -5,7 +5,6 @@
 use std::process::ExitCode;
 
 use anyhow::{Context, anyhow};
-use bootstrap_agent_api::*;
 use bootstrap_agent_lockstep_api::*;
 use camino::Utf8PathBuf;
 use clap::Parser;
@@ -30,6 +29,7 @@ use repo_depot_api::*;
 use serde::{Deserialize, Serialize};
 use sled_agent_api::*;
 use wicketd_api::*;
+use wicketd_commission_api::*;
 
 fn environment() -> anyhow::Result<Environment> {
     // The workspace root is two levels up from this crate's directory.
@@ -54,24 +54,6 @@ fn environment() -> anyhow::Result<Environment> {
 // TODO The metadata here overlaps with metadata in api-manifest.toml.
 fn all_apis() -> anyhow::Result<ManagedApis> {
     let apis = vec![
-        ManagedApi::from(ManagedApiConfig {
-            title: "Bootstrap Agent API",
-            versions: Versions::new_versioned(
-                bootstrap_agent_api::supported_versions(),
-            ),
-            metadata: ManagedApiMetadata {
-                description: Some("Per-sled API for setup and teardown"),
-                contact_url: Some("https://oxide.computer"),
-                contact_email: Some("api@oxide.computer"),
-                extra: to_value(ApiBoundary::Internal),
-            },
-            api_description: bootstrap_agent_api_mod::stub_api_description,
-            ident: "bootstrap-agent",
-        })
-        // The bootstrap-agent API is client-side-versioned and currently frozen.
-        // We allow trivial changes to go through. If we did not, we would need to
-        // unfreeze the API and bump the version number for trivial changes.
-        .allow_trivial_changes_for_latest(),
         ManagedApi::from(ManagedApiConfig {
             title: "Bootstrap Agent Lockstep API",
             versions: Versions::new_lockstep(semver::Version::new(0, 0, 1)),
@@ -174,7 +156,9 @@ fn all_apis() -> anyhow::Result<ManagedApis> {
         }),
         ManagedApi::from(ManagedApiConfig {
             title: "Oxide Management Gateway Service API",
-            versions: Versions::new_versioned(gateway_api::supported_versions()),
+            versions: Versions::new_versioned(
+                gateway_api::supported_versions(),
+            ),
             metadata: ManagedApiMetadata {
                 description: Some(
                     "API for interacting with the Oxide \
@@ -186,7 +170,11 @@ fn all_apis() -> anyhow::Result<ManagedApis> {
             },
             api_description: gateway_api_mod::stub_api_description,
             ident: "gateway",
-        }),
+        })
+        // The MGS API ought to be client-side-versioned (see #9708) but
+        // currently isn't. Allow trivial changes through so cosmetic dropshot
+        // spec changes don't force a version bump until #9708 is resolved.
+        .allow_trivial_changes_for_latest(),
         ManagedApi::from(ManagedApiConfig {
             title: "Installinator API",
             versions: Versions::new_versioned(
@@ -268,7 +256,11 @@ fn all_apis() -> anyhow::Result<ManagedApis> {
             },
             api_description: ntp_admin_api_mod::stub_api_description,
             ident: "ntp-admin",
-        }),
+        })
+        // The NTP Admin API is client-side-versioned and currently frozen. We
+        // allow trivial changes to go through. If we did not, we would need to
+        // unfreeze the API and bump the version number for trivial changes.
+        .allow_trivial_changes_for_latest(),
         ManagedApi::from(ManagedApiConfig {
             title: "Oxide Oximeter API",
             versions: Versions::new_versioned(
@@ -328,6 +320,22 @@ fn all_apis() -> anyhow::Result<ManagedApis> {
             },
             api_description: wicketd_api_mod::stub_api_description,
             ident: "wicketd",
+        }),
+        ManagedApi::from(ManagedApiConfig {
+            title: "Wicketd Commission API",
+            versions: Versions::new_versioned(
+                wicketd_commission_api::supported_versions(),
+            ),
+            metadata: ManagedApiMetadata {
+                description: Some(
+                    "Stable API for rack commissioning (RFD 710)",
+                ),
+                contact_url: Some("https://oxide.computer"),
+                contact_email: Some("api@oxide.computer"),
+                extra: to_value(ApiBoundary::Internal),
+            },
+            api_description: wicketd_commission_api_mod::stub_api_description,
+            ident: "wicketd-commission",
         }),
     ];
 

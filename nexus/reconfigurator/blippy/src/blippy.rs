@@ -16,7 +16,7 @@ use nexus_types::deployment::PlanningInput;
 use nexus_types::inventory::ZpoolName;
 use omicron_common::address::DnsSubnet;
 use omicron_common::address::Ipv6Subnet;
-use omicron_common::address::SLED_PREFIX;
+use omicron_common::address::SLED_PREFIX_LENGTH;
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::MacAddr;
 use omicron_common::disk::DatasetKind;
@@ -138,7 +138,7 @@ pub enum SledKind {
     /// A sled has a zone with an IP that isn't a member of its subnet.
     UnderlayIpOnWrongSubnet {
         zone: BlueprintZoneConfig,
-        subnet: Ipv6Subnet<SLED_PREFIX>,
+        subnet: Ipv6Subnet<SLED_PREFIX_LENGTH>,
     },
     /// A sled has a zone with an IP that is above the sled's overall "last
     /// allocated IP" value.
@@ -149,7 +149,7 @@ pub enum SledKind {
     /// Two sleds are using the same sled subnet.
     ConflictingSledSubnets {
         other_sled: SledUuid,
-        subnet: Ipv6Subnet<SLED_PREFIX>,
+        subnet: Ipv6Subnet<SLED_PREFIX_LENGTH>,
     },
     /// An internal DNS zone has an IP that is not one of the expected rack DNS
     /// subnets.
@@ -533,6 +533,18 @@ pub enum PlanningInputKind {
     NicMacNotInBluperint(OmicronZoneNicEntry),
     NicIpNotInBlueprint(OmicronZoneNicEntry),
     NicWithUnknownOpteSubnet(OmicronZoneNicEntry),
+
+    /// The blueprint's `external_networking_generation` is not the expected
+    /// value.
+    ///
+    /// We expect the generation number to be equal to the parent blueprint if
+    /// no external networking configuration changed, or equal to its parent
+    /// blueprint generation plus one if it has.
+    WrongExternalNetworkingGeneration {
+        parent_generation: Generation,
+        expected_child_generation: Generation,
+        actual_child_generation: Generation,
+    },
 }
 
 impl fmt::Display for PlanningInputKind {
@@ -569,6 +581,19 @@ impl fmt::Display for PlanningInputKind {
                     "planning input contains a NIC with an IP not in a known
                      OPTE subnet: {} (NIC {} in zone {})",
                     nic.nic.ip, nic.nic.id, nic.zone_id,
+                )
+            }
+            PlanningInputKind::WrongExternalNetworkingGeneration {
+                parent_generation,
+                expected_child_generation,
+                actual_child_generation,
+            } => {
+                write!(
+                    f,
+                    "expected blueprint external networking generation to be \
+                     {expected_child_generation} (from parent's generation \
+                     {parent_generation}), but the blueprint's actual \
+                     generation is {actual_child_generation}",
                 )
             }
         }

@@ -46,6 +46,7 @@ pub mod subnet_pool;
 pub mod support_bundle;
 pub mod switch;
 pub mod system;
+pub mod system_networking;
 pub mod timeseries;
 pub mod update;
 pub mod user;

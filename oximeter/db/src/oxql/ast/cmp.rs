@@ -4,8 +4,6 @@
 
 //! An AST node describing comparison operators
 
-// Copyright 2024 Oxide Computer Company
-
 use std::fmt;
 
 /// Comparison operators.

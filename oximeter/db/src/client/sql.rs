@@ -16,8 +16,6 @@
 //! small datasets. It's less helpful on real deployments, where the size of
 //! data makes this approach prohibitive.
 
-// Copyright 2024 Oxide Computer Company
-
 use crate::Error;
 use crate::client::Client;
 use crate::sql::QueryResult;
@@ -32,7 +30,11 @@ impl Client {
         query: impl AsRef<str>,
     ) -> Result<String, Error> {
         let restricted = RestrictedQuery::new(query.as_ref())?;
-        restricted.to_oximeter_sql(&*self.schema.lock().await)
+        let mut handle = self.claim_connection().await?;
+        let schemas = self
+            .fetch_schema_from_db(&mut handle, restricted.timeseries())
+            .await?;
+        restricted.to_oximeter_sql(&schemas)
     }
 
     /// Run a SQL query against a timeseries.

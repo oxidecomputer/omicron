@@ -34,8 +34,9 @@ use sled_agent_config_reconciler::{
 use sled_agent_health_monitor::HealthMonitorHandle;
 use sled_agent_measurements::MeasurementsHandle;
 use sled_agent_resolvable_files::ZoneImageSourceResolver;
+use sled_agent_scrimlet_reconcilers::ScrimletReconcilers;
 use sled_agent_types::zone_bundle::CleanupContext;
-use sled_hardware::{HardwareManager, SledMode, UnparsedDisk};
+use sled_hardware::{ExternalDisks, HardwareManager, SledMode};
 use sled_storage::config::MountConfig;
 use sled_storage::disk::RawSyntheticDisk;
 use slog::{Logger, info};
@@ -52,6 +53,10 @@ pub struct LongRunningTaskHandles {
     /// A handle to the set of tasks managed by the sled-agent-config-reconciler
     /// system.
     pub config_reconciler: Arc<ConfigReconcilerHandle>,
+
+    /// A handle to the set of tasks managed by the
+    /// sled-agent-scrimlet-reconcilers system.
+    pub scrimlet_reconcilers: Arc<ScrimletReconcilers>,
 
     /// A mechanism for interacting with the hardware device tree
     pub hardware_manager: HardwareManager,
@@ -125,18 +130,23 @@ pub async fn spawn_all_longrunning_tasks(
             log,
         );
 
-    let nongimlet_observed_disks =
-        config.nongimlet_observed_disks.clone().unwrap_or(vec![]);
+    let scrimlet_reconcilers = Arc::new(ScrimletReconcilers::new(log));
 
     let hardware_manager =
-        spawn_hardware_manager(log, sled_mode, nongimlet_observed_disks).await;
+        spawn_hardware_manager(log, sled_mode, config.external_disks.clone())
+            .await;
 
     // Start monitoring for hardware changes, adding some synthetic disks if
     // necessary.
     let raw_disks_tx = config_reconciler.raw_disks_tx();
     upsert_synthetic_disks_if_needed(&log, &raw_disks_tx, &config).await;
     let (hardware_monitor, sled_agent_started_tx, service_manager_ready_tx) =
-        spawn_hardware_monitor(log, &hardware_manager, raw_disks_tx);
+        spawn_hardware_monitor(
+            log,
+            &hardware_manager,
+            raw_disks_tx,
+            Arc::clone(&scrimlet_reconcilers),
+        );
 
     // Wait for the boot disk so that we can work with any ledgers,
     // such as those needed by the bootstore and sled-agent
@@ -200,6 +210,7 @@ pub async fn spawn_all_longrunning_tasks(
     LongRunningTaskResult {
         long_running_task_handles: LongRunningTaskHandles {
             config_reconciler,
+            scrimlet_reconcilers,
             hardware_manager,
             hardware_monitor,
             bootstore,
@@ -231,7 +242,7 @@ fn spawn_key_manager(
 async fn spawn_hardware_manager(
     log: &Logger,
     sled_mode: SledMode,
-    nongimlet_observed_disks: Vec<UnparsedDisk>,
+    external_disks: ExternalDisks,
 ) -> HardwareManager {
     // The `HardwareManager` does not use the the "task/handle" pattern
     // and spawns its worker task inside `HardwareManager::new`. Instead of returning
@@ -241,10 +252,10 @@ async fn spawn_hardware_manager(
     //
     // There are pros and cons to both methods, but the reason to mention it here is that
     // the handle in this case is the `HardwareManager` itself.
-    info!(log, "Starting HardwareManager"; "sled_mode" => ?sled_mode, "nongimlet_observed_disks" => ?nongimlet_observed_disks);
+    info!(log, "Starting HardwareManager"; "sled_mode" => ?sled_mode, "external_disks" => ?external_disks);
     let log = log.clone();
     tokio::task::spawn_blocking(move || {
-        HardwareManager::new(&log, sled_mode, nongimlet_observed_disks).unwrap()
+        HardwareManager::new(&log, sled_mode, external_disks).unwrap()
     })
     .await
     .unwrap()
@@ -254,6 +265,7 @@ fn spawn_hardware_monitor(
     log: &Logger,
     hardware_manager: &HardwareManager,
     raw_disks_tx: RawDisksSender,
+    scrimlet_reconcilers: Arc<ScrimletReconcilers>,
 ) -> (
     HardwareMonitorHandle,
     oneshot::Sender<SledAgent>,
@@ -261,7 +273,12 @@ fn spawn_hardware_monitor(
 ) {
     info!(log, "Starting HardwareMonitor");
     let (monitor, sled_agent_started_tx, service_manager_ready_tx) =
-        HardwareMonitor::spawn(log, hardware_manager, raw_disks_tx);
+        HardwareMonitor::spawn(
+            log,
+            hardware_manager,
+            raw_disks_tx,
+            scrimlet_reconcilers,
+        );
     (monitor, sled_agent_started_tx, service_manager_ready_tx)
 }
 
@@ -363,7 +380,8 @@ async fn upsert_synthetic_disks_if_needed(
     raw_disks_tx: &RawDisksSender,
     config: &Config,
 ) {
-    if let Some(vdevs) = &config.vdevs {
+    if let ExternalDisks::Hardcoded { vdevs, disks: _ } = &config.external_disks
+    {
         for (i, vdev) in vdevs.iter().enumerate() {
             info!(
                 log,

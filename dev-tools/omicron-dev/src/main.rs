@@ -135,7 +135,7 @@ impl RunAllArgs {
         );
         println!(
             "omicron-dev: cockroachdb directory:  {}",
-            cptestctx.database.temp_dir().display()
+            cptestctx.database.temp_dir()
         );
         println!(
             "omicron-dev: clickhouse native addr: {}",

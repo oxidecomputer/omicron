@@ -4,8 +4,6 @@
 
 //! A prototype SQL shell directly to ClickHouse for testing the native client.
 
-// Copyright 2024 Oxide Computer Company
-
 use crate::native::{self, QueryResult, block::ValueArray};
 use anyhow::Context as _;
 use crossterm::style::Stylize;

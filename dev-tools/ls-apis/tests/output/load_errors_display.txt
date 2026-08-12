@@ -1,0 +1,4 @@
+found 3 errors while loading API metadata:
+  - duplicate client package name in API metadata: dup-client
+  - embedded component "embedded-comp" has `inside = "nonexistent-package"`, but no such package exists in deployment unit "Unit One"'s `packages` list
+  - dependency rule references unknown client: "unknown-client"

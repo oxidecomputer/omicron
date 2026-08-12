@@ -7,11 +7,12 @@
 //! This includes the usual task that inserts data into ClickHouse, and a
 //! printing task used in `oximeter` standalone.
 
-// Copyright 2026 Oxide Computer Company
-
 use crate::collection_task::CollectionTaskOutput;
 use crate::probes;
+use crate::self_stats;
 use oximeter::Sample;
+use oximeter::histogram::Record;
+use oximeter::queue::BoundedQueue;
 use oximeter::types::ProducerResultsItem;
 use oximeter_db::Client;
 use oximeter_db::DbWrite as _;
@@ -42,6 +43,7 @@ pub async fn database_batcher(
     batch_size: usize,
     batch_interval: Duration,
     mut rx: mpsc::Receiver<CollectionTaskOutput>,
+    sink_stats: Arc<self_stats::CollectorSinkStats>,
 ) {
     // Construct a handoff point between the batch task here, and the database
     // insertion task.
@@ -110,7 +112,7 @@ pub async fn database_batcher(
                         probes::results__sink__item__processed!(|| n_samples);
 
                         // Append the current batch to the handoff buffer.
-                        let n_dropped =
+                        let (n_dropped, queue_depth) =
                             batch_tx.send_and_notify(batch, was_forced_collection);
                         if n_dropped > 0 {
                             probes::dropped__old__samples!(|| n_dropped);
@@ -119,7 +121,13 @@ pub async fn database_batcher(
                                 "sample buffer full, dropped oldest samples";
                                 "n_dropped" => n_dropped,
                             );
+                            *sink_stats.samples_dropped.lock().unwrap() += n_dropped.try_into().unwrap();
                         }
+                        // Note: Histogram::u64::sample should never error.
+                        // The `sample` method only returns a `HistogramError`
+                        // if its argument is non-finite, and `u64` values are
+                        // always finite.
+                        sink_stats.queue_depth.lock().unwrap().sample(queue_depth.try_into().unwrap()).unwrap();
                     }
                     None => {
                         warn!(log, "result queue closed, exiting");
@@ -151,14 +159,16 @@ const MAX_BUFFER_SIZE_MULTIPLIER: usize = 100;
 #[derive(Clone)]
 struct BatchHandoff<T> {
     notify: Arc<Notify>,
-    batch: Arc<Mutex<VecDeque<T>>>,
+    batch: Arc<Mutex<BoundedQueue<T>>>,
 }
 
 impl<T> BatchHandoff<T> {
     fn new(batch_size: usize) -> Self {
         Self {
             notify: Arc::new(Notify::new()),
-            batch: Arc::new(Mutex::new(VecDeque::with_capacity(batch_size))),
+            batch: Arc::new(Mutex::new(BoundedQueue::new(
+                batch_size * MAX_BUFFER_SIZE_MULTIPLIER,
+            ))),
         }
     }
 }
@@ -168,19 +178,11 @@ struct BatchSender<T> {
     handoff: BatchHandoff<T>,
     // Minimum size of the buffer before inserting into the database.
     batch_size: usize,
-    // Maximum size we let the ring buffer grow before starting to drop older
-    // samples. This is a relief value, in the case where the database is
-    // completely partitioned or insertions have slowed dramatically.
-    max_buffer_size: usize,
 }
 
 impl<T> BatchSender<T> {
     fn new(handoff: BatchHandoff<T>, batch_size: usize) -> Self {
-        Self {
-            handoff,
-            batch_size,
-            max_buffer_size: batch_size * MAX_BUFFER_SIZE_MULTIPLIER,
-        }
+        Self { handoff, batch_size }
     }
 
     // Notify the insertion task that it should insert the batch of results.
@@ -202,59 +204,21 @@ impl<T> BatchSender<T> {
         &self,
         samples: Vec<T>,
         was_forced_collection: bool,
-    ) -> usize {
+    ) -> (usize, usize) {
         let mut batch = self.handoff.batch.lock().unwrap();
 
-        // Append the new samples, ensuring we never exceed the maximum buffer
-        // size.
-        let n_current_samples = batch.len();
-        let n_new_samples = samples.len();
-        let n_total_samples = n_current_samples + n_new_samples;
-
-        // The easy case is when all the samples fit. Just append them and
-        // return 0, since we've not dropped anything.
-        let n_dropped = if n_total_samples <= self.max_buffer_size {
-            batch.extend(samples);
-            0
-        } else {
-            // Now, drop samples first from the existing batch, then the new set of
-            // samples, until we're under our limit. Start by computing the total
-            // number to be dropped.
-            //
-            // NOTE: This can't underflow, we're in the branch where
-            // `n_total_samples > self.max_buffer size`.
-            let n_dropped = n_total_samples - self.max_buffer_size;
-
-            // We want to drop from the existing batch first. We can drop the
-            // minimum of the number to be dropped and the batch length. If
-            // we're only dropping part of the batch, we'll take `n_dropped` off
-            // the front. If we need to drop the whole batch and then some,
-            // we'll take the batch length and drop the whole thing.
-            let n_to_drop_from_batch = n_dropped.min(batch.len());
-            drop(batch.drain(..n_to_drop_from_batch));
-
-            // At this point, we've dropped something (potentially everything)
-            // from the existing batch. We need to figure out how many, if any,
-            // to drop from the _incoming_ set of samples. Subtract whatever we
-            // dropped immediately above to compute the number left to drop.
-            let n_left_to_drop = n_dropped - n_to_drop_from_batch;
-
-            // Append whatever we don't want to drop.
-            batch.extend(samples.into_iter().skip(n_left_to_drop));
-            n_dropped
-        };
+        let n_dropped = batch.extend(samples);
 
         // Notify the insertion task if needed.
         if was_forced_collection || batch.len() >= self.batch_size {
             self.notify_inserter();
         }
-        n_dropped
+        (n_dropped, batch.len())
     }
 }
 
 struct BatchReceiver<T> {
     handoff: BatchHandoff<T>,
-    batch_size: usize,
 }
 
 impl<T> BatchReceiver<T> {
@@ -264,10 +228,7 @@ impl<T> BatchReceiver<T> {
     // a contiguous `&[Sample]` without an additional heap allocation.
     async fn wait_for_batch(&self) -> VecDeque<T> {
         self.handoff.notify.notified().await;
-        let mut stolen = VecDeque::with_capacity(self.batch_size);
-        let mut batch = self.handoff.batch.lock().unwrap();
-        std::mem::swap(&mut stolen, &mut *batch);
-        stolen
+        self.handoff.batch.lock().unwrap().drain()
     }
 }
 
@@ -276,7 +237,7 @@ fn batch_handoff<T: Clone>(
 ) -> (BatchSender<T>, BatchReceiver<T>) {
     let handoff = BatchHandoff::new(batch_size);
     let sender = BatchSender::new(handoff.clone(), batch_size);
-    let receiver = BatchReceiver { handoff, batch_size };
+    let receiver = BatchReceiver { handoff };
     (sender, receiver)
 }
 
@@ -359,6 +320,8 @@ pub async fn logger(log: Logger, mut rx: mpsc::Receiver<CollectionTaskOutput>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::Utc;
+    use omicron_test_utils::dev::test_setup_log;
     use proptest::prelude::*;
     use tokio::time::timeout;
 
@@ -370,7 +333,7 @@ mod tests {
         let (batch_tx, batch_rx) = batch_handoff::<()>(BATCH_SIZE);
         let n_samples = 3;
         let samples = vec![(); n_samples];
-        let n_dropped = batch_tx.send_and_notify(samples, true);
+        let (n_dropped, _) = batch_tx.send_and_notify(samples, true);
         assert_eq!(n_dropped, 0);
         assert_eq!(batch_tx.handoff.batch.lock().unwrap().len(), n_samples);
 
@@ -379,7 +342,7 @@ mod tests {
                 .await
                 .expect("Should be notified with force collection");
         assert_eq!(batch.len(), n_samples);
-        assert!(batch_tx.handoff.batch.lock().unwrap().is_empty());
+        assert_eq!(batch_tx.handoff.batch.lock().unwrap().len(), 0);
     }
 
     proptest! {
@@ -396,7 +359,7 @@ mod tests {
             // Insert the first batch of samples.
             let (batch_tx, batch_rx) = batch_handoff::<usize>(BATCH_SIZE);
             let samples = (0..current_size).collect();
-            let n_dropped = batch_tx.send_and_notify(samples, false);
+            let (n_dropped, _) = batch_tx.send_and_notify(samples, false);
             let expected_n_dropped = current_size.saturating_sub(MAX_BUFFER_SIZE);
             let expected_n_samples = current_size.min(MAX_BUFFER_SIZE);
             assert_eq!(n_dropped, expected_n_dropped);
@@ -407,7 +370,7 @@ mod tests {
             {
                 let buf = batch_tx.handoff.batch.lock().unwrap();
                 assert_eq!(buf.len(), expected_n_samples);
-                assert_eq!(*buf, tail);
+                assert!(buf.iter().eq(tail.iter()));
             }
 
             // Check that we're either notified, or not, if the current batch is
@@ -422,7 +385,7 @@ mod tests {
                 rt.block_on(async {
                     timeout(TIMEOUT, fut).await
                 }).expect("Should be notified");
-                assert_eq!(*batch_rx.handoff.batch.lock().unwrap(), tail);
+                assert!(batch_rx.handoff.batch.lock().unwrap().iter().eq(tail.iter()));
             } else {
                 rt.block_on(async {
                     timeout(TIMEOUT, fut).await
@@ -432,7 +395,7 @@ mod tests {
             // Push the new set of samples, which start at the end of the first
             // batch, even if we've dropped some.
             let new_samples = (current_size..(current_size + new_size)).collect();
-            let n_dropped = batch_tx.send_and_notify(new_samples, false);
+            let (n_dropped, _) = batch_tx.send_and_notify(new_samples, false);
 
             // We expect to drop all the samples beyond the maximum buffer size.
             // We need to include what we have in the buffer already (some of
@@ -453,7 +416,7 @@ mod tests {
             {
                 let buf = batch_tx.handoff.batch.lock().unwrap();
                 assert_eq!(buf.len(), expected_n_samples);
-                assert_eq!(*buf, tail);
+                assert!(buf.iter().eq(tail.iter()));
             }
 
             // And check we've notified the receiver again.
@@ -469,5 +432,52 @@ mod tests {
                 }).expect_err("Should not be notified");
             }
         }
+    }
+
+    #[tokio::test]
+    async fn batcher_increments_dropped_counter() {
+        let logctx = test_setup_log("batcher_increments_dropped_counter");
+        let log = &logctx.log;
+
+        // Construct a database batcher with a dummy ClickHouse client.
+        let client = Client::new("[::1]:0".parse().unwrap(), log);
+        let (tx, rx) = mpsc::channel(1);
+        let sink_stats = Arc::new(self_stats::CollectorSinkStats::new(
+            "test".into(),
+            Utc::now(),
+        ));
+        let batcher = tokio::spawn(database_batcher(
+            log.clone(),
+            client,
+            BATCH_SIZE,
+            Duration::from_secs(3600),
+            rx,
+            sink_stats.clone(),
+        ));
+
+        // Insert `want_dropped` too many samples into the batcher.
+        let want_dropped = 50;
+        let samples = (0..MAX_BUFFER_SIZE + want_dropped)
+            .map(|_| oximeter_test_utils::make_sample())
+            .collect();
+        tx.send(CollectionTaskOutput {
+            results: vec![ProducerResultsItem::Ok(samples)],
+            was_forced_collection: false,
+        })
+        .await
+        .unwrap();
+
+        // Drop the sender so that the batcher loop exits.
+        drop(tx);
+        batcher.await.unwrap();
+
+        let samples_dropped = sink_stats.samples_dropped.lock().unwrap();
+        assert_eq!(samples_dropped.value(), want_dropped as u64);
+
+        let queue_depth = sink_stats.queue_depth.lock().unwrap();
+        assert_eq!(queue_depth.n_samples(), 1);
+        assert_eq!(queue_depth.max(), MAX_BUFFER_SIZE as u64);
+
+        logctx.cleanup_successful();
     }
 }

@@ -7,7 +7,6 @@
 use dropshot::test_util::ClientTestContext;
 use hmac::{Hmac, Mac};
 use httpmock::prelude::*;
-use nexus_db_model::AlertClass;
 use nexus_db_queries::context::OpContext;
 use nexus_test_utils::background::activate_background_task;
 use nexus_test_utils::http_testing::AuthnMode;
@@ -16,14 +15,16 @@ use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::resource_helpers;
 use nexus_test_utils_macros::nexus_test;
+use nexus_types::alert::test_alerts;
 use nexus_types::external_api::alert::{
     AlertDelivery, AlertDeliveryAttempts, AlertDeliveryId, AlertDeliveryState,
     AlertDeliveryTrigger, AlertProbeResult, AlertReceiver, AlertSubscription,
     AlertSubscriptionCreate, AlertSubscriptionCreated, WebhookCreate,
-    WebhookDeliveryAttemptResult, WebhookReceiver, WebhookSecret,
-    WebhookSecretCreate, WebhookSecrets,
+    WebhookDeliveryAttemptResult, WebhookReceiver, WebhookReceiverUpdate,
+    WebhookSecret, WebhookSecretCreate, WebhookSecrets,
 };
 use omicron_common::api::external::IdentityMetadataCreateParams;
+use omicron_common::api::external::IdentityMetadataUpdateParams;
 use omicron_common::api::external::NameOrId;
 use omicron_uuid_kinds::AlertReceiverUuid;
 use omicron_uuid_kinds::AlertUuid;
@@ -456,6 +457,108 @@ async fn test_webhook_receiver_names_are_unique(
 }
 
 #[nexus_test]
+async fn test_webhook_receiver_create_rejects_invalid_urls(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    let rack_subnet: ipnetwork::Ipv6Network =
+        nexus_test_utils::RACK_SUBNET.parse().unwrap();
+    let underlay_ip =
+        rack_subnet.nth(3).expect("3rd underlay addr should exist");
+    let underlay_url = format!("http://[{underlay_ip}]/im-underlay-lol");
+    let invalid_urls = [
+        &underlay_url,
+        // TODO(eliza): it would also be nice to test that URLs that don't
+        // *parse* are rejected, but because the API type uses a `Url` rather
+        // than a string, we can't use the actual API params type to construct
+        // an invalid request here. We'd have to make our own JSON to do that.
+    ];
+
+    for url in invalid_urls {
+        let error = resource_helpers::object_create_error(
+            &client,
+            WEBHOOK_RECEIVERS_BASE_PATH,
+            &WebhookCreate {
+                identity: my_great_webhook_identity(),
+                endpoint: dbg!(url).parse().expect("this should be a URL"),
+                secrets: vec![MY_COOL_SECRET.to_string()],
+                subscriptions: vec!["test.foo.bar".parse().unwrap()],
+            },
+            http::StatusCode::BAD_REQUEST,
+        )
+        .await;
+
+        assert!(
+            dbg!(&error)
+                .message
+                .starts_with("unsupported value for \"endpoint\"")
+        );
+    }
+}
+
+#[nexus_test]
+async fn test_webhook_receiver_update_rejects_invalid_urls(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let created_webhook = webhook_create(
+        &cptestctx,
+        &WebhookCreate {
+            identity: my_great_webhook_identity(),
+            endpoint: "https://example.com/this-url-is-okay"
+                .parse()
+                .expect("this should be a valid URL"),
+            secrets: vec![MY_COOL_SECRET.to_string()],
+            subscriptions: vec!["test.foo".parse().unwrap()],
+        },
+    )
+    .await;
+    dbg!(&created_webhook);
+
+    let rack_subnet: ipnetwork::Ipv6Network =
+        nexus_test_utils::RACK_SUBNET.parse().unwrap();
+    let underlay_ip =
+        rack_subnet.nth(3).expect("3rd underlay addr should exist");
+    let underlay_url = format!("http://[{underlay_ip}]/im-underlay-lol");
+    let invalid_urls = [
+        &underlay_url,
+        // TODO(eliza): it would also be nice to test that URLs that don't
+        // *parse* are rejected, but because the API type uses a `Url` rather
+        // than a string, we can't use the actual API params type to construct
+        // an invalid request here. We'd have to make our own JSON to do that.
+    ];
+
+    let rx_update_url = format!(
+        "{WEBHOOK_RECEIVERS_BASE_PATH}/{}",
+        created_webhook.identity.id
+    );
+    for url in invalid_urls {
+        let error = resource_helpers::object_put_error(
+            &client,
+            &rx_update_url,
+            &WebhookReceiverUpdate {
+                identity: IdentityMetadataUpdateParams {
+                    name: None,
+                    description: None,
+                },
+                endpoint: Some(
+                    dbg!(url).parse().expect("this should be a URL"),
+                ),
+            },
+            http::StatusCode::BAD_REQUEST,
+        )
+        .await;
+
+        assert!(
+            dbg!(&error)
+                .message
+                .starts_with("unsupported value for \"endpoint\"")
+        );
+    }
+}
+
+#[nexus_test]
 async fn test_cannot_subscribe_to_probes(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
@@ -507,6 +610,7 @@ async fn test_event_delivery(cptestctx: &ControlPlaneTestContext) {
             .mock_async(move |when, then| {
                 let body = serde_json::json!({
                     "alert_class": "test.foo",
+                    "alert_version": 0,
                     "alert_id": id,
                     "data": {
                         "hello_world": true,
@@ -515,6 +619,7 @@ async fn test_event_delivery(cptestctx: &ControlPlaneTestContext) {
                 .to_string();
                 when.method(POST)
                     .header("x-oxide-alert-class", "test.foo")
+                    .header("x-oxide-alert-version", "0")
                     .header("x-oxide-alert-id", id.to_string())
                     .and(is_valid_for_webhook(&webhook))
                     .is_true(signature_verifies(
@@ -532,8 +637,7 @@ async fn test_event_delivery(cptestctx: &ControlPlaneTestContext) {
         .alert_publish(
             &opctx,
             id,
-            AlertClass::TestFoo,
-            serde_json::json!({"hello_world": true}),
+            &test_alerts::Foo(serde_json::json!({"hello_world": true})),
         )
         .await
         .expect("event should be published successfully");
@@ -628,6 +732,7 @@ async fn test_multiple_secrets(cptestctx: &ControlPlaneTestContext) {
         .mock_async(|when, then| {
             when.method(POST)
                 .header("x-oxide-alert-class", "test.foo")
+                .header("x-oxide-alert-version", "0")
                 .header("x-oxide-alert-id", id.to_string())
                 .and(is_valid_for_webhook(&webhook))
                 // There should be a signature header present for all three
@@ -654,8 +759,7 @@ async fn test_multiple_secrets(cptestctx: &ControlPlaneTestContext) {
         .alert_publish(
             &opctx,
             id,
-            AlertClass::TestFoo,
-            serde_json::json!({"hello_world": true}),
+            &test_alerts::Foo(serde_json::json!({"hello_world": true})),
         )
         .await
         .expect("event should be published successfully");
@@ -818,8 +922,9 @@ async fn test_multiple_receivers(cptestctx: &ControlPlaneTestContext) {
         .alert_publish(
             &opctx,
             bar_alert_id,
-            AlertClass::TestFooBar,
-            serde_json::json!({"lol": "webhooked on phonics"}),
+            &test_alerts::FooBar(
+                serde_json::json!({"lol": "webhooked on phonics"}),
+            ),
         )
         .await
         .expect("event should be published successfully");
@@ -829,8 +934,9 @@ async fn test_multiple_receivers(cptestctx: &ControlPlaneTestContext) {
         .alert_publish(
             &opctx,
             baz_alert_id,
-            AlertClass::TestFooBaz,
-            serde_json::json!({"lol": "webhook, line, and sinker"}),
+            &test_alerts::FooBaz(
+                serde_json::json!({"lol": "webhook, line, and sinker"}),
+            ),
         )
         .await
         .expect("event should be published successfully");
@@ -875,6 +981,7 @@ async fn test_retry_backoff(cptestctx: &ControlPlaneTestContext) {
             .mock_async(move |when, then| {
                 let body = serde_json::json!({
                     "alert_class": "test.foo",
+                    "alert_version": 0,
                     "alert_id": id,
                     "data": {
                         "hello_world": true,
@@ -883,6 +990,7 @@ async fn test_retry_backoff(cptestctx: &ControlPlaneTestContext) {
                 .to_string();
                 when.method(POST)
                     .header("x-oxide-alert-class", "test.foo")
+                    .header("x-oxide-alert-version", "0")
                     .header("x-oxide-alert-id", id.to_string())
                     .and(is_valid_for_webhook(&webhook))
                     .is_true(signature_verifies(
@@ -900,8 +1008,7 @@ async fn test_retry_backoff(cptestctx: &ControlPlaneTestContext) {
         .alert_publish(
             &opctx,
             id,
-            AlertClass::TestFoo,
-            serde_json::json!({"hello_world": true}),
+            &test_alerts::Foo(serde_json::json!({"hello_world": true})),
         )
         .await
         .expect("event should be published successfully");
@@ -954,6 +1061,7 @@ async fn test_retry_backoff(cptestctx: &ControlPlaneTestContext) {
             .mock_async(move |when, then| {
                 let body = serde_json::json!({
                     "alert_class": "test.foo",
+                    "alert_version": 0,
                     "alert_id": id,
                     "data": {
                         "hello_world": true,
@@ -962,6 +1070,7 @@ async fn test_retry_backoff(cptestctx: &ControlPlaneTestContext) {
                 .to_string();
                 when.method(POST)
                     .header("x-oxide-alert-class", "test.foo")
+                    .header("x-oxide-alert-version", "0")
                     .header("x-oxide-alert-id", id.to_string())
                     .and(is_valid_for_webhook(&webhook))
                     .is_true(signature_verifies(
@@ -1024,6 +1133,7 @@ async fn test_retry_backoff(cptestctx: &ControlPlaneTestContext) {
             .mock_async(move |when, then| {
                 let body = serde_json::json!({
                     "alert_class": "test.foo",
+                    "alert_version": 0,
                     "alert_id": id,
                     "data": {
                         "hello_world": true,
@@ -1032,6 +1142,7 @@ async fn test_retry_backoff(cptestctx: &ControlPlaneTestContext) {
                 .to_string();
                 when.method(POST)
                     .header("x-oxide-alert-class", "test.foo")
+                    .header("x-oxide-alert-version", "0")
                     .header("x-oxide-alert-id", id.to_string())
                     .and(is_valid_for_webhook(&webhook))
                     .is_true(signature_verifies(
@@ -1310,8 +1421,7 @@ async fn test_probe_resends_failed_deliveries(
             .alert_publish(
                 &opctx,
                 event1_id,
-                AlertClass::TestFoo,
-                serde_json::json!({"hello": "world"}),
+                &test_alerts::Foo(serde_json::json!({"hello": "world"})),
             )
             .await
             .expect("event1 should be published successfully")
@@ -1321,8 +1431,7 @@ async fn test_probe_resends_failed_deliveries(
             .alert_publish(
                 &opctx,
                 event2_id,
-                AlertClass::TestFoo,
-                serde_json::json!({"hello": "emeryville"}),
+                &test_alerts::Foo(serde_json::json!({"hello": "emeryville"})),
             )
             .await
             .expect("event2 should be published successfully")
@@ -1440,6 +1549,7 @@ async fn test_api_resends_failed_deliveries(
     let event2_id = AlertUuid::new_v4();
     let body = serde_json::json!({
         "alert_class": "test.foo",
+        "alert_version": 0,
         "alert_id": event1_id,
         "data": {
             "hello_world": true,
@@ -1453,6 +1563,7 @@ async fn test_api_resends_failed_deliveries(
             .mock_async(move |when, then| {
                 when.method(POST)
                     .header("x-oxide-alert-class", "test.foo")
+                    .header("x-oxide-alert-version", "0")
                     .header("x-oxide-alert-id", event1_id.to_string())
                     .and(is_valid_for_webhook(&webhook))
                     .is_true(signature_verifies(
@@ -1470,8 +1581,7 @@ async fn test_api_resends_failed_deliveries(
         .alert_publish(
             &opctx,
             event1_id,
-            AlertClass::TestFoo,
-            serde_json::json!({"hello_world": true}),
+            &test_alerts::Foo(serde_json::json!({"hello_world": true})),
         )
         .await
         .expect("event should be published successfully");
@@ -1482,8 +1592,7 @@ async fn test_api_resends_failed_deliveries(
         .alert_publish(
             &opctx,
             event2_id,
-            AlertClass::TestQuuxBar,
-            serde_json::json!({"hello_world": true}),
+            &test_alerts::QuuxBar(serde_json::json!({"hello_world": true})),
         )
         .await
         .expect("event should be published successfully");
@@ -1513,6 +1622,7 @@ async fn test_api_resends_failed_deliveries(
             .mock_async(move |when, then| {
                 when.method(POST)
                     .header("x-oxide-alert-class", "test.foo")
+                    .header("x-oxide-alert-version", "0")
                     .header("x-oxide-alert-id", event1_id.to_string())
                     .and(is_valid_for_webhook(&webhook))
                     .is_true(signature_verifies(
@@ -1610,8 +1720,7 @@ async fn subscription_add_test(
         .alert_publish(
             &opctx,
             id1,
-            AlertClass::TestFooBar,
-            serde_json::json!({"hello_world": false}),
+            &test_alerts::FooBar(serde_json::json!({"hello_world": false})),
         )
         .await
         .expect("event should be published successfully");
@@ -1643,8 +1752,7 @@ async fn subscription_add_test(
         .alert_publish(
             &opctx,
             id2,
-            AlertClass::TestFooBar,
-            serde_json::json!({"hello_world": true}),
+            &test_alerts::FooBar(serde_json::json!({"hello_world": true})),
         )
         .await
         .expect("event should be published successfully");
@@ -1741,8 +1849,7 @@ async fn subscription_remove_test(
         .alert_publish(
             &opctx,
             id1,
-            AlertClass::TestFooBar,
-            serde_json::json!({"hello_world": true}),
+            &test_alerts::FooBar(serde_json::json!({"hello_world": true})),
         )
         .await
         .expect("event should be published successfully");
@@ -1773,8 +1880,7 @@ async fn subscription_remove_test(
         .alert_publish(
             &opctx,
             id2,
-            AlertClass::TestFooBar,
-            serde_json::json!({"hello_world": false}),
+            &test_alerts::FooBar(serde_json::json!({"hello_world": false})),
         )
         .await
         .expect("event should be published successfully");
@@ -1796,6 +1902,7 @@ async fn subscription_remove_test(
             .mock_async(move |when, then| {
                 let body = serde_json::json!({
                     "alert_class": "test.foo",
+                    "alert_version": 0,
                     "alert_id": id3,
                     "data": {
                         "whatever": 1
@@ -1804,6 +1911,7 @@ async fn subscription_remove_test(
                 .to_string();
                 when.method(POST)
                     .header("x-oxide-alert-class", "test.foo")
+                    .header("x-oxide-alert-version", "0")
                     .header("x-oxide-alert-id", id3.to_string())
                     .and(is_valid_for_webhook(&webhook))
                     .is_true(signature_verifies(
@@ -1820,8 +1928,7 @@ async fn subscription_remove_test(
         .alert_publish(
             &opctx,
             id3,
-            AlertClass::TestFoo,
-            serde_json::json!({"whatever": 1}),
+            &test_alerts::Foo(serde_json::json!({"whatever": 1})),
         )
         .await
         .expect("event should be published successfully");

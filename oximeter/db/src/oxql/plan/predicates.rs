@@ -5,8 +5,6 @@
 //! Operate on predicates in a query plan, including spliting, merging and
 //! reordering.
 
-// Copyright 2024 Oxide Computer Company
-
 use crate::oxql::ast::table_ops::filter;
 use crate::oxql::ast::table_ops::limit::Limit;
 use crate::oxql::plan::align::Align;

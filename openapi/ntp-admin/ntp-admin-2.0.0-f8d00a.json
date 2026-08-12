@@ -1,0 +1,147 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "NTP Admin API",
+    "description": "API for interacting with NTP",
+    "contact": {
+      "url": "https://oxide.computer",
+      "email": "api@oxide.computer"
+    },
+    "version": "2.0.0"
+  },
+  "paths": {
+    "/timesync": {
+      "get": {
+        "summary": "Query for the state of time synchronization",
+        "operationId": "timesync",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TimeSync"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Error": {
+        "description": "Error information from a response.",
+        "type": "object",
+        "properties": {
+          "error_code": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "request_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "message",
+          "request_id"
+        ]
+      },
+      "TimeSync": {
+        "type": "object",
+        "properties": {
+          "correction": {
+            "description": "The current offset between the NTP clock and system clock, in seconds.",
+            "type": "number",
+            "format": "double"
+          },
+          "ip_addr": {
+            "description": "The NTP reference IP address.",
+            "type": "string",
+            "format": "ip"
+          },
+          "last_offset": {
+            "description": "The offset of the NTP clock from the reference clock in the last measurement, in seconds.",
+            "type": "number",
+            "format": "double"
+          },
+          "max_error": {
+            "description": "The maximum estimated clock error: root_delay / 2 + root_dispersion, in seconds.",
+            "type": "number",
+            "format": "double"
+          },
+          "ref_id": {
+            "description": "The NTP reference ID.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "ref_time": {
+            "description": "The NTP reference time (i.e. what chrony thinks the current time is, not necessarily the current system time).",
+            "type": "number",
+            "format": "double"
+          },
+          "rms_offset": {
+            "description": "The root-mean-square (RMS) of recent NTP clock offsets from the reference clock, in seconds.",
+            "type": "number",
+            "format": "double"
+          },
+          "root_delay": {
+            "description": "The total round-trip delay to the reference clock, in seconds.",
+            "type": "number",
+            "format": "double"
+          },
+          "root_dispersion": {
+            "description": "The root dispersion: uncertainty in the NTP clock due to accumulated frequency errors since the last reference update, in seconds.",
+            "type": "number",
+            "format": "double"
+          },
+          "stratum": {
+            "description": "The NTP stratum (our upstream's stratum plus one).",
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
+          },
+          "sync": {
+            "description": "The synchronization state of the sled, true when the system clock and the NTP clock are in sync (to within a small window).",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "correction",
+          "ip_addr",
+          "last_offset",
+          "max_error",
+          "ref_id",
+          "ref_time",
+          "rms_offset",
+          "root_delay",
+          "root_dispersion",
+          "stratum",
+          "sync"
+        ]
+      }
+    },
+    "responses": {
+      "Error": {
+        "description": "Error",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      }
+    }
+  }
+}

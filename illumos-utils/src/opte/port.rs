@@ -14,10 +14,12 @@ use omicron_common::api::internal::shared::RouterId;
 use omicron_common::api::internal::shared::RouterKind;
 use oxnet::Ipv4Net;
 use oxnet::Ipv6Net;
+use sled_agent_types::inventory::NetworkInterfaceKind;
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
 use std::sync::Arc;
+use uuid::Uuid;
 
 #[derive(Debug)]
 pub struct PortData {
@@ -158,4 +160,11 @@ impl Port {
             ..self.system_router_key()
         })
     }
+}
+
+/// An OPTE port, along with its control plane metadata.
+pub struct PortInfo {
+    pub port: Port,
+    pub nic_id: Uuid,
+    pub nic_kind: NetworkInterfaceKind,
 }

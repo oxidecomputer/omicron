@@ -31,6 +31,8 @@ use nexus_types::external_api::path_params::{BlueprintPath, PhysicalDiskPath};
 use nexus_types::external_api::sled::{SledPolicy, SledSelector};
 use nexus_types::external_api::support_bundle;
 use nexus_types::external_api::system::{Ping, PingStatus};
+use nexus_types::fm::config::FmConfigParam;
+use nexus_types::fm::config::FmConfigView;
 use nexus_types::internal_api::params::InstanceMigrateRequest;
 use nexus_types::internal_api::params::RackInitializationRequest;
 use nexus_types::internal_api::views::BackgroundTask;
@@ -42,13 +44,14 @@ use nexus_types::internal_api::views::SupportBundleInfo;
 use nexus_types::internal_api::views::UpdateStatus;
 use nexus_types::trust_quorum::TrustQuorumConfig;
 use nexus_types_versions::latest::headers::RangeRequest;
-use omicron_common::api::external::Instance;
+use nexus_types_versions::latest::instance::Instance;
 use omicron_common::api::external::http_pagination::PaginatedById;
 use omicron_common::api::external::http_pagination::PaginatedByTimeAndId;
 use omicron_uuid_kinds::*;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
+use sled_hardware_types::BaseboardId;
 use trust_quorum_types::types::Epoch;
 use uuid::Uuid;
 
@@ -577,16 +580,60 @@ pub trait NexusLockstepApi {
     ///
     /// This is a required first step towards expunging a sled
     ///
+    /// The sled is identified by its baseboard, since trust quorum membership
+    /// is tracked by baseboard and the sled may have no database record.
+    ///
     /// Return the epoch of the proposed configuration so it can be polled
     /// asynchronously.
     #[endpoint {
         method = POST,
-        path = "/trust-quorum/remove/{sled}"
+        path = "/trust-quorum/remove/{rack_id}"
     }]
     async fn trust_quorum_remove_sled(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<SledSelector>,
+        path_params: Path<
+            nexus_types::external_api::rack::RackMembershipConfigPathParams,
+        >,
+        sled: TypedBody<BaseboardId>,
     ) -> Result<HttpResponseOk<Epoch>, HttpError>;
+
+    // Fault management
+
+    /// List ereport classes that this Nexus's diagnosis engines consume.
+    #[endpoint {
+        method = GET,
+        path = "/fm/known-ereport-classes",
+    }]
+    async fn fm_known_ereport_classes_list(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Vec<String>>, HttpError>;
+
+    #[endpoint {
+        method = GET,
+        path = "/fm/config"
+    }]
+    async fn fm_config_show_current(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<FmConfigView>, HttpError>;
+
+    /// Update the fault management config at the latest version
+    #[endpoint {
+        method = POST,
+        path = "/fm/config"
+    }]
+    async fn fm_config_set(
+        rqctx: RequestContext<Self::Context>,
+        config: TypedBody<FmConfigParam>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    #[endpoint {
+        method = GET,
+        path = "/fm/config/versions/{version}"
+    }]
+    async fn fm_config_show_version(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<VersionPathParam>,
+    ) -> Result<HttpResponseOk<FmConfigView>, HttpError>;
 }
 
 /// Path parameters for Rack requests.

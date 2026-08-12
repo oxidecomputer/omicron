@@ -1055,6 +1055,17 @@ impl SpHandler for Handler {
         self.update_state.component_set_active_slot(component, slot, persist)
     }
 
+    fn component_get_persistent_slot(
+        &mut self,
+        component: SpComponent,
+    ) -> std::result::Result<u16, SpError> {
+        debug!(
+            &self.log, "asked for component persistent slot";
+            "component" => ?component,
+        );
+        self.update_state.component_get_persistent_slot(component)
+    }
+
     fn component_action(
         &mut self,
         sender: Sender<Self::VLanId>,

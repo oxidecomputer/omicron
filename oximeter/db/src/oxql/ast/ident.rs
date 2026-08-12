@@ -4,8 +4,6 @@
 
 //! OxQL identifiers, such as column names.
 
-// Copyright 2024 Oxide Computer Company
-
 use std::fmt;
 
 /// An identifier, such as a column or function name.

@@ -20,5 +20,5 @@ schemars.workspace = true
 serde.workspace = true
 slog.workspace = true
 tufaceous-artifact.workspace = true
-update-engine.workspace = true
+oxide-update-engine-types.workspace = true
 uuid.workspace = true

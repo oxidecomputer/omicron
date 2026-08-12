@@ -620,6 +620,7 @@ mod test {
     use omicron_uuid_kinds::CollectionUuid;
     use omicron_uuid_kinds::DatasetUuid;
     use omicron_uuid_kinds::PhysicalDiskUuid;
+    use omicron_uuid_kinds::RackUuid;
     use omicron_uuid_kinds::SledUuid;
     use omicron_uuid_kinds::ZpoolUuid;
     use sled_agent_types::inventory::ZpoolHealth;
@@ -1085,14 +1086,14 @@ mod test {
                     reservoir_size: (16 << 30).try_into().unwrap(),
                     cpu_family: db::model::SledCpuFamily::AmdMilan,
                 },
-                Uuid::new_v4(),
+                RackUuid::new_v4(),
                 Generation::new(),
             );
 
             datastore.sled_upsert(sled).await.expect("failed to upsert sled");
 
             for u2 in &sled_config.u2s {
-                let physical_disk = db::model::PhysicalDisk::new(
+                let physical_disk = db::model::PhysicalDisk::from_parts(
                     u2.physical_disk_id,
                     String::from("vendor"),
                     u2.physical_disk_serial.clone(),

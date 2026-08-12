@@ -17,7 +17,8 @@ use super::{
     BlueprintHostPhase2TableData, BlueprintMeasurements,
     BlueprintMeasurementsTableData, BlueprintMetadata,
     BlueprintPhysicalDiskConfig, BlueprintPhysicalDiskConfigDiff,
-    BlueprintZoneConfigDiff, BlueprintZoneImageSource, ClickhouseClusterConfig,
+    BlueprintSledUpdateDisposition, BlueprintZoneConfigDiff,
+    BlueprintZoneImageSource, ClickhouseClusterConfig,
     CockroachDbPreserveDowngrade, PendingMgsUpdatesDiff, unwrap_or_none,
     zone_sort_key,
 };
@@ -67,6 +68,7 @@ impl<'a> BlueprintDiffSummary<'a> {
             clickhouse_cluster_config,
             target_release_minimum_generation,
             nexus_generation,
+            external_networking_generation,
             // Metadata fields for which changes don't reflect semantic
             // changes from one blueprint to the next.
             id: _,
@@ -117,6 +119,16 @@ impl<'a> BlueprintDiffSummary<'a> {
 
         // Did the nexus generation change?
         if nexus_generation.before != nexus_generation.after {
+            return true;
+        }
+
+        // Did the external networking generation change? (Since we never mutate
+        // networking config properties in place, and always expunge/add zones
+        // to change them, this should only happen if there was a change in
+        // sleds also, but it doesn't hurt to double check.)
+        if external_networking_generation.before
+            != external_networking_generation.after
+        {
             return true;
         }
 
@@ -1791,11 +1803,11 @@ impl<'a, 'b> BpDiffPendingMgsUpdates<'a, 'b> {
                 BpTableColumn::new(&u1.artifact_version, &u2.artifact_version);
             let details = if u1.details != u2.details {
                 BpTableColumn::diff(
-                    format!("{:?}", &u1.details),
-                    format!("{:?}", &u2.details),
+                    format!("{:?}", u1.details),
+                    format!("{:?}", u2.details),
                 )
             } else {
-                BpTableColumn::value(format!("{:?}", &u1.details))
+                BpTableColumn::value(format!("{:?}", u1.details))
             };
             rows.push(BpTableRow::new(
                 BpDiffState::Modified,
@@ -2073,7 +2085,11 @@ impl fmt::Display for BlueprintDiffDisplay<'_, '_> {
                     sled.state, sled.sled_agent_generation
                 )?;
 
-                let mut rows = Vec::new();
+                let mut rows = vec![KvPair::new(
+                    BpDiffState::Removed,
+                    UPDATE_DISPOSITION,
+                    sled.update_disposition.to_string(),
+                )];
                 if let Some(id) = sled.remove_mupdate_override {
                     rows.push(KvPair::new(
                         BpDiffState::Removed,
@@ -2117,6 +2133,23 @@ impl fmt::Display for BlueprintDiffDisplay<'_, '_> {
                 )?;
 
                 let mut rows = Vec::new();
+                if sled.before.update_disposition
+                    != sled.after.update_disposition
+                {
+                    rows.push(KvPair::new(
+                        BpDiffState::Modified,
+                        UPDATE_DISPOSITION,
+                        display_modified_update_disposition(
+                            &sled.before.update_disposition,
+                            &sled.after.update_disposition,
+                        ),
+                    ));
+                } else {
+                    rows.push(KvPair::new_unchanged(
+                        UPDATE_DISPOSITION,
+                        linear_table_unchanged(&sled.after.update_disposition),
+                    ));
+                }
                 // If either before or after is set for remove_mupdate_override,
                 // display it.
                 if sled.before.remove_mupdate_override.is_some()
@@ -2147,7 +2180,11 @@ impl fmt::Display for BlueprintDiffDisplay<'_, '_> {
                     sled.state, sled.sled_agent_generation
                 )?;
 
-                let mut rows = Vec::new();
+                let mut rows = vec![KvPair::new(
+                    BpDiffState::Added,
+                    UPDATE_DISPOSITION,
+                    sled.update_disposition.to_string(),
+                )];
                 if let Some(id) = sled.remove_mupdate_override {
                     rows.push(KvPair::new(
                         BpDiffState::Added,
@@ -2244,5 +2281,72 @@ fn display_optional_preserve_downgrade(
     match value {
         Some(v) => v.to_string(),
         None => INVALID_VALUE_PARENS.to_string(),
+    }
+}
+
+fn display_modified_update_disposition(
+    before: &BlueprintSledUpdateDisposition,
+    after: &BlueprintSledUpdateDisposition,
+) -> String {
+    let kind = if before.kind != after.kind {
+        format!("{} {ARROW} {}", before.kind, after.kind)
+    } else {
+        after.kind.to_string()
+    };
+    let generation = if before.generation != after.generation {
+        format!(
+            "(generation {} {ARROW} {})",
+            before.generation, after.generation,
+        )
+    } else {
+        format!("(generation {})", after.generation)
+    };
+    format!("{kind} {generation}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::deployment::BlueprintSledUpdateDispositionKind;
+    use crate::deployment::ReconfiguratorDisruptionPolicy;
+
+    const EVACUATING: BlueprintSledUpdateDispositionKind =
+        BlueprintSledUpdateDispositionKind::Evacuating {
+            policy: ReconfiguratorDisruptionPolicy::MigrateOrTerminate,
+        };
+
+    // The initial (`available`, generation 1) disposition and its single-step
+    // departures, shared by the rendering tests.
+    const AVAILABLE: BlueprintSledUpdateDisposition =
+        BlueprintSledUpdateDisposition::initial();
+
+    // kind + generation both changed by one: the valid parent→child edit.
+    const BUMPED: BlueprintSledUpdateDisposition =
+        BlueprintSledUpdateDisposition {
+            generation: AVAILABLE.generation.next(),
+            kind: EVACUATING,
+        };
+
+    // generation changed, kind unchanged.
+    const GEN_ONLY: BlueprintSledUpdateDisposition =
+        BlueprintSledUpdateDisposition {
+            generation: AVAILABLE.generation.next(),
+            kind: AVAILABLE.kind,
+        };
+
+    #[test]
+    fn modified_update_disposition_rendering() {
+        // Kind change with a generation bump.
+        assert_eq!(
+            display_modified_update_disposition(&AVAILABLE, &BUMPED),
+            "available -> evacuating (live-migrate or terminate) \
+             (generation 1 -> 2)",
+        );
+
+        // A generation change with no kind change.
+        assert_eq!(
+            display_modified_update_disposition(&AVAILABLE, &GEN_ONLY),
+            "available (generation 1 -> 2)",
+        );
     }
 }

@@ -38,7 +38,7 @@ use crate::mgs::sensors::{
 use crate::mgs::sp_to_string;
 use clap::Args;
 use gateway_client::types::MeasurementKind;
-use gateway_client::types::SpIdentifier;
+use gateway_types::component::SpIdentifier;
 use multimap::MultiMap;
 use std::collections::HashMap;
 use std::fs::File;
@@ -559,42 +559,42 @@ impl Dashboard {
 
     fn up(&mut self) {
         let selected_kind = self.kinds[self.selected_kind];
-        let type_ = self.sps[self.selected_sp].type_;
+        let type_ = self.sps[self.selected_sp].typ;
 
         if let Some(flipped) = self.flipped.get_mut(&selected_kind) {
             flipped.previous();
             return;
         }
 
-        for sp in self.sps.iter().filter(|&s| s.type_ == type_) {
+        for sp in self.sps.iter().filter(|&s| s.typ == type_) {
             self.graphs.get_mut(&(*sp, selected_kind)).unwrap().previous();
         }
     }
 
     fn down(&mut self) {
         let selected_kind = self.kinds[self.selected_kind];
-        let type_ = self.sps[self.selected_sp].type_;
+        let type_ = self.sps[self.selected_sp].typ;
 
         if let Some(flipped) = self.flipped.get_mut(&selected_kind) {
             flipped.next();
             return;
         }
 
-        for sp in self.sps.iter().filter(|&s| s.type_ == type_) {
+        for sp in self.sps.iter().filter(|&s| s.typ == type_) {
             self.graphs.get_mut(&(*sp, selected_kind)).unwrap().next();
         }
     }
 
     fn esc(&mut self) {
         let selected_kind = self.kinds[self.selected_kind];
-        let type_ = self.sps[self.selected_sp].type_;
+        let type_ = self.sps[self.selected_sp].typ;
 
         if let Some(flipped) = self.flipped.get_mut(&selected_kind) {
             flipped.unselect();
             return;
         }
 
-        for sp in self.sps.iter().filter(|&s| s.type_ == type_) {
+        for sp in self.sps.iter().filter(|&s| s.typ == type_) {
             self.graphs.get_mut(&(*sp, selected_kind)).unwrap().unselect();
         }
     }
@@ -636,7 +636,7 @@ impl Dashboard {
 
     fn flip(&mut self) {
         let selected_kind = self.kinds[self.selected_kind];
-        let type_ = self.sps[self.selected_sp].type_;
+        let type_ = self.sps[self.selected_sp].typ;
 
         if self.flipped.remove(&selected_kind).is_some() {
             return;
@@ -649,7 +649,7 @@ impl Dashboard {
         if let Some(ndx) = graph.selected() {
             let mut from = vec![];
 
-            for sp in self.sps.iter().filter(|&s| s.type_ == type_) {
+            for sp in self.sps.iter().filter(|&s| s.typ == type_) {
                 from.push((
                     self.graphs.get(&(*sp, selected_kind)).unwrap(),
                     sp_to_string(sp),

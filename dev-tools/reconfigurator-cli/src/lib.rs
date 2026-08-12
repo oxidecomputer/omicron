@@ -5,9 +5,9 @@
 //! developer REPL for driving blueprint planning
 
 use anyhow::{Context, anyhow, bail, ensure};
-use camino::Utf8PathBuf;
+use camino::{Utf8Path, Utf8PathBuf};
 use chrono::{DateTime, Utc};
-use clap::{ArgAction, ValueEnum};
+use clap::ValueEnum;
 use clap::{Args, Parser, Subcommand};
 use daft::Diffable;
 use gateway_types::rot::RotSlot;
@@ -21,9 +21,7 @@ use nexus_reconfigurator_blippy::Blippy;
 use nexus_reconfigurator_blippy::BlippyReportSortKey;
 use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
 use nexus_reconfigurator_planning::blueprint_editor::ExternalNetworkingAllocator;
-use nexus_reconfigurator_planning::example::{
-    ExampleSystemBuilder, extract_tuf_repo_description, tuf_assemble,
-};
+use nexus_reconfigurator_planning::example::ExampleSystemBuilder;
 use nexus_reconfigurator_planning::planner::Planner;
 use nexus_reconfigurator_planning::system::{
     RotStateOverrides, SledBuilder, SledInventoryVisibility, SystemDescription,
@@ -34,25 +32,26 @@ use nexus_reconfigurator_simulation::{
 };
 use nexus_reconfigurator_simulation::{SimStateBuilder, SimTufRepoSource};
 use nexus_reconfigurator_simulation::{SimTufRepoDescription, Simulator};
+use nexus_types::deployment::BlueprintHostPhase2DesiredContents;
 use nexus_types::deployment::BlueprintMeasurements;
+use nexus_types::deployment::BlueprintSledUpdateDispositionKind;
 use nexus_types::deployment::CockroachDbSettings;
-use nexus_types::deployment::ExpectedVersion;
+use nexus_types::deployment::ReconfiguratorDisruptionPolicy;
 use nexus_types::deployment::execution::blueprint_external_dns_config;
 use nexus_types::deployment::execution::blueprint_internal_dns_config;
 use nexus_types::deployment::{Blueprint, UnstableReconfiguratorState};
 use nexus_types::deployment::{BlueprintArtifactVersion, PendingMgsUpdate};
 use nexus_types::deployment::{BlueprintExpungedZoneAccessReason, execution};
-use nexus_types::deployment::{
-    BlueprintHostPhase2DesiredContents, PlannerConfig,
-};
 use nexus_types::deployment::{BlueprintSource, SledFilter};
 use nexus_types::deployment::{
     BlueprintZoneImageSource, PendingMgsUpdateDetails,
 };
+use nexus_types::deployment::{ExpectedVersion, ReconfiguratorStateInput};
 use nexus_types::deployment::{OmicronZoneNic, TargetReleaseDescription};
 use nexus_types::deployment::{PendingMgsUpdateSpDetails, PlanningInput};
 use nexus_types::external_api::sled::{SledPolicy, SledProvisionPolicy};
 use nexus_types::inventory::CollectionDisplayCliFilter;
+use nexus_types::tuf_repo::TufRepoDescription;
 use omicron_common::address::REPO_DEPOT_PORT;
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::Name;
@@ -69,6 +68,7 @@ use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::VnicUuid;
 use omicron_uuid_kinds::{BlueprintUuid, MupdateOverrideUuid};
 use omicron_uuid_kinds::{CollectionUuid, MupdateUuid};
+use semver::Version;
 use sled_agent_types::inventory::ZoneKind;
 use slog_error_chain::InlineErrorChain;
 use std::borrow::Cow;
@@ -76,16 +76,16 @@ use std::collections::BTreeSet;
 use std::convert::Infallible;
 use std::fmt::{self, Write};
 use std::io::IsTerminal;
-use std::net::IpAddr;
 use std::num::ParseIntError;
 use std::str::FromStr;
 use std::sync::Arc;
 use swrite::{SWrite, swrite, swriteln};
 use tabled::Tabled;
+use tufaceous::RepositoryLoader;
+use tufaceous::edit::RepositoryEditor;
 use tufaceous_artifact::ArtifactHash;
 use tufaceous_artifact::ArtifactVersion;
 use tufaceous_artifact::ArtifactVersionError;
-use tufaceous_lib::assemble::ArtifactManifest;
 
 mod log_capture;
 pub mod test_utils;
@@ -161,32 +161,11 @@ impl ReconfiguratorSim {
                 builder
                     .add_omicron_zone_external_ip(zone.id, external_ip)
                     .context("adding omicron zone external IP")?;
-
-                // TODO-completeness: This needs to support dual-stack zones.
-                // See https://github.com/oxidecomputer/omicron/issues/9288 and
-                // related issues.
-                let maybe_ip = if matches!(external_ip.ip(), IpAddr::V4(_)) {
-                    nic.ip_config.ipv4_addr().copied().map(IpAddr::V4)
-                } else {
-                    nic.ip_config.ipv6_addr().copied().map(IpAddr::V6)
-                };
-                let ip = maybe_ip.with_context(|| {
-                    format!(
-                        "Omicron zone has external and private IP \
-                        configurations with different IP versions. \
-                        zone_id={} zone_kind={} \
-                        external_ip={} private_ip_config={:?}",
-                        zone.id,
-                        zone.zone_type.kind().report_str(),
-                        external_ip.ip(),
-                        nic.ip_config,
-                    )
-                })?;
                 let nic = OmicronZoneNic {
                     // TODO-cleanup use `TypedUuid` everywhere
                     id: VnicUuid::from_untyped_uuid(nic.id),
                     mac: nic.mac,
-                    ip,
+                    ip: (&nic.ip_config).into(),
                     slot: nic.slot,
                     primary: nic.primary,
                 };
@@ -466,7 +445,7 @@ fn process_command(
         Commands::BlueprintLoad(args) => cmd_blueprint_load(sim, args),
         Commands::Show => cmd_show(sim),
         Commands::Set(args) => cmd_set(sim, args),
-        Commands::TufAssemble(args) => cmd_tuf_assemble(sim, args),
+        Commands::GenerateFakeRepo(args) => cmd_generate_fake_repo(args),
         Commands::Load(args) => cmd_load(sim, args),
         Commands::LoadExample(args) => cmd_load_example(sim, args),
         Commands::FileContents(args) => cmd_file_contents(args),
@@ -569,8 +548,8 @@ enum Commands {
     #[command(subcommand)]
     Set(SetArgs),
 
-    /// use tufaceous to generate a repo from a manifest
-    TufAssemble(TufAssembleArgs),
+    /// use tufaceous to generate a fake repository
+    GenerateFakeRepo(GenerateFakeRepoArgs),
 
     /// save state to a file
     Save(SaveArgs),
@@ -978,6 +957,15 @@ enum BlueprintEditCommands {
         /// the UUID to set the field to, or "unset"
         value: MupdateOverrideUuidOpt,
     },
+    /// set the update disposition for a sled
+    SetUpdateDisposition {
+        /// sled to set the field on
+        sled_id: SledOpt,
+
+        /// the disposition to set the sled to
+        #[command(subcommand)]
+        command: SledUpdateDispositionTarget,
+    },
     /// set the minimum generation for which target releases are accepted
     ///
     /// At the moment, this just sets the field to the given value. In the
@@ -1042,6 +1030,39 @@ enum SledMeasurementTarget {
     InstallDataset,
     // Unlike Omicron zones we don't have a need for the
     // `Artifact` kind for now
+}
+
+#[derive(Debug, Subcommand)]
+enum SledUpdateDispositionTarget {
+    /// mark the sled available for provisioning
+    Available,
+    /// mark the sled as evacuating, with the given disruption policy
+    Evacuating {
+        /// the disruption policy to apply while the sled is evacuating
+        #[clap(value_enum)]
+        policy: DisruptionPolicyOpt,
+    },
+}
+
+/// A clap-friendly mirror of [`ReconfiguratorDisruptionPolicy`].
+///
+/// We keep this local to the CLI (rather than deriving `ValueEnum` on the type
+/// itself) so the API type stays free of clap.
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum DisruptionPolicyOpt {
+    Terminate,
+    MigrateOrTerminate,
+    MigrateOnly,
+}
+
+impl From<DisruptionPolicyOpt> for ReconfiguratorDisruptionPolicy {
+    fn from(value: DisruptionPolicyOpt) -> Self {
+        match value {
+            DisruptionPolicyOpt::Terminate => Self::Terminate,
+            DisruptionPolicyOpt::MigrateOrTerminate => Self::MigrateOrTerminate,
+            DisruptionPolicyOpt::MigrateOnly => Self::MigrateOnly,
+        }
+    }
 }
 
 #[derive(Debug, Subcommand)]
@@ -1554,8 +1575,6 @@ enum SetArgs {
         /// TUF repo containing release artifacts
         filename: Utf8PathBuf,
     },
-    /// planner config
-    PlannerConfig(SetPlannerConfigArgs),
     /// timestamp for ignoring impossible MGS updates
     IgnoreImpossibleMgsUpdatesSince {
         since: SetIgnoreImpossibleMgsUpdatesSinceArgs,
@@ -1578,35 +1597,6 @@ impl FromStr for SetIgnoreImpossibleMgsUpdatesSinceArgs {
             return Ok(Self(datetime.into()));
         }
         bail!("invalid timestamp: expected `now` or an RFC3339 timestamp")
-    }
-}
-
-#[derive(Debug, Args)]
-struct SetPlannerConfigArgs {
-    #[clap(flatten)]
-    planner_config: PlannerConfigOpts,
-}
-
-// Define the config fields separately so we can use `group(required = true,
-// multiple = true).`
-#[derive(Debug, Clone, Args)]
-#[group(required = true, multiple = true)]
-pub struct PlannerConfigOpts {
-    #[clap(long, action = ArgAction::Set)]
-    add_zones_with_mupdate_override: Option<bool>,
-}
-
-impl PlannerConfigOpts {
-    fn update_if_modified(
-        &self,
-        current: &PlannerConfig,
-    ) -> Option<PlannerConfig> {
-        let new = PlannerConfig {
-            add_zones_with_mupdate_override: self
-                .add_zones_with_mupdate_override
-                .unwrap_or(current.add_zones_with_mupdate_override),
-        };
-        (new != *current).then_some(new)
     }
 }
 
@@ -1655,19 +1645,15 @@ impl CockroachdbSettingsOpts {
 }
 
 #[derive(Debug, Args)]
-struct TufAssembleArgs {
-    /// The tufaceous manifest path (relative to this crate's root)
-    manifest_path: Utf8PathBuf,
-
-    /// Allow non-semver artifact versions.
-    #[clap(long)]
-    allow_non_semver: bool,
+struct GenerateFakeRepoArgs {
+    /// System version of generated repository
+    version: Version,
 
     #[clap(
         long,
         // Use help here rather than a doc comment because rustdoc doesn't like
         // `<` and `>` in help messages.
-        help = "The path to the output [default: repo-<system-version>.zip]"
+        help = "The path to the output [default: repo-<version>.zip]"
     )]
     output: Option<Utf8PathBuf>,
 }
@@ -1675,10 +1661,11 @@ struct TufAssembleArgs {
 #[derive(Debug, Args)]
 struct LoadArgs {
     /// input file
-    filename: Utf8PathBuf,
+    globs: Vec<glob::Pattern>,
 
     /// id of inventory collection to use for sled details
     /// (may be omitted only if the file contains only one collection)
+    #[clap(long)]
     collection_id: Option<CollectionUuid>,
 }
 
@@ -2639,12 +2626,16 @@ fn cmd_blueprint_edit(
             .context("failed to construct external networking allocator")?
             .for_new_nexus()
             .context("failed to pick an external IP for Nexus")?;
+            let nexus_config = planning_input
+                .external_service_networking_policy()
+                .operator_nexus_config();
             builder
                 .sled_add_zone_nexus(
                     sled_id,
                     image_source,
                     external_ip,
                     nexus_generation,
+                    &nexus_config,
                 )
                 .context("failed to add Nexus zone")?;
             format!("added Nexus zone to sled {}", sled_id)
@@ -2692,6 +2683,23 @@ fn cmd_blueprint_edit(
                     format!("set remove_mupdate_override to {uuid}")
                 }
             }
+        }
+        BlueprintEditCommands::SetUpdateDisposition { sled_id, command } => {
+            let sled_id = sled_id.to_sled_id(system.description())?;
+            let kind = match command {
+                SledUpdateDispositionTarget::Available => {
+                    BlueprintSledUpdateDispositionKind::Available
+                }
+                SledUpdateDispositionTarget::Evacuating { policy } => {
+                    BlueprintSledUpdateDispositionKind::Evacuating {
+                        policy: policy.into(),
+                    }
+                }
+            };
+            builder
+                .sled_set_update_disposition_kind(sled_id, kind)
+                .context("failed to set update disposition")?;
+            format!("set sled {sled_id} update disposition kind to {kind}")
         }
         BlueprintEditCommands::SetTargetReleaseMinimumGeneration {
             generation,
@@ -3384,17 +3392,16 @@ fn cmd_show(sim: &mut ReconfiguratorSim) -> anyhow::Result<Option<String>> {
                 s,
                 "target release (generation {}): {} ({})",
                 target_release.target_release_generation,
-                tuf_desc.repo.system_version,
-                tuf_desc.repo.file_name
+                tuf_desc.system_version,
+                tuf_desc.file_name
             );
             for artifact in &tuf_desc.artifacts {
                 swriteln!(
                     s,
-                    "    artifact: {} {} ({} version {})",
+                    "    artifact: {} {} version {}",
                     artifact.hash,
-                    artifact.id.kind,
-                    artifact.id.name,
-                    artifact.id.version
+                    artifact.display_tags(),
+                    artifact.version
                 );
             }
         }
@@ -3542,17 +3549,6 @@ fn cmd_set(
             );
             format!("set target release based on {}", filename)
         }
-        SetArgs::PlannerConfig(args) => {
-            let current = state.system_mut().description().get_planner_config();
-            if let Some(new) = args.planner_config.update_if_modified(&current)
-            {
-                state.system_mut().description_mut().set_planner_config(new);
-                let diff = current.diff(&new);
-                format!("planner config updated:\n{}", diff.display())
-            } else {
-                format!("no changes to planner config:\n{}", current.display())
-            }
-        }
         SetArgs::IgnoreImpossibleMgsUpdatesSince { since } => {
             state
                 .system_mut()
@@ -3590,6 +3586,32 @@ fn cmd_set(
 
     sim.commit_and_bump(format!("reconfigurator-cli set: {}", rv), state);
     Ok(Some(rv))
+}
+
+fn extract_tuf_repo_description(
+    logger: &slog::Logger,
+    archive_path: &Utf8Path,
+) -> anyhow::Result<TufRepoDescription> {
+    let repo = oxide_tokio_rt::run(
+        RepositoryLoader::new()
+            .unsafe_blindly_trust_repo()
+            .compute_archive_sha256(true)
+            .load_zip_path(archive_path.to_owned(), logger),
+    )?;
+    Ok(TufRepoDescription {
+        artifacts: repo.artifacts().clone(),
+        metadata: repo.metadata().clone(),
+        system_version: repo.system_version().clone(),
+        hash: ArtifactHash(
+            *repo
+                .archive_sha256()
+                .expect("tufaceous should have calculated hash"),
+        ),
+        file_name: archive_path
+            .file_name()
+            .expect("path to opened file must have a file name")
+            .to_owned(),
+    })
 }
 
 /// Converts a mupdate source to a TUF repo description.
@@ -3659,48 +3681,27 @@ fn mupdate_source_to_description(
     }
 }
 
-fn cmd_tuf_assemble(
-    sim: &ReconfiguratorSim,
-    args: TufAssembleArgs,
+fn cmd_generate_fake_repo(
+    args: GenerateFakeRepoArgs,
 ) -> anyhow::Result<Option<String>> {
-    let manifest_path = if args.manifest_path.is_absolute() {
-        args.manifest_path.clone()
-    } else {
-        // Use CARGO_MANIFEST_DIR to resolve relative paths.
-        let dir = std::env::var("CARGO_MANIFEST_DIR").context(
-            "CARGO_MANIFEST_DIR not set in environment \
-             (are you running with `cargo run`?)",
-        )?;
-        let mut dir = Utf8PathBuf::from(dir);
-        dir.push(&args.manifest_path);
-        dir
-    };
-
-    // Obtain the system version from the manifest.
-    let manifest =
-        ArtifactManifest::from_path(&manifest_path).with_context(|| {
-            format!("error parsing manifest from `{manifest_path}`")
-        })?;
-
-    let output_path = if let Some(output_path) = &args.output {
-        output_path.clone()
-    } else {
-        // This is relative to the current directory.
-        Utf8PathBuf::from(format!("repo-{}.zip", manifest.system_version))
-    };
-
-    tuf_assemble(
-        &sim.log,
-        &manifest_path,
-        &output_path,
-        args.allow_non_semver,
-    )?;
-
-    let rv = format!(
-        "created {} for system version {}",
-        output_path, manifest.system_version,
-    );
-    Ok(Some(rv))
+    oxide_tokio_rt::run(async {
+        let output_path = args.output.unwrap_or_else(|| {
+            // This is relative to the current directory.
+            format!("repo-{}.zip", args.version).into()
+        });
+        RepositoryEditor::fake(args.version.clone())?
+            .finish()
+            .await?
+            .generate_root()
+            .sign()
+            .await?
+            .write_zip_file(&output_path, chrono::Utc::now())
+            .await?;
+        Ok(Some(format!(
+            "created {} for system version {}",
+            output_path, args.version
+        )))
+    })
 }
 
 fn read_file(
@@ -3725,20 +3726,64 @@ fn cmd_load(
         );
     }
 
-    let input_path = args.filename;
     let collection_id = args.collection_id;
-    let loaded = read_file(&input_path)?;
 
-    let result = state.load_serialized(loaded, collection_id)?;
+    let mut inputs = Vec::new();
+    for pattern in args.globs {
+        // Work around the lack of rust-lang/glob#148: there is no way to
+        // iterate the paths matching a compiled `Pattern`.  We have to pass the
+        // underlying string to `glob::glob` and have it compile the pattern
+        // again.  It would be very surprising to get an error here since we
+        // have already parsed the string as a pattern before.
+        let paths = glob::glob(pattern.as_str())
+            .with_context(|| format!("parsing glob pattern {pattern:?}"))?;
+        for maybe_path in paths {
+            let input_path = maybe_path.with_context(|| {
+                format!("error globbing pattern {pattern:?}")
+            })?;
+            let input_path = Utf8PathBuf::from_path_buf(input_path).map_err(
+                |input_path| {
+                    anyhow!(
+                        "path was not valid UTF-8: {:?}",
+                        input_path.display()
+                    )
+                },
+            )?;
+            let file = std::fs::File::open(&input_path)
+                .with_context(|| format!("open {:?}", input_path))?;
+            let bufread = std::io::BufReader::new(file);
+            let input = ReconfiguratorStateInput {
+                label: input_path.as_str().to_owned(),
+                reader: bufread,
+            };
+            inputs.push(input);
+        }
+    }
+
+    let mut s = String::new();
+    let count = inputs.len();
+    let plural = if count == 1 { "" } else { "s" };
+    let loaded = UnstableReconfiguratorState::read_series(inputs)
+        .with_context(|| format!("loading {count} input{plural}"))?;
+    for warning in loaded.warnings {
+        swriteln!(s, "  {}", warning);
+    }
+    if count > 1 {
+        swriteln!(s, "latest of {count} file{plural}: {}", loaded.latest);
+    }
+
+    let result = state.load_serialized(loaded.state, collection_id)?;
 
     sim.commit_and_bump(
-        format!("reconfigurator-sim: load {:?}", input_path),
+        format!("reconfigurator-sim: load {count} file{plural}",),
         state,
     );
 
-    let mut s = String::new();
-
-    swriteln!(s, "loaded data from {:?}", input_path);
+    if count == 1 {
+        swriteln!(s, "loaded data from {:?}", loaded.latest);
+    } else {
+        swriteln!(s, "loaded data from {count} files");
+    }
 
     if !result.warnings.is_empty() {
         swriteln!(s, "warnings:");

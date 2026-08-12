@@ -33,6 +33,7 @@ use oxnet::IpNet;
 use oxnet::Ipv4Net;
 use oxnet::Ipv6Net;
 pub use port::Port;
+pub use port::PortInfo;
 pub use port_manager::MulticastGroupCfg;
 pub use port_manager::PortCreateParams;
 pub use port_manager::PortManager;

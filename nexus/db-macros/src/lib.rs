@@ -9,8 +9,6 @@
 //! provides support for auto-generating structures that are common among many
 //! tables.
 
-// Copyright 2021 Oxide Computer Company
-
 extern crate proc_macro;
 
 use nexus_macros_common::PrimaryKeyType;

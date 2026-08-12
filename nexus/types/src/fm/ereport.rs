@@ -17,8 +17,18 @@ use std::fmt;
 
 pub use ereport_types::{Ena, EreportId};
 
+/// A complete representation of an ereport that has been ingested by the
+/// control plane.
+///
+/// This type includes the [`data`](EreportData) payload of the ereport, its
+/// [ID](EreportId), the [`reporter`](Reporter) from which it was collected, and
+/// metadata describing its collection.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Ereport {
+    #[serde(flatten)]
+    pub id: EreportId,
+    pub time_collected: DateTime<Utc>,
+    pub collector_id: OmicronZoneUuid,
     #[serde(flatten)]
     pub data: EreportData,
     #[serde(flatten)]
@@ -28,12 +38,21 @@ pub struct Ereport {
 }
 
 impl Ereport {
-    pub fn new(data: EreportData, reporter: Reporter) -> Self {
-        Self { data, reporter, marked_seen_in: None }
-    }
-
-    pub fn id(&self) -> &EreportId {
-        &self.data.id
+    pub fn new(
+        id: EreportId,
+        time_collected: DateTime<Utc>,
+        collector_id: OmicronZoneUuid,
+        data: EreportData,
+        reporter: Reporter,
+    ) -> Self {
+        Self {
+            id,
+            time_collected,
+            collector_id,
+            data,
+            reporter,
+            marked_seen_in: None,
+        }
     }
 }
 
@@ -47,18 +66,16 @@ impl core::ops::Deref for Ereport {
 impl iddqd::IdOrdItem for Ereport {
     type Key<'a> = &'a EreportId;
     fn key(&self) -> Self::Key<'_> {
-        self.id()
+        &self.id
     }
 
     iddqd::id_upcast!();
 }
 
+/// Per-ereport data, including the VPD identity of the reporter, the ereport's
+/// class, and the actual JSON body of the ereport.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EreportData {
-    #[serde(flatten)]
-    pub id: EreportId,
-    pub time_collected: DateTime<Utc>,
-    pub collector_id: OmicronZoneUuid,
     pub serial_number: Option<String>,
     pub part_number: Option<String>,
     pub class: Option<String>,
@@ -67,8 +84,9 @@ pub struct EreportData {
 }
 
 impl EreportData {
-    /// Interpret a service processor ereport from a raw JSON blobule, plus the
-    /// restart ID and collection metadata.
+    /// Interpret a service processor ereport from a raw JSON blobule and
+    /// restart ID, returning a tuple of the [`Ena`] and [`EreportData`]
+    /// suitable for insertion into the database.
     ///
     /// This conversion is lossy; if some information is not present in the raw
     /// ereport JSON, such as the SP's VPD identity, we log a warning, rather
@@ -82,9 +100,7 @@ impl EreportData {
         log: &slog::Logger,
         restart_id: EreporterRestartUuid,
         ereport: ereport_types::Ereport,
-        time_collected: DateTime<Utc>,
-        collector_id: OmicronZoneUuid,
-    ) -> Self {
+    ) -> (Ena, EreportData) {
         const MISSING_VPD: &str = " (perhaps the SP doesn't know its own VPD?)";
         let part_number = get_sp_metadata_string(
             "baseboard_part_number",
@@ -139,15 +155,15 @@ impl EreportData {
             }
         };
 
-        EreportData {
-            id: EreportId { restart_id, ena },
-            time_collected,
-            collector_id,
-            part_number,
-            serial_number,
-            class,
-            report: serde_json::Value::Object(ereport.data),
-        }
+        (
+            ena,
+            EreportData {
+                part_number,
+                serial_number,
+                class,
+                report: serde_json::Value::Object(ereport.data),
+            },
+        )
     }
 }
 
@@ -303,6 +319,15 @@ impl TryFrom<EreportFiltersParams> for EreportFilters {
 #[must_use = "this struct does nothing unless displayed"]
 pub struct DisplayEreportFilters<'a> {
     filters: &'a EreportFilters,
+    colored: bool,
+}
+
+impl DisplayEreportFilters<'_> {
+    /// If `colored` is true, style the output with ANSI terminal colors.
+    pub fn colored(mut self, colored: bool) -> Self {
+        self.colored = colored;
+        self
+    }
 }
 
 impl EreportFilters {
@@ -389,7 +414,7 @@ impl EreportFilters {
     }
 
     pub fn display(&self) -> DisplayEreportFilters<'_> {
-        DisplayEreportFilters { filters: self }
+        DisplayEreportFilters { filters: self, colored: false }
     }
 }
 
@@ -398,6 +423,8 @@ impl fmt::Display for DisplayEreportFilters<'_> {
         use itertools::Itertools;
 
         let filters = self.filters;
+        let styles = super::display::Styles::new(self.colored);
+        let heading = styles.heading();
 
         // Writes a semicolon-separated part to the formatter, tracking whether
         // we've written anything yet.
@@ -412,16 +439,17 @@ impl fmt::Display for DisplayEreportFilters<'_> {
             };
 
         if let Some(start) = filters.start_time() {
-            fmt_part(f, format_args!("start: {start}"))?;
+            fmt_part(f, format_args!("{}: {start}", heading.style("start")))?;
         }
         if let Some(end) = filters.end_time() {
-            fmt_part(f, format_args!("end: {end}"))?;
+            fmt_part(f, format_args!("{}: {end}", heading.style("end")))?;
         }
         if !filters.only_serials().is_empty() {
             fmt_part(
                 f,
                 format_args!(
-                    "serials: {}",
+                    "{}: {}",
+                    heading.style("serials"),
                     filters.only_serials().iter().format(", ")
                 ),
             )?;
@@ -430,7 +458,8 @@ impl fmt::Display for DisplayEreportFilters<'_> {
             fmt_part(
                 f,
                 format_args!(
-                    "classes: {}",
+                    "{}: {}",
+                    heading.style("classes"),
                     filters.only_classes().iter().format(", ")
                 ),
             )?;
@@ -438,7 +467,7 @@ impl fmt::Display for DisplayEreportFilters<'_> {
 
         // If no filters are set, display "none" rather than empty output.
         if empty {
-            write!(f, "none")?;
+            write!(f, "{}", styles.missing().style("none"))?;
         }
         Ok(())
     }

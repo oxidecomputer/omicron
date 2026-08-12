@@ -4,8 +4,6 @@
 
 //! An AST node describing join table operations.
 
-// Copyright 2024 Oxide Computer Company
-
 use anyhow::Context;
 use anyhow::Error;
 use oxql_types::Table;

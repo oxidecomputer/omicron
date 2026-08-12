@@ -1,8 +1,11 @@
 #!/bin/bash
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
 #:
 #: name = "build-and-test (helios)"
 #: variety = "basic"
-#: target = "helios-2.0-32c256gb"
+#: target = "helios-3.0-32c256gb"
 #: rust_toolchain = true
 #: output_rules = [
 #:	"%/work/*",
@@ -13,9 +16,6 @@
 #:	"%/var/tmp/omicron_tmp/**/*",
 #:	"!/var/tmp/omicron_tmp/crdb-base*",
 #:	"!/var/tmp/omicron_tmp/rustc*",
-#: ]
-#: access_repos = [
-#:	"oxidecomputer/dendrite"
 #: ]
 #:
 #: [[publish]]

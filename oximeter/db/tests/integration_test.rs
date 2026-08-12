@@ -491,7 +491,7 @@ async fn wait_for_num_points(
                     QueryAuthzScope::Fleet)
                 .await
                 .map_err(|_| {
-                    poll::CondCheckError::<oximeter_db::Error>::NotYet
+                    poll::CondCheckError::<oximeter_db::Error>::NotYet { status: None }
                 })?;
             if total_points(&oxql_res) != n_samples {
                 info!(
@@ -500,7 +500,7 @@ async fn wait_for_num_points(
                     total_points(&oxql_res),
                     n_samples
                 );
-                Err(poll::CondCheckError::<oximeter_db::Error>::NotYet)
+                Err(poll::CondCheckError::<oximeter_db::Error>::NotYet { status: None })
             } else {
                 Ok(())
             }
@@ -518,10 +518,11 @@ async fn wait_for_num_points(
 async fn wait_for_ping(log: &Logger, client: &Client) -> anyhow::Result<()> {
     poll::wait_for_condition(
         || async {
-            client
-                .ping()
-                .await
-                .map_err(|_| poll::CondCheckError::<oximeter_db::Error>::NotYet)
+            client.ping().await.map_err(|_| poll::CondCheckError::<
+                oximeter_db::Error,
+            >::NotYet {
+                status: None,
+            })
         },
         &Duration::from_millis(100),
         &Duration::from_secs(30),
@@ -540,10 +541,11 @@ async fn wait_for_insert(
 ) -> anyhow::Result<()> {
     poll::wait_for_condition(
         || async {
-            client
-                .insert_samples(&samples)
-                .await
-                .map_err(|_| poll::CondCheckError::<oximeter_db::Error>::NotYet)
+            client.insert_samples(&samples).await.map_err(|_| {
+                poll::CondCheckError::<oximeter_db::Error>::NotYet {
+                    status: None,
+                }
+            })
         },
         &Duration::from_millis(1000),
         &Duration::from_secs(60),

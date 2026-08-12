@@ -301,9 +301,11 @@ impl ExternalNetworkingAllocator {
     pub fn for_new_nexus(
         &mut self,
     ) -> Result<ExternalNetworkingChoice, ExternalNetworkingError> {
-        // TODO-completeness: Support dual-stack external networking for
-        // services. See https://github.com/oxidecomputer/omicron/issues/8949
-        // and https://github.com/oxidecomputer/omicron/issues/9288.
+        // TODO(#8949): We need to consider how the IP Pools are assigned
+        // to services in order to generate the right public IP(s). Then we
+        // can generate the private IP configuration that's required to
+        // support that. See also
+        // https://github.com/oxidecomputer/omicron/issues/9313.
         let external_ip = self.external_ip_alloc.claim_next_exclusive_ip()?;
         let nic_ip_config = match external_ip {
             IpAddr::V4(_) => {
@@ -334,8 +336,11 @@ impl ExternalNetworkingAllocator {
     pub fn for_new_boundary_ntp(
         &mut self,
     ) -> Result<ExternalSnatNetworkingChoice, ExternalNetworkingError> {
-        // TODO-completeness: Support dual-stack external networking for
-        // services. See https://github.com/oxidecomputer/omicron/issues/8949.
+        // TODO(#8949): We need to consider how the IP Pools are assigned
+        // to services in order to generate the right public IP(s). Then we
+        // can generate the private IP configuration that's required to
+        // support that. See also
+        // https://github.com/oxidecomputer/omicron/issues/9313.
         let snat_cfg = self.external_ip_alloc.claim_next_snat_ip()?;
         let nic_ip_config = match snat_cfg.ip {
             IpAddr::V4(_) => {
@@ -366,8 +371,11 @@ impl ExternalNetworkingAllocator {
     pub fn for_new_external_dns(
         &mut self,
     ) -> Result<ExternalNetworkingChoice, ExternalNetworkingError> {
-        // TODO-completeness: Support dual-stack external networking for
-        // services. See https://github.com/oxidecomputer/omicron/issues/8949.
+        // TODO(#8949): We need to consider how the IP Pools are assigned
+        // to services in order to generate the right public IP(s). Then we
+        // can generate the private IP configuration that's required to
+        // support that. See also
+        // https://github.com/oxidecomputer/omicron/issues/9313.
         let external_ip = self
             .available_external_dns_ips
             .pop_first()
@@ -680,6 +688,7 @@ pub mod test {
     use nexus_types::deployment::blueprint_zone_type;
     use omicron_common::address::IpRange;
     use omicron_common::address::Ipv4Range;
+    use omicron_common::address::Ipv6Range;
     use omicron_common::api::external::Vni;
     use omicron_uuid_kinds::ExternalIpUuid;
     use omicron_uuid_kinds::GenericUuid;
@@ -1023,6 +1032,68 @@ pub mod test {
             matches!(err, ExternalNetworkingError::NoExternalDnsIpAvailable),
             "unexpected error: {}",
             InlineErrorChain::new(&err),
+        );
+    }
+
+    // Ensure we correctly generate addresses for all external service zones
+    // with only IPv6 pools to draw from.
+    #[test]
+    fn v6_only_pool_allocates_v6_external_networking() {
+        // Four v6 addresses: the first is reserved for external DNS, the rest
+        // are available for other external services (Nexus, boundary NTP).
+        let service_ip_pool = Ipv6Range::new(
+            "2001:db8::1".parse::<Ipv6Addr>().unwrap(),
+            "2001:db8::4".parse::<Ipv6Addr>().unwrap(),
+        )
+        .unwrap();
+        assert_eq!(service_ip_pool.len(), 4);
+
+        let external_dns_ip: IpAddr = "2001:db8::1".parse().unwrap();
+        let external_ip_policy = {
+            let mut builder = ExternalIpPolicy::builder();
+            builder.push_service_pool_ipv6_range(service_ip_pool).unwrap();
+            builder.add_external_dns_ip(external_dns_ip).unwrap();
+            builder.build()
+        };
+
+        // No running zones, so every address is available.
+        let mut builder = ExternalNetworkingAllocator::new(
+            std::iter::empty(),
+            &external_ip_policy,
+        )
+        .expect("constructed allocator");
+
+        // External DNS gets the reserved v6 address (::1) on the v6 OPTE subnet.
+        let dns = builder.for_new_external_dns().expect("got external DNS IP");
+        assert_eq!(dns.external_ip, external_dns_ip);
+        assert!(dns.nic_ip_config.is_ipv6_only());
+        assert_eq!(
+            dns.nic_ip_config.ipv6_subnet(),
+            Some(&*DNS_OPTE_IPV6_SUBNET)
+        );
+
+        // Nexus gets the next non-DNS v6 address (::2) on the v6 OPTE subnet.
+        let nexus = builder.for_new_nexus().expect("got Nexus IP");
+        assert_eq!(
+            nexus.external_ip,
+            IpAddr::from(service_ip_pool.iter().nth(1).unwrap()),
+        );
+        assert!(nexus.nic_ip_config.is_ipv6_only());
+        assert_eq!(
+            nexus.nic_ip_config.ipv6_subnet(),
+            Some(&*NEXUS_OPTE_IPV6_SUBNET),
+        );
+
+        // Boundary NTP gets a v6 SNAT address (::3) on the v6 OPTE subnet.
+        let ntp = builder.for_new_boundary_ntp().expect("got boundary NTP IP");
+        assert_eq!(
+            ntp.snat_cfg.ip,
+            IpAddr::from(service_ip_pool.iter().nth(2).unwrap()),
+        );
+        assert!(ntp.nic_ip_config.is_ipv6_only());
+        assert_eq!(
+            ntp.nic_ip_config.ipv6_subnet(),
+            Some(&*NTP_OPTE_IPV6_SUBNET),
         );
     }
 }
