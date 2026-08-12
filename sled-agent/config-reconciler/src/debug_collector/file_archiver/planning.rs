@@ -507,7 +507,9 @@ mod test {
     use file_archiver::rules::MAX_COLLIDING_FILENAMES;
     use file_archiver::rules::NameRotatedLogFile;
     use file_archiver::test_helpers::*;
+    use iddqd::IdOrdMap;
     use omicron_test_utils::dev::test_setup_log;
+    use slog::Logger;
     use slog::debug;
     use slog::info;
     use slog_error_chain::InlineErrorChain;
@@ -857,76 +859,17 @@ mod test {
                 }
             })
             .expect("at least one always-archived file in test data");
-        info!(
-            log,
-            "injecting error for directory";
-            "directory" => fail_dir.as_str(),
-        );
-
-        // Begin a simulated archive.  Configure the lister to inject an error
-        // for the directory that we chose.
-        let fake_output_dir = Utf8Path::new("/fake-output-directory");
-        let mut lister = TestLister::new_for_test_data(&files);
-        lister.inject_error(fail_dir);
-        let plan = test_archive(
-            log,
-            &files,
-            fake_output_dir,
-            ArchiveKind::Final,
-            &lister,
-        );
-
-        // Now walk through the archive plan and make sure:
-        // (1) Everything that's not in this directory gets archived.
-        // (2) There's an error produced for this directory.
-        // (3) Nothing is archived within this directory.
-        let mut unarchived_files = files.clone();
-        let mut nerrors = 0;
-        for step in plan.to_steps() {
-            let step = match step {
-                Err(error) => {
-                    let error = InlineErrorChain::new(&*error);
-                    let error_str = error.to_string();
-                    debug!(log, "found error"; error);
-                    assert!(error_str.contains(fail_dir.as_str()));
-                    assert!(error_str.contains("injected error"));
-                    nerrors += 1;
-                    continue;
-                }
-                Ok(step) => step,
-            };
-
-            let ArchiveStep::ArchiveFile(archive_file) = &step else {
-                continue;
-            };
-
-            assert!(
-                !archive_file.input_path.starts_with(fail_dir),
-                "archived file in the directory where we injected an error"
-            );
-
-            let _ = unarchived_files
-                .remove(archive_file.input_path.as_path())
-                .expect("archived file was in list of test files");
-        }
 
         // We should see one error for each time the directory that we chose was
         // listed.  That should always be at least once.  It could be more than
         // once, depending on how rules are configured.  For example, with two
         // rules for syslog (/var/adm/messages.* and /var/adm/messages), there
         // would be two errors for /var/adm.
+        let nerrors = check_injected_error(log, &files, fail_dir);
         assert_ne!(
             nerrors, 0,
             "expected at least one error after injecting one"
         );
-
-        for file in unarchived_files {
-            assert!(
-                file.path.starts_with(fail_dir) || file.kind.is_not_archived(),
-                "missed file: {:?}",
-                file.path
-            );
-        }
 
         logctx.cleanup_successful();
     }
@@ -969,25 +912,107 @@ mod test {
             );
         };
 
+        // There should be exactly one error.  Only one rule looks at any given
+        // file, so an error on a file path can only be reported once.
+        let nerrors = check_injected_error(log, &files, fail_file);
+        assert_eq!(
+            nerrors, 1,
+            "expected exactly one error after injecting only one error \
+             on a file path",
+        );
+
+        logctx.cleanup_successful();
+    }
+
+    /// Verifies that failures while scanning a `RuleScanning::Nested` rule do
+    /// not affect archiving other files
+    ///
+    /// Nested rules are scanned by `nested_file_steps()`, which is separate
+    /// code from `flat_file_steps()` and looks at the filesystem in three
+    /// places.  Each of those can fail on its own, and each has its own code to
+    /// report the failure.  This test injects an error at each of them in turn.
+    ///
+    /// The debug dropbox is used as the example here because it's the only
+    /// nested rule today.  Nothing about this test is specific to it.
+    #[test]
+    fn test_nested_archival_errors() {
+        // Set up the test.
+        let logctx = test_setup_log("test_nested_archival_errors");
+        let log = &logctx.log;
+
+        // Load the test data
+        let files = load_test_files().unwrap();
+
+        // Find a file archived by a nested rule.  From it we can derive all
+        // three paths where the nested scan looks at the filesystem: the file
+        // itself, the subdirectory containing it, and the directory containing
+        // that one (the root of the nested scan).  We look this up by kind
+        // rather than hardcoding a path so that this keeps working if the test
+        // data changes.
+        let nested_file = files
+            .iter()
+            .find(|test_file| {
+                matches!(test_file.kind, TestFileKind::DebugDropbox { .. })
+            })
+            .expect("test data has a file archived by a nested rule")
+            .path
+            .as_path();
+        let subdir =
+            nested_file.parent().expect("nested file has a parent directory");
+        let scan_root =
+            subdir.parent().expect("nested subdirectory has a parent");
+
+        // Each of these paths is used by exactly one rule, so each one should
+        // produce exactly one error.
+        //
+        // Failure to fetch the file's mtime.
+        let nerrors = check_injected_error(log, &files, nested_file);
+        assert_eq!(nerrors, 1, "expected one error for the nested file");
+
+        // Failure to list the files in the subdirectory.
+        let nerrors = check_injected_error(log, &files, subdir);
+        assert_eq!(nerrors, 1, "expected one error for the subdirectory");
+
+        // Failure to list the subdirectories of the scan's root directory.
+        let nerrors = check_injected_error(log, &files, scan_root);
+        assert_eq!(nerrors, 1, "expected one error for the scan root");
+
+        logctx.cleanup_successful();
+    }
+
+    /// Plans an archive with the lister configured to fail on `fail_path`, then
+    /// verifies that:
+    ///
+    /// (1) every error in the plan names `fail_path`
+    /// (2) nothing under `fail_path` is archived
+    /// (3) everything else that should be archived still is
+    ///
+    /// `fail_path` may be either a file or a directory.
+    ///
+    /// Returns the number of errors found in the plan.  Callers check this
+    /// because how many times a path is visited depends on the rules.
+    fn check_injected_error<'a>(
+        log: &Logger,
+        files: &'a IdOrdMap<TestFile>,
+        fail_path: &'a Utf8Path,
+    ) -> usize {
+        info!(log, "injecting error"; "path" => fail_path.as_str());
+
         // Begin a simulated archive.  Configure the lister to inject an error
-        // on the path that we selected above.
+        // for the path that the caller chose.
         let fake_output_dir = Utf8Path::new("/fake-output-directory");
-        let mut lister = TestLister::new_for_test_data(&files);
-        lister.inject_error(fail_file);
+        let mut lister = TestLister::new_for_test_data(files);
+        lister.inject_error(fail_path);
         let plan = test_archive(
             log,
-            &files,
+            files,
             fake_output_dir,
             ArchiveKind::Final,
             &lister,
         );
 
-        // Run through the archive plan and verify:
-        //
-        // (1) We get exactly one error and it's for the path we injected an
-        //     error for.
-        // (2) That file does not get archived.
-        // (2) Every other file gets archived.
+        // Walk through the archive plan, counting errors and removing the files
+        // that were archived from the list of files that were not.
         let mut unarchived_files = files.clone();
         let mut nerrors = 0;
         for step in plan.to_steps() {
@@ -996,7 +1021,7 @@ mod test {
                     let error = InlineErrorChain::new(&*error);
                     let error_str = error.to_string();
                     debug!(log, "found error"; error);
-                    assert!(error_str.contains(fail_file.as_str()));
+                    assert!(error_str.contains(fail_path.as_str()));
                     assert!(error_str.contains("injected error"));
                     nerrors += 1;
                     continue;
@@ -1011,8 +1036,9 @@ mod test {
             };
 
             assert!(
-                input_path != fail_file,
-                "unexpectedly archived file for which we injected an error"
+                !input_path.starts_with(fail_path),
+                "archived a file at or under the path where we injected an \
+                 error: {input_path:?}",
             );
 
             let _ = unarchived_files
@@ -1020,23 +1046,24 @@ mod test {
                 .expect("archived file was in list of test files");
         }
 
-        // There should be exactly one error.
-        assert_eq!(
-            nerrors, 1,
-            "expected exatcly one error after injecting only one error \
-             on a file path",
-        );
-
-        // Aside from the files that are never expected to be archived, there
-        // should be exactly one file that was not archived.
-        let unarchived_files: Vec<_> = unarchived_files
+        // The files that should have been archived but were not should be
+        // exactly those at or under the path where we injected the error.
+        let missed: Vec<_> = unarchived_files
             .iter()
             .filter(|test_file| !test_file.kind.is_not_archived())
             .map(|test_file| test_file.path.as_path())
             .collect();
-        assert_eq!(unarchived_files, [fail_file.as_path()]);
+        let expected: Vec<_> = files
+            .iter()
+            .filter(|test_file| {
+                !test_file.kind.is_not_archived()
+                    && test_file.path.starts_with(fail_path)
+            })
+            .map(|test_file| test_file.path.as_path())
+            .collect();
+        assert_eq!(missed, expected);
 
-        logctx.cleanup_successful();
+        nerrors
     }
 
     #[test]
