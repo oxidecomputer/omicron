@@ -953,6 +953,7 @@ name = "bootstrap-agent-lockstep-types"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "chrono",
  "iddqd",
  "omicron-common",
  "omicron-passwords",
@@ -962,6 +963,7 @@ dependencies = [
  "serde",
  "sled-agent-types",
  "sled-hardware-types",
+ "slog",
  "strum 0.27.2",
  "wicketd-commission-types",
 ]
@@ -14264,6 +14266,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "assert_matches",
+ "bootstrap-agent-lockstep-types",
  "chrono",
  "daft",
  "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=04a52a3240a26c58f03e1cf40353d67ff69d76b6)",
