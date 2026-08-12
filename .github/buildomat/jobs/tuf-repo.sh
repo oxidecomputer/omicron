@@ -8,7 +8,6 @@
 #: target = "helios-3.0-16c128gb"
 #: rust_toolchain = true
 #: output_rules = [
-#:	"=/work/manifest.toml",
 #:	"=/work/repo.zip",
 #:	"=/work/repo.zip.sha256.txt",
 #:	"=/work/helios.json",
@@ -22,11 +21,6 @@
 #:	"oxidecomputer/dmar-report",
 #:	"oxidecomputer/pilot",
 #: ]
-#:
-#: [[publish]]
-#: series = "rot-all"
-#: name = "manifest.toml"
-#: from_output = "/work/manifest.toml"
 #:
 #: [[publish]]
 #: series = "rot-all"

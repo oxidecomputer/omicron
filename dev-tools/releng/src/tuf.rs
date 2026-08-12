@@ -125,13 +125,6 @@ pub(crate) async fn build_tuf_repo(
         }],
     );
 
-    // Serialize the manifest out.
-    fs::write(
-        output_dir.join("manifest.toml"),
-        toml::to_string_pretty(&manifest)?.into_bytes(),
-    )
-    .await?;
-
     // Convert the manifest.
     let manifest = ArtifactManifest::from_deserialized(&output_dir, manifest)?;
     manifest.verify_all_semver()?;
