@@ -1874,10 +1874,11 @@ blueprint  ......<REDACTED_BLUEPRINT_ID>.......
 parent:    <none>
 
   sled: ..........<REDACTED_UUID>...........
-    state:::::::::::::   active
-    config generation:   2
-    subnet::::::::::::   ::/64
-    last allocated IP:   ::2
+    state::::::::::::::   active
+    update disposition:   available (generation 1)
+    config generation::   2
+    subnet:::::::::::::   ::/64
+    last allocated IP::   ::2
 
     host phase 2 contents:
     ------------------------
@@ -1924,10 +1925,11 @@ parent:    <none>
 
 
   sled: ..........<REDACTED_UUID>...........
-    state:::::::::::::   active
-    config generation:   2
-    subnet::::::::::::   ::/64
-    last allocated IP:   ::2
+    state::::::::::::::   active
+    update disposition:   available (generation 1)
+    config generation::   2
+    subnet:::::::::::::   ::/64
+    last allocated IP::   ::2
 
     host phase 2 contents:
     ------------------------
@@ -2021,10 +2023,11 @@ blueprint  ......<REDACTED_BLUEPRINT_ID>.......
 parent:    <none>
 
   sled: ..........<REDACTED_UUID>...........
-    state:::::::::::::   active
-    config generation:   2
-    subnet::::::::::::   ::/64
-    last allocated IP:   ::2
+    state::::::::::::::   active
+    update disposition:   available (generation 1)
+    config generation::   2
+    subnet:::::::::::::   ::/64
+    last allocated IP::   ::2
 
     host phase 2 contents:
     ------------------------
@@ -2071,10 +2074,11 @@ parent:    <none>
 
 
   sled: ..........<REDACTED_UUID>...........
-    state:::::::::::::   active
-    config generation:   2
-    subnet::::::::::::   ::/64
-    last allocated IP:   ::2
+    state::::::::::::::   active
+    update disposition:   available (generation 1)
+    config generation::   2
+    subnet:::::::::::::   ::/64
+    last allocated IP::   ::2
 
     host phase 2 contents:
     ------------------------

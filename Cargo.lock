@@ -953,6 +953,7 @@ name = "bootstrap-agent-lockstep-types"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "chrono",
  "iddqd",
  "omicron-common",
  "omicron-passwords",
@@ -962,6 +963,7 @@ dependencies = [
  "serde",
  "sled-agent-types",
  "sled-hardware-types",
+ "slog",
  "strum 0.27.2",
  "wicketd-commission-types",
 ]
@@ -7984,7 +7986,7 @@ dependencies = [
  "tokio",
  "toml 0.8.23",
  "transient-dns-server",
- "tufaceous 0.2.0",
+ "tufaceous",
  "tufaceous-artifact 0.2.0",
  "typed-rng",
  "uuid",
@@ -9296,7 +9298,7 @@ dependencies = [
  "tokio-util",
  "transient-dns-server",
  "trust-quorum-types",
- "tufaceous 0.2.0",
+ "tufaceous",
  "tufaceous-artifact 0.2.0",
  "url",
  "usdt 0.5.0",
@@ -9581,11 +9583,10 @@ dependencies = [
  "tar",
  "tokio",
  "toml 0.8.23",
- "tufaceous 0.2.0",
+ "tufaceous",
  "tufaceous-artifact 0.1.0",
  "tufaceous-artifact 0.2.0",
  "tufaceous-lib",
- "update-common",
 ]
 
 [[package]]
@@ -9623,7 +9624,7 @@ dependencies = [
  "slog-error-chain",
  "tokio",
  "tokio-util",
- "tufaceous 0.2.0",
+ "tufaceous",
  "tufaceous-artifact 0.2.0",
 ]
 
@@ -10815,9 +10816,9 @@ dependencies = [
 
 [[package]]
 name = "papergrid"
-version = "0.17.0"
+version = "0.18.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6978128c8b51d8f4080631ceb2302ab51e32cc6e8615f735ee2f83fd269ae3f1"
+checksum = "d0984e668274d34691bc2b262ef0d115de5fa9973bcdee7ae32213f93099153e"
 dependencies = [
  "bytecount",
  "fnv",
@@ -12030,7 +12031,7 @@ dependencies = [
  "quinn-udp",
  "rustc-hash",
  "rustls",
- "socket2 0.6.3",
+ "socket2 0.5.10",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -12393,7 +12394,7 @@ dependencies = [
  "tabled 0.15.0",
  "tokio",
  "toml 0.8.23",
- "tufaceous 0.2.0",
+ "tufaceous",
  "tufaceous-artifact 0.2.0",
  "uuid",
 ]
@@ -14265,6 +14266,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "assert_matches",
+ "bootstrap-agent-lockstep-types",
  "chrono",
  "daft",
  "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=04a52a3240a26c58f03e1cf40353d67ff69d76b6)",
@@ -15298,18 +15300,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4c998b0c8b921495196a48aabaf1901ff28be0760136e31604f7967b0792050e"
 dependencies = [
  "papergrid 0.11.0",
- "tabled_derive 0.7.0",
+ "tabled_derive",
  "unicode-width 0.1.14",
 ]
 
 [[package]]
 name = "tabled"
-version = "0.20.0"
+version = "0.21.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e39a2ee1fbcd360805a771e1b300f78cc88fec7b8d3e2f71cd37bbf23e725c7d"
+checksum = "b5dc662e6da844ad6e428ad16b57967c9d33c82e16bb1c258326c0c078605dff"
 dependencies = [
- "papergrid 0.17.0",
- "tabled_derive 0.11.0",
+ "papergrid 0.18.0",
  "testing_table",
 ]
 
@@ -15324,19 +15325,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 1.0.109",
-]
-
-[[package]]
-name = "tabled_derive"
-version = "0.11.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0ea5d1b13ca6cff1f9231ffd62f15eefd72543dab5e468735f1a456728a02846"
-dependencies = [
- "heck 0.5.0",
- "proc-macro-error2",
- "proc-macro2",
- "quote",
- "syn 2.0.117",
 ]
 
 [[package]]
@@ -16210,19 +16198,19 @@ dependencies = [
 [[package]]
 name = "transceiver-controller"
 version = "0.1.1"
-source = "git+https://github.com/oxidecomputer/transceiver-control?branch=main#81167659157860d6587713b3362b7bc791dfb530"
+source = "git+https://github.com/oxidecomputer/transceiver-control?branch=main#03a79a895871f9eca5400fac1556ed8526e031b7"
 dependencies = [
  "anyhow",
  "clap",
  "hubpack",
- "itertools 0.14.0",
+ "itertools 0.15.0",
  "nix 0.31.2",
  "schemars 0.8.22",
  "serde",
  "slog",
  "slog-async",
  "slog-term",
- "tabled 0.20.0",
+ "tabled 0.21.0",
  "thiserror 2.0.18",
  "tokio",
  "transceiver-decode 0.1.0 (git+https://github.com/oxidecomputer/transceiver-control?branch=main)",
@@ -16234,19 +16222,19 @@ dependencies = [
 [[package]]
 name = "transceiver-controller"
 version = "0.1.1"
-source = "git+https://github.com/oxidecomputer/transceiver-control#11afc484d5957b13d3058e44db274aa720cea1c4"
+source = "git+https://github.com/oxidecomputer/transceiver-control#03a79a895871f9eca5400fac1556ed8526e031b7"
 dependencies = [
  "anyhow",
  "clap",
  "hubpack",
- "itertools 0.14.0",
+ "itertools 0.15.0",
  "nix 0.31.2",
  "schemars 0.8.22",
  "serde",
  "slog",
  "slog-async",
  "slog-term",
- "tabled 0.20.0",
+ "tabled 0.21.0",
  "thiserror 2.0.18",
  "tokio",
  "transceiver-decode 0.1.0 (git+https://github.com/oxidecomputer/transceiver-control)",
@@ -16258,7 +16246,7 @@ dependencies = [
 [[package]]
 name = "transceiver-decode"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/transceiver-control?branch=main#81167659157860d6587713b3362b7bc791dfb530"
+source = "git+https://github.com/oxidecomputer/transceiver-control?branch=main#03a79a895871f9eca5400fac1556ed8526e031b7"
 dependencies = [
  "schemars 0.8.22",
  "serde",
@@ -16270,7 +16258,7 @@ dependencies = [
 [[package]]
 name = "transceiver-decode"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/transceiver-control#11afc484d5957b13d3058e44db274aa720cea1c4"
+source = "git+https://github.com/oxidecomputer/transceiver-control#03a79a895871f9eca5400fac1556ed8526e031b7"
 dependencies = [
  "schemars 0.8.22",
  "serde",
@@ -16282,7 +16270,7 @@ dependencies = [
 [[package]]
 name = "transceiver-messages"
 version = "0.1.1"
-source = "git+https://github.com/oxidecomputer/transceiver-control?branch=main#81167659157860d6587713b3362b7bc791dfb530"
+source = "git+https://github.com/oxidecomputer/transceiver-control?branch=main#03a79a895871f9eca5400fac1556ed8526e031b7"
 dependencies = [
  "bitflags 2.11.0",
  "clap",
@@ -16295,7 +16283,7 @@ dependencies = [
 [[package]]
 name = "transceiver-messages"
 version = "0.1.1"
-source = "git+https://github.com/oxidecomputer/transceiver-control#11afc484d5957b13d3058e44db274aa720cea1c4"
+source = "git+https://github.com/oxidecomputer/transceiver-control#03a79a895871f9eca5400fac1556ed8526e031b7"
 dependencies = [
  "bitflags 2.11.0",
  "clap",
@@ -16484,27 +16472,6 @@ dependencies = [
  "target-triple",
  "termcolor",
  "toml 1.1.2+spec-1.1.0",
-]
-
-[[package]]
-name = "tufaceous"
-version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/tufaceous?branch=v1#95395cecb019b851519232468472212efce1e42d"
-dependencies = [
- "anyhow",
- "camino",
- "chrono",
- "clap",
- "console 0.15.11",
- "humantime",
- "semver 1.0.28",
- "slog",
- "slog-async",
- "slog-envlogger",
- "slog-term",
- "tokio",
- "tufaceous-artifact 0.1.0",
- "tufaceous-lib",
 ]
 
 [[package]]
@@ -16902,44 +16869,6 @@ name = "untrusted"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8ecb6da28b8a351d773b68d5825ac39017e680750f980f3a1a85cd8dd28a47c1"
-
-[[package]]
-name = "update-common"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "bytes",
- "camino",
- "camino-tempfile",
- "chrono",
- "clap",
- "debug-ignore",
- "display-error-chain",
- "dropshot",
- "flate2",
- "fs-err 3.3.0",
- "futures",
- "hex",
- "hubtools 0.4.7 (git+https://github.com/oxidecomputer/hubtools.git?rev=2b1ef9b38d75563ea800baa3b17327eec17b1b7a)",
- "omicron-common",
- "omicron-test-utils",
- "omicron-workspace-hack",
- "rand 0.9.2",
- "schemars 0.8.22",
- "semver 1.0.28",
- "serde",
- "sha2 0.10.9",
- "slog",
- "tar",
- "thiserror 2.0.18",
- "tokio",
- "tokio-util",
- "tough 0.22.0",
- "tufaceous 0.1.0",
- "tufaceous-artifact 0.1.0",
- "tufaceous-brand-metadata 0.1.0",
- "tufaceous-lib",
-]
 
 [[package]]
 name = "url"
@@ -17686,7 +17615,7 @@ dependencies = [
  "toml 0.8.23",
  "tough 0.22.0",
  "transceiver-controller 0.1.1 (git+https://github.com/oxidecomputer/transceiver-control)",
- "tufaceous 0.2.0",
+ "tufaceous",
  "tufaceous-artifact 0.2.0",
  "uuid",
  "wicket",
