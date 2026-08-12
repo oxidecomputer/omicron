@@ -11,7 +11,6 @@ use dropshot::RequestContext;
 use dropshot::StreamingBody;
 use dropshot::TypedBody;
 use gateway_client::types::IgnitionCommand;
-use omicron_uuid_kinds::RackInitUuid;
 use schemars::JsonSchema;
 use semver::Version;
 use serde::Deserialize;
@@ -185,18 +184,6 @@ pub trait WicketdApi {
     async fn get_rack_setup_state(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<RackOperationStatus>, HttpError>;
-
-    /// Run rack setup.
-    ///
-    /// Will return an error if not all of the rack setup configuration has
-    /// been populated.
-    #[endpoint {
-        method = POST,
-        path = "/rack-setup"
-    }]
-    async fn post_run_rack_setup(
-        rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<RackInitUuid>, HttpError>;
 
     /// A status endpoint used to report high level information known to
     /// wicketd.

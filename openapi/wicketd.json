@@ -319,29 +319,6 @@
             "$ref": "#/components/responses/Error"
           }
         }
-      },
-      "post": {
-        "summary": "Run rack setup.",
-        "description": "Will return an error if not all of the rack setup configuration has been populated.",
-        "operationId": "post_run_rack_setup",
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RackInitUuid"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
       }
     },
     "/rack-setup/config": {
