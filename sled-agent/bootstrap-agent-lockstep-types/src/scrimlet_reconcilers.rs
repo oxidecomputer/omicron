@@ -121,51 +121,7 @@ pub enum ReconcilerCurrentStatus {
     Idle,
 }
 
-<<<<<<< HEAD
-impl ReconcilerCurrentStatus {
-    pub fn display(&self) -> ReconcilerCurrentStatusDisplay<'_> {
-        ReconcilerCurrentStatusDisplay(self)
-    }
-}
-
-pub struct ReconcilerCurrentStatusDisplay<'a>(&'a ReconcilerCurrentStatus);
-
-impl fmt::Display for ReconcilerCurrentStatusDisplay<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self.0 {
-            ReconcilerCurrentStatus::Inert(reason) => match reason {
-                ReconcilerInertReason::NoLongerAScrimlet => {
-                    write!(f, "inert: switch no longer present")
-                }
-                ReconcilerInertReason::TaskExitedUnexpectedly => write!(
-                    f,
-                    "inert: task exited unexpectedly \
-                     (this should be impossible!)"
-                ),
-            },
-            ReconcilerCurrentStatus::Running(ReconcilerRunningStatus {
-                activation_reason,
-                started_at_time,
-                running_for,
-            }) => {
-                writeln!(f, "currently running:")?;
-                let mut f = IndentWriter::new("    ", f);
-                writeln!(
-                    f,
-                    "activation reason: {}",
-                    activation_reason.description()
-                )?;
-                writeln!(f, "started at {started_at_time}")?;
-                write!(f, "running for {running_for:?}")
-            }
-            ReconcilerCurrentStatus::Idle => write!(f, "idle"),
-        }
-    }
-}
-
 /// Status of a single scrimlet reconciler.
-=======
->>>>>>> f1fb43473 (move Display adapters to omdb)
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[schemars(rename = "ReconcilerStatus{T}")]
 pub struct ReconcilerStatus<T> {

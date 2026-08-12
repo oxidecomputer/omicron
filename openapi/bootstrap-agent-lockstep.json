@@ -719,6 +719,7 @@
         ]
       },
       "DpdNatReconcilerStatusNatEntry": {
+        "description": "Identifying information of a single NAT entry.",
         "type": "object",
         "properties": {
           "external_ip": {
@@ -743,6 +744,7 @@
         ]
       },
       "DpdNatReconcilerStatusNatEntryFailure": {
+        "description": "Description of a failure to perform some dpd operation on a specific NAT entry.",
         "type": "object",
         "properties": {
           "entry": {
@@ -758,6 +760,7 @@
         ]
       },
       "DpdPortOperationFailure": {
+        "description": "Description of a failure to perform some dpd operation on a specific port.",
         "type": "object",
         "properties": {
           "error": {
@@ -877,6 +880,7 @@
         ]
       },
       "DpdReconcilerStatus": {
+        "description": "Status of the `dpd` scrimlet reconciler.",
         "type": "object",
         "properties": {
           "nat_status": {
@@ -1241,6 +1245,7 @@
         ]
       },
       "LldpdReconcilerStatus": {
+        "description": "Status of the `lldpd` scrimlet reconciler.",
         "oneOf": [
           {
             "type": "object",
@@ -1312,6 +1317,7 @@
         "maximum": 32
       },
       "MgdBfdOperationFailure": {
+        "description": "Description of a failure to perform some mgd operation on a BFD peer.",
         "type": "object",
         "properties": {
           "error": {
@@ -1328,6 +1334,7 @@
         ]
       },
       "MgdBfdReconcilerStatus": {
+        "description": "Status of reconciling BFD settings with `mgd`.",
         "oneOf": [
           {
             "description": "Reconciliation failed because we couldn't fetch the current set of BFD peers from mgd.",
@@ -1413,6 +1420,7 @@
         ]
       },
       "MgdBgpReconcilerStatus": {
+        "description": "Status of reconciling BGP settings with `mgd`.",
         "oneOf": [
           {
             "description": "Reconciliation failed because we couldn't fetch the current BGP configuration from MGD.",
@@ -1493,6 +1501,7 @@
         ]
       },
       "MgdBgpReconcilerStatusOpCount": {
+        "description": "Count of operations performed while reconciling BGP settings with mgd.",
         "type": "object",
         "properties": {
           "checkers_created": {
@@ -1626,6 +1635,7 @@
         ]
       },
       "MgdReconcilerStatus": {
+        "description": "Status of the `mgd` scrimlet reconciler.",
         "type": "object",
         "properties": {
           "bfd_status": {
@@ -1645,6 +1655,7 @@
         ]
       },
       "MgdStaticRouteReconcilerStatus": {
+        "description": "Status of reconciling static routes with `mgd`.",
         "oneOf": [
           {
             "description": "Reconciliation failed because we couldn't fetch the current set of static routes from MGD.",
@@ -2311,6 +2322,7 @@
         ]
       },
       "ReconcilerCurrentStatus": {
+        "description": "Current-point-in-time status of a single scrimlet reconciler.\n\n`Inert` and `Idle` both indicate \"not running\", but `Inert` means \"not running and will continue to not run for a given reason\", whereas `Idle` means \"not currently running but will run again soon\".",
         "oneOf": [
           {
             "description": "The reconciler is inert: it will not or cannot run for some reason.",
@@ -2419,6 +2431,7 @@
         ]
       },
       "ReconcilerStatusDpdReconcilerStatus": {
+        "description": "Status of a single scrimlet reconciler.",
         "type": "object",
         "properties": {
           "current_status": {
@@ -2444,6 +2457,7 @@
         ]
       },
       "ReconcilerStatusLldpdReconcilerStatus": {
+        "description": "Status of a single scrimlet reconciler.",
         "type": "object",
         "properties": {
           "current_status": {
@@ -2469,6 +2483,7 @@
         ]
       },
       "ReconcilerStatusMgdReconcilerStatus": {
+        "description": "Status of a single scrimlet reconciler.",
         "type": "object",
         "properties": {
           "current_status": {
@@ -2494,6 +2509,7 @@
         ]
       },
       "ReconcilerStatusUplinkdReconcilerStatus": {
+        "description": "Status of a single scrimlet reconciler.",
         "type": "object",
         "properties": {
           "current_status": {
@@ -3085,6 +3101,7 @@
         ]
       },
       "ScrimletReconcilersStatus": {
+        "description": "Status of the collective set of scrimlet reconcilers.",
         "oneOf": [
           {
             "description": "`sled-agent` has not yet provided underlay networking information.",
@@ -3314,6 +3331,7 @@
         "minItems": 1
       },
       "UplinkdReconcilerStatus": {
+        "description": "Status of the `uplinkd` scrimlet reconciler.",
         "oneOf": [
           {
             "type": "object",
