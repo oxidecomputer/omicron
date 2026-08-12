@@ -1685,7 +1685,7 @@
           {
             "in": "query",
             "name": "classes",
-            "description": "Optional alert class or glob pattern used to filter alerts",
+            "description": "Optional alert class or glob pattern used to filter alerts\n\nSee the guide-level documentation on alerts for details on alert classes and alert class glob patterns.",
             "schema": {
               "$ref": "#/components/schemas/AlertSubscription"
             }
@@ -1693,7 +1693,7 @@
           {
             "in": "query",
             "name": "end_time",
-            "description": "Inclusive upper bound on the alert creation time",
+            "description": "Inclusive upper bound on the alert creation time\n\nIf this is included, only alerts created at or before this time will be returned.",
             "schema": {
               "nullable": true,
               "type": "string",
@@ -1730,7 +1730,7 @@
           {
             "in": "query",
             "name": "start_time",
-            "description": "Inclusive lower bound on the alert creation time",
+            "description": "Inclusive lower bound on the alert creation time.\n\nIf this is included, only alerts created at or after this time will be returned.",
             "schema": {
               "nullable": true,
               "type": "string",
@@ -16240,14 +16240,14 @@
         ]
       },
       "Alert": {
-        "description": "Identity-related metadata that's included in \"asset\" public API objects (which generally have no name or description)",
+        "description": "An alert.\n\nAlerts represent edge-triggered notifications of an event that occurred in the system at a point in time. See the guide-level documentation alerts for details.",
         "type": "object",
         "properties": {
           "alert": {
-            "description": "The alert's data payload."
+            "description": "The alert's data payload.\n\nThe schema for this object is determined based on the alert class and version."
           },
           "class": {
-            "description": "The alert's class.",
+            "description": "The alert's class.\n\nSee the guide-level documentation on alerts for details on alert classes.",
             "type": "string"
           },
           "id": {
@@ -16266,7 +16266,7 @@
             "format": "date-time"
           },
           "version": {
-            "description": "The schema version of the payload for this alert class.",
+            "description": "The schema version of this alert's data payload.\n\nAlert schemas are versioned on a per-alert-class basis. The schema version for a particular alert class does not correspond to an Oxide API version. Clients should expect to encounter earlier schema versions for a given alert class, if the alert was recorded on an earlier Oxide system software version.",
             "type": "integer",
             "format": "uint32",
             "minimum": 0
