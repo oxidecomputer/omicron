@@ -181,10 +181,12 @@ impl SvcsResult {
                     // More detail in
                     // https://github.com/oxidecomputer/omicron/issues/10316
                     //
-                    // `InTransition` (or state with '*' appended as represented
-                    // in svcs)  is excluded because it is a momentary state
-                    // while a service moves between two states, not a stable
-                    // "enabled not online" condition worth reporting.
+                    // "in-transition" (or state with '*' appended as
+                    // represented in svcs) is excluded because it is not an
+                    // official `svcs`` state and is only displayed temporarily
+                    // while a service's instance moves between two states. It
+                    // is not a stable "enabled not online" condition worth
+                    // reporting.
                     SvcState::Online
                     | SvcState::Uninitialized
                     | SvcState::Disabled
