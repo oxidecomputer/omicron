@@ -9680,7 +9680,6 @@ dependencies = [
  "sled-agent-api",
  "sled-agent-client",
  "sled-agent-config-reconciler",
- "sled-agent-early-networking",
  "sled-agent-health-monitor",
  "sled-agent-measurements",
  "sled-agent-rack-setup",
@@ -14054,22 +14053,6 @@ dependencies = [
  "tufaceous-artifact 0.2.0",
  "xshell",
  "zone",
-]
-
-[[package]]
-name = "sled-agent-early-networking"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "futures",
- "gateway-client",
- "internal-dns-resolver",
- "internal-dns-types",
- "omicron-common",
- "omicron-workspace-hack",
- "sled-agent-types",
- "slog",
- "tokio",
 ]
 
 [[package]]
