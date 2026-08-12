@@ -271,24 +271,15 @@ impl NamingRule for NameRotatedLogFile {
             None => source_file_name.as_ref(),
         };
 
-        let mtime_as_seconds =
-            source_file_mtime.unwrap_or_else(|| Utc::now()).timestamp();
-        for i in 0..MAX_COLLIDING_FILENAMES {
-            let rv =
-                format!("{filename_base}.{}", mtime_as_seconds + i64::from(i));
-            let dest = output_directory.join(&rv);
-            if !lister.file_exists(&dest)? {
-                // unwrap(): we started with a valid `Filename` and did not add
-                // any slashes here.
-                return Ok(Filename::try_from(rv).unwrap());
-            }
-        }
-
-        Err(anyhow!(
-            "failed to choose archive file name for file {source_file_name:?} \
-             because there are too many files with colliding names (at least \
-             {MAX_COLLIDING_FILENAMES})"
-        ))
+        choose_unused_filename(
+            source_file_name,
+            source_file_mtime,
+            lister,
+            output_directory,
+            |mtime_as_seconds, i| {
+                format!("{filename_base}.{}", mtime_as_seconds + i64::from(i))
+            },
+        )
     }
 }
 
@@ -344,23 +335,48 @@ impl NamingRule for NameDropbox {
         lister: &dyn FileLister,
         output_directory: &Utf8Path,
     ) -> Result<Filename, anyhow::Error> {
-        let mtime_as_seconds =
-            source_file_mtime.unwrap_or_else(|| Utc::now()).timestamp();
-        for i in 0..MAX_COLLIDING_FILENAMES {
-            let rv =
-                format!("{}.{mtime_as_seconds}.{i}", source_file_name.as_ref());
-            let dest = output_directory.join(&rv);
-            if !lister.file_exists(&dest)? {
-                // unwrap(): we started with a valid `Filename` and did not add
-                // any slashes here.
-                return Ok(Filename::try_from(rv).unwrap());
-            }
-        }
-
-        Err(anyhow!(
-            "failed to choose archive file name for file {source_file_name:?} \
-             because there are too many files with colliding names (at least \
-             {MAX_COLLIDING_FILENAMES})"
-        ))
+        choose_unused_filename(
+            source_file_name,
+            source_file_mtime,
+            lister,
+            output_directory,
+            |mtime_as_seconds, i| {
+                format!("{}.{mtime_as_seconds}.{i}", source_file_name.as_ref())
+            },
+        )
     }
+}
+
+/// Chooses a name in `output_directory` that's not already used
+///
+/// `make_candidate` is invoked with the source file's `mtime` (as a Unix
+/// timestamp) and a counter that starts at zero.  It returns the candidate
+/// name to try.  This function returns the first candidate that does not
+/// already exist, giving up after `MAX_COLLIDING_FILENAMES` attempts.  If the
+/// source file has no `mtime`, the current time is used instead.
+///
+/// `make_candidate` must not produce a name containing a slash.
+fn choose_unused_filename(
+    source_file_name: &Filename,
+    source_file_mtime: Option<DateTime<Utc>>,
+    lister: &dyn FileLister,
+    output_directory: &Utf8Path,
+    make_candidate: impl Fn(i64, u16) -> String,
+) -> Result<Filename, anyhow::Error> {
+    let mtime_as_seconds =
+        source_file_mtime.unwrap_or_else(|| Utc::now()).timestamp();
+    for i in 0..MAX_COLLIDING_FILENAMES {
+        let rv = make_candidate(mtime_as_seconds, i);
+        let dest = output_directory.join(&rv);
+        if !lister.file_exists(&dest)? {
+            // unwrap(): callers are required not to introduce slashes.
+            return Ok(Filename::try_from(rv).unwrap());
+        }
+    }
+
+    Err(anyhow!(
+        "failed to choose archive file name for file {source_file_name:?} \
+         because there are too many files with colliding names (at least \
+         {MAX_COLLIDING_FILENAMES})"
+    ))
 }

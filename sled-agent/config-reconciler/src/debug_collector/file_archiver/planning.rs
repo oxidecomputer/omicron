@@ -505,6 +505,7 @@ mod test {
     use file_archiver::planning::ArchiveStep;
     use file_archiver::rules::ALL_RULES;
     use file_archiver::rules::MAX_COLLIDING_FILENAMES;
+    use file_archiver::rules::NameDropbox;
     use file_archiver::rules::NameRotatedLogFile;
     use file_archiver::test_helpers::*;
     use iddqd::IdOrdMap;
@@ -1178,6 +1179,80 @@ mod test {
             .collect();
         let lister = TestLister::new(colliding_filenames.iter());
         let error = input.choose_filename(&lister).unwrap_err();
+        assert!(
+            error.to_string().contains("too many files with colliding names")
+        );
+    }
+
+    #[test]
+    fn test_naming_dropbox() {
+        // Unlike log files, dropbox files keep their whole name.  The mtime and
+        // a counter are appended to it.
+        let template = ArchiveFile {
+            input_path: Utf8Path::new("/nonexistent/one/dap-test.txt")
+                .to_owned(),
+            mtime: Some("2025-12-12T16:51:00-07:00".parse().unwrap()),
+            output_directory: Utf8Path::new("/nonexistent/out").to_owned(),
+            namer: &NameDropbox,
+            delete_original: true,
+            rule: "dummy rule",
+        };
+
+        let empty_lister = TestLister::empty();
+
+        // ordinary case: output filename generated from the whole input
+        // filename, the mtime, and a counter
+        let filename = template.choose_filename(&empty_lister).unwrap();
+        assert_eq!(filename.as_ref(), "dap-test.txt.1765583460.0");
+
+        // case: no mtime available
+        // (this may never happen in practice)
+        //
+        // The current time should be used instead.
+        let input = ArchiveFile { mtime: None, ..template.clone() };
+        let before = Utc::now().with_nanosecond(0).unwrap();
+        let filename = input.choose_filename(&empty_lister).unwrap();
+        let after = Utc::now();
+        assert!(before <= after);
+        // The resulting filename should be "dap-test.txt.MTIME.0".
+        let (rest, counter) =
+            filename.as_ref().rsplit_once(".").expect("unexpected filename");
+        assert_eq!(counter, "0");
+        let (prefix, mtime) =
+            rest.rsplit_once(".").expect("unexpected filename");
+        assert_eq!(prefix, "dap-test.txt");
+        let parsed: DateTime<Utc> = DateTime::from_timestamp(
+            mtime.parse().expect("expected Unix timestamp in filename"),
+            0,
+        )
+        .unwrap();
+        assert!(before <= parsed);
+        assert!(parsed <= after);
+
+        // case: the normal output filename already exists
+        // expected behavior: the counter is incremented (unlike log files,
+        // where the mtime is what gets incremented)
+        let lister =
+            TestLister::new(["/nonexistent/out/dap-test.txt.1765583460.0"]);
+        let filename = template.choose_filename(&lister).unwrap();
+        assert_eq!(filename.as_ref(), "dap-test.txt.1765583460.1");
+
+        // case: several closely-named output filenames also exist
+        let lister = TestLister::new([
+            "/nonexistent/out/dap-test.txt.1765583460.0",
+            "/nonexistent/out/dap-test.txt.1765583460.1",
+            "/nonexistent/out/dap-test.txt.1765583460.2",
+            "/nonexistent/out/dap-test.txt.1765583460.4",
+        ]);
+        let filename = template.choose_filename(&lister).unwrap();
+        assert_eq!(filename.as_ref(), "dap-test.txt.1765583460.3");
+
+        // case: too many closely-named output files also exist
+        let colliding_filenames: Vec<_> = (0..=MAX_COLLIDING_FILENAMES)
+            .map(|i| format!("/nonexistent/out/dap-test.txt.1765583460.{i}"))
+            .collect();
+        let lister = TestLister::new(colliding_filenames.iter());
+        let error = template.choose_filename(&lister).unwrap_err();
         assert!(
             error.to_string().contains("too many files with colliding names")
         );
