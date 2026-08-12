@@ -33,6 +33,7 @@ use slog::info;
 use slog::o;
 use slog::warn;
 use slog_error_chain::InlineErrorChain;
+use std::collections::BTreeSet;
 
 /// Describes what kind of archive operation this is, which affects what debug
 /// data to collect
@@ -357,7 +358,7 @@ fn nested_file_steps<'a>(
     debug_dir: &'a Utf8Path,
     lister: &'a (dyn FileLister + Send + Sync),
     output_subdir: &'a Filename,
-    exclude_subdirs: &'a Regex,
+    exclude_subdirs: &'a BTreeSet<Filename>,
 ) -> Box<dyn Iterator<Item = Result<ArchiveStep<'a>, anyhow::Error>> + Send + 'a>
 {
     let input_directory = group.input_directory();
@@ -383,7 +384,7 @@ fn nested_file_steps<'a>(
         .filter(move |item| match item {
             // Pass errors through to the end of the pipeline.
             Err(_) => true,
-            Ok(subdir) => !exclude_subdirs.is_match(subdir.as_ref()),
+            Ok(subdir) => !exclude_subdirs.contains(subdir),
         })
         .flat_map(
             move |item| -> Box<

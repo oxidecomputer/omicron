@@ -15,6 +15,7 @@ use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
 use iddqd::id_upcast;
 use regex::Regex;
+use std::collections::BTreeSet;
 use std::sync::LazyLock;
 
 /// Describes a source of debug data
@@ -84,12 +85,13 @@ pub(crate) enum RuleScanning {
     /// `include_files_matching` regex
     Flat { include_files_matching: Regex },
     /// Archive files in immediate subdirectories of `directory`, skipping
-    /// subdirectories whose names match `exclude_subdirs`
+    /// subdirectories named in `exclude_subdirs`
     Nested {
         /// outputs should go in this subdirectory of the source's output
         /// directory
         output_subdir: Filename,
-        exclude_subdirs: Regex,
+        /// subdirectories with these names are not scanned at all
+        exclude_subdirs: BTreeSet<Filename>,
     },
 }
 
@@ -128,10 +130,12 @@ pub(crate) static ALL_RULES: LazyLock<IdOrdMap<Rule>> = LazyLock::new(|| {
             .unwrap()
             .to_owned();
     assert!(debug_dropbox.is_relative());
-    let debug_dropbox_reserved: Regex =
-        format!("^{}$", omicron_debug_dropbox::RESERVED_PRODUCER_NAME)
-            .parse()
-            .unwrap();
+    // unwrap(): the dropbox's reserved producer name is the name of a directory
+    // that the dropbox itself creates, so it cannot contain a slash.
+    let debug_dropbox_reserved = Filename::try_from(String::from(
+        omicron_debug_dropbox::RESERVED_PRODUCER_NAME,
+    ))
+    .unwrap();
     let rules = [
         Rule {
             label: "process core files",
@@ -192,7 +196,7 @@ pub(crate) static ALL_RULES: LazyLock<IdOrdMap<Rule>> = LazyLock::new(|| {
                     "debug_dropbox",
                 ))
                 .unwrap(),
-                exclude_subdirs: debug_dropbox_reserved,
+                exclude_subdirs: BTreeSet::from([debug_dropbox_reserved]),
             },
             delete_original: true,
             naming: &NameDropbox,
