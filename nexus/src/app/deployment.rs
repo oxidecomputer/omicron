@@ -1068,7 +1068,7 @@ pub enum BlueprintDebugAction {
     /// someone explicitly ran the planner using the Nexus internal API
     /// (likely a person running `omdb`)
     Plan,
-    /// someone explicit set the target blueprint using the Nexus internal API
+    /// someone explicitly set the target blueprint using the Nexus internal API
     /// (likely a person running `omdb`)
     Target,
 }
