@@ -230,14 +230,25 @@ mod test {
     /// Verifies that listing a non-existent directory produces an empty listing
     /// rather than an error.
     #[test]
-    fn test_list_files_nonexistent_dir() {
+    fn test_list_nonexistent_dir() {
         let dir = TestDir::new();
+        let path = dir.path().join("nonexistent");
         let lister = FilesystemLister;
-        let results = lister.list_files(&dir.path().join("nonexistent"));
+
+        let results = lister.list_files(&path);
         assert!(
             results.is_empty(),
-            "expected empty vec for nonexistent dir, got: {results:?}",
+            "expected empty vec from list_files() for nonexistent dir, \
+             got: {results:?}",
         );
+
+        let results = lister.list_directories(&path);
+        assert!(
+            results.is_empty(),
+            "expected empty vec from list_directories() for nonexistent dir, \
+             got: {results:?}",
+        );
+
         dir.cleanup();
     }
 
