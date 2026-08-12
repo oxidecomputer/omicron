@@ -235,16 +235,12 @@ async fn apply_plan(
         }
     }
 
-    if clear_failures.is_empty() && apply_failures.is_empty() {
-        DpdPortReconcilerStatus::Success { unchanged, cleared, applied }
-    } else {
-        DpdPortReconcilerStatus::PartialSuccess {
-            unchanged,
-            cleared,
-            clear_failures,
-            applied,
-            apply_failures,
-        }
+    DpdPortReconcilerStatus::Complete {
+        unchanged,
+        cleared,
+        clear_failures,
+        applied,
+        apply_failures,
     }
 }
 

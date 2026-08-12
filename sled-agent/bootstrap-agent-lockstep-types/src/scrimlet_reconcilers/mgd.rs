@@ -11,7 +11,7 @@ use std::collections::BTreeSet;
 use std::net::IpAddr;
 
 /// Description of a failure to perform some mgd operation on a BFD peer.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct MgdBfdOperationFailure {
     pub peer: IpAddr,
     pub error: String,
@@ -24,15 +24,8 @@ pub enum MgdBfdReconcilerStatus {
     /// BFD peers from mgd.
     FailedReadingBfdPeers(String),
 
-    /// Reconciliation completed successfully.
-    Success {
-        unchanged: BTreeSet<IpAddr>,
-        remove_success: Vec<IpAddr>,
-        add_success: Vec<IpAddr>,
-    },
-
-    /// Reconciliation completed but had at least one failure.
-    PartialSuccess {
+    /// Reconciliation completed.
+    Complete {
         unchanged: BTreeSet<IpAddr>,
         remove_success: Vec<IpAddr>,
         remove_failure: Vec<MgdBfdOperationFailure>,
@@ -52,19 +45,7 @@ impl slog::KV for MgdBfdReconcilerStatus {
             Self::FailedReadingBfdPeers(reason) => {
                 serializer.emit_str(skipped_key.into(), reason)
             }
-            Self::Success { unchanged, remove_success, add_success } => {
-                for (key, val) in [
-                    ("bfd-unchanged", unchanged.len()),
-                    ("bfd-successfully-removed", remove_success.len()),
-                    ("bfd-failed-to-remove", 0),
-                    ("bfd-successfully-added", add_success.len()),
-                    ("bfd-failed-to-add", 0),
-                ] {
-                    serializer.emit_usize(key.into(), val)?;
-                }
-                Ok(())
-            }
-            Self::PartialSuccess {
+            Self::Complete {
                 unchanged,
                 remove_success,
                 remove_failure,
@@ -190,20 +171,11 @@ pub enum MgdBgpReconcilerStatus {
     /// persisted config.
     FailedGeneratingDesiredConfig(String),
 
-    /// Reconciliation completed successfully.
+    /// Reconciliation completed.
     ///
-    /// mgd operations are performed in bulk, so each item here contains the
-    /// count of items involved.
-    Success {
-        counts: MgdBgpReconcilerStatusOpCount,
-        did_change_max_paths: bool,
-    },
-
-    /// Reconciliation completed with at least one failure.
-    ///
-    /// mgd operations are performed in bulk, so each item here contains the
-    /// count of items applied on success.
-    PartialSuccess {
+    /// mgd operations are performed in bulk, so `counts` contains the number of
+    /// items involved.
+    Complete {
         counts: MgdBgpReconcilerStatusOpCount,
         did_change_max_paths: bool,
         errors: Vec<String>,
@@ -222,14 +194,7 @@ impl slog::KV for MgdBgpReconcilerStatus {
             | Self::FailedGeneratingDesiredConfig(reason) => {
                 serializer.emit_str(skipped_key, reason)
             }
-            Self::Success { counts, did_change_max_paths } => {
-                serializer.emit_bool(
-                    "bgp-did-change-max-paths".into(),
-                    *did_change_max_paths,
-                )?;
-                slog::KV::serialize(&counts, record, serializer)
-            }
-            MgdBgpReconcilerStatus::PartialSuccess {
+            MgdBgpReconcilerStatus::Complete {
                 counts,
                 did_change_max_paths,
                 errors,
@@ -260,23 +225,12 @@ pub enum MgdStaticRouteReconcilerStatus {
     /// somewhere (either coming from mgd or in the rack network config).
     FailedGeneratingPlan(String),
 
-    /// Reconciliation completed successfully.
+    /// Reconciliation completed.
     ///
     /// mgd operations are performed in bulk, so each item here contains the
-    /// count of items involved.
-    Success {
-        unchanged: usize,
-        deleted_v4: usize,
-        deleted_v6: usize,
-        added_v4: usize,
-        added_v6: usize,
-    },
-
-    /// Reconciliation completed with at least one failure.
-    ///
-    /// mgd operations are performed in bulk. Each successful result contains
-    /// the count of items involved; error results describe the failure.
-    PartialSuccess {
+    /// count of items involved (on success) or the error associated with the
+    /// bulk operation (on failure).
+    Complete {
         unchanged: usize,
         delete_v4_result: Result<usize, String>,
         delete_v6_result: Result<usize, String>,
@@ -299,29 +253,7 @@ impl slog::KV for MgdStaticRouteReconcilerStatus {
             Self::FailedGeneratingPlan(reason) => {
                 serializer.emit_str(skipped_key.into(), reason)
             }
-            Self::Success {
-                unchanged,
-                deleted_v4,
-                deleted_v6,
-                added_v4,
-                added_v6,
-            } => {
-                serializer
-                    .emit_usize("static-routes-unchanged".into(), *unchanged)?;
-                for (key, items) in [
-                    ("static-routes-delete-v4", deleted_v4),
-                    ("static-routes-delete-v6", deleted_v6),
-                    ("static-routes-add-v4", added_v4),
-                    ("static-routes-add-v6", added_v6),
-                ] {
-                    serializer.emit_arguments(
-                        key.into(),
-                        &format_args!("success ({items} routes affected)"),
-                    )?;
-                }
-                Ok(())
-            }
-            Self::PartialSuccess {
+            Self::Complete {
                 unchanged,
                 delete_v4_result,
                 delete_v6_result,

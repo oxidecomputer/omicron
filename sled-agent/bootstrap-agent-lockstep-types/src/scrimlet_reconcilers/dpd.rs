@@ -41,15 +41,8 @@ pub enum DpdPortReconcilerStatus {
     /// plan - this should be impossible absent bugs.
     FailedGeneratingPlan(String),
 
-    /// Reconciliation completed successfully.
-    Success {
-        unchanged: BTreeSet<String>,
-        cleared: BTreeSet<String>,
-        applied: BTreeSet<String>,
-    },
-
-    /// Reconciliation completed but had at least one failure.
-    PartialSuccess {
+    /// Reconciliation completed.
+    Complete {
         unchanged: BTreeSet<String>,
         cleared: BTreeSet<String>,
         clear_failures: Vec<DpdPortOperationFailure>,
@@ -72,21 +65,7 @@ impl slog::KV for DpdPortReconcilerStatus {
             Self::FailedGeneratingPlan(reason) => {
                 serializer.emit_str(skipped_key.into(), reason)
             }
-            Self::Success { unchanged, cleared, applied } => {
-                // Only show a summary count; we have individual log statements
-                // for each clear/apply.
-                for (key, val) in [
-                    ("port-settings-unchanged", unchanged.len()),
-                    ("port-settings-successfully-cleared", cleared.len()),
-                    ("port-settings-failed-to-clear", 0),
-                    ("port-settings-successfully-applied", applied.len()),
-                    ("port-settings-failed-to-apply", 0),
-                ] {
-                    serializer.emit_usize(key.into(), val)?;
-                }
-                Ok(())
-            }
-            Self::PartialSuccess {
+            Self::Complete {
                 unchanged,
                 cleared,
                 clear_failures,
@@ -183,21 +162,8 @@ pub enum DpdNatReconcilerStatus {
     /// combination of entries (e.g., two zones with identical NAT entries).
     InvalidSystemNetworkingConfig(String),
 
-    /// Reconciliation completed successfully.
-    Success {
-        /// Set of zone IDs whose NAT entries were already correct in `dpd` and
-        /// left unchanged.
-        unchanged: BTreeSet<OmicronZoneUuid>,
-
-        /// List of NAT entries removed.
-        removed: Vec<DpdNatReconcilerStatusNatEntry>,
-
-        /// Map of zone NAT entries created.
-        created: BTreeMap<OmicronZoneUuid, DpdNatReconcilerStatusNatEntry>,
-    },
-
-    /// Reconciliation completed but had at least one failure.
-    PartialSuccess {
+    /// Reconciliation completed.
+    Complete {
         /// Set of zone IDs whose NAT entries were already correct in `dpd` and
         /// left unchanged.
         unchanged: BTreeSet<OmicronZoneUuid>,
@@ -237,21 +203,7 @@ impl slog::KV for DpdNatReconcilerStatus {
                     &format_args!("invalid system networking config: {reason}"),
                 )
             }
-            DpdNatReconcilerStatus::Success { unchanged, removed, created } => {
-                // Only show a summary count; we have individual log statements
-                // for each create/remove.
-                for (key, val) in [
-                    ("nat-entries-unchanged", unchanged.len()),
-                    ("nat-entries-successfully-removed", removed.len()),
-                    ("nat-entries-failed-to-remove", 0),
-                    ("nat-entries-successfully-created", created.len()),
-                    ("nat-entries-failed-to-create", 0),
-                ] {
-                    serializer.emit_usize(key.into(), val)?;
-                }
-                Ok(())
-            }
-            DpdNatReconcilerStatus::PartialSuccess {
+            DpdNatReconcilerStatus::Complete {
                 unchanged,
                 removed,
                 remove_failures,

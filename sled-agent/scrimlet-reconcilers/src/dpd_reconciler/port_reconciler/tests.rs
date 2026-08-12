@@ -925,15 +925,19 @@ async fn proptest_full_reconciliation() {
 
         match status {
             DpdPortReconcilerStatus::FailedReadingCurrentSettings(_)
-            | DpdPortReconcilerStatus::FailedGeneratingPlan(_)
-            | DpdPortReconcilerStatus::PartialSuccess { .. } => {
+            | DpdPortReconcilerStatus::FailedGeneratingPlan(_) => {
                 panic!("unexpected reconciler status: {status:?}");
             }
-            DpdPortReconcilerStatus::Success {
+            DpdPortReconcilerStatus::Complete {
                 unchanged,
                 cleared,
+                clear_failures,
                 applied,
+                apply_failures,
             } => {
+                assert_eq!(clear_failures, Vec::new());
+                assert_eq!(apply_failures, Vec::new());
+
                 assert_eq!(
                     unchanged,
                     input.expected_unchanged(),
