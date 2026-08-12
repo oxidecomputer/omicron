@@ -49,9 +49,7 @@ impl SimArtifactStorage {
                     .tempdir()
                     .unwrap()
             })),
-            write_semaphore: Arc::new(
-                const { Semaphore::const_new(MAX_PERMITS as usize) },
-            ),
+            write_semaphore: Arc::new(Semaphore::new(MAX_PERMITS as usize)),
             delete_done: watch::Sender::new(0u32.into()),
         }
     }
@@ -119,24 +117,21 @@ impl ArtifactStore<SimArtifactStorage> {
     pub async fn wait_for_writers(&self) {
         // Acquire a permit for MAX_PERMITS, which requires that all write tasks
         // have dropped their permits. Then immediately drop it.
-        let _permit = self
-            .storage
-            .write_semaphore
-            .acquire_many(MAX_PERMITS)
-            .await
-            .unwrap();
+        let _permit_or_closed =
+            self.storage.write_semaphore.acquire_many(MAX_PERMITS).await;
     }
 
+    /// Waits for all current writers to complete, then closes the semaphore to
+    /// disallow any new writers from starting.
+    ///
+    /// This cannot take an owned `self` because it would require moving this
+    /// struct out of an `Arc`.
     pub async fn stop_writers(&self) {
         // Acquire a permit for MAX_PERMITS, which requires that all write
         // tasks have dropped their permits. While holding the permit, close the
         // semaphore to prevent any new write tasks from starting.
-        let _permit = self
-            .storage
-            .write_semaphore
-            .acquire_many(MAX_PERMITS)
-            .await
-            .unwrap();
+        let _permit_or_closed =
+            self.storage.write_semaphore.acquire_many(MAX_PERMITS).await;
         self.storage.write_semaphore.close();
     }
 
