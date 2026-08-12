@@ -521,6 +521,8 @@ impl DataStore {
             (alert_dsl::time_created, alert_dsl::id),
             &pagparams,
         )
+        // The singleton probe alert should not appear in the alert list.
+        .filter(alert_dsl::alert_class.ne(model::AlertClass::Probe))
         .left_join(marker_dsl::rendezvous_alert_created)
         .select((
             Alert::as_select(),
