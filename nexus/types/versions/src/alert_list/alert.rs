@@ -12,7 +12,7 @@ use crate::v2025_11_20_00::asset::AssetIdentityMetadata;
 /// An alert.
 ///
 /// Alerts represent edge-triggered notifications of an event that occurred in
-/// the system at a point in time. See the guide-level documentation alerts for
+/// the system at a point in time. See the guide-level documentation on alerts for
 /// details.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct Alert {
