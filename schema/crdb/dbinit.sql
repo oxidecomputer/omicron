@@ -4132,6 +4132,16 @@ CREATE TABLE IF NOT EXISTS omicron.public.router_configuration_bgp_peer (
     PRIMARY KEY (router_configuration_id, name)
 );
 
+/* Unique constraint for numbered BGP peers (one per peer address) */
+CREATE UNIQUE INDEX IF NOT EXISTS router_configuration_bgp_peer_numbered_unique
+    ON omicron.public.router_configuration_bgp_peer (router_configuration_id, addr)
+    WHERE addr IS NOT NULL;
+
+/* Unique constraint for unnumbered BGP peers (one per port) */
+CREATE UNIQUE INDEX IF NOT EXISTS router_configuration_bgp_peer_unnumbered_unique
+    ON omicron.public.router_configuration_bgp_peer (router_configuration_id, port_name)
+    WHERE addr IS NULL;
+
 /*
  * A static route within a router configuration, identified by name within
  * its parent router configuration.
