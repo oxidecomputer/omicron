@@ -9,6 +9,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
+/// Status of the `uplinkd` scrimlet reconciler.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub enum UplinkdReconcilerStatus {
     Failed(String),

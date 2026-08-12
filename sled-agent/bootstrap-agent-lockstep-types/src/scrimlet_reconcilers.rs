@@ -100,6 +100,11 @@ pub struct ReconcilerRunningStatus {
     pub running_for: Duration,
 }
 
+/// Current-point-in-time status of a single scrimlet reconciler.
+///
+/// `Inert` and `Idle` both indicate "not running", but `Inert` means "not
+/// running and will continue to not run for a given reason", whereas `Idle`
+/// means "not currently running but will run again soon".
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub enum ReconcilerCurrentStatus {
     /// The reconciler is inert: it will not or cannot run for some reason.
@@ -110,6 +115,7 @@ pub enum ReconcilerCurrentStatus {
     Idle,
 }
 
+/// Status of a single scrimlet reconciler.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct ReconcilerStatus<T> {
     /// Status of the task at this moment.
@@ -120,6 +126,7 @@ pub struct ReconcilerStatus<T> {
     pub last_completion: Option<Box<ReconciliationCompletedStatus<T>>>,
 }
 
+/// Status of the collective set of scrimlet reconcilers.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub enum ScrimletReconcilersStatus {
     /// `sled-agent` has not yet provided underlay networking information.

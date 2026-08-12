@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use sled_agent_types::early_networking::LldpAdminStatus;
 use std::collections::BTreeMap;
 
+/// Status of the `lldpd` scrimlet reconciler.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub enum LldpdReconcilerStatus {
     Failed(String),

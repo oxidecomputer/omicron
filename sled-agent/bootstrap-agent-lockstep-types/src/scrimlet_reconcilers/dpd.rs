@@ -13,6 +13,7 @@ use std::{
     net::IpAddr,
 };
 
+/// Description of a failure to perform some dpd operation on a specific port.
 #[derive(
     Debug,
     Clone,
@@ -109,6 +110,7 @@ impl slog::KV for DpdPortReconcilerStatus {
     }
 }
 
+/// Status of the `dpd` scrimlet reconciler.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct DpdReconcilerStatus {
     /// Result of reconciling port settings
@@ -130,6 +132,7 @@ impl slog::KV for DpdReconcilerStatus {
     }
 }
 
+/// Identifying information of a single NAT entry.
 #[derive(
     Debug,
     Clone,
@@ -147,6 +150,8 @@ pub struct DpdNatReconcilerStatusNatEntry {
     pub last_port: u16,
 }
 
+/// Description of a failure to perform some dpd operation on a specific NAT
+/// entry.
 #[derive(
     Debug,
     Clone,

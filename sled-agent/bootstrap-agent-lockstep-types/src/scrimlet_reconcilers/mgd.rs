@@ -10,12 +10,14 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use std::net::IpAddr;
 
+/// Description of a failure to perform some mgd operation on a BFD peer.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct MgdBfdOperationFailure {
     pub peer: IpAddr,
     pub error: String,
 }
 
+/// Status of reconciling BFD settings with `mgd`.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub enum MgdBfdReconcilerStatus {
     /// Reconciliation failed because we couldn't fetch the current set of
@@ -84,6 +86,7 @@ impl slog::KV for MgdBfdReconcilerStatus {
     }
 }
 
+/// Count of operations performed while reconciling BGP settings with mgd.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
 pub struct MgdBgpReconcilerStatusOpCount {
     pub routers_deleted: usize,
@@ -173,6 +176,7 @@ impl slog::KV for MgdBgpReconcilerStatusOpCount {
     }
 }
 
+/// Status of reconciling BGP settings with `mgd`.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub enum MgdBgpReconcilerStatus {
     /// Reconciliation failed because we couldn't fetch the current BGP
@@ -242,6 +246,7 @@ impl slog::KV for MgdBgpReconcilerStatus {
     }
 }
 
+/// Status of reconciling static routes with `mgd`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub enum MgdStaticRouteReconcilerStatus {
     /// Reconciliation failed because we couldn't fetch the current set of
@@ -347,6 +352,7 @@ impl slog::KV for MgdStaticRouteReconcilerStatus {
     }
 }
 
+/// Status of the `mgd` scrimlet reconciler.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct MgdReconcilerStatus {
     pub bfd_status: MgdBfdReconcilerStatus,
