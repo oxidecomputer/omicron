@@ -14084,6 +14084,7 @@ dependencies = [
  "installinator-common",
  "key-manager",
  "key-manager-types",
+ "libc",
  "ntp-admin-client",
  "omicron-common",
  "omicron-debug-dropbox",
@@ -14114,6 +14115,7 @@ dependencies = [
  "tokio",
  "trust-quorum-types",
  "tufaceous-artifact 0.2.0",
+ "walkdir",
  "xshell",
  "zone",
 ]

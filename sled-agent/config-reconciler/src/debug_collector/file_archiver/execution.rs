@@ -85,8 +85,12 @@ async fn archive_one(
     dest: &Utf8Path,
     delete_original: bool,
 ) -> tokio::io::Result<()> {
+    let mut src_f = tokio::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW)
+        .open(&source)
+        .await?;
     let mut dest_f = tokio::fs::File::create(&dest).await?;
-    let mut src_f = tokio::fs::File::open(&source).await?;
 
     tokio::io::copy(&mut src_f, &mut dest_f).await?;
 
@@ -337,6 +341,174 @@ mod test {
             })
             .unwrap();
         assert_eq!(contents, "core.123-second");
+
+        tempdir.cleanup();
+        logctx.cleanup_successful();
+    }
+
+    /// Contents of files outside the zone tree that must never be archived
+    const CANARY_CONTENTS: &str = "canary-contents-must-never-be-archived";
+
+    /// Verifies that directory entries whose type does not match what a rule
+    /// expects are neither archived nor removed, nor do they cause archiving to
+    /// fail
+    ///
+    /// A critical case is a symlink where a rule expects a regular file: if the
+    /// archiver followed it, it would copy the target's contents into the debug
+    /// dataset (which gets shipped off-sled in support bundles) and then unlink
+    /// the symlink rather than the file whose contents it copied.  These cases
+    /// cannot be expressed with `TestLister`, which models the test data as
+    /// paths with no type information, so they are tested here against a real
+    /// filesystem.
+    #[tokio::test]
+    async fn test_entry_type_confusion() {
+        let logctx = test_setup_log("test_entry_type_confusion");
+        let log = &logctx.log;
+
+        let tempdir = TestDir::new();
+        info!(log, "temporary directory"; "tempdir" => %tempdir.path());
+
+        // The input tree, relative to the temporary directory, looks like
+        // this.  "->" marks a symlink; the targets are absolute paths.
+        //
+        //     outside-dir/                      outside the zone tree
+        //         canary.txt
+        //     an-example-zone/                  zone root
+        //         var/svc/log/
+        //             svc.log.0 -> canary.txt
+        //         var/debug_dropbox/
+        //             stray.dat
+        //             producer-link -> outside-dir
+        //             producer-a/
+        //                 real.dat              the one file to be archived
+        //                 link.dat -> canary.txt
+        //                 subdir/
+        //                     nested.dat
+        //
+        // Despite the dropbox and logs directories containing symlinks that
+        // point at paths under "outside-dir", nothing under `outside-dir`
+        // should ever be read or copied into the output directory because
+        // symlinks should not be followed.
+        let outdir = tempdir.path().join("out");
+        let zone_name = "an-example-zone";
+        let zone_root = tempdir.path().join(zone_name);
+        let dropbox = zone_root.join("var/debug_dropbox");
+        let producer_dir = dropbox.join("producer-a");
+
+        let outside_dir = tempdir.path().join("outside-dir");
+        let canary = outside_dir.join("canary.txt");
+
+        // Define some paths:
+        //
+        // - a real deposit that must be archived
+        let real_file = producer_dir.join("real.dat");
+        // - a directory where we expect to find a regular file, plus a file
+        //   nested below it
+        let unexpected_subdir = producer_dir.join("subdir");
+        let too_deep_file = unexpected_subdir.join("nested.dat");
+        // - a regular file in a path where we expect to find a directory
+        let stray_file = dropbox.join("stray.dat");
+
+        for (path, contents) in [
+            (&canary, CANARY_CONTENTS),
+            (&real_file, "real-contents"),
+            (&too_deep_file, "nested-contents"),
+            (&stray_file, "stray-contents"),
+        ] {
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, contents).unwrap();
+        }
+
+        // Define some paths to symlinks:
+        //
+        // - a symlink where we expect a regular file.
+        let file_symlink = producer_dir.join("link.dat");
+        // - a symlink where we expect a directory.
+        let producer_symlink = dropbox.join("producer-link");
+        // - a symlink matching the rotated SMF log rule
+        let log_symlink = zone_root.join("var/svc/log/svc.log.0");
+
+        for (link, target) in [
+            (&file_symlink, &canary),
+            (&producer_symlink, &outside_dir),
+            (&log_symlink, &canary),
+        ] {
+            std::fs::create_dir_all(link.parent().unwrap()).unwrap();
+            std::os::unix::fs::symlink(target, link).unwrap();
+            // Verify that the link really resolves to the intended target.
+            assert_eq!(
+                link.canonicalize_utf8().unwrap(),
+                target.canonicalize_utf8().unwrap(),
+                "symlink {link} does not resolve to {target}",
+            );
+        }
+
+        // Now, run a complete archive.
+        std::fs::create_dir(&outdir).unwrap();
+        let mut planner = ArchivePlanner::new(log, ArchiveKind::Final, &outdir);
+        planner.include_zone(zone_name, &zone_root);
+        let () = planner.execute().await.expect("successful execution");
+
+        // The real deposit should be the only thing archived from the producer
+        // directory, and its original should be gone.
+        let dropbox_outdir = outdir.join(zone_name).join("debug_dropbox");
+        let mut archived: Vec<_> = dropbox_outdir
+            .join("producer-a")
+            .read_dir_utf8()
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().to_owned())
+            .collect();
+        archived.sort();
+        assert_eq!(archived.len(), 1, "unexpected output files: {archived:?}");
+        assert!(
+            archived[0].starts_with("real.dat."),
+            "unexpected output file: {:?}",
+            archived[0],
+        );
+        assert!(!real_file.exists(), "real deposit was not deleted");
+
+        // Each symlink should still be a symlink.  Checking this rather than
+        // `exists()` (which follows symlinks) verifies that the link itself was
+        // not unlinked.
+        for path in [&file_symlink, &producer_symlink, &log_symlink] {
+            let metadata = path.symlink_metadata().unwrap();
+            assert!(metadata.is_symlink(), "no longer a symlink: {path}");
+        }
+
+        // Everything else the archiver declined to handle should be untouched.
+        for path in [&canary, &stray_file, &unexpected_subdir, &too_deep_file] {
+            assert!(path.exists(), "no longer exists: {path}");
+        }
+        assert_eq!(std::fs::read_to_string(&canary).unwrap(), CANARY_CONTENTS);
+
+        // No output directory should have been created for an entry that isn't
+        // a producer directory, nor for a subdirectory nested below one.
+        for path in [
+            dropbox_outdir.join("producer-link"),
+            dropbox_outdir.join("stray.dat"),
+            dropbox_outdir.join("producer-a").join("subdir"),
+        ] {
+            assert!(!path.exists(), "unexpected output path: {path}");
+        }
+
+        // The property that actually matters: nothing from outside the zone
+        // tree wound up in the debug dataset.
+        for entry in walkdir::WalkDir::new(&outdir) {
+            let entry = entry.unwrap();
+            if !entry.file_type().is_file() {
+                continue;
+            }
+            let contents = std::fs::read_to_string(entry.path())
+                .with_context(|| format!("read {:?}", entry.path()))
+                .unwrap();
+            assert_ne!(
+                contents,
+                CANARY_CONTENTS,
+                "archiver copied a symlink's target into the debug dataset: \
+                 {:?}",
+                entry.path(),
+            );
+        }
 
         tempdir.cleanup();
         logctx.cleanup_successful();
