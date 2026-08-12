@@ -2,8 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-// Copyright 2024 Oxide Computer Company
-
 // Export the current crate as `oximeter`. The macros defined in `oximeter-macro-impl` generate
 // code referring to symbols like `oximeter::traits::Target`. In consumers of this crate, that's
 // fine, but internally there _is_ no crate named `oximeter`, it's just `self` or `crate`.

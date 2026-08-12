@@ -6,7 +6,9 @@ use async_trait::async_trait;
 use nexus_db_lookup::LookupPath;
 use nexus_db_queries::context::OpContext;
 use omicron_common::api::external::Error;
-use omicron_uuid_kinds::{GenericUuid, InstanceUuid, PropolisUuid, SledUuid};
+use omicron_uuid_kinds::{
+    GenericUuid, InstanceUuid, PropolisUuid, RackUuid, SledUuid,
+};
 use sled_agent_client::Client as SledAgentClient;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -31,7 +33,7 @@ pub struct InstanceSledAgentInfo {
 #[async_trait]
 pub trait TestInterfaces {
     /// Access the Rack ID of the currently executing Nexus.
-    fn rack_id(&self) -> Uuid;
+    fn rack_id(&self) -> RackUuid;
 
     /// Attempts to obtain the Propolis ID and sled agent information for an
     /// instance.
@@ -73,7 +75,7 @@ pub trait TestInterfaces {
 
 #[async_trait]
 impl TestInterfaces for super::Nexus {
-    fn rack_id(&self) -> Uuid {
+    fn rack_id(&self) -> RackUuid {
         self.rack_id
     }
 

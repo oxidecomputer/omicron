@@ -10,23 +10,24 @@ use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::networking::{
     Address, AddressConfig, AddressLotBlockCreate, AddressLotCreate,
-    BgpAnnounceSetCreate, BgpAnnouncementCreate, BgpConfigCreate, BgpPeer,
-    BgpPeerConfig, LinkConfigCreate, LldpLinkConfigCreate, Route, RouteConfig,
-    SwitchInterfaceConfigCreate, SwitchInterfaceKind, SwitchPort,
-    SwitchPortApplySettings, SwitchPortSettings, SwitchPortSettingsCreate,
+    AddressLotKind, BgpAnnounceSetCreate, BgpAnnouncementCreate, BgpConfig,
+    BgpConfigCreate, BgpConfigUpdate, BgpPeer, BgpPeerConfig, LinkConfigCreate,
+    LldpLinkConfigCreate, Route, RouteConfig, SwitchInterfaceConfigCreate,
+    SwitchInterfaceKind, SwitchPort, SwitchPortApplySettings,
+    SwitchPortSettings, SwitchPortSettingsCreate,
 };
 use nexus_types::external_api::rack::Rack;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::{
-    AddressLotKind, IdentityMetadataCreateParams, NameOrId,
+    IdentityMetadataCreateParams, IdentityMetadataUpdateParams, NameOrId,
 };
 use oxnet::IpNet;
 use sled_agent_types::early_networking::ImportExportPolicy;
 use sled_agent_types::early_networking::LinkFec;
 use sled_agent_types::early_networking::LinkSpeed;
+use sled_agent_types::early_networking::MaxPathConfig;
 use sled_agent_types::early_networking::RouterLifetimeConfig;
 use sled_agent_types::early_networking::RouterPeerType;
-use sled_agent_types::early_networking::SwitchSlot;
 use std::str::FromStr;
 
 type ControlPlaneTestContext =
@@ -556,7 +557,7 @@ async fn test_port_settings_basic_v6_crud(ctx: &ControlPlaneTestContext) {
 
     // Create port settings
     let settings_name =
-        Name::from_str("nacelle").expect("nacell should be a valid name");
+        Name::from_str("nacelle").expect("should be a valid name");
     let mut settings =
         SwitchPortSettingsCreate::new(IdentityMetadataCreateParams {
             name: settings_name.clone(),
@@ -628,12 +629,6 @@ async fn test_port_settings_basic_v6_crud(ctx: &ControlPlaneTestContext) {
     assert_eq!(route.dst, IpNet::from_str("2000::/64").unwrap());
     assert_eq!(&route.gw.to_string(), "2000::1");
 
-    let mgd = &ctx.mgd[&SwitchSlot::Switch0];
-    let mgd_client = mg_admin_client::Client::new(
-        &format!("http://[::1]:{}", mgd.port),
-        ctx.logctx.log.clone(),
-    );
-
     // apply port settings
     let apply_settings = SwitchPortApplySettings {
         port_settings: NameOrId::Name(settings_name.clone()),
@@ -662,22 +657,160 @@ async fn test_port_settings_basic_v6_crud(ctx: &ControlPlaneTestContext) {
     .await
     .unwrap();
 
-    // wait for routes to be reconciled to mgd
-    for _ in 0..20 {
-        tokio::time::sleep(std::time::Duration::from_secs(10)).await;
-        match mgd_client.static_list_v6_routes().await {
-            Ok(routes) => {
-                let n = routes.len();
-                if n == 1 {
-                    return;
-                } else {
-                    println!("expected 1 route got {n}")
-                }
-            }
-            Err(e) => {
-                println!("failed to contact mgd: {e:?}");
-            }
-        }
+    // TODO-cleanup We'd like to confirm that the `sync_switch_configuration`
+    // background task propagates the changes requested above out to the
+    // bootstore via sled-agent, but in the test suite, that propagation fails
+    // for unrelated reasons:
+    // <https://github.com/oxidecomputer/omicron/issues/10958>.
+    //
+    // As a fallback, it'd be nice to check that `sync_switch_configuration` at
+    // least persists the new config into CRDB, but the task gates that on
+    // having successfully contacted at least one sled-agent, so this also is
+    // blocked by the above issue. For now, we've manually confirmed that the
+    // above route is present in the request `sync_switch_configuration`
+    // attempts to send by inspecting the logfile (where the request is included
+    // alongside the connection error from trying to contact a nonexistent
+    // sled-agent).
+}
+
+#[nexus_test]
+async fn test_bgp_config_update(ctx: &ControlPlaneTestContext) {
+    let client = &ctx.external_client;
+
+    let parkinglot: Name = "parkinglot".parse().unwrap();
+    let as47: Name = "as47".parse().unwrap();
+    let instances = NameOrId::Name("instances".parse().unwrap());
+
+    // Create an address lot for the announce set blocks.
+    let lot_params = AddressLotCreate {
+        identity: IdentityMetadataCreateParams {
+            name: parkinglot.clone(),
+            description: "an address parking lot".into(),
+        },
+        kind: AddressLotKind::Infra,
+        blocks: vec![AddressLotBlockCreate {
+            first_address: "1.2.3.0".parse().unwrap(),
+            last_address: "1.2.3.255".parse().unwrap(),
+        }],
+    };
+    NexusRequest::objects_post(
+        client,
+        "/v1/system/networking/address-lot",
+        &lot_params,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+
+    // Create two announce sets so the config can be moved between them.
+    for name in ["instances", "instances2"] {
+        let announce_set = BgpAnnounceSetCreate {
+            identity: IdentityMetadataCreateParams {
+                name: name.parse().unwrap(),
+                description: "an announce set".into(),
+            },
+            announcement: vec![BgpAnnouncementCreate {
+                address_lot_block: NameOrId::Name(parkinglot.clone()),
+                network: "1.2.3.0/24".parse().unwrap(),
+            }],
+        };
+        NexusRequest::object_put(
+            client,
+            "/v1/system/networking/bgp-announce-set",
+            Some(&announce_set),
+        )
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap();
     }
-    panic!("expected number of routes not found");
+
+    // Create the BGP config.
+    let bgp_config = BgpConfigCreate {
+        identity: IdentityMetadataCreateParams {
+            name: as47.clone(),
+            description: "autonomous system 47".into(),
+        },
+        bgp_announce_set_id: instances.clone(),
+        asn: 47,
+        vrf: None,
+        checker: None,
+        shaper: None,
+        max_paths: Default::default(),
+    };
+    NexusRequest::objects_post(
+        client,
+        "/v1/system/networking/bgp",
+        &bgp_config,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+
+    let valid_update = BgpConfigUpdate {
+        identity: IdentityMetadataUpdateParams {
+            name: Some(as47),
+            description: Some("autonomous system 47".into()),
+        },
+        bgp_announce_set_id: Some(instances),
+        max_paths: Some(MaxPathConfig::new(1).unwrap()),
+    };
+
+    // Updating a config that doesn't exist is a 404.
+    NexusRequest::expect_failure_with_body(
+        client,
+        StatusCode::NOT_FOUND,
+        Method::PUT,
+        "/v1/system/networking/bgp?name_or_id=does-not-exist",
+        &valid_update,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+
+    // Referencing an announce set that doesn't exist is a 404.
+    NexusRequest::expect_failure_with_body(
+        client,
+        StatusCode::NOT_FOUND,
+        Method::PUT,
+        "/v1/system/networking/bgp?name_or_id=as47",
+        &BgpConfigUpdate {
+            bgp_announce_set_id: Some(NameOrId::Name(
+                "does-not-exist".parse().unwrap(),
+            )),
+            ..valid_update.clone()
+        },
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+
+    // A valid update returns the updated configuration.
+    let update = BgpConfigUpdate {
+        identity: IdentityMetadataUpdateParams {
+            name: Some("as47-renamed".parse().unwrap()),
+            description: Some("renamed config".into()),
+        },
+        bgp_announce_set_id: Some(NameOrId::Name(
+            "instances2".parse().unwrap(),
+        )),
+        max_paths: Some(MaxPathConfig::new(3).unwrap()),
+    };
+    let updated: BgpConfig = NexusRequest::object_put(
+        client,
+        "/v1/system/networking/bgp?name_or_id=as47",
+        Some(&update),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute_and_parse_unwrap()
+    .await;
+
+    assert_eq!(updated.identity.name.to_string(), "as47-renamed");
+    assert_eq!(updated.identity.description, "renamed config");
+    assert_eq!(updated.asn, 47);
+    assert_eq!(updated.max_paths, MaxPathConfig::new(3).unwrap());
 }

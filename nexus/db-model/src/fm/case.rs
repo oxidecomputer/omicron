@@ -123,8 +123,8 @@ impl CaseEreport {
     ) -> Self {
         let fm::case::CaseEreport { id, ereport, assigned_sitrep_id, comment } =
             ereport;
-        let restart_id = ereport.id().restart_id.into();
-        let ena = ereport.id().ena.into();
+        let restart_id = ereport.id.restart_id.into();
+        let ena = ereport.id.ena.into();
         Self {
             id: id.into(),
             case_id: case_id.into(),

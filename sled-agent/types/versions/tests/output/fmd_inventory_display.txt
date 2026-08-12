@@ -1,0 +1,24 @@
+--- ok variant ---
+cases (2):
+  case feedface-dead-beef-dead-beefdeadb00f (BOO-0000-FAKE)
+    url: http://example.invalid/msg/BOO-0000-FAKE
+  case feedface-dead-beef-dead-beefdeadbeef (JOKE-9001-FAKE)
+    url: http://example.invalid/msg/JOKE-9001-FAKE
+    event:
+      {
+        "class": "fault.vibes.off",
+        "spookiness": 9001,
+        "suspects": [
+          "casper",
+          "slimer"
+        ]
+      }
+resources (2):
+  resource bada55ca-fe00-0000-0000-000000000001 (case feedface-dead-beef-dead-beefdeadbeef)
+    fmri: ghost:///not/a/real/fmri
+    faulty: true   unusable: false  invisible: false
+  resource bada55ca-fe00-0000-0000-000000000002 (case feedface-dead-beef-dead-beefdeadb00f)
+    fmri: ghost:///also/not/a/real/fmri
+    faulty: false  unusable: true   invisible: true 
+--- err variant ---
+FMD collection failed: haunted by an absent fmd daemon

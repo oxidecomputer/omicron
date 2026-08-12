@@ -7,6 +7,7 @@
 use crate::authz;
 use crate::context::OpContext;
 use crate::db::DataStore;
+use crate::db::datastore::ServiceIpPool;
 use nexus_db_lookup::LookupPath;
 
 use anyhow::Result;
@@ -20,6 +21,8 @@ use nexus_db_model::Image;
 use nexus_db_model::Instance;
 use nexus_db_model::InstanceRuntimeState;
 use nexus_db_model::InstanceState;
+use nexus_db_model::IpPool;
+use nexus_db_model::IpPoolAssignment;
 use nexus_db_model::Project;
 use nexus_db_model::ProjectImage;
 use nexus_db_model::ProjectImageIdentity;
@@ -36,22 +39,23 @@ use nexus_types::external_api::affinity;
 use nexus_types::external_api::instance as instance_types;
 use nexus_types::external_api::project;
 use nexus_types::identity::Resource;
+use nexus_types::tuf_repo::TufRepoDescription;
 use omicron_common::api::external;
-use omicron_common::api::external::{
-    TufArtifactMeta, TufRepoDescription, TufRepoMeta,
-};
-use omicron_common::update::ArtifactId;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::PropolisUuid;
+use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::TufRepoUuid;
 use omicron_uuid_kinds::VolumeUuid;
+use std::collections::BTreeMap;
 use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
 use std::str::FromStr;
+use tufaceous_artifact::Artifact;
 use tufaceous_artifact::ArtifactHash;
-use tufaceous_artifact::{ArtifactKind, ArtifactVersion};
+use tufaceous_artifact::ArtifactSet;
+use tufaceous_artifact::ArtifactVersion;
 use uuid::Uuid;
 
 /// Creates a project within the silo of "opctx".
@@ -156,7 +160,7 @@ pub struct SledUpdateBuilder {
     sled_id: SledUuid,
     addr: SocketAddrV6,
     repo_depot_port: u16,
-    rack_id: Uuid,
+    rack_id: RackUuid,
     sled_hardware: SledSystemHardwareBuilder,
 }
 
@@ -166,7 +170,7 @@ impl Default for SledUpdateBuilder {
             sled_id: SledUuid::new_v4(),
             addr: SocketAddrV6::new(Ipv6Addr::LOCALHOST, 0, 0, 0),
             repo_depot_port: 0,
-            rack_id: Uuid::new_v4(),
+            rack_id: RackUuid::new_v4(),
             sled_hardware: SledSystemHardwareBuilder::default(),
         }
     }
@@ -192,7 +196,7 @@ impl SledUpdateBuilder {
         self
     }
 
-    pub fn rack_id(&mut self, rack_id: Uuid) -> &mut Self {
+    pub fn rack_id(&mut self, rack_id: RackUuid) -> &mut Self {
         self.rack_id = rack_id;
         self
     }
@@ -619,27 +623,64 @@ fn make_test_repo(version: u32) -> TufRepoDescription {
     let version_bytes = version.to_le_bytes();
     let hash_bytes: [u8; 32] = std::array::from_fn(|i| version_bytes[i % 4]);
     let hash = ArtifactHash(hash_bytes);
-    let version = semver::Version::new(u64::from(version), 0, 0);
-    let artifact_version = ArtifactVersion::new(version.to_string())
+    let system_version = semver::Version::new(u64::from(version), 0, 0);
+    let artifact_version = ArtifactVersion::new(system_version.to_string())
         .expect("valid artifact version");
     TufRepoDescription {
-        repo: TufRepoMeta {
+        artifacts: ArtifactSet::from([Artifact {
+            version: artifact_version,
+            tags: BTreeMap::from([(
+                "kind".to_string(),
+                "cool-blob".to_string(),
+            )]),
             hash,
-            targets_role_version: 0,
-            valid_until: chrono::Utc::now(),
-            system_version: version,
-            file_name: String::new(),
-        },
-        artifacts: vec![TufArtifactMeta {
-            id: ArtifactId {
-                name: String::new(),
-                version: artifact_version,
-                kind: ArtifactKind::from_static("empty"),
-            },
-            hash,
-            size: 0,
-            board: None,
-            sign: None,
-        }],
+            length: 0,
+        }]),
+        metadata: BTreeMap::from([("repo".to_string(), "yes".to_string())]),
+        system_version,
+        hash,
+        file_name: String::new(),
     }
+}
+
+/// Create a system-service IP pool of the given IP version, using the built-in
+/// service pool name and description, and return it.
+///
+/// Tests that need a system-service IP pool to exist (for example, to allocate
+/// service external IPs or NICs) should call this first.
+///
+/// This is idempotent: if the pool already exists, it is looked up and returned
+/// rather than recreated.
+pub async fn create_service_ip_pool(
+    opctx: &OpContext,
+    datastore: &DataStore,
+    name: &str,
+    version: external::IpVersion,
+) -> ServiceIpPool {
+    let description = format!("IP{version} IP Pool for Oxide Services");
+    let name: external::Name = name.parse().expect("valid service pool name");
+    let pool = IpPool::new(
+        &external::IdentityMetadataCreateParams {
+            name: name.clone(),
+            description: description.to_string(),
+        },
+        version.into(),
+        IpPoolAssignment::SystemServices,
+    );
+    let db_pool = match datastore.ip_pool_create(opctx, pool).await {
+        Ok(db_pool) => db_pool,
+        Err(external::Error::ObjectAlreadyExists { .. }) => {
+            let (_authz_pool, db_pool) = LookupPath::new(opctx, datastore)
+                .ip_pool_name(&nexus_db_model::Name(name))
+                .fetch()
+                .await
+                .expect("existing service IP pool");
+            db_pool
+        }
+        Err(e) => panic!("failed to create service IP pool: {e}"),
+    };
+    let id = db_pool.id();
+    let authz_pool =
+        authz::IpPool::new(authz::FLEET, id, external::LookupType::ById(id));
+    ServiceIpPool { authz_pool, db_pool }
 }

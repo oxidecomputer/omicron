@@ -1539,10 +1539,10 @@ Sled serial0
         A    0101010101010101010101010101010101010101010101010101010101010101 
         B    0202020202020202020202020202020202020202020202020202020202020202 
     cabooses:
-        SLOT     BOARD       NAME        VERSION GIT_COMMIT SIGN        
-        SpSlot0  SimGimletSp SimGimletSp 0.0.1   unknown    n/a         
-        RotSlotA SimRot      SimRot      0.0.2   unknown    sign-gimlet 
-        Stage0   SimRot      SimRot      0.0.1   unknown    sign-gimlet 
+        SLOT     BOARD       NAME        VERSION GIT_COMMIT SIGN                                                             
+        SpSlot0  SimGimletSp SimGimletSp 0.0.1   unknown    n/a                                                              
+        RotSlotA SimRot      SimRot      0.0.2   unknown    0000000000000000000000000000000000000000000000000000000000000000 
+        Stage0   SimRot      SimRot      0.0.1   unknown    0000000000000000000000000000000000000000000000000000000000000000 
     RoT pages:
         SLOT DATA_BASE64 
     RoT: active slot: slot A
@@ -1564,10 +1564,10 @@ Sled serial1
         A    0101010101010101010101010101010101010101010101010101010101010101 
         B    0202020202020202020202020202020202020202020202020202020202020202 
     cabooses:
-        SLOT     BOARD       NAME        VERSION GIT_COMMIT SIGN        
-        SpSlot0  SimGimletSp SimGimletSp 0.0.1   unknown    n/a         
-        RotSlotA SimRot      SimRot      0.0.2   unknown    sign-gimlet 
-        Stage0   SimRot      SimRot      0.0.1   unknown    sign-gimlet 
+        SLOT     BOARD       NAME        VERSION GIT_COMMIT SIGN                                                             
+        SpSlot0  SimGimletSp SimGimletSp 0.0.1   unknown    n/a                                                              
+        RotSlotA SimRot      SimRot      0.0.2   unknown    0000000000000000000000000000000000000000000000000000000000000000 
+        Stage0   SimRot      SimRot      0.0.1   unknown    0000000000000000000000000000000000000000000000000000000000000000 
     RoT pages:
         SLOT DATA_BASE64 
     RoT: active slot: slot A
@@ -1589,10 +1589,10 @@ Sled serial2
         A    0101010101010101010101010101010101010101010101010101010101010101 
         B    0202020202020202020202020202020202020202020202020202020202020202 
     cabooses:
-        SLOT     BOARD       NAME        VERSION GIT_COMMIT SIGN        
-        SpSlot0  SimGimletSp SimGimletSp 0.0.1   unknown    n/a         
-        RotSlotA SimRot      SimRot      0.0.2   unknown    sign-gimlet 
-        Stage0   SimRot      SimRot      0.0.1   unknown    sign-gimlet 
+        SLOT     BOARD       NAME        VERSION GIT_COMMIT SIGN                                                             
+        SpSlot0  SimGimletSp SimGimletSp 0.0.1   unknown    n/a                                                              
+        RotSlotA SimRot      SimRot      0.0.2   unknown    0000000000000000000000000000000000000000000000000000000000000000 
+        Stage0   SimRot      SimRot      0.0.1   unknown    0000000000000000000000000000000000000000000000000000000000000000 
     RoT pages:
         SLOT DATA_BASE64 
     RoT: active slot: slot A
@@ -1751,6 +1751,8 @@ LEDGERED SLED CONFIG
     reconciler task status: idle (finished at <REDACTED_TIMESTAMP> after running for <REDACTED_DURATION>s)
     reference measurements:
         (measurement set is empty)
+    fmd:
+        no faults reported
 
 SMF SERVICES STATUS
     no data on SMF services has been collected
@@ -1902,6 +1904,8 @@ LEDGERED SLED CONFIG
     reconciler task status: idle (finished at <REDACTED_TIMESTAMP> after running for <REDACTED_DURATION>s)
     reference measurements:
         (measurement set is empty)
+    fmd:
+        no faults reported
 
 SMF SERVICES STATUS
     no data on SMF services has been collected
@@ -2146,6 +2150,8 @@ LEDGERED SLED CONFIG
     reconciler task status: idle (finished at <REDACTED_TIMESTAMP> after running for <REDACTED_DURATION>s)
     reference measurements:
         (measurement set is empty)
+    fmd:
+        no faults reported
 
 SMF SERVICES STATUS
     no data on SMF services has been collected

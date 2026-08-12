@@ -7,6 +7,7 @@ use std::io::{BufWriter, Write};
 use anyhow::{Context, Result, ensure};
 use camino::{Utf8Path, Utf8PathBuf};
 use filetime::FileTime;
+use sha2::{Digest, Sha256};
 use slog::Logger;
 
 use super::CRDB_SEED_TAR_ENV;
@@ -18,11 +19,10 @@ use super::CRDB_SEED_TAR_ENV;
 pub fn digest_unique_to_schema() -> String {
     let schema = include_str!("../../../schema/crdb/dbinit.sql");
     let crdb_version = include_str!("../../../tools/cockroachdb_version");
-    let mut ctx = ring::digest::Context::new(&ring::digest::SHA256);
-    ctx.update(&schema.as_bytes());
-    ctx.update(&crdb_version.as_bytes());
-    let digest = ctx.finish();
-    hex::encode(digest.as_ref())
+    let mut hasher = Sha256::new();
+    hasher.update(&schema.as_bytes());
+    hasher.update(&crdb_version.as_bytes());
+    hex::encode(&hasher.finalize())
 }
 
 /// Looks up the standard environment variable `CRDB_SEED_INVALIDATE` to check

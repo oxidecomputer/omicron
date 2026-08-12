@@ -76,7 +76,6 @@ use sled_agent_types::support_bundle::{
 use sled_agent_types::trust_quorum::{
     ProxyCommitRequest, ProxyPrepareAndCommitRequest, TrustQuorumNetworkConfig,
 };
-use sled_agent_types::uplink::SwitchPorts;
 use sled_agent_types::zone_bundle::{
     BundleUtilization, CleanupContext, CleanupContextUpdate, CleanupCount,
     ZoneBundleFilter, ZoneBundleId, ZoneBundleMetadata, ZonePathParam,
@@ -90,6 +89,7 @@ use sled_agent_types_versions::v26;
 use sled_agent_types_versions::v30;
 use sled_agent_types_versions::v33;
 use sled_agent_types_versions::v39;
+use sled_agent_types_versions::v42;
 use sled_diagnostics::SledDiagnosticsQueryOutput;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
@@ -391,13 +391,6 @@ impl SledAgentApi for SledAgentSimImpl {
         Ok(HttpResponseOk(vnics))
     }
 
-    async fn uplink_ensure(
-        _rqctx: RequestContext<Self::Context>,
-        _body: TypedBody<SwitchPorts>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        Ok(HttpResponseUpdatedNoContent())
-    }
-
     async fn read_network_bootstore_config_cache(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<
@@ -410,6 +403,7 @@ impl SledAgentApi for SledAgentSimImpl {
         use v26::early_networking::EarlyNetworkConfigBody as BodyV26;
         use v30::early_networking::EarlyNetworkConfigBody as BodyV30;
         use v33::system_networking::SystemNetworkingConfig as BodyV33;
+        use v39::system_networking::SystemNetworkingConfig as BodyV39;
 
         let config =
             rqctx.context().bootstore_network_config.lock().unwrap().clone();
@@ -433,7 +427,7 @@ impl SledAgentApi for SledAgentSimImpl {
         // Downconvert from the current version to the v20 version we have to
         // return from this endpoint.
         let body = BodyV20::from(BodyV26::from(BodyV30::from(BodyV33::from(
-            latest_version_body,
+            BodyV39::from(latest_version_body),
         ))));
 
         Ok(HttpResponseOk(v20::early_networking::EarlyNetworkConfig {
@@ -441,6 +435,19 @@ impl SledAgentApi for SledAgentSimImpl {
             schema_version: BodyV20::SCHEMA_VERSION,
             body,
         }))
+    }
+
+    async fn write_network_bootstore_config_v42(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<v42::system_networking::WriteNetworkConfigRequest>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let mut config =
+            rqctx.context().bootstore_network_config.lock().unwrap();
+        let body = body.into_inner();
+
+        *config = EarlyNetworkConfigEnvelope::from(&body.body)
+            .serialize_to_bootstore_with_generation(body.generation);
+        Ok(HttpResponseUpdatedNoContent())
     }
 
     async fn write_network_bootstore_config_v39(

@@ -19,6 +19,8 @@ use omicron_common::api::external::{
     CreateResult, DataPageParams, DeleteResult, Error, ListResultVec,
     LookupResult, Name, NameOrId, UpdateResult,
 };
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::RackUuid;
 use sled_agent_types::early_networking::RouterPeerType;
 use sled_agent_types::early_networking::SwitchSlot;
 use std::sync::Arc;
@@ -218,7 +220,7 @@ impl super::Nexus {
             .db_datastore
             .switch_port_get_id(
                 opctx,
-                selector.rack_id,
+                RackUuid::from_untyped_uuid(selector.rack_id),
                 selector.switch_slot,
                 port.clone().into(),
             )
@@ -259,7 +261,7 @@ impl super::Nexus {
             .db_datastore
             .switch_port_get_id(
                 opctx,
-                params.rack_id,
+                RackUuid::from_untyped_uuid(params.rack_id),
                 params.switch_slot,
                 port.clone().into(),
             )

@@ -5,6 +5,9 @@
 //! Sled agent implementation
 
 use crate::artifact_store::{ArtifactStore, SledAgentArtifactStoreWrapper};
+use crate::bootstrap::sprockets_client::{
+    SprocketsClient, SprocketsClientError,
+};
 use crate::config::Config;
 use crate::hardware_monitor::HardwareMonitorHandle;
 use crate::instance_manager::InstanceManager;
@@ -26,8 +29,6 @@ use bootstore::schemes::v0 as bootstore;
 use camino::Utf8PathBuf;
 use derive_more::From;
 use dropshot::HttpError;
-use futures::StreamExt;
-use futures::stream::FuturesUnordered;
 use iddqd::IdHashMap;
 use illumos_utils::opte::PortManager;
 use illumos_utils::running_zone::RunningZone;
@@ -46,7 +47,9 @@ use illumos_utils::zpool::ZpoolOrRamdisk;
 use internal_dns_resolver::Resolver;
 use itertools::Itertools as _;
 use omicron_common::address::BOOTSTRAP_AGENT_RACK_INIT_PORT;
-use omicron_common::address::{Ipv6Subnet, SLED_PREFIX, get_sled_address};
+use omicron_common::address::{
+    Ipv6Subnet, SLED_PREFIX_LENGTH, get_sled_address,
+};
 use omicron_common::api::external::{ByteCount, ByteCountRangeError, Vni};
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::shared::DelegatedZvol;
@@ -66,9 +69,11 @@ use sled_agent_config_reconciler::{
     InternalDisksReceiver, LedgerNewConfigError, LedgerTaskError,
     ReconcilerInventory, SledAgentFacilities,
 };
-use sled_agent_early_networking::EarlyNetworkSetupError;
 use sled_agent_health_monitor::handle::HealthMonitorHandle;
 use sled_agent_measurements::MeasurementsHandle;
+use sled_agent_scrimlet_reconcilers::{
+    ScrimletReconcilersMode, SledAgentNetworkingInfo,
+};
 use sled_agent_types::attached_subnet::AttachedSubnet;
 use sled_agent_types::attached_subnet::AttachedSubnets;
 use sled_agent_types::dataset::LocalStorageDatasetDeleteRequest;
@@ -91,7 +96,6 @@ use sled_agent_types::sled::{
     StartSledAgentRequest, ThisSledSwitchZoneUnderlayIpAddr,
 };
 use sled_agent_types::system_networking::SystemNetworkingConfig;
-use sled_agent_types::uplink::HostPortConfig;
 use sled_agent_types::zone_bundle::{
     BundleUtilization, CleanupContext, CleanupCount, CleanupPeriod,
     PriorityOrder, StorageLimit, ZoneBundleMetadata,
@@ -106,9 +110,12 @@ use slog::Logger;
 use slog_error_chain::{InlineErrorChain, SlogInlineError};
 use sprockets_tls::keys::SprocketsConfig;
 use std::collections::BTreeMap;
-use std::net::{SocketAddr, SocketAddrV6};
+use std::net::{Ipv6Addr, SocketAddr, SocketAddrV6};
 use std::sync::Arc;
+use tokio::net::TcpStream;
 use tokio::sync::watch;
+use tokio::task::JoinSet;
+use trust_quorum::platform_id_to_baseboard_id;
 use uuid::Uuid;
 
 use illumos_utils::dladm::{Dladm, EtherstubVnic};
@@ -156,9 +163,6 @@ pub enum Error {
     #[error("Error managing instances")]
     Instance(#[from] crate::instance_manager::Error),
 
-    #[error("Error updating")]
-    Download(#[from] crate::updates::Error),
-
     #[error("Error managing guest networking")]
     Opte(#[from] illumos_utils::opte::Error),
 
@@ -170,9 +174,6 @@ pub enum Error {
 
     #[error(transparent)]
     ZpoolList(#[from] illumos_utils::zpool::ListError),
-
-    #[error(transparent)]
-    EarlyNetworkError(#[from] EarlyNetworkSetupError),
 
     #[error("Bootstore Error")]
     Bootstore(#[from] bootstore::NodeRequestError),
@@ -380,7 +381,7 @@ struct SledAgentInner {
     // Subnet of the Sled's underlay.
     //
     // The Sled Agent's address can be derived from this value.
-    subnet: Ipv6Subnet<SLED_PREFIX>,
+    subnet: Ipv6Subnet<SLED_PREFIX_LENGTH>,
 
     // The request that was used to start the sled-agent
     // This is used for idempotence checks during RSS/Add-Sled internal APIs
@@ -542,7 +543,7 @@ impl SledAgent {
         // Start collecting metric data.
         let baseboard = long_running_task_handles.hardware_manager.baseboard();
         let identifiers = SledIdentifiers {
-            rack_id: request.body.rack_id,
+            rack_id: request.body.rack_id.into_untyped_uuid(),
             sled_id: request.body.id.into_untyped_uuid(),
             model: baseboard.model().to_string(),
             revision: baseboard.revision(),
@@ -690,6 +691,19 @@ impl SledAgent {
                 .new(o!("component" => "NetworkConfigDeserializationTask")),
         ));
 
+        // Hand our scrimlet reconcilers the information they need, now that we
+        // have it available.
+        let this_sled_switch_zone_ip =
+            ThisSledSwitchZoneUnderlayIpAddr::from_sled_agent_request(&request);
+        long_running_task_handles
+            .scrimlet_reconcilers
+            .set_sled_agent_networking_info_once(SledAgentNetworkingInfo {
+                system_networking_config_rx: network_config_rx.clone(),
+                mode: ScrimletReconcilersMode::SwitchZone(
+                    this_sled_switch_zone_ip,
+                ),
+            });
+
         // Start reconciling against our ledgered sled config.
         config_reconciler.spawn_reconciliation_task(
             ReconcilerFacilities {
@@ -713,10 +727,7 @@ impl SledAgent {
                     *sled_address.ip(),
                 )?,
                 underlay_address: *sled_address.ip(),
-                local_switch_zone_ip:
-                    ThisSledSwitchZoneUnderlayIpAddr::from_sled_agent_request(
-                        &request,
-                    ),
+                local_switch_zone_ip: this_sled_switch_zone_ip,
                 rack_id: request.body.rack_id,
                 network_config_rx,
                 metrics_queue: metrics_manager.request_queue(),
@@ -1142,17 +1153,6 @@ impl SledAgent {
             .map_err(Error::from)
     }
 
-    pub async fn ensure_scrimlet_host_ports(
-        &self,
-        uplinks: Vec<HostPortConfig>,
-    ) -> Result<(), Error> {
-        self.inner
-            .services
-            .ensure_scrimlet_host_ports(uplinks)
-            .await
-            .map_err(Error::from)
-    }
-
     /// Validate if the given [`SocketAddr`] represents a peer on the same
     /// underlay subnet as the current sled.
     pub fn ensure_sled_local_request(
@@ -1248,7 +1248,7 @@ impl SledAgent {
     pub(crate) fn sled_identifiers(&self) -> SledIdentifiers {
         let baseboard = self.inner.hardware.baseboard();
         SledIdentifiers {
-            rack_id: self.inner.start_request.body.rack_id,
+            rack_id: self.inner.start_request.body.rack_id.into_untyped_uuid(),
             sled_id: self.inner.id.into_untyped_uuid(),
             model: baseboard.model().to_string(),
             revision: baseboard.revision(),
@@ -1294,7 +1294,7 @@ impl SledAgent {
             sled_id,
             sled_agent_address,
             sled_role,
-            baseboard,
+            baseboard_id: baseboard.into(),
             usable_hardware_threads,
             usable_physical_ram: ByteCount::try_from(usable_physical_ram)?,
             cpu_family,
@@ -1650,7 +1650,7 @@ pub enum AddSledError {
     BootstrapAgentClient {
         sled_id: Baseboard,
         #[source]
-        err: bootstrap_agent_client::Error,
+        err: SprocketsClientError,
     },
     #[error("Failed to connect to DDM")]
     DdmAdminClient(#[source] omicron_ddm_admin_client::DdmError),
@@ -1658,9 +1658,9 @@ pub enum AddSledError {
     NotFound(BaseboardId),
     #[error("Failed to initialize {sled_id}")]
     BootstrapTcpClient {
-        sled_id: Baseboard,
+        sled_id: BaseboardId,
         #[source]
-        err: crate::bootstrap::client::Error,
+        err: SprocketsClientError,
     },
 }
 
@@ -1672,77 +1672,107 @@ pub async fn sled_add(
     sled_id: BaseboardId,
     request: StartSledAgentRequest,
 ) -> Result<(), AddSledError> {
+    let (bootstrap_addr, stream) = find_sprockets_stream(
+        &log,
+        sprockets_config,
+        measurements,
+        sled_id.clone(),
+    )
+    .await?;
+
+    SprocketsClient::start_sled_agent_with_stream(stream, &request)
+        .await
+        .map_err(|err| AddSledError::BootstrapTcpClient {
+            sled_id: sled_id.clone(),
+            err,
+        })?;
+
+    info!(
+        log,
+        "Peer agent initialized";
+        "peer_bootstrap_addr" => %bootstrap_addr,
+        "peer_id" => %sled_id
+    );
+
+    Ok(())
+}
+
+/// Connect to each bootstrap address with sprockets until the one with a
+/// matching `BaseboardId` is found. Return that connection.
+async fn find_sprockets_stream(
+    log: &Logger,
+    sprockets_config: SprocketsConfig,
+    measurements: Arc<MeasurementsHandle>,
+    sled_id: BaseboardId,
+) -> Result<(Ipv6Addr, sprockets_tls::Stream<TcpStream>), AddSledError> {
     // Get all known bootstrap addresses via DDM
     let ddm_admin_client = DdmAdminClient::localhost(&log)?;
     let addrs = ddm_admin_client
         .derive_bootstrap_addrs_from_prefixes(&[BootstrapInterface::GlobalZone])
         .await?;
 
-    // Create a set of futures to concurrently map the baseboard to bootstrap ip
-    // for each sled
-    let mut addrs_to_sleds = addrs
-        .map(|ip| {
-            let log = log.clone();
-            async move {
-                let client = bootstrap_agent_client::Client::new(
-                    &format!("http://[{ip}]"),
-                    log,
+    let mut set = JoinSet::new();
+
+    for ip in addrs {
+        let sprockets_config = sprockets_config.clone();
+        let measurements = measurements.clone();
+        let bootstrap_addr =
+            SocketAddrV6::new(ip, BOOTSTRAP_AGENT_RACK_INIT_PORT, 0, 0);
+        let log =
+            log.new(o!("BootstrapAgentClient" => bootstrap_addr.to_string()));
+        set.spawn(async move {
+            let client = SprocketsClient::new(
+                bootstrap_addr,
+                sprockets_config,
+                measurements,
+                log,
+            );
+            (ip, client.connect().await)
+        });
+    }
+
+    let mut found = None;
+    while let Some(res) = set.join_next().await {
+        match res {
+            Ok((ip, Ok(stream))) => {
+                // Safety: We guarantee the format of the platform id at manufacturing time.
+                let baseboard_id = platform_id_to_baseboard_id(
+                    stream.peer_platform_id().as_str(),
                 );
-                let result = client.baseboard_get().await;
 
-                (ip, result)
-            }
-        })
-        .collect::<FuturesUnordered<_>>();
+                if baseboard_id == sled_id {
+                    // We found the stream for our new client.
+                    let log =
+                        log.new(o!("BootstrapAgentClient" => ip.to_string()));
+                    info!(
+                        log,
+                        "Found bootstrap IP for sled";
+                        "baseboard_id" => %baseboard_id
+                    );
+                    found = Some((ip, stream));
 
-    // Execute the futures until we find our matching sled or are done searching
-    let mut target_ip = None;
-    let mut found_baseboard = None;
-    while let Some((ip, result)) = addrs_to_sleds.next().await {
-        match result {
-            Ok(baseboard) => {
-                // Convert from progenitor type back to `sled-hardware`
-                // type.
-                let found: Baseboard = baseboard.into_inner().into();
-                if sled_id.serial_number == found.identifier()
-                    && sled_id.part_number == found.model()
-                {
-                    target_ip = Some(ip);
-                    found_baseboard = Some(found);
+                    // This aborts the rest of the tasks in `set`, which is what
+                    // we want in this case. They are only trying to establish
+                    // connections and so cancellation is fine.
                     break;
                 }
             }
+            Ok((ip, Err(err))) => {
+                let log = log.new(o!("BootstrapAgentClient" => ip.to_string()));
+                warn!(log, "Failed to get baseboard for {ip}"; "err" => #%err);
+            }
             Err(err) => {
                 warn!(
-                    log, "Failed to get baseboard for {ip}";
-                    "err" => #%err,
+                    log,
+                    "Failed to join sprockets connection task";
+                    "err" => #%err
                 );
             }
         }
     }
 
-    // Contact the sled and initialize it
-    let bootstrap_addr =
-        target_ip.ok_or_else(|| AddSledError::NotFound(sled_id.clone()))?;
-    let bootstrap_addr =
-        SocketAddrV6::new(bootstrap_addr, BOOTSTRAP_AGENT_RACK_INIT_PORT, 0, 0);
-    let client = crate::bootstrap::client::Client::new(
-        bootstrap_addr,
-        sprockets_config,
-        measurements,
-        log.new(o!("BootstrapAgentClient" => bootstrap_addr.to_string())),
-    );
-
-    // Safe to unwrap, because we would have bailed when checking target_ip
-    // above otherwise. baseboard and target_ip are set together.
-    let baseboard = found_baseboard.unwrap();
-
-    client.start_sled_agent(&request).await.map_err(|err| {
-        AddSledError::BootstrapTcpClient { sled_id: baseboard.clone(), err }
-    })?;
-
-    info!(log, "Peer agent initialized"; "peer_bootstrap_addr" => %bootstrap_addr, "peer_id" => %baseboard);
-    Ok(())
+    let ip_and_stream = found.ok_or_else(|| AddSledError::NotFound(sled_id))?;
+    Ok(ip_and_stream)
 }
 
 // Long-running task that updates the contents of `network_config_tx` any
@@ -1875,7 +1905,10 @@ impl SledAgentFacilities for ReconcilerFacilities {
         }
     }
 
-    fn ddm_remove_internal_dns_prefix(&self, prefix: Ipv6Subnet<SLED_PREFIX>) {
+    fn ddm_remove_internal_dns_prefix(
+        &self,
+        prefix: Ipv6Subnet<SLED_PREFIX_LENGTH>,
+    ) {
         self.service_manager
             .ddm_reconciler()
             .remove_internal_dns_subnet(prefix);

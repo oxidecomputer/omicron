@@ -14,9 +14,9 @@ use chrono::DateTime;
 use chrono::Utc;
 use clickhouse_admin_types::keeper::ClickhouseKeeperClusterMembership;
 use daft::Diffable;
-pub use gateway_client::types::PowerState;
-pub use gateway_client::types::RotImageError;
+pub use gateway_types::component::PowerState;
 pub use gateway_types::component::SpType;
+pub use gateway_types::rot::RotImageError;
 pub use gateway_types::rot::RotSlot;
 use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
@@ -35,6 +35,8 @@ use serde_with::serde_as;
 use sled_agent_types_versions::latest::inventory::ConfigReconcilerInventory;
 use sled_agent_types_versions::latest::inventory::ConfigReconcilerInventoryResult;
 use sled_agent_types_versions::latest::inventory::ConfigReconcilerInventoryStatus;
+use sled_agent_types_versions::latest::inventory::FmdInventory;
+use sled_agent_types_versions::latest::inventory::FmdInventoryError;
 use sled_agent_types_versions::latest::inventory::InventoryDataset;
 use sled_agent_types_versions::latest::inventory::InventoryDisk;
 use sled_agent_types_versions::latest::inventory::InventoryZpool;
@@ -322,6 +324,10 @@ impl Collection {
             .filter_map(|sled_agent| {
                 match &sled_agent.smf_services_enabled_not_online {
                     SvcsEnabledNotOnlineResult::SvcsEnabledNotOnline(svcs)
+                        // This should check if svcs.is_empty() which includes
+                        // parsing errors. We have a bug with this at the moment
+                        // https://github.com/oxidecomputer/omicron/issues/10997
+                        // This check should change once that issue is resolved
                         if svcs.services.is_empty() =>
                     {
                         None
@@ -345,6 +351,16 @@ impl Collection {
     pub fn display(&self) -> CollectionDisplay<'_> {
         CollectionDisplay::new(self)
     }
+}
+
+impl IdOrdItem for Collection {
+    type Key<'a> = CollectionUuid;
+
+    fn key(&self) -> Self::Key<'_> {
+        self.id
+    }
+
+    id_upcast!();
 }
 
 /// Caboose contents found during a collection
@@ -706,6 +722,7 @@ pub struct SledAgent {
     pub file_source_resolver: OmicronFileSourceResolverInventory,
     pub smf_services_enabled_not_online: SvcsEnabledNotOnlineResult,
     pub reference_measurements: IdOrdMap<SingleMeasurementInventory>,
+    pub fmd: Result<FmdInventory, FmdInventoryError>,
 }
 
 impl IdOrdItem for SledAgent {

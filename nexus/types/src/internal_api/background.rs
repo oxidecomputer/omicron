@@ -15,6 +15,7 @@ use omicron_uuid_kinds::AlertReceiverUuid;
 use omicron_uuid_kinds::AlertUuid;
 use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::CollectionUuid;
+use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::SitrepUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::SupportBundleUuid;
@@ -892,6 +893,35 @@ pub struct EreporterStatus {
     pub errors: Vec<String>,
 }
 
+/// The status of a `fm_config_loader` background task activation.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub enum FmConfigLoadStatus {
+    /// An error occurred querying the database.
+    Error(String),
+
+    /// The latest config override in the database could not be converted to
+    /// the domain type. The previously loaded config (or the default, if no
+    /// config was previously loaded) is still in effect.
+    LatestConfigInvalid {
+        /// What's wrong with it?
+        error: String,
+        fallback: CurrentFmConfig,
+    },
+
+    /// A fault management configuration was loaded (as of `time_loaded`).
+    Loaded(CurrentFmConfig),
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct CurrentFmConfig {
+    /// The current configuration.
+    pub config: crate::fm::FmConfigView,
+    /// The time at which the current config was loaded.
+    pub time_loaded: DateTime<Utc>,
+    /// Whether the config was updated in this activation.
+    pub updated: bool,
+}
+
 /// The status of a `fm_sitrep_loader` background task activation.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub enum SitrepLoadStatus {
@@ -905,24 +935,80 @@ pub enum SitrepLoadStatus {
     Loaded { version: crate::fm::SitrepVersion, time_loaded: DateTime<Utc> },
 }
 
-/// Per-child-table GC statistics, used by [`SitrepGcStatus`].
-#[derive(
-    Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq,
-)]
-pub struct ChildTableGcStats {
-    pub rows_deleted: usize,
-    pub batches: usize,
-}
-
 /// The status of a `fm_sitrep_gc` background task activation.
-#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct SitrepGcStatus {
     pub orphaned_sitreps_deleted: usize,
     pub sitrep_metadata_batches: usize,
     pub batch_size: u32,
     /// Per-child-table statistics, keyed by table name.
-    pub child_tables: BTreeMap<String, ChildTableGcStats>,
+    pub child_tables: BTreeMap<String, fm_sitrep_gc::ChildTableGcStats>,
     pub errors: Vec<String>,
+}
+
+pub mod fm_sitrep_gc {
+    use super::*;
+
+    /// Per-child-table GC statistics, used by [`SitrepGcStatus`].
+    #[derive(
+        Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq,
+    )]
+    pub struct ChildTableGcStats {
+        pub rows_deleted: usize,
+        pub batches: usize,
+    }
+}
+
+/// The status of a `fm_sitrep_history_pruner` background task activation.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub enum SitrepHistoryPrunerStatus {
+    /// The FM config has not yet been loaded from the database, so the pruning
+    /// task is waiting for the config to be available.
+    WaitingForConfig,
+    /// The pruning task has activated normally.
+    Activated {
+        /// The configuration values used for this pruning pass.
+        cfg: crate::fm::FmConfig,
+        /// The maximum number of history table entries deleted per query.
+        batch_size: u32,
+        /// Tracks how many sitreps were deleted during this activation.
+        pruned: fm_sitrep_history_pruner::SitrepsPruned,
+        /// The outcome of this activation (i.e. why it ended, and the last
+        /// observed history table count).
+        outcome: fm_sitrep_history_pruner::Outcome,
+    },
+}
+
+pub mod fm_sitrep_history_pruner {
+    use super::*;
+
+    #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+    pub struct SitrepsPruned {
+        /// The number of batched delete queries executed by this activation.
+        pub batches: usize,
+        /// The total number of history table entries deleted by this
+        /// activation, across all batches.
+        pub total: usize,
+        /// The range of sitrep versions deleted by this activation
+        /// (oldest..=newest), if any were deleted.
+        pub versions: Option<std::ops::RangeInclusive<u32>>,
+    }
+
+    /// Describes how a `fm_sitrep_history_pruner` activation ended.
+    #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+    pub enum Outcome {
+        /// The history table was already within the limit (with `count`
+        /// entries), so nothing was deleted.
+        NotPruned { count: u64 },
+        /// Entries were pruned from the history table, which is now within
+        /// the limit (with `count` entries remaining). The details of what
+        /// was pruned are recorded in [`SitrepsPruned`].
+        Pruned { count: u64 },
+        /// A pruning query failed. Any batches that completed before the
+        /// error still happened, and are recorded in
+        /// [`SitrepsPruned`].
+        Error(String),
+    }
 }
 
 /// The status of a `fm_analysis` background task activation.
@@ -945,21 +1031,26 @@ pub struct FmAnalysisStatus {
 
 pub mod fm_analysis {
     use super::*;
-    use crate::fm::analysis_reports;
+    use crate::fm::FmConfigSource;
+    use std::num::{NonZeroU32, NonZeroU64};
 
     #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
     pub struct PreparationStatus {
         /// Errors encountered during the preparation step which did *not*
         /// prevent the analysis step from completing.
         pub warnings: Vec<String>,
-        pub report: analysis_reports::InputReport,
     }
 
     #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
     #[allow(clippy::large_enum_variant)]
     pub enum Outcome {
         /// The task is disabled by config.
-        Disabled,
+        Disabled(FmConfigSource),
+
+        /// Fault management analysis was not performed, as the fault
+        /// management configuration has not yet been loaded from the
+        /// database.
+        WaitingForConfig,
 
         /// Fault management analysis was not performed, as no inventory
         /// collection has been loaded.
@@ -988,8 +1079,23 @@ pub mod fm_analysis {
     pub struct AnalysisStatus {
         pub start_time: DateTime<Utc>,
         pub end_time: DateTime<Utc>,
-        pub report: crate::fm::analysis_reports::AnalysisReport,
         pub outcome: AnalysisOutcome,
+        pub capacity: Option<SitrepCapacity>,
+    }
+
+    #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+    pub struct SitrepCapacity {
+        pub count: u64,
+        pub limit: NonZeroU32,
+    }
+
+    impl SitrepCapacity {
+        // NOTE(eliza): this _could_ be implemented as a float to get a couple
+        // decimal places, but I don't really think we need to be that precise,
+        // and matching on ranges nicely is cute...
+        pub fn usage_percent(&self) -> u64 {
+            self.count.saturating_mul(100) / NonZeroU64::from(self.limit)
+        }
     }
 
     #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -1000,6 +1106,10 @@ pub mod fm_analysis {
         /// Analysis produced a sitrep identical to the current sitrep,
         /// so we threw it away and did nothing.
         Unchanged,
+
+        /// Analysis produced a new sitrep, but the sitrep limit has been
+        /// reached, so it was not written to the database.
+        LimitReached { limit: NonZeroU32 },
 
         /// Analysis produced a new sitrep, but we failed to make it
         /// the current sitrep.
@@ -1024,6 +1134,21 @@ pub struct FmRendezvousStatus {
         fm_rendezvous::OpStatus<fm_rendezvous::SupportBundleCreationStatus>,
     pub ereport_marking:
         fm_rendezvous::OpStatus<fm_rendezvous::EreportMarkingStatus>,
+    pub alert_marker_gc: fm_rendezvous::OpStatus<fm_rendezvous::MarkerGcStatus>,
+    pub support_bundle_marker_gc:
+        fm_rendezvous::OpStatus<fm_rendezvous::MarkerGcStatus>,
+}
+
+impl FmRendezvousStatus {
+    /// Returns `true` if any operation in this activation observed that the
+    /// task's sitrep is older than the current sitrep in the database.
+    ///
+    /// If a new operation that uses `SitrepGuardedInsert` is added to the
+    /// rendezvous task, its stale-sitrep flag should be included here.
+    pub fn stale_sitrep_detected(&self) -> bool {
+        self.alerts.details.stale_sitrep
+            || self.support_bundles.details.stale_sitrep
+    }
 }
 
 pub mod fm_rendezvous {
@@ -1053,20 +1178,55 @@ pub mod fm_rendezvous {
         pub current_sitrep_alerts_requested: usize,
         /// The number of alerts created by this activation.
         pub alerts_created: usize,
+        /// The number of alerts that were already created by an earlier
+        /// activation (the `SitrepGuardedInsert` short-circuited on the
+        /// `rendezvous_alert_created` marker).
+        pub alerts_already_existed: usize,
+        /// If `true`, the activation aborted early because the
+        /// `SitrepGuardedInsert` guard detected that the rendezvous task's
+        /// sitrep is older than the current sitrep in the database. The
+        /// remaining alert requests for this activation were skipped; a
+        /// fresher activation will retry them.
+        pub stale_sitrep: bool,
         /// Errors that occurred during this activation.
         pub errors: Vec<String>,
     }
 
     #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
     pub struct SupportBundleCreationStatus {
-        /// The total number of support bundles requested by the current sitrep.
+        /// The number of support bundle requests in the current sitrep.
         pub total_bundles_requested: usize,
-        /// The total number of support bundles which were *first* requested in the
-        /// current sitrep.
+        /// Of those, the number which were *first* requested in the current
+        /// sitrep (rather than carried forward from an ancestor).
         pub current_sitrep_bundles_requested: usize,
         /// The number of support bundles created by this activation.
         pub bundles_created: usize,
+        /// The number of support bundles that were already created by an
+        /// earlier activation (the `SitrepGuardedInsert` short-circuited on
+        /// the `rendezvous_support_bundle_created` marker).
+        pub bundles_already_existed: usize,
+        /// If `true`, the activation aborted early because the
+        /// `SitrepGuardedInsert` guard detected that the rendezvous task's
+        /// sitrep is older than the current sitrep in the database. The
+        /// remaining bundle requests for this activation were skipped; a
+        /// fresher activation will retry them.
+        pub stale_sitrep: bool,
         /// Errors that occurred during this activation.
+        pub errors: Vec<String>,
+    }
+
+    /// Per-activation statistics for a `rendezvous_*_created` marker-table
+    /// GC sweep.
+    ///
+    /// Used for both `rendezvous_alert_created` and
+    /// `rendezvous_support_bundle_created` since the shape is identical.
+    #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+    pub struct MarkerGcStatus {
+        /// Number of marker rows deleted by this activation's sweep.
+        pub rows_deleted: usize,
+        /// Number of pages the sweep executed.
+        pub batches: usize,
+        /// Errors from this activation's sweep.
         pub errors: Vec<String>,
     }
 
@@ -1191,6 +1351,24 @@ pub struct SwitchPortPopulatorStatus {
     pub switch0: Result<SwitchPortPopulatorStatusKind, String>,
     /// Result of populating switch 1's ports, if any.
     pub switch1: Result<SwitchPortPopulatorStatusKind, String>,
+}
+
+/// The status of a `sync_switch_configuration` background task activation.
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+pub struct SwitchPortSettingsManagerStatus {
+    /// Racks skipped because a complete bootstore network config could not be
+    /// built from their switch port settings.
+    pub incomplete_bootstore_configs: Vec<IncompleteBootstoreConfigReport>,
+}
+
+/// A rack that `sync_switch_configuration` skipped because its bootstore network
+/// config could not be built completely.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct IncompleteBootstoreConfigReport {
+    /// The rack that was skipped.
+    pub rack_id: RackUuid,
+    /// The list of problems encountered.
+    pub problems: Vec<String>,
 }
 
 /// The status of a `session_cleanup` background task activation.

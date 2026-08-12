@@ -163,7 +163,7 @@ async fn write_ereport(ereport: Ereport, dir: &Utf8Path) -> anyhow::Result<()> {
         .as_deref()
         .filter(|&s| is_fs_safe_single_path_component(s))
         .unwrap_or("unknown_serial");
-    let id = &ereport.data.id;
+    let id = &ereport.id;
 
     let dir = dir
         .join(format!("{pn}-{sn}"))

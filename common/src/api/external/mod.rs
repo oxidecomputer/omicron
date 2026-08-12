@@ -11,7 +11,6 @@ mod error;
 pub mod http_pagination;
 pub use crate::address::IpVersion;
 pub use crate::api::internal::shared::AllowedSourceIps;
-use crate::update::ArtifactId;
 use api_identity::ObjectIdentity;
 use chrono::DateTime;
 use chrono::Utc;
@@ -28,7 +27,6 @@ use parse_display::Display;
 use parse_display::FromStr;
 use rand::Rng;
 use schemars::JsonSchema;
-use semver::Version;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_with::{DeserializeFromStr, SerializeDisplay};
@@ -45,7 +43,6 @@ use std::num::{NonZeroU16, NonZeroU32};
 use std::ops::Deref;
 use std::ops::RangeInclusive;
 use std::str::FromStr;
-use tufaceous_artifact::ArtifactHash;
 use uuid::Uuid;
 
 // The type aliases below exist primarily to ensure consistency among return
@@ -111,7 +108,7 @@ impl<T: ObjectIdentity> SimpleIdentityOrName for T {
 /// collection of objects
 ///
 /// This is logically analogous to Dropshot's `PageSelector` (plus the limit from
-/// Dropshot's `PaginationParams).  However, this type is HTTP-agnostic.  More
+/// Dropshot's `PaginationParams`).  However, this type is HTTP-agnostic.  More
 /// importantly, by the time this struct is generated, we know the type of the
 /// sort field and we can specialize `DataPageParams` to that type.  This makes
 /// it considerably simpler to implement the backend for most of our paginated
@@ -591,6 +588,8 @@ impl Display for ByteCount {
 // TODO-cleanup This could use the experimental std::num::IntErrorKind.
 #[derive(
     Debug,
+    Clone,
+    Copy,
     Eq,
     thiserror::Error,
     Ord,
@@ -2484,179 +2483,6 @@ impl std::fmt::Display for Digest {
     }
 }
 
-/// An address lot and associated blocks resulting from creating an address lot.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct AddressLotCreateResponse {
-    /// The address lot that was created.
-    pub lot: AddressLot,
-
-    /// The address lot blocks that were created.
-    pub blocks: Vec<AddressLotBlock>,
-}
-
-/// An address lot and associated blocks resulting from viewing an address lot.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct AddressLotViewResponse {
-    /// The address lot.
-    pub lot: AddressLot,
-
-    /// The address lot blocks.
-    pub blocks: Vec<AddressLotBlock>,
-}
-
-/// Represents an address lot object, containing the id of the lot that can be
-/// used in other API calls.
-// TODO Add kind attribute to AddressLot
-// https://github.com/oxidecomputer/omicron/issues/3064
-#[derive(
-    ObjectIdentity, Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq,
-)]
-pub struct AddressLot {
-    #[serde(flatten)]
-    pub identity: IdentityMetadata,
-
-    /// Desired use of `AddressLot`
-    pub kind: AddressLotKind,
-}
-
-/// The kind associated with an address lot.
-#[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
-#[serde(rename_all = "snake_case")]
-pub enum AddressLotKind {
-    /// Infrastructure address lots are used for network infrastructure like
-    /// addresses assigned to rack switches.
-    Infra,
-
-    /// Pool address lots are used by IP pools.
-    Pool,
-}
-
-/// An address lot block is a part of an address lot and contains a range of
-/// addresses. The range is inclusive.
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
-pub struct AddressLotBlock {
-    /// The id of the address lot block.
-    pub id: Uuid,
-
-    /// The first address of the block (inclusive).
-    pub first_address: IpAddr,
-
-    /// The last address of the block (inclusive).
-    pub last_address: IpAddr,
-}
-
-/// Information about LLDP advertisements from other network entities directly
-/// connected to a switch port.  This structure contains both metadata about
-/// when and where the neighbor was seen, as well as the specific information
-/// the neighbor was advertising.
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
-pub struct LldpNeighbor {
-    // Unique ID assigned to this neighbor - only used for pagination
-    #[serde(skip)]
-    pub id: Uuid,
-
-    /// The port on which the neighbor was seen
-    pub local_port: String,
-
-    /// Initial sighting of this LldpNeighbor
-    pub first_seen: DateTime<Utc>,
-
-    /// Most recent sighting of this LldpNeighbor
-    pub last_seen: DateTime<Utc>,
-
-    /// The LLDP link name advertised by the neighbor
-    pub link_name: String,
-
-    /// The LLDP link description advertised by the neighbor
-    pub link_description: Option<String>,
-
-    /// The LLDP chassis identifier advertised by the neighbor
-    pub chassis_id: String,
-
-    /// The LLDP system name advertised by the neighbor
-    pub system_name: Option<String>,
-
-    /// The LLDP system description advertised by the neighbor
-    pub system_description: Option<String>,
-
-    /// The LLDP management IP(s) advertised by the neighbor
-    pub management_ip: Vec<lldp_protocol::types::ManagementAddress>,
-}
-
-impl SimpleIdentity for LldpNeighbor {
-    fn id(&self) -> Uuid {
-        self.id
-    }
-}
-
-/// A route configuration for a port settings object.
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
-pub struct SwitchPortRouteConfig {
-    /// The port settings object this route configuration belongs to.
-    pub port_settings_id: Uuid,
-
-    /// The interface name this route configuration is assigned to.
-    pub interface_name: Name,
-
-    /// The route's destination network.
-    pub dst: oxnet::IpNet,
-
-    /// The route's gateway address.
-    pub gw: IpAddr,
-
-    /// The VLAN identifier for the route. Use this if the gateway is reachable
-    /// over an 802.1Q tagged L2 segment.
-    pub vlan_id: Option<u16>,
-
-    /// Route RIB priority. Higher priority indicates precedence within and across
-    /// protocols.
-    pub rib_priority: Option<u8>,
-}
-
-/// An IP address configuration for a port settings object.
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
-pub struct SwitchPortAddressConfig {
-    /// The port settings object this address configuration belongs to.
-    pub port_settings_id: Uuid,
-
-    /// The id of the address lot block this address is drawn from.
-    pub address_lot_block_id: Uuid,
-
-    /// The IP address and prefix.
-    pub address: oxnet::IpNet,
-
-    /// An optional VLAN ID
-    pub vlan_id: Option<u16>,
-
-    /// The interface name this address belongs to.
-    pub interface_name: Name,
-}
-
-/// An IP address configuration for a port settings object.
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
-pub struct SwitchPortAddressView {
-    /// The port settings object this address configuration belongs to.
-    pub port_settings_id: Uuid,
-
-    /// The id of the address lot this address is drawn from.
-    pub address_lot_id: Uuid,
-
-    /// The name of the address lot this address is drawn from.
-    pub address_lot_name: Name,
-
-    /// The id of the address lot block this address is drawn from.
-    pub address_lot_block_id: Uuid,
-
-    /// The IP address and prefix.
-    pub address: oxnet::IpNet,
-
-    /// An optional VLAN ID
-    pub vlan_id: Option<u16>,
-
-    /// The interface name this address belongs to.
-    pub interface_name: Name,
-}
-
 /// Configuration of inbound ICMP allowed by API services.
 #[derive(
     Clone,
@@ -2677,84 +2503,6 @@ pub struct ServiceIcmpConfig {
     /// MTU discovery and better cope with fragmentation issues. Otherwise all
     /// inbound ICMP traffic will be dropped.
     pub enabled: bool,
-}
-
-// TODO: move these TUF repo structs out of this file. They're not external
-// anymore after refactors that use views::TufRepo in the external API. They are
-// still used extensively in internal services.
-
-/// A description of an uploaded TUF repository.
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
-pub struct TufRepoDescription {
-    /// Information about the repository.
-    pub repo: TufRepoMeta,
-
-    /// Information about the artifacts present in the repository.
-    pub artifacts: Vec<TufArtifactMeta>,
-}
-
-impl TufRepoDescription {
-    /// Sorts the artifacts so that descriptions can be compared.
-    pub fn sort_artifacts(&mut self) {
-        self.artifacts.sort_by(|a, b| a.id.cmp(&b.id));
-    }
-}
-
-/// Metadata about a TUF repository.
-///
-/// Found within a `TufRepoDescription`.
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
-pub struct TufRepoMeta {
-    /// The hash of the repository.
-    ///
-    /// This is a slight abuse of `ArtifactHash`, since that's the hash of
-    /// individual artifacts within the repository. However, we use it here for
-    /// convenience.
-    pub hash: ArtifactHash,
-
-    /// The version of the targets role.
-    pub targets_role_version: u64,
-
-    /// The time until which the repo is valid.
-    pub valid_until: DateTime<Utc>,
-
-    /// The system version in artifacts.json.
-    pub system_version: Version,
-
-    /// The file name of the repository.
-    ///
-    /// This is purely used for debugging and may not always be correct (e.g.
-    /// with wicket, we read the file contents from stdin so we don't know the
-    /// correct file name).
-    pub file_name: String,
-}
-
-/// Metadata about an individual TUF artifact.
-///
-/// Found within a `TufRepoDescription`.
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
-pub struct TufArtifactMeta {
-    /// The artifact ID.
-    pub id: ArtifactId,
-
-    /// The hash of the artifact.
-    pub hash: ArtifactHash,
-
-    /// The size of the artifact in bytes.
-    pub size: u64,
-
-    /// Contents of the `BORD` field of a Hubris archive caboose. Only
-    /// applicable to artifacts that are Hubris archives.
-    ///
-    /// This field should always be `Some(_)` if `sign` is `Some(_)`, but the
-    /// opposite is not true (SP images will have a `board` but not a `sign`).
-    pub board: Option<String>,
-
-    /// Contents of the `SIGN` field of a Hubris archive caboose, i.e.,
-    /// an identifier for the set of valid signing keys. Currently only
-    /// applicable to RoT image and bootloader artifacts, where it will
-    /// be an LPC55 Root Key Table Hash (RKTH).
-    pub sign: Option<Vec<u8>>,
 }
 
 /// A networking probe

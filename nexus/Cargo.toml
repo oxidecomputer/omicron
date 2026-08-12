@@ -65,6 +65,8 @@ macaddr.workspace = true
 maplit.workspace = true
 mg-api-types.workspace = true
 nexus-background-task-interface.workspace = true
+nexus-switch-config.workspace = true
+nexus-switch-config-preparation.workspace = true
 # Not under "dev-dependencies"; these also need to be implemented for
 # integration tests.
 nexus-config.workspace = true
@@ -99,7 +101,6 @@ range-requests.workspace = true
 ref-cast.workspace = true
 regex.workspace = true
 reqwest = { workspace = true, features = ["http2", "json"] }
-ring.workspace = true
 samael.workspace = true
 schemars = { workspace = true, features = ["chrono", "uuid1"] }
 semver.workspace = true
@@ -123,14 +124,14 @@ display-error-chain.workspace = true
 slog-term.workspace = true
 static_assertions.workspace = true
 steno.workspace = true
-tempfile.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["full"] }
 tokio-postgres = { workspace = true, features = ["with-serde_json-1"] }
 tokio-util = { workspace = true, features = ["codec", "rt"] }
-tough.workspace = true
 trust-quorum-types.workspace = true
+tufaceous.workspace = true
 tufaceous-artifact.workspace = true
+url.workspace = true
 usdt.workspace = true
 uuid.workspace = true
 
@@ -160,8 +161,8 @@ rustls = { workspace = true }
 rustls-pemfile = { workspace = true }
 scim2-rs.workspace = true
 support-bundle-collection.workspace = true
-update-common.workspace = true
-update-engine.workspace = true
+oxide-update-engine.workspace = true
+oxide-update-engine-types.workspace = true
 omicron-workspace-hack.workspace = true
 omicron-uuid-kinds.workspace = true
 zip = { workspace = true, features = ["jiff-02"] }
@@ -185,6 +186,7 @@ httpmock.workspace = true
 httptest.workspace = true
 hubtools.workspace = true
 hyper-rustls.workspace = true
+nexus-background-task-interface = { workspace = true, features = ["testing"] }
 nexus-client.workspace = true
 nexus-db-queries = { workspace = true, features = ["testing"] }
 nexus-fm = { workspace = true, features = ["testing"] }
@@ -209,10 +211,9 @@ sp-sim.workspace = true
 strum.workspace = true
 subprocess.workspace = true
 term.workspace = true
-tokio-test.workspace = true
+transient-dns-server.workspace = true
 tufaceous.workspace = true
 tufaceous-artifact.workspace = true
-tufaceous-lib.workspace = true
 
 [[bench]]
 name = "setup_benchmark"

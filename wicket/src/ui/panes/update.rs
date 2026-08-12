@@ -8,8 +8,8 @@ use std::collections::BTreeMap;
 use super::{Control, PendingScroll, align_by, help_text, push_text_lines};
 use crate::keymap::ShowPopupCmd;
 use crate::state::{
-    ALL_COMPONENT_IDS, ArtifactVersions, ComponentId, Inventory,
-    UpdateItemState, update_component_title,
+    ALL_COMPONENT_IDS, ComponentId, Inventory, UpdateItemState,
+    update_component_title,
 };
 use crate::ui::defaults::style;
 use crate::ui::widgets::{
@@ -19,6 +19,11 @@ use crate::ui::widgets::{
 use crate::ui::wrap::wrap_text;
 use crate::{Action, Cmd, State};
 use indexmap::IndexMap;
+use oxide_update_engine_display::ProgressRatioDisplay;
+use oxide_update_engine_types::buffer::{
+    AbortReason, CompletionReason, ExecutionStatus, FailureReason, StepKey,
+    TerminalKind, WillNotBeRunReason,
+};
 use ratatui::Frame;
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::text::{Line, Span, Text};
@@ -27,13 +32,11 @@ use ratatui::widgets::{
     Row, Table,
 };
 use slog::{Logger, info, o};
-use tufaceous_artifact::KnownArtifactKind;
-use tui_tree_widget::{Tree, TreeItem, TreeState};
-use update_engine::display::ProgressRatioDisplay;
-use update_engine::{
-    AbortReason, CompletionReason, ExecutionStatus, FailureReason, StepKey,
-    TerminalKind, WillNotBeRunReason,
+use tufaceous_artifact::{
+    ArtifactVersion, KnownArtifactTags, OsPhase2Tags, OsVariant,
+    RotBootloaderTags, RotKeyTableHash, RotTags,
 };
+use tui_tree_widget::{Tree, TreeItem, TreeState};
 use wicket_common::inventory::RotSlot;
 use wicket_common::update_events::{
     EventBuffer, EventReport, ProgressEvent, StepOutcome, StepStatus,
@@ -965,7 +968,7 @@ impl UpdatePane {
             // Ignore update-related commands if we're on the sled or switch
             // where wicketd is running.
             Cmd::StartUpdate | Cmd::AbortUpdate | Cmd::ResetState
-                if state.selected_component_matches_wicked_location() =>
+                if state.selected_component_matches_wicketd_location() =>
             {
                 None
             }
@@ -1526,7 +1529,7 @@ impl UpdatePane {
                 frame.render_widget(paragraph, rect);
             }
             UpdateItemState::NotStarted
-                if state.selected_component_matches_wicked_location() =>
+                if state.selected_component_matches_wicketd_location() =>
             {
                 // No status bar, so make the main rect bigger.
                 let mut rect = self.status_view_main_rect;
@@ -2070,7 +2073,13 @@ impl ComponentUpdateListState {
         for &(step_key, value) in steps.as_slice() {
             let step_info = value.step_info();
             let mut item_spans = Vec::new();
-            let indent = value.nest_level() * 2;
+            let nest_level = event_buffer
+                .get_execution_data(&step_key.execution_id)
+                .expect(
+                    "step's execution is present in the buffer it came from",
+                )
+                .nest_level();
+            let indent = nest_level * 2;
             if indent > 0 {
                 item_spans.push(Span::raw(format!("{:indent$}", ' ')));
             }
@@ -2397,88 +2406,77 @@ fn all_installed_versions(
 fn artifact_version(
     id: &ComponentId,
     update_component: UpdateComponent,
-    versions: &BTreeMap<KnownArtifactKind, Vec<ArtifactVersions>>,
+    versions: &BTreeMap<KnownArtifactTags, Vec<ArtifactVersion>>,
     inventory: &Inventory,
 ) -> String {
-    let (artifact, multiple) = match (id, update_component) {
-        (ComponentId::Sled(_), UpdateComponent::RotBootloader) => {
-            (KnownArtifactKind::GimletRotBootloader, true)
-        }
-        (ComponentId::Sled(_), UpdateComponent::Rot) => {
-            (KnownArtifactKind::GimletRot, true)
-        }
-        (ComponentId::Sled(_), UpdateComponent::Sp) => {
-            (KnownArtifactKind::GimletSp, false)
-        }
-        (ComponentId::Sled(_), UpdateComponent::Host) => {
-            (KnownArtifactKind::Host, false)
-        }
-        (ComponentId::Switch(_), UpdateComponent::RotBootloader) => {
-            (KnownArtifactKind::SwitchRotBootloader, true)
-        }
-        (ComponentId::Switch(_), UpdateComponent::Rot) => {
-            (KnownArtifactKind::SwitchRot, true)
-        }
-        (ComponentId::Switch(_), UpdateComponent::Sp) => {
-            (KnownArtifactKind::SwitchSp, false)
-        }
-        (ComponentId::Psc(_), UpdateComponent::RotBootloader) => {
-            (KnownArtifactKind::PscRotBootloader, true)
-        }
-        (ComponentId::Psc(_), UpdateComponent::Rot) => {
-            (KnownArtifactKind::PscRot, true)
-        }
-        (ComponentId::Psc(_), UpdateComponent::Sp) => {
-            (KnownArtifactKind::PscSp, false)
-        }
-
-        // Switches and PSCs do not have a host.
-        (ComponentId::Switch(_), UpdateComponent::Host)
-        | (ComponentId::Psc(_), UpdateComponent::Host) => {
-            return "N/A".to_string();
-        }
-    };
-    match versions.get(&artifact) {
-        None => "UNKNOWN".to_string(),
-        Some(artifact_versions) => {
-            let component = match inventory.get_inventory(id) {
-                Some(c) => c,
-                None => return "UNKNOWN".to_string(),
+    // NOTE: This function currently assumes that all artifacts in the repo of
+    // the same general kind (SP, ROT, bootloader) are of the same version; we
+    // don't filter on board or slot. (Wicketd does not verify this assumption,
+    // either.)
+    match update_component {
+        UpdateComponent::RotBootloader => {
+            let Some(sign) = inventory
+                .get_inventory(id)
+                .and_then(|component| component.rot_sign())
+                .and_then(|sign| String::from_utf8(sign).ok())
+            else {
+                return "UNKNOWN (MISSING SIGN)".to_string();
             };
-            let cnt = artifact_versions.len();
-            // We loop through all possible artifact versions for a
-            // given artifact type. Right now only RoT artifacts
-            // will have a sign value.
-            for a in artifact_versions {
-                match (&a.sign, component.rot_sign()) {
-                    // No sign anywhere, this is for SP components
-                    (None, None) => return a.version.to_string(),
-                    // if we have a version that's tagged with sign data but
-                    // we can't read from the caboose check if we can fall
-                    // back to just returning the version. This matches
-                    // very old repositories
-                    (Some(_), None) => {
-                        if multiple && cnt > 1 {
-                            return "UNKNOWN (MISSING SIGN)".to_string();
-                        } else {
-                            return a.version.to_string();
-                        }
-                    }
-                    // If something isn't tagged with a sign just
-                    // pass on the version. This should only match
-                    // very old repositories/testing configurations
-                    (None, Some(_)) => return a.version.to_string(),
-                    // The interesting case to make sure the sign
-                    // matches both the component and the caboose
-                    (Some(s), Some(c)) => {
-                        if *s == c {
-                            return a.version.to_string();
-                        }
-                    }
-                }
-            }
-            "NO MATCH".to_string()
+            versions
+                .iter()
+                .find_map(|(tags, versions)| match tags {
+                    KnownArtifactTags::RotBootloader(RotBootloaderTags {
+                        rot_rkth: Some(RotKeyTableHash(rot_rkth)),
+                        ..
+                    }) if rot_rkth == &sign => versions.first(),
+                    _ => None,
+                })
+                .map(ArtifactVersion::as_str)
+                .unwrap_or("NO MATCH")
+                .to_string()
         }
+        UpdateComponent::Rot => {
+            let Some(sign) = inventory
+                .get_inventory(id)
+                .and_then(|component| component.rot_sign())
+                .and_then(|sign| String::from_utf8(sign).ok())
+            else {
+                return "UNKNOWN (MISSING SIGN)".to_string();
+            };
+            versions
+                .iter()
+                .find_map(|(tags, versions)| match tags {
+                    KnownArtifactTags::Rot(RotTags {
+                        rot_rkth: Some(RotKeyTableHash(rot_rkth)),
+                        ..
+                    }) if rot_rkth == &sign => versions.first(),
+                    _ => None,
+                })
+                .map(ArtifactVersion::as_str)
+                .unwrap_or("NO MATCH")
+                .to_string()
+        }
+        UpdateComponent::Sp => versions
+            .iter()
+            .find_map(|(tags, versions)| match tags {
+                KnownArtifactTags::Sp(_) => versions.first(),
+                _ => None,
+            })
+            .map(ArtifactVersion::as_str)
+            .unwrap_or("NO MATCH")
+            .to_string(),
+        UpdateComponent::Host => match id {
+            ComponentId::Sled(_) => versions
+                .get(&KnownArtifactTags::OsPhase2(OsPhase2Tags {
+                    os_variant: OsVariant::Host,
+                }))
+                .and_then(|versions| versions.first())
+                .map(ArtifactVersion::as_str)
+                .unwrap_or("NO MATCH")
+                .to_string(),
+            // Switches and PSCs do not have a host.
+            ComponentId::Switch(_) | ComponentId::Psc(_) => "N/A".to_string(),
+        },
     }
 }
 

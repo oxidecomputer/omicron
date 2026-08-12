@@ -17,12 +17,14 @@ use nexus_types::{
     identity::Asset,
     internal_api::params,
 };
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::RackKind;
+use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::SledKind;
 use omicron_uuid_kinds::SledUuid;
 use sled_agent_types::inventory::SledRole;
 use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
-use uuid::Uuid;
 
 /// Baseboard information about a sled.
 ///
@@ -56,7 +58,7 @@ pub struct Sled {
     time_deleted: Option<DateTime<Utc>>,
     pub rcgen: Generation,
 
-    pub rack_id: Uuid,
+    pub rack_id: DbTypedUuid<RackKind>,
 
     is_scrimlet: bool,
     serial_number: String,
@@ -143,13 +145,17 @@ impl Sled {
     pub fn time_modified(&self) -> DateTime<Utc> {
         self.identity.time_modified
     }
+
+    pub fn rack_id(&self) -> RackUuid {
+        self.rack_id.into()
+    }
 }
 
 impl From<Sled> for sled_types::Sled {
     fn from(sled: Sled) -> Self {
         Self {
             identity: sled.identity(),
-            rack_id: sled.rack_id,
+            rack_id: sled.rack_id.into_untyped_uuid(),
             baseboard: hardware::Baseboard {
                 serial: sled.serial_number,
                 part: sled.part_number,
@@ -230,7 +236,7 @@ impl DatastoreCollectionConfig<super::Zpool> for Sled {
 pub struct SledUpdate {
     id: SledUuid,
 
-    pub rack_id: Uuid,
+    pub rack_id: DbTypedUuid<RackKind>,
 
     is_scrimlet: bool,
     serial_number: String,
@@ -261,12 +267,12 @@ impl SledUpdate {
         repo_depot_port: u16,
         baseboard: SledBaseboard,
         hardware: SledSystemHardware,
-        rack_id: Uuid,
+        rack_id: RackUuid,
         sled_agent_gen: Generation,
     ) -> Self {
         Self {
             id,
-            rack_id,
+            rack_id: rack_id.into(),
             is_scrimlet: hardware.is_scrimlet,
             serial_number: baseboard.serial_number,
             part_number: baseboard.part_number,

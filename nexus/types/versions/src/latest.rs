@@ -210,20 +210,25 @@ pub mod internet_gateway {
 }
 
 pub mod ip_pool {
-    pub use crate::v2025_11_20_00::ip_pool::IpPool;
-    pub use crate::v2025_11_20_00::ip_pool::IpPoolCreate;
     pub use crate::v2025_11_20_00::ip_pool::IpPoolRange;
     pub use crate::v2025_11_20_00::ip_pool::IpPoolSiloLink;
     pub use crate::v2025_11_20_00::ip_pool::IpPoolSiloPath;
     pub use crate::v2025_11_20_00::ip_pool::IpPoolType;
     pub use crate::v2025_11_20_00::ip_pool::IpPoolUpdate;
     pub use crate::v2025_11_20_00::ip_pool::IpPoolUtilization;
+    pub use crate::v2026_06_11_00::ip_pool::IpPool;
 
     pub use crate::v2026_01_01_00::ip_pool::SiloIpPool;
 
     pub use crate::v2026_01_05_00::ip_pool::IpPoolLinkSilo;
     pub use crate::v2026_01_05_00::ip_pool::IpPoolSiloUpdate;
     pub use crate::v2026_01_05_00::ip_pool::PoolSelector;
+
+    pub use crate::v2026_06_11_00::ip_pool::IpPoolAssignParam;
+    pub use crate::v2026_06_11_00::ip_pool::IpPoolAssignment;
+    pub use crate::v2026_06_11_00::ip_pool::IpPoolCreate;
+    pub use crate::v2026_06_11_00::ip_pool::IpPoolFilter;
+    pub use crate::v2026_06_11_00::ip_pool::SystemIpPoolFilter;
 }
 
 pub mod metrics {
@@ -257,9 +262,14 @@ pub mod multicast {
 pub mod networking {
     pub use crate::v2025_11_20_00::networking::Address;
     pub use crate::v2025_11_20_00::networking::AddressConfig;
+    pub use crate::v2025_11_20_00::networking::AddressLot;
+    pub use crate::v2025_11_20_00::networking::AddressLotBlock;
     pub use crate::v2025_11_20_00::networking::AddressLotBlockCreate;
     pub use crate::v2025_11_20_00::networking::AddressLotCreate;
+    pub use crate::v2025_11_20_00::networking::AddressLotCreateResponse;
+    pub use crate::v2025_11_20_00::networking::AddressLotKind;
     pub use crate::v2025_11_20_00::networking::AddressLotSelector;
+    pub use crate::v2025_11_20_00::networking::AddressLotViewResponse;
     pub use crate::v2025_11_20_00::networking::AggregateBgpMessageHistory;
     pub use crate::v2025_11_20_00::networking::BgpAnnounceListSelector;
     pub use crate::v2025_11_20_00::networking::BgpAnnounceSet;
@@ -274,11 +284,14 @@ pub mod networking {
     pub use crate::v2025_11_20_00::networking::LinkConfigCreate;
     pub use crate::v2025_11_20_00::networking::LldpLinkConfig;
     pub use crate::v2025_11_20_00::networking::LldpLinkConfigCreate;
+    pub use crate::v2025_11_20_00::networking::LldpNeighbor;
     pub use crate::v2025_11_20_00::networking::Route;
     pub use crate::v2025_11_20_00::networking::RouteConfig;
     pub use crate::v2025_11_20_00::networking::SwitchBgpHistory;
     pub use crate::v2025_11_20_00::networking::SwitchInterfaceConfigCreate;
     pub use crate::v2025_11_20_00::networking::SwitchInterfaceKind;
+    pub use crate::v2025_11_20_00::networking::SwitchPortAddressConfig;
+    pub use crate::v2025_11_20_00::networking::SwitchPortAddressView;
     pub use crate::v2025_11_20_00::networking::SwitchPortApplySettings;
     pub use crate::v2025_11_20_00::networking::SwitchPortConfig;
     pub use crate::v2025_11_20_00::networking::SwitchPortConfigCreate;
@@ -286,6 +299,7 @@ pub mod networking {
     pub use crate::v2025_11_20_00::networking::SwitchPortLinkConfig;
     pub use crate::v2025_11_20_00::networking::SwitchPortPageSelector;
     pub use crate::v2025_11_20_00::networking::SwitchPortPathSelector;
+    pub use crate::v2025_11_20_00::networking::SwitchPortRouteConfig;
     pub use crate::v2025_11_20_00::networking::SwitchPortSettingsGroup;
     pub use crate::v2025_11_20_00::networking::SwitchPortSettingsGroups;
     pub use crate::v2025_11_20_00::networking::SwitchPortSettingsIdentity;
@@ -319,6 +333,8 @@ pub mod networking {
 
     pub use crate::v2026_05_07_00::networking::SwitchInterfaceConfig;
     pub use crate::v2026_05_07_00::networking::SwitchPortSettings;
+
+    pub use crate::v2026_06_10_00::networking::BgpConfigUpdate;
 }
 
 pub mod oxql {

@@ -350,9 +350,9 @@ mod test {
     use nexus_types::silo::silo_dns_name;
     use omicron_common::address::IpRange;
     use omicron_common::address::Ipv6Subnet;
-    use omicron_common::address::RACK_PREFIX;
+    use omicron_common::address::RACK_PREFIX_LENGTH;
     use omicron_common::address::REPO_DEPOT_PORT;
-    use omicron_common::address::SLED_PREFIX;
+    use omicron_common::address::SLED_PREFIX_LENGTH;
     use omicron_common::address::get_sled_address;
     use omicron_common::address::get_switch_zone_address;
     use omicron_common::api::external::Generation;
@@ -647,8 +647,9 @@ mod test {
         let rack_subnet_base: Ipv6Addr =
             "fd00:1122:3344:0100::".parse().unwrap();
         let rack_subnet =
-            ipnet::Ipv6Net::new(rack_subnet_base, RACK_PREFIX).unwrap();
-        let possible_sled_subnets = rack_subnet.subnets(SLED_PREFIX).unwrap();
+            ipnet::Ipv6Net::new(rack_subnet_base, RACK_PREFIX_LENGTH).unwrap();
+        let possible_sled_subnets =
+            rack_subnet.subnets(SLED_PREFIX_LENGTH).unwrap();
 
         let mut blueprint_sleds = BTreeMap::new();
 
@@ -1384,19 +1385,15 @@ mod test {
             .ip_pools_service_lookup_both_versions(&opctx)
             .await
             .expect("success looking up both versions of the service IP Pools");
-        let mut ranges = datastore
-            .ip_pool_list_ranges_batched(&opctx, &service_pools.ipv4.authz_pool)
-            .await
-            .expect("success listing IPv4 pool ranges");
-        ranges.append(
-            &mut datastore
-                .ip_pool_list_ranges_batched(
-                    &opctx,
-                    &service_pools.ipv6.authz_pool,
-                )
-                .await
-                .expect("success listing IPv6 pool ranges"),
-        );
+        let mut ranges = Vec::new();
+        for pool in service_pools.ipv4.iter().chain(service_pools.ipv6.iter()) {
+            ranges.append(
+                &mut datastore
+                    .ip_pool_list_ranges_batched(&opctx, &pool.authz_pool)
+                    .await
+                    .expect("success listing service pool ranges"),
+            );
+        }
         ranges
     }
 
@@ -1533,12 +1530,16 @@ mod test {
             .expect("constructed ExternalNetworkingAllocator")
             .for_new_nexus()
             .expect("found external IP for Nexus");
+        let nexus_config =
+            DataStore::blueprint_operator_nexus_config(&blueprint)
+                .expect("blueprint has at least one Nexus zone");
         builder
             .sled_add_zone_nexus(
                 sled_id,
                 BlueprintZoneImageSource::InstallDataset,
                 new_nexus_external_ip,
                 blueprint.nexus_generation,
+                &nexus_config,
             )
             .unwrap();
         // The silo creation above advanced external DNS past B1's recorded

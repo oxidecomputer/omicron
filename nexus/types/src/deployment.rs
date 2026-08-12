@@ -30,12 +30,11 @@ use iddqd::id_ord_map::RefMut;
 use iddqd::id_upcast;
 use ipnet::IpAdd;
 use omicron_common::address::Ipv6Subnet;
-use omicron_common::address::SLED_PREFIX;
+use omicron_common::address::SLED_PREFIX_LENGTH;
 use omicron_common::address::SLED_RESERVED_ADDRESSES;
 use omicron_common::address::get_sled_address;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Generation;
-use omicron_common::api::external::TufArtifactMeta;
 use omicron_common::api::internal::shared::DatasetKind;
 use omicron_common::disk::CompressionAlgorithm;
 use omicron_common::disk::DatasetConfig;
@@ -75,6 +74,7 @@ use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
 use std::sync::Arc;
 use strum::EnumIter;
+use tufaceous_artifact::Artifact;
 use tufaceous_artifact::ArtifactHash;
 use tufaceous_artifact::ArtifactVersion;
 use tufaceous_artifact::ArtifactVersionError;
@@ -89,6 +89,7 @@ pub mod planning_report;
 mod reconfigurator_config;
 mod zone_type;
 
+use anyhow::Context;
 use anyhow::anyhow;
 use anyhow::bail;
 pub use blueprint_diff::BlueprintDiffSummary;
@@ -105,6 +106,7 @@ pub use network_resources::OmicronZoneExternalSnatIp;
 pub use network_resources::OmicronZoneNetworkResources;
 pub use network_resources::OmicronZoneNic;
 pub use network_resources::OmicronZoneNicEntry;
+pub use network_resources::OmicronZoneNicIp;
 use omicron_common::api::external::Error;
 pub use planning_input::ClickhouseMode;
 pub use planning_input::ClickhousePolicy;
@@ -115,6 +117,7 @@ pub use planning_input::DiskFilter;
 pub use planning_input::ExternalIpPolicy;
 pub use planning_input::ExternalIpPolicyBuilder;
 pub use planning_input::ExternalIpPolicyError;
+pub use planning_input::ExternalServiceNetworkingPolicy;
 pub use planning_input::OximeterReadMode;
 pub use planning_input::OximeterReadPolicy;
 pub use planning_input::PlanningInput;
@@ -681,69 +684,6 @@ impl Blueprint {
         )))
     }
 
-    /// Return the configuration of upstream NTP settings (needed to configure
-    /// boundary NTP zones).
-    ///
-    /// This information should be operator-configurable, but currently is not:
-    /// we carry it forward from rack setup time onward from blueprint to
-    /// blueprint. Fixing this is
-    /// <https://github.com/oxidecomputer/omicron/issues/9040>.
-    ///
-    /// Returns `None` if this blueprint contains no boundary NTP zones from
-    /// which we can infer the upstream configuration. (This should only be the
-    /// case for test blueprints - real systems always deploy at least one
-    /// boundary NTP zone).
-    pub fn upstream_ntp_config(&self) -> Option<UpstreamNtpConfig<'_>> {
-        // The upstream NTP config can't be changed, so it's fine to use
-        // `find()` here and include searching both in-service and expunged
-        // zones. (Real racks will always have at least one in-service boundary
-        // NTP zone, but some test or test systems may have 0 if they have only
-        // a single sled and that sled's boundary NTP zone is being upgraded.)
-        self.all_in_service_and_expunged_zones(
-            BlueprintExpungedZoneAccessReason::BoundaryNtpUpstreamConfig,
-        )
-        .find_map(|(_sled_id, zone)| match &zone.zone_type {
-            BlueprintZoneType::BoundaryNtp(ntp_config) => {
-                Some(UpstreamNtpConfig {
-                    ntp_servers: &ntp_config.ntp_servers,
-                    dns_servers: &ntp_config.dns_servers,
-                    domain: ntp_config.domain.as_deref(),
-                })
-            }
-            _ => None,
-        })
-    }
-
-    /// Return the operator-specified configuration of Nexus.
-    ///
-    /// This information should be operator-configurable, but currently is not:
-    /// we carry it forward from rack setup time onward from blueprint to
-    /// blueprint. Fixing this is
-    /// <https://github.com/oxidecomputer/omicron/issues/9040>.
-    ///
-    /// Returns `None` if this blueprint contains no Nexus zones from which we
-    /// can infer the configuration. (This should only be the case for test
-    /// blueprints - real systems always deploy at least one Nexus zone).
-    pub fn operator_nexus_config(&self) -> Option<OperatorNexusConfig<'_>> {
-        // The Nexus config can't be changed, so it's fine to use
-        // `find()` here and include searching both in-service and expunged
-        // zones. (Real racks will always have at least one in-service Nexus
-        // zone - the one calling this code - but some tests create blueprints
-        // without any.)
-        self.all_in_service_and_expunged_zones(
-            BlueprintExpungedZoneAccessReason::NexusExternalConfig,
-        )
-        .find_map(|(_sled_id, zone)| match &zone.zone_type {
-            BlueprintZoneType::Nexus(nexus_config) => {
-                Some(OperatorNexusConfig {
-                    external_tls: nexus_config.external_tls,
-                    external_dns_servers: &nexus_config.external_dns_servers,
-                })
-            }
-            _ => None,
-        })
-    }
-
     /// Returns the complete set of external IP addresses assigned to external
     /// DNS servers described by this blueprint, including both in-service and
     /// expunged external DNS zones.
@@ -751,7 +691,7 @@ impl Blueprint {
     /// This information should be operator-configurable, but currently is not:
     /// we carry it forward from rack setup time onward from blueprint to
     /// blueprint. Fixing this is
-    /// <https://github.com/oxidecomputer/omicron/issues/9040>.
+    /// <https://github.com/oxidecomputer/omicron/issues/3732>.
     ///
     /// Returns an empty set if this blueprint contains no external DNS zones.
     /// (This should only be the case for test blueprints - real systems always
@@ -794,14 +734,27 @@ impl Blueprint {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+impl IdOrdItem for Blueprint {
+    type Key<'a> = BlueprintUuid;
+
+    fn key(&self) -> Self::Key<'_> {
+        self.id
+    }
+
+    id_upcast!();
+}
+
+/// Operator-supplied upstream NTP configuration plumbed into boundary NTP
+/// zones.
+#[derive(Debug, Clone)]
 pub struct UpstreamNtpConfig<'a> {
     pub ntp_servers: &'a [String],
     pub dns_servers: &'a [IpAddr],
     pub domain: Option<&'a str>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+/// Operator-supplied configuration for Nexus's external API endpoint.
+#[derive(Debug, Clone)]
 pub struct OperatorNexusConfig<'a> {
     pub external_tls: bool,
     pub external_dns_servers: &'a [IpAddr],
@@ -861,7 +814,7 @@ pub enum BlueprintExpungedZoneAccessReason {
     // conditions the planner must consider during pruning.
     // --------------------------------------------------------------------
     /// Carrying forward the upstream NTP configuration provided by the operator
-    /// during rack setup; see [`Blueprint::upstream_ntp_config()`].
+    /// during rack setup.
     ///
     /// The planner must not prune a boundary NTP zone if it's the last zone
     /// remaining with the set of configuration.
@@ -906,7 +859,7 @@ pub enum BlueprintExpungedZoneAccessReason {
     NexusDeleteMetadataRecord,
 
     /// Carrying forward the external Nexus configuration provided by the
-    /// operator during rack setup; see [`Blueprint::operator_nexus_config()`].
+    /// operator during rack setup.
     ///
     /// The planner must not prune a Nexus zone if it's the last zone
     /// remaining with the set of configuration.
@@ -1644,7 +1597,7 @@ impl fmt::Display for BlueprintDisplay<'_> {
 )]
 pub struct BlueprintSledConfig {
     pub state: SledState,
-    pub subnet: Ipv6Subnet<SLED_PREFIX>,
+    pub subnet: Ipv6Subnet<SLED_PREFIX_LENGTH>,
 
     /// Each sled is assigned an IPv6 /64 `subnet` (above). Currently, the
     /// lowest /112 subnet within the sled subnet is reserved for control plane
@@ -1869,7 +1822,7 @@ impl LastAllocatedSubnetIpOffset {
     }
 
     /// Convert this offset into the `offset`'th IP in `subnet`.
-    pub fn to_ip(self, subnet: Ipv6Subnet<SLED_PREFIX>) -> Ipv6Addr {
+    pub fn to_ip(self, subnet: Ipv6Subnet<SLED_PREFIX_LENGTH>) -> Ipv6Addr {
         subnet.net().prefix().saturating_add(u128::from(self.0))
     }
 
@@ -2141,14 +2094,21 @@ pub enum BlueprintZoneImageSource {
     /// This originates from TUF repos uploaded to Nexus which are then
     /// replicated out to all sleds.
     #[serde(rename_all = "snake_case")]
-    Artifact { version: BlueprintArtifactVersion, hash: ArtifactHash },
+    Artifact {
+        version: BlueprintArtifactVersion,
+        // Tufaceous v2 introduces a new JSON schema for `ArtifactHash` that is
+        // wire-compatible but perceived as different by drift. Continue using
+        // the old schema in this API version.
+        #[schemars(schema_with = "ArtifactHash::v1_json_schema")]
+        hash: ArtifactHash,
+    },
 }
 
 impl BlueprintZoneImageSource {
-    pub fn from_available_artifact(artifact: &TufArtifactMeta) -> Self {
+    pub fn from_available_artifact(artifact: &Artifact) -> Self {
         BlueprintZoneImageSource::Artifact {
             version: BlueprintArtifactVersion::Available {
-                version: artifact.id.version.clone(),
+                version: artifact.version.clone(),
             },
             hash: artifact.hash,
         }
@@ -2235,6 +2195,10 @@ impl fmt::Display for BlueprintArtifactVersion {
 )]
 pub struct BlueprintSingleMeasurement {
     pub version: BlueprintArtifactVersion,
+    // Tufaceous v2 introduces a new JSON schema for `ArtifactHash` that is
+    // wire-compatible but perceived as different by drift. Continue using the
+    // old schema in this API version.
+    #[schemars(schema_with = "ArtifactHash::v1_json_schema")]
     pub hash: ArtifactHash,
 }
 
@@ -2510,7 +2474,14 @@ pub enum BlueprintHostPhase2DesiredContents {
     /// Set the phase 2 slot to the given artifact.
     ///
     /// The artifact will come from an unpacked and distributed TUF repo.
-    Artifact { version: BlueprintArtifactVersion, hash: ArtifactHash },
+    Artifact {
+        version: BlueprintArtifactVersion,
+        // Tufaceous v2 introduces a new JSON schema for `ArtifactHash` that is
+        // wire-compatible but perceived as different by drift. Continue using
+        // the old schema in this API version.
+        #[schemars(schema_with = "ArtifactHash::v1_json_schema")]
+        hash: ArtifactHash,
+    },
 }
 
 impl From<BlueprintHostPhase2DesiredContents> for HostPhase2DesiredContents {
@@ -2680,6 +2651,10 @@ pub struct PendingMgsUpdate {
     pub details: PendingMgsUpdateDetails,
 
     /// which artifact to apply to this device
+    // Tufaceous v2 introduces a new JSON schema for `ArtifactHash` that is
+    // wire-compatible but perceived as different by drift. Continue using the
+    // old schema in this API version.
+    #[schemars(schema_with = "ArtifactHash::v1_json_schema")]
     pub artifact_hash: ArtifactHash,
     pub artifact_version: ArtifactVersion,
 }
@@ -2981,12 +2956,17 @@ pub struct PendingMgsUpdateHostPhase1Details {
     pub expected_active_phase_1_slot: M2Slot,
     /// Which slot the host OS most recently booted from.
     pub expected_boot_disk: M2Slot,
+
+    // Tufaceous v2 introduces a new JSON schema for `ArtifactHash` that is
+    // wire-compatible but perceived as different by drift. Continue using the
+    // old schema in this API version.
     /// The hash of the phase 1 slot specified by
     /// `expected_active_phase_1_hash`.
     ///
     /// We should always be able to fetch this. Even if the phase 1 contents
     /// themselves have been corrupted (very scary for the active slot!), the SP
     /// can still hash those contents.
+    #[schemars(schema_with = "ArtifactHash::v1_json_schema")]
     pub expected_active_phase_1_hash: ArtifactHash,
     /// The hash of the currently-active phase 2 artifact.
     ///
@@ -2994,6 +2974,7 @@ pub struct PendingMgsUpdateHostPhase1Details {
     /// would indicate that we don't know the version currently running. The
     /// planner wouldn't stage an update without knowing the current version, so
     /// if something has gone wrong in the meantime we won't proceede either.
+    #[schemars(schema_with = "ArtifactHash::v1_json_schema")]
     pub expected_active_phase_2_hash: ArtifactHash,
     /// The hash of the phase 1 slot specified by toggling
     /// `expected_active_phase_1_slot` to the other slot.
@@ -3001,6 +2982,7 @@ pub struct PendingMgsUpdateHostPhase1Details {
     /// We should always be able to fetch this. Even if the phase 1 contents
     /// of the inactive slot are entirely bogus, the SP can still hash those
     /// contents.
+    #[schemars(schema_with = "ArtifactHash::v1_json_schema")]
     pub expected_inactive_phase_1_hash: ArtifactHash,
     /// The hash of the currently-inactive phase 2 artifact.
     ///
@@ -3009,7 +2991,9 @@ pub struct PendingMgsUpdateHostPhase1Details {
     /// a phase 1 update is that `sled-agent` on the target sled has already
     /// written the paired phase 2 artifact to the inactive slot; therefore, we
     /// don't need to be able to represent an invalid inactive slot.
+    #[schemars(schema_with = "ArtifactHash::v1_json_schema")]
     pub expected_inactive_phase_2_hash: ArtifactHash,
+
     /// Address for contacting sled-agent to check phase 2 contents.
     #[cfg_attr(test, strategy(socket_addr_v6_without_flowinfo()))]
     pub sled_agent_address: SocketAddrV6,
@@ -3488,22 +3472,352 @@ impl From<&crate::inventory::Dataset> for CollectionDatasetIdentifier {
 ///
 /// **This format is not stable.  It may change at any time without
 /// backwards-compatibility guarantees.**
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UnstableReconfiguratorState {
     pub planning_input: PlanningInput,
-    pub collections: Vec<Collection>,
+    pub collections: IdOrdMap<Collection>,
     pub target_blueprint: BlueprintTarget,
-    pub blueprints: Vec<Blueprint>,
+    pub blueprints: IdOrdMap<Blueprint>,
     pub internal_dns: BTreeMap<Generation, DnsConfigParams>,
     pub external_dns: BTreeMap<Generation, DnsConfigParams>,
     pub silo_names: Vec<omicron_common::api::external::Name>,
     pub external_dns_zone_names: Vec<String>,
 }
 
+pub struct ReconfiguratorStateInput<R> {
+    pub label: String,
+    pub reader: R,
+}
+
+pub struct ReadSeries {
+    pub latest: String,
+    pub warnings: Vec<anyhow::Error>,
+    pub state: UnstableReconfiguratorState,
+}
+
+impl UnstableReconfiguratorState {
+    pub fn read_series<I, R>(iter: I) -> Result<ReadSeries, anyhow::Error>
+    where
+        I: IntoIterator<Item = ReconfiguratorStateInput<R>>,
+        R: std::io::Read,
+    {
+        let mut collections = IdOrdMap::new();
+        let mut blueprints = IdOrdMap::new();
+        let mut non_targets: BTreeSet<BlueprintUuid> = BTreeSet::new();
+        let mut maybe_targets: BTreeSet<BlueprintUuid> = BTreeSet::new();
+        let mut internal_dns = BTreeMap::new();
+        let mut external_dns = BTreeMap::new();
+        let mut warnings = Vec::new();
+        let mut all_states: BTreeMap<BlueprintUuid, UniqueState> =
+            BTreeMap::new();
+
+        struct UniqueState {
+            planning_input: PlanningInput,
+            target_blueprint: BlueprintTarget,
+            external_dns_zone_names: Vec<String>,
+            silo_names: Vec<omicron_common::api::external::Name>,
+            label: String,
+        }
+
+        // Read all the inputs and incorporate them into the state we're
+        // tracking.
+        for input in iter {
+            let p: UnstableReconfiguratorState =
+                serde_json::from_reader(input.reader)
+                    .with_context(|| format!("parse {:?}", input.label))?;
+
+            // Walk through the inventory collections.  If we've seen this one
+            // before, the contents should exactly match because these are
+            // immutable over time.  Otherwise, accumulate them into
+            // `collections`.
+            for c in p.collections {
+                match collections.entry(c.id) {
+                    Entry::Vacant(vacant_entry) => {
+                        vacant_entry.insert(c);
+                    }
+                    Entry::Occupied(occupied_entry) => {
+                        if *occupied_entry.get() != c {
+                            bail!(
+                                "input {:?}: collection {} does not match \
+                                 what we read in a different file",
+                                input.label,
+                                c.id
+                            );
+                        }
+                    }
+                };
+            }
+
+            // Do the same with blueprints.
+            for mut b in p.blueprints {
+                match blueprints.entry(b.id) {
+                    Entry::Vacant(vacant_entry) => {
+                        vacant_entry.insert(b);
+                    }
+                    Entry::Occupied(mut occupied_entry) => {
+                        // With blueprints, there's one legitimate way for the
+                        // blueprint in one file to differ from that in other
+                        // files: the copy of the blueprint in the file in which
+                        // it was created may contain a detailed planning
+                        // report.  This does not get serialized to the
+                        // database, so it's effectively not available after the
+                        // plan operation finishes.  Usually, no other file will
+                        // have this detailed report, though it's always
+                        // possible that the user handed us the same input
+                        // twice.
+                        //
+                        // Our goals here are:
+                        //
+                        // - report if the blueprint appears different in
+                        //   different files in any way _other_ than one maybe
+                        //   having a planning report where another does not
+                        // - regardless of the order we read the files, always
+                        //   keep the planning report, if we find one
+                        //
+                        // The easiest way to achieve this is to check if
+                        // exactly one of these two has the planning report, and
+                        // if so, copy it to the other one.  Then the comparison
+                        // will be valid.  And regardless of which one had it,
+                        // we'll wind up with the planning report in the copy
+                        // we're storing.
+                        let mut earlier = occupied_entry.get_mut();
+                        match (&mut earlier.source, &mut b.source) {
+                            (
+                                BlueprintSource::Planner(report),
+                                replace @
+                                    BlueprintSource::PlannerLoadedFromDatabase
+                            ) => *replace =
+                                BlueprintSource::Planner(report.clone()),
+
+                            (
+                                replace @
+                                    BlueprintSource::PlannerLoadedFromDatabase,
+                                BlueprintSource::Planner(report)
+                            ) => *replace =
+                                BlueprintSource::Planner(report.clone()),
+
+                            _ => (),
+                        }
+
+                        if *earlier != b {
+                            bail!(
+                                "input {:?}: blueprint {} does not match \
+                                 what we read in a different file",
+                                input.label,
+                                b.id
+                            );
+                        }
+                    }
+                };
+            }
+
+            // Do the same with internal DNS.
+            for (generation, dns) in p.internal_dns {
+                match internal_dns.entry(generation) {
+                    std::collections::btree_map::Entry::Vacant(
+                        vacant_entry,
+                    ) => {
+                        vacant_entry.insert(dns);
+                    }
+                    std::collections::btree_map::Entry::Occupied(
+                        occupied_entry,
+                    ) => {
+                        if *occupied_entry.get() != dns {
+                            bail!(
+                                "input {:?}: internal DNS generation {} does \
+                                 not match what we read in a different file",
+                                input.label,
+                                generation,
+                            );
+                        }
+                    }
+                };
+            }
+
+            // Do the same with external DNS.
+            for (generation, dns) in p.external_dns {
+                match external_dns.entry(generation) {
+                    std::collections::btree_map::Entry::Vacant(
+                        vacant_entry,
+                    ) => {
+                        vacant_entry.insert(dns);
+                    }
+                    std::collections::btree_map::Entry::Occupied(
+                        occupied_entry,
+                    ) => {
+                        if *occupied_entry.get() != dns {
+                            bail!(
+                                "input {:?}: external DNS generation {} does \
+                                 not match what we read in a different file",
+                                input.label,
+                                generation,
+                            );
+                        }
+                    }
+                };
+            }
+
+            // We've merged in the state that's easy to merge.  For the rest of
+            // it: we'll end up choosing the state stored in whichever file is
+            // logically the latest one.  How do we know which one that is?  Its
+            // target blueprint is not referred to in the ancestry of any
+            // _other_ blueprint that we find.  There may be more than one of
+            // these, in the end.  More on this below.
+            //
+            // For now, update some structures that will help us quickly find
+            // candidates.  And store all of the state we _might_ take from this
+            // file into `all_states`.
+            let target_blueprint_id = p.target_blueprint.target_id;
+            match all_states.entry(target_blueprint_id) {
+                std::collections::btree_map::Entry::Vacant(vacant_entry) => {
+                    vacant_entry.insert(UniqueState {
+                        planning_input: p.planning_input,
+                        target_blueprint: p.target_blueprint,
+                        external_dns_zone_names: p.external_dns_zone_names,
+                        silo_names: p.silo_names,
+                        label: input.label.clone(),
+                    });
+                }
+                std::collections::btree_map::Entry::Occupied(
+                    _occupied_entry,
+                ) => {
+                    // This means we found an input file with the same target
+                    // blueprint as some other input file that we already
+                    // processed.  That's fine.  We'll ignore this file in terms
+                    // of figuring out which file contains the latest blueprint.
+                    //
+                    // This is unfortunately common.  What frequently happens is
+                    // that each of the three Nexus zones tries to plan a
+                    // blueprint, each one saves a Reconfigurator state file for
+                    // it's planning process, but only one of these will become
+                    // the next target blueprint.  (We could instead only save
+                    // the state file into the dropbox when we know it's become
+                    // the target, but that introduces the possibility that a
+                    // crash at the wrong time will mean we made it the target
+                    // but never wound up putting the state file into the
+                    // dropbox.)
+                }
+            };
+
+            let Some(blueprint) = blueprints.get(&target_blueprint_id) else {
+                warnings.push(anyhow!(
+                    "input {:?}: file refers to target blueprint {} that is \
+                     missing from this file",
+                    input.label,
+                    target_blueprint_id,
+                ));
+                continue;
+            };
+
+            // The parent blueprint definitely can't be the latest target.
+            //
+            // Insert it into `non_targets` so that a subsequent iteration that
+            // finds this blueprint as the target knows that it cannot be the
+            // final target.
+            //
+            // Remove it from `maybe_targets` in case a previous iteration
+            // thought that maybe it could have been the final target.
+            if let Some(parent_id) = blueprint.parent_blueprint_id {
+                non_targets.insert(parent_id);
+                maybe_targets.remove(&parent_id);
+            };
+
+            // If a previous iteration did not find this blueprint as its
+            // target's parent, then this one could be the latest target.
+            if !non_targets.contains(&target_blueprint_id) {
+                maybe_targets.insert(target_blueprint_id);
+            }
+        }
+
+        if all_states.is_empty() {
+            bail!("found no inputs containing a valid target blueprint id");
+        }
+
+        // It's time to figure out which blueprint is the latest target across
+        // all these files.
+        //
+        // At this point, `maybe_targets` contains the set of blueprint ids that
+        // were not observed to be the parent of any blueprint contained in
+        // these files.
+        //
+        let latest = match maybe_targets.len() {
+            0 => {
+                // If `maybe_targets` were empty, that would mean that either we
+                // had no blueprint ids at all (in which case we would have
+                // bailed out above after checking whether `all_states` was
+                // empty) or else every blueprint in all the files was reported
+                // as the parent of some other blueprint in the files.  This is
+                // not valid: it would imply a cycle in the blueprint history.
+                bail!(
+                    "no blueprint found that is not some other blueprint's \
+                     parent (this should be impossible)"
+                );
+            }
+
+            1 => {
+                // This is the easy, common case.
+                // unwrap(): we just checked that `maybe_targets` is not empty.
+                let latest_id = maybe_targets.into_iter().next().unwrap();
+                // unwrap(): for an entry to be in `maybe_targets`, it must have
+                // also been added to `all_states`.
+                all_states.remove(&latest_id).unwrap()
+            }
+
+            n => {
+                // It is possible to find more than candidate for the "latest"
+                // blueprint if there's a gap in the history.  For example, we
+                // may have been provided a sequence of blueprints: 1, 2, 4, 5.
+                // In that case, blueprints 2 and 5 will both look like
+                // candidates for the latest.  In that case, use
+                // `time_made_target` as the tiebreaker.  (One might wonder why
+                // we didn't just use that field to start with.  We want to
+                // avoid relying on timestamps for correctness.  If we have to
+                // resort to it here, we will generate a warning.)
+                let mut candidates: Vec<_> =
+                    maybe_targets.into_iter().collect();
+                warnings.push(anyhow!(
+                    "{n} blueprint ids found that were not the parent of some \
+                     other blueprint in these files (is there a gap in the \
+                     history here?) (will choose based on latest time made \
+                     target): {:?}",
+                    candidates,
+                ));
+                candidates.sort_by_key(|blueprint_id| {
+                    // unwrap(): for a value to be in `maybe_targets`, we must
+                    // have inserted it into `all_states`, too.
+                    all_states
+                        .get(blueprint_id)
+                        .unwrap()
+                        .target_blueprint
+                        .time_made_target
+                });
+                // unwrap(): we just checked that this list is not empty.
+                let latest_id = candidates.last().unwrap();
+                // unwrap(): as above, for a value to be in this list, it must
+                // have been added to `all_states`.
+                all_states.remove(latest_id).unwrap()
+            }
+        };
+
+        Ok(ReadSeries {
+            latest: latest.label.to_owned(),
+            warnings,
+            state: UnstableReconfiguratorState {
+                planning_input: latest.planning_input,
+                collections,
+                target_blueprint: latest.target_blueprint,
+                blueprints,
+                internal_dns,
+                external_dns,
+                silo_names: latest.silo_names,
+                external_dns_zone_names: latest.external_dns_zone_names,
+            },
+        })
+    }
+}
+
 #[cfg(test)]
 mod test {
-    use std::sync::Arc;
-
     use super::ExpectedVersion;
     use super::PendingMgsUpdate;
     use super::PendingMgsUpdateDetails;
@@ -3512,6 +3826,7 @@ mod test {
     use gateway_types::component::SpType;
     use sled_hardware_types::BaseboardId;
     use sled_hardware_types::GIMLET_SLED_MODEL;
+    use std::sync::Arc;
 
     #[test]
     fn test_serialize_pending_mgs_updates() {

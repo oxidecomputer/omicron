@@ -124,12 +124,16 @@ async fn test_nexus_add_remove(lc: &LiveTestContext) {
             .context("failed to construct external networking allocator")?
             .for_new_nexus()
             .context("failed to pick an external IP for Nexus")?;
+            let nexus_config = planning_input
+                .external_service_networking_policy()
+                .operator_nexus_config();
             builder
                 .sled_add_zone_nexus(
                     sled_id,
                     image_source,
                     external_ip,
                     *nexus_generation,
+                    &nexus_config,
                 )
                 .context("adding Nexus zone")?;
 

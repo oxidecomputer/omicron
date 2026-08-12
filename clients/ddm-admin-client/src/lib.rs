@@ -2,8 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-// Copyright 2023 Oxide Computer Company
-
 #![allow(clippy::redundant_closure_call)]
 #![allow(clippy::needless_lifetimes)]
 #![allow(clippy::match_single_binding)]
@@ -13,10 +11,10 @@ pub use ddm_admin_client::types;
 
 use ddm_admin_client::Client as InnerClient;
 use either::Either;
+use omicron_common::address::BOOTSTRAP_PREFIX;
+use omicron_common::address::BOOTSTRAP_SLED_SUBNET_PREFIX_LENGTH;
 use omicron_common::address::DDMD_PORT;
 use oxnet::Ipv6Net;
-use sled_hardware_types::underlay::BOOTSTRAP_MASK;
-use sled_hardware_types::underlay::BOOTSTRAP_PREFIX;
 use sled_hardware_types::underlay::BootstrapInterface;
 use slog::Logger;
 use slog_error_chain::SlogInlineError;
@@ -113,10 +111,11 @@ impl Client {
         interfaces: &'a [BootstrapInterface],
     ) -> Result<impl Iterator<Item = Ipv6Addr> + 'a + use<'a>, DdmError> {
         let prefixes = self.inner.get_prefixes().await?.into_inner();
-        Ok(prefixes.into_iter().flat_map(|(_, prefixes)| {
+        Ok(prefixes.into_values().flat_map(|prefixes| {
             prefixes.into_iter().flat_map(|prefix| {
                 let mut segments = prefix.destination.addr().segments();
-                if prefix.destination.width() == BOOTSTRAP_MASK
+                if prefix.destination.width()
+                    == BOOTSTRAP_SLED_SUBNET_PREFIX_LENGTH
                     && segments[0] == BOOTSTRAP_PREFIX
                 {
                     Either::Left(interfaces.iter().map(move |interface| {

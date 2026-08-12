@@ -4,7 +4,9 @@
 
 use crate::latest;
 use omicron_common::api::external::IdentityMetadataCreateParams;
+use omicron_common::api::external::SimpleIdentity;
 use oxnet::IpNet;
+use uuid::Uuid;
 
 impl From<IpNet> for latest::networking::AddressLotBlockCreate {
     fn from(ipnet: IpNet) -> Self {
@@ -67,5 +69,11 @@ impl latest::networking::SwitchPortSettingsCreate {
             bgp_peers: Vec::new(),
             addresses: Vec::new(),
         }
+    }
+}
+
+impl SimpleIdentity for latest::networking::LldpNeighbor {
+    fn id(&self) -> Uuid {
+        self.id
     }
 }

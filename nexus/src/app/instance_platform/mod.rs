@@ -225,7 +225,7 @@ impl DisksByIdBuilder {
         Self { map: BTreeMap::new(), slot_usage: BTreeSet::new() }
     }
 
-    fn add_generic_disk(
+    fn add_nvme_disk(
         &mut self,
         disk: &Disk,
         backend: Component,
@@ -246,12 +246,58 @@ impl DisksByIdBuilder {
 
         let pci_path = slot_to_pci_bdf(slot, PciDeviceKind::Disk)?;
 
+        // Generally we report that storage devices have volatile write cache
+        // semantics. This is a conservative default that matches most system
+        // behaviors. Crucible fast-acks writes and requires flushes to persist
+        // writes to non-volatile storage, and - theoretically - file-backed
+        // disks could be *any file* which may include normal POSIX "you must
+        // fdatasync() for writes to not be lost" semantics.
+        //
+        // This being anything other than "true" must be carefully considered;
+        // incorrectly claiming there is no write cache while the backing
+        // storage has volatile write cache semantics risks guest data loss in
+        // the event of power loss or crashes.
+        //
+        // On the other hand, when we can avoid claiming volatile write cache
+        // semantics, guest OSes know to not send spurious flushes. This can
+        // have important performance consequences from avoided VM exits,
+        // Propolis syscalls, interrupts, etc.
+        let volatile_write_cache = match &backend {
+            // We match on all fields so that if FileStorageBackend changes,
+            // those changes must consider if volatile-write-cache semantics are
+            // correctly captured here.
+            Component::FileStorageBackend(FileStorageBackend {
+                path,
+                readonly: _,
+                block_size: _,
+                workers: _,
+            }) => {
+                // In the product, for the forseeable future, local storage raw
+                // zvols are on enterprise U.2s which do not report volatile
+                // write caches. "/rdsk/" here refers to the character device
+                // for that raw volume with unbuffered semantics (versus
+                // `/dsk/`, the block device, which can buffer writes when not
+                // opened O_DIRECT - see spec_write(), vpm_data_copy(), and
+                // vpm_sync_pages()).
+                //
+                // XXX: In development and non-product environments where
+                // storage may be commodity M.2s or worse, this can claim "no
+                // VWC semantics" when the underlying storage actually does.
+                // This could be improved. See Omicron#10933.
+                let vwc_semantics = !path.starts_with("/dev/zvol/rdsk/");
+
+                vwc_semantics
+            }
+            _ => true,
+        };
+
         let device = Component::NvmeDisk(NvmeDisk {
             backend_id: SpecKey::Uuid(disk.id()),
             pci_path,
             serial_number: zero_padded_nvme_serial_from_str(
                 disk.name().as_str(),
             ),
+            has_write_cache: volatile_write_cache,
         });
 
         let device_name = component_names::device_name_from_id(&disk.id());
@@ -279,10 +325,10 @@ impl DisksByIdBuilder {
                 request_json: volume.data().to_owned(),
             });
 
-        self.add_generic_disk(disk, backend)
+        self.add_nvme_disk(disk, backend)
     }
 
-    fn add_file_backed_disk(
+    fn add_local_disk(
         &mut self,
         disk: &Disk,
         path: String,
@@ -296,7 +342,7 @@ impl DisksByIdBuilder {
             workers: Some(LOCAL_STORAGE_WORKERS),
         });
 
-        self.add_generic_disk(disk, backend)
+        self.add_nvme_disk(disk, backend)
     }
 }
 
@@ -526,7 +572,7 @@ impl super::Nexus {
                 }
 
                 db::datastore::Disk::LocalStorage(local_storage_disk) => {
-                    builder.add_file_backed_disk(
+                    builder.add_local_disk(
                         disk,
                         // Use the delegated zvol as the target for the file
                         // backed disk

@@ -285,7 +285,13 @@ pub(super) fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
                 }
                 case_mut
             }
-            None => builder.cases.open_case(DiagnosisEngineKind::PhysicalDisk),
+            None => builder.cases.open_case(
+                DiagnosisEngineKind::PhysicalDisk,
+                format!(
+                    "opened because zpool {} on disk {} was {current_health}",
+                    disk.zpool_id, disk.physical_disk_id
+                ),
+            ),
         };
 
         case_mut.add_fact(
@@ -315,6 +321,7 @@ mod tests {
     use nexus_types::fm::{self, Sitrep, SitrepVersion};
     use nexus_types::in_service_disk::InServiceDisk;
     use nexus_types::inventory;
+    use omicron_common::api::external;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::{
         OmicronZoneUuid, PhysicalDiskUuid, SitrepUuid, SledUuid,
@@ -503,6 +510,8 @@ mod tests {
                 time_created: Utc::now(),
                 next_inv_min_time_started: Utc::now(),
                 comment: String::new(),
+                alert_generation: external::Generation::new(),
+                support_bundle_generation: external::Generation::new(),
             },
             cases: case_map,
             ereports_by_id: Default::default(),

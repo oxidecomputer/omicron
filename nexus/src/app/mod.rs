@@ -10,7 +10,6 @@ use crate::DropshotServer;
 use crate::app::background::BackgroundTasksData;
 use crate::app::background::CurrentSitrep;
 use crate::app::background::SagaRecoveryHelpers;
-use crate::app::background::resolve_mgd_clients;
 use crate::app::update::UpdateStatusHandle;
 use crate::populate::PopulateArgs;
 use crate::populate::PopulateStatus;
@@ -33,11 +32,12 @@ use nexus_mgs_updates::ArtifactCache;
 use nexus_mgs_updates::MgsUpdateDriver;
 use nexus_types::deployment::PendingMgsUpdates;
 use nexus_types::deployment::ReconfiguratorConfigParam;
-
 use omicron_common::address::MGS_PORT;
+use omicron_common::address::UnderlaySubnets;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Error;
 use omicron_uuid_kinds::OmicronZoneUuid;
+use omicron_uuid_kinds::RackUuid;
 use oximeter_producer::Server as ProducerServer;
 use sagas::common_storage::PooledPantryClient;
 use sagas::common_storage::make_pantry_connection_pool;
@@ -52,7 +52,7 @@ use std::sync::Arc;
 use std::sync::OnceLock;
 use tokio::sync::mpsc;
 use tokio::sync::watch;
-use update_common::artifacts::ArtifactsWithPlan;
+use tufaceous::Repository;
 use uuid::Uuid;
 
 // The implementation of Nexus is large, and split into a number of submodules
@@ -70,6 +70,7 @@ pub mod crucible;
 mod deployment;
 mod device_auth;
 mod disk;
+pub(crate) mod external_client;
 mod external_dns;
 pub(crate) mod external_endpoints;
 mod external_ip;
@@ -187,7 +188,7 @@ pub struct Nexus {
     id: OmicronZoneUuid,
 
     /// uuid for this rack
-    rack_id: Uuid,
+    rack_id: RackUuid,
 
     /// general server log
     log: Logger,
@@ -235,7 +236,7 @@ pub struct Nexus {
     /// This lives on the Nexus struct as we would like to use the same client
     /// pool for the webhook deliverator background task and the webhook probe
     /// API.
-    webhook_delivery_client: reqwest::Client,
+    webhook_delivery_client: external_client::ExternalHttpClient,
 
     /// The tunable parameters from a configuration file
     tunables: Tunables,
@@ -289,7 +290,7 @@ pub struct Nexus {
 
     /// Sender for TUF repository artifacts temporarily stored in this zone to
     /// be replicated out to sleds in the background
-    tuf_artifact_replication_tx: mpsc::Sender<ArtifactsWithPlan>,
+    tuf_artifact_replication_tx: mpsc::Sender<Repository>,
 
     /// reports status of pending MGS-managed updates
     mgs_update_status_rx: watch::Receiver<MgsUpdateDriverStatus>,
@@ -315,6 +316,11 @@ pub struct Nexus {
 
     /// state of overall Nexus quiesce activity
     quiesce: NexusQuiesceHandle,
+
+    /// the underlay subnets (rack and AZ), set once they have been loaded, or
+    /// once the rack has been initialized (if RSS has not already finished when
+    /// this Nexus process starts).
+    underlay_subnets: Arc<OnceLock<UnderlaySubnets>>,
 }
 
 impl Nexus {
@@ -324,7 +330,7 @@ impl Nexus {
     // TODO-polish revisit rack metadata
     #[allow(clippy::too_many_arguments)]
     pub(crate) async fn new_with_id(
-        rack_id: Uuid,
+        rack_id: RackUuid,
         log: Logger,
         resolver: internal_dns_resolver::Resolver,
         qorb_resolver: internal_dns_resolver::QorbResolver,
@@ -471,30 +477,38 @@ impl Nexus {
             background_tasks_internal,
         ) = background::BackgroundTasksInitializer::new();
 
+        let underlay_subnets = Arc::new(OnceLock::new());
+        // The IP policy is shared by the external DNS resolver (which applies
+        // it to resolved addresses) and any `ExternalHttpClient` (which
+        // applies it to IP literals in URLs).
+        let external_ip_policy = external_client::ExternalIpPolicy::new(
+            underlay_subnets.clone(),
+            config.deployment.external_http_clients.treat_loopback_as_external,
+        );
         let external_resolver = {
             if config.deployment.external_dns_servers.is_empty() {
                 return Err("expected at least 1 external DNS server".into());
             }
+
             Arc::new(external_dns::Resolver::new(
                 &config.deployment.external_dns_servers,
+                external_ip_policy,
             ))
         };
 
-        let webhook_delivery_client = {
-            // The webhook delivery HTTP client will send requests to endpoints
-            // external to the rack, so apply the configuration for external
-            // HTTP clients.
-            let builder = external_http_client_builder(
-                &config.deployment.external_http_clients,
-                &external_resolver,
-            );
-            webhook::delivery_client(builder).map_err(|e| {
-                format!(
-                    "failed to build webhook delivery client: {}",
-                    InlineErrorChain::new(&e)
-                )
-            })?
-        };
+        // The webhook delivery HTTP client will send requests to endpoints
+        // external to the rack, so apply the configuration for external
+        // HTTP clients.
+        let webhook_delivery_client = webhook::delivery_client(
+            &config.deployment.external_http_clients,
+            &external_resolver,
+        )
+        .map_err(|e| {
+            format!(
+                "failed to build webhook delivery client: {}",
+                InlineErrorChain::new(&e)
+            )
+        })?;
 
         let mut mgs_resolver =
             qorb_resolver.for_service(ServiceName::ManagementGatewayService);
@@ -581,6 +595,7 @@ impl Nexus {
             update_status: UpdateStatusHandle::new(blueprint_load_rx),
             quiesce,
             sitrep_load_rx,
+            underlay_subnets,
         };
 
         // TODO-cleanup all the extra Arcs here seems wrong
@@ -695,7 +710,7 @@ impl Nexus {
     }
 
     /// Return the rack ID for this Nexus instance.
-    pub fn rack_id(&self) -> Uuid {
+    pub fn rack_id(&self) -> RackUuid {
         self.rack_id
     }
 
@@ -1154,7 +1169,7 @@ impl Nexus {
 
     pub(crate) async fn lldpd_clients(
         &self,
-        rack_id: Uuid,
+        rack_id: RackUuid,
     ) -> Result<HashMap<SwitchSlot, lldpd_client::Client>, String> {
         let resolver = self.resolver();
         lldpd_clients(resolver, rack_id, &self.log).await
@@ -1174,7 +1189,47 @@ impl Nexus {
         &self,
     ) -> Result<HashMap<SwitchSlot, mg_admin_client::Client>, ResolveError>
     {
-        resolve_mgd_clients(self.resolver(), &self.log).await
+        let mgd_addrs =
+            self.resolver().lookup_all_socket_v6(ServiceName::Mgd).await?;
+        let mut clients = HashMap::new();
+        for addr in mgd_addrs {
+            let client = mg_admin_client::Client::new(
+                &format!("http://{addr}"),
+                self.log.clone(),
+            );
+            let switch_slot = match client.switch_identifiers().await {
+                Ok(response) => match response.slot {
+                    Some(0) => SwitchSlot::Switch0,
+                    Some(1) => SwitchSlot::Switch1,
+                    Some(n) => {
+                        warn!(
+                            self.log, "failed to determine switch slot for mgd";
+                            "addr" => %addr,
+                            "error" => format!("mgd returned unknown slot {n}"),
+                        );
+                        continue;
+                    }
+                    None => {
+                        warn!(
+                            self.log, "failed to determine switch slot for mgd";
+                            "addr" => %addr,
+                            "error" => "mgd does not yet know its switch slot",
+                        );
+                        continue;
+                    }
+                },
+                Err(err) => {
+                    warn!(
+                        self.log, "failed to determine switch slot for mgd";
+                        "addr" => %addr,
+                        InlineErrorChain::new(&err),
+                    );
+                    continue;
+                }
+            };
+            clients.insert(switch_slot, client);
+        }
+        Ok(clients)
     }
 
     pub(crate) fn demo_sagas(
@@ -1311,7 +1366,7 @@ pub(crate) async fn dpd_clients(
 /// of SwitchSlot -> Zone Underlay Address, we omit an entry for that client.
 pub(crate) async fn lldpd_clients(
     resolver: &internal_dns_resolver::Resolver,
-    _rack_id: Uuid,
+    _rack_id: RackUuid,
     log: &slog::Logger,
 ) -> Result<HashMap<SwitchSlot, lldpd_client::Client>, String> {
     let mappings = switch_zone_address_mappings(resolver, log).await?;
@@ -1451,29 +1506,4 @@ async fn map_switch_zone_addrs(
     );
 
     switch_zone_addrs
-}
-
-/// Begin configuring an external HTTP client, returning a
-/// `reqwest::ClientBuilder`.
-pub(crate) fn external_http_client_builder(
-    config: &nexus_config::ExternalHttpClientConfig,
-    resolver: &Arc<external_dns::Resolver>,
-) -> reqwest::ClientBuilder {
-    let mut builder = reqwest::ClientBuilder::new();
-
-    builder = builder.dns_resolver(resolver.clone());
-
-    // If we are configured to only bind external TCP connections on a specific interface, do so.
-    #[cfg(any(
-        target_os = "linux",
-        target_os = "macos",
-        target_os = "illumos",
-    ))]
-    {
-        if let Some(ref interface) = config.interface {
-            builder = builder.interface(interface);
-        }
-    }
-
-    builder
 }

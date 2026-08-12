@@ -412,7 +412,7 @@ async fn cmd_reconfigurator_config_history(
             .await
             .context("batch of reconfigurator configs")?;
         paginator = p.found_batch(&batch, &|b| SqlU32::new(b.version));
-        history.extend(batch.into_iter());
+        history.extend(batch);
     }
 
     #[derive(Tabled)]

@@ -69,6 +69,7 @@ pub enum InvalidIpAddrError {
     Ord,
 )]
 #[serde(tag = "type", rename_all = "snake_case")]
+#[cfg_attr(any(test, feature = "testing"), derive(test_strategy::Arbitrary))]
 pub enum UplinkAddress {
     // `#[serde(rename)]` this to `addrconf` so when this shows up in
     // config-rss.toml development files, it's not phrased as `addr_conf`. This
@@ -95,6 +96,7 @@ pub enum UplinkAddress {
     Ord,
 )]
 #[serde(tag = "type", rename_all = "snake_case")]
+#[cfg_attr(any(test, feature = "testing"), derive(test_strategy::Arbitrary))]
 pub enum RouterPeerType {
     Unnumbered {
         /// Router lifetime in seconds for unnumbered BGP peers.
@@ -297,8 +299,19 @@ impl TryFrom<IpAddr> for RouterPeerIpAddr {
 }
 
 #[derive(
-    Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq, JsonSchema, Hash,
+    Clone,
+    Copy,
+    Debug,
+    Deserialize,
+    Serialize,
+    PartialEq,
+    Eq,
+    JsonSchema,
+    Hash,
+    PartialOrd,
+    Ord,
 )]
+#[cfg_attr(any(test, feature = "testing"), derive(test_strategy::Arbitrary))]
 pub struct UplinkAddressConfig {
     /// The address to be used on the uplink.
     pub address: UplinkAddress,
@@ -372,6 +385,24 @@ pub struct PortConfig {
     pub lldp: Option<v1::LldpPortConfig>,
     /// TX-EQ configuration for this port
     pub tx_eq: Option<v1::TxEqConfig>,
+}
+
+impl PortConfig {
+    /// Create a placeholder `PortConfig` for use in tests.
+    pub fn empty_for_tests(port: &str) -> Self {
+        Self {
+            routes: Vec::new(),
+            addresses: Vec::new(),
+            switch: v1::SwitchSlot::Switch0,
+            port: port.to_string(),
+            uplink_port_speed: v1::LinkSpeed::Speed100G,
+            uplink_port_fec: None,
+            bgp_peers: Vec::new(),
+            autoneg: false,
+            lldp: None,
+            tx_eq: None,
+        }
+    }
 }
 
 #[derive(Debug, thiserror::Error)]

@@ -10,11 +10,13 @@ use chrono::DateTime;
 use chrono::Utc;
 use parse_display::Display;
 use parse_display::FromStr;
+use regex::Regex;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 use std::collections::BTreeSet;
 use std::num::NonZeroU8;
+use std::sync::LazyLock;
 
 pub type TimeseriesKey = u64;
 
@@ -158,8 +160,12 @@ pub struct TimeseriesSchema {
 //  - Zero or more of the above, delimited by '-'.
 //
 // That describes the target/metric name, and the timeseries is two of those, joined with ':'.
-pub(crate) const TIMESERIES_NAME_REGEX: &str =
-    "^(([a-z]+[a-z0-9]*)(_([a-z0-9]+))*):(([a-z]+[a-z0-9]*)(_([a-z0-9]+))*)$";
+pub(crate) static TIMESERIES_NAME_REGEX: LazyLock<Regex> = LazyLock::new(
+    || {
+        Regex::new("^(([a-z]+[a-z0-9]*)(_([a-z0-9]+))*):(([a-z]+[a-z0-9]*)(_([a-z0-9]+))*)$")
+            .expect("timeseries name validation regex should be valid")
+    },
+);
 
 /// Authorization scope for a timeseries.
 ///

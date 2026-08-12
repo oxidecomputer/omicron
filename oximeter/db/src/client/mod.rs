@@ -4,8 +4,6 @@
 
 //! Rust client to ClickHouse database
 
-// Copyright 2026 Oxide Computer Company
-
 pub(crate) mod dbwrite;
 #[cfg(any(feature = "oxql", test))]
 pub(crate) mod oxql;
@@ -1089,7 +1087,14 @@ impl Client {
 
         // Skip the timeseries schema table, which doesn't have a TTL, and
         // prepend the database name.
-        let mut tables = Vec::with_capacity(oximeter_tables.len() - 1);
+        //
+        // NOTE: `oximeter_tables` may legitimately be empty, e.g., if this
+        // is called before the oximeter database schema has been created.
+        // Use `saturating_sub()` so that case doesn't panic; it's only used
+        // to size the output `Vec`, so being off by one costs at most one
+        // extra (unused) allocation slot.
+        let mut tables =
+            Vec::with_capacity(oximeter_tables.len().saturating_sub(1));
         for table in
             oximeter_tables.into_iter().filter(|n| n != "timeseries_schema")
         {
@@ -1580,7 +1585,7 @@ impl Client {
     async fn read_timeseries_to_delete(
         replicated: bool,
         next_version: u64,
-        schema_dir: &Path,
+        schema_dir: impl AsRef<Path>,
     ) -> Result<Vec<TimeseriesName>, Error> {
         let version_schema_dir =
             Self::full_upgrade_path(replicated, next_version, schema_dir);
@@ -1771,6 +1776,7 @@ mod tests {
     use crate::query;
     use crate::query::field_table_name;
     use bytes::Bytes;
+    use camino_tempfile::Utf8TempDir;
     use chrono::Utc;
     use dropshot::test_util::LogContext;
     use futures::Future;
@@ -1791,7 +1797,6 @@ mod tests {
     use std::path::PathBuf;
     use std::pin::Pin;
     use std::time::Duration;
-    use tempfile::TempDir;
     use uuid::Uuid;
 
     /// Use client to initialize the database.
@@ -2116,6 +2121,29 @@ mod tests {
             ClickHouseDeployment::new_single_node(&logctx).await.unwrap();
         let client = Client::new(db.native_address().into(), &logctx.log);
         client.ping().await.expect("Should be able to ping existing server");
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn set_retention_policy_before_db_init_does_not_panic() {
+        let logctx = test_setup_log(
+            "set_retention_policy_before_db_init_does_not_panic",
+        );
+        let mut db =
+            ClickHouseDeployment::new_single_node(&logctx).await.unwrap();
+        let client = Client::new(db.native_address().into(), &logctx.log);
+
+        // Deliberately do *not* call `init_db()` here. The oximeter
+        // database (and its tables) don't exist yet, so
+        // `list_retention_policy_tables()` will see zero tables. This
+        // should be handled gracefully as a no-op, not panic on an
+        // integer underflow while sizing its output `Vec`.
+        let policy = RetentionPolicyRequest { days: Days::new(30).unwrap() };
+        client.set_retention_policy(policy, false).await.expect(
+            "setting a retention policy with no tables present yet should succeed as a no-op",
+        );
+
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -4035,10 +4063,8 @@ mod tests {
 
     fn verify_target(actual: &crate::Target, expected: &Service) {
         assert_eq!(actual.name, expected.name());
-        for (field_name, field_value) in expected
-            .field_names()
-            .into_iter()
-            .zip(expected.field_values().into_iter())
+        for (field_name, field_value) in
+            expected.field_names().into_iter().zip(expected.field_values())
         {
             let actual_field = actual
                 .fields
@@ -4054,10 +4080,8 @@ mod tests {
 
     fn verify_metric(actual: &crate::Metric, expected: &RequestLatency) {
         assert_eq!(actual.name, expected.name());
-        for (field_name, field_value) in expected
-            .field_names()
-            .into_iter()
-            .zip(expected.field_values().into_iter())
+        for (field_name, field_value) in
+            expected.field_names().into_iter().zip(expected.field_values())
         {
             let actual_field = actual
                 .fields
@@ -4074,15 +4098,15 @@ mod tests {
     async fn create_test_upgrade_schema_directory(
         replicated: bool,
         versions: &[u64],
-    ) -> (TempDir, Vec<PathBuf>) {
+    ) -> (Utf8TempDir, Vec<PathBuf>) {
         assert!(!versions.is_empty());
-        let schema_dir = TempDir::new().expect("failed to create tempdir");
+        let schema_dir = Utf8TempDir::new().expect("failed to create tempdir");
         let mut paths = Vec::with_capacity(versions.len());
         for version in versions.iter() {
             let version_dir = Client::full_upgrade_path(
                 replicated,
                 *version,
-                schema_dir.as_ref(),
+                schema_dir.path(),
             );
             fs::create_dir_all(&version_dir)
                 .await
@@ -4856,12 +4880,13 @@ mod tests {
 
     // Helper to write a test file containing timeseries to delete.
     async fn write_timeseries_to_delete_file(
-        schema_dir: &Path,
+        schema_dir: impl AsRef<Path>,
         replicated: bool,
         version: u64,
         names: &[TimeseriesName],
     ) {
         let subdir = schema_dir
+            .as_ref()
             .join(if replicated { "replicated" } else { "single-node" })
             .join(version.to_string());
         tokio::fs::create_dir_all(&subdir)
@@ -4882,8 +4907,7 @@ mod tests {
     async fn test_read_timeseries_to_delete() {
         let names: Vec<TimeseriesName> =
             vec!["a:b".parse().unwrap(), "c:d".parse().unwrap()];
-        let schema_dir =
-            tempfile::TempDir::new().expect("failed to make temp dir");
+        let schema_dir = Utf8TempDir::new().expect("failed to make temp dir");
         const VERSION: u64 = 7;
         write_timeseries_to_delete_file(
             schema_dir.path(),
@@ -4904,8 +4928,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_read_timeseries_to_delete_empty_file_is_ok() {
-        let schema_dir =
-            tempfile::TempDir::new().expect("failed to make temp dir");
+        let schema_dir = Utf8TempDir::new().expect("failed to make temp dir");
         const VERSION: u64 = 7;
         write_timeseries_to_delete_file(schema_dir.path(), false, VERSION, &[])
             .await;
@@ -5044,7 +5067,7 @@ mod tests {
                 WHERE timeseries_name = '{}'",
                 crate::DATABASE_NAME,
                 table,
-                &to_delete[0].to_string(),
+                to_delete[0],
             );
             let count = client
                 .execute_with_block(&mut handle, &sql)

@@ -27,8 +27,10 @@ use nexus_types::external_api::snapshot;
 use omicron_common::disk::DatasetKind;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::ZpoolUuid;
+use semver::Version;
 use sled_agent_types::inventory::ZpoolHealth;
 use std::sync::LazyLock;
+use tufaceous::edit::RepositoryEditor;
 
 type DiskTest<'a> =
     nexus_test_utils::resource_helpers::DiskTest<'a, omicron_nexus::Server>;
@@ -60,10 +62,7 @@ type DiskTest<'a> =
 //   endpoint with a non-existent resource to ensure that we get the same result
 //   (so that we don't leak information about existence based on, say, 401 vs.
 //   403).
-//
-// Uploading a TUF repository requires a multithreaded runtime with 2 worker
-// threads.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[tokio::test]
 async fn test_unauthorized() {
     let cptestctx =
         nexus_test_utils::ControlPlaneBuilder::new("test_unauthorized")
@@ -100,7 +99,7 @@ async fn test_unauthorized() {
             ZpoolHealth::Online,
         )
         .await;
-    disk_test.propagate_datasets_to_sleds().await;
+    disk_test.propagate_storage_to_sleds().await;
 
     let client = &cptestctx.external_client;
     let log = &cptestctx.logctx.log;
@@ -187,8 +186,9 @@ async fn test_unauthorized() {
         .execute()
         .await
         .unwrap();
+    let editor = RepositoryEditor::fake(Version::new(1, 0, 0)).unwrap();
     trust_root
-        .assemble_repo(&log, &[])
+        .assemble_repo(editor)
         .await
         .unwrap()
         .into_upload_request(client, StatusCode::OK)
@@ -359,7 +359,7 @@ static SETUP_REQUESTS: LazyLock<Vec<SetupReq>> = LazyLock::new(|| {
         SetupReq::Post {
             url: &DEMO_IP_POOLS_URL,
             body: serde_json::to_value(&*DEMO_IP_POOL_CREATE).unwrap(),
-            id_routes: vec!["/v1/ip-pools/{id}"],
+            id_routes: vec!["/v1/system/ip-pools/{id}"],
         },
         // Create an IP pool range
         SetupReq::Post {
@@ -372,6 +372,16 @@ static SETUP_REQUESTS: LazyLock<Vec<SetupReq>> = LazyLock::new(|| {
             url: &DEMO_IP_POOL_SILOS_URL,
             body: serde_json::to_value(&*DEMO_IP_POOL_SILOS_BODY).unwrap(),
             id_routes: vec![],
+        },
+        // Create a default services IP pool.
+        //
+        // This is just another IP Pool that the operator can control, but it's
+        // assigned to Oxide system services. See the create-parameters for
+        // details.
+        SetupReq::Post {
+            url: &DEMO_IP_POOLS_URL,
+            body: serde_json::to_value(&*DEMO_SERVICES_IP_POOL_CREATE).unwrap(),
+            id_routes: vec!["/v1/system/ip-pools/{id}"],
         },
         // Create a Project in the Organization
         SetupReq::Post {

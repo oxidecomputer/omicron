@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::DbSwitchSlot;
+use crate::DbTypedUuid;
 use crate::SqlU16;
 use crate::impl_enum_type;
 use db_macros::Asset;
@@ -10,7 +11,10 @@ use ipnetwork::IpNetwork;
 use nexus_db_schema::schema::{loopback_address, switch_vlan_interface_config};
 use nexus_types::external_api::networking as networking_types;
 use nexus_types::identity::Asset;
+use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::LoopbackAddressKind;
+use omicron_uuid_kinds::RackKind;
+use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::TypedUuid;
 use serde::{Deserialize, Serialize};
 use sled_agent_types::early_networking::SwitchSlot;
@@ -102,7 +106,7 @@ pub struct LoopbackAddress {
     pub identity: LoopbackAddressIdentity,
     pub address_lot_block_id: Uuid,
     pub rsvd_address_lot_block_id: Uuid,
-    pub rack_id: Uuid,
+    pub rack_id: DbTypedUuid<RackKind>,
     pub address: IpNetwork,
     pub anycast: bool,
     pub switch_slot: DbSwitchSlot,
@@ -113,7 +117,7 @@ impl LoopbackAddress {
         id: Option<TypedUuid<LoopbackAddressKind>>,
         address_lot_block_id: Uuid,
         rsvd_address_lot_block_id: Uuid,
-        rack_id: Uuid,
+        rack_id: RackUuid,
         switch_slot: SwitchSlot,
         address: IpNetwork,
         anycast: bool,
@@ -124,11 +128,15 @@ impl LoopbackAddress {
             ),
             address_lot_block_id,
             rsvd_address_lot_block_id,
-            rack_id,
+            rack_id: rack_id.into(),
             switch_slot: switch_slot.into(),
             address,
             anycast,
         }
+    }
+
+    pub fn rack_id(&self) -> RackUuid {
+        self.rack_id.into()
     }
 }
 
@@ -137,7 +145,7 @@ impl Into<networking_types::LoopbackAddress> for LoopbackAddress {
         networking_types::LoopbackAddress {
             id: self.identity().id,
             address_lot_block_id: self.address_lot_block_id,
-            rack_id: self.rack_id,
+            rack_id: self.rack_id.into_untyped_uuid(),
             switch_slot: self.switch_slot.into(),
             address: self.address.into(),
         }

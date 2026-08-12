@@ -4,40 +4,40 @@
 
 //! Example data structures for use in tests and documentation.
 
-use std::{collections::BTreeSet, net::Ipv6Addr};
+use std::{collections::BTreeMap, net::Ipv6Addr};
 
-use gateway_types::component::SpType;
-use maplit::{btreemap, btreeset};
-use omicron_common::{
-    address::{IpRange, Ipv4Range},
-    api::external::AllowedSourceIps,
-};
+use gateway_types::component::{SpState, SpType};
+use gateway_types::rot::{RotSlot, RotState};
+use iddqd::id_ord_map;
+use maplit::btreemap;
 use sled_agent_types::early_networking::{
     BgpConfig, BgpPeerConfig, LinkFec, LinkSpeed, LldpAdminStatus,
     LldpPortConfig, MaxPathConfig, RouteConfig, RouterLifetimeConfig,
-    TxEqConfig, UplinkAddress,
+    TxEqConfig,
 };
-use sled_hardware_types::Baseboard;
+use sled_hardware_types::BaseboardId;
 
 use crate::{
-    inventory::SpIdentifier,
-    rack_setup::{
-        BgpAuthKeyId, BootstrapSledDescription,
-        CurrentRssUserConfigInsensitive, PutRssUserConfigInsensitive,
-        UserSpecifiedBgpPeerConfig, UserSpecifiedImportExportPolicy,
-        UserSpecifiedPortConfig, UserSpecifiedRackNetworkConfig,
-        UserSpecifiedRouterPeerAddr, UserSpecifiedUplinkAddressConfig,
-    },
+    inventory::{MgsV1Inventory, SpIdentifier, SpInventory},
+    rack_setup::{BootstrapSledDescription, CurrentRssUserConfigInsensitive},
+};
+use wicketd_commission_types::rack_setup::{
+    AllowedSourceIps, BgpAuthKeyId, IpRange, Ipv4Range, ManualPortConfig,
+    PutRssUserConfigInsensitive, ServiceIpPoolConfig, UplinkAddress,
+    UserSpecifiedBgpPeerConfig, UserSpecifiedImportExportPolicy,
+    UserSpecifiedPortConfig, UserSpecifiedRackNetworkConfig,
+    UserSpecifiedRouterPeerAddr, UserSpecifiedUplinkAddressConfig,
 };
 
 /// A collection of example data structures.
 pub struct ExampleRackSetupData {
-    pub inventory: BTreeSet<BootstrapSledDescription>,
     /// The example baseboard where wicket/wicketd is presumed to be running.
-    pub our_baseboard: Option<Baseboard>,
+    pub our_baseboard_id: BaseboardId,
     pub put_insensitive: PutRssUserConfigInsensitive,
     pub current_insensitive: CurrentRssUserConfigInsensitive,
     pub bgp_auth_keys: Vec<BgpAuthKeyId>,
+    pub inventory: MgsV1Inventory,
+    pub ddm_discovered_sleds: BTreeMap<BaseboardId, Ipv6Addr>,
 }
 
 impl ExampleRackSetupData {
@@ -63,37 +63,92 @@ impl ExampleRackSetupData {
 
         // our_baseboard matches the baseboard of the first sled in
         // bootstrap_sleds.
-        let our_baseboard = Baseboard::Gimlet {
-            model: "model1".into(),
-            revision: 3,
-            identifier: "serial 1 2 3".into(),
+        let our_baseboard = BaseboardId {
+            part_number: "model1".into(),
+            serial_number: "serial 1 2 3".into(),
         };
 
-        let inventory = btreeset![
-            BootstrapSledDescription {
-                id: SpIdentifier { slot: 1, type_: SpType::Sled },
-                baseboard: our_baseboard.clone(),
-                bootstrap_ip: None,
+        let mut sp0 =
+            SpInventory::new(SpIdentifier { slot: 1, typ: SpType::Sled });
+        sp0.state = Some(SpState {
+            serial_number: "serial 1 2 3".into(),
+            model: "model1".into(),
+            revision: 3,
+            hubris_archive_id: "fake".into(),
+            base_mac_address: [0u8; 6],
+            power_state: gateway_types::component::PowerState::A0,
+            rot: RotState::V2 {
+                active: RotSlot::A,
+                persistent_boot_preference: RotSlot::A,
+                pending_persistent_boot_preference: None,
+                transient_boot_preference: None,
+                slot_a_sha3_256_digest: None,
+                slot_b_sha3_256_digest: None,
             },
-            BootstrapSledDescription {
-                id: SpIdentifier { slot: 5, type_: SpType::Sled },
-                baseboard: Baseboard::Gimlet {
-                    model: "model2".into(),
-                    revision: 5,
-                    identifier: "serial 4 5 6".into(),
+        });
+        let mut sp1 =
+            SpInventory::new(SpIdentifier { slot: 5, typ: SpType::Sled });
+        sp1.state = Some(SpState {
+            serial_number: "serial 4 5 6".into(),
+            model: "model2".into(),
+            revision: 5,
+            hubris_archive_id: "fake".into(),
+            base_mac_address: [0u8; 6],
+            power_state: gateway_types::component::PowerState::A0,
+            rot: RotState::V2 {
+                active: RotSlot::A,
+                persistent_boot_preference: RotSlot::A,
+                pending_persistent_boot_preference: None,
+                transient_boot_preference: None,
+                slot_a_sha3_256_digest: None,
+                slot_b_sha3_256_digest: None,
+            },
+        });
+        let inventory = MgsV1Inventory { sps: id_ord_map! { sp0, sp1 } };
+
+        let ddm_discovered_sleds: BTreeMap<_, _> = [
+            (our_baseboard.clone(), Ipv6Addr::LOCALHOST),
+            (
+                BaseboardId {
+                    part_number: "model2".into(),
+                    serial_number: "serial 4 5 6".into(),
                 },
-                bootstrap_ip: Some(Ipv6Addr::LOCALHOST),
+                Ipv6Addr::LOCALHOST,
+            ),
+        ]
+        .into_iter()
+        .collect();
+
+        let bootstrap_sleds = id_ord_map! {
+            BootstrapSledDescription {
+                id: SpIdentifier { slot: 1, typ: SpType::Sled },
+                baseboard_id: our_baseboard.clone(),
+                bootstrap_ip: Some(Ipv6Addr::LOCALHOST)
             },
-        ];
-        let bootstrap_sleds = inventory.clone();
+            BootstrapSledDescription {
+                id: SpIdentifier { slot: 5, typ: SpType::Sled },
+                baseboard_id: BaseboardId {
+                    part_number: "model2".into(),
+                    serial_number: "serial 4 5 6".into(),
+                },
+                bootstrap_ip: None
+            },
+        };
 
         let dns_servers =
             vec!["1.1.1.1".parse().unwrap(), "2.2.2.2".parse().unwrap()];
         let external_dns_zone_name = "oxide.computer".to_owned();
-        let internal_services_ip_pool_ranges = vec![IpRange::V4(Ipv4Range {
-            first: "10.0.0.1".parse().unwrap(),
-            last: "10.0.0.5".parse().unwrap(),
-        })];
+        let service_ip_pools = id_ord_map! {
+            ServiceIpPoolConfig::new(
+                "oxide-service-pool-v4".parse().unwrap(),
+                "IPv4 IP Pool for Oxide Services".to_string(),
+                vec![IpRange::V4(Ipv4Range {
+                    first: "10.0.0.1".parse().unwrap(),
+                    last: "10.0.0.5".parse().unwrap(),
+                })],
+            )
+            .unwrap(),
+        };
         let external_dns_ips = vec!["10.0.0.1".parse().unwrap()];
         let ntp_servers = vec!["ntp1.com".into(), "ntp2.com".into()];
 
@@ -212,7 +267,7 @@ impl ExampleRackSetupData {
             infra_ip_last: "172.30.0.10".parse().unwrap(),
             #[rustfmt::skip]
             switch0: btreemap! {
-                "port0".to_owned() => UserSpecifiedPortConfig {
+                "port0".to_owned() => UserSpecifiedPortConfig::Manual(ManualPortConfig {
                     addresses: vec![UserSpecifiedUplinkAddressConfig {
                         address: UplinkAddress::AddrConf,
                         vlan_id: Some(1),
@@ -229,13 +284,13 @@ impl ExampleRackSetupData {
                     lldp: switch0_port0_lldp,
                     tx_eq,
                     autoneg: true,
-                },
+                }),
             },
             #[rustfmt::skip]
             switch1: btreemap! {
                 // Use the same port name as in switch0 to test that it doesn't
                 // collide.
-                "port0".to_owned() => UserSpecifiedPortConfig {
+                "port0".to_owned() => UserSpecifiedPortConfig::Manual(ManualPortConfig {
                     addresses: vec![UserSpecifiedUplinkAddressConfig::without_vlan(
                         "172.30.0.1/24".parse().unwrap(),
                     )],
@@ -251,7 +306,7 @@ impl ExampleRackSetupData {
                     lldp: switch1_port0_lldp,
                     tx_eq,
                     autoneg: true,
-                },
+                }),
             },
             bgp: vec![BgpConfig {
                 asn: 47,
@@ -266,7 +321,7 @@ impl ExampleRackSetupData {
             bootstrap_sleds,
             dns_servers,
             external_dns_zone_name,
-            internal_services_ip_pool_ranges,
+            service_ip_pools,
             external_dns_ips,
             ntp_servers,
             rack_network_config: Some(rack_network_config),
@@ -296,9 +351,7 @@ impl ExampleRackSetupData {
             external_dns_zone_name: current_insensitive
                 .external_dns_zone_name
                 .clone(),
-            internal_services_ip_pool_ranges: current_insensitive
-                .internal_services_ip_pool_ranges
-                .clone(),
+            service_ip_pools: current_insensitive.service_ip_pools.clone(),
             external_dns_ips: current_insensitive.external_dns_ips.clone(),
             ntp_servers: current_insensitive.ntp_servers.clone(),
             rack_network_config: current_insensitive
@@ -310,11 +363,12 @@ impl ExampleRackSetupData {
         };
 
         Self {
-            inventory,
-            our_baseboard: Some(our_baseboard),
+            our_baseboard_id: our_baseboard,
             current_insensitive,
             put_insensitive,
             bgp_auth_keys: bgp_auth_keys.into_iter().collect(),
+            inventory,
+            ddm_discovered_sleds,
         }
     }
 }
@@ -335,6 +389,9 @@ fn apply_tweak(
             let rnc = current_insensitive.rack_network_config.as_mut().unwrap();
             for (_, _, port) in rnc.iter_uplinks_mut() {
                 // Remove all but the first BGP peer.
+                let UserSpecifiedPortConfig::Manual(port) = port else {
+                    unimplemented!("DdmAutoPortConfig currently unsupported")
+                };
                 port.bgp_peers.drain(1..);
             }
         }
