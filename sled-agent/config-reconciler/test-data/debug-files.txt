@@ -66,16 +66,18 @@
 # Rotated syslog files
 /pool/ext/2115b084-be0f-4fba-941b-33a659798a9e/crypt/zone/oxz_ntp_a700528f-f600-4908-94ac-9c06442ef6b4/root/var/adm/messages.0
 
-# Debug dropbox files
+# Debug dropbox files using various legal producer names
 /pool/ext/7141d974-5c1e-4b60-9b7e-3c0af5b75ce5/crypt/zone/oxz_nexus_592f37a5-b7b4-4a76-be24-af9868381bc1/root/var/debug_dropbox/reconfigurator/dap-test.txt
+/pool/ext/7141d974-5c1e-4b60-9b7e-3c0af5b75ce5/crypt/zone/oxz_nexus_592f37a5-b7b4-4a76-be24-af9868381bc1/root/var/debug_dropbox/reconfigurator/dap-test-2.txt
+/pool/ext/7141d974-5c1e-4b60-9b7e-3c0af5b75ce5/crypt/zone/oxz_nexus_592f37a5-b7b4-4a76-be24-af9868381bc1/root/var/debug_dropbox/tmpfiles/dap-test.txt
+/pool/ext/416232c1-bc8f-403f-bacb-28403dd8fced/crypt/zone/oxz_cockroachdb_e86845b5-eabd-49f5-9a10-6dfef9066209/root/var/debug_dropbox/reconfigurator/dap-test.txt
 
-# Debug dropbox deposits that are still being staged.  These must never be
-# archived: they may be only partially written.
+# Debug dropbox deposits that are still being staged.  (These are not archived.)
 /pool/ext/7141d974-5c1e-4b60-9b7e-3c0af5b75ce5/crypt/zone/oxz_nexus_592f37a5-b7b4-4a76-be24-af9868381bc1/root/var/debug_dropbox/tmp/reconfigurator/dap-test-partial.txt
 
-# Unlike the other paths in this file, this one ought not be found on a real
-# system because the dropbox stages deposits one level further down (in
-# "tmp/PRODUCER").  This tests that the archiver would skip it anyway.
+# Debug dropbox files directly under the staging path.  Unlike the other paths
+# in this file, this one ought not be found on a real system, but it's important
+# to test.
 /pool/ext/7141d974-5c1e-4b60-9b7e-3c0af5b75ce5/crypt/zone/oxz_nexus_592f37a5-b7b4-4a76-be24-af9868381bc1/root/var/debug_dropbox/tmp/dap-test-stray.txt
 
 # Global zone: live syslog
