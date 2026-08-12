@@ -16240,7 +16240,7 @@
         ]
       },
       "Alert": {
-        "description": "An alert.\n\nAlerts represent edge-triggered notifications of an event that occurred in the system at a point in time. See the guide-level documentation alerts for details.",
+        "description": "An alert.\n\nAlerts represent edge-triggered notifications of an event that occurred in the system at a point in time. See the guide-level documentation on alerts for details.",
         "type": "object",
         "properties": {
           "alert": {
