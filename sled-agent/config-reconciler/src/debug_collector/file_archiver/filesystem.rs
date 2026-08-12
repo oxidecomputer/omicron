@@ -113,7 +113,9 @@ fn list_files(
                 // this the same as an empty directory.
                 return vec![];
             } else {
-                return vec![Err(anyhow!(error).context("readdir {path:?}"))];
+                return vec![Err(
+                    anyhow!(error).context(format!("readdir {path:?}"))
+                )];
             }
         }
     };
