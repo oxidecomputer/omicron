@@ -73,6 +73,11 @@
 # archived: they may be only partially written.
 /pool/ext/7141d974-5c1e-4b60-9b7e-3c0af5b75ce5/crypt/zone/oxz_nexus_592f37a5-b7b4-4a76-be24-af9868381bc1/root/var/debug_dropbox/tmp/reconfigurator/dap-test-partial.txt
 
+# Unlike the other paths in this file, this one ought not be found on a real
+# system because the dropbox stages deposits one level further down (in
+# "tmp/PRODUCER").  This tests that the archiver would skip it anyway.
+/pool/ext/7141d974-5c1e-4b60-9b7e-3c0af5b75ce5/crypt/zone/oxz_nexus_592f37a5-b7b4-4a76-be24-af9868381bc1/root/var/debug_dropbox/tmp/dap-test-stray.txt
+
 # Global zone: live syslog
 /var/adm/messages
 

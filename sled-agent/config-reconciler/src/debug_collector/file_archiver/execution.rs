@@ -154,8 +154,8 @@ mod test {
         let producer_dir =
             zone_root.join("var/debug_dropbox").join("test-producer");
         let file5_dropbox = producer_dir.join("test-file.dat");
-        // A deposit that's still being staged.  This must never be archived nor
-        // deleted.
+        // A dropbox deposit that's still being staged.  This must never be
+        // archived nor deleted.
         let staging_dir =
             zone_root.join("var/debug_dropbox/tmp").join("test-producer");
         let file6_staged = staging_dir.join("partial.dat");
