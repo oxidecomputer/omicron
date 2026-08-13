@@ -77,7 +77,7 @@ fn make_postgres_connector(
     // We're currently relying on the DieselPgConnector doing the following:
     // - Disallowing full table scans in its implementation of "on_acquire"
     // - Creating async_bb8_diesel connections that also wrap DTraceConnections.
-    // 
+    //
     // We also enable TCP keepalive to identify dead network connections in
     // about 60 seconds (30 second initial idle time plus 6 probes, each 5
     // seconds apart).
