@@ -3,9 +3,9 @@ SELECT
   alert.id,
   alert.time_created,
   alert.time_modified,
-  alert.time_dispatched,
   alert.alert_class,
   alert.payload,
+  alert.time_dispatched,
   alert.num_dispatched,
   alert.case_id,
   alert.alert_version

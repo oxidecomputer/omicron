@@ -761,6 +761,7 @@ mod test {
     use async_bb8_diesel::AsyncConnection;
     use async_bb8_diesel::AsyncRunQueryDsl;
     use chrono::Utc;
+    use diesel::prelude::*;
     use futures::FutureExt;
     use nexus_db_errors::TransactionError;
     use nexus_db_model::DnsGroup;
@@ -777,6 +778,64 @@ mod test {
     use std::net::Ipv6Addr;
     use std::num::NonZeroU32;
     use uuid::Uuid;
+
+    #[derive(Queryable)]
+    struct MisorderedDnsVersion {
+        dns_group: DnsGroup,
+        version: Generation,
+        time_created: chrono::DateTime<Utc>,
+        comment: String,
+        creator: String,
+    }
+
+    #[tokio::test]
+    async fn test_default_selection_silently_swaps_same_typed_model_fields() {
+        let logctx = dev::test_setup_log(
+            "test_default_selection_silently_swaps_same_typed_model_fields",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let datastore = db.datastore();
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+        let version = Generation::try_from(1_i64).unwrap();
+        let time_created = Utc::now();
+
+        use nexus_db_schema::schema::dns_version::dsl;
+        diesel::insert_into(dsl::dns_version)
+            .values(DnsVersion {
+                dns_group: DnsGroup::Internal,
+                version,
+                time_created,
+                creator: "creator value".to_string(),
+                comment: "comment value".to_string(),
+            })
+            .execute_async(&*conn)
+            .await
+            .unwrap();
+
+        // No explicit selection: Diesel selects the table's columns in table
+        // order and decodes them into the model in field order. `creator` and
+        // `comment` have the same SQL and Rust types, so their order mismatch
+        // is accepted and the values are silently swapped.
+        let misordered = dsl::dns_version
+            .find((DnsGroup::Internal, version))
+            .get_result_async::<MisorderedDnsVersion>(&*conn)
+            .await
+            .unwrap();
+        assert_eq!(misordered.dns_group, DnsGroup::Internal);
+        assert_eq!(misordered.version, version);
+        assert_eq!(
+            misordered
+                .time_created
+                .signed_duration_since(time_created)
+                .num_seconds(),
+            0
+        );
+        assert_eq!(misordered.comment, "creator value");
+        assert_eq!(misordered.creator, "comment value");
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
 
     // Tests reading various uninitialized or partially-initialized DNS data
     #[tokio::test]
