@@ -103,6 +103,7 @@ members = [
     "nexus/defaults",
     "nexus/external-api",
     "nexus/fm",
+    "nexus/fm/state-report"
     "nexus/internal-api",
     "nexus/inventory",
     "nexus/lockstep-api",
@@ -297,6 +298,7 @@ default-members = [
     "nexus/defaults",
     "nexus/external-api",
     "nexus/fm",
+    "nexus/fm/state-report",
     "nexus/internal-api",
     "nexus/inventory",
     "nexus/lockstep-api",

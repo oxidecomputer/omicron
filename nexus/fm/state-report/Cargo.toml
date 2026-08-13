@@ -1,0 +1,20 @@
+[package]
+name = "nexus-fm-state-report"
+edition.workspace = true
+
+[lints]
+workspace = true
+
+[build-dependencies]
+omicron-rpaths.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+futures.workspace = true
+nexus-db-model.workspace = true
+nexus-db-queries.workspace = true
+nexus-types.workspace = true
+# See omicron-rpaths for more about the "pq-sys" dependency.
+pq-sys = "*"
+
+omicron-workspace-hack.workspace = true

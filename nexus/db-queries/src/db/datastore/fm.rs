@@ -47,6 +47,7 @@ use nexus_db_schema::schema::fm_sitrep_history::dsl as history_dsl;
 use nexus_db_schema::schema::fm_support_bundle_request::dsl as support_bundle_req_dsl;
 use nexus_types::fm;
 use nexus_types::fm::Sitrep;
+use nexus_types::fm::analysis_reports::SitrepSummary;
 use nexus_types::support_bundle::{BundleData, BundleDataSelection};
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
@@ -1640,6 +1641,94 @@ impl DataStore {
         .select(model::SitrepVersion::as_select())
     }
 
+    /// Lists summaries of the sitreps in the sitrep history, paginated by
+    /// version number.
+    ///
+    /// Unlike [`DataStore::fm_sitrep_version_list`], which returns only the
+    /// [`fm::SitrepVersion`] records from the history table, this method
+    /// returns a [`SitrepSummary`] for each version in the history, which
+    /// includes the sitrep's [`fm::SitrepMetadata`] record, along with
+    /// [analysis report](fm::analysis_reports::UnparsedSitrepReport) reports
+    /// describing the analysis that produced it, if one exists.
+    pub async fn fm_sitrep_history_summary_list(
+        &self,
+        opctx: &OpContext,
+        pagparams: &DataPageParams<'_, SqlU32>,
+    ) -> ListResultVec<SitrepSummary> {
+        // TODO(eliza): there should probably be an authz object for the fm
+        // sitrep?
+        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        let summaries = Self::sitrep_history_summary_list_query(pagparams)
+            .load_async(&*conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?
+            .into_iter()
+            .filter_map(|(version, metadata, report)| {
+                let version: fm::SitrepVersion = version.into();
+                // This *should* never be null, as discussed in the comment in
+                // `sitrep_history_summary_list_query`. Throwing the whole thing
+                // out if it is is probably fine, since it should never happen.
+                let Some(metadata) = metadata else {
+                    slog::warn!(
+                        opctx.log,
+                        "sitrep v{} has ID {}, but no corresponding fm_sitrep \
+                         metadata record exists with that ID! this is a bug!",
+                        version.version,
+                        version.id;
+                        "sitrep_id" => ?version.id,
+                        "sitrep_version" => version.version,
+                    );
+                    return None;
+                };
+                Some(SitrepSummary::new(version, metadata.into(), report))
+            })
+            .collect::<Vec<_>>();
+
+        Ok(summaries)
+    }
+
+    fn sitrep_history_summary_list_query(
+        pagparams: &DataPageParams<'_, SqlU32>,
+    ) -> impl RunnableQuery<(
+        model::SitrepVersion,
+        Option<model::SitrepMetadata>,
+        Option<model::fm::SitrepAnalysisReport>,
+    )> + use<> {
+        paginated(
+            history_dsl::fm_sitrep_history,
+            history_dsl::version,
+            &pagparams,
+        )
+        // Here we come to a somewhat sad state of affairs: each row in
+        // `fm_sitrep_history` should always have a corresponding row in
+        // `fm_sitrep` for the history record's sitrep ID, so logically, this is
+        // an INNER JOIN. However! An INNER JOIN prevents CockroachDB's query
+        // planner from enforcing the LIMIT until after the JOIN is evaluated,
+        // since an INNER JOIN may discard rows. This means we perform a "full
+        // scan" of the `fm_sitrep_history` table, which runs afoul of the "no
+        // full table scans" setting. Using a LEFT JOIN here allows the query
+        // planner to apply the LIMIT to the scan over the history table, and
+        // avoids the full scan. Unfortunately, this means that the caller has
+        // to handle the fact that the "shouldn't happen" case where a history
+        // row lacks a sitrep with the same UUID.
+        .left_join(
+            sitrep_dsl::fm_sitrep.on(sitrep_dsl::id.eq(history_dsl::sitrep_id)),
+        )
+        // The analysis report may or may not exist, so this one actually
+        // *should* be a LEFT JOIN.
+        .left_join(
+            analysis_report_dsl::fm_sitrep_analysis_report
+                .on(analysis_report_dsl::sitrep_id.eq(history_dsl::sitrep_id)),
+        )
+        .select((
+            model::SitrepVersion::as_select(),
+            Option::<model::SitrepMetadata>::as_select(),
+            Option::<model::fm::SitrepAnalysisReport>::as_select(),
+        ))
+    }
+
     /// Check whether the given sitrep limit has been reached.
     ///
     /// This (necessarily) does a full table scan on the sitrep table up to
@@ -2186,6 +2275,35 @@ mod tests {
             direction: dropshot::PaginationOrder::Descending,
         };
         let query = DataStore::sitrep_version_list_query(&pagparams);
+        let explanation = query
+            .explain_async(&conn)
+            .await
+            .expect("Failed to explain query - is it valid SQL?");
+        eprintln!("{explanation}");
+        assert!(
+            !explanation.contains("FULL SCAN"),
+            "Found an unexpected FULL SCAN: {}",
+            explanation
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn explain_sitrep_history_summary_list_query() {
+        let logctx =
+            dev::test_setup_log("explain_sitrep_history_summary_list_query");
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let pool = db.pool();
+        let conn = pool.claim().await.unwrap();
+
+        let pagparams = DataPageParams {
+            marker: None,
+            limit: std::num::NonZeroU32::new(420).unwrap(),
+            direction: dropshot::PaginationOrder::Descending,
+        };
+        let query = DataStore::sitrep_history_summary_list_query(&pagparams);
         let explanation = query
             .explain_async(&conn)
             .await

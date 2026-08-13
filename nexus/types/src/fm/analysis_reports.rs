@@ -5,10 +5,18 @@
 //! Human-readable reports summarizing what occurred during fault management
 //! analysis.
 
+use super::FmConfigView;
+use super::Sitrep;
+use super::SitrepMetadata;
+use super::SitrepVersion;
 use super::case;
 use super::display;
 use super::ereport::EreportId;
+use anyhow::Context;
+use chrono::DateTime;
+use chrono::Utc;
 use iddqd::IdOrdMap;
+use omicron_git_version::GitVersion;
 use omicron_uuid_kinds::{
     AlertUuid, CaseUuid, CollectionUuid, PhysicalDiskUuid, SitrepUuid,
     SupportBundleUuid,
@@ -17,6 +25,109 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::fmt;
+use std::sync::Arc;
+
+/// A snapshot of the state of the fault management subsystem, for diagnostic
+/// purposes.
+///
+/// **This format is not stable.  It may change at any time without
+/// backwards-compatibility guarantees.**
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FmStateReport {
+    /// The current configuration for the fault management subsystem.
+    pub current_config: FmConfigView,
+    /// A complete snapshot of the current sitrep, if one exists.
+    pub current_sitrep: Option<Arc<CommittedSitrep>>,
+    /// A complete snapshot of the sitrep in which
+    /// Summaries of historical sitreps, including the reports for the current
+    /// sitrep at the first index.
+    pub history: Vec<SitrepSummary>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CommittedSitrep {
+    pub version: u32,
+    pub time_made_current: DateTime<Utc>,
+    pub sitrep: Sitrep,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum RequestedSitrep {
+    NoLongerExists(SitrepUuid),
+    Found(Arc<CommittedSitrep>),
+}
+
+/// An entry in the sitrep history in a [`FmStateReport`]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SitrepSummary {
+    #[serde(flatten)]
+    pub metadata: SitrepMetadata,
+    pub version: u32,
+    pub time_made_current: DateTime<Utc>,
+    pub reports: Option<UnparsedSitrepReport>,
+}
+
+impl SitrepSummary {
+    pub fn new(
+        version: SitrepVersion,
+        metadata: SitrepMetadata,
+        reports: Option<impl Into<UnparsedSitrepReport>>,
+    ) -> Self {
+        let SitrepVersion {
+            version,
+            time_made_current,
+            // drop the ID here as it's already in the metadaa
+            id: _,
+        } = version;
+        Self {
+            version,
+            time_made_current,
+            metadata,
+            reports: reports.map(Into::into),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UnparsedSitrepReport {
+    pub git_commit: GitVersion,
+    pub input_report: serde_json::Value,
+    pub analysis_report: serde_json::Value,
+}
+
+impl UnparsedSitrepReport {
+    pub fn parse_analysis_report(
+        &self,
+        current_git_commit: &GitVersion,
+    ) -> anyhow::Result<AnalysisReport> {
+        AnalysisReport::deserialize(&self.analysis_report)
+            .with_context(self.parse_err("analysis_report", current_git_commit))
+    }
+
+    pub fn parse_inputreport(
+        &self,
+        current_git_commit: &GitVersion,
+    ) -> anyhow::Result<InputReport> {
+        InputReport::deserialize(&self.input_report)
+            .with_context(self.parse_err("input_report", current_git_commit))
+    }
+
+    fn parse_err(
+        &self,
+        which: &str,
+        current_git_commit: &GitVersion,
+    ) -> impl FnOnce() -> String {
+        move || {
+            format!(
+                "could not interpret {which}. note: it was produced by Nexus \
+                 on Git commit {}, while the current Git commit is \
+                 {current_git_commit}. perhaps these versions are \
+                 incompatible?",
+                self.git_commit,
+            )
+        }
+    }
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AnalysisReport {
