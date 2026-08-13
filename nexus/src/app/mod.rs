@@ -93,6 +93,7 @@ mod project;
 mod quiesce;
 mod quota;
 mod rack;
+mod router_configuration;
 pub(crate) mod saga;
 mod scim;
 mod session;

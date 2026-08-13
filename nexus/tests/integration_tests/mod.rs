@@ -46,6 +46,7 @@ mod quiesce;
 mod quotas;
 mod rack;
 mod role_assignments;
+mod router_configurations;
 mod router_routes;
 mod saml;
 mod schema;
