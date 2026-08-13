@@ -275,6 +275,15 @@ async fn drive_reconfiguration(
     // Allocate a subnet and start a sled agent for each sled that needs it
     let rack_id = config.rack_id;
     let epoch = config.epoch;
+
+    let existing_sleds: BTreeSet<_> = config
+        .members
+        .iter()
+        .filter_map(|m| {
+            if added_sleds.contains(&m.0) { None } else { Some(m.0.clone()) }
+        })
+        .collect();
+
     let started_sleds = allocate_subnets_and_start_sled_agents(
         log,
         opctx,
@@ -282,6 +291,7 @@ async fn drive_reconfiguration(
         rack_id,
         epoch,
         added_sleds,
+        existing_sleds,
     )
     .await
     .with_context(|| {
@@ -471,6 +481,7 @@ async fn allocate_subnets_and_start_sled_agents(
     rack_id: RackUuid,
     epoch: Epoch,
     added_sleds: BTreeSet<BaseboardId>,
+    existing_sleds: BTreeSet<BaseboardId>,
 ) -> Result<Vec<StartSledAgentResults>, Error> {
     info!(
         log,
@@ -517,7 +528,7 @@ async fn allocate_subnets_and_start_sled_agents(
         datastore,
         rack_id,
         epoch,
-        added_sleds,
+        existing_sleds,
         allocations_by_baseboard_id,
     )
     .await
@@ -529,7 +540,7 @@ async fn start_sled_agents(
     datastore: Arc<DataStore>,
     rack_id: RackUuid,
     epoch: Epoch,
-    all_members: BTreeSet<BaseboardId>,
+    existing_sleds: BTreeSet<BaseboardId>,
     allocations_by_baseboard_id: BTreeMap<
         BaseboardId,
         SledUnderlaySubnetAllocation,
@@ -552,7 +563,7 @@ async fn start_sled_agents(
         &datastore,
         rack_id,
         epoch,
-        &all_members,
+        &existing_sleds,
         num_clients,
         Duration::from_mins(5),
     )
@@ -658,12 +669,12 @@ async fn get_sled_agent_clients(
     datastore: &DataStore,
     rack_id: RackUuid,
     epoch: Epoch,
-    all_members: &BTreeSet<BaseboardId>,
+    existing_sleds: &BTreeSet<BaseboardId>,
     num_clients: usize,
     timeout: Duration,
 ) -> Result<Vec<(BaseboardId, sled_agent_client::Client)>, Error> {
     // First shuffle the possible members
-    let mut randomized: Vec<_> = all_members.iter().cloned().collect();
+    let mut randomized: Vec<_> = existing_sleds.iter().cloned().collect();
     randomized.shuffle(&mut rand::rng());
     let mut clients = Vec::with_capacity(num_clients);
 
