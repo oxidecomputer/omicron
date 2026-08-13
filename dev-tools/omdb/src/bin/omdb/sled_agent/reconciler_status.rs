@@ -119,7 +119,7 @@ impl fmt::Display for ScrimletReconcilersStatusDisplay<'_> {
                             "not yet running: sleeping before retrying \
                              contacting MGS to determine our location \
                              (previous MGS contact attempt failed: \
-                              {prev_attempt_err})"
+                             {prev_attempt_err})"
                         )
                     }
                 }
@@ -228,10 +228,10 @@ impl fmt::Display for ReconcilerCurrentStatusDisplay<'_> {
                 )?;
                 writeln!(
                     f,
-                    "started at {}",
+                    "started at: {}",
                     datetime_rfc3339_concise(started_at_time)
                 )?;
-                write!(f, "running for {running_for:?}")
+                write!(f, "running for: {running_for:?}")
             }
             ReconcilerCurrentStatus::Idle => write!(f, "idle"),
         }
@@ -262,7 +262,7 @@ where
         writeln!(f, "activation count: {activation_count}")?;
         writeln!(
             f,
-            "completed at {}",
+            "completed at: {}",
             datetime_rfc3339_concise(completed_at_time)
         )?;
         writeln!(f, "ran for {ran_for:?}")?;
@@ -506,61 +506,61 @@ impl fmt::Display for DpdNatReconcilerStatusDisplay<'_> {
             } => {
                 writeln!(f, "reconciliation completed")?;
                 let mut f = IndentWriter::new(INDENT, f);
-                if !unchanged.is_empty() {
-                    writeln!(
-                        f,
-                        "zones unchanged: {}",
-                        unchanged
-                            .iter()
-                            .map(|id| id.to_string())
-                            .collect::<Vec<_>>()
-                            .join(", ")
+                if unchanged.is_empty() {
+                    writeln!(f, "zones unchanged: none")?;
+                } else {
+                    writeln!(f, "zones unchanged:")?;
+                    write_lines(
+                        &mut IndentWriter::new(INDENT, &mut f),
+                        unchanged,
+                        |f, id| write!(f, "* zone {id}"),
                     )?;
                 }
-                if !removed.is_empty() {
-                    writeln!(
-                        f,
-                        "NAT entries removed: {}",
-                        removed
-                            .iter()
-                            .map(|entry| DpdNatReconcilerStatusNatEntryDisplay(
-                                &entry
-                            )
-                            .to_string())
-                            .collect::<Vec<_>>()
-                            .join(", ")
+                if removed.is_empty() {
+                    writeln!(f, "NAT entries removed: none")?;
+                } else {
+                    writeln!(f, "NAT entries removed")?;
+                    write_lines(
+                        &mut IndentWriter::new(INDENT, &mut f),
+                        removed,
+                        |f, entry| {
+                            let entry =
+                                DpdNatReconcilerStatusNatEntryDisplay(&entry);
+                            write!(f, "* {entry}")
+                        },
                     )?;
                 }
-                if !created.is_empty() {
-                    writeln!(
-                        f,
-                        "NAT entries created: {}",
-                        created
-                            .iter()
-                            .map(|(id, entry)| format!(
-                                "zone {id}: {}",
-                                DpdNatReconcilerStatusNatEntryDisplay(&entry)
-                            ))
-                            .collect::<Vec<_>>()
-                            .join(", ")
+                if created.is_empty() {
+                    writeln!(f, "NAT entries created: none")?;
+                } else {
+                    writeln!(f, "NAT entries created")?;
+                    write_lines(
+                        &mut IndentWriter::new(INDENT, &mut f),
+                        created,
+                        |f, (id, entry)| {
+                            let entry =
+                                DpdNatReconcilerStatusNatEntryDisplay(&entry);
+                            write!(f, "* zone {id}: {entry}")
+                        },
                     )?;
                 }
                 if remove_failures.is_empty() {
                     writeln!(f, "remove failures: none")?;
                 } else {
                     writeln!(f, "remove failures:")?;
-                    let mut f = IndentWriter::new(INDENT, &mut f);
-                    for DpdNatReconcilerStatusNatEntryFailure {
-                        entry,
-                        error,
-                    } in remove_failures
-                    {
-                        writeln!(
-                            f,
-                            "* {}: {error}",
-                            DpdNatReconcilerStatusNatEntryDisplay(&entry)
-                        )?;
-                    }
+                    write_lines(
+                        &mut IndentWriter::new(INDENT, &mut f),
+                        remove_failures,
+                        |f,
+                         DpdNatReconcilerStatusNatEntryFailure {
+                             entry,
+                             error,
+                         }| {
+                            let entry =
+                                DpdNatReconcilerStatusNatEntryDisplay(&entry);
+                            write!(f, "* {entry}: {error}")
+                        },
+                    )?;
                 }
                 if create_failures.is_empty() {
                     write!(f, "create failures: none")?;
@@ -755,12 +755,16 @@ impl fmt::Display for MgdBgpReconcilerStatusOpCountDisplay<'_> {
                 unnumbered_peers_deleted,
             ),
         ];
-        write_lines(f, lines, |f, (name, created, updated, deleted)| {
-            write!(
-                f,
-                "{name} created / updated / deleted: \
-                 {created} / {updated} / {deleted}"
-            )
+        write_lines(f, lines, |f, (name, &created, &updated, &deleted)| {
+            if created == 0 && updated == 0 && deleted == 0 {
+                write!(f, "{name}: unchanged")
+            } else {
+                writeln!(f, "{name}:")?;
+                let mut f = IndentWriter::new(INDENT, f);
+                writeln!(f, "created: {created}")?;
+                writeln!(f, "updated: {updated}")?;
+                write!(f, "deleted: {deleted}")
+            }
         })
     }
 }
@@ -830,13 +834,17 @@ impl fmt::Display for MgdStaticRouteReconcilerStatusDisplay<'_> {
 
                 writeln!(f, "routes unchanged: {unchanged}")?;
 
-                if let (Ok(deleted), Ok(added)) =
+                if let (&Ok(deleted), &Ok(added)) =
                     (delete_v4_result, add_v4_result)
                 {
-                    writeln!(
-                        f,
-                        "v4 routes deleted / added: {deleted} / {added}"
-                    )?;
+                    if deleted == 0 && added == 0 {
+                        writeln!(f, "v4 routes: unchanged")?;
+                    } else {
+                        writeln!(f, "v4 routes:")?;
+                        let mut f = IndentWriter::new(INDENT, &mut f);
+                        writeln!(f, "deleted: {deleted}")?;
+                        writeln!(f, "added: {added}")?;
+                    }
                 } else {
                     match delete_v4_result {
                         Ok(n) => {
@@ -856,13 +864,17 @@ impl fmt::Display for MgdStaticRouteReconcilerStatusDisplay<'_> {
                     }
                 }
 
-                if let (Ok(deleted), Ok(added)) =
+                if let (&Ok(deleted), &Ok(added)) =
                     (delete_v6_result, add_v6_result)
                 {
-                    write!(
-                        f,
-                        "v6 routes deleted / added: {deleted} / {added}"
-                    )?;
+                    if deleted == 0 && added == 0 {
+                        write!(f, "v6 routes: unchanged")?;
+                    } else {
+                        writeln!(f, "v6 routes:")?;
+                        let mut f = IndentWriter::new(INDENT, &mut f);
+                        writeln!(f, "deleted: {deleted}")?;
+                        write!(f, "added: {added}")?;
+                    }
                 } else {
                     match delete_v6_result {
                         Ok(n) => {
