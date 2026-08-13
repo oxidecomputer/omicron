@@ -225,19 +225,12 @@ async fn drive_reconfiguration(
         bail!("failed to retrieve configuration: missing");
     };
 
-    // We may have committed all members, but some of them may not have started sled-agents yet.
-    //
-    // We continue to retry sending them a `StartSledAgentRequest` until it starts.
-    let added_sleds = datastore
-        .tq_get_committed_members_without_active_sled(&opctx, authz_tq.clone())
-        .await?;
-
     // If we are preparing, then collect from coordinator, otherwise
     // attempt to commit at unacked nodes.
     let status = if config.state.is_active() {
         info!(
             log,
-            "Loaded active trust quorum config from database";
+            "Loaded active trust quorum config from database.";
             "rack_id" => %rack_id,
             "epoch" => %epoch,
             "state" => ?config.state
@@ -250,7 +243,7 @@ async fn drive_reconfiguration(
     } else {
         info!(
             log,
-            "Loaded inactive trust quorum config from database. Skipping";
+            "Loaded inactive trust quorum config from database.";
             "rack_id" => %rack_id,
             "epoch" => %epoch,
             "state" => ?config.state
@@ -258,9 +251,15 @@ async fn drive_reconfiguration(
         Status::ConfigInactive
     };
 
-    // Do we have any sled-agents that need starting?
+    // We may have committed all members, but some of them may not have started
+    // sled-agents yet.
     //
-    // If not, just return our status.
+    // We continue to retry sending them a `StartSledAgentRequest` until it
+    // starts.
+    let added_sleds = datastore
+        .tq_get_committed_members_without_active_sled(&opctx, authz_tq.clone())
+        .await?;
+
     if added_sleds.is_empty() {
         return Ok(status);
     }

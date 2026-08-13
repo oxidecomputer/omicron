@@ -1527,7 +1527,9 @@ mod tests {
     use nexus_db_model::Generation;
     use nexus_db_model::HwBaseboardId;
     use nexus_db_model::SledBaseboard;
+    use nexus_db_model::SledState;
     use nexus_db_model::SledUpdate;
+    use nexus_types::external_api::sled::SledProvisionPolicy;
     use nexus_types::trust_quorum::{
         IsLrtqUpgrade, TrustQuorumConfigState, TrustQuorumMemberState,
     };
@@ -2529,8 +2531,49 @@ mod tests {
 
         // A sled for the right baseboard but on a different rack does not
         // count as present.
-        insert_sled_for_baseboard(datastore, RackUuid::new_v4(), &hw_ids[9])
-            .await;
+        let sled9 = insert_sled_for_baseboard(
+            datastore,
+            RackUuid::new_v4(),
+            &hw_ids[9],
+        )
+        .await;
+        assert_eq!(missing_members().await, expected);
+
+        // Prepare for next test: reset sleds 0 and 1 to their prior states
+        diesel::update(sled_dsl::sled)
+            .filter(sled_dsl::id.eq(sled_ids[0].into_untyped_uuid()))
+            .set(sled_dsl::sled_policy.eq(to_db_sled_policy(
+                SledPolicy::InService {
+                    provision_policy: SledProvisionPolicy::Provisionable,
+                },
+            )))
+            .execute_async(&*conn)
+            .await
+            .unwrap();
+        diesel::update(sled_dsl::sled)
+            .filter(sled_dsl::id.eq(sled_ids[1].into_untyped_uuid()))
+            .set(
+                sled_dsl::time_deleted
+                    .eq(Option::<chrono::DateTime<Utc>>::None),
+            )
+            .execute_async(&*conn)
+            .await
+            .unwrap();
+
+        // Prepare for next test: decommission sled 9
+        diesel::update(sled_dsl::sled)
+            .filter(sled_dsl::id.eq(sled9.into_untyped_uuid()))
+            .set(sled_dsl::sled_state.eq(SledState::Decommissioned))
+            .execute_async(&*conn)
+            .await
+            .unwrap();
+
+        // All sleds having sled rows means missing_members() is empty
+        for hw in &hw_ids[8..] {
+            sled_ids
+                .push(insert_sled_for_baseboard(datastore, rack_id, hw).await);
+        }
+        let expected = BTreeSet::new();
         assert_eq!(missing_members().await, expected);
 
         db.terminate().await;
