@@ -17,7 +17,6 @@ use slog::Logger;
 use slog::{debug, error, info};
 use slog_error_chain::InlineErrorChain;
 use std::io::{Stdout, stdout};
-use std::net::SocketAddrV6;
 use std::time::Instant;
 use tokio::sync::mpsc::{
     UnboundedReceiver, UnboundedSender, unbounded_channel,
@@ -30,7 +29,7 @@ use crate::helpers::get_update_test_error;
 use crate::state::CreateClearUpdateStateOptions;
 use crate::state::CreateStartUpdateOptions;
 use crate::ui::Screen;
-use crate::wicketd::{self, WicketdHandle, WicketdManager};
+use crate::wicketd::{self, WicketdAddrs, WicketdHandle, WicketdManager};
 use crate::{Action, Cmd, Event, KeyHandler, Recorder, State, TICK_INTERVAL};
 
 // We can avoid a bunch of unnecessary type parameters by picking them ahead of time.
@@ -283,22 +282,14 @@ pub struct Runner {
 
 #[allow(clippy::new_without_default)]
 impl Runner {
-    pub fn new(
-        log: slog::Logger,
-        wicketd_addr: SocketAddrV6,
-        commission_addr: SocketAddrV6,
-    ) -> Runner {
+    pub fn new(log: slog::Logger, addrs: WicketdAddrs) -> Runner {
         let (events_tx, events_rx) = unbounded_channel();
         let tokio_rt = tokio::runtime::Builder::new_multi_thread()
             .enable_all()
             .build()
             .unwrap();
-        let (wicketd, wicketd_manager) = WicketdManager::new(
-            &log,
-            events_tx.clone(),
-            wicketd_addr,
-            commission_addr,
-        );
+        let (wicketd, wicketd_manager) =
+            WicketdManager::new(&log, events_tx.clone(), addrs);
         let core = RunnerCore::new(log);
         Runner {
             core,

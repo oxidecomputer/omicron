@@ -25,6 +25,15 @@ use crate::keymap::ShowPopupCmd;
 use crate::state::ComponentId;
 use crate::{Cmd, Event};
 
+/// The addresses of the wicketd server.
+#[derive(Clone, Copy, Debug)]
+pub struct WicketdAddrs {
+    /// The address of the lockstep wicketd API.
+    pub wicketd: SocketAddrV6,
+    /// The address of the stable commission API.
+    pub commission: SocketAddrV6,
+}
+
 impl From<ComponentId> for SpIdentifier {
     fn from(id: ComponentId) -> Self {
         match id {
@@ -78,27 +87,19 @@ pub struct WicketdManager {
     log: Logger,
     rx: mpsc::Receiver<Request>,
     events_tx: UnboundedSender<Event>,
-    wicketd_addr: SocketAddrV6,
-    commission_addr: SocketAddrV6,
+    addrs: WicketdAddrs,
 }
 
 impl WicketdManager {
     pub fn new(
         log: &Logger,
         events_tx: UnboundedSender<Event>,
-        wicketd_addr: SocketAddrV6,
-        commission_addr: SocketAddrV6,
+        addrs: WicketdAddrs,
     ) -> (WicketdHandle, WicketdManager) {
         let log = log.new(o!("component" => "WicketdManager"));
         let (tx, rx) = tokio::sync::mpsc::channel(CHANNEL_CAPACITY);
         let handle = WicketdHandle { tx };
-        let manager = WicketdManager {
-            log,
-            rx,
-            events_tx,
-            wicketd_addr,
-            commission_addr,
-        };
+        let manager = WicketdManager { log, rx, events_tx, addrs };
 
         (handle, manager)
     }
@@ -164,7 +165,7 @@ impl WicketdManager {
         options: StartUpdateOptions,
     ) {
         let log = self.log.clone();
-        let addr = self.wicketd_addr;
+        let addr = self.addrs.wicketd;
         let events_tx = self.events_tx.clone();
         tokio::spawn(async move {
             let update_client =
@@ -197,7 +198,7 @@ impl WicketdManager {
         options: AbortUpdateOptions,
     ) {
         let log = self.log.clone();
-        let addr = self.wicketd_addr;
+        let addr = self.addrs.wicketd;
         let events_tx = self.events_tx.clone();
         tokio::spawn(async move {
             let update_client =
@@ -229,7 +230,7 @@ impl WicketdManager {
         options: ClearUpdateStateOptions,
     ) {
         let log = self.log.clone();
-        let addr = self.wicketd_addr;
+        let addr = self.addrs.wicketd;
         let events_tx = self.events_tx.clone();
         tokio::spawn(async move {
             let update_client =
@@ -266,7 +267,7 @@ impl WicketdManager {
         poll_inventory_now: mpsc::Sender<SpIdentifier>,
     ) {
         let log = self.log.clone();
-        let addr = self.wicketd_addr;
+        let addr = self.addrs.wicketd;
         tokio::spawn(async move {
             let client = create_wicketd_client(&log, addr, WICKETD_TIMEOUT);
             let sp: SpIdentifier = component_id.into();
@@ -290,7 +291,7 @@ impl WicketdManager {
 
     fn start_rack_initialization(&self) {
         let log = self.log.clone();
-        let addr = self.commission_addr;
+        let addr = self.addrs.commission;
         let events_tx = self.events_tx.clone();
         tokio::spawn(async move {
             let client = create_commission_client(&log, addr, WICKETD_TIMEOUT);
@@ -309,7 +310,7 @@ impl WicketdManager {
     fn poll_rack_setup_status(&self) {
         let log = self.log.clone();
         let tx = self.events_tx.clone();
-        let addr = self.wicketd_addr;
+        let addr = self.addrs.wicketd;
         tokio::spawn(async move {
             let client = create_wicketd_client(&log, addr, WICKETD_TIMEOUT);
             let mut ticker = interval(WICKETD_POLL_INTERVAL * 2);
@@ -335,7 +336,7 @@ impl WicketdManager {
     fn poll_location(&self) {
         let log = self.log.clone();
         let tx = self.events_tx.clone();
-        let addr = self.commission_addr;
+        let addr = self.addrs.commission;
         tokio::spawn(async move {
             let client = create_commission_client(&log, addr, WICKETD_TIMEOUT);
             let mut ticker = interval(WICKETD_POLL_INTERVAL * 2);
@@ -393,7 +394,7 @@ impl WicketdManager {
     fn poll_rack_setup_config(&self) {
         let log = self.log.clone();
         let tx = self.events_tx.clone();
-        let addr = self.wicketd_addr;
+        let addr = self.addrs.wicketd;
         tokio::spawn(async move {
             let client = create_wicketd_client(&log, addr, WICKETD_TIMEOUT);
             let mut ticker = interval(WICKETD_POLL_INTERVAL * 2);
@@ -426,7 +427,7 @@ impl WicketdManager {
     fn poll_artifacts_and_event_reports(&self) {
         let log = self.log.clone();
         let tx = self.events_tx.clone();
-        let addr = self.wicketd_addr;
+        let addr = self.addrs.wicketd;
         tokio::spawn(async move {
             let client = create_wicketd_client(&log, addr, WICKETD_TIMEOUT);
             let mut ticker = interval(WICKETD_POLL_INTERVAL * 2);
@@ -455,7 +456,7 @@ impl WicketdManager {
     fn poll_inventory(&self, mut poll_now: mpsc::Receiver<SpIdentifier>) {
         let log = self.log.clone();
         let tx = self.events_tx.clone();
-        let addr = self.wicketd_addr;
+        let addr = self.addrs.wicketd;
 
         tokio::spawn(async move {
             let client = create_wicketd_client(&log, addr, WICKETD_TIMEOUT);
