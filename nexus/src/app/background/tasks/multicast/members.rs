@@ -297,6 +297,9 @@ impl MulticastGroupReconciler {
             }
         }
 
+        processed +=
+            self.reconcile_pending_deleted_members(opctx, sled_client).await?;
+
         debug!(
             opctx.log,
             "member state reconciliation completed";
@@ -304,6 +307,149 @@ impl MulticastGroupReconciler {
         );
 
         Ok(processed)
+    }
+
+    /// Retry OPTE cleanup for soft-deleted members whose `sled_id` is set.
+    ///
+    /// These rows are not part of live group-member listings. A live
+    /// replacement for the same group and instance owns the subscription, so
+    /// that case only clears the old row's sled handle. Otherwise, the member's
+    /// stored multicast IP is sufficient to retry unsubscribe even when the
+    /// external group row is soft-deleted or gone.
+    async fn reconcile_pending_deleted_members(
+        &self,
+        opctx: &OpContext,
+        sled_client: &MulticastSledClient,
+    ) -> Result<usize, anyhow::Error> {
+        let members = self
+            .datastore
+            .multicast_group_members_list_pending_cleanup(
+                opctx,
+                &DataPageParams::max_page(),
+            )
+            .await
+            .context("failed to list multicast members pending OPTE cleanup")?;
+
+        let outcomes = stream::iter(members)
+            .map(|member| async move {
+                let result = self
+                    .reconcile_pending_deleted_member(
+                        opctx,
+                        sled_client,
+                        &member,
+                    )
+                    .await;
+                (member, result)
+            })
+            .buffer_unordered(self.member_concurrency_limit)
+            .collect::<Vec<_>>()
+            .await;
+
+        let mut cleaned = 0;
+        for (member, result) in outcomes {
+            match result {
+                Ok(true) => cleaned += 1,
+                Ok(false) => {}
+                Err(e) => {
+                    warn!(
+                        opctx.log,
+                        "failed to reconcile pending multicast member cleanup";
+                        "member_id" => %member.id,
+                        "group_id" => %member.external_group_id,
+                        "error" => %e
+                    );
+                }
+            }
+        }
+
+        Ok(cleaned)
+    }
+
+    async fn reconcile_pending_deleted_member(
+        &self,
+        opctx: &OpContext,
+        sled_client: &MulticastSledClient,
+        member: &MulticastGroupMember,
+    ) -> Result<bool, anyhow::Error> {
+        let Some(sled_id) = member.sled_id else {
+            return Ok(false);
+        };
+
+        let instance_id = InstanceUuid::from_untyped_uuid(member.parent_id);
+
+        // A new live row for the same address and instance supersedes this
+        // deleted row. Its normal joined-member reconciliation owns the
+        // current OPTE subscription. Use the address rather than the group ID
+        // because the old group row may already have been reaped and the
+        // address reallocated to a new group. OPTE keys the subscription by
+        // multicast IP, so the address is what identifies it across group
+        // generations.
+        let has_live_replacement = self
+            .datastore
+            .multicast_group_member_get_by_multicast_ip_and_instance(
+                opctx,
+                member.multicast_ip,
+                instance_id,
+            )
+            .await?
+            .is_some();
+
+        if has_live_replacement {
+            return self
+                .datastore
+                .multicast_group_member_clear_sled_id_if_current(
+                    opctx, member.id, sled_id,
+                )
+                .await
+                .context("failed to clear pending multicast member sled_id");
+        }
+
+        // The old OPTE port is gone once the instance's current VMM is on a
+        // different sled or the instance has no current VMM. Calling the old
+        // sled with the new VMM ID would return 404 forever and keep this row
+        // pending indefinitely.
+        let current_sled_id = match self
+            .datastore
+            .instance_get_sled_id(opctx, member.parent_id)
+            .await
+        {
+            Ok(sled_id) => sled_id.map(SledUuid::from_untyped_uuid),
+            Err(omicron_common::api::external::Error::ObjectNotFound {
+                ..
+            }) => None,
+            Err(e) => {
+                return Err(anyhow::Error::from(e))
+                    .context("failed to look up current instance sled");
+            }
+        };
+
+        if current_sled_id == Some(sled_id.into()) {
+            sled_client
+                .unsubscribe_vmm_by_ip(
+                    opctx,
+                    member.multicast_ip.ip(),
+                    member,
+                    sled_id.into(),
+                    None,
+                )
+                .await
+                .context("failed to unsubscribe pending multicast VMM")?;
+        } else {
+            debug!(
+                opctx.log,
+                "skipping pending multicast unsubscribe for a replaced VMM";
+                "member_id" => %member.id,
+                "recorded_sled_id" => %sled_id,
+                "current_sled_id" => ?current_sled_id
+            );
+        }
+
+        self.datastore
+            .multicast_group_member_clear_sled_id_if_current(
+                opctx, member.id, sled_id,
+            )
+            .await
+            .context("failed to clear pending multicast member sled_id")
     }
 
     /// Process member state changes for a single group.
@@ -474,10 +620,11 @@ impl MulticastGroupReconciler {
             return Ok(StateTransition::NoChange);
         }
 
-        // Delete the member (sets `time_deleted`, `state`="Left", and clears `sled_id`)
+        // Delete the member while retaining `sled_id` so the pending cleanup
+        // pass can retry OPTE removal.
         let deleted = self
             .datastore
-            .multicast_group_member_delete_by_id(
+            .multicast_group_member_delete_by_id_preserving_sled_id(
                 opctx,
                 member.id.into_untyped_uuid(),
             )
@@ -2168,8 +2315,10 @@ impl MulticastGroupReconciler {
         Ok(())
     }
 
-    /// Cleanup members that are "Left" and time_deleted.
-    /// This permanently removes member records that are no longer needed.
+    /// Hard-delete "Left" members with `time_deleted` set and `sled_id` cleared.
+    ///
+    /// Rows with `sled_id` set remain available to the pending OPTE cleanup
+    /// pass above.
     pub async fn cleanup_deleted_members(
         &self,
         opctx: &OpContext,

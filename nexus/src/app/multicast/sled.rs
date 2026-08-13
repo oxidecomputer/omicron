@@ -33,7 +33,7 @@ use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_types::deployment::SledFilter;
 use nexus_types::identity::{Asset, Resource};
-use omicron_common::api::external::DataPageParams;
+use omicron_common::api::external::{DataPageParams, Error as ExternalError};
 use omicron_uuid_kinds::{
     GenericUuid, InstanceUuid, MulticastGroupUuid, PropolisUuid, SledUuid,
 };
@@ -93,11 +93,18 @@ impl MulticastSledClient {
         opctx: &OpContext,
         instance_id: InstanceUuid,
     ) -> Result<Option<PropolisUuid>, anyhow::Error> {
-        let instance_state = self
+        let instance_state = match self
             .datastore
             .instance_get_state(opctx, &instance_id)
             .await
-            .context("failed to look up instance state")?;
+        {
+            Ok(state) => state,
+            Err(ExternalError::ObjectNotFound { .. }) => return Ok(None),
+            Err(e) => {
+                return Err(anyhow::Error::from(e))
+                    .context("failed to look up instance state");
+            }
+        };
 
         Ok(instance_state
             .and_then(|s| s.propolis_id)
@@ -110,8 +117,15 @@ impl MulticastSledClient {
         group: &MulticastGroup,
         member: &MulticastGroupMember,
     ) -> sled_agent_client::types::InstanceMulticastMembership {
+        Self::membership_for_ip(group.multicast_ip.ip(), member)
+    }
+
+    fn membership_for_ip(
+        group_ip: IpAddr,
+        member: &MulticastGroupMember,
+    ) -> sled_agent_client::types::InstanceMulticastMembership {
         sled_agent_client::types::InstanceMulticastMembership {
-            group_ip: group.multicast_ip.ip(),
+            group_ip,
             sources: member.source_ips.iter().map(|s| s.ip()).collect(),
         }
     }
@@ -184,6 +198,28 @@ impl MulticastSledClient {
         sled_id: SledUuid,
         cached_propolis_id: Option<PropolisUuid>,
     ) -> Result<(), anyhow::Error> {
+        self.unsubscribe_vmm_by_ip(
+            opctx,
+            group.multicast_ip.ip(),
+            member,
+            sled_id,
+            cached_propolis_id,
+        )
+        .await
+    }
+
+    /// Unsubscribe a VMM when the external group row is unavailable.
+    ///
+    /// The member row stores the multicast IP, so cleanup can still withdraw
+    /// the OPTE filter after the group has been soft- or hard-deleted.
+    pub(crate) async fn unsubscribe_vmm_by_ip(
+        &self,
+        opctx: &OpContext,
+        group_ip: IpAddr,
+        member: &MulticastGroupMember,
+        sled_id: SledUuid,
+        cached_propolis_id: Option<PropolisUuid>,
+    ) -> Result<(), anyhow::Error> {
         let instance_id = InstanceUuid::from_untyped_uuid(member.parent_id);
 
         // If the instance has no propolis_id (already stopped/destroyed),
@@ -209,7 +245,7 @@ impl MulticastSledClient {
             .await
             .context("failed to create sled-agent client")?;
 
-        let membership = Self::membership_for(group, member);
+        let membership = Self::membership_for_ip(group_ip, member);
 
         client
             .vmm_leave_multicast_group(&propolis_id, &membership)
@@ -222,7 +258,7 @@ impl MulticastSledClient {
             "member_id" => %member.id,
             "propolis_id" => %propolis_id,
             "sled_id" => %sled_id,
-            "group_ip" => %group.multicast_ip
+            "group_ip" => %group_ip
         );
 
         Ok(())

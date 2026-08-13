@@ -1067,7 +1067,9 @@ impl super::Nexus {
         };
 
         self.db_datastore
-            .multicast_group_member_delete_by_id(opctx, member.id)
+            .multicast_group_member_delete_by_id_preserving_sled_id(
+                opctx, member.id,
+            )
             .await?;
 
         // Atomically mark group for deletion if this was the last member.

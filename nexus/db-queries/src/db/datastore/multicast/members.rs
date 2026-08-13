@@ -47,7 +47,7 @@ use crate::db::pagination::paginated;
 ///   The `has_any_source_member` flag is ignored because API validation
 ///   prevents SSM joins without sources.
 /// - **ASM**: If `has_any_source_member` is true, passes `None` to DPD
-///   (no switch-level filtering). Otherwise uses `specific_sources`.
+///   (no switch-level filtering). Otherwise, it uses `specific_sources`.
 /// - **OPTE**: Always uses per-member source lists for fine-grained filtering,
 ///   regardless of switch-level behavior.
 ///
@@ -70,6 +70,11 @@ pub struct SourceFilterState {
     pub has_any_source_member: bool,
 }
 
+enum MulticastGroupMemberGroupKey {
+    Id(MulticastGroupUuid),
+    MulticastIp(IpNetwork),
+}
+
 impl DataStore {
     /// List members of a multicast group.
     pub async fn multicast_group_members_list(
@@ -80,6 +85,30 @@ impl DataStore {
     ) -> ListResultVec<MulticastGroupMember> {
         self.multicast_group_members_list_by_id(opctx, group_id, pagparams)
             .await
+    }
+
+    /// List members that were soft-deleted with `sled_id` still set. These
+    /// rows identify multicast state that may need to be withdrawn from a VMM.
+    ///
+    /// Every producer that sets `time_deleted` also transitions the row to
+    /// "Left" in the same update. The state filter keeps this listing aligned
+    /// with [`Self::multicast_group_members_complete_delete`], which only
+    /// reaps "Left" rows.
+    pub async fn multicast_group_members_list_pending_cleanup(
+        &self,
+        opctx: &OpContext,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<MulticastGroupMember> {
+        use nexus_db_schema::schema::multicast_group_member::dsl;
+
+        paginated(dsl::multicast_group_member, dsl::id, pagparams)
+            .filter(dsl::state.eq(MulticastGroupMemberState::Left))
+            .filter(dsl::time_deleted.is_not_null())
+            .filter(dsl::sled_id.is_not_null())
+            .select(MulticastGroupMember::as_select())
+            .get_results_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     /// Attach an instance to a multicast group as a member.
@@ -198,8 +227,9 @@ impl DataStore {
 
     /// Hard delete every member of a group that is still marked for removal.
     ///
-    /// Covers both active and soft-deleted member rows, and is used by the
-    /// reconciler when tearing a group down.
+    /// Covers active and soft-deleted member rows without a sled assignment,
+    /// and is used by the reconciler when tearing a group down. Rows holding
+    /// a `sled_id` are left for the member reconciler to unsubscribe first.
     ///
     /// The delete declines unless the parent group is still soft-deleted in
     /// "Deleting" state. A reaped group can come back to life through
@@ -222,6 +252,10 @@ impl DataStore {
                 multicast_group_member::external_group_id
                     .eq(group_id.into_untyped_uuid()),
             )
+            // A pending OPTE cleanup has `sled_id` set. Leave that row for
+            // the member reconciler. Deleting it here would discard the only
+            // durable handle for retrying the unsubscribe.
+            .filter(multicast_group_member::sled_id.is_null())
             .filter(diesel::dsl::exists(
                 multicast_group::table
                     .filter(
@@ -486,7 +520,8 @@ impl DataStore {
     /// # DPD Source Filtering
     ///
     /// When `has_any_source_member` is true, pass `None` to DPD for sources
-    /// (disabling switch-level filtering). Otherwise, use `specific_sources`.
+    /// (disabling switch-level filtering). Otherwise, use
+    /// `specific_sources`.
     pub async fn multicast_groups_source_filter_state(
         &self,
         opctx: &OpContext,
@@ -645,12 +680,55 @@ impl DataStore {
         group_id: MulticastGroupUuid,
         instance_id: InstanceUuid,
     ) -> Result<Option<MulticastGroupMember>, external::Error> {
+        self.multicast_group_member_get_by_group_key_and_instance(
+            opctx,
+            MulticastGroupMemberGroupKey::Id(group_id),
+            instance_id,
+        )
+        .await
+    }
+
+    /// Get the live member for a multicast IP and instance.
+    ///
+    /// This lookup deliberately uses the IP rather than the external group
+    /// UUID so cleanup remains safe if the group row has already been reaped
+    /// and the address has been allocated to a replacement group.
+    pub async fn multicast_group_member_get_by_multicast_ip_and_instance(
+        &self,
+        opctx: &OpContext,
+        multicast_ip: IpNetwork,
+        instance_id: InstanceUuid,
+    ) -> Result<Option<MulticastGroupMember>, external::Error> {
+        self.multicast_group_member_get_by_group_key_and_instance(
+            opctx,
+            MulticastGroupMemberGroupKey::MulticastIp(multicast_ip),
+            instance_id,
+        )
+        .await
+    }
+
+    async fn multicast_group_member_get_by_group_key_and_instance(
+        &self,
+        opctx: &OpContext,
+        group_key: MulticastGroupMemberGroupKey,
+        instance_id: InstanceUuid,
+    ) -> Result<Option<MulticastGroupMember>, external::Error> {
         use nexus_db_schema::schema::multicast_group_member::dsl;
 
-        let member = dsl::multicast_group_member
-            .filter(dsl::external_group_id.eq(group_id.into_untyped_uuid()))
+        let mut query = dsl::multicast_group_member.into_boxed();
+        query = query
             .filter(dsl::parent_id.eq(instance_id.into_untyped_uuid()))
-            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::time_deleted.is_null());
+        query = match group_key {
+            MulticastGroupMemberGroupKey::Id(group_id) => query.filter(
+                dsl::external_group_id.eq(group_id.into_untyped_uuid()),
+            ),
+            MulticastGroupMemberGroupKey::MulticastIp(multicast_ip) => {
+                query.filter(dsl::multicast_ip.eq(multicast_ip))
+            }
+        };
+
+        let member = query
             .select(MulticastGroupMember::as_select())
             .first_async(&*self.pool_connection_authorized(opctx).await?)
             .await
@@ -663,7 +741,7 @@ impl DataStore {
     /// Get a multicast group member by its unique ID.
     ///
     /// If `include_removed` is true, returns the member even if it has been
-    /// soft-deleted (i.e., `time_deleted` is set). Otherwise filters out
+    /// soft-deleted (i.e., `time_deleted` is set). Otherwise, it filters out
     /// soft-deleted rows.
     pub async fn multicast_group_member_get_by_id(
         &self,
@@ -691,9 +769,13 @@ impl DataStore {
 
     /// Detach a specific multicast group member by group ID and instance ID.
     ///
-    /// This transitions member to "Left" state, clears `sled_id`, and sets `time_deleted`
-    /// (marking for permanent removal). Used by the HTTP API for explicit detach operations.
-    /// Distinct from instance stop which only transitions to "Left" without `time_deleted`.
+    /// This transitions member to "Left" state, sets `time_deleted` (marking
+    /// for permanent removal), and retains `sled_id` for OPTE cleanup retry.
+    /// Used by the HTTP API for explicit detach operations. Distinct from
+    /// instance stop, which only transitions to "Left" without `time_deleted`.
+    ///
+    /// `sled_id` remains unchanged so the member RPW knows which sled has the
+    /// VMM's OPTE subscription.
     ///
     /// See [`Self::multicast_group_members_detach_by_instance`] for detaching all
     /// memberships of an instance (used during instance stop).
@@ -727,15 +809,15 @@ impl DataStore {
 
         let now = Utc::now();
 
-        // Mark member for removal (set time_deleted and state to "Left"), similar
-        // to soft instance deletion
+        // Mark member for removal (set time_deleted and state to "Left"),
+        // similar to soft instance deletion. Retain `sled_id` so OPTE cleanup
+        // can retry against the assigned sled.
         let updated_rows = diesel::update(dsl::multicast_group_member)
             .filter(dsl::external_group_id.eq(group_id.into_untyped_uuid()))
             .filter(dsl::parent_id.eq(instance_id.into_untyped_uuid()))
             .filter(dsl::time_deleted.is_null())
             .set((
                 dsl::state.eq(MulticastGroupMemberState::Left),
-                dsl::sled_id.eq(Option::<DbTypedUuid<SledKind>>::None),
                 dsl::time_deleted.eq(Some(now)), // Mark for deletion
                 dsl::time_modified.eq(now),
             ))
@@ -897,6 +979,11 @@ impl DataStore {
     ///
     /// Compare with [`Self::multicast_group_members_detach_by_instance`] which leaves
     /// `time_deleted=NULL` for reactivation on instance restart.
+    ///
+    /// `sled_id` survives the soft delete. A row that still records a sled is
+    /// picked up by [`Self::multicast_group_members_list_pending_cleanup`], so
+    /// any OPTE subscription left behind can be withdrawn before the
+    /// hard-delete sweep reaps the row.
     pub async fn multicast_group_members_mark_for_removal(
         &self,
         opctx: &OpContext,
@@ -910,9 +997,8 @@ impl DataStore {
             .filter(dsl::parent_id.eq(instance_id.into_untyped_uuid()))
             .filter(dsl::time_deleted.is_null())
             .set((
-                dsl::state.eq(MulticastGroupMemberState::Left), // Transition to Left state
-                dsl::sled_id.eq(Option::<DbTypedUuid<SledKind>>::None), // Clear sled reference
-                dsl::time_deleted.eq(Some(now)), // Mark for deletion
+                dsl::state.eq(MulticastGroupMemberState::Left),
+                dsl::time_deleted.eq(Some(now)),
                 dsl::time_modified.eq(now),
             ))
             .execute_async(&*self.pool_connection_authorized(opctx).await?)
@@ -965,9 +1051,71 @@ impl DataStore {
         Ok(true)
     }
 
+    /// Mark a multicast group member for deletion while retaining `sled_id` so
+    /// the RPW can retry the OPTE unsubscribe.
+    pub async fn multicast_group_member_delete_by_id_preserving_sled_id(
+        &self,
+        opctx: &OpContext,
+        member_id: Uuid,
+    ) -> Result<bool, external::Error> {
+        use nexus_db_schema::schema::multicast_group_member::dsl;
+
+        let now = Utc::now();
+        let updated_rows = diesel::update(dsl::multicast_group_member)
+            .filter(dsl::id.eq(member_id))
+            .filter(dsl::time_deleted.is_null())
+            .set((
+                dsl::state.eq(MulticastGroupMemberState::Left),
+                dsl::time_deleted.eq(Some(now)),
+                dsl::time_modified.eq(now),
+            ))
+            .execute_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        if updated_rows == 0 {
+            return Ok(false);
+        }
+
+        debug!(
+            opctx.log,
+            "multicast group member marked for deletion with sled assignment retained";
+            "member_id" => %member_id,
+            "rows_updated" => updated_rows
+        );
+
+        Ok(true)
+    }
+
+    /// Clear a pending member's sled assignment after its OPTE unsubscribe
+    /// succeeds. The expected sled ID makes this a compare-and-swap so a
+    /// concurrent operation cannot clear a newer assignment.
+    pub async fn multicast_group_member_clear_sled_id_if_current(
+        &self,
+        opctx: &OpContext,
+        member_id: Uuid,
+        expected_sled_id: DbTypedUuid<SledKind>,
+    ) -> Result<bool, external::Error> {
+        use nexus_db_schema::schema::multicast_group_member::dsl;
+
+        let updated_rows = diesel::update(dsl::multicast_group_member)
+            .filter(dsl::id.eq(member_id))
+            .filter(dsl::time_deleted.is_not_null())
+            .filter(dsl::sled_id.eq(expected_sled_id))
+            .set((
+                dsl::sled_id.eq(Option::<DbTypedUuid<SledKind>>::None),
+                dsl::time_modified.eq(Utc::now()),
+            ))
+            .execute_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        Ok(updated_rows > 0)
+    }
+
     /// Complete deletion of multicast group members that are in
-    /// ["Left"](MulticastGroupMemberState::Left) state and `time_deleted` is
-    /// set.
+    /// ["Left"](MulticastGroupMemberState::Left) state, have `time_deleted`
+    /// set, and have `sled_id` cleared.
     ///
     /// Returns the number of members physically deleted.
     pub async fn multicast_group_members_complete_delete(
@@ -979,6 +1127,7 @@ impl DataStore {
         let deleted_rows = diesel::delete(dsl::multicast_group_member)
             .filter(dsl::state.eq(MulticastGroupMemberState::Left))
             .filter(dsl::time_deleted.is_not_null())
+            .filter(dsl::sled_id.is_null())
             .execute_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
@@ -986,7 +1135,7 @@ impl DataStore {
         debug!(
             opctx.log,
             "multicast group member complete deletion finished";
-            "left_and_time_deleted_members_deleted" => deleted_rows
+            "sledless_time_deleted_members_deleted" => deleted_rows
         );
 
         Ok(deleted_rows)
@@ -1953,6 +2102,16 @@ mod tests {
         .await;
         let instance3_id = instance3.into_untyped_uuid();
 
+        let (instance4, _vmm4) = create_instance_with_vmm(
+            &opctx,
+            &datastore,
+            &setup.authz_project,
+            "delete-test-instance4",
+            setup.sled_id,
+        )
+        .await;
+        let instance4_id = instance4.into_untyped_uuid();
+
         // Create member records in different states
         let conn = datastore
             .pool_connection_authorized(&opctx)
@@ -1960,7 +2119,8 @@ mod tests {
             .expect("Get connection");
         use nexus_db_schema::schema::multicast_group_member::dsl;
 
-        // Member 1: "Left" + `time_deleted` (should be deleted)
+        // Member 1: "Left" + `time_deleted` + no sled assignment (should be
+        // deleted).
         let member1: MulticastGroupMember =
             diesel::insert_into(dsl::multicast_group_member)
                 .values(MulticastGroupMemberValues {
@@ -1971,7 +2131,7 @@ mod tests {
                     external_group_id: group.id(),
                     multicast_ip: group.multicast_ip,
                     parent_id: instance1_id,
-                    sled_id: Some(setup.sled_id.into()),
+                    sled_id: None,
                     state: MulticastGroupMemberState::Left,
                     source_ips: vec![],
                 })
@@ -2000,7 +2160,8 @@ mod tests {
                 .await
                 .expect("Should create member2 record");
 
-        // Member 3: "Joined" state (should not be deleted, even if it had time_deleted)
+        // Member 3: "Joined" state (should not be deleted, even if it had
+        // `time_deleted`).
         let member3: MulticastGroupMember =
             diesel::insert_into(dsl::multicast_group_member)
                 .values(MulticastGroupMemberValues {
@@ -2020,10 +2181,26 @@ mod tests {
                 .await
                 .expect("Should create member3 record");
 
-        // Since we created exactly 3 member records above, we can verify by
-        // checking that each member was created successfully (no need for a
-        // full table scan) member1: "Left" + `time_deleted`, member2: "Left" +
-        // no `time_deleted`, member3: "Joined" + `time_deleted`
+        // Member 4: "Left" + `time_deleted` + sled assignment (pending OPTE
+        // cleanup, so it must not be hard-deleted yet).
+        let member4: MulticastGroupMember =
+            diesel::insert_into(dsl::multicast_group_member)
+                .values(MulticastGroupMemberValues {
+                    id: Uuid::new_v4(),
+                    time_created: Utc::now(),
+                    time_modified: Utc::now(),
+                    time_deleted: Some(Utc::now()),
+                    external_group_id: group.id(),
+                    multicast_ip: group.multicast_ip,
+                    parent_id: instance4_id,
+                    sled_id: Some(setup.sled_id.into()),
+                    state: MulticastGroupMemberState::Left,
+                    source_ips: vec![],
+                })
+                .returning(MulticastGroupMember::as_returning())
+                .get_result_async(&*conn)
+                .await
+                .expect("Should create member4 record");
 
         // Run complete delete
         let deleted_count = datastore
@@ -2031,16 +2208,14 @@ mod tests {
             .await
             .expect("Should run complete delete");
 
-        // Should only delete member1 ("Left" + `time_deleted`)
+        // Should only delete member1, because member4 still has an OPTE
+        // cleanup handle.
         assert_eq!(deleted_count, 1);
 
-        // Verify member1 was deleted by trying to find it directly
+        // Verify member1 was deleted by including soft-deleted rows in the
+        // lookup.
         let member1_result = datastore
-            .multicast_group_member_get_by_group_and_instance(
-                &opctx,
-                MulticastGroupUuid::from_untyped_uuid(group.id()),
-                InstanceUuid::from_untyped_uuid(member1.parent_id),
-            )
+            .multicast_group_member_get_by_id(&opctx, member1.id, true)
             .await
             .expect("Should query for member1");
         assert!(member1_result.is_none(), "member1 should be deleted");
@@ -2064,6 +2239,106 @@ mod tests {
         assert!(
             member3_result.is_some(),
             "member3 should still exist in database (not cleaned up due to 'Joined' state)"
+        );
+
+        assert!(
+            datastore
+                .multicast_group_member_delete_by_id_preserving_sled_id(
+                    &opctx, member2.id,
+                )
+                .await
+                .expect("Should mark member2 for deletion"),
+            "member2 should be marked for deletion"
+        );
+        let member2_pending = datastore
+            .multicast_group_member_get_by_id(&opctx, member2.id, true)
+            .await
+            .expect("Should query pending member2")
+            .expect("member2 should remain available for cleanup");
+        assert!(member2_pending.time_deleted.is_some());
+        assert_eq!(member2_pending.sled_id, Some(setup.sled_id.into()));
+
+        // A replacement member for the same multicast address and instance
+        // must be visible to the pending-cleanup guard.
+        let replacement4 = datastore
+            .multicast_group_member_attach_to_instance(
+                &opctx,
+                MulticastGroupUuid::from_untyped_uuid(group.id()),
+                InstanceUuid::from_untyped_uuid(instance4_id),
+                Some(NO_SOURCE_IPS),
+            )
+            .await
+            .expect("Should attach a replacement member4")
+            .member;
+        assert_ne!(replacement4.id, member4.id);
+        let replacement4_lookup = datastore
+            .multicast_group_member_get_by_multicast_ip_and_instance(
+                &opctx,
+                group.multicast_ip,
+                InstanceUuid::from_untyped_uuid(instance4_id),
+            )
+            .await
+            .expect("Should look up replacement member4")
+            .expect("Replacement member4 should be live");
+        assert_eq!(replacement4_lookup.id, replacement4.id);
+
+        let pending = datastore
+            .multicast_group_members_list_pending_cleanup(
+                &opctx,
+                &DataPageParams::max_page(),
+            )
+            .await
+            .expect("Should list pending cleanup members");
+        assert_eq!(pending.len(), 2);
+        assert!(pending.iter().any(|member| member.id == member2.id));
+        assert!(pending.iter().any(|member| member.id == member4.id));
+
+        assert!(
+            !datastore
+                .multicast_group_member_clear_sled_id_if_current(
+                    &opctx,
+                    member4.id,
+                    SledUuid::new_v4().into(),
+                )
+                .await
+                .expect("Should compare pending sled assignment"),
+            "A stale sled assignment must not clear the row"
+        );
+        assert!(
+            datastore
+                .multicast_group_member_clear_sled_id_if_current(
+                    &opctx,
+                    member4.id,
+                    setup.sled_id.into(),
+                )
+                .await
+                .expect("Should clear pending sled assignment"),
+            "The current sled assignment should clear"
+        );
+        assert!(
+            datastore
+                .multicast_group_member_clear_sled_id_if_current(
+                    &opctx,
+                    member2.id,
+                    setup.sled_id.into(),
+                )
+                .await
+                .expect("Should clear member2 sled assignment"),
+            "member2's current sled assignment should clear"
+        );
+
+        let deleted_count = datastore
+            .multicast_group_members_complete_delete(&opctx)
+            .await
+            .expect("Should run complete delete after OPTE cleanup");
+        assert_eq!(deleted_count, 2);
+        assert!(
+            datastore
+                .multicast_group_member_get_by_id(&opctx, member4.id, true)
+                .await
+                .expect("Should query cleaned member")
+                .is_none(),
+            "member4 should be deleted after its sled assignment is cleared"
         );
 
         db.terminate().await;
@@ -2606,6 +2881,16 @@ mod tests {
         assert!(member1_2.time_deleted.is_none());
         assert!(member2_1.time_deleted.is_none());
 
+        // Assign a sled so removal marking can demonstrate retention.
+        datastore
+            .multicast_group_member_update_sled_id(
+                &opctx,
+                instance1_id,
+                Some(setup.sled_id.into()),
+            )
+            .await
+            .expect("Should assign a sled before marking for removal");
+
         // Mark all memberships for instance1 for removal
         datastore
             .multicast_group_members_mark_for_removal(&opctx, instance1_id)
@@ -2619,6 +2904,11 @@ mod tests {
             .expect("Should query member1_1")
             .expect("Member1_1 should exist");
         assert!(marked_member1_1.time_deleted.is_some());
+        assert_eq!(
+            marked_member1_1.sled_id,
+            Some(setup.sled_id.into()),
+            "Removal marking must retain sled_id for OPTE cleanup"
+        );
 
         let marked_member1_2 = datastore
             .multicast_group_member_get_by_id(&opctx, member1_2.id, true)
@@ -2626,6 +2916,11 @@ mod tests {
             .expect("Should query member1_2")
             .expect("Member1_2 should exist");
         assert!(marked_member1_2.time_deleted.is_some());
+        assert_eq!(
+            marked_member1_2.sled_id,
+            Some(setup.sled_id.into()),
+            "Removal marking must retain sled_id for OPTE cleanup"
+        );
 
         // Verify instance2 membership is not marked for removal
         let unmarked_member2_1 = datastore
@@ -2823,6 +3118,15 @@ mod tests {
         // every member soft-deleted, then the group itself marked for removal.
         // The hard delete declines unless the group is still in that state.
         for instance_id in [instance1_id, instance2_id] {
+            datastore
+                .multicast_group_member_update_sled_id(
+                    &opctx,
+                    instance_id,
+                    Some(setup.sled_id.into()),
+                )
+                .await
+                .expect("Should assign a sled before detaching");
+
             let detached = datastore
                 .multicast_group_member_detach_by_group_and_instance(
                     &opctx,
@@ -2835,6 +3139,30 @@ mod tests {
                 detached,
                 "Received an untouched row instead of a soft-deleted \
                  group1 member"
+            );
+        }
+
+        for member_id in [member1_1.id, member1_2.id] {
+            let detached_member = datastore
+                .multicast_group_member_get_by_id(&opctx, member_id, true)
+                .await
+                .expect("Should fetch detached group1 member")
+                .expect("Detached group1 member should remain");
+            assert_eq!(
+                detached_member.sled_id,
+                Some(setup.sled_id.into()),
+                "Explicit detach must retain sled_id for OPTE cleanup"
+            );
+            assert!(
+                datastore
+                    .multicast_group_member_clear_sled_id_if_current(
+                        &opctx,
+                        member_id,
+                        setup.sled_id.into(),
+                    )
+                    .await
+                    .expect("Should clear detached member sled assignment"),
+                "The current sled assignment should clear after cleanup"
             );
         }
 

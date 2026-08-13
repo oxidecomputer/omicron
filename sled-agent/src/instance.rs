@@ -858,7 +858,7 @@ impl InstanceRunner {
         // This needs to be done only after publishing the final VMM state to
         // Nexus so that Nexus is guaranteed to have received notice of the
         // VMM's terminal state before it begins to see "no such VMM" errors
-        // from the instance manager. Otherwise it is possible for Nexus to
+        // from the instance manager. Otherwise, it is possible for Nexus to
         // conclude that a cleanly-stopped instance has gone missing and should
         // be restarted.
         ticket.deregister();
@@ -2701,21 +2701,44 @@ impl InstanceRunner {
         &mut self,
         membership: &InstanceMulticastMembership,
     ) -> Result<(), Error> {
-        // Idempotent -> skip if already subscribed.
-        if self.multicast_groups.contains(membership) {
+        if !Self::record_multicast_membership(
+            &mut self.multicast_groups,
+            membership,
+        ) {
             return Ok(());
         }
 
-        self.multicast_groups.push(membership.clone());
         self.ensure_multicast_groups()?;
         Ok(())
+    }
+
+    /// Record `membership` in `groups`, keyed on the group IP.
+    ///
+    /// An instance has one source filter per group. A repeat join with a
+    /// different source list replaces the stored filter instead of retaining
+    /// both filters in memory.
+    fn record_multicast_membership(
+        groups: &mut Vec<InstanceMulticastMembership>,
+        membership: &InstanceMulticastMembership,
+    ) -> bool {
+        match groups.iter_mut().find(|m| m.group_ip == membership.group_ip) {
+            Some(existing) if existing.sources == membership.sources => false,
+            Some(existing) => {
+                existing.sources = membership.sources.clone();
+                true
+            }
+            None => {
+                groups.push(membership.clone());
+                true
+            }
+        }
     }
 
     async fn leave_multicast_group_inner(
         &mut self,
         membership: &InstanceMulticastMembership,
     ) -> Result<(), Error> {
-        self.multicast_groups.retain(|m| m != membership);
+        self.multicast_groups.retain(|m| m.group_ip != membership.group_ip);
         self.ensure_multicast_groups()
     }
 
@@ -3831,6 +3854,30 @@ mod tests {
 
         assert_eq!(membership1, membership2);
         assert_ne!(membership1, membership3);
+    }
+
+    #[test]
+    fn multicast_membership_is_keyed_on_group_ip() {
+        let group_ip = IpAddr::V4(Ipv4Addr::new(239, 1, 1, 1));
+        let old_membership = InstanceMulticastMembership {
+            group_ip,
+            sources: vec![IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1))],
+        };
+        let replacement = InstanceMulticastMembership {
+            group_ip,
+            sources: vec![IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2))],
+        };
+        let mut groups = vec![old_membership];
+
+        assert!(InstanceRunner::record_multicast_membership(
+            &mut groups,
+            &replacement,
+        ));
+        assert_eq!(groups, vec![replacement.clone()]);
+        assert!(!InstanceRunner::record_multicast_membership(
+            &mut groups,
+            &replacement,
+        ));
     }
 
     #[test]
