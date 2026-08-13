@@ -88,8 +88,10 @@ pub(crate) mod dataplane;
 ///   need to specify sources upfront.
 /// - Sources are optional for filtering (IGMPv3/MLDv2), not required.
 ///
-/// This validation applies to all SSM joins (new or existing groups) because
-/// every member must explicitly declare their source subscriptions.
+/// This validation applies to a join that establishes a membership, since
+/// every member must declare its own source subscriptions. A repeat join that
+/// omits `source_ips` preserves the filter already stored on the membership,
+/// so callers skip this check for that case.
 ///
 /// # Arguments
 /// - `group_ip`: The multicast group's IP address
@@ -339,7 +341,8 @@ impl super::Nexus {
     /// - **Source IPs**: Optional for ASM, required for SSM addresses (232/8, ff3x::/32)
     /// - **Existing member**: A repeat join acts as an update, rewriting the
     ///   source filter when source IPs are given and leaving the membership
-    ///   untouched when omitted
+    ///   untouched when omitted. Omitting them on an SSM group is accepted,
+    ///   since the filter stored on the membership already carries sources
     /// - **IP version**: Required when joining by name if multiple default pools exist
     pub(crate) async fn instance_join_multicast_group(
         self: &Arc<Self>,
@@ -361,17 +364,59 @@ impl super::Nexus {
             instance_lookup.lookup_for(authz::Action::Modify).await?;
         let instance_id = InstanceUuid::from_untyped_uuid(authz_instance.id());
 
-        // Find or create the group based on identifier type.
-        // SSM validation happens inside resolve functions.
-        let resolved = self
-            .resolve_multicast_group_identifier_with_sources(
+        let current_members = self
+            .db_datastore
+            .multicast_group_members_list_by_instance(
                 opctx,
-                group_identifier,
-                source_ips,
-                ip_version,
+                instance_id,
+                &DataPageParams::max_page(),
             )
             .await?;
+
+        // A join that omits `source_ips` keeps the filter the membership
+        // already stores, so it carries no source list for SSM validation to
+        // inspect. Resolve by lookup first and, when the instance already
+        // holds a membership in the resolved group, skip the validating
+        // resolver that would otherwise reject the omitted sources of an SSM
+        // group. A lookup that finds nothing falls through, leaving implicit
+        // creation and its validation to the resolver below.
+        let existing_membership = if source_ips.is_none() {
+            match self
+                .resolve_multicast_group_identifier(opctx, group_identifier)
+                .await
+            {
+                Ok(group_id)
+                    if current_members.iter().any(|m| {
+                        m.external_group_id == group_id.into_untyped_uuid()
+                    }) =>
+                {
+                    Some(group_id)
+                }
+                Ok(_) | Err(external::Error::ObjectNotFound { .. }) => None,
+                Err(e) => return Err(e),
+            }
+        } else {
+            None
+        };
+
+        // Find or create the group based on identifier type.
+        // SSM validation happens inside resolve functions.
+        let resolved = match existing_membership {
+            Some(id) => ResolvedGroup { id, created: false },
+            None => {
+                self.resolve_multicast_group_identifier_with_sources(
+                    opctx,
+                    group_identifier,
+                    source_ips,
+                    ip_version,
+                )
+                .await?
+            }
+        };
         let group_id = resolved.id;
+        let already_member = current_members
+            .iter()
+            .any(|m| m.external_group_id == group_id.into_untyped_uuid());
 
         let attach = async {
             // Multicast joins during instance create are limited to at most
@@ -383,18 +428,6 @@ impl super::Nexus {
             // member's source filter when `source_ips` is supplied, rather
             // than adding a membership. Omitting `source_ips` preserves the
             // existing filter.
-            let current_members = self
-                .db_datastore
-                .multicast_group_members_list_by_instance(
-                    opctx,
-                    instance_id,
-                    &DataPageParams::max_page(),
-                )
-                .await?;
-            let already_member = current_members
-                .iter()
-                .any(|m| m.external_group_id == group_id.into_untyped_uuid());
-
             if !already_member
                 && current_members.len() >= MAX_MULTICAST_GROUPS_PER_INSTANCE
             {

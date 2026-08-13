@@ -540,14 +540,16 @@ async fn test_join_by_ip_ssm_with_sources(cptestctx: &ControlPlaneTestContext) {
     wait_for_group_deleted(cptestctx, &group_name).await;
 }
 
-/// Test SSM source validation: all scenarios where SSM joins should fail.
+/// Test SSM source validation on join.
 ///
 /// SSM addresses (232.0.0.0/8) require source IPs for every member subscription.
-/// This test validates three failure scenarios with a single setup:
+/// This test validates the following scenarios with a single setup:
 ///
 /// 1. Join-by-IP with new SSM group without sources (implicit creation blocked)
 /// 2. Join existing SSM group without sources (via ID, name, and IP lookup)
-/// 3. Join-by-IP with empty sources array (treated same as no sources)
+/// 3. Repeat join from an existing member without sources, which keeps the
+///    filter stored on the membership (via ID, name, and IP lookup)
+/// 4. Join-by-IP with empty sources array (treated same as no sources)
 #[nexus_test]
 async fn test_ssm_source_validation(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
@@ -688,6 +690,31 @@ async fn test_ssm_source_validation(cptestctx: &ControlPlaneTestContext) {
             Some("InvalidRequest".to_string()),
             "Expected InvalidRequest for join-by-IP, got: {:?}",
             error.error_code
+        );
+    }
+
+    // Case: A repeat join from an existing member without sources succeeds
+    //
+    // Omitting `source_ips` means "keep the filter," which the membership
+    // created above already satisfies, so the SSM requirement is met by the
+    // stored sources rather than by the request.
+    for identifier in
+        [ssm_ip.to_string(), group_name.clone(), group_id.to_string()]
+    {
+        let join_url = format!(
+            "/v1/instances/ssm-inst-creator/multicast-groups/{identifier}?project={project_name}"
+        );
+        let member: MulticastGroupMember =
+            put_upsert(client, &join_url, &join_body_no_sources).await;
+        assert_eq!(
+            member.identity.id, member_creator.identity.id,
+            "Repeat join by {identifier} should return the same membership"
+        );
+        assert_eq!(
+            member.source_ips,
+            vec![source_ip],
+            "Repeat join by {identifier} should preserve the stored source \
+             filter"
         );
     }
 
