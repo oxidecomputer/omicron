@@ -1684,7 +1684,7 @@
         "parameters": [
           {
             "in": "query",
-            "name": "classes",
+            "name": "alert_class",
             "description": "Optional alert class or glob pattern used to filter alerts\n\nSee the guide-level documentation on alerts for details on alert classes and alert class glob patterns.",
             "schema": {
               "$ref": "#/components/schemas/AlertSubscription"

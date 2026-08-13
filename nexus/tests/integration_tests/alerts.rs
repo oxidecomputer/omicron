@@ -119,7 +119,7 @@ async fn test_alert_list_and_view(ctx: &ControlPlaneTestContext) {
     ascending_ids.sort();
 
     let all_test_alerts = AlertListParams {
-        classes: Some("test.**".parse().unwrap()),
+        alert_class: Some("test.**".parse().unwrap()),
         start_time: None,
         end_time: None,
     };
@@ -151,7 +151,7 @@ async fn test_alert_list_and_view(ctx: &ControlPlaneTestContext) {
     );
 
     let params_for_classes = |classes: &str| AlertListParams {
-        classes: Some(classes.parse().unwrap()),
+        alert_class: Some(classes.parse().unwrap()),
         start_time: None,
         end_time: None,
     };
@@ -214,7 +214,7 @@ async fn test_alert_list_and_view(ctx: &ControlPlaneTestContext) {
         "{ALERTS_URL}?{}",
         alert_list_query(
             &AlertListParams {
-                classes: None,
+                alert_class: None,
                 start_time: Some(timestamp + TimeDelta::microseconds(1)),
                 end_time: Some(timestamp),
             },

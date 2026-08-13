@@ -253,7 +253,7 @@ impl TryFrom<external_api::AlertListParams> for AlertFilters {
     fn try_from(
         params: external_api::AlertListParams,
     ) -> Result<Self, Self::Error> {
-        let external_api::AlertListParams { classes, start_time, end_time } =
+        let external_api::AlertListParams { alert_class, start_time, end_time } =
             params;
 
         let mut filters = Self::default();
@@ -263,8 +263,8 @@ impl TryFrom<external_api::AlertListParams> for AlertFilters {
         if let Some(end_time) = end_time {
             filters = filters.before(end_time)?;
         }
-        if let Some(classes) = classes {
-            let classes = model::AlertSubscriptionKind::try_from(classes)?;
+        if let Some(alert_class) = alert_class {
+            let classes = model::AlertSubscriptionKind::try_from(alert_class)?;
             filters = filters.with_classes(classes.matching_classes()?);
         }
         Ok(filters)

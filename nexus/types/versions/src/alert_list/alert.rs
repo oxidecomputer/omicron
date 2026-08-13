@@ -45,7 +45,7 @@ pub struct AlertListParams {
     ///
     /// See the guide-level documentation on alerts for details on alert classes
     /// and alert class glob patterns.
-    pub classes: Option<AlertSubscription>,
+    pub alert_class: Option<AlertSubscription>,
     /// Inclusive lower bound on the alert creation time.
     ///
     /// If this is included, only alerts created at or after this time will be
