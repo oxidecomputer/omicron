@@ -633,35 +633,6 @@
         }
       }
     },
-    "/repository": {
-      "put": {
-        "summary": "Upload a TUF repository to the server.",
-        "description": "At any given time, wicketd will keep at most one TUF repository in memory. Any previously-uploaded repositories will be discarded.",
-        "operationId": "put_repository",
-        "requestBody": {
-          "content": {
-            "application/octet-stream": {
-              "schema": {
-                "type": "string",
-                "format": "binary"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "204": {
-            "description": "resource updated"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
     "/update": {
       "post": {
         "summary": "An endpoint to start updating one or more sleds, switches and PSCs.",

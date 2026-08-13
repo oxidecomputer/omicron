@@ -8,7 +8,6 @@ use dropshot::HttpResponseOk;
 use dropshot::HttpResponseUpdatedNoContent;
 use dropshot::Path;
 use dropshot::RequestContext;
-use dropshot::StreamingBody;
 use dropshot::TypedBody;
 use gateway_client::types::IgnitionCommand;
 use schemars::JsonSchema;
@@ -39,10 +38,6 @@ use wicketd_commission_types::rack_setup::PutRssUserConfigInsensitive;
 use wicketd_commission_types::rack_setup::SetBgpAuthKeyStatus;
 use wicketd_commission_types::update::ClearUpdateStateResponse;
 use wicketd_commission_types::update::UpdateTargets;
-
-/// Full release repositories are currently (Dec 2024) 1.8 GiB and are likely to
-/// continue growing.
-const PUT_REPOSITORY_MAX_BYTES: usize = 4 * 1024 * 1024 * 1024;
 
 #[dropshot::api_description]
 pub trait WicketdApi {
@@ -201,20 +196,6 @@ pub trait WicketdApi {
         rqctx: RequestContext<Self::Context>,
         body_params: TypedBody<GetInventoryParams>,
     ) -> Result<HttpResponseOk<GetInventoryResponse>, HttpError>;
-
-    /// Upload a TUF repository to the server.
-    ///
-    /// At any given time, wicketd will keep at most one TUF repository in
-    /// memory. Any previously-uploaded repositories will be discarded.
-    #[endpoint {
-        method = PUT,
-        path = "/repository",
-        request_body_max_bytes = PUT_REPOSITORY_MAX_BYTES,
-    }]
-    async fn put_repository(
-        rqctx: RequestContext<Self::Context>,
-        body: StreamingBody,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
     /// An endpoint used to report all available artifacts and event reports.
     ///

@@ -22,7 +22,6 @@ use dropshot::HttpResponseOk;
 use dropshot::HttpResponseUpdatedNoContent;
 use dropshot::Path;
 use dropshot::RequestContext;
-use dropshot::StreamingBody;
 use dropshot::TypedBody;
 use internal_dns_resolver::Resolver;
 use sled_agent_types::early_networking::SwitchSlot;
@@ -388,17 +387,6 @@ impl WicketdApi for WicketdApiImpl {
             });
         let inventory = RackV1Inventory { mgs, transceivers };
         Ok(HttpResponseOk(GetInventoryResponse::Response { inventory }))
-    }
-
-    async fn put_repository(
-        rqctx: RequestContext<Self::Context>,
-        body: StreamingBody,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        let rqctx = rqctx.context();
-
-        rqctx.update_tracker.put_repository(body.into_stream()).await?;
-
-        Ok(HttpResponseUpdatedNoContent())
     }
 
     async fn get_artifacts_and_event_reports(
