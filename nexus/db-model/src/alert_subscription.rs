@@ -91,7 +91,9 @@ impl AlertSubscriptionKind {
         if class == AlertClass::Probe {
             return Err(Error::invalid_value(
                 "alert_class",
-                "webhook receivers cannot subscribe to probes",
+                "the 'probe' alert class is a synthetic alert used \
+                only for webhook liveness probes, and is not included in alert \
+                lists and cannot be subscribed to",
             ));
         }
 
