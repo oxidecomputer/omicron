@@ -806,14 +806,8 @@ impl super::Nexus {
                 })
                 .collect();
 
-        let sled_baseboards: BTreeSet<hardware::Baseboard> = sleds
-            .into_iter()
-            .map(|s| hardware::Baseboard {
-                serial: s.serial_number,
-                part: s.part_number,
-                revision: s.revision.into(),
-            })
-            .collect();
+        let sled_baseboards: BTreeSet<hardware::Baseboard> =
+            sleds.into_iter().map(db::model::Sled::into_baseboard).collect();
 
         // Retain all sleds that exist but are not in the sled table
         uninitialized_sleds.retain(|s| !sled_baseboards.contains(&s.baseboard));

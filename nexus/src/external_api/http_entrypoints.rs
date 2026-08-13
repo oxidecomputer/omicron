@@ -6748,8 +6748,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let (.., sled) =
                 nexus.sled_lookup(&opctx, &path.sled_id)?.fetch().await?;
             let inv_rx = nexus.inventory_load_rx();
-            let sled =
-                crate::app::sled::db_sled_to_external(sled, &inv_rx.borrow());
+            let sled = sled.to_external_api(&inv_rx.borrow());
             Ok(HttpResponseOk(sled))
         };
         apictx

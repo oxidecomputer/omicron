@@ -19,9 +19,9 @@ pub struct Sled {
     pub baseboard: Baseboard,
     /// The rack to which this Sled is currently attached
     pub rack_id: Uuid,
-    /// The physical slot in the rack where this sled is currently located, or
-    /// null if its location is not known at this time.
-    pub slot: Option<u8>,
+    /// The physical slot in the rack where this sled was last observed to be
+    /// located, or null if its location is not known at this time.
+    pub slot: Option<u16>,
     /// The operator-defined policy of a sled.
     pub policy: SledPolicy,
     /// The current state of the sled.
