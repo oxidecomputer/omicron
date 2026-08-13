@@ -1104,6 +1104,8 @@ mod tests {
 
         let ip_addr = IpAddr::V6(Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 1));
         let ip = RouterPeerIpAddr::try_from(ip_addr).unwrap();
+        let src_addr = IpAddr::V6(Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 2));
+        let src = RouterPeerIpAddr::try_from(src_addr).unwrap();
         let original: RouterPeerType =
             NumberedRouter::new(ip, Some(src)).unwrap().into();
 
