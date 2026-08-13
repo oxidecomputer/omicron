@@ -3513,3 +3513,8 @@ table! {
 
 allow_tables_to_appear_in_same_query!(trust_quorum_member, hw_baseboard_id);
 joinable!(trust_quorum_member -> hw_baseboard_id(hw_baseboard_id));
+
+// Declared as separate pairs rather than one three-table invocation, which
+// would re-emit the `trust_quorum_member`/`hw_baseboard_id` impls above.
+allow_tables_to_appear_in_same_query!(sled, hw_baseboard_id);
+allow_tables_to_appear_in_same_query!(sled, trust_quorum_member);
