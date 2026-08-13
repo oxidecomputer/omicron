@@ -677,7 +677,7 @@ dependencies = [
 [[package]]
 name = "before"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/rumors?rev=66aea68b6578345275de3cf14151c4707345773f#66aea68b6578345275de3cf14151c4707345773f"
+source = "git+https://github.com/oxidecomputer/rumors?rev=4be4b8308b38d6961e7ccaf613394e7d5bbf3f6d#4be4b8308b38d6961e7ccaf613394e7d5bbf3f6d"
 dependencies = [
  "bitvec",
  "borsh",
@@ -10089,10 +10089,9 @@ dependencies = [
  "ppv-lite86",
  "predicates",
  "proc-macro2",
+ "qorb",
  "quote",
- "rand 0.8.6",
  "rand 0.9.2",
- "rand_chacha 0.3.1",
  "rand_chacha 0.9.0",
  "regex",
  "regex-automata",
@@ -13089,7 +13088,7 @@ dependencies = [
 [[package]]
 name = "rumors"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/rumors?rev=66aea68b6578345275de3cf14151c4707345773f#66aea68b6578345275de3cf14151c4707345773f"
+source = "git+https://github.com/oxidecomputer/rumors?rev=4be4b8308b38d6961e7ccaf613394e7d5bbf3f6d#4be4b8308b38d6961e7ccaf613394e7d5bbf3f6d"
 dependencies = [
  "async-stream",
  "before",
@@ -15418,7 +15417,7 @@ dependencies = [
 [[package]]
 name = "suanpan"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/rumors?rev=66aea68b6578345275de3cf14151c4707345773f#66aea68b6578345275de3cf14151c4707345773f"
+source = "git+https://github.com/oxidecomputer/rumors?rev=4be4b8308b38d6961e7ccaf613394e7d5bbf3f6d#4be4b8308b38d6961e7ccaf613394e7d5bbf3f6d"
 dependencies = [
  "dashu-int",
 ]
@@ -15546,7 +15545,7 @@ checksum = "b7401a30af6cb5818bb64852270bb722533397edcfc7344954a38f420819ece2"
 [[package]]
 name = "sush-api"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/sush?rev=860073e7951f66441b18652f556d3db0bf862dc8#860073e7951f66441b18652f556d3db0bf862dc8"
+source = "git+https://github.com/oxidecomputer/sush?rev=f969073674290f07b7fbecf3d65b1c4dc0f1a21d#f969073674290f07b7fbecf3d65b1c4dc0f1a21d"
 dependencies = [
  "borsh",
  "chrono",
@@ -15563,7 +15562,7 @@ dependencies = [
 [[package]]
 name = "sush-common"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/sush?rev=860073e7951f66441b18652f556d3db0bf862dc8#860073e7951f66441b18652f556d3db0bf862dc8"
+source = "git+https://github.com/oxidecomputer/sush?rev=f969073674290f07b7fbecf3d65b1c4dc0f1a21d#f969073674290f07b7fbecf3d65b1c4dc0f1a21d"
 dependencies = [
  "blake3",
  "borsh",
@@ -15624,8 +15623,9 @@ dependencies = [
 [[package]]
 name = "sush-server"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/sush?rev=860073e7951f66441b18652f556d3db0bf862dc8#860073e7951f66441b18652f556d3db0bf862dc8"
+source = "git+https://github.com/oxidecomputer/sush?rev=f969073674290f07b7fbecf3d65b1c4dc0f1a21d#f969073674290f07b7fbecf3d65b1c4dc0f1a21d"
 dependencies = [
+ "async-trait",
  "blake3",
  "borsh",
  "bytes",
@@ -15647,6 +15647,7 @@ dependencies = [
  "p256 0.13.2",
  "percent-encoding",
  "pwd",
+ "qorb",
  "rand_core 0.6.4",
  "rumors",
  "rustix 1.1.4",
