@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::display;
+use super::display::const_max_len;
 use crate::alert::AlertClass;
 use crate::fm::DiagnosisEngineKind;
 use crate::fm::Ereport;
@@ -569,19 +570,6 @@ impl fmt::Display for DisplayCase<'_> {
 
         Ok(())
     }
-}
-
-const fn const_max_len(strs: &[&str]) -> usize {
-    let mut max = 0;
-    let mut i = 0;
-    while i < strs.len() {
-        let len = strs[i].len();
-        if len > max {
-            max = len;
-        }
-        i += 1;
-    }
-    max
 }
 
 #[cfg(test)]

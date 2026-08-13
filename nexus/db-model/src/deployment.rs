@@ -9,9 +9,9 @@ use crate::inventory::{HwRotSlot, SpMgsSlot, SpType, ZoneType};
 use crate::omicron_zone_config::{self, OmicronZoneNic};
 use crate::typed_uuid::DbTypedUuid;
 use crate::{
-    ArtifactHash, ByteCount, DbArtifactVersion, DbOximeterReadMode, Generation,
-    HwM2Slot, MacAddr, Name, SledState, SqlU8, SqlU16, SqlU32, TufArtifact,
-    impl_enum_type, ipv6,
+    ArtifactHash, ByteCount, DbArtifactVersion, DbOximeterReadMode,
+    DbReconfiguratorDisruptionPolicy, Generation, HwM2Slot, MacAddr, Name,
+    SledState, SqlU8, SqlU16, SqlU32, TufArtifactFile, impl_enum_type, ipv6,
 };
 use anyhow::{Context, Result, anyhow, bail};
 use chrono::{DateTime, Utc};
@@ -31,6 +31,8 @@ use nexus_db_schema::schema::{
 use nexus_types::deployment::BlueprintMeasurements;
 use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
 use nexus_types::deployment::BlueprintSingleMeasurement;
+use nexus_types::deployment::BlueprintSledUpdateDisposition;
+use nexus_types::deployment::BlueprintSledUpdateDispositionKind;
 use nexus_types::deployment::BlueprintTarget;
 use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneDisposition;
@@ -256,6 +258,9 @@ pub struct BpSledMetadata {
     pub subnet: IpNetwork,
     pub last_allocated_ip_subnet_offset: SqlU16,
     pub measurements: DbBpSledMeasurements,
+    pub update_disposition_generation: Generation,
+    pub update_availability: DbSledUpdateAvailability,
+    pub update_disruption_policy: Option<DbReconfiguratorDisruptionPolicy>,
 }
 
 impl BpSledMetadata {
@@ -269,6 +274,44 @@ impl BpSledMetadata {
         };
 
         Ok(subnet.into())
+    }
+
+    /// Splits a [`BlueprintSledUpdateDisposition`] into the columns stored on
+    /// `bp_sled_metadata`.
+    ///
+    /// See [`BpSledMetadata::update_disposition`] for the inverse.
+    pub fn update_disposition_columns(
+        update_disposition: BlueprintSledUpdateDisposition,
+    ) -> (
+        Generation,
+        DbSledUpdateAvailability,
+        Option<DbReconfiguratorDisruptionPolicy>,
+    ) {
+        let (availability, policy) = match update_disposition.kind {
+            BlueprintSledUpdateDispositionKind::Available => {
+                (DbSledUpdateAvailability::Available, None)
+            }
+            BlueprintSledUpdateDispositionKind::Evacuating { policy } => {
+                (DbSledUpdateAvailability::Evacuating, Some(policy.into()))
+            }
+        };
+        (update_disposition.generation.into(), availability, policy)
+    }
+
+    /// Reassembles the [`BlueprintSledUpdateDisposition`] from this row's
+    /// `(update_disposition_generation, update_availability,
+    /// update_disruption_policy)` columns.
+    pub fn update_disposition(
+        &self,
+    ) -> anyhow::Result<BlueprintSledUpdateDisposition> {
+        reassemble_update_disposition(
+            self.update_disposition_generation,
+            self.update_availability,
+            self.update_disruption_policy,
+        )
+        .with_context(|| {
+            format!("invalid bp_sled_metadata row for sled {}", self.sled_id)
+        })
     }
 
     pub fn host_phase_2(
@@ -314,6 +357,52 @@ impl BpSledMetadata {
             ),
         }
     }
+}
+
+impl_enum_type!(
+    SledUpdateAvailabilityEnum:
+
+    /// Database representation of the availability half of a sled's
+    /// `update_disposition`.
+    #[derive(
+        Copy,
+        Clone,
+        Debug,
+        PartialEq,
+        AsExpression,
+        FromSqlRow,
+    )]
+    pub enum DbSledUpdateAvailability;
+
+    Available => b"available"
+    Evacuating => b"evacuating"
+);
+
+fn reassemble_update_disposition(
+    generation: Generation,
+    availability: DbSledUpdateAvailability,
+    policy: Option<DbReconfiguratorDisruptionPolicy>,
+) -> anyhow::Result<BlueprintSledUpdateDisposition> {
+    let kind = match (availability, policy) {
+        (DbSledUpdateAvailability::Available, None) => {
+            BlueprintSledUpdateDispositionKind::Available
+        }
+        (DbSledUpdateAvailability::Evacuating, Some(policy)) => {
+            BlueprintSledUpdateDispositionKind::Evacuating {
+                policy: policy.into(),
+            }
+        }
+        // Invalid cases (there's a CHECK constraint to enforce this).
+        (DbSledUpdateAvailability::Available, Some(policy)) => bail!(
+            "update_availability is 'available' but update_disruption_policy \
+             is {policy:?} (expected NULL)"
+        ),
+        (DbSledUpdateAvailability::Evacuating, None) => bail!(
+            "update_availability is 'evacuating' but update_disruption_policy \
+             is NULL (expected a policy)"
+        ),
+    };
+    Ok(BlueprintSledUpdateDisposition { generation: *generation, kind })
 }
 
 impl_enum_type!(
@@ -878,7 +967,7 @@ impl BpOmicronZone {
     pub fn into_blueprint_zone_config(
         self,
         nic_row: Option<BpOmicronZoneNic>,
-        image_artifact_row: Option<TufArtifact>,
+        image_artifact_row: Option<TufArtifactFile>,
     ) -> anyhow::Result<BlueprintZoneConfig> {
         // Build up a set of common fields for our `BlueprintZoneType`s
         //
@@ -1189,7 +1278,7 @@ impl DbBpZoneImageSourceColumns {
     fn new(
         image_source: DbBpZoneImageSource,
         image_artifact_sha256: Option<ArtifactHash>,
-        image_artifact_row: Option<TufArtifact>,
+        image_artifact_row: Option<TufArtifactFile>,
     ) -> Self {
         // Note that artifact_row can only be Some if image_artifact_sha256 is
         // Some.
@@ -1275,7 +1364,7 @@ impl BpSingleMeasurement {
 
     pub fn to_measurement(
         self,
-        artifact: Option<TufArtifact>,
+        artifact: Option<TufArtifactFile>,
     ) -> BlueprintSingleMeasurement {
         BlueprintSingleMeasurement {
             version: match artifact {
@@ -1295,12 +1384,19 @@ pub struct BpOmicronZoneNic {
     blueprint_id: DbTypedUuid<BlueprintKind>,
     pub id: Uuid,
     name: Name,
-    ip: IpNetwork,
+    // The `ipv4`/`ipv4_subnet` fields map to the `ip`/`subnet` columns, which
+    // predate dual-stack support: CRDB can't idempotently rename columns, so we
+    // keep the original names rather than rename them to `ipv4`/`ipv4_subnet`.
+    #[diesel(column_name = ip)]
+    ipv4: Option<IpNetwork>,
+    #[diesel(column_name = subnet)]
+    ipv4_subnet: Option<IpNetwork>,
     mac: MacAddr,
-    subnet: IpNetwork,
     vni: SqlU32,
     is_primary: bool,
     slot: SqlU8,
+    ipv6: Option<IpNetwork>,
+    ipv6_subnet: Option<IpNetwork>,
 }
 
 impl BpOmicronZoneNic {
@@ -1316,9 +1412,11 @@ impl BpOmicronZoneNic {
             blueprint_id: blueprint_id.into(),
             id: nic.id,
             name: nic.name,
-            ip: nic.ip,
+            ipv4: nic.ipv4,
+            ipv4_subnet: nic.ipv4_subnet,
+            ipv6: nic.ipv6,
+            ipv6_subnet: nic.ipv6_subnet,
             mac: nic.mac,
-            subnet: nic.subnet,
             vni: nic.vni,
             is_primary: nic.is_primary,
             slot: nic.slot,
@@ -1339,9 +1437,11 @@ impl From<BpOmicronZoneNic> for OmicronZoneNic {
         OmicronZoneNic {
             id: value.id,
             name: value.name,
-            ip: value.ip,
+            ipv4: value.ipv4,
+            ipv4_subnet: value.ipv4_subnet,
+            ipv6: value.ipv6,
+            ipv6_subnet: value.ipv6_subnet,
             mac: value.mac,
-            subnet: value.subnet,
             vni: value.vni,
             is_primary: value.is_primary,
             slot: value.slot,
@@ -1687,5 +1787,70 @@ impl DebugLogBlueprintPlanning {
         });
 
         Ok(Self { blueprint_id: blueprint_id.into(), debug_blob })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use nexus_types::deployment::ReconfiguratorDisruptionPolicy;
+
+    #[test]
+    fn update_disposition_columns_roundtrip() {
+        // Set this to a non-initial generation so that we cover roundtripping
+        // the generation column away from its default value.
+        let evacuating_generation =
+            BlueprintSledUpdateDisposition::initial().generation.next();
+        let mut dispositions = vec![BlueprintSledUpdateDisposition::initial()];
+        dispositions.extend(
+            ReconfiguratorDisruptionPolicy::ALL_VARIANTS.iter().copied().map(
+                |policy| BlueprintSledUpdateDisposition {
+                    generation: evacuating_generation,
+                    kind: BlueprintSledUpdateDispositionKind::Evacuating {
+                        policy,
+                    },
+                },
+            ),
+        );
+
+        for disposition in dispositions {
+            let (generation, availability, policy) =
+                BpSledMetadata::update_disposition_columns(disposition);
+            let reassembled = reassemble_update_disposition(
+                generation,
+                availability,
+                policy,
+            )
+            .expect("columns from update_disposition_columns are consistent");
+            assert_eq!(reassembled, disposition, "{disposition:?} roundtrips");
+        }
+    }
+
+    #[test]
+    fn reassemble_rejects_inconsistent_columns() {
+        // The generation is not relevant to these consistency checks.
+        let generation = Generation::new();
+        // Available must not carry a disruption policy.
+        for &policy in ReconfiguratorDisruptionPolicy::ALL_VARIANTS {
+            assert!(
+                reassemble_update_disposition(
+                    generation,
+                    DbSledUpdateAvailability::Available,
+                    Some(policy.into()),
+                )
+                .is_err(),
+                "available + {policy:?} should be rejected",
+            );
+        }
+        // Evacuating must carry a disruption policy.
+        assert!(
+            reassemble_update_disposition(
+                generation,
+                DbSledUpdateAvailability::Evacuating,
+                None,
+            )
+            .is_err(),
+            "evacuating + NULL policy should be rejected",
+        );
     }
 }

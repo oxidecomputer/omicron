@@ -1441,7 +1441,13 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let paginated_by = name_or_id_pagination(&pag_params, scan_params)?;
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
-            let filter = ip_pool::SystemIpPoolFilter::default();
+            // Before the API supported assigning IP pools to silos or system
+            // services, this endpoint only listed pools available to silos.
+            // Preserve that behavior for old clients.
+            let filter = ip_pool::SystemIpPoolFilter {
+                assignment: Some(ip_pool::IpPoolAssignment::Silos),
+                ..Default::default()
+            };
             let pools = nexus
                 .ip_pools_list_operator(&opctx, &filter, &paginated_by)
                 .await?

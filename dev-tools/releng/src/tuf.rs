@@ -14,24 +14,19 @@ use chrono::Duration;
 use chrono::Timelike;
 use chrono::Utc;
 use fs_err::tokio as fs;
-use fs_err::tokio::File;
 use omicron_zone_package::config::Config;
 use semver::Version;
 use slog::Logger;
-use tufaceous_artifact::ArtifactHash;
-use tufaceous_artifact::ArtifactVersion;
-use tufaceous_artifact::KnownArtifactKind;
-use tufaceous_lib::Key;
-use tufaceous_lib::assemble::ArtifactManifest;
-use tufaceous_lib::assemble::DeserializedArtifactData;
-use tufaceous_lib::assemble::DeserializedArtifactSource;
-use tufaceous_lib::assemble::DeserializedControlPlaneZoneSource;
-use tufaceous_lib::assemble::DeserializedManifest;
-use tufaceous_lib::assemble::OmicronRepoAssembler;
-use tufaceous_v2::RepositoryLoader;
-use update_common::artifacts::{
-    ArtifactsWithPlan, ControlPlaneZonesMode, VerificationMode,
-};
+use tufaceous::RepositoryLoader;
+use tufaceous_artifact_v1::ArtifactVersion;
+use tufaceous_artifact_v1::KnownArtifactKind;
+use tufaceous_lib_v1::Key;
+use tufaceous_lib_v1::assemble::ArtifactManifest;
+use tufaceous_lib_v1::assemble::DeserializedArtifactData;
+use tufaceous_lib_v1::assemble::DeserializedArtifactSource;
+use tufaceous_lib_v1::assemble::DeserializedControlPlaneZoneSource;
+use tufaceous_lib_v1::assemble::DeserializedManifest;
+use tufaceous_lib_v1::assemble::OmicronRepoAssembler;
 
 pub(crate) async fn build_tuf_repo(
     logger: Logger,
@@ -178,26 +173,6 @@ pub(crate) async fn build_tuf_repo(
         }
     }
     ensure!(problems.is_empty(), "found compatibility problems:{problems}",);
-
-    // Check that we haven't stepped on any rakes by attempting to generate a
-    // plan from the zip
-    for mode in [ControlPlaneZonesMode::Split, ControlPlaneZonesMode::Composite]
-    {
-        let file = File::open(&repo_path).await?.into_std().await;
-        let repo_hash = ArtifactHash(sha256);
-        let _ = ArtifactsWithPlan::from_zip(
-            file,
-            None,
-            repo_hash,
-            mode,
-            VerificationMode::BlindlyTrustAnything,
-            &logger,
-        )
-        .await
-        .with_context(|| {
-            format!("error reading generated TUF repo ({mode:?} control plane)")
-        })?;
-    }
 
     Ok(())
 }

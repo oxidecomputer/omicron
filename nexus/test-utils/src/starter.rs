@@ -43,6 +43,7 @@ use nexus_types::deployment::BlueprintMeasurements;
 use nexus_types::deployment::BlueprintPhysicalDiskConfig;
 use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
 use nexus_types::deployment::BlueprintSledConfig;
+use nexus_types::deployment::BlueprintSledUpdateDisposition;
 use nexus_types::deployment::BlueprintSource;
 use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneDisposition;
@@ -428,8 +429,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
         let log = &self.logctx.log;
         debug!(log, "Starting Dendrite"; "switch_slot" => ?switch_slot);
         let mgs = self.gateway.get(&switch_slot).unwrap();
-        let mgs_addr =
-            SocketAddrV6::new(Ipv6Addr::LOCALHOST, mgs.port, 0, 0).into();
+        let mgs_addr = mgs.address().into();
 
         // Set up a stub instance of dendrite
         let dendrite = dev::dendrite::DendriteInstance::start(
@@ -454,9 +454,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
     pub async fn start_mgd(&mut self, switch_slot: SwitchSlot) {
         let log = &self.logctx.log;
         debug!(log, "Starting mgd"; "switch_slot" => ?switch_slot);
-        let mgs = self.gateway.get(&switch_slot).unwrap();
-        let mgs_addr =
-            SocketAddrV6::new(Ipv6Addr::LOCALHOST, mgs.port, 0, 0).into();
+        let mgs_addr = self.gateway.get(&switch_slot).unwrap().address().into();
 
         // Set up an instance of mgd
         let mgd =
@@ -508,7 +506,12 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
                         .get(&switch_slot)
                         .unwrap()
                         .port(),
-                    mgs: self.gateway.get(&switch_slot).unwrap().port,
+                    mgs: self
+                        .gateway
+                        .get(&switch_slot)
+                        .unwrap()
+                        .address()
+                        .port(),
                     mgd: self.mgd.get(&switch_slot).unwrap().port,
                     ddm: self.ddm.get(&switch_slot).unwrap().port,
                 },
@@ -1414,6 +1417,8 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
                 sled_id,
                 BlueprintSledConfig {
                     state: SledState::Active,
+                    update_disposition: BlueprintSledUpdateDisposition::initial(
+                    ),
                     subnet: Ipv6Subnet::new(Ipv6Addr::LOCALHOST),
                     last_allocated_ip_subnet_offset:
                         LastAllocatedSubnetIpOffset::initial(),
@@ -1460,6 +1465,7 @@ impl ControlPlaneTestContextSledAgent {
 
     pub async fn teardown(self) {
         self.server.http_server.close().await.unwrap();
+        self.server.sled_agent.repo_depot.app_private().stop_writers().await;
     }
 }
 

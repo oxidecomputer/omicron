@@ -41,7 +41,7 @@ use slog::warn;
 use slog_term::FullFormat;
 use slog_term::TermDecorator;
 use tokio::sync::Semaphore;
-use tufaceous_artifact_v2::OsVariant;
+use tufaceous_artifact::OsVariant;
 
 use crate::cmd::Command;
 use crate::job::Jobs;
@@ -54,7 +54,7 @@ use crate::job::Jobs;
 /// to as "v8", "version 8", or "release 8" to customers). The use of semantic
 /// versioning is mostly to hedge for perhaps wanting something more granular in
 /// the future.
-const BASE_VERSION: Version = Version::new(22, 0, 0);
+const BASE_VERSION: Version = Version::new(23, 0, 0);
 
 const RETRY_ATTEMPTS: usize = 3;
 

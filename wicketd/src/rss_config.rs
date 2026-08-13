@@ -18,9 +18,10 @@ use bootstrap_agent_lockstep_client::types::Name;
 use bootstrap_agent_lockstep_client::types::RackInitializeRequest;
 use bootstrap_agent_lockstep_client::types::RecoverySiloConfig;
 use bootstrap_agent_lockstep_client::types::UserId;
+use bootstrap_agent_lockstep_types::ServiceIpPoolConfig;
 use display_error_chain::DisplayErrorChain;
+use iddqd::IdOrdMap;
 use omicron_certificates::CertificateError;
-use omicron_common::address;
 use omicron_common::address::IpRange;
 use omicron_common::address::Ipv4Range;
 use omicron_common::address::Ipv6Range;
@@ -65,7 +66,7 @@ pub(crate) struct CurrentRssConfig {
     pub common: RssOrMultirackJoinConfigCommon,
     ntp_servers: Vec<String>,
     dns_servers: Vec<IpAddr>,
-    internal_services_ip_pool_ranges: Vec<address::IpRange>,
+    service_ip_pools: IdOrdMap<ServiceIpPoolConfig>,
     external_dns_ips: Vec<IpAddr>,
     external_dns_zone_name: String,
     external_certificates: Vec<Certificate>,
@@ -114,8 +115,8 @@ impl CurrentRssConfig {
         if self.dns_servers.is_empty() {
             bail!("at least one DNS server is required");
         }
-        if self.internal_services_ip_pool_ranges.is_empty() {
-            bail!("at least one internal services IP pool range is required");
+        if self.service_ip_pools.is_empty() {
+            bail!("at least one service IP pool is required");
         }
         if self.external_dns_ips.is_empty() {
             bail!("at least one external DNS IP address is required");
@@ -206,25 +207,8 @@ impl CurrentRssConfig {
             bootstrap_agent_lockstep_client::types::NewPasswordHash(
                 recovery_silo_password_hash.to_string(),
             );
-        let internal_services_ip_pool_ranges = self
-            .internal_services_ip_pool_ranges
-            .iter()
-            .map(|pool| {
-                use bootstrap_agent_lockstep_client::types::IpRange;
-                use bootstrap_agent_lockstep_client::types::Ipv4Range;
-                use bootstrap_agent_lockstep_client::types::Ipv6Range;
-                match pool {
-                    address::IpRange::V4(range) => IpRange::V4(Ipv4Range {
-                        first: range.first,
-                        last: range.last,
-                    }),
-                    address::IpRange::V6(range) => IpRange::V6(Ipv6Range {
-                        first: range.first,
-                        last: range.last,
-                    }),
-                }
-            })
-            .collect();
+
+        let service_ip_pools = self.service_ip_pools.clone();
 
         let request = RackInitializeRequest {
             trust_quorum_peers,
@@ -233,7 +217,7 @@ impl CurrentRssConfig {
             ),
             ntp_servers: self.ntp_servers.clone(),
             dns_servers: self.dns_servers.clone(),
-            internal_services_ip_pool_ranges,
+            service_ip_pools,
             external_dns_ips: self.external_dns_ips.clone(),
             external_dns_zone_name: self.external_dns_zone_name.clone(),
             external_certificates: self.external_certificates.clone(),
@@ -357,8 +341,7 @@ impl CurrentRssConfig {
 
         self.ntp_servers = config.ntp_servers;
         self.dns_servers = config.dns_servers;
-        self.internal_services_ip_pool_ranges =
-            config.internal_services_ip_pool_ranges;
+        self.service_ip_pools = config.service_ip_pools;
         self.external_dns_ips = config.external_dns_ips;
         self.external_dns_zone_name = config.external_dns_zone_name;
         self.allowed_source_ips = Some(config.allowed_source_ips);
@@ -400,9 +383,7 @@ impl From<&'_ CurrentRssConfig> for CurrentRssUserConfig {
                 bootstrap_sleds,
                 ntp_servers: rss.ntp_servers.clone(),
                 dns_servers: rss.dns_servers.clone(),
-                internal_services_ip_pool_ranges: rss
-                    .internal_services_ip_pool_ranges
-                    .clone(),
+                service_ip_pools: rss.service_ip_pools.clone(),
                 external_dns_ips: rss.external_dns_ips.clone(),
                 external_dns_zone_name: rss.external_dns_zone_name.clone(),
                 rack_network_config: rss.rack_network_config.clone(),

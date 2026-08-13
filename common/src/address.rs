@@ -19,6 +19,11 @@ use std::{
     sync::LazyLock,
 };
 
+/// The routing prefix length of the bootstrap network /40.
+///
+/// This is distinct from [`BOOTSTRAP_SLED_SUBNET_PREFIX_LENGTH`], which is the
+/// prefix length of the /64 subnet for an individual sled's bootstrap
+/// addresses.
 pub const BOOTSTRAP_SUBNET_PREFIX_LENGTH: u8 = 40;
 pub const AZ_PREFIX_LENGTH: u8 = 48;
 pub const RACK_PREFIX_LENGTH: u8 = 56;
@@ -449,6 +454,33 @@ pub const CP_SERVICES_RESERVED_ADDRESSES: u16 = 0xFFFF;
 /// with each sled in the Reconfigurator blueprint.
 pub const SLED_RESERVED_ADDRESSES: u16 = 2;
 
+/// Initial octets of IPv6 for bootstrap addresses.
+pub const BOOTSTRAP_PREFIX: u16 = 0xfdb0;
+
+/// IPv6 subnet for the *entire* bootstrap network.
+///
+/// This is a /16 subnet with the prefix [`BOOTSTRAP_PREFIX`]. Individual sled
+/// bootstrap networks are /64 subnets within this range, with the rest of the
+/// prefix constructed from the sled's MAC address. This constant is intended to
+/// be used for checking whether an address is a bootstrap address on *any*
+/// sled's bootstrap network.
+pub const BOOTSTRAP_NETWORK_SUBNET: Ipv6Net = Ipv6Net::new_unchecked(
+    Ipv6Addr::new(BOOTSTRAP_PREFIX, 0, 0, 0, 0, 0, 0, 0),
+    16,
+);
+
+/// IPv6 prefix length for bootstrap network sled subnets.
+///
+/// This is the length of the prefix for the bootstrap network subnet *of an
+/// individual sled*. The prefix begins with [`BOOTSTRAP_PREFIX`], and the rest
+/// of the /64 prefix is constructed from the sled's MAC address.
+///
+/// This is distinct from the prefix length of [`BOOTSTRAP_NETWORK_SUBNET`],
+/// which is the /16 subnet that contains *all* sled bootstrap networks, and
+/// from [`BOOTSTRAP_SUBNET_PREFIX_LENGTH`], which is the prefix length of the
+/// announced bootstrap route.
+pub const BOOTSTRAP_SLED_SUBNET_PREFIX_LENGTH: u8 = 64;
+
 /// Wraps an [`Ipv6Net`] with a compile-time prefix length.
 #[derive(
     Debug,
@@ -525,6 +557,25 @@ impl<'de, const N: u8> Deserialize<'de> for Ipv6Subnet<N> {
                 N,
                 net.width(),
             )))
+        }
+    }
+}
+
+/// A rack's underlay subnet, along with the AZ-wide underlay subnet
+/// containing it.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct UnderlaySubnets {
+    pub rack_subnet: Ipv6Subnet<RACK_PREFIX_LENGTH>,
+    pub az_subnet: Ipv6Subnet<AZ_PREFIX_LENGTH>,
+}
+
+impl UnderlaySubnets {
+    /// Constructs a new `UnderlaySubnets` from the rack subnet, widening it to
+    /// determine the AZ subnet.
+    pub fn new(rack_subnet: Ipv6Subnet<RACK_PREFIX_LENGTH>) -> Self {
+        Self {
+            rack_subnet,
+            az_subnet: Ipv6Subnet::new(rack_subnet.net().addr()),
         }
     }
 }
