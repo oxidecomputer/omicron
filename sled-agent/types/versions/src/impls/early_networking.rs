@@ -190,8 +190,8 @@ impl RouterPeerType {
     /// Value is `None` for unnumbered peers.
     pub fn src_addr(&self) -> Option<RouterPeerIpAddr> {
         match self {
-            RouterPeerType::Unnumbered { .. } => None,
-            RouterPeerType::Numbered { ip: _, src_addr } => *src_addr,
+            RouterPeerType::Unnumbered(_) => None,
+            RouterPeerType::Numbered(peer) => peer.src_addr(),
         }
     }
 }
@@ -354,6 +354,8 @@ mod complicated_arbitrary_impls {
     use crate::latest::early_networking::BfdPeerConfig;
     use crate::latest::early_networking::BgpConfig;
     use crate::latest::early_networking::ImportExportPolicy;
+    use crate::v45::early_networking::NumberedRouter;
+    use crate::v45::early_networking::UnnumberedRouter;
     use oxnet::Ipv4Net;
     use proptest::prelude::*;
     use std::net::Ipv4Addr;
@@ -419,6 +421,57 @@ mod complicated_arbitrary_impls {
                     Self::try_from(ip).expect(
                         "unspecial IPs should produce valid RouterPeerIpAddrs",
                     )
+                })
+                .boxed()
+        }
+    }
+
+    impl Arbitrary for RouterPeerType {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            // Start with either numbered or unnumbered.
+            #[derive(Debug, Clone, test_strategy::Arbitrary)]
+            enum Kind {
+                Numbered(RouterPeerIpAddr),
+                Unnumbered(RouterLifetimeConfig),
+            }
+
+            // Converts an IP into a `RotuerPeerType::Numbered` value by gluing
+            // on an (optional) src_addr that, if Some(_), matches the IP
+            // family of `ip`.
+            fn glue_src_addr_matching_family(
+                ip: RouterPeerIpAddr,
+            ) -> impl Strategy<Value = RouterPeerType> {
+                let src_addr = match IpAddr::from(ip) {
+                    IpAddr::V4(_) => {
+                        arb_unspecial_ipv4().prop_map(IpAddr::V4).boxed()
+                    }
+                    IpAddr::V6(_) => {
+                        arb_unspecial_ipv6().prop_map(IpAddr::V6).boxed()
+                    }
+                };
+                let src_addr = src_addr.prop_flat_map(|src_addr| {
+                    let src_addr = RouterPeerIpAddr::try_from(src_addr).expect(
+                        "unspecial IPs should produce valid RouterPeerIpAddrs",
+                    );
+                    prop_oneof![Just(None), Just(Some(src_addr))]
+                });
+                src_addr.prop_map(move |src_addr| {
+                    NumberedRouter::new(ip, src_addr).unwrap().into()
+                })
+            }
+
+            any::<Kind>()
+                .prop_flat_map(|kind| match kind {
+                    Kind::Numbered(ip) => {
+                        glue_src_addr_matching_family(ip).boxed()
+                    }
+                    Kind::Unnumbered(router_lifetime) => {
+                        Just(UnnumberedRouter { router_lifetime }.into())
+                            .boxed()
+                    }
                 })
                 .boxed()
         }

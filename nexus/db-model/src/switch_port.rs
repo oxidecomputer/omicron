@@ -34,8 +34,6 @@ use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::TypedUuid;
 use oxnet::IpNet;
 use serde::{Deserialize, Serialize};
-use sled_agent_types::early_networking::AddressFamilyConfigError;
-use sled_agent_types::early_networking::ImportExportPolicy;
 use sled_agent_types::early_networking::LinkFec;
 use sled_agent_types::early_networking::LinkSpeed;
 use sled_agent_types::early_networking::RouterLifetimeConfig;
@@ -44,6 +42,10 @@ use sled_agent_types::early_networking::RouterPeerIpAddr;
 use sled_agent_types::early_networking::RouterPeerIpAddrError;
 use sled_agent_types::early_networking::RouterPeerType;
 use sled_agent_types::early_networking::SwitchSlot;
+use sled_agent_types::early_networking::{
+    AddressFamilyConfigError, UnnumberedRouter,
+};
+use sled_agent_types::early_networking::{ImportExportPolicy, NumberedRouter};
 use std::net::IpAddr;
 use uuid::Uuid;
 
@@ -62,8 +64,10 @@ pub trait RouterPeerTypeDbRepresentation: Sized {
 impl RouterPeerTypeDbRepresentation for RouterPeerType {
     fn ip_db_repr(&self) -> Option<IpNetwork> {
         match self {
-            Self::Unnumbered { .. } => None,
-            Self::Numbered { ip, .. } => Some((*ip).into()),
+            Self::Unnumbered(_) => None,
+            Self::Numbered(numbered_router) => {
+                Some((numbered_router.target_addr()).into())
+            }
         }
     }
 }
@@ -810,25 +814,15 @@ impl SwitchPortBgpPeerConfig {
                         }
                     })?;
 
-                if let Some(src_addr) = src_addr {
-                    match (src_addr.is_ipv4(), ip.is_ipv4()) {
-                        (true, false) => Err(
-                            SwitchPortBgpPeerConfigInvalidData::AddressFamily {
-                                port_settings_id: self.port_settings_id,
-                                err: AddressFamilyConfigError::V4toV6,
-                            },
-                        ),
-                        (false, true) => Err(
-                            SwitchPortBgpPeerConfigInvalidData::AddressFamily {
-                                port_settings_id: self.port_settings_id,
-                                err: AddressFamilyConfigError::V6toV4,
-                            },
-                        ),
-                        (true, true) | (false, false) => Ok(()),
-                    }?
-                }
+                let router =
+                    NumberedRouter::new(ip, src_addr).map_err(|err| {
+                        SwitchPortBgpPeerConfigInvalidData::AddressFamily {
+                            port_settings_id: self.port_settings_id,
+                            err,
+                        }
+                    })?;
 
-                Ok(RouterPeerType::Numbered { ip, src_addr })
+                Ok(router.into())
             }
             None => {
                 let router_lifetime = RouterLifetimeConfig::new(
@@ -849,7 +843,7 @@ impl SwitchPortBgpPeerConfig {
                     );
                 }
 
-                Ok(RouterPeerType::Unnumbered { router_lifetime })
+                Ok(UnnumberedRouter { router_lifetime }.into())
             }
         }
     }
@@ -991,7 +985,7 @@ impl SwitchPortBgpPeerConfig {
         // must use the default (0). This is enforced by a CHECK constraint.
         let router_lifetime = match p.addr {
             RouterPeerType::Numbered { .. } => RouterLifetimeConfig::default(),
-            RouterPeerType::Unnumbered { router_lifetime } => router_lifetime,
+            RouterPeerType::Unnumbered(u) => u.router_lifetime,
         };
         Self {
             id: Uuid::new_v4(),
@@ -1023,10 +1017,10 @@ impl SwitchPortBgpPeerConfig {
             vlan_id: p.vlan_id.map(|x| x.into()),
             router_lifetime: router_lifetime.as_u16().into(),
             src_addr: match p.addr {
-                RouterPeerType::Numbered { src_addr, .. } => {
-                    src_addr.map(|a| IpAddr::from(a).into())
+                RouterPeerType::Numbered(numbered_router) => {
+                    numbered_router.src_addr().map(|a| IpAddr::from(a).into())
                 }
-                RouterPeerType::Unnumbered { .. } => None,
+                RouterPeerType::Unnumbered(_) => None,
             },
         }
     }
@@ -1089,29 +1083,36 @@ impl Into<networking_types::SwitchPortAddressConfig>
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sled_agent_types::early_networking::NumberedRouter;
     use sled_agent_types::early_networking::RouterLifetimeConfig;
     use sled_agent_types::early_networking::RouterPeerIpAddr;
     use sled_agent_types::early_networking::RouterPeerType;
+    use sled_agent_types::early_networking::UnnumberedRouter;
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
     #[test]
     fn router_peer_type_test_ip_db_repr() {
         let ip_addr = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1));
         let ip = RouterPeerIpAddr::try_from(ip_addr).unwrap();
-        let original = RouterPeerType::Numbered { ip, src_addr: None };
+        let src_addr = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2));
+        let src = RouterPeerIpAddr::try_from(src_addr).unwrap();
+        let original: RouterPeerType =
+            NumberedRouter::new(ip, Some(src)).unwrap().into();
 
         let db_repr = original.ip_db_repr();
         assert_eq!(db_repr, Some(IpNetwork::from(ip_addr)));
 
         let ip_addr = IpAddr::V6(Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 1));
         let ip = RouterPeerIpAddr::try_from(ip_addr).unwrap();
-        let original = RouterPeerType::Numbered { ip, src_addr: None };
+        let original: RouterPeerType =
+            NumberedRouter::new(ip, Some(src)).unwrap().into();
 
         let db_repr = original.ip_db_repr();
         assert_eq!(db_repr, Some(IpNetwork::from(ip_addr)));
 
-        let lifetime = RouterLifetimeConfig::new(1800).unwrap();
-        let original = RouterPeerType::Unnumbered { router_lifetime: lifetime };
+        let router_lifetime = RouterLifetimeConfig::new(1800).unwrap();
+        let original: RouterPeerType =
+            UnnumberedRouter { router_lifetime }.into();
 
         assert_eq!(original.ip_db_repr(), None);
     }
@@ -1143,7 +1144,9 @@ mod tests {
         let ip =
             RouterPeerIpAddr::try_from(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)))
                 .unwrap();
-        let original = RouterPeerType::Numbered { ip, src_addr: None };
+        let src_addr = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2));
+        let src = RouterPeerIpAddr::try_from(src_addr).unwrap();
+        let original = NumberedRouter::new(ip, Some(src)).unwrap().into();
         let db_peer = SwitchPortBgpPeerConfig::new(
             Uuid::new_v4(),
             BgpConfigUuid::new_v4(),
@@ -1161,8 +1164,8 @@ mod tests {
 
     #[test]
     fn peer_type_round_trip_unnumbered() {
-        let lifetime = RouterLifetimeConfig::new(300).unwrap();
-        let original = RouterPeerType::Unnumbered { router_lifetime: lifetime };
+        let router_lifetime = RouterLifetimeConfig::new(300).unwrap();
+        let original = UnnumberedRouter { router_lifetime }.into();
         let db_peer = SwitchPortBgpPeerConfig::new(
             Uuid::new_v4(),
             BgpConfigUuid::new_v4(),
@@ -1171,7 +1174,7 @@ mod tests {
         );
         // Unnumbered peers store NULL addr in the DB.
         assert_eq!(db_peer.raw_ip_in_db_repr(), None);
-        assert_eq!(db_peer.router_lifetime, SqlU16(lifetime.as_u16()));
+        assert_eq!(db_peer.router_lifetime, SqlU16(router_lifetime.as_u16()));
         assert_eq!(db_peer.peer_type().unwrap(), original);
     }
 }

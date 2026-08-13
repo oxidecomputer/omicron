@@ -26,24 +26,72 @@ use std::net::IpAddr;
     Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq, Hash, JsonSchema,
 )]
 #[serde(tag = "type", rename_all = "snake_case")]
-#[cfg_attr(any(test, feature = "testing"), derive(test_strategy::Arbitrary))]
 pub enum RouterPeerType {
-    Unnumbered {
-        /// Router lifetime in seconds for unnumbered BGP peers.
-        router_lifetime: v20::RouterLifetimeConfig,
-    },
-    Numbered {
-        /// IP address for numbered BGP peers.
+    Unnumbered(UnnumberedRouter),
+    Numbered(NumberedRouter),
+}
+
+#[derive(
+    Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq, Hash, JsonSchema,
+)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub struct UnnumberedRouter {
+    /// Router lifetime in seconds for unnumbered BGP peers.
+    pub router_lifetime: v20::RouterLifetimeConfig,
+}
+
+impl From<UnnumberedRouter> for RouterPeerType {
+    fn from(value: UnnumberedRouter) -> Self {
+        Self::Unnumbered(value)
+    }
+}
+
+#[derive(
+    Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq, Hash, JsonSchema,
+)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub struct NumberedRouter {
+    /// Target IP address for numbered BGP peers.
+    target_addr: v30::RouterPeerIpAddr,
+    /// Optional local IP address to bind when establishing outbound TCP
+    /// connections to this peer. If `None`, the OS selects the source
+    /// address.
+    // We derive default here because this type gets shared with the
+    // Nexus external api, and many users will not need to specify this
+    // parameter for their configurations
+    #[serde(default)]
+    src_addr: Option<v30::RouterPeerIpAddr>,
+}
+
+impl From<NumberedRouter> for RouterPeerType {
+    fn from(value: NumberedRouter) -> Self {
+        RouterPeerType::Numbered(value)
+    }
+}
+
+impl NumberedRouter {
+    pub fn new(
         ip: v30::RouterPeerIpAddr,
-        /// Optional local IP address to bind when establishing outbound TCP
-        /// connections to this peer. If `None`, the OS selects the source
-        /// address.
-        // We derive default here because this type gets shared with the
-        // Nexus external api, and many users will not need to specify this
-        // parameter for their configurations
-        #[serde(default)]
         src_addr: Option<v30::RouterPeerIpAddr>,
-    },
+    ) -> Result<Self, AddressFamilyConfigError> {
+        match src_addr {
+            Some(src) if src.is_ipv4() && ip.is_ipv6() => {
+                Err(AddressFamilyConfigError::V4toV6)
+            }
+            Some(src) if src.is_ipv6() && ip.is_ipv4() => {
+                Err(AddressFamilyConfigError::V6toV4)
+            }
+            _ => Ok(Self { target_addr: ip, src_addr }),
+        }
+    }
+
+    pub fn target_addr(&self) -> v30::RouterPeerIpAddr {
+        self.target_addr
+    }
+
+    pub fn src_addr(&self) -> Option<v30::RouterPeerIpAddr> {
+        self.src_addr
+    }
 }
 
 /// Upgrade from v30: set `src_addr: None` for numbered peers.
@@ -51,10 +99,10 @@ impl From<v30::RouterPeerType> for RouterPeerType {
     fn from(value: v30::RouterPeerType) -> Self {
         match value {
             v30::RouterPeerType::Unnumbered { router_lifetime } => {
-                Self::Unnumbered { router_lifetime }
+                UnnumberedRouter { router_lifetime }.into()
             }
             v30::RouterPeerType::Numbered { ip } => {
-                Self::Numbered { ip, src_addr: None }
+                NumberedRouter { target_addr: ip, src_addr: None }.into()
             }
         }
     }
@@ -75,14 +123,14 @@ impl TryFrom<RouterPeerType> for v30::RouterPeerType {
 
     fn try_from(value: RouterPeerType) -> Result<Self, Self::Error> {
         match value {
-            RouterPeerType::Unnumbered { router_lifetime } => {
-                Ok(Self::Unnumbered { router_lifetime })
+            RouterPeerType::Unnumbered(peer) => {
+                Ok(Self::Unnumbered { router_lifetime: peer.router_lifetime })
             }
-            RouterPeerType::Numbered { ip, src_addr } => {
-                if let Some(_) = src_addr {
+            RouterPeerType::Numbered(peer) => {
+                if let Some(_) = peer.src_addr {
                     return Err(NumberedPeerWithSrcAddrError);
                 };
-                Ok(Self::Numbered { ip })
+                Ok(Self::Numbered { ip: peer.target_addr })
             }
         }
     }

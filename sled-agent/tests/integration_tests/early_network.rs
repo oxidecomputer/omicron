@@ -11,8 +11,9 @@ use omicron_test_utils::dev::test_setup_log;
 use sled_agent_types::early_networking::{
     BgpConfig, BgpPeerConfig, EarlyNetworkConfigEnvelope, ImportExportPolicy,
     LinkFec, LinkSpeed, LldpAdminStatus, LldpPortConfig, MaxPathConfig,
-    PortConfig, RackNetworkConfig, RouterLifetimeConfig, RouterPeerType,
-    SwitchSlot, UplinkAddress, UplinkAddressConfig, UplinkPorts,
+    NumberedRouter, PortConfig, RackNetworkConfig, RouterLifetimeConfig,
+    SwitchSlot, UnnumberedRouter, UplinkAddress, UplinkAddressConfig,
+    UplinkPorts,
 };
 use sled_agent_types::inventory::SourceNatConfigGeneric;
 use sled_agent_types::system_networking::{
@@ -185,10 +186,11 @@ fn current_config_example() -> (&'static str, EarlyNetworkConfigEnvelope) {
                     bgp_peers: vec![BgpPeerConfig {
                         asn: 65002,
                         port: "qsfp18".to_owned(),
-                        addr: RouterPeerType::Unnumbered {
+                        addr: UnnumberedRouter {
                             router_lifetime: RouterLifetimeConfig::new(1234)
                                 .unwrap(),
-                        },
+                        }
+                        .into(),
                         hold_time: Some(6),
                         idle_hold_time: Some(3),
                         delay_open: Some(3),
@@ -232,10 +234,12 @@ fn current_config_example() -> (&'static str, EarlyNetworkConfigEnvelope) {
                     bgp_peers: vec![BgpPeerConfig {
                         asn: 65002,
                         port: "qsfp18".to_owned(),
-                        addr: RouterPeerType::Numbered {
-                            ip: "172.20.15.43".parse().unwrap(),
-                            src_addr: Some("172.20.15.44".parse().unwrap()),
-                        },
+                        addr: NumberedRouter::new(
+                            "172.20.15.43".parse().unwrap(),
+                            Some("172.20.15.44".parse().unwrap()),
+                        )
+                        .unwrap()
+                        .into(),
                         hold_time: Some(6),
                         idle_hold_time: Some(0),
                         delay_open: Some(3),

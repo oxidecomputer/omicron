@@ -83,9 +83,11 @@ pub mod early_networking {
     pub use crate::v45::early_networking::AddressFamilyConfigError;
     pub use crate::v45::early_networking::BgpPeerConfig;
     pub use crate::v45::early_networking::EmptyUplinkPortsError;
+    pub use crate::v45::early_networking::NumberedRouter;
     pub use crate::v45::early_networking::PortConfig;
     pub use crate::v45::early_networking::RackNetworkConfig;
     pub use crate::v45::early_networking::RouterPeerType;
+    pub use crate::v45::early_networking::UnnumberedRouter;
     pub use crate::v45::early_networking::UplinkPorts;
 }
 

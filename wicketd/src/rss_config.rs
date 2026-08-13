@@ -28,10 +28,11 @@ use omicron_common::address::Ipv4Range;
 use omicron_common::address::Ipv6Range;
 use omicron_common::api::external::AllowedSourceIps;
 use oxnet::Ipv6Net;
+use sled_agent_types::early_networking::NumberedRouter;
 use sled_agent_types::early_networking::PortConfig;
 use sled_agent_types::early_networking::RouterLifetimeConfig;
-use sled_agent_types::early_networking::RouterPeerType;
 use sled_agent_types::early_networking::SwitchSlot;
+use sled_agent_types::early_networking::UnnumberedRouter;
 use sled_agent_types::early_networking::UplinkAddress;
 use sled_agent_types::early_networking::UplinkPorts;
 use sled_hardware_types::BaseboardId;
@@ -685,12 +686,11 @@ fn build_port_config(
 
                 let addr = match p.addr {
                     UserSpecifiedRouterPeerAddr::Unnumbered => {
-                        RouterPeerType::Unnumbered {
-                            router_lifetime: p.router_lifetime,
-                        }
+                        UnnumberedRouter { router_lifetime: p.router_lifetime }
+                            .into()
                     }
                     UserSpecifiedRouterPeerAddr::Numbered(ip) => {
-                        RouterPeerType::Numbered { ip, src_addr: p.src_addr }
+                        NumberedRouter::new(ip, p.src_addr).unwrap().into()
                     }
                 };
 

@@ -65,10 +65,10 @@ impl super::Nexus {
             for p in x.peers.iter() {
                 if let Some(ref key) = p.md5_auth_key {
                     let peer_id = match p.addr {
-                        RouterPeerType::Numbered { ip, .. } => {
-                            format!("peer {ip}")
+                        RouterPeerType::Numbered(numbered_peer) => {
+                            format!("peer {}", numbered_peer.target_addr())
                         }
-                        RouterPeerType::Unnumbered { .. } => {
+                        RouterPeerType::Unnumbered(_) => {
                             format!("unnumbered peer {}", p.bgp_config)
                         }
                     };
@@ -91,21 +91,6 @@ impl super::Nexus {
                                 ),
                             ));
                         }
-                    }
-                }
-                if let RouterPeerType::Numbered {
-                    ip,
-                    src_addr: Some(src_addr),
-                } = p.addr
-                {
-                    if src_addr.is_ipv4() != ip.is_ipv4() {
-                        return Err(Error::invalid_value(
-                            "src_addr",
-                            format!(
-                                "src_addr {src_addr} and peer address {ip} \
-                                must have the same address family"
-                            ),
-                        ));
                     }
                 }
             }

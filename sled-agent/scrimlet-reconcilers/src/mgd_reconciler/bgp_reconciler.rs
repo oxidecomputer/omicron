@@ -32,6 +32,7 @@ use sled_agent_types::early_networking::ImportExportPolicy;
 use sled_agent_types::early_networking::MaxPathConfig;
 use sled_agent_types::early_networking::RackNetworkConfig;
 use sled_agent_types::early_networking::RouterPeerType;
+use sled_agent_types::early_networking::UnnumberedRouter;
 use slog::Logger;
 use slog::warn;
 use slog_error_chain::InlineErrorChain;
@@ -1538,7 +1539,9 @@ impl DiffableBgpConfig {
                 RouterPeerType::Unnumbered { .. } => {
                     format!("unnumbered-{port_name}")
                 }
-                RouterPeerType::Numbered { ip, src_addr: _ } => ip.to_string(),
+                RouterPeerType::Numbered(numbered_router) => {
+                    numbered_router.target_addr().to_string()
+                }
             };
 
             let common = DiffableBgpCommonPeerConfig {
@@ -1588,7 +1591,9 @@ impl DiffableBgpConfig {
             };
 
             match addr {
-                RouterPeerType::Unnumbered { router_lifetime } => {
+                RouterPeerType::Unnumbered(UnnumberedRouter {
+                    router_lifetime,
+                }) => {
                     let interface = format!("tfport{port_name}_0");
                     if let Some(_prev) = unnumbered_peers.insert(
                         interface.clone(),
@@ -1603,8 +1608,11 @@ impl DiffableBgpConfig {
                         );
                     }
                 }
-                RouterPeerType::Numbered { ip, src_addr: _ } => {
-                    let addr = SocketAddr::new((*ip).into(), BGP_PORT);
+                RouterPeerType::Numbered(numbered_router) => {
+                    let addr = SocketAddr::new(
+                        (numbered_router.target_addr()).into(),
+                        BGP_PORT,
+                    );
                     if let Some(_prev) = numbered_peers.insert(addr, common) {
                         bail!(
                             "invalid config: multiple numbered peers \

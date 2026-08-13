@@ -43,7 +43,7 @@ use omicron_ddm_admin_client::DdmError;
 use oxnet::IpNet;
 use sled_agent_types::early_networking::{
     BfdMode, BgpConfig, BgpPeerConfig, ImportExportPolicy, LinkFec, LinkSpeed,
-    PortConfig, RouterPeerType, SwitchSlot, UplinkAddress,
+    PortConfig, RouterPeerType, SwitchSlot, UnnumberedRouter, UplinkAddress,
 };
 use sled_agent_types::sled::ThisSledSwitchZoneUnderlayIpAddr;
 use sled_agent_types::system_networking::SystemNetworkingConfig;
@@ -557,10 +557,13 @@ impl<'a> EarlyNetworkSetup<'a> {
 
                 match peer.addr {
                     // Numbered peer - identified by address
-                    RouterPeerType::Numbered { ip: addr, src_addr } => {
+                    RouterPeerType::Numbered(numbered_router) => {
                         let bpc = MgBgpPeerConfig {
-                            name: format!("{}", addr),
-                            host: SocketAddr::new(addr.into(), 179),
+                            name: format!("{}", numbered_router.target_addr()),
+                            host: SocketAddr::new(
+                                numbered_router.target_addr().into(),
+                                179,
+                            ),
                             hold_time: peer
                                 .hold_time
                                 .unwrap_or(BgpPeerConfig::DEFAULT_HOLD_TIME),
@@ -595,7 +598,9 @@ impl<'a> EarlyNetworkSetup<'a> {
                             }),
                             deterministic_collision_resolution: false,
                             idle_hold_jitter: None,
-                            src_addr: src_addr.map(IpAddr::from),
+                            src_addr: numbered_router
+                                .src_addr()
+                                .map(IpAddr::from),
                             src_port: None,
                         };
                         match bgp_peer_configs.get_mut(&port.port) {
@@ -610,7 +615,9 @@ impl<'a> EarlyNetworkSetup<'a> {
                     }
 
                     // Unnumbered peer - identified by interface
-                    RouterPeerType::Unnumbered { router_lifetime } => {
+                    RouterPeerType::Unnumbered(UnnumberedRouter {
+                        router_lifetime,
+                    }) => {
                         let bpc = MgUnnumberedBgpPeerConfig {
                             name: format!("unnumbered-{}", port.port),
                             interface: format!("tfport{}_0", port.port),

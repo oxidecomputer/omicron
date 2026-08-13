@@ -768,8 +768,9 @@ impl BackgroundTask for SwitchPortSettingsManager {
 
                         match peer.addr {
                             // Numbered peer - identified by address
-                            RouterPeerType::Numbered { ip, src_addr } => {
+                            RouterPeerType::Numbered(numbered_router) => {
                                 // now that the peer passes the above validations, add it to the list for configuration
+                                let ip = numbered_router.target_addr();
                                 let peer_config = BgpPeerConfig {
                                     name: format!("{ip}"),
                                     host: SocketAddr::new(ip.into(), 179),
@@ -805,7 +806,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                                     deterministic_collision_resolution: false,
                                     idle_hold_jitter: None,
                                     src_port: None,
-                                    src_addr: src_addr.map(IpAddr::from),
+                                    src_addr: numbered_router.src_addr().map(IpAddr::from),
                                 };
 
                                 // update the stored vec if it exists, create a new on if it doesn't exist
@@ -819,11 +820,11 @@ impl BackgroundTask for SwitchPortSettingsManager {
                                 }
                             }
                             // Unnumbered peer - identified by interface
-                            RouterPeerType::Unnumbered { router_lifetime } => {
+                            RouterPeerType::Unnumbered(unnumbered_router) => {
                                 let peer_config = MgUnnumberedBgpPeerConfig {
                                     name: format!("unnumbered-{}", port.port_name),
                                     interface: format!("tfport{}_0", port.port_name),
-                                    router_lifetime: router_lifetime.as_u16(),
+                                    router_lifetime: unnumbered_router.router_lifetime.as_u16(),
                                     hold_time: peer.hold_time.into(),
                                     idle_hold_time: peer.idle_hold_time.into(),
                                     delay_open: peer.delay_open.into(),
