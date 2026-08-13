@@ -55,6 +55,25 @@ async fn alert_list(
     collection.all_items
 }
 
+async fn alert_list_expect_error(
+    client: &dropshot::test_util::ClientTestContext,
+    params: &AlertListParams,
+    status: StatusCode,
+) {
+    let query = alert_list_query(params, None);
+    let url = format!("{ALERTS_URL}?{query}");
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::GET, &url)
+            .expect_status(Some(status)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap_or_else(|error| {
+        panic!("listing alerts with params '{query}' failed: {error}")
+    });
+}
+
 #[nexus_test]
 async fn test_alert_list_and_view(ctx: &ControlPlaneTestContext) {
     let client = &ctx.external_client;
@@ -166,10 +185,12 @@ async fn test_alert_list_and_view(ctx: &ControlPlaneTestContext) {
     assert_eq!(glob.len(), 1);
     assert_eq!(glob[0].identity.id, foo_bar_id.into_untyped_uuid());
 
-    let unmatched =
-        alert_list(client, &params_for_classes("unmatched.**"), None, None)
-            .await;
-    assert!(unmatched.is_empty());
+    alert_list_expect_error(
+        client,
+        &params_for_classes("unmatched.**"),
+        StatusCode::NOT_FOUND,
+    )
+    .await;
 
     assert_eq!(
         alert_list(
@@ -210,23 +231,14 @@ async fn test_alert_list_and_view(ctx: &ControlPlaneTestContext) {
     assert_eq!(view.version, 0);
     assert_eq!(view.alert, serde_json::json!({ "sequence": 2 }));
 
-    let invalid_range = format!(
-        "{ALERTS_URL}?{}",
-        alert_list_query(
-            &AlertListParams {
-                alert_class: None,
-                start_time: Some(timestamp + TimeDelta::microseconds(1)),
-                end_time: Some(timestamp),
-            },
-            None,
-        ),
-    );
-    NexusRequest::new(
-        RequestBuilder::new(client, Method::GET, &invalid_range)
-            .expect_status(Some(StatusCode::BAD_REQUEST)),
+    alert_list_expect_error(
+        client,
+        &AlertListParams {
+            alert_class: None,
+            start_time: Some(timestamp + TimeDelta::microseconds(1)),
+            end_time: Some(timestamp),
+        },
+        StatusCode::BAD_REQUEST,
     )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .expect("invalid alert time range should be rejected");
+    .await;
 }

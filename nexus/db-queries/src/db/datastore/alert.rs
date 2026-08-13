@@ -90,12 +90,8 @@ pub struct AlertFilters {
 
     /// Include only alerts with the specified alert classes.
     ///
-    /// This is an `Option` to distinguish between the case where no class
-    /// filtering was requested, and the case where the `AlertFilters` was
-    /// generated from a glob that matched no extant alert classes. If this is
-    /// `None`, then *all* alerts will be matched, but if it is `Some([])`, then
-    /// *no* alerts will be matched.
-    classes: Option<Vec<model::AlertClass>>,
+    /// If this is empty, all alert classes will be included.
+    classes: Vec<model::AlertClass>,
 
     /// If `true`, include only alerts that have been fully dispatched.
     /// If `false`, include only alerts that have not been fully dispatched.
@@ -220,9 +216,7 @@ impl AlertFilters {
     where
         I: Into<model::AlertClass>,
     {
-        self.classes
-            .get_or_insert_default()
-            .extend(classes.into_iter().map(Into::into));
+        self.classes.extend(classes.into_iter().map(Into::into));
         self
     }
 
@@ -263,9 +257,25 @@ impl TryFrom<external_api::AlertListParams> for AlertFilters {
         if let Some(end_time) = end_time {
             filters = filters.before(end_time)?;
         }
+
         if let Some(alert_class) = alert_class {
-            let classes = model::AlertSubscriptionKind::try_from(alert_class)?;
-            filters = filters.with_classes(classes.matching_classes()?);
+            let subscription =
+                model::AlertSubscriptionKind::try_from(alert_class)?;
+            let classes = subscription.matching_classes()?.collect::<Vec<_>>();
+
+            // If the provided glob doesn't match any classes, give up.
+            if classes.is_empty() {
+                return Err(Error::non_resourcetype_not_found(format!(
+                    "alert class glob '{subscription}' does not match any \
+                     existing alert classes"
+                )));
+            }
+
+            // The `AlertFilters::with_classes` method will `into_iter()` the
+            // argument and `extend()` the existing list of classes with it.
+            // This is not necessary here, since we just created the alert
+            // filters and are not going to add any other classes to it.
+            filters.classes = classes;
         }
         Ok(filters)
     }
@@ -497,12 +507,6 @@ impl DataStore {
     ) -> ListResultVec<(Alert, Option<fm::RendezvousAlertCreated>)> {
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
 
-        // If we were asked to filter by an alert glob, and the glob matched no
-        // extant classes, we can just give up without hitting the DB.
-        if let Some([]) = filters.classes.as_deref() {
-            return Ok(Vec::new());
-        }
-
         Self::alert_list_matching_query(filters, pagparams)
             .load_async(&*self.pool_connection_authorized(opctx).await?)
             .await
@@ -566,7 +570,7 @@ impl DataStore {
             query = query.filter(alert_dsl::case_id.eq_any(cases.clone()));
         }
 
-        if let Some(classes) = classes {
+        if !classes.is_empty() {
             query =
                 query.filter(alert_dsl::alert_class.eq_any(classes.clone()));
         }
