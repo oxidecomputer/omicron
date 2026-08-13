@@ -1043,7 +1043,7 @@ impl MulticastDataplaneClient {
         found_results
             .iter()
             .filter_map(|(loc, resp)| resp.as_ref().map(|r| (loc, r)))
-            .filter(|(_, cfg)| *cfg != first_config)
+            .filter(|(_, cfg)| !external_configs_equivalent(cfg, first_config))
             .for_each(|(switch_slot, _)| {
                 error!(
                     self.log,
@@ -1058,10 +1058,11 @@ impl MulticastDataplaneClient {
 
     /// Fetch external multicast group DPD state for RPW drift detection.
     ///
-    /// Queries all switches to detect configuration drift. If any switch has
-    /// different state (missing group, different config), it will return the
-    /// found state, so the reconciler can initiate an UPDATE
-    /// saga that will fix all switches atomically.
+    /// Queries every switch and returns a configuration only when all of them
+    /// agree on it. `None` covers both the group being absent everywhere and
+    /// the switches disagreeing, since the caller compares a returned
+    /// configuration against the database and would otherwise accept one
+    /// switch's view as the state of the whole rack.
     pub(crate) async fn fetch_external_group_for_drift_check(
         &self,
         group_ip: IpAddr,
@@ -1128,7 +1129,9 @@ impl MulticastDataplaneClient {
             return Ok(None);
         }
 
-        // Get first found config for comparison and return value
+        // The first found config is the comparison baseline for the agreement
+        // check below and, when every switch matches it, the returned
+        // configuration.
         let (first_location, first_config) = found
             .first()
             .and_then(|(loc, resp)| resp.as_ref().map(|r| (*loc, r)))
@@ -1154,7 +1157,20 @@ impl MulticastDataplaneClient {
             "dpd_operation" => "fetch_external_group_for_drift_check"
         );
 
-        // Return first found config (reconciler will compare with DB and launch UPDATE if needed)
+        let configs_diverge = found
+            .iter()
+            .filter_map(|(_, resp)| resp.as_ref())
+            .any(|config| !external_configs_equivalent(config, first_config));
+
+        // A switch that is missing the group while others have it, or that
+        // holds a different configuration, cannot be repaired by reporting one
+        // switch's view to the caller. Withholding the configuration drives the
+        // caller into the update path, which rewrites the group on every switch
+        // and creates it where DPD returns 'not found'.
+        if !not_found.is_empty() || configs_diverge {
+            return Ok(None);
+        }
+
         Ok(Some(first_config.clone().into_external_response()?))
     }
 
@@ -1367,5 +1383,168 @@ impl MulticastDataplaneClient {
             "tag" => tag
         );
         Ok(())
+    }
+}
+
+/// Compare two DPD responses for the same external group across switches.
+///
+/// `external_group_id` is a switch-local allocation, so two switches that
+/// agree on the group's configuration still report different IDs. Comparing
+/// it would flag permanent drift and drive the reconciler into rewriting the
+/// group on every pass. Sources are compared as sets because DPD does not
+/// guarantee a stable ordering.
+fn external_configs_equivalent(
+    a: &MulticastGroupResponse,
+    b: &MulticastGroupResponse,
+) -> bool {
+    match (a, b) {
+        (
+            MulticastGroupResponse::External {
+                group_ip: a_group_ip,
+                external_group_id: _,
+                tag: a_tag,
+                internal_forwarding: a_internal,
+                external_forwarding: a_external,
+                sources: a_sources,
+            },
+            MulticastGroupResponse::External {
+                group_ip: b_group_ip,
+                external_group_id: _,
+                tag: b_tag,
+                internal_forwarding: b_internal,
+                external_forwarding: b_external,
+                sources: b_sources,
+            },
+        ) => {
+            a_group_ip == b_group_ip
+                && a_tag == b_tag
+                && a_internal == b_internal
+                && a_external == b_external
+                && sources_equivalent(
+                    a_sources.as_deref(),
+                    b_sources.as_deref(),
+                )
+        }
+        // An underlay response for an external group IP cannot be repaired by
+        // the update path either, but it is still drift, as is a mixed pair.
+        _ => false,
+    }
+}
+
+/// Compare two optional source lists as sets.
+///
+/// `None` (any-source) and `Some([])` are distinct filter states in DPD, so
+/// they do not compare equal.
+fn sources_equivalent(a: Option<&[IpSrc]>, b: Option<&[IpSrc]>) -> bool {
+    match (a, b) {
+        (None, None) => true,
+        (Some(a), Some(b)) => {
+            a.iter().all(|src| b.contains(src))
+                && b.iter().all(|src| a.contains(src))
+        }
+        _ => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn external_response(
+        external_group_id: u16,
+        tag: &str,
+        sources: Option<Vec<IpSrc>>,
+    ) -> MulticastGroupResponse {
+        MulticastGroupResponse::External {
+            group_ip: "232.1.1.1".parse().unwrap(),
+            external_group_id,
+            tag: tag.to_string(),
+            internal_forwarding: InternalForwarding { nat_target: None },
+            external_forwarding: ExternalForwarding { vlan_id: None },
+            sources,
+        }
+    }
+
+    #[test]
+    fn test_external_configs_equivalent_ignores_group_id() {
+        let sources = Some(vec![
+            IpSrc::Exact("10.0.0.1".parse().unwrap()),
+            IpSrc::Exact("10.0.0.2".parse().unwrap()),
+        ]);
+        let a = external_response(1, "tag", sources.clone());
+        let b = external_response(2, "tag", sources);
+        assert!(
+            external_configs_equivalent(&a, &b),
+            "switch-local external_group_id must not register as drift"
+        );
+    }
+
+    #[test]
+    fn test_external_configs_equivalent_ignores_source_order() {
+        let a = external_response(
+            1,
+            "tag",
+            Some(vec![
+                IpSrc::Exact("10.0.0.1".parse().unwrap()),
+                IpSrc::Exact("10.0.0.2".parse().unwrap()),
+            ]),
+        );
+        let b = external_response(
+            1,
+            "tag",
+            Some(vec![
+                IpSrc::Exact("10.0.0.2".parse().unwrap()),
+                IpSrc::Exact("10.0.0.1".parse().unwrap()),
+            ]),
+        );
+        assert!(
+            external_configs_equivalent(&a, &b),
+            "source ordering must not register as drift"
+        );
+    }
+
+    #[test]
+    fn test_external_configs_equivalent_detects_drift() {
+        let sources = Some(vec![IpSrc::Exact("10.0.0.1".parse().unwrap())]);
+
+        let a = external_response(1, "tag", sources.clone());
+        let tag_differs = external_response(1, "other-tag", sources.clone());
+        assert!(!external_configs_equivalent(&a, &tag_differs));
+
+        let any_source = external_response(1, "tag", None);
+        let empty_sources = external_response(1, "tag", Some(Vec::new()));
+        assert!(
+            !external_configs_equivalent(&any_source, &empty_sources),
+            "any-source and empty filter are distinct DPD states"
+        );
+
+        let sources_differ = external_response(
+            1,
+            "tag",
+            Some(vec![IpSrc::Exact("10.0.0.9".parse().unwrap())]),
+        );
+        assert!(!external_configs_equivalent(&a, &sources_differ));
+
+        let duplicate_sources = external_response(
+            1,
+            "tag",
+            Some(vec![IpSrc::Exact("10.0.0.1".parse().unwrap()); 2]),
+        );
+        assert!(
+            external_configs_equivalent(&a, &duplicate_sources),
+            "source lists are compared as sets"
+        );
+
+        let underlay = MulticastGroupResponse::Underlay {
+            group_ip: UnderlayMulticastIpv6("ff04::1".parse().unwrap()),
+            external_group_id: 1,
+            underlay_group_id: 2,
+            tag: "tag".to_string(),
+            members: Vec::new(),
+        };
+        assert!(
+            !external_configs_equivalent(&a, &underlay),
+            "an external/underlay variant mismatch is drift"
+        );
     }
 }

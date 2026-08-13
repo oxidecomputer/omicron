@@ -707,10 +707,12 @@ impl MulticastGroupReconciler {
                 needs_update
             }
             Ok(None) => {
-                // Group not found in DPD
+                // Either no switch has the group, or the switches do not agree
+                // on it. Both cases are resolved by rewriting the group on
+                // every switch.
                 debug!(
                     opctx.log,
-                    "active group not found in DPD, will update";
+                    "active group absent from DPD or inconsistent across switches, will update";
                     "group_id" => %group.id()
                 );
                 true
