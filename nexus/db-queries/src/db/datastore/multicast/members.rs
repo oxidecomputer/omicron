@@ -566,6 +566,31 @@ impl DataStore {
         Ok(res)
     }
 
+    /// Union of the specific source IPs contributed by members other than
+    /// `instance_id` for `group_id`.
+    ///
+    /// A repeat join replaces the existing member's filter, so excluding that
+    /// member here matches the atomic attach validation.
+    pub async fn multicast_group_source_union_excluding_instance(
+        &self,
+        opctx: &OpContext,
+        group_id: MulticastGroupUuid,
+        instance_id: InstanceUuid,
+    ) -> Result<BTreeSet<IpAddr>, external::Error> {
+        use nexus_db_schema::schema::multicast_group_member::dsl;
+
+        let rows: Vec<Vec<IpNetwork>> = dsl::multicast_group_member
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::external_group_id.eq(group_id.into_untyped_uuid()))
+            .filter(dsl::parent_id.ne(instance_id.into_untyped_uuid()))
+            .select(dsl::source_ips)
+            .load_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        Ok(rows.into_iter().flatten().map(|ip| ip.ip()).collect())
+    }
+
     /// Atomically reconcile a member in "Joining" state.
     ///
     /// This combines sled_id updates and state transitions into a single atomic
@@ -1148,6 +1173,7 @@ mod tests {
 
     use nexus_types::identity::Resource;
     use nexus_types::multicast::MulticastGroupCreate;
+    use omicron_common::address::MAX_SOURCE_IPS_PER_GROUP;
     use omicron_common::api::external::DataPageParams;
     use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_test_utils::dev;
@@ -1419,6 +1445,7 @@ mod tests {
             .await
             .expect("Should delete original member row");
         assert!(deleted, "Original member row should be deleted");
+
         let replacement = datastore
             .multicast_group_member_attach_to_instance(
                 &opctx,
@@ -4331,6 +4358,138 @@ mod tests {
             !state.has_any_source_member,
             "Group with no members should have has_any_source_member=false"
         );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_multicast_group_member_attach_source_union_cap() {
+        let logctx = dev::test_setup_log(
+            "test_multicast_group_member_attach_source_union_cap",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let setup = multicast::create_test_setup(
+            &opctx,
+            &datastore,
+            "union-cap-pool",
+            "test-project",
+        )
+        .await;
+
+        let group = multicast::create_test_group_with_state(
+            &opctx,
+            &datastore,
+            "union-cap-group",
+            "224.10.1.50",
+            true,
+        )
+        .await;
+        let group_id = MulticastGroupUuid::from_untyped_uuid(group.id());
+
+        let mut instances = Vec::new();
+        for name in ["union-cap-inst1", "union-cap-inst2", "union-cap-inst3"] {
+            let record = create_stopped_instance_record(
+                &opctx,
+                &datastore,
+                &setup.authz_project,
+                name,
+            )
+            .await;
+            instances.push(InstanceUuid::from_untyped_uuid(
+                *record.as_untyped_uuid(),
+            ));
+        }
+
+        // Disjoint source blocks: 10.<block>.<i / 256>.<i % 256>.
+        let sources = |block: u8, count: usize| -> Vec<IpAddr> {
+            (0..count)
+                .map(|i| {
+                    IpAddr::from(std::net::Ipv4Addr::new(
+                        10,
+                        block,
+                        (i / 256) as u8,
+                        (i % 256) as u8,
+                    ))
+                })
+                .collect()
+        };
+
+        // The per-member cap does not bind at the datastore layer, so a
+        // single member can carry most of the group budget.
+        let first = sources(0, MAX_SOURCE_IPS_PER_GROUP - 6);
+        datastore
+            .multicast_group_member_attach_to_instance(
+                &opctx,
+                group_id,
+                instances[0],
+                Some(first.as_slice()),
+            )
+            .await
+            .expect("Should attach member under the cap");
+
+        // Second member lands the union exactly on the cap. The check is
+        // strictly greater-than, so this succeeds.
+        let boundary = sources(1, 6);
+        datastore
+            .multicast_group_member_attach_to_instance(
+                &opctx,
+                group_id,
+                instances[1],
+                Some(boundary.as_slice()),
+            )
+            .await
+            .expect("Should attach member with union at the cap");
+
+        // A single new source pushes the union past the cap and trips the
+        // CTE sentinel.
+        let over = sources(2, 1);
+        let err = datastore
+            .multicast_group_member_attach_to_instance(
+                &opctx,
+                group_id,
+                instances[2],
+                Some(over.as_slice()),
+            )
+            .await
+            .expect_err("Received an attach success for an over-cap union");
+        assert!(
+            err.to_string().contains("source IP union cap"),
+            "Received unexpected error for over-cap union: {err}"
+        );
+
+        // A repeat join replaces this member's list, so the union is
+        // measured without its stored sources: swapping most of the budget
+        // for 10 fresh sources stays under the cap.
+        let replacement = sources(3, 10);
+        let replaced = datastore
+            .multicast_group_member_attach_to_instance(
+                &opctx,
+                group_id,
+                instances[0],
+                Some(replacement.as_slice()),
+            )
+            .await
+            .expect("Should replace member sources during a repeat join");
+        assert_eq!(
+            replaced.member.source_ips.len(),
+            10,
+            "Received a merged source list instead of a replacement"
+        );
+
+        // A repeat join that omits sources preserves the stored list and
+        // skips the cap check entirely.
+        datastore
+            .multicast_group_member_attach_to_instance(
+                &opctx,
+                group_id,
+                instances[1],
+                None,
+            )
+            .await
+            .expect("Should preserve sources on a repeat join without a list");
 
         db.terminate().await;
         logctx.cleanup_successful();

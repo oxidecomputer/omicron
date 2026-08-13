@@ -41,6 +41,9 @@ use nexus_types::external_api::multicast::{
 use nexus_types::internal_api::params::InstanceMigrateRequest;
 
 use nexus_types_versions::latest::instance::Instance;
+use omicron_common::address::{
+    MAX_SOURCE_IPS_PER_GROUP, MAX_SOURCE_IPS_PER_MEMBER,
+};
 use omicron_common::api::external::{
     ByteCount, IdentityMetadataCreateParams, Nullable,
 };
@@ -1263,6 +1266,129 @@ async fn test_source_ips_preserved_on_instance_restart(
     wait_for_group_deleted(cptestctx, &expected_group_name).await;
 }
 
+/// Test the per-group source IP union cap on the up-front join check.
+///
+/// Eight members with disjoint full-size source filters fill the union to
+/// exactly [`MAX_SOURCE_IPS_PER_GROUP`]. A ninth member adding one fresh
+/// source is rejected with a 400. A repeat join that swaps one member's full
+/// filter for a fresh one still passes because that member's stored sources
+/// are excluded from the union it is measured against.
+#[nexus_test]
+async fn test_source_union_cap_enforced_on_join(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let project_name = "union-cap-project";
+
+    ops::join3(
+        create_default_ip_pools(client),
+        create_project(client, project_name),
+        create_multicast_ip_pool_with_range(
+            client,
+            "union-cap-ssm-pool",
+            (232, 82, 0, 1),
+            (232, 82, 0, 100),
+        ),
+    )
+    .await;
+
+    let ssm_ip = "232.82.0.10";
+    let filling_members = MAX_SOURCE_IPS_PER_GROUP / MAX_SOURCE_IPS_PER_MEMBER;
+    let names: Vec<String> =
+        (0..=filling_members).map(|i| format!("union-cap-inst-{i}")).collect();
+    for name in &names {
+        instance_for_multicast_groups(
+            cptestctx,
+            project_name,
+            name,
+            false,
+            &[],
+        )
+        .await;
+    }
+
+    // Disjoint full-size source lists per member, 10.<member>.0.<i>.
+    let sources = |member: usize| -> Vec<IpAddr> {
+        (0..MAX_SOURCE_IPS_PER_MEMBER)
+            .map(|i| format!("10.{member}.0.{}", i + 1).parse().unwrap())
+            .collect()
+    };
+    let join_url = |name: &str| {
+        format!(
+            "/v1/instances/{name}/multicast-groups/{ssm_ip}?project={project_name}"
+        )
+    };
+
+    for (member, name) in names.iter().take(filling_members).enumerate() {
+        let joined: MulticastGroupMember = put_upsert(
+            client,
+            &join_url(name),
+            &InstanceMulticastGroupJoin {
+                source_ips: Some(sources(member)),
+                ip_version: None,
+            },
+        )
+        .await;
+        assert_eq!(
+            joined.source_ips.len(),
+            MAX_SOURCE_IPS_PER_MEMBER,
+            "Received a truncated source list on an in-cap join"
+        );
+    }
+
+    // The union now sits at exactly the cap, so one fresh source from a new
+    // member overflows it.
+    let overflow_body = InstanceMulticastGroupJoin {
+        source_ips: Some(vec!["10.99.0.1".parse().unwrap()]),
+        ip_version: None,
+    };
+    let error = NexusRequest::new(
+        RequestBuilder::new(
+            client,
+            Method::PUT,
+            &join_url(&names[filling_members]),
+        )
+        .body(Some(&overflow_body))
+        .expect_status(Some(StatusCode::BAD_REQUEST)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("Should reject a join that overflows the source union cap");
+    let error_body: serde_json::Value =
+        serde_json::from_slice(&error.body).unwrap();
+    let message = error_body["message"].as_str().unwrap_or("");
+    assert!(
+        message.contains("per-group cap"),
+        "Received unexpected join rejection message: {message}"
+    );
+
+    // A repeat join replaces the member's filter, so swapping one full list
+    // for a fresh one keeps the union at the cap and passes.
+    let swap: Vec<IpAddr> = (0..MAX_SOURCE_IPS_PER_MEMBER)
+        .map(|i| format!("10.99.1.{}", i + 1).parse().unwrap())
+        .collect();
+    let swapped: MulticastGroupMember = put_upsert(
+        client,
+        &join_url(&names[0]),
+        &InstanceMulticastGroupJoin {
+            source_ips: Some(swap),
+            ip_version: None,
+        },
+    )
+    .await;
+    assert_eq!(
+        swapped.source_ips.len(),
+        MAX_SOURCE_IPS_PER_MEMBER,
+        "Received a merged source list instead of a replacement"
+    );
+
+    let name_refs: Vec<&str> = names.iter().map(String::as_str).collect();
+    cleanup_instances(cptestctx, client, project_name, &name_refs).await;
+    let expected_group_name = format!("mcast-{}", ssm_ip.replace('.', "-"));
+    wait_for_group_deleted(cptestctx, &expected_group_name).await;
+}
+
 /// Test that source_ips are preserved when instance is reconfigured with multicast_groups.
 ///
 /// This verifies that when an instance already has a membership with source_ips
@@ -1406,6 +1532,38 @@ async fn test_source_ips_preserved_on_instance_reconfigure(
     .execute()
     .await
     .expect("Should reconfigure instance with multicast_groups");
+
+    // Reconfiguration must enforce the same per-member source-list shape
+    // checks as the direct join and create paths. In particular, duplicate
+    // sources must not reach the datastore upsert.
+    let invalid_update_body = serde_json::json!({
+        "ncpus": 2,
+        "memory": 4294967296_u64,
+        "boot_disk": null,
+        "auto_restart_policy": null,
+        "cpu_platform": null,
+        "enable_jumbo_frames": false,
+        "multicast_groups": [
+            { "group": ssm_ip, "source_ips": [source_ip, source_ip] },
+        ]
+    });
+    let invalid_update = NexusRequest::new(
+        RequestBuilder::new(client, Method::PUT, &update_url)
+            .body(Some(&invalid_update_body))
+            .expect_status(Some(StatusCode::BAD_REQUEST)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("Duplicate reconfiguration sources should fail");
+    let invalid_update_error: serde_json::Value =
+        serde_json::from_slice(&invalid_update.body).unwrap();
+    let invalid_update_message =
+        invalid_update_error["message"].as_str().unwrap_or("");
+    assert!(
+        invalid_update_message.contains("duplicate source IP"),
+        "Received unexpected source validation error: {invalid_update_message}"
+    );
 
     // Wait for ASM group to be created
     wait_for_group_active(client, &asm_group_name).await;

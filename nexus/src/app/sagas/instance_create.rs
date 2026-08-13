@@ -1112,6 +1112,14 @@ async fn sic_join_instance_multicast_group(
         return Ok(None);
     }
 
+    // Per-member source list shape is checked at instance-create parameter
+    // validation. Repeating it here covers saga replay and any caller that
+    // builds params without going through that path.
+    crate::app::multicast::validate_member_source_ips(
+        join_spec.source_ips.as_deref(),
+    )
+    .map_err(saga_action_failed)?;
+
     // Resolve the multicast group identifier to a group ID.
     // a) For IP-based identifiers, this implicitly auto-creates the group if it
     //    doesn't exist.

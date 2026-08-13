@@ -465,7 +465,13 @@ impl AttachMemberToGroupStatement {
         out.push_bind_param::<Array<diesel::sql_types::Inet>, _>(
             &self.source_ips_for_insert,
         )?;
-        out.push_sql(" FROM valid_group CROSS JOIN instance_sled ");
+        // Make the write depend on the materialized validation CTE. Merely
+        // emitting `validation` in the WITH clause does not force the
+        // database to evaluate it before this data-modifying CTE.
+        out.push_sql(
+            " FROM valid_group CROSS JOIN instance_sled \
+             CROSS JOIN validation ",
+        );
 
         // ON CONFLICT: only update "Left" members, preserve other states
         out.push_sql("ON CONFLICT (external_group_id, parent_id) WHERE time_deleted IS NULL DO UPDATE SET state = CASE WHEN multicast_group_member.state = ");
@@ -518,8 +524,9 @@ impl AttachMemberToGroupStatement {
 
     /// Generates the final SELECT (returns member columns directly).
     ///
-    /// The validation CTE has already triggered an error if validation failed,
-    /// so we can assume the upserted_member CTE returned exactly one row.
+    /// Reference `validation` in the final SELECT as well as from the upsert
+    /// CTE. This keeps the validation dependency explicit throughout the
+    /// statement and prevents the check from being optimized away.
     fn push_final_select<'a>(
         &'a self,
         mut out: AstPass<'_, 'a, Pg>,
@@ -531,7 +538,7 @@ impl AttachMemberToGroupStatement {
             "SELECT id, time_created, time_modified, time_deleted, \
              external_group_id, parent_id, sled_id, state, version_added, \
              version_removed, multicast_ip, source_ips \
-             FROM upserted_member",
+             FROM upserted_member CROSS JOIN validation",
         );
         Ok(())
     }
@@ -564,15 +571,14 @@ impl QueryFragment<Pg> for AttachMemberToGroupStatement {
         self.push_validation_cte(out.reborrow())?;
         out.push_sql("), ");
 
-        // CTE: Unconditional upsert (INSERT or UPDATE)
-        // This depends on validation CTE being evaluated first (MATERIALIZED ensures this)
+        // CTE: Unconditional upsert (INSERT or UPDATE), explicitly dependent
+        // on validation so the sentinel check runs before the write.
         out.push_sql("upserted_member AS (");
         self.push_upserted_member_cte(out.reborrow())?;
         out.push_sql(") ");
 
-        // Final SELECT: return member columns directly
-        // The validation CTE already triggered an error if validation failed,
-        // so upserted_member is guaranteed to have exactly one row.
+        // Final SELECT: return member columns directly, retaining the
+        // validation dependency through the statement's result.
         self.push_final_select(out.reborrow())?;
 
         Ok(())

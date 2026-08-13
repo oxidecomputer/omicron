@@ -452,8 +452,13 @@ impl super::Nexus {
             // CTE enforces the same bound atomically inside
             // `multicast_group_member_attach_to_instance`.
             if let Some(sources) = source_ips.filter(|s| !s.is_empty()) {
-                self.validate_group_source_union(opctx, group_id, sources)
-                    .await?;
+                self.validate_group_source_union(
+                    opctx,
+                    group_id,
+                    instance_id,
+                    sources,
+                )
+                .await?;
             }
 
             self.db_datastore
@@ -887,20 +892,26 @@ impl super::Nexus {
     /// Check up front that the union of existing member source IPs and
     /// `proposed` for `group_id` stays within
     /// [`MAX_SOURCE_IPS_PER_GROUP`].
+    ///
+    /// `instance_id` is the joining member. Its stored sources are left out of
+    /// the union because a repeat join replaces that member's filter, so a
+    /// member that swaps one full source list for another is measured against
+    /// the same union the attach CTE computes.
     async fn validate_group_source_union(
         &self,
         opctx: &OpContext,
         group_id: MulticastGroupUuid,
+        instance_id: InstanceUuid,
         proposed: &[IpAddr],
     ) -> Result<(), external::Error> {
-        let filter_state = self
+        let mut union = self
             .db_datastore
-            .multicast_groups_source_filter_state(opctx, &[group_id])
+            .multicast_group_source_union_excluding_instance(
+                opctx,
+                group_id,
+                instance_id,
+            )
             .await?;
-        let mut union = filter_state
-            .get(&group_id.into_untyped_uuid())
-            .map(|s| s.specific_sources.clone())
-            .unwrap_or_default();
         union.extend(proposed.iter().copied());
         if union.len() > MAX_SOURCE_IPS_PER_GROUP {
             return Err(external::Error::invalid_request(format!(
@@ -1233,6 +1244,28 @@ mod tests {
         assert!(!is_ssm_address(IpAddr::V6(Ipv6Addr::new(
             0xff1e, 0, 0, 0, 0, 0, 0, 1
         ))));
+    }
+
+    #[test]
+    fn test_validate_member_source_ips() {
+        assert!(validate_member_source_ips(None).is_ok());
+        assert!(validate_member_source_ips(Some(&[])).is_ok());
+
+        let valid = vec![IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1))];
+        assert!(validate_member_source_ips(Some(&valid)).is_ok());
+
+        let duplicate = vec![valid[0], valid[0]];
+        let err = validate_member_source_ips(Some(&duplicate))
+            .expect_err("duplicate sources should be rejected");
+        assert!(err.to_string().contains("duplicate source IP"));
+
+        let too_many = vec![
+            IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1));
+            MAX_SOURCE_IPS_PER_MEMBER + 1
+        ];
+        let err = validate_member_source_ips(Some(&too_many))
+            .expect_err("an oversized source list should be rejected");
+        assert!(err.to_string().contains("per-member limit"));
     }
 
     #[test]
