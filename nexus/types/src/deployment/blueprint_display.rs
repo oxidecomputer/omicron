@@ -55,6 +55,7 @@ pub mod constants {
     pub const INVALID_VALUE_PARENS: &str = "(invalid value)";
     pub const GENERATION: &str = "generation";
     pub const STATE: &str = "state";
+    pub const UPDATE_DISPOSITION: &str = "update disposition";
     pub const CONFIG_GENERATION: &str = "config generation";
     pub const SUBNET: &str = "subnet";
     pub const LAST_ALLOCATED_IP: &str = "last allocated IP";
