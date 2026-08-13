@@ -1154,3 +1154,10 @@ path = "workspace-hack"
 [patch."https://github.com/oxidecomputer/omicron"]
 omicron-uuid-kinds = { path = "uuid-kinds" }
 omicron-common = { path = "common" }
+
+# RFD 662 POC: build against the local maghemite checkout, which carries the
+# v13 multi-router admin API. Replace with a rev bump once that branch is
+# pushed.
+[patch."https://github.com/oxidecomputer/maghemite"]
+mg-admin-client = { path = "../maghemite/mg-admin-client" }
+mg-api-types = { path = "../maghemite/mg-api-types" }

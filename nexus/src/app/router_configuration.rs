@@ -30,6 +30,12 @@ use std::collections::{BTreeSet, HashMap};
 const MAX_ROUTER_CONFIGURATIONS_PER_SILO: usize = 64;
 
 impl super::Nexus {
+    fn activate_router_configuration_reconciler(&self) {
+        self.background_tasks.activate(
+            &self.background_tasks.task_router_configuration_reconciler,
+        );
+    }
+
     pub fn router_configuration_lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
@@ -94,6 +100,7 @@ impl super::Nexus {
                 RouterConfiguration::new(params),
             )
             .await?;
+        self.activate_router_configuration_reconciler();
         // A just-created router configuration has no entries.
         db_configuration.try_into()
     }
@@ -199,6 +206,7 @@ impl super::Nexus {
                 update.into(),
             )
             .await?;
+        self.activate_router_configuration_reconciler();
         self.router_configuration_assemble(
             opctx,
             &authz_configuration,
@@ -219,7 +227,9 @@ impl super::Nexus {
             .await?;
         self.db_datastore
             .router_configuration_delete(opctx, &authz_configuration)
-            .await
+            .await?;
+        self.activate_router_configuration_reconciler();
+        Ok(())
     }
 
     pub async fn router_configuration_bgp_config_view(
@@ -265,6 +275,7 @@ impl super::Nexus {
                 authz_announce_set.id(),
             )
             .await?;
+        self.activate_router_configuration_reconciler();
         db_configuration.bgp_config()?.ok_or_else(|| {
             Error::internal_error(
                 "BGP configuration missing after it was just set",
@@ -284,7 +295,9 @@ impl super::Nexus {
             .await?;
         self.db_datastore
             .router_configuration_bgp_config_delete(opctx, &authz_configuration)
-            .await
+            .await?;
+        self.activate_router_configuration_reconciler();
+        Ok(())
     }
 
     pub async fn router_configuration_bgp_peer_list(
@@ -316,13 +329,15 @@ impl super::Nexus {
             .router_configuration_lookup(opctx, name_or_id)?
             .lookup_for(authz::Action::Modify)
             .await?;
-        self.db_datastore
+        let db_peer = self
+            .db_datastore
             .router_configuration_bgp_peer_create(
                 opctx,
                 RouterConfigurationBgpPeer::new(authz_configuration.id(), peer),
             )
-            .await?
-            .try_into()
+            .await?;
+        self.activate_router_configuration_reconciler();
+        db_peer.try_into()
     }
 
     pub async fn router_configuration_bgp_peer_view(
@@ -358,15 +373,17 @@ impl super::Nexus {
             .router_configuration_lookup(opctx, name_or_id)?
             .lookup_for(authz::Action::Modify)
             .await?;
-        self.db_datastore
+        let db_peer = self
+            .db_datastore
             .router_configuration_bgp_peer_update(
                 opctx,
                 &authz_configuration,
                 peer_name,
                 RouterConfigurationBgpPeer::new(authz_configuration.id(), peer),
             )
-            .await?
-            .try_into()
+            .await?;
+        self.activate_router_configuration_reconciler();
+        db_peer.try_into()
     }
 
     pub async fn router_configuration_bgp_peer_delete(
@@ -386,7 +403,9 @@ impl super::Nexus {
                 &authz_configuration,
                 peer,
             )
-            .await
+            .await?;
+        self.activate_router_configuration_reconciler();
+        Ok(())
     }
 
     pub async fn router_configuration_static_route_list(
@@ -419,7 +438,7 @@ impl super::Nexus {
             .router_configuration_lookup(opctx, name_or_id)?
             .lookup_for(authz::Action::Modify)
             .await?;
-        Ok(self
+        let db_route = self
             .db_datastore
             .router_configuration_static_route_create(
                 opctx,
@@ -428,8 +447,9 @@ impl super::Nexus {
                     route,
                 ),
             )
-            .await?
-            .into())
+            .await?;
+        self.activate_router_configuration_reconciler();
+        Ok(db_route.into())
     }
 
     pub async fn router_configuration_static_route_view(
@@ -466,7 +486,7 @@ impl super::Nexus {
             .router_configuration_lookup(opctx, name_or_id)?
             .lookup_for(authz::Action::Modify)
             .await?;
-        Ok(self
+        let db_route = self
             .db_datastore
             .router_configuration_static_route_update(
                 opctx,
@@ -477,8 +497,9 @@ impl super::Nexus {
                     route,
                 ),
             )
-            .await?
-            .into())
+            .await?;
+        self.activate_router_configuration_reconciler();
+        Ok(db_route.into())
     }
 
     pub async fn router_configuration_static_route_delete(
@@ -498,7 +519,9 @@ impl super::Nexus {
                 &authz_configuration,
                 route,
             )
-            .await
+            .await?;
+        self.activate_router_configuration_reconciler();
+        Ok(())
     }
 
     pub async fn router_configuration_bfd_peer_list(
@@ -531,14 +554,15 @@ impl super::Nexus {
             .router_configuration_lookup(opctx, name_or_id)?
             .lookup_for(authz::Action::Modify)
             .await?;
-        Ok(self
+        let db_peer = self
             .db_datastore
             .router_configuration_bfd_peer_create(
                 opctx,
                 RouterConfigurationBfdPeer::new(authz_configuration.id(), peer),
             )
-            .await?
-            .into())
+            .await?;
+        self.activate_router_configuration_reconciler();
+        Ok(db_peer.into())
     }
 
     pub async fn router_configuration_bfd_peer_view(
@@ -575,7 +599,7 @@ impl super::Nexus {
             .router_configuration_lookup(opctx, name_or_id)?
             .lookup_for(authz::Action::Modify)
             .await?;
-        Ok(self
+        let db_peer = self
             .db_datastore
             .router_configuration_bfd_peer_update(
                 opctx,
@@ -583,8 +607,9 @@ impl super::Nexus {
                 peer_name,
                 RouterConfigurationBfdPeer::new(authz_configuration.id(), peer),
             )
-            .await?
-            .into())
+            .await?;
+        self.activate_router_configuration_reconciler();
+        Ok(db_peer.into())
     }
 
     pub async fn router_configuration_bfd_peer_delete(
@@ -604,7 +629,9 @@ impl super::Nexus {
                 &authz_configuration,
                 peer,
             )
-            .await
+            .await?;
+        self.activate_router_configuration_reconciler();
+        Ok(())
     }
 
     pub async fn silo_router_configurations_view(

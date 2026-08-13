@@ -137,6 +137,7 @@ use super::tasks::saga_recovery;
 use super::tasks::service_firewall_rules;
 use super::tasks::session_cleanup;
 use super::tasks::support_bundle_collector;
+use super::tasks::sync_router_configurations;
 use super::tasks::sync_switch_configuration::SwitchPortSettingsManager;
 use super::tasks::trust_quorum;
 use super::tasks::tuf_artifact_replication;
@@ -243,6 +244,7 @@ impl BackgroundTasksInitializer {
             task_blueprint_rendezvous: Activator::new(),
             task_crdb_node_id_collector: Activator::new(),
             task_switch_port_settings_manager: Activator::new(),
+            task_router_configuration_reconciler: Activator::new(),
             task_v2p_manager: Activator::new(),
             task_region_replacement: Activator::new(),
             task_region_replacement_driver: Activator::new(),
@@ -340,6 +342,7 @@ impl BackgroundTasksInitializer {
             task_blueprint_rendezvous,
             task_crdb_node_id_collector,
             task_switch_port_settings_manager,
+            task_router_configuration_reconciler,
             task_v2p_manager,
             task_region_replacement,
             task_region_replacement_driver,
@@ -708,6 +711,22 @@ impl BackgroundTasksInitializer {
             opctx: opctx.child(BTreeMap::new()),
             watchers: vec![],
             activator: task_switch_port_settings_manager,
+        });
+
+        driver.register(TaskDefinition {
+            name: "router_configuration_reconciler",
+            description:
+                "propagates router configurations to mgd on each switch",
+            period: config.router_configuration_reconciler.period_secs,
+            task_impl: Box::new(
+                sync_router_configurations::RouterConfigurationReconciler::new(
+                    datastore.clone(),
+                    resolver.clone(),
+                ),
+            ),
+            opctx: opctx.child(BTreeMap::new()),
+            watchers: vec![],
+            activator: task_router_configuration_reconciler,
         });
 
         driver.register(TaskDefinition {
