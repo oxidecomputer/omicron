@@ -34,7 +34,7 @@ pub enum RouterPeerType {
 #[derive(
     Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq, Hash, JsonSchema,
 )]
-#[serde(tag = "type", rename_all = "snake_case")]
+#[serde(rename_all = "snake_case")]
 pub struct UnnumberedRouter {
     /// Router lifetime in seconds for unnumbered BGP peers.
     pub router_lifetime: v20::RouterLifetimeConfig,
@@ -49,7 +49,7 @@ impl From<UnnumberedRouter> for RouterPeerType {
 #[derive(
     Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq, Hash, JsonSchema,
 )]
-#[serde(tag = "type", rename_all = "snake_case")]
+#[serde(rename_all = "snake_case")]
 pub struct NumberedRouter {
     /// Target IP address for numbered BGP peers.
     target_addr: v30::RouterPeerIpAddr,
