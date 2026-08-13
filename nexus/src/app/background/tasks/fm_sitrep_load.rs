@@ -10,20 +10,19 @@ use chrono::Utc;
 use futures::future::BoxFuture;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
-use nexus_types::fm::Sitrep;
-use nexus_types::fm::SitrepVersion;
+use nexus_types::fm;
 use nexus_types::internal_api::background::SitrepLoadStatus as Status;
 use serde_json::json;
 use slog_error_chain::InlineErrorChain;
 use std::sync::Arc;
 use tokio::sync::watch;
 
+pub type CurrentSitrep = Arc<fm::CommittedSitrep>;
+
 pub struct SitrepLoader {
     datastore: Arc<DataStore>,
-    tx: watch::Sender<Option<CurrentSitrep>>,
+    tx: watch::Sender<Option<Arc<fm::CommittedSitrep>>>,
 }
-
-pub type CurrentSitrep = Arc<(SitrepVersion, Sitrep)>;
 
 impl BackgroundTask for SitrepLoader {
     fn activate<'a>(
@@ -65,7 +64,11 @@ impl SitrepLoader {
         let (old, log) = match &*self.tx.borrow() {
             None => (None, opctx.log.clone()),
             Some(old) => {
-                let (ref old_version, _) = **old;
+                let old_version = fm::SitrepVersion {
+                    id: old.sitrep.id(),
+                    version: old.version,
+                    time_made_current: old.time_made_current,
+                };
                 let log = opctx.log.new(slog::o!(
                     // since this is a TypedUuid, use `Debug` to avoid
                     // including ()
@@ -73,20 +76,20 @@ impl SitrepLoader {
                     "original_made_current" => old_version.time_made_current.to_string(),
                     "original_version" => old_version.version,
                 ));
-                (Some(old_version.clone()), log)
+                (Some(old_version), log)
             }
         };
 
         // Get the ID of the current sitrep.
         let time_loaded = Utc::now();
-        let current_version: SitrepVersion = match self
+        let current_version: fm::SitrepVersion = match self
             .datastore
             .fm_current_sitrep_version(opctx)
             .await
         {
             Ok(Some(version)) => version,
             Ok(None) => match old {
-                Some(SitrepVersion { version, id, .. }) => {
+                Some(fm::SitrepVersion { version, id, .. }) => {
                     // We should never go from "some sitrep" to "no sitrep";
                     // pruning should always keep a small number of old sitreps
                     // around until we have new ones to replace them.
@@ -138,7 +141,7 @@ impl SitrepLoader {
                     current_version.version, old.version,
                 ));
             }
-            Some(SitrepVersion { version, id, .. })
+            Some(fm::SitrepVersion { version, id, .. })
                 if version == current_version.version
                     && id != current_version.id =>
             {
@@ -178,7 +181,9 @@ impl SitrepLoader {
             }
         };
 
-        let sitrep = Arc::new((current_version.clone(), sitrep));
+        let sitrep = Arc::new(fm::CommittedSitrep::new(current_version.clone(), sitrep).expect(
+            "version ID should match sitrep ID since we just loaded the sitrep by version ID"
+        ));
         self.tx.send_modify(|s| {
             *s = Some(sitrep);
         });
@@ -192,6 +197,7 @@ mod test {
     use super::*;
     use crate::app::background::BackgroundTask;
     use nexus_db_queries::db::pub_test_utils::TestDatabase;
+    use nexus_types::fm::Sitrep;
     use nexus_types::fm::SitrepMetadata;
     use omicron_common::api::external::Generation;
     use omicron_test_utils::dev;
@@ -247,16 +253,21 @@ mod test {
             .borrow_and_update()
             .clone()
             .expect("the new sitrep should have been loaded");
-        let (ref loaded_version1, ref loaded_sitrep) = *snapshot;
+        let loaded_version1 = fm::SitrepVersion {
+            id: snapshot.sitrep.id(),
+            version: snapshot.version,
+            time_made_current: snapshot.time_made_current,
+        };
+        let loaded_sitrep = &snapshot.sitrep;
         // N.B.: we just compare the IDs here as comparing the whole struct may
         // not be equal, since the `time_created` field may have been rounded in
         // CRDB. Which is a shame, but whatever. :/
         assert_eq!(loaded_sitrep.metadata.id, sitrep1.metadata.id);
-        dbg!(loaded_version1);
+        dbg!(&loaded_version1);
         let status = serde_json::from_value::<Status>(status).unwrap();
         match status {
             Status::Loaded { version, .. } => {
-                assert_eq!(&version, loaded_version1);
+                assert_eq!(version, loaded_version1);
             }
             status => panic!("expected Status::Loaded, got {status:?}",),
         };
@@ -272,13 +283,18 @@ mod test {
             .borrow_and_update()
             .clone()
             .expect("the same should have been loaded");
-        let (ref loaded_version2, ref loaded_sitrep) = *snapshot;
+        let loaded_version2 = fm::SitrepVersion {
+            id: snapshot.sitrep.id(),
+            version: snapshot.version,
+            time_made_current: snapshot.time_made_current,
+        };
+        let loaded_sitrep = &snapshot.sitrep;
         assert_eq!(loaded_sitrep.metadata.id, sitrep1.metadata.id);
-        dbg!(loaded_version1, loaded_version2);
+        dbg!(&loaded_version1, &loaded_version2);
         let status = serde_json::from_value::<Status>(status).unwrap();
         match status {
             Status::Loaded { version, .. } => {
-                assert_eq!(&version, loaded_version2);
+                assert_eq!(version, loaded_version2);
             }
             status => panic!("expected Status::Loaded, got {status:?}",),
         };
@@ -316,14 +332,19 @@ mod test {
             .borrow_and_update()
             .clone()
             .expect("the new sitrep should have been loaded");
-        let (ref loaded_version3, ref loaded_sitrep) = *snapshot;
+        let loaded_version3 = fm::SitrepVersion {
+            id: snapshot.sitrep.id(),
+            version: snapshot.version,
+            time_made_current: snapshot.time_made_current,
+        };
+        let loaded_sitrep = &snapshot.sitrep;
         assert_eq!(loaded_sitrep.metadata.id, sitrep2.metadata.id);
-        dbg!(loaded_version3);
-        assert_ne!(loaded_version3, loaded_version2);
+        dbg!(&loaded_version3);
+        assert_ne!(&loaded_version3, &loaded_version2);
         let status = serde_json::from_value::<Status>(status).unwrap();
         match status {
             Status::Loaded { version, .. } => {
-                assert_eq!(&version, loaded_version3);
+                assert_eq!(version, loaded_version3);
             }
             status => panic!("expected Status::Loaded, got {status:?}",),
         };

@@ -249,7 +249,7 @@ impl DataStore {
     pub async fn fm_sitrep_read_current(
         &self,
         opctx: &OpContext,
-    ) -> Result<Option<(fm::SitrepVersion, Sitrep)>, Error> {
+    ) -> Result<Option<fm::CommittedSitrep>, Error> {
         let conn = self.pool_connection_authorized(opctx).await?;
         loop {
             let version =
@@ -263,7 +263,9 @@ impl DataStore {
                 None => return Ok(None),
             };
             match self.fm_sitrep_read_on_conn(version.id, &conn).await {
-                Ok(sitrep) => return Ok(Some((version, sitrep))),
+                Ok(sitrep) => {
+                    return fm::CommittedSitrep::new(version, sitrep).map(Some);
+                }
                 // If `fm_sitrep_read_on_conn` returns `NotFound` for a sitrep
                 // ID that was returned by `fm_current_sitrep_version_on_conn`,
                 // this means that the sitrep we were attempting to read is no
@@ -2268,9 +2270,10 @@ mod tests {
             .fm_sitrep_read_current(&opctx)
             .await
             .expect("should successfully read current sitrep");
-        let (version, current_sitrep) = current.expect("sitrep should be Some");
-        assert_eq!(version.id, sitrep.metadata.id);
-        assert_eq!(version.version, 1);
+        let committed = current.expect("sitrep should be Some");
+        let current_sitrep = &committed.sitrep;
+        assert_eq!(current_sitrep.metadata.id, sitrep.metadata.id);
+        assert_eq!(committed.version, 1);
         assert_eq!(sitrep.id(), current_sitrep.id());
         assert_eq!(sitrep.parent_id(), current_sitrep.parent_id());
         assert_eq!(
@@ -2340,13 +2343,14 @@ mod tests {
         );
 
         // Verify the second sitrep is now current
-        let (version, current_sitrep) = datastore
+        let committed = datastore
             .fm_sitrep_read_current(&opctx)
             .await
             .unwrap()
             .expect("current sitrep should be Some");
-        assert_eq!(version.id, sitrep2.id());
-        assert_eq!(version.version, 2);
+        let current_sitrep = &committed.sitrep;
+        assert_eq!(current_sitrep.metadata.id, sitrep2.id());
+        assert_eq!(committed.version, 2);
         assert_eq!(sitrep2.id(), current_sitrep.id());
         assert_eq!(sitrep2.parent_id(), current_sitrep.parent_id());
 
@@ -2494,13 +2498,14 @@ mod tests {
         }
 
         // Verify sitrep2 is still current
-        let (version, current_sitrep) = datastore
+        let committed = datastore
             .fm_sitrep_read_current(&opctx)
             .await
             .unwrap()
             .expect("current sitrep should be Some");
-        assert_eq!(version.id, sitrep2.id());
-        assert_eq!(version.version, 2);
+        let current_sitrep = &committed.sitrep;
+        assert_eq!(current_sitrep.metadata.id, sitrep2.id());
+        assert_eq!(committed.version, 2);
         assert_eq!(sitrep2.id(), current_sitrep.id());
         assert_eq!(sitrep2.parent_id(), current_sitrep.parent_id());
 

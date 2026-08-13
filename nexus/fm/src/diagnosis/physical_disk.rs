@@ -411,14 +411,17 @@ mod tests {
         in_service: IdOrdMap<InServiceDisk>,
     ) -> Input {
         let parent = parent_sitrep.map(|s| {
-            Arc::new((
-                SitrepVersion {
-                    id: s.id(),
-                    version: 0,
-                    time_made_current: Utc::now(),
-                },
-                s,
-            ))
+            Arc::new(
+                fm::CommittedSitrep::new(
+                    SitrepVersion {
+                        id: s.id(),
+                        version: 0,
+                        time_made_current: Utc::now(),
+                    },
+                    s,
+                )
+                .unwrap(),
+            )
         });
         let builder =
             Input::builder(parent, Arc::new(collection), Arc::new(in_service))

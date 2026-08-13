@@ -295,7 +295,9 @@ mod tests {
             time_made_current: chrono::Utc::now(),
         };
         let (input, _) = Input::builder(
-            Some(Arc::new((parent_version, parent))),
+            Some(Arc::new(
+                fm::CommittedSitrep::new(parent_version, parent).unwrap(),
+            )),
             inv,
             Arc::new(IdOrdMap::new()),
         )
@@ -521,7 +523,9 @@ mod tests {
             time_made_current: chrono::Utc::now(),
         };
         let mut builder_inputs = crate::analysis_input::Input::builder(
-            Some(Arc::new((parent_version, parent))),
+            Some(Arc::new(
+                fm::CommittedSitrep::new(parent_version, parent).unwrap(),
+            )),
             inv,
             Arc::new(IdOrdMap::new()),
         )
@@ -596,7 +600,9 @@ mod tests {
             time_made_current: chrono::Utc::now(),
         };
         let mut builder_inputs = crate::analysis_input::Input::builder(
-            Some(Arc::new((parent_version, parent))),
+            Some(Arc::new(
+                fm::CommittedSitrep::new(parent_version, parent).unwrap(),
+            )),
             inv,
             Arc::new(IdOrdMap::new()),
         )
