@@ -19,7 +19,7 @@ use nexus_db_queries::db::identity::Asset;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils::resource_helpers::{
     create_ip_pool, create_local_user, create_project, create_silo,
-    create_subnet_pool, grant_iam, link_ip_pool, link_subnet_pool,
+    create_subnet_pool, delete_silo, grant_iam, link_ip_pool, link_subnet_pool,
     object_create, object_delete, objects_list_page_authz, projects_list,
     test_params,
 };
@@ -265,11 +265,7 @@ async fn test_silos(cptestctx: &ControlPlaneTestContext) {
         .expect("failed to make request");
 
     // Verify silo DELETE now works
-    NexusRequest::object_delete(&client, &discoverable_url)
-        .authn_as(AuthnMode::PrivilegedUser)
-        .execute()
-        .await
-        .expect("failed to make request");
+    delete_silo(client, "discoverable").await;
 
     // Verify the DNS name was removed.
     verify_silo_dns_name(cptestctx, "discoverable", false).await;
@@ -529,14 +525,7 @@ async fn test_deleting_a_silo_deletes_the_idp(
     .await;
 
     // Delete the silo
-    NexusRequest::object_delete(
-        &client,
-        &format!("/v1/system/silos/{}", SILO_NAME),
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .expect("failed to make request");
+    delete_silo(client, SILO_NAME).await;
 
     // Expect that the silo is gone
     let nexus = &cptestctx.server.server_context().nexus;
@@ -869,11 +858,7 @@ async fn test_silo_user_provision_types(cptestctx: &ControlPlaneTestContext) {
             assert!(existing_silo_user.is_err());
         }
 
-        NexusRequest::object_delete(&client, &"/v1/system/silos/test-silo")
-            .authn_as(AuthnMode::PrivilegedUser)
-            .execute()
-            .await
-            .expect("failed to make request");
+        delete_silo(client, "test-silo").await;
     }
 }
 
@@ -1418,6 +1403,126 @@ async fn test_silo_groups_remove_from_both_groups(
     assert!(group_names.contains(&"c-group".to_string()));
 }
 
+// Test that silo delete cleans up associated users and password hashes
+#[nexus_test]
+async fn test_silo_delete_cleans_up_users_and_password_hashes(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let nexus = &cptestctx.server.server_context().nexus;
+    let opctx = nexus.opctx_external_authn();
+    let datastore = nexus.datastore();
+
+    const SILO_NAME: &str = "test-silo";
+    let silo =
+        create_silo(client, SILO_NAME, true, silo::SiloIdentityMode::LocalOnly)
+            .await;
+    let (authz_silo, _) = LookupPath::new(opctx, datastore)
+        .silo_id(silo.identity.id)
+        .fetch()
+        .await
+        .unwrap();
+
+    let mut silo_users = Vec::new();
+
+    // Create two users with passwords and one without.
+    for (username, password, expect_password_hash) in [
+        (
+            "homer-simpson",
+            test_params::UserPassword::Password(
+                "he card read good".to_string(),
+            ),
+            true,
+        ),
+        (
+            "marge-simpson",
+            test_params::UserPassword::Password(
+                "i just think they're neat".to_string(),
+            ),
+            true,
+        ),
+        ("lisa-simpson", test_params::UserPassword::LoginDisallowed, false),
+    ] {
+        let created_user = create_local_user(
+            client,
+            &silo,
+            &UserId::from_str(username).unwrap(),
+            password,
+        )
+        .await;
+
+        // Verify users and password hash state before deleting the silo.
+        let (_, authz_silo_user, _) = LookupPath::new(opctx, datastore)
+            .silo_user_id(created_user.id)
+            .fetch()
+            .await
+            .unwrap();
+        assert_eq!(
+            datastore
+                .silo_user_password_hash_fetch(opctx, &authz_silo_user)
+                .await
+                .unwrap()
+                .is_some(),
+            expect_password_hash,
+            "unexpected password hash state for user {username}",
+        );
+
+        silo_users.push((created_user.id, authz_silo_user));
+    }
+
+    let authz_silo_user_list = authz::SiloUserList::new(authz_silo.clone());
+
+    // Verify that listing silo users also reports the 3 new users.
+    assert_eq!(
+        datastore
+            .silo_users_list(
+                opctx,
+                &authz_silo_user_list,
+                &DataPageParams::max_page(),
+            )
+            .await
+            .unwrap()
+            .len(),
+        3,
+        "unexpected silo user count before deleting silo",
+    );
+
+    delete_silo(client, SILO_NAME).await;
+
+    // Verify that users and password hashes no longer exist after deleting
+    // the silo. We first check the path for listing silo users and then check
+    // direct lookup for each created user.
+    assert!(
+        datastore
+            .silo_users_list(
+                opctx,
+                &authz_silo_user_list,
+                &DataPageParams::max_page(),
+            )
+            .await
+            .unwrap()
+            .is_empty(),
+        "unexpected silo users after deleting silo",
+    );
+
+    for (silo_user_id, authz_silo_user) in silo_users {
+        LookupPath::new(opctx, datastore)
+            .silo_user_id(silo_user_id)
+            .fetch()
+            .await
+            .expect_err("unexpected silo user after deleting silo");
+
+        assert!(
+            datastore
+                .silo_user_password_hash_fetch(opctx, &authz_silo_user)
+                .await
+                .unwrap()
+                .is_none(),
+            "unexpected password hash after deleting silo",
+        );
+    }
+}
+
 // Test that silo delete cleans up associated groups
 #[nexus_test]
 async fn test_silo_delete_clean_up_groups(cptestctx: &ControlPlaneTestContext) {
@@ -1460,11 +1565,7 @@ async fn test_silo_delete_clean_up_groups(cptestctx: &ControlPlaneTestContext) {
         .expect("silo_user_from_authenticated_subject");
 
     // Delete the silo
-    NexusRequest::object_delete(&client, &"/v1/system/silos/test-silo")
-        .authn_as(AuthnMode::PrivilegedUser)
-        .execute()
-        .await
-        .expect("failed to make request");
+    delete_silo(client, "test-silo").await;
 
     // Expect the group is gone
     assert!(
@@ -2691,8 +2792,7 @@ async fn test_silo_delete_cleans_up_ip_pool_links(
     assert_eq!(links.items.len(), 1);
 
     // Delete the silo
-    let url = format!("/v1/system/silos/{}", silo1.identity.id);
-    object_delete(client, &url).await;
+    delete_silo(client, &silo1.identity.id.to_string()).await;
 
     // Now make sure the links are gone
     let url = "/v1/system/ip-pools/pool1/silos";
@@ -2775,8 +2875,7 @@ async fn test_silo_delete_cleans_up_subnet_pool_links(
             .await;
     assert_eq!(links.items.len(), 1);
 
-    let url = format!("/v1/system/silos/{}", silo1.identity.id);
-    object_delete(client, &url).await;
+    delete_silo(client, &silo1.identity.id.to_string()).await;
 
     let url = "/v1/system/subnet-pools/pool1/silos";
     let links =
