@@ -114,6 +114,7 @@ impl Port {
         &self.inner.name
     }
 
+    // TODO-remove: <https://github.com/oxidecomputer/omicron/issues/2931>
     pub fn gateway(&self) -> &Gateway {
         &self.inner.gateway
     }

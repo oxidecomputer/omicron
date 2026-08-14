@@ -29,6 +29,9 @@ const ADDROBJ_ALREADY_EXISTS: &str = "Address object already exists";
 
 pub enum AddrObjType {
     DHCP,
+    // NOTE: This can result in more than one address, if there is a DHCPv6
+    // server on the same link as the addrobj. That happens most often for OPTE
+    // ports used in zones that need external connectivity.
     AddrConf,
     Static(IpAddr),
 }
@@ -83,6 +86,9 @@ impl Ipadm {
     /// Remove any scope from an IPv6 address.
     /// e.g. fe80::8:20ff:fed0:8687%oxControlService1/10 ->
     ///      fe80::8:20ff:fed0:8687/10
+    //
+    // TODO-cleanup: This could directly parse the line into an IpNet if
+    // possible, rather than emitting a new string.
     fn remove_addr_scope(input: &str) -> String {
         if let Some(pos) = input.find('%') {
             let (base, rest) = input.split_at(pos);
@@ -98,6 +104,10 @@ impl Ipadm {
 
     /// Return the IP network associated with an address object, or None if
     /// there is no address object with this name.
+    //
+    // TODO-correctness: There can be many addresses associated with an addrobj,
+    // e.g., for IPv6 where we have link-local + DHCPv6 addresses. This will
+    // ignore all but the first.
     pub async fn addrobj_addr(
         addrobj: &str,
     ) -> Result<Option<IpNet>, ExecutionError> {
@@ -173,6 +183,7 @@ impl Ipadm {
         Ok(())
     }
 
+    /// Create a link-local IPv6 addrconf address and a static IPv6 address.
     pub async fn create_static_and_autoconfigured_addrs(
         datalink: &str,
         listen_addr: &Ipv6Addr,
@@ -189,15 +200,6 @@ impl Ipadm {
             AddrObjType::Static((*listen_addr).into()),
         )
         .await?;
-        Ok(())
-    }
-
-    // Create gateway on the IP interface if it doesn't already exist
-    pub async fn create_opte_gateway(
-        opte_iface: &String,
-    ) -> Result<(), ExecutionError> {
-        let addrobj = format!("{}/public", opte_iface);
-        Self::ensure_ip_addrobj_exists(&addrobj, AddrObjType::DHCP).await?;
         Ok(())
     }
 

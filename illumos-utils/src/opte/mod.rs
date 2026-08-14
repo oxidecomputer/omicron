@@ -43,6 +43,11 @@ use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
 
 /// Information about the gateway for an OPTE port
+///
+/// TODO-remove: This only exists to communicate the destination for a default
+/// IPv4 route from the port's private IP to the OPTE "virtual gateway". We can
+/// remove this entirely when we resolve
+/// <https://github.com/oxidecomputer/omicron/issues/2931>.
 #[derive(Debug, Clone, Copy)]
 #[allow(dead_code)]
 pub struct Gateway {

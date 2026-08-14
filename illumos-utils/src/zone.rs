@@ -11,15 +11,18 @@ use ipnetwork::IpNetworkError;
 use sled_agent_types::inventory::OmicronZoneConfig;
 use slog::Logger;
 use slog::info;
-use std::net::{IpAddr, Ipv6Addr};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use tokio::process::Command;
 
 use crate::ExecutionError;
 use crate::addrobj::AddrObject;
 use crate::dladm::{EtherstubVnic, VNIC_PREFIX_BOOTSTRAP, VNIC_PREFIX_CONTROL};
+use crate::route::Route;
+use crate::route::RouteError;
 use crate::zpool::PathInPool;
 use crate::{PFEXEC, execute_async};
 use omicron_common::address::SLED_PREFIX_LENGTH;
+use omicron_common::backoff;
 use omicron_uuid_kinds::OmicronZoneUuid;
 
 const DLADM: &str = "/usr/sbin/dladm";
@@ -213,6 +216,25 @@ pub struct GetAddressesError {
     name: AddrObject,
     #[source]
     err: anyhow::Error,
+}
+
+/// Errors configuring the addresses and routes for an OPTE port.
+#[derive(Debug, thiserror::Error)]
+pub enum OptePortSetupError {
+    #[error(transparent)]
+    EnsureAddress(#[from] EnsureAddressError),
+    #[error(transparent)]
+    GetAddresses(#[from] GetAddressesError),
+    #[error("Failed to create link-local IPv6 address for {addrobj}")]
+    LinkLocal {
+        addrobj: AddrObject,
+        #[source]
+        err: crate::ExecutionError,
+    },
+    #[error(transparent)]
+    Route(#[from] RouteError),
+    #[error("Failed to wait for a DHCPv6 address on {addrobj}")]
+    NoDhcpV6Addr { addrobj: AddrObject },
 }
 
 /// Describes the type of addresses which may be requested from a zone.
@@ -855,6 +877,100 @@ impl Zones {
 
         let cmd = command.args(args);
         execute_async(cmd).await?;
+        Ok(())
+    }
+
+    /// Configure a V4-capable OPTE port.
+    ///
+    /// This ensures the DHCP private address object exists, and then (until
+    /// stlouis#326 lands) manually programs the routes to OPTE's virtual
+    /// gateway. See [`Route::configure_opte_virtual_gateway_ipv4_route`] for
+    /// why those routes are needed.
+    ///
+    /// `zone` selects where the commands run: `None` runs them in the current
+    /// zone (the `zone-setup` service, which runs inside the zone itself),
+    /// while `Some(name)` reaches into that zone from the global zone (the
+    /// probe path).
+    pub async fn configure_opte_ipv4_port(
+        zone: Option<&str>,
+        addrobj: &AddrObject,
+        gateway: Ipv4Addr,
+        private_ip: Ipv4Addr,
+    ) -> Result<(), OptePortSetupError> {
+        // Creating the DHCP address blocks until we get a lease, so the
+        // address is usable by the time this returns.
+        Self::ensure_address(zone, addrobj, AddressRequest::Dhcp).await?;
+        Route::configure_opte_virtual_gateway_ipv4_route(
+            zone,
+            addrobj.interface(),
+            &gateway,
+            &private_ip,
+        )
+        .await?;
+        Ok(())
+    }
+
+    /// Configure a V6-capable OPTE port.
+    ///
+    /// This ensures the addrconf private address object exists, and then waits
+    /// for a DHCPv6 address to be assigned. Unlike IPv4, there are no routes to
+    /// program: IPv6 routing to OPTE's virtual gateway is learned entirely
+    /// through NDP.
+    ///
+    /// See [`Self::configure_opte_ipv4_port`] for the meaning of `zone`.
+    pub async fn configure_opte_ipv6_port(
+        zone: Option<&str>,
+        addrobj: &AddrObject,
+        log: &Logger,
+    ) -> Result<(), OptePortSetupError> {
+        // Creating the addrconf link-local address also kicks off DHCPv6, via
+        // OPTE's Router Advertisements.
+        Self::ensure_has_link_local_v6_address(zone, addrobj).await.map_err(
+            |err| OptePortSetupError::LinkLocal {
+                addrobj: addrobj.clone(),
+                err,
+            },
+        )?;
+
+        // Unlike DHCPv4, there's no blocking call we can make: the DHCPv6
+        // address is configured in the background, after the NDP exchange
+        // completes. Poll until a non-link-local address shows up on the
+        // address object.
+        backoff::retry_notify(
+            backoff::retry_policy_local(),
+            || async {
+                let addrs = Self::get_all_addresses(zone, addrobj)
+                    .await
+                    .map_err(|err| {
+                        backoff::BackoffError::permanent(
+                            OptePortSetupError::from(err),
+                        )
+                    })?;
+                if addrs.iter().any(|addr| {
+                    matches!(
+                        addr,
+                        IpNetwork::V6(ip) if !ip.ip().is_unicast_link_local()
+                    )
+                }) {
+                    Ok(())
+                } else {
+                    Err(backoff::BackoffError::transient(
+                        OptePortSetupError::NoDhcpV6Addr {
+                            addrobj: addrobj.clone(),
+                        },
+                    ))
+                }
+            },
+            |error, delay| {
+                slog::debug!(
+                    log,
+                    "No non-link-local IPv6 address yet (retrying)";
+                    "delay" => ?delay,
+                    "error" => ?error,
+                );
+            },
+        )
+        .await?;
         Ok(())
     }
 
