@@ -474,15 +474,58 @@ impl MultirackJoinServiceTask {
         });
 
         for peer in remote_peers {
-            self.tq_spawn_proxy_commit_task(
-                rack_id,
-                peer,
-                epoch,
-                transient_errors_tx.clone(),
-                &mut set,
+            let proxy = self.ctx.trust_quorum_handle.proxy();
+            let transient_errors_tx = transient_errors_tx.clone();
+            info!(
+                self.log,
+                "Attempting to proxy commit trust quorum";
+                "epoch" => %epoch,
+                "baseboard_id" => %peer
             );
+
+            // Spawn a task to perform a proxy commit
+            //
+            // Success and fatal errors are returned from the task. Transient errors
+            // are continuously retried.
+            set.spawn(async move {
+                loop {
+                    let peer = peer.clone();
+                    match proxy.commit(peer.clone(), rack_id, epoch).await {
+                        Ok(
+                            trust_quorum_types::status::CommitStatus::Committed,
+                        ) => {
+                            return Ok(peer);
+                        }
+                        Ok(
+                            trust_quorum_types::status::CommitStatus::Pending,
+                        ) => {
+                            let s = "unexpected CommitStatus::Pending \
+                            from prepared peer"
+                                .to_string();
+                            return Err((peer, s));
+                        }
+                        Err(e @ ProxyError::Inner(_))
+                        | Err(e @ ProxyError::InvalidResponse(_))
+                        | Err(e @ ProxyError::RecvError) => {
+                            let s = InlineErrorChain::new(&e).to_string();
+                            return Err((peer, s));
+                        }
+                        Err(e @ ProxyError::Disconnected)
+                        | Err(e @ ProxyError::Busy) => {
+                            let s = InlineErrorChain::new(&e).to_string();
+                            transient_errors_tx.send_modify(|errs| {
+                                errs.insert(peer, s);
+                            });
+                            tokio::time::sleep(TRUST_QUORUM_RETRY_TIMEOUT)
+                                .await;
+                        }
+                    }
+                }
+            });
         }
 
+        // Wait for the results of proxy commits, membership changes from an
+        // operator, or transient errors.
         loop {
             // All arms are cancel-safe and we do not `.await` within the body
             // of any arm, avoiding any opportunity for futurelock.
@@ -591,57 +634,6 @@ impl MultirackJoinServiceTask {
         }
 
         Ok(TqCommitResult::Committed)
-    }
-
-    /// Spawn a task to perform a proxy commit
-    ///
-    /// Success and fatal errors are returned from the task. Transient errors
-    /// are continuously retried.
-    fn tq_spawn_proxy_commit_task(
-        &mut self,
-        rack_id: RackUuid,
-        peer: BaseboardId,
-        epoch: Epoch,
-        transient_errors_tx: watch::Sender<BTreeMap<BaseboardId, String>>,
-        set: &mut JoinSet<Result<BaseboardId, (BaseboardId, String)>>,
-    ) {
-        let proxy = self.ctx.trust_quorum_handle.proxy();
-        info!(
-            self.log,
-            "Attempting to proxy commit trust quorum";
-            "epoch" => %epoch,
-            "baseboard_id" => %peer
-        );
-        set.spawn(async move {
-            loop {
-                let peer = peer.clone();
-                match proxy.commit(peer.clone(), rack_id, epoch).await {
-                    Ok(trust_quorum_types::status::CommitStatus::Committed) => {
-                        return Ok(peer);
-                    }
-                    Ok(trust_quorum_types::status::CommitStatus::Pending) => {
-                        let s = "unexpected CommitStatus::Pending \
-                            from prepared peer"
-                            .to_string();
-                        return Err((peer, s));
-                    }
-                    Err(e @ ProxyError::Inner(_))
-                    | Err(e @ ProxyError::InvalidResponse(_))
-                    | Err(e @ ProxyError::RecvError) => {
-                        let s = InlineErrorChain::new(&e).to_string();
-                        return Err((peer, s));
-                    }
-                    Err(e @ ProxyError::Disconnected)
-                    | Err(e @ ProxyError::Busy) => {
-                        let s = InlineErrorChain::new(&e).to_string();
-                        transient_errors_tx.send_modify(|errs| {
-                            errs.insert(peer, s);
-                        });
-                        tokio::time::sleep(TRUST_QUORUM_RETRY_TIMEOUT).await;
-                    }
-                }
-            }
-        });
     }
 
     // Check if we have received an updated membership set from an operator.
