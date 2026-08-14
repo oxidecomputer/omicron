@@ -400,12 +400,11 @@ impl DataStore {
     /// **Warning:** This is destructive. An abandoned saga will never be
     /// recovered or resumed, so any partial work it did (including a partial
     /// unwind) is left in place. Only call this for sagas whose current SEC is
-    /// known to be permanently gone and can never be reassigned.
+    /// known to be permanently gone and whose sagas can never be reassigned.
     pub async fn sagas_abandon_orphans(
         &self,
         opctx: &OpContext,
         sec_ids: &[db::saga_types::SecId],
-        reason: SagaReasonAbandoned,
         comment: String,
     ) -> Result<usize, Error> {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
@@ -431,7 +430,11 @@ impl DataStore {
                 ),
         )
         .set::<SagaStateDbFields>(
-            NewSagaState::Abandoned { reason, comment }.into(),
+            NewSagaState::Abandoned {
+                reason: SagaReasonAbandoned::Orphaned,
+                comment,
+            }
+            .into(),
         )
         .execute_async(&*conn)
         .await
@@ -1075,6 +1078,16 @@ mod test {
             })
             .collect();
 
+        // 4 passed-in SECs, each with a running and an unwinding saga, are
+        // abandoned.
+        assert_eq!(sagas_affected.len(), 8);
+
+        // Everything else is untouched. The 4 passed-in SECs' done sagas, plus
+        // all 3 of sec_e's sagas.
+        assert_eq!(sagas_unaffected.len(), 7);
+
+        // The sum of both `sagas_affected` and `sagas_unaffected` should be the
+        // same amount if total sagas we will insert to the DB.
         assert_eq!(
             sagas_affected.len() + sagas_unaffected.len(),
             sagas_to_insert.len()
@@ -1102,12 +1115,7 @@ mod test {
 
         // Passing zero SECs should abandon nothing.
         let nabandoned = datastore
-            .sagas_abandon_orphans(
-                &opctx,
-                &[],
-                SagaReasonAbandoned::Unrecoverable,
-                "test abandonment".to_string(),
-            )
+            .sagas_abandon_orphans(&opctx, &[], "test abandonment".to_string())
             .await
             .expect("failed to abandon sagas");
         assert_eq!(nabandoned, 0);
@@ -1115,12 +1123,7 @@ mod test {
         // Abandon uncompleted sagas for the subset of SECs (i.e. not sec_e).
         let comment = "test abandonment".to_string();
         let nabandoned = datastore
-            .sagas_abandon_orphans(
-                &opctx,
-                &subset_sec_ids,
-                SagaReasonAbandoned::Unrecoverable,
-                comment.clone(),
-            )
+            .sagas_abandon_orphans(&opctx, &subset_sec_ids, comment.clone())
             .await
             .expect("failed to abandon sagas");
 
@@ -1193,12 +1196,7 @@ mod test {
         // If we do it again, we should make no changes: the running/unwinding
         // sagas are now abandoned, and abandoned sagas aren't touched.
         let nabandoned = datastore
-            .sagas_abandon_orphans(
-                &opctx,
-                &subset_sec_ids,
-                SagaReasonAbandoned::Unrecoverable,
-                comment,
-            )
+            .sagas_abandon_orphans(&opctx, &subset_sec_ids, comment)
             .await
             .expect("failed to abandon sagas");
         assert_eq!(nabandoned, 0);
