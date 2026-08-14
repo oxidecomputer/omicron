@@ -413,10 +413,14 @@ impl Drop for ClaimReleaser {
 mod test {
     use super::*;
     use crate::db::pub_test_utils::crdb;
+    #[cfg(target_os = "illumos")]
     use camino::Utf8Path;
     use omicron_test_utils::dev;
+    #[cfg(target_os = "illumos")]
     use socket2::Socket;
+    #[cfg(target_os = "illumos")]
     use std::os::fd::FromRawFd;
+    #[cfg(target_os = "illumos")]
     use std::os::fd::IntoRawFd;
 
     #[tokio::test]
