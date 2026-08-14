@@ -6727,10 +6727,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 crate::context::op_context_for_external_api(&rqctx).await?;
             let sleds = nexus
                 .sled_list(&opctx, &data_page_params_for(&rqctx, &query)?)
-                .await?
-                .into_iter()
-                .map(|s| s.into())
-                .collect();
+                .await?;
             Ok(HttpResponseOk(ScanById::results_page(
                 &query,
                 sleds,
@@ -6756,7 +6753,9 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 crate::context::op_context_for_external_api(&rqctx).await?;
             let (.., sled) =
                 nexus.sled_lookup(&opctx, &path.sled_id)?.fetch().await?;
-            Ok(HttpResponseOk(sled.into()))
+            let inv_rx = nexus.inventory_load_rx();
+            let sled = sled.to_external_api(&inv_rx.borrow());
+            Ok(HttpResponseOk(sled))
         };
         apictx
             .context
