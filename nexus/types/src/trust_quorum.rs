@@ -233,9 +233,9 @@ impl TrustQuorumConfig {
 
     pub fn commit_crash_tolerance(num_members: u8) -> u8 {
         match num_members {
-            0..=3 => 0,
-            4..=7 => 1,
-            8..=15 => 2,
+            0..=4 => 0,
+            5..=8 => 1,
+            9..=15 => 2,
             16..=23 => 3,
             _ => 4,
         }

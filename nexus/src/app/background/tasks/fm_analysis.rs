@@ -7,10 +7,15 @@ use crate::app::background::BackgroundTask;
 use crate::app::background::tasks::fm_sitrep_load::CurrentSitrep;
 use anyhow::Context;
 use chrono::Utc;
+use fm::analysis_input::Input;
 use fm::analysis_input::InvalidInputs;
+use fm::analysis_reports::InputReport;
 use futures::future::BoxFuture;
 use iddqd::IdOrdMap;
+use nexus_db_model::DbMetadataNexusState;
 use nexus_db_model::PhysicalDiskPolicy;
+use nexus_db_model::SagaExecState;
+use nexus_db_model::SagaReasonAbandoned;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use nexus_db_queries::db::DataStore;
@@ -25,6 +30,10 @@ use nexus_types::in_service_disk::InServiceDisk;
 use nexus_types::internal_api::background::FmAnalysisStatus;
 use nexus_types::internal_api::background::fm_analysis as status;
 use nexus_types::inventory;
+use nexus_types::observed_saga::{
+    ObservedSaga, ObservedSagaState, SagaAbandonInfo, SagaAbandonReason,
+    SagaOwnerState,
+};
 use omicron_uuid_kinds::AlertUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
@@ -217,13 +226,34 @@ impl FmAnalysis {
         );
 
         // Prepare analysis inputs.
-        let (inputs, prep_status) = match self
+        let (inputs, prep_status, input_report) = match self
             .prepare_inputs(&opctx, parent_sitrep, inv)
             .await
         {
             Ok(inputs) => inputs,
             Err(PreparationError::Other(err)) => {
                 let error = InlineErrorChain::new(&*err);
+                slog::error!(
+                    opctx.log,
+                    "fault management analysis preparation failed";
+                    &error,
+                );
+                return FmAnalysisStatus {
+                    parent_sitrep_id,
+                    inv_collection_id: Some(inv_collection_id),
+                    known_classes,
+                    outcome: status::Outcome::PreparationError(
+                        error.to_string(),
+                    ),
+                    warnings,
+                };
+            }
+            Err(PreparationError::InvalidInputs(
+                err @ InvalidInputs::MissingInput { .. },
+            )) => {
+                // A missing input is a bug in this task: `prepare_inputs`
+                // must provide every required input to the builder.
+                let error = InlineErrorChain::new(&err);
                 slog::error!(
                     opctx.log,
                     "fault management analysis preparation failed";
@@ -271,7 +301,7 @@ impl FmAnalysis {
 
         // Okay, actually run analysis and generate a new sitrep.
         let outcome = self
-            .analyze(&opctx, inputs, &prep_status.report, &cfg, &mut warnings)
+            .analyze(&opctx, inputs, &input_report, &cfg, &mut warnings)
             .await;
 
         FmAnalysisStatus {
@@ -291,20 +321,20 @@ impl FmAnalysis {
         opctx: &OpContext,
         parent_sitrep: Option<CurrentSitrep>,
         inv: Arc<inventory::Collection>,
-    ) -> Result<
-        (fm::analysis_input::Input, status::PreparationStatus),
-        PreparationError,
-    > {
+    ) -> Result<(Input, status::PreparationStatus, InputReport), PreparationError>
+    {
         let mut warnings = Vec::new();
 
         let in_service_disks =
             Arc::new(self.load_in_service_disks(opctx, &mut warnings).await?);
 
-        let mut builder = fm::analysis_input::Input::builder(
-            parent_sitrep.clone(),
-            inv,
-            in_service_disks,
-        )?;
+        let observed_sagas =
+            Arc::new(self.prepare_observed_sagas(opctx).await?);
+
+        let mut builder =
+            fm::analysis_input::Input::builder(parent_sitrep.clone(), inv)?
+                .in_service_disks(in_service_disks)
+                .observed_sagas(observed_sagas);
         self.load_ereporter_restarts(opctx, &mut builder)
             .await
             .context("failed to load ereporter restarts")?;
@@ -326,8 +356,8 @@ impl FmAnalysis {
         .await
         .context("failed to load existing support bundle markers")?;
 
-        let (input, report) = builder.build();
-        Ok((input, status::PreparationStatus { warnings, report }))
+        let (input, report) = builder.build()?;
+        Ok((input, status::PreparationStatus { warnings }, report))
     }
 
     /// Load all in-service control plane disks, projected down to FM's
@@ -389,6 +419,108 @@ impl FmAnalysis {
             }
         }
         Ok(in_service_disks)
+    }
+
+    /// Build the saga diagnosis engine's input: every non-terminal saga,
+    /// annotated with the timestamp of its latest node event (the progress
+    /// signal) and the state of its owning Nexus.
+    async fn prepare_observed_sagas(
+        &self,
+        opctx: &OpContext,
+    ) -> anyhow::Result<IdOrdMap<ObservedSaga>> {
+        use std::collections::BTreeMap;
+
+        // All unfinished (running, unwinding, or abandoned) sagas. Completed
+        // sagas are excluded; a parent case whose saga is absent from this
+        // set is closed by the engine.
+        let sagas = self
+            .datastore
+            .saga_list_unfinished_batched(opctx)
+            .await
+            .context("failed to list unfinished sagas")?;
+
+        // Latest node-event time per saga: the last durably-recorded step.
+        let saga_ids: Vec<_> = sagas.iter().map(|s| s.id).collect();
+        let last_event_times: BTreeMap<
+            steno::SagaId,
+            Option<chrono::DateTime<Utc>>,
+        > = self
+            .datastore
+            .saga_latest_node_event_times(opctx, &saga_ids)
+            .await
+            .context("failed to load saga node-event times")?
+            .into_iter()
+            .map(|(id, t)| (id.0, t))
+            .collect();
+
+        // Classify each owning Nexus (current_sec) against db_metadata_nexus.
+        let nexus_states: BTreeMap<OmicronZoneUuid, DbMetadataNexusState> =
+            self.datastore
+                .get_db_metadata_nexus_in_state(
+                    opctx,
+                    DbMetadataNexusState::ALL.to_vec(),
+                )
+                .await
+                .context("failed to load db_metadata_nexus records")?
+                .into_iter()
+                .map(|n| (n.nexus_id(), n.state()))
+                .collect();
+
+        let mut observed = IdOrdMap::new();
+        for saga in sagas {
+            let saga_state = match saga.saga_state {
+                SagaExecState::Running => ObservedSagaState::Running,
+                SagaExecState::Unwinding => ObservedSagaState::Unwinding,
+                SagaExecState::Abandoned(metadata) => {
+                    ObservedSagaState::Abandoned(SagaAbandonInfo {
+                        time: metadata.time,
+                        reason: match metadata.reason {
+                            SagaReasonAbandoned::Omdb => {
+                                SagaAbandonReason::Omdb
+                            }
+                            SagaReasonAbandoned::Unrecoverable => {
+                                SagaAbandonReason::Unrecoverable
+                            }
+                        },
+                        comment: metadata.comment,
+                    })
+                }
+                // The query filters to unfinished states; defend anyway.
+                SagaExecState::Done => continue,
+            };
+            let current_sec = saga
+                .current_sec
+                .map(|sec| OmicronZoneUuid::from_untyped_uuid(sec.0));
+            let owner_state =
+                current_sec.map(|sec_id| match nexus_states.get(&sec_id) {
+                    Some(DbMetadataNexusState::Active) => {
+                        SagaOwnerState::Active
+                    }
+                    Some(DbMetadataNexusState::NotYet) => {
+                        SagaOwnerState::NotYet
+                    }
+                    Some(DbMetadataNexusState::Quiesced) => {
+                        SagaOwnerState::Quiesced
+                    }
+                    None => SagaOwnerState::Absent,
+                });
+            let last_event_time =
+                last_event_times.get(&saga.id.0).copied().flatten();
+            observed
+                .insert_unique(ObservedSaga {
+                    saga_id: saga.id.0,
+                    saga_name: saga.name,
+                    saga_state,
+                    time_created: saga.time_created,
+                    current_sec,
+                    last_event_time,
+                    owner_state,
+                })
+                .expect(
+                    "saga.id is a primary key, so duplicates are impossible",
+                );
+        }
+        Ok(observed)
     }
 
     async fn load_ereporter_restarts(
@@ -545,8 +677,8 @@ impl FmAnalysis {
     async fn analyze(
         &mut self,
         opctx: &OpContext,
-        inputs: fm::analysis_input::Input,
-        input_report: &nexus_types::fm::analysis_reports::InputReport,
+        inputs: Input,
+        input_report: &InputReport,
         cfg: &FmConfig,
         warnings: &mut Vec<String>,
     ) -> status::AnalysisStatus {
@@ -567,7 +699,6 @@ impl FmAnalysis {
             return status::AnalysisStatus {
                 start_time,
                 end_time,
-                report,
                 capacity: None,
                 outcome: status::AnalysisOutcome::Error(e.to_string()),
             };
@@ -584,7 +715,6 @@ impl FmAnalysis {
                 return status::AnalysisStatus {
                     start_time,
                     end_time,
-                    report,
                     capacity: None,
                     outcome: status::AnalysisOutcome::Unchanged,
                 };
@@ -615,7 +745,6 @@ impl FmAnalysis {
                     return status::AnalysisStatus {
                         start_time,
                         end_time,
-                        report,
                         capacity: None,
                         outcome,
                     };
@@ -661,7 +790,6 @@ impl FmAnalysis {
                 status::AnalysisStatus {
                     start_time,
                     end_time,
-                    report,
                     capacity,
                     outcome: status::AnalysisOutcome::Committed { sitrep_id },
                 }
@@ -680,7 +808,6 @@ impl FmAnalysis {
                 status::AnalysisStatus {
                     start_time,
                     end_time,
-                    report,
                     capacity,
                     outcome: status::AnalysisOutcome::NotCommitted {
                         sitrep_id,
@@ -697,7 +824,6 @@ impl FmAnalysis {
                 status::AnalysisStatus {
                     start_time,
                     end_time,
-                    report,
                     capacity,
                     outcome: status::AnalysisOutcome::CommitFailed {
                         sitrep_id,
@@ -1216,7 +1342,7 @@ mod tests {
             OmicronZoneUuid::new_v4(),
         );
 
-        let (input, prep) = task
+        let (input, prep, report) = task
             .prepare_inputs(opctx, Some(parent), inv)
             .await
             .expect("input preparation should succeed");
@@ -1230,24 +1356,22 @@ mod tests {
         assert!(input.open_cases().contains_key(&open_case_id));
         assert_eq!(input.open_cases().len(), 1);
         assert_eq!(
-            prep.report.open_cases.keys().collect::<Vec<_>>(),
+            report.open_cases.keys().collect::<Vec<_>>(),
             vec![&open_case_id]
         );
 
         // The closed case whose only alert request has a marker is dropped
         // from the carry-forward set entirely...
         assert!(
-            !prep
-                .report
+            !report
                 .closed_cases_copied_forward
                 .contains_key(&satisfied_case_id),
             "satisfied closed case should be dropped, got: {:?}",
-            prep.report.closed_cases_copied_forward,
+            report.closed_cases_copied_forward,
         );
         // ...while the closed case with an unsatisfied alert request is
         // copied forward, with that request reported as outstanding.
-        let carried = prep
-            .report
+        let carried = report
             .closed_cases_copied_forward
             .get(&unsatisfied_case_id)
             .expect("unsatisfied closed case must be copied forward");
@@ -1256,7 +1380,7 @@ mod tests {
             BTreeSet::from([unsatisfied_alert_id])
         );
         assert!(carried.unmarked_ereports.is_empty());
-        assert_eq!(prep.report.closed_cases_copied_forward.len(), 1);
+        assert_eq!(report.closed_cases_copied_forward.len(), 1);
 
         db.terminate().await;
         logctx.cleanup_successful();

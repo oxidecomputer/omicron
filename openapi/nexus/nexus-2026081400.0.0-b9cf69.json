@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "2026073100.0.0"
+    "version": "2026081400.0.0"
   },
   "paths": {
     "/device/auth": {
@@ -1663,6 +1663,133 @@
         "responses": {
           "204": {
             "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/alerts": {
+      "get": {
+        "tags": [
+          "system/alerts"
+        ],
+        "summary": "List alerts",
+        "description": "Alerts may be filtered by alert class or alert class glob and by an inclusive creation time range.",
+        "operationId": "alert_list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "alert_class",
+            "description": "Optional alert class or glob pattern used to filter alerts.\n\nIf this is included, only alerts with the specified class or matching the glob pattern (as appropriate) will be returned. Otherwise, alerts of all classes will be returned.\n\nSee the guide-level documentation on alerts for details on alert classes and alert class glob patterns.",
+            "schema": {
+              "$ref": "#/components/schemas/AlertSubscription"
+            }
+          },
+          {
+            "in": "query",
+            "name": "end_time",
+            "description": "Inclusive upper bound on the alert creation time\n\nIf this is included, only alerts created at or before this time will be returned.",
+            "schema": {
+              "nullable": true,
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/TimeAndIdSortMode"
+            }
+          },
+          {
+            "in": "query",
+            "name": "start_time",
+            "description": "Inclusive lower bound on the alert creation time.\n\nIf this is included, only alerts created at or after this time will be returned.",
+            "schema": {
+              "nullable": true,
+              "type": "string",
+              "format": "date-time"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AlertResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": []
+        }
+      }
+    },
+    "/v1/alerts/{alert_id}": {
+      "get": {
+        "tags": [
+          "system/alerts"
+        ],
+        "summary": "Fetch alert",
+        "operationId": "alert_view",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "alert_id",
+            "description": "UUID of the alert",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Alert"
+                }
+              }
+            }
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -16112,6 +16239,48 @@
           "switch_histories"
         ]
       },
+      "Alert": {
+        "description": "An alert.\n\nAlerts provide notifications about events that occurred in the system at a point in time. See the guide-level documentation on alerts for details.",
+        "type": "object",
+        "properties": {
+          "alert": {
+            "description": "The alert's data payload.\n\nThe schema for this object depends on the alert class and version."
+          },
+          "class": {
+            "description": "The alert's class.\n\nSee the guide-level documentation on alerts for details on alert classes.",
+            "type": "string"
+          },
+          "id": {
+            "description": "Unique, immutable, system-controlled identifier for each resource",
+            "type": "string",
+            "format": "uuid"
+          },
+          "time_created": {
+            "description": "Timestamp when this resource was created",
+            "type": "string",
+            "format": "date-time"
+          },
+          "time_modified": {
+            "description": "Timestamp when this resource was last modified",
+            "type": "string",
+            "format": "date-time"
+          },
+          "version": {
+            "description": "The schema version of this alert's data payload.\n\nAlert schemas are versioned on a per-alert-class basis. The schema version for a particular alert class does not correspond to an Oxide API version. Clients should expect to encounter earlier schema versions when retrieving alerts recorded by an earlier version of the system software.\n\nSee the guide-level documentation on alerts for details.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "alert",
+          "class",
+          "id",
+          "time_created",
+          "time_modified",
+          "version"
+        ]
+      },
       "AlertClass": {
         "description": "An alert class.",
         "type": "object",
@@ -16445,6 +16614,27 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/AlertReceiver"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "AlertResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Alert"
             }
           },
           "next_page": {
@@ -28000,6 +28190,13 @@
             "description": "The rack to which this Sled is currently attached",
             "type": "string",
             "format": "uuid"
+          },
+          "slot": {
+            "nullable": true,
+            "description": "The physical slot in the rack where this sled was last observed to be located, or null if its location is not known at this time.",
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
           },
           "state": {
             "description": "The current state of the sled.",

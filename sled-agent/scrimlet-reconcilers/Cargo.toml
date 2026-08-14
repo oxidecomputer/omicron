@@ -9,6 +9,7 @@ workspace = true
 
 [dependencies]
 anyhow.workspace = true
+bootstrap-agent-lockstep-types.workspace = true
 chrono.workspace = true
 daft.workspace = true
 dpd-client.workspace = true

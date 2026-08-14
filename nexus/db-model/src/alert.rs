@@ -9,7 +9,9 @@ use chrono::{DateTime, Utc};
 use db_macros::Asset;
 use nexus_db_schema::schema::alert;
 use nexus_types::alert::AlertPayload;
+use nexus_types::external_api;
 use nexus_types::fm::case;
+use nexus_types::identity::Asset;
 use omicron_common::api::external::Error;
 use omicron_uuid_kinds::AlertUuid;
 use omicron_uuid_kinds::CaseKind;
@@ -122,6 +124,29 @@ impl Alert {
             payload: payload.clone(),
             num_dispatched: 0,
             case_id: Some(case_id.into()),
+        }
+    }
+}
+
+impl From<Alert> for external_api::alert::Alert {
+    fn from(alert: Alert) -> Self {
+        let identity = alert.identity();
+        let Alert {
+            identity: _, // we already converted this above
+            class,
+            version,
+            payload: alert,
+            // internal dispatch data is not included in the API model
+            num_dispatched: _,
+            time_dispatched: _,
+            // internal FM case ID is not included in the API model.
+            case_id: _,
+        } = alert;
+        Self {
+            identity,
+            class: class.to_string(),
+            version: version.into(),
+            alert,
         }
     }
 }
