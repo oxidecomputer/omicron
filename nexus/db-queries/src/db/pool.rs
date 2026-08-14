@@ -24,7 +24,20 @@ use std::collections::BTreeMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Duration;
 use tokio::sync::watch;
+
+// TCP KeepAlive parameters used for connections to CockroachDB.
+//
+// These values result in terminating connections after 2 minutes of being
+// unable to reach the other side.
+//
+// Recall that TCP KeepAlive is processed by the networking stack without the
+// help of the application.  No amount of database slowness should trigger these
+// timeouts.
+const CFG_TCP_KEEPIDLE: Duration = Duration::from_secs(30);
+const CFG_TCP_KEEPINTVL: Duration = Duration::from_secs(10);
+const CFG_TCP_KEEPCNT: u32 = 12;
 
 /// Wrapper around a database connection pool.
 ///
@@ -78,17 +91,18 @@ fn make_postgres_connector(
     // - Disallowing full table scans in its implementation of "on_acquire"
     // - Creating async_bb8_diesel connections that also wrap DTraceConnections.
     //
-    // We also enable TCP keepalive to identify dead network connections in
-    // about 60 seconds (30 second initial idle time plus 6 probes, each 5
-    // seconds apart).
+    // We also enable TCP keepalive as configured above.
     let user = "root";
     let db = "omicron";
+    let tcp_keepidle_str = CFG_TCP_KEEPIDLE.as_secs().to_string();
+    let tcp_keepintvl_str = CFG_TCP_KEEPINTVL.as_secs().to_string();
+    let tcp_keepcnt_str = CFG_TCP_KEEPCNT.to_string();
     let args = vec![
         ("sslmode", "disable"),
         ("keepalives", "1"),
-        ("keepalives_idle", "30"),
-        ("keepalives_interval", "5"),
-        ("keepalives_count", "6"),
+        ("keepalives_idle", &tcp_keepidle_str),
+        ("keepalives_interval", &tcp_keepintvl_str),
+        ("keepalives_count", &tcp_keepcnt_str),
     ];
 
     Arc::new(DieselPgConnector::new(
@@ -399,7 +413,11 @@ impl Drop for ClaimReleaser {
 mod test {
     use super::*;
     use crate::db::pub_test_utils::crdb;
+    use camino::Utf8Path;
     use omicron_test_utils::dev;
+    use socket2::Socket;
+    use std::os::fd::FromRawFd;
+    use std::os::fd::IntoRawFd;
 
     #[tokio::test]
     async fn test_pool_can_be_terminated() {
@@ -428,6 +446,125 @@ mod test {
             let pool = Pool::new_single_host(&log, &cfg);
             drop(pool);
         }
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    /// Verifies that connections created by the pool do in practice have the
+    /// right TCP keep-alive options set.
+    #[cfg(target_os = "illumos")]
+    #[tokio::test]
+    async fn test_keep_alive_set() {
+        // Set up the test database.
+        let logctx = dev::test_setup_log("test_pool_drop_does_not_panic");
+        let log = &logctx.log;
+        let mut db = crdb::test_setup_database(log).await;
+
+        // Create a pool.  Make sure there's a connection established to the
+        // database.
+        let cfg = crate::db::Config { url: db.pg_config().clone() };
+        let pool = Pool::new_single_host(&log, &cfg);
+        let _conn = pool.claim().await.expect("established db connection");
+        let peer_addr = db.pg_config().address();
+
+        // We want to know that the underlying socket for this connection really
+        // has TCP keep-alive configured correctly.  (One might also like to
+        // verify that it *works* correctly, but that's beyond the scope of this
+        // test suite.)  To do that, we want to look at the configuration on the
+        // fd itself.  Unfortunately, Diesel doesn't make that available to us.
+        //
+        // Here's where things get gross.  We're going to look at all open fds
+        // in this process to see which one is our connection.  Beware that
+        // other components in this process could be opening and closing fds as
+        // we iterate them.  And the ones we find could be any kind of fd.  So
+        // we'll ignore all errors here.  Absurdity aside, we can say a few
+        // things:
+        //
+        // 1. The fd from our connection must be in this list.  We should be
+        //    able to call `getpeername()` and `getsockopt()` on it without
+        //    errors.
+        //
+        // 2. For any fd that's not from this pool, either it's not open by the
+        //    time we get to it, or `getpeername()` should fail on it (because
+        //    it's not a socket), or the peer must not be our CockroachDB
+        //    instance.  That's because nothing else should spontaneously
+        //    connect to the test database that we just set up.
+        //
+        // Thus, as long as we ignore most errors, we should find at least one
+        // fd that's correctly set up.
+        let mut found = false;
+        let fd_dirents = Utf8Path::new("/proc/self/fd")
+            .read_dir_utf8()
+            .expect("read /proc/self/fd");
+        for maybe_dirent in fd_dirents {
+            // Ignore failures traversing the directory.
+            let Ok(dirent) = maybe_dirent else {
+                continue;
+            };
+
+            // Ignore anything that doesn't parse as a number.  It's not an fd.
+            let maybe_fd_str = dirent.file_name();
+            let Ok(fd_num) = i32::from_str_radix(maybe_fd_str, 10) else {
+                continue;
+            };
+
+            // See if it's a networking socket connected to the right address.
+            // unsafe(): we're not doing any mutating operations and we
+            // correctly handle read operations on a closed fd or one that's
+            // different than the fd we're looking for.
+            let socket = unsafe { Socket::from_raw_fd(fd_num) };
+            // Ignore anything that's not a socket with a valid peer address.
+            let Ok(socket_peer) = socket.peer_addr() else {
+                // `FromRawFd` is ambiguous about whether `self` (`Socket` in
+                // this case) becomes responsible for closing the fd.  To be
+                // safe, use `IntoRawFd` to get it back out.
+                let _ = socket.into_raw_fd();
+                continue;
+            };
+
+            // Ignore anything whose peer is not our CockroachDB server.
+            if socket_peer != peer_addr.into() {
+                // See above.
+                let _ = socket.into_raw_fd();
+                continue;
+            };
+
+            // We've finally found an fd corresponding to a socket connected to
+            // our CockroachDB server.  We assume this is from our pool.
+            // (Otherwise, how did somebody discover our address to make a
+            // connection to it?)  It must therefore have TCP keepalive set.
+            println!("found client fd: {fd_num}");
+
+            let so_keepalive =
+                socket.keepalive().expect("failed to read SO_KEEPALIVE");
+            assert!(
+                so_keepalive,
+                "socket does not have SO_KEEPALIVE set to true"
+            );
+
+            let tcp_keepidle =
+                socket.keepalive_time().expect("failed to read TCP_KEEPIDLE");
+            assert_eq!(tcp_keepidle, CFG_TCP_KEEPIDLE);
+
+            let tcp_keepintvl = socket
+                .keepalive_interval()
+                .expect("failed to read TCP_KEEPINTVL");
+            assert_eq!(tcp_keepintvl, CFG_TCP_KEEPINTVL);
+
+            let tcp_keepcnt =
+                socket.keepalive_retries().expect("failed to read TCP_KEEPCNT");
+            assert_eq!(tcp_keepcnt, CFG_TCP_KEEPCNT);
+
+            // See above.
+            let _ = socket.into_raw_fd();
+            found = true;
+            break;
+        }
+
+        if !found {
+            panic!("found no fd matching our database connection");
+        }
+
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
