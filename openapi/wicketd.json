@@ -319,29 +319,6 @@
             "$ref": "#/components/responses/Error"
           }
         }
-      },
-      "post": {
-        "summary": "Run rack setup.",
-        "description": "Will return an error if not all of the rack setup configuration has been populated.",
-        "operationId": "post_run_rack_setup",
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RackInitUuid"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
       }
     },
     "/rack-setup/config": {
@@ -643,35 +620,6 @@
         "summary": "Instruct wicketd to reload its SMF config properties.",
         "description": "The only expected client of this endpoint is `curl` from wicketd's SMF `refresh` method, but other clients hitting it is harmless.",
         "operationId": "post_reload_config",
-        "responses": {
-          "204": {
-            "description": "resource updated"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/repository": {
-      "put": {
-        "summary": "Upload a TUF repository to the server.",
-        "description": "At any given time, wicketd will keep at most one TUF repository in memory. Any previously-uploaded repositories will be discarded.",
-        "operationId": "put_repository",
-        "requestBody": {
-          "content": {
-            "application/octet-stream": {
-              "schema": {
-                "type": "string",
-                "format": "binary"
-              }
-            }
-          },
-          "required": true
-        },
         "responses": {
           "204": {
             "description": "resource updated"

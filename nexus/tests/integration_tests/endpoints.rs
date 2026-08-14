@@ -1525,6 +1525,9 @@ pub static DEMO_TARGET_RELEASE: LazyLock<update::SetTargetReleaseParams> =
     });
 
 // Alerts
+pub static ALERTS_URL: &'static str = "/v1/alerts";
+pub static DEMO_ALERT_URL: &'static str =
+    "/v1/alerts/001de000-7768-4000-8000-000000000001";
 pub static ALERT_CLASSES_URL: &'static str = "/v1/alert-classes";
 pub static ALERT_RECEIVERS_URL: &'static str = "/v1/alert-receivers";
 pub static WEBHOOK_RECEIVERS_URL: &'static str = "/v1/webhook-receivers";
@@ -3574,6 +3577,18 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                 ],
             },
             // Alerts
+            VerifyEndpoint {
+                url: &ALERTS_URL,
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Get],
+            },
+            VerifyEndpoint {
+                url: &DEMO_ALERT_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Get],
+            },
             VerifyEndpoint {
                 url: &WEBHOOK_RECEIVERS_URL,
                 visibility: Visibility::Public,

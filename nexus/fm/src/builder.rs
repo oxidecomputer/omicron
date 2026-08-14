@@ -260,10 +260,11 @@ mod tests {
 
     /// Build a minimal `Input` with no parent sitrep and an empty inventory.
     fn make_input() -> Input {
-        let (input, _) =
-            Input::builder(None, make_collection(), Arc::new(IdOrdMap::new()))
-                .expect("no parent sitrep, so builder should succeed")
-                .build();
+        let (input, _) = Input::builder(None, make_collection())
+            .expect("no parent sitrep, so builder should succeed")
+            .with_empty_defaults()
+            .build()
+            .expect("all inputs provided");
         input
     }
 
@@ -294,13 +295,12 @@ mod tests {
             version: 1,
             time_made_current: chrono::Utc::now(),
         };
-        let (input, _) = Input::builder(
-            Some(Arc::new((parent_version, parent))),
-            inv,
-            Arc::new(IdOrdMap::new()),
-        )
-        .expect("parent and child share an inventory")
-        .build();
+        let (input, _) =
+            Input::builder(Some(Arc::new((parent_version, parent))), inv)
+                .expect("parent and child share an inventory")
+                .with_empty_defaults()
+                .build()
+                .expect("all inputs provided");
         input
     }
 
@@ -523,12 +523,12 @@ mod tests {
         let mut builder_inputs = crate::analysis_input::Input::builder(
             Some(Arc::new((parent_version, parent))),
             inv,
-            Arc::new(IdOrdMap::new()),
         )
-        .unwrap();
+        .unwrap()
+        .with_empty_defaults();
         // Marker exists, so carry-forward will drop the case.
         builder_inputs.add_marked_alert_requests([alert_id]);
-        let (input, _) = builder_inputs.build();
+        let (input, _) = builder_inputs.build().expect("all inputs provided");
 
         let sitrep = build_sitrep(SitrepBuilder::new(&logctx.log, &input));
         assert_eq!(
@@ -598,12 +598,12 @@ mod tests {
         let mut builder_inputs = crate::analysis_input::Input::builder(
             Some(Arc::new((parent_version, parent))),
             inv,
-            Arc::new(IdOrdMap::new()),
         )
-        .unwrap();
+        .unwrap()
+        .with_empty_defaults();
         // Marker exists, so carry-forward will drop the case.
         builder_inputs.add_marked_support_bundle_requests([bundle_id]);
-        let (input, _) = builder_inputs.build();
+        let (input, _) = builder_inputs.build().expect("all inputs provided");
 
         let sitrep = build_sitrep(SitrepBuilder::new(&logctx.log, &input));
         assert_eq!(
