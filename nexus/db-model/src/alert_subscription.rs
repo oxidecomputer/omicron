@@ -112,22 +112,7 @@ impl AlertSubscriptionKind {
 
         match self {
             Self::Exact(class) => Ok(Either::Left(std::iter::once(*class))),
-            Self::Glob(glob) => {
-                let regex = regex::Regex::new(&glob.regex).map_err(
-                    |error| Error::InternalError {
-                        internal_message: format!(
-                            "valid alert class glob {:?} produced an invalid \
-                             regular expression: {error}",
-                            glob.glob,
-                        ),
-                    },
-                )?;
-                let iter = AlertClass::ALL_CLASSES
-                    .iter()
-                    .copied()
-                    .filter(move |class| regex.is_match(class.as_str()));
-                Ok(Either::Right(iter))
-            }
+            Self::Glob(glob) => glob.matching_classes().map(Either::Right),
         }
     }
 }
@@ -256,6 +241,25 @@ impl AlertGlob {
         regex.push('$'); // End anchor
 
         Ok(regex)
+    }
+
+    pub fn matching_classes(
+        &self,
+    ) -> Result<impl Iterator<Item = AlertClass>, Error> {
+        let regex = regex::Regex::new(&self.regex).map_err(|error| {
+            Error::InternalError {
+                internal_message: format!(
+                    "valid alert class glob {:?} produced an invalid \
+                     regular expression: {error}",
+                    self.glob,
+                ),
+            }
+        })?;
+        let iter = AlertClass::ALL_CLASSES
+            .iter()
+            .copied()
+            .filter(move |class| regex.is_match(class.as_str()));
+        Ok(iter)
     }
 }
 
