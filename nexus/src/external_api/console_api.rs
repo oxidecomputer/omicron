@@ -9,7 +9,7 @@
 //! these routes directly from the external API.
 
 use crate::context::ApiContext;
-use camino::{Utf8Path, Utf8PathBuf};
+use camino::{Utf8Component, Utf8Path, Utf8PathBuf};
 use dropshot::Body;
 use dropshot::{HttpError, Path, RequestContext};
 use futures::TryStreamExt;
@@ -388,7 +388,8 @@ async fn serve_static(
     let file = File::from_std(file);
     let metadata = file.metadata().await.map_err(|e| {
         not_found(&format!(
-            "accessing console asset: {}",
+            "accessing {:?}: {}",
+            path,
             InlineErrorChain::new(&e)
         ))
     })?;
@@ -438,10 +439,10 @@ fn not_found(internal_msg: &str) -> HttpError {
     HttpError::for_not_found(None, internal_msg.to_string())
 }
 
-/// Open `path` beneath `root_dir` without following symlinks.
-///
-/// WARNING: This function assumes that `..` path segments have already been
-/// found and rejected.
+/// Open `path` beneath `root_dir` without following symlinks. Reject paths
+/// containing anything other than normal segments (e.g., `..` or a leading
+/// `/`). Dropshot is expected to have rejected those already, but we don't
+/// rely on that here.
 fn find_file(
     path: &Utf8Path,
     root_dir: &Utf8Path,
@@ -452,9 +453,12 @@ fn find_file(
         Mode::empty(),
     )
     .map_err(open_error)?;
-    let mut segments = path.into_iter().peekable();
+    let mut segments = path.components().peekable();
 
-    while let Some(segment) = segments.next() {
+    while let Some(component) = segments.next() {
+        let Utf8Component::Normal(segment) = component else {
+            return Err(not_found("illegal path segment"));
+        };
         let base = OFlag::O_RDONLY | OFlag::O_NOFOLLOW | OFlag::O_CLOEXEC;
         let flags = if segments.peek().is_some() {
             // Intermediate segments must be directories; O_DIRECTORY makes
@@ -485,7 +489,7 @@ fn open_error(error: Errno) -> HttpError {
     match error {
         Errno::ELOOP => not_found("attempted to follow a symlink"),
         Errno::ENOTDIR => not_found("expected a directory"),
-        _ => not_found("failed to get file metadata"),
+        _ => not_found("failed to open file"),
     }
 }
 
@@ -523,7 +527,7 @@ mod test {
             find_file(Utf8Path::new("tests/static/nonexistent.svg"), &root)
                 .unwrap_err();
         assert_eq!(error.status_code, StatusCode::NOT_FOUND);
-        assert_eq!(error.internal_message, "failed to get file metadata",);
+        assert_eq!(error.internal_message, "failed to open file");
     }
 
     #[test]
@@ -535,7 +539,17 @@ mod test {
         )
         .unwrap_err();
         assert_eq!(error.status_code, StatusCode::NOT_FOUND);
-        assert_eq!(error.internal_message, "failed to get file metadata")
+        assert_eq!(error.internal_message, "failed to open file")
+    }
+
+    #[test]
+    fn test_find_file_404_on_illegal_segment() {
+        let root = current_dir();
+        for path in ["tests/static/assets/../assets/hello.txt", "/etc/passwd"] {
+            let error = find_file(Utf8Path::new(path), &root).unwrap_err();
+            assert_eq!(error.status_code, StatusCode::NOT_FOUND);
+            assert_eq!(error.internal_message, "illegal path segment");
+        }
     }
 
     #[test]
