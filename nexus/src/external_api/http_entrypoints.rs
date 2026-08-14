@@ -8913,6 +8913,58 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
+    async fn alert_list(
+        rqctx: RequestContext<Self::Context>,
+        pag_params: Query<PaginatedByTimeAndId<alert::AlertListParams>>,
+    ) -> Result<HttpResponseOk<ResultsPage<alert::Alert>>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let query = pag_params.into_inner();
+            let scan_params = ScanByTimeAndId::from_query(&query)?;
+            let pag_params = data_page_params_for(&rqctx, &query)?;
+            let alerts = nexus
+                .alert_list(&opctx, &scan_params.selector, &pag_params)
+                .await?;
+
+            Ok(HttpResponseOk(ScanByTimeAndId::results_page(
+                &query,
+                alerts,
+                &|_, alert: &alert::Alert| {
+                    (alert.identity.time_created, alert.identity.id)
+                },
+            )?))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn alert_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<alert::AlertSelector>,
+    ) -> Result<HttpResponseOk<alert::Alert>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let selector = path_params.into_inner();
+            let (_, alert) =
+                nexus.alert_lookup(&opctx, selector)?.fetch().await?;
+            Ok(HttpResponseOk(alert.into()))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
     async fn alert_class_list(
         rqctx: RequestContext<Self::Context>,
         pag_params: Query<

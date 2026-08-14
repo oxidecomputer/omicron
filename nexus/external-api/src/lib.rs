@@ -86,6 +86,7 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyy_mm_dd_nn, IDENT),
+    (2026_08_14_00, ALERT_LIST),
     (2026_08_12_00, SLED_SLOT),
     (2026_07_31_00, SET_TARGET_RELEASE_UPDATE_RECOVERY_DOCS),
     (2026_07_28_00, INTERNET_GATEWAY_CASCADE_DOCS),
@@ -9062,6 +9063,33 @@ pub trait NexusExternalApi {
     ) -> Result<Response<Body>, HttpError>;
 
     // Alerts
+
+    /// List alerts
+    ///
+    /// Alerts may be filtered by alert class or alert class glob and by an
+    /// inclusive creation time range.
+    #[endpoint {
+        method = GET,
+        path = "/v1/alerts",
+        tags = ["system/alerts"],
+        versions = VERSION_ALERT_LIST..
+    }]
+    async fn alert_list(
+        rqctx: RequestContext<Self::Context>,
+        pagination: Query<PaginatedByTimeAndId<latest::alert::AlertListParams>>,
+    ) -> Result<HttpResponseOk<ResultsPage<latest::alert::Alert>>, HttpError>;
+
+    /// Fetch alert
+    #[endpoint {
+        method = GET,
+        path = "/v1/alerts/{alert_id}",
+        tags = ["system/alerts"],
+        versions = VERSION_ALERT_LIST..
+    }]
+    async fn alert_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::alert::AlertSelector>,
+    ) -> Result<HttpResponseOk<latest::alert::Alert>, HttpError>;
 
     /// List alert classes
     #[endpoint {
