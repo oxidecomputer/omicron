@@ -9220,6 +9220,7 @@ dependencies = [
  "nexus-test-utils-macros",
  "nexus-types",
  "nexus-types-versions",
+ "nix 0.31.2",
  "ntp-admin-client",
  "num-integer",
  "omicron-cockroach-metrics",
