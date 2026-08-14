@@ -81,6 +81,7 @@ fn main() {
                 system_description: None,
                 management_addrs: None,
             }),
+            allow_ddm_traffic: false,
         }])
         .expect("port list is non-empty"),
         bgp: vec![BgpConfig {
