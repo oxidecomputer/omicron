@@ -137,3 +137,135 @@ impl backend::Connector for DieselPgConnector {
         })
     }
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use omicron_test_utils::dev;
+    use qorb::backend::Connector;
+    use socket2::Socket;
+    use std::fs;
+    use std::net::{IpAddr, SocketAddr};
+    use std::os::unix::io::{FromRawFd, IntoRawFd, RawFd};
+    use std::time::Duration;
+
+    // Regression test for https://github.com/oxidecomputer/omicron/issues/10668.
+    // Finds the database's connection file descriptor (fd) by matching its
+    // peer address and reads keepalive settings from the socket.
+    #[tokio::test]
+    async fn connection_has_real_tcp_keepalive_set() {
+        let logctx =
+            dev::test_setup_log("connection_has_real_tcp_keepalive_set");
+        let mut db = dev::test_setup_database(
+            &logctx.log,
+            dev::StorageSource::DoNotPopulate,
+        )
+        .await;
+
+        let db_url_str = db.pg_config().to_string();
+        let parsed = url::Url::parse(&db_url_str)
+            .expect("pg_config() did not produce a parseable URL");
+        let ip = match parsed.host() {
+            Some(url::Host::Ipv4(v4)) => IpAddr::V4(v4),
+            Some(url::Host::Ipv6(v6)) => IpAddr::V6(v6),
+            other => panic!(
+                "expected pg_config() host to be a literal IP, got {other:?}"
+            ),
+        };
+        let port = parsed.port().expect("pg_config() URL has no port");
+        let addr = SocketAddr::new(ip, port);
+        let backend = backend::Backend { address: addr };
+
+        let connector = DieselPgConnector::new(
+            &logctx.log,
+            DieselPgConnectorArgs {
+                user: "root",
+                db: "omicron",
+                args: vec![
+                    ("sslmode", "disable"),
+                    ("keepalives", "1"),
+                    ("keepalives_idle", "10"),
+                    ("keepalives_interval", "10"),
+                    ("keepalives_count", "12"),
+                ],
+            },
+        );
+
+        let _conn = connector
+            .connect(&backend)
+            .await
+            .expect("failed to establish connection");
+
+        // Fail if multiple connections are open in the process.
+        // Prevents silently using the wrong socket.
+        let fd = match find_fds_with_peer_addr(addr).as_slice() {
+            [fd] => *fd,
+            [] => panic!("no open fd found with peer address {addr}"),
+            multiple => panic!(
+                "found {} fds with peer address {addr}, expected 1",
+                multiple.len()
+            ),
+        };
+
+        let (idle, interval, retries) = read_keepalive(fd)
+            .expect("getsockopt failed on matched connection fd");
+
+        assert!(
+            idle <= Duration::from_secs(30),
+            "keepalive idle too high: {idle:?}"
+        );
+        assert!(
+            interval <= Duration::from_secs(10),
+            "keepalive interval too high: {interval:?}"
+        );
+        assert!(retries >= 3, "keepalive retry count too low: {retries}");
+
+        db.cleanup().await.expect("failed to clean up test database");
+        logctx.cleanup_successful();
+    }
+
+    /// Returns every open fd in this process whose peer address is `addr`.
+    fn find_fds_with_peer_addr(addr: SocketAddr) -> Vec<RawFd> {
+        let Ok(entries) = fs::read_dir("/proc/self/fd") else {
+            return Vec::new();
+        };
+        let mut matches = Vec::new();
+        for entry in entries.flatten() {
+            let Ok(fd) = entry.file_name().to_string_lossy().parse::<RawFd>()
+            else {
+                continue;
+            };
+
+            // Read the opened fd in this process. Don't close socket we don't
+            // own. Return ownership with into_raw_fd.
+            let socket = unsafe { Socket::from_raw_fd(fd) };
+            let matched = socket
+                .peer_addr()
+                .ok()
+                .and_then(|peer| peer.as_socket())
+                .is_some_and(|sock_addr| sock_addr == addr);
+            let _ = socket.into_raw_fd();
+
+            if matched {
+                matches.push(fd);
+            }
+        }
+        matches
+    }
+
+    /// Read TCP keepalive counts for a raw fd.
+    fn read_keepalive(fd: RawFd) -> std::io::Result<(Duration, Duration, u32)> {
+        // Read the opened fd in this process. Don't close socket we don't
+        // own. Return ownership with into_raw_fd.
+        let socket = unsafe { Socket::from_raw_fd(fd) };
+        let result = (|| -> std::io::Result<(Duration, Duration, u32)> {
+            Ok((
+                socket.keepalive_time()?,
+                socket.keepalive_interval()?,
+                socket.keepalive_retries()?,
+            ))
+        })();
+        let _ = socket.into_raw_fd();
+        result
+    }
+}

@@ -7492,6 +7492,7 @@ dependencies = [
  "sled-hardware-types",
  "slog",
  "slog-error-chain",
+ "socket2 0.5.10",
  "static_assertions",
  "steno",
  "strum 0.27.2",
