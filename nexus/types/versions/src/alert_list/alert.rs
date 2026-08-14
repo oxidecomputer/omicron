@@ -11,9 +11,8 @@ use crate::v2025_11_20_00::asset::AssetIdentityMetadata;
 
 /// An alert.
 ///
-/// Alerts represent edge-triggered notifications of an event that occurred in
-/// the system at a point in time. See the guide-level documentation on alerts for
-/// details.
+/// Alerts provide notifications about events that occurred in the system at a
+/// point in time. See the guide-level documentation on alerts for details.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct Alert {
     #[serde(flatten)]
@@ -27,21 +26,25 @@ pub struct Alert {
     ///
     /// Alert schemas are versioned on a per-alert-class basis. The schema
     /// version for a particular alert class does not correspond to an Oxide API
-    /// version. Clients should expect to encounter earlier schema versions for
-    /// a given alert class, if the alert was recorded on an earlier Oxide
-    /// system software version.
+    /// version. Clients should expect to encounter earlier schema versions when
+    /// retrieving alerts recorded by an earlier version of the system software.
+    ///
+    /// See the guide-level documentation on alerts for details.
     pub version: u32,
     /// The alert's data payload.
     ///
-    /// The schema for this object is determined based on the alert class and
-    /// version.
+    /// The schema for this object depends on the alert class and version.
     pub alert: serde_json::Value,
 }
 
 /// Query parameters for listing alerts
 #[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
 pub struct AlertListParams {
-    /// Optional alert class or glob pattern used to filter alerts
+    /// Optional alert class or glob pattern used to filter alerts.
+    ///
+    /// If this is included, only alerts with the specified class or matching
+    /// the glob pattern (as appropriate) will be returned. Otherwise, alerts of
+    /// all classes will be returned.
     ///
     /// See the guide-level documentation on alerts for details on alert classes
     /// and alert class glob patterns.
