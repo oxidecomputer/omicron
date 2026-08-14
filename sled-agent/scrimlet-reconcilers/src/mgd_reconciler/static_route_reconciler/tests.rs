@@ -942,12 +942,12 @@ impl TestInput {
             }
         }
 
-        MgdStaticRouteReconcilerStatus::Success {
+        MgdStaticRouteReconcilerStatus::Complete {
             unchanged,
-            deleted_v4,
-            deleted_v6,
-            added_v4,
-            added_v6,
+            delete_v4_result: Ok(deleted_v4),
+            delete_v6_result: Ok(deleted_v6),
+            add_v4_result: Ok(added_v4),
+            add_v6_result: Ok(added_v6),
         }
     }
 }

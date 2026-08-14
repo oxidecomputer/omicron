@@ -10,6 +10,7 @@ use std::{
     net::{IpAddr, Ipv6Addr},
 };
 
+use iddqd::IdOrdMap;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize, Serializer};
 use sled_agent_types_versions::v30::early_networking::RouterPeerIpAddr;
@@ -20,9 +21,12 @@ use sled_agent_types_versions::{
     v20::early_networking::{BgpConfig, RouterLifetimeConfig},
 };
 
-use crate::v1::rack_setup::{
-    BgpAuthKeyId, UserSpecifiedImportExportPolicy, UserSpecifiedRouterPeerAddr,
-    UserSpecifiedUplinkAddressConfig,
+use crate::{
+    v1::rack_setup::{
+        BgpAuthKeyId, UserSpecifiedImportExportPolicy,
+        UserSpecifiedRouterPeerAddr, UserSpecifiedUplinkAddressConfig,
+    },
+    v2::rack_setup::ServiceIpPoolConfig,
 };
 
 // Re-exports of types from omicron-common that should never change.
@@ -405,22 +409,21 @@ impl From<crate::v1::rack_setup::UserSpecifiedRackNetworkConfig>
     }
 }
 
-impl From<crate::v1::rack_setup::PutRssUserConfigInsensitive>
+impl From<crate::v2::rack_setup::PutRssUserConfigInsensitive>
     for PutRssUserConfigInsensitive
 {
-    fn from(old: crate::v1::rack_setup::PutRssUserConfigInsensitive) -> Self {
+    fn from(old: crate::v2::rack_setup::PutRssUserConfigInsensitive) -> Self {
         Self {
             bootstrap_sleds: old.bootstrap_sleds,
             ntp_servers: old.ntp_servers,
             dns_servers: old.dns_servers,
-            internal_services_ip_pool_ranges: old
-                .internal_services_ip_pool_ranges,
             external_dns_ips: old.external_dns_ips,
             external_dns_zone_name: old.external_dns_zone_name,
             rack_network_config: old.rack_network_config.into(),
             allowed_source_ips: old.allowed_source_ips,
             external_jumbo_frames_opt_in_enabled: old
                 .external_jumbo_frames_opt_in_enabled,
+            service_ip_pools: old.service_ip_pools,
         }
     }
 }
@@ -430,8 +433,14 @@ impl From<crate::v1::rack_setup::PutRssUserConfigInsensitive>
 /// It is provided by the operator uploading a TOML file. Sensitive values
 /// (certificates, the recovery password hash, and BGP authentication keys) are
 /// set separately.
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
+///
+/// This version replaces the flat `internal_services_ip_pool_ranges` of the
+/// initial version with fully-specified [`service_ip_pools`], letting operators
+/// name and describe each pool.
+///
+/// [`service_ip_pools`]: Self::service_ip_pools
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
+#[serde(try_from = "UnvalidatedPutRssUserConfigInsensitive")]
 pub struct PutRssUserConfigInsensitive {
     /// The slot numbers of the sleds to bring up during RSS.
     ///
@@ -442,8 +451,8 @@ pub struct PutRssUserConfigInsensitive {
     pub ntp_servers: Vec<String>,
     /// The external DNS server addresses.
     pub dns_servers: Vec<IpAddr>,
-    /// Ranges of the service IP pool which may be used for internal services.
-    pub internal_services_ip_pool_ranges: Vec<IpRange>,
+    /// The service IP pools which may be used for internal services.
+    pub service_ip_pools: IdOrdMap<ServiceIpPoolConfig>,
     /// Service IP addresses on which external DNS servers are run.
     pub external_dns_ips: Vec<IpAddr>,
     /// The DNS zone name delegated to the rack for external DNS.
@@ -455,4 +464,48 @@ pub struct PutRssUserConfigInsensitive {
     /// Enable the fleet-wide jumbo-frames opt-in.
     #[serde(default)]
     pub external_jumbo_frames_opt_in_enabled: bool,
+}
+
+// Shadow of `PutRssUserConfigInsensitive` that deserializes the pools as a
+// plain `Vec` (the natural TOML/JSON array shape) before the `TryFrom` folds
+// them into an `IdOrdMap`, failing on duplicate pool names.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct UnvalidatedPutRssUserConfigInsensitive {
+    bootstrap_sleds: BTreeSet<u16>,
+    ntp_servers: Vec<String>,
+    dns_servers: Vec<IpAddr>,
+    service_ip_pools: Vec<ServiceIpPoolConfig>,
+    external_dns_ips: Vec<IpAddr>,
+    external_dns_zone_name: String,
+    rack_network_config: UserSpecifiedRackNetworkConfig,
+    allowed_source_ips: AllowedSourceIps,
+    #[serde(default)]
+    external_jumbo_frames_opt_in_enabled: bool,
+}
+
+impl TryFrom<UnvalidatedPutRssUserConfigInsensitive>
+    for PutRssUserConfigInsensitive
+{
+    type Error = String;
+
+    fn try_from(
+        value: UnvalidatedPutRssUserConfigInsensitive,
+    ) -> Result<Self, Self::Error> {
+        let service_ip_pools =
+            IdOrdMap::from_iter_unique(value.service_ip_pools)
+                .map_err(|e| format!("duplicate service IP pool name: {e}"))?;
+        Ok(Self {
+            bootstrap_sleds: value.bootstrap_sleds,
+            ntp_servers: value.ntp_servers,
+            dns_servers: value.dns_servers,
+            service_ip_pools,
+            external_dns_ips: value.external_dns_ips,
+            external_dns_zone_name: value.external_dns_zone_name,
+            rack_network_config: value.rack_network_config,
+            allowed_source_ips: value.allowed_source_ips,
+            external_jumbo_frames_opt_in_enabled: value
+                .external_jumbo_frames_opt_in_enabled,
+        })
+    }
 }

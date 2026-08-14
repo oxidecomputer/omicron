@@ -28,7 +28,6 @@ use sled_agent_types::early_networking::LinkSpeed;
 use sled_agent_types::early_networking::MaxPathConfig;
 use sled_agent_types::early_networking::NumberedRouter;
 use sled_agent_types::early_networking::RouterLifetimeConfig;
-use sled_agent_types::early_networking::SwitchSlot;
 use sled_agent_types::early_networking::UnnumberedRouter;
 use std::str::FromStr;
 
@@ -570,7 +569,7 @@ async fn test_port_settings_basic_v6_crud(ctx: &ControlPlaneTestContext) {
 
     // Create port settings
     let settings_name =
-        Name::from_str("nacelle").expect("nacell should be a valid name");
+        Name::from_str("nacelle").expect("should be a valid name");
     let mut settings =
         SwitchPortSettingsCreate::new(IdentityMetadataCreateParams {
             name: settings_name.clone(),
@@ -642,12 +641,6 @@ async fn test_port_settings_basic_v6_crud(ctx: &ControlPlaneTestContext) {
     assert_eq!(route.dst, IpNet::from_str("2000::/64").unwrap());
     assert_eq!(&route.gw.to_string(), "2000::1");
 
-    let mgd = &ctx.mgd[&SwitchSlot::Switch0];
-    let mgd_client = mg_admin_client::Client::new(
-        &format!("http://[::1]:{}", mgd.port),
-        ctx.logctx.log.clone(),
-    );
-
     // apply port settings
     let apply_settings = SwitchPortApplySettings {
         port_settings: NameOrId::Name(settings_name.clone()),
@@ -676,24 +669,20 @@ async fn test_port_settings_basic_v6_crud(ctx: &ControlPlaneTestContext) {
     .await
     .unwrap();
 
-    // wait for routes to be reconciled to mgd
-    for _ in 0..20 {
-        tokio::time::sleep(std::time::Duration::from_secs(10)).await;
-        match mgd_client.static_list_v6_routes().await {
-            Ok(routes) => {
-                let n = routes.len();
-                if n == 1 {
-                    return;
-                } else {
-                    println!("expected 1 route got {n}")
-                }
-            }
-            Err(e) => {
-                println!("failed to contact mgd: {e:?}");
-            }
-        }
-    }
-    panic!("expected number of routes not found");
+    // TODO-cleanup We'd like to confirm that the `sync_switch_configuration`
+    // background task propagates the changes requested above out to the
+    // bootstore via sled-agent, but in the test suite, that propagation fails
+    // for unrelated reasons:
+    // <https://github.com/oxidecomputer/omicron/issues/10958>.
+    //
+    // As a fallback, it'd be nice to check that `sync_switch_configuration` at
+    // least persists the new config into CRDB, but the task gates that on
+    // having successfully contacted at least one sled-agent, so this also is
+    // blocked by the above issue. For now, we've manually confirmed that the
+    // above route is present in the request `sync_switch_configuration`
+    // attempts to send by inspecting the logfile (where the request is included
+    // alongside the connection error from trying to contact a nonexistent
+    // sled-agent).
 }
 
 #[nexus_test]

@@ -167,7 +167,7 @@ version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "40c48f72fd53cd289104fc64099abca73db4166ad86ea0b4341abe65af83dadc"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -178,7 +178,7 @@ checksum = "291e6a250ff86cd4a820112fb8898808a366d8f9f58ce16d1f538353ad55747d"
 dependencies = [
  "anstyle",
  "once_cell_polyfill",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -953,6 +953,7 @@ name = "bootstrap-agent-lockstep-types"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "chrono",
  "iddqd",
  "omicron-common",
  "omicron-passwords",
@@ -962,8 +963,9 @@ dependencies = [
  "serde",
  "sled-agent-types",
  "sled-hardware-types",
+ "slog",
  "strum 0.27.2",
- "thiserror 2.0.18",
+ "wicketd-commission-types",
 ]
 
 [[package]]
@@ -1715,7 +1717,7 @@ version = "3.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "faf9468729b8cbcea668e36183cb69d317348c2e08e994829fb56ebfdfbaac34"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
@@ -1989,7 +1991,7 @@ dependencies = [
  "omicron-workspace-hack",
  "serde_json",
  "sha2 0.10.9",
- "tufaceous-artifact 0.1.0",
+ "tufaceous-artifact 0.2.0",
  "uuid",
 ]
 
@@ -3146,7 +3148,7 @@ dependencies = [
 [[package]]
 name = "dlpi"
 version = "0.2.0"
-source = "git+https://github.com/oxidecomputer/dlpi-sys#d9645f8d61187e76384474b1100f6537fb644993"
+source = "git+https://github.com/oxidecomputer/dlpi-sys#b0887ece420ff6d641fb62e4a6cbd8788fc822d1"
 dependencies = [
  "libc",
  "libdlpi-sys",
@@ -3846,7 +3848,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -4316,7 +4318,7 @@ dependencies = [
  "termios",
  "tokio",
  "tokio-tungstenite 0.23.1",
- "tufaceous-artifact 0.1.0",
+ "tufaceous-artifact 0.2.0",
  "uuid",
 ]
 
@@ -5400,7 +5402,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2 0.6.3",
+ "socket2 0.5.10",
  "system-configuration",
  "tokio",
  "tower-layer",
@@ -5609,7 +5611,7 @@ checksum = "a4b8219c9c8c2c844dfd5772ec0bda5cd2a81d78c4579aba97f699721d46ab24"
 [[package]]
 name = "illumos-sys-hdrs"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=7f20f04c289961b92d18906846c28ff2b28ba681#7f20f04c289961b92d18906846c28ff2b28ba681"
+source = "git+https://github.com/oxidecomputer/opte?rev=0525f2f95588760133b7d5ebc8548e1ccdfbb353#0525f2f95588760133b7d5ebc8548e1ccdfbb353"
 dependencies = [
  "bitflags 2.11.0",
 ]
@@ -6104,7 +6106,7 @@ checksum = "3640c1c38b8e4e43584d8df18be5fc6b0aa314ce6ebf51b53313d4306cca8e46"
 dependencies = [
  "hermit-abi 0.5.2",
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -6357,7 +6359,7 @@ dependencies = [
 [[package]]
 name = "kstat-macro"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=7f20f04c289961b92d18906846c28ff2b28ba681#7f20f04c289961b92d18906846c28ff2b28ba681"
+source = "git+https://github.com/oxidecomputer/opte?rev=0525f2f95588760133b7d5ebc8548e1ccdfbb353#0525f2f95588760133b7d5ebc8548e1ccdfbb353"
 dependencies = [
  "quote",
  "syn 2.0.117",
@@ -6365,9 +6367,9 @@ dependencies = [
 
 [[package]]
 name = "kstat-rs"
-version = "0.2.4"
+version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "27964e4632377753acb0898ce6f28770d50cbca1339200ae63d700cff97b5c2b"
+checksum = "52d0786643a0b49f595bd1fc81e1c1aa7bad8555bc820c6892f4d28cb20cf210"
 dependencies = [
  "libc",
  "thiserror 1.0.69",
@@ -6431,7 +6433,7 @@ checksum = "52ff2c0fe9bc6cb6b14a0592c2ff4fa9ceb83eea9db979b0487cd054946a2b8f"
 [[package]]
 name = "libdlpi-sys"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/dlpi-sys#d9645f8d61187e76384474b1100f6537fb644993"
+source = "git+https://github.com/oxidecomputer/dlpi-sys#b0887ece420ff6d641fb62e4a6cbd8788fc822d1"
 
 [[package]]
 name = "libefi-illumos"
@@ -6511,7 +6513,7 @@ checksum = "b6d2cec3eae94f9f509c767b45932f1ada8350c4bdb85af2fcab4a3c14807981"
 [[package]]
 name = "libnet"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/netadm-sys?branch=main#1e40efd8497973ef3b7d6f0285510424f53f43c5"
+source = "git+https://github.com/oxidecomputer/netadm-sys?branch=main#83c624ff7a18197f8073682af91e8eed833242a2"
 dependencies = [
  "anyhow",
  "cfg-if",
@@ -6527,7 +6529,7 @@ dependencies = [
  "socket2 0.6.3",
  "thiserror 2.0.18",
  "tracing",
- "winnow 0.7.14",
+ "winnow 1.0.3",
 ]
 
 [[package]]
@@ -7402,7 +7404,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "trust-quorum-protocol",
- "tufaceous-artifact 0.1.0",
+ "tufaceous-artifact 0.2.0",
  "uuid",
 ]
 
@@ -7500,7 +7502,7 @@ dependencies = [
  "tokio",
  "trust-quorum-protocol",
  "trust-quorum-types",
- "tufaceous-artifact 0.1.0",
+ "tufaceous-artifact 0.2.0",
  "url",
  "usdt 0.5.0",
  "uuid",
@@ -7564,7 +7566,6 @@ dependencies = [
  "serde_json",
  "slog-error-chain",
  "trust-quorum-types",
- "tufaceous-artifact 0.1.0",
  "uuid",
 ]
 
@@ -7591,9 +7592,11 @@ dependencies = [
  "serde_json",
  "slog",
  "slog-error-chain",
+ "steno",
  "strum 0.27.2",
  "thiserror 2.0.18",
  "typed-rng",
+ "uuid",
 ]
 
 [[package]]
@@ -7660,7 +7663,7 @@ dependencies = [
  "swrite",
  "thiserror 2.0.18",
  "tokio",
- "tufaceous-artifact 0.1.0",
+ "tufaceous-artifact 0.2.0",
  "typed-rng",
  "uuid",
 ]
@@ -7794,7 +7797,7 @@ dependencies = [
  "tokio-stream",
  "tokio-util",
  "trust-quorum-types",
- "tufaceous-artifact 0.1.0",
+ "tufaceous-artifact 0.2.0",
  "uuid",
 ]
 
@@ -7838,7 +7841,7 @@ dependencies = [
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "sled-agent-types",
- "tufaceous-artifact 0.1.0",
+ "tufaceous-artifact 0.2.0",
 ]
 
 [[package]]
@@ -7985,11 +7988,9 @@ dependencies = [
  "tokio",
  "toml 0.8.23",
  "transient-dns-server",
- "tufaceous 0.1.0",
- "tufaceous-artifact 0.1.0",
- "tufaceous-lib",
+ "tufaceous",
+ "tufaceous-artifact 0.2.0",
  "typed-rng",
- "update-common",
  "uuid",
 ]
 
@@ -7999,6 +8000,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "futures",
+ "iddqd",
  "nexus-db-model",
  "nexus-db-queries",
  "nexus-types",
@@ -8045,6 +8047,7 @@ dependencies = [
  "anyhow",
  "camino",
  "chrono",
+ "iddqd",
  "indent_write",
  "indexmap 2.14.0",
  "itertools 0.14.0",
@@ -8062,7 +8065,7 @@ dependencies = [
  "swrite",
  "sync-ptr",
  "thiserror 2.0.18",
- "tufaceous-artifact 0.1.0",
+ "tufaceous-artifact 0.2.0",
  "typed-rng",
  "uuid",
 ]
@@ -8271,6 +8274,7 @@ dependencies = [
  "oxql-types",
  "parse-display",
  "proptest",
+ "reconfigurator-cli",
  "regex",
  "schemars 0.8.22",
  "semver 1.0.28",
@@ -8293,7 +8297,7 @@ dependencies = [
  "tough 0.22.0",
  "trust-quorum-protocol",
  "trust-quorum-types",
- "tufaceous-artifact 0.1.0",
+ "tufaceous-artifact 0.2.0",
  "unicode-width 0.1.14",
  "url",
  "uuid",
@@ -8332,7 +8336,7 @@ dependencies = [
  "strum 0.27.2",
  "thiserror 2.0.18",
  "tough 0.22.0",
- "tufaceous-artifact 0.1.0",
+ "tufaceous-artifact 0.2.0",
  "url",
  "uuid",
 ]
@@ -8472,7 +8476,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -8618,7 +8622,7 @@ version = "0.7.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "680998035259dcfcafe653688bf2aa6d3e2dc05e98be6ab46afb089dc84f1df8"
 dependencies = [
- "proc-macro-crate 3.4.0",
+ "proc-macro-crate 1.3.1",
  "proc-macro2",
  "quote",
  "syn 2.0.117",
@@ -8869,7 +8873,6 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "toml 0.8.23",
- "tufaceous-artifact 0.1.0",
  "tufaceous-artifact 0.2.0",
  "uuid",
 ]
@@ -9295,13 +9298,10 @@ dependencies = [
  "tokio",
  "tokio-postgres",
  "tokio-util",
- "tough 0.22.0",
  "transient-dns-server",
  "trust-quorum-types",
- "tufaceous 0.1.0",
- "tufaceous-artifact 0.1.0",
- "tufaceous-lib",
- "update-common",
+ "tufaceous",
+ "tufaceous-artifact 0.2.0",
  "url",
  "usdt 0.5.0",
  "uuid",
@@ -9446,7 +9446,6 @@ dependencies = [
  "textwrap 0.16.2",
  "tokio",
  "trust-quorum-types",
- "tufaceous-artifact 0.1.0",
  "unicode-width 0.1.14",
  "url",
  "uuid",
@@ -9586,11 +9585,10 @@ dependencies = [
  "tar",
  "tokio",
  "toml 0.8.23",
- "tufaceous 0.2.0",
+ "tufaceous",
  "tufaceous-artifact 0.1.0",
  "tufaceous-artifact 0.2.0",
  "tufaceous-lib",
- "update-common",
 ]
 
 [[package]]
@@ -9614,6 +9612,7 @@ dependencies = [
  "bytes",
  "camino",
  "clap",
+ "display-error-chain",
  "dropshot",
  "futures",
  "libc",
@@ -9627,8 +9626,8 @@ dependencies = [
  "slog-error-chain",
  "tokio",
  "tokio-util",
- "tufaceous-artifact 0.1.0",
- "update-common",
+ "tufaceous",
+ "tufaceous-artifact 0.2.0",
 ]
 
 [[package]]
@@ -9734,6 +9733,7 @@ dependencies = [
  "sled-agent-measurements",
  "sled-agent-rack-setup",
  "sled-agent-resolvable-files",
+ "sled-agent-scrimlet-reconcilers",
  "sled-agent-types",
  "sled-agent-types-versions",
  "sled-diagnostics",
@@ -9761,8 +9761,8 @@ dependencies = [
  "trust-quorum",
  "trust-quorum-protocol",
  "trust-quorum-types",
- "tufaceous-artifact 0.1.0",
- "tufaceous-brand-metadata 0.1.0",
+ "tufaceous-artifact 0.2.0",
+ "tufaceous-brand-metadata 0.2.0",
  "usdt 0.5.0",
  "uuid",
  "walkdir",
@@ -9993,6 +9993,7 @@ dependencies = [
  "uuid",
  "vergen",
  "vergen-lib 9.1.0",
+ "winnow 1.0.3",
  "x509-cert",
  "zerocopy 0.8.40",
  "zeroize",
@@ -10085,9 +10086,9 @@ dependencies = [
 
 [[package]]
 name = "openssl"
-version = "0.10.79"
+version = "0.10.80"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bf0b434746ee2832f4f0baf10137e1cabb18cbe6912c69e2e33263c45250f542"
+checksum = "a45fa2aa886c42762255da344f0a0d313e254066c46aad76f300c3d3da62d967"
 dependencies = [
  "bitflags 2.11.0",
  "cfg-if",
@@ -10122,9 +10123,9 @@ checksum = "7c87def4c32ab89d880effc9e097653c8da5d6ef28e6b539d313baaacfbafcbe"
 
 [[package]]
 name = "openssl-sys"
-version = "0.9.115"
+version = "0.9.117"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "158fe5b292746440aa6e7a7e690e55aeb72d41505e2804c23c6973ad0e9c9781"
+checksum = "b47e7e6bb2c38cd930d25a23b40fa52e068c10e85f3e03a7f5ba5aaca5713695"
 dependencies = [
  "cc",
  "libc",
@@ -10135,7 +10136,7 @@ dependencies = [
 [[package]]
 name = "opte"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=7f20f04c289961b92d18906846c28ff2b28ba681#7f20f04c289961b92d18906846c28ff2b28ba681"
+source = "git+https://github.com/oxidecomputer/opte?rev=0525f2f95588760133b7d5ebc8548e1ccdfbb353#0525f2f95588760133b7d5ebc8548e1ccdfbb353"
 dependencies = [
  "bitflags 2.11.0",
  "dyn-clone",
@@ -10154,7 +10155,7 @@ dependencies = [
 [[package]]
 name = "opte-api"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=7f20f04c289961b92d18906846c28ff2b28ba681#7f20f04c289961b92d18906846c28ff2b28ba681"
+source = "git+https://github.com/oxidecomputer/opte?rev=0525f2f95588760133b7d5ebc8548e1ccdfbb353#0525f2f95588760133b7d5ebc8548e1ccdfbb353"
 dependencies = [
  "illumos-sys-hdrs",
  "ingot",
@@ -10167,7 +10168,7 @@ dependencies = [
 [[package]]
 name = "opte-ioctl"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=7f20f04c289961b92d18906846c28ff2b28ba681#7f20f04c289961b92d18906846c28ff2b28ba681"
+source = "git+https://github.com/oxidecomputer/opte?rev=0525f2f95588760133b7d5ebc8548e1ccdfbb353#0525f2f95588760133b7d5ebc8548e1ccdfbb353"
 dependencies = [
  "libc",
  "libnet",
@@ -10306,7 +10307,7 @@ dependencies = [
 [[package]]
 name = "oxide-vpc"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=7f20f04c289961b92d18906846c28ff2b28ba681#7f20f04c289961b92d18906846c28ff2b28ba681"
+source = "git+https://github.com/oxidecomputer/opte?rev=0525f2f95588760133b7d5ebc8548e1ccdfbb353#0525f2f95588760133b7d5ebc8548e1ccdfbb353"
 dependencies = [
  "cfg-if",
  "illumos-sys-hdrs",
@@ -10817,9 +10818,9 @@ dependencies = [
 
 [[package]]
 name = "papergrid"
-version = "0.17.0"
+version = "0.18.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6978128c8b51d8f4080631ceb2302ab51e32cc6e8615f735ee2f83fd269ae3f1"
+checksum = "d0984e668274d34691bc2b262ef0d115de5fa9973bcdee7ae32213f93099153e"
 dependencies = [
  "bytecount",
  "fnv",
@@ -11128,7 +11129,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9cd31dcfdbbd7431a807ef4df6edd6473228e94d5c805e8cf671227a21bad068"
 dependencies = [
  "anyhow",
- "itertools 0.14.0",
+ "itertools 0.12.1",
  "proc-macro2",
  "quote",
  "rand 0.8.6",
@@ -12071,7 +12072,7 @@ dependencies = [
  "cfg_aliases 0.2.1",
  "libc",
  "once_cell",
- "socket2 0.6.3",
+ "socket2 0.5.10",
  "tracing",
  "windows-sys 0.60.2",
 ]
@@ -12100,6 +12101,23 @@ dependencies = [
  "log",
  "parking_lot 0.12.5",
  "scheduled-thread-pool",
+]
+
+[[package]]
+name = "rack-init-config"
+version = "0.1.0"
+dependencies = [
+ "bootstrap-agent-lockstep-types",
+ "camino-tempfile",
+ "iddqd",
+ "omicron-common",
+ "omicron-passwords",
+ "omicron-workspace-hack",
+ "oxnet",
+ "sled-agent-rack-setup",
+ "sled-agent-types",
+ "sled-hardware-types",
+ "toml 0.8.23",
 ]
 
 [[package]]
@@ -12363,6 +12381,7 @@ dependencies = [
  "dropshot",
  "expectorate",
  "gateway-types",
+ "glob",
  "humantime",
  "iddqd",
  "indent_write",
@@ -12380,6 +12399,7 @@ dependencies = [
  "omicron-test-utils",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
+ "oxide-tokio-rt",
  "pq-sys",
  "semver 1.0.28",
  "serde",
@@ -12393,10 +12413,8 @@ dependencies = [
  "tabled 0.15.0",
  "tokio",
  "toml 0.8.23",
- "tufaceous 0.1.0",
- "tufaceous-artifact 0.1.0",
- "tufaceous-lib",
- "update-common",
+ "tufaceous",
+ "tufaceous-artifact 0.2.0",
  "uuid",
 ]
 
@@ -12427,7 +12445,7 @@ dependencies = [
  "slog",
  "swrite",
  "tokio",
- "tufaceous-artifact 0.1.0",
+ "tufaceous-artifact 0.2.0",
 ]
 
 [[package]]
@@ -12598,7 +12616,7 @@ dependencies = [
  "omicron-workspace-hack",
  "schemars 0.8.22",
  "serde",
- "tufaceous-artifact 0.1.0",
+ "tufaceous-artifact 0.2.0",
 ]
 
 [[package]]
@@ -13008,7 +13026,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.11.0",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -13075,7 +13093,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -14015,7 +14033,6 @@ dependencies = [
  "slog-error-chain",
  "static_assertions",
  "trust-quorum-types",
- "tufaceous-artifact 0.1.0",
  "uuid",
  "x509-cert",
 ]
@@ -14099,7 +14116,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "trust-quorum-types",
- "tufaceous-artifact 0.1.0",
+ "tufaceous-artifact 0.2.0",
  "xshell",
  "zone",
 ]
@@ -14109,22 +14126,14 @@ name = "sled-agent-early-networking"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=cc0c307c617f2988aafdca4e3bd35ea178b64801)",
  "futures",
  "gateway-client",
- "http",
  "internal-dns-resolver",
  "internal-dns-types",
- "mg-admin-client",
- "mg-api-types",
  "omicron-common",
- "omicron-ddm-admin-client",
  "omicron-workspace-hack",
- "oxnet",
  "sled-agent-types",
  "slog",
- "slog-error-chain",
- "thiserror 2.0.18",
  "tokio",
 ]
 
@@ -14250,7 +14259,7 @@ dependencies = [
  "slog",
  "slog-error-chain",
  "thiserror 2.0.18",
- "tufaceous-artifact 0.1.0",
+ "tufaceous-artifact 0.2.0",
 ]
 
 [[package]]
@@ -14267,7 +14276,7 @@ dependencies = [
  "sha2 0.10.9",
  "sled-agent-types",
  "sled-storage",
- "tufaceous-artifact 0.1.0",
+ "tufaceous-artifact 0.2.0",
 ]
 
 [[package]]
@@ -14276,6 +14285,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "assert_matches",
+ "bootstrap-agent-lockstep-types",
  "chrono",
  "daft",
  "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=04a52a3240a26c58f03e1cf40353d67ff69d76b6)",
@@ -14337,7 +14347,7 @@ dependencies = [
  "swrite",
  "test-strategy",
  "thiserror 2.0.18",
- "tufaceous-artifact 0.1.0",
+ "tufaceous-artifact 0.2.0",
  "uuid",
 ]
 
@@ -14381,7 +14391,7 @@ dependencies = [
  "thiserror 2.0.18",
  "toml 0.8.23",
  "trust-quorum-types-versions",
- "tufaceous-artifact 0.1.0",
+ "tufaceous-artifact 0.2.0",
  "uuid",
 ]
 
@@ -14715,7 +14725,7 @@ version = "0.8.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c1c97747dbf44bb1ca44a561ece23508e99cb592e862f22222dcf42f51d1e451"
 dependencies = [
- "heck 0.5.0",
+ "heck 0.4.1",
  "proc-macro2",
  "quote",
  "syn 2.0.117",
@@ -14738,7 +14748,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3a766e1110788c36f4fa1c2b71b387a7815aa65f88ce0229841826633d93723e"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -15170,7 +15180,6 @@ dependencies = [
  "slog-error-chain",
  "tokio",
  "tokio-util",
- "tufaceous-artifact 0.1.0",
  "uuid",
  "zip 4.6.1",
 ]
@@ -15310,18 +15319,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4c998b0c8b921495196a48aabaf1901ff28be0760136e31604f7967b0792050e"
 dependencies = [
  "papergrid 0.11.0",
- "tabled_derive 0.7.0",
+ "tabled_derive",
  "unicode-width 0.1.14",
 ]
 
 [[package]]
 name = "tabled"
-version = "0.20.0"
+version = "0.21.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e39a2ee1fbcd360805a771e1b300f78cc88fec7b8d3e2f71cd37bbf23e725c7d"
+checksum = "b5dc662e6da844ad6e428ad16b57967c9d33c82e16bb1c258326c0c078605dff"
 dependencies = [
- "papergrid 0.17.0",
- "tabled_derive 0.11.0",
+ "papergrid 0.18.0",
  "testing_table",
 ]
 
@@ -15336,19 +15344,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 1.0.109",
-]
-
-[[package]]
-name = "tabled_derive"
-version = "0.11.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0ea5d1b13ca6cff1f9231ffd62f15eefd72543dab5e468735f1a456728a02846"
-dependencies = [
- "heck 0.5.0",
- "proc-macro-error2",
- "proc-macro2",
- "quote",
- "syn 2.0.117",
 ]
 
 [[package]]
@@ -15422,7 +15417,7 @@ dependencies = [
  "getrandom 0.4.1",
  "once_cell",
  "rustix 1.1.3",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -15442,7 +15437,7 @@ version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d8c27177b12a6399ffc08b98f76f7c9a1f4fe9fc967c784c5a071fa8d93cf7e1"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -16222,19 +16217,19 @@ dependencies = [
 [[package]]
 name = "transceiver-controller"
 version = "0.1.1"
-source = "git+https://github.com/oxidecomputer/transceiver-control?branch=main#81167659157860d6587713b3362b7bc791dfb530"
+source = "git+https://github.com/oxidecomputer/transceiver-control?branch=main#03a79a895871f9eca5400fac1556ed8526e031b7"
 dependencies = [
  "anyhow",
  "clap",
  "hubpack",
- "itertools 0.14.0",
+ "itertools 0.15.0",
  "nix 0.31.2",
  "schemars 0.8.22",
  "serde",
  "slog",
  "slog-async",
  "slog-term",
- "tabled 0.20.0",
+ "tabled 0.21.0",
  "thiserror 2.0.18",
  "tokio",
  "transceiver-decode 0.1.0 (git+https://github.com/oxidecomputer/transceiver-control?branch=main)",
@@ -16246,19 +16241,19 @@ dependencies = [
 [[package]]
 name = "transceiver-controller"
 version = "0.1.1"
-source = "git+https://github.com/oxidecomputer/transceiver-control#11afc484d5957b13d3058e44db274aa720cea1c4"
+source = "git+https://github.com/oxidecomputer/transceiver-control#03a79a895871f9eca5400fac1556ed8526e031b7"
 dependencies = [
  "anyhow",
  "clap",
  "hubpack",
- "itertools 0.14.0",
+ "itertools 0.15.0",
  "nix 0.31.2",
  "schemars 0.8.22",
  "serde",
  "slog",
  "slog-async",
  "slog-term",
- "tabled 0.20.0",
+ "tabled 0.21.0",
  "thiserror 2.0.18",
  "tokio",
  "transceiver-decode 0.1.0 (git+https://github.com/oxidecomputer/transceiver-control)",
@@ -16270,7 +16265,7 @@ dependencies = [
 [[package]]
 name = "transceiver-decode"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/transceiver-control?branch=main#81167659157860d6587713b3362b7bc791dfb530"
+source = "git+https://github.com/oxidecomputer/transceiver-control?branch=main#03a79a895871f9eca5400fac1556ed8526e031b7"
 dependencies = [
  "schemars 0.8.22",
  "serde",
@@ -16282,7 +16277,7 @@ dependencies = [
 [[package]]
 name = "transceiver-decode"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/transceiver-control#11afc484d5957b13d3058e44db274aa720cea1c4"
+source = "git+https://github.com/oxidecomputer/transceiver-control#03a79a895871f9eca5400fac1556ed8526e031b7"
 dependencies = [
  "schemars 0.8.22",
  "serde",
@@ -16294,7 +16289,7 @@ dependencies = [
 [[package]]
 name = "transceiver-messages"
 version = "0.1.1"
-source = "git+https://github.com/oxidecomputer/transceiver-control?branch=main#81167659157860d6587713b3362b7bc791dfb530"
+source = "git+https://github.com/oxidecomputer/transceiver-control?branch=main#03a79a895871f9eca5400fac1556ed8526e031b7"
 dependencies = [
  "bitflags 2.11.0",
  "clap",
@@ -16307,7 +16302,7 @@ dependencies = [
 [[package]]
 name = "transceiver-messages"
 version = "0.1.1"
-source = "git+https://github.com/oxidecomputer/transceiver-control#11afc484d5957b13d3058e44db274aa720cea1c4"
+source = "git+https://github.com/oxidecomputer/transceiver-control#03a79a895871f9eca5400fac1556ed8526e031b7"
 dependencies = [
  "bitflags 2.11.0",
  "clap",
@@ -16496,27 +16491,6 @@ dependencies = [
  "target-triple",
  "termcolor",
  "toml 1.1.2+spec-1.1.0",
-]
-
-[[package]]
-name = "tufaceous"
-version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/tufaceous?branch=v1#95395cecb019b851519232468472212efce1e42d"
-dependencies = [
- "anyhow",
- "camino",
- "chrono",
- "clap",
- "console 0.15.11",
- "humantime",
- "semver 1.0.28",
- "slog",
- "slog-async",
- "slog-envlogger",
- "slog-term",
- "tokio",
- "tufaceous-artifact 0.1.0",
- "tufaceous-lib",
 ]
 
 [[package]]
@@ -16914,42 +16888,6 @@ name = "untrusted"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8ecb6da28b8a351d773b68d5825ac39017e680750f980f3a1a85cd8dd28a47c1"
-
-[[package]]
-name = "update-common"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "bytes",
- "camino",
- "camino-tempfile",
- "chrono",
- "clap",
- "debug-ignore",
- "display-error-chain",
- "dropshot",
- "flate2",
- "fs-err 3.3.0",
- "futures",
- "hex",
- "hubtools 0.4.7 (git+https://github.com/oxidecomputer/hubtools.git?rev=2b1ef9b38d75563ea800baa3b17327eec17b1b7a)",
- "omicron-common",
- "omicron-test-utils",
- "omicron-workspace-hack",
- "rand 0.9.2",
- "semver 1.0.28",
- "sha2 0.10.9",
- "slog",
- "tar",
- "thiserror 2.0.18",
- "tokio",
- "tokio-util",
- "tough 0.22.0",
- "tufaceous 0.1.0",
- "tufaceous-artifact 0.1.0",
- "tufaceous-brand-metadata 0.1.0",
- "tufaceous-lib",
-]
 
 [[package]]
 name = "url"
@@ -17696,7 +17634,7 @@ dependencies = [
  "toml 0.8.23",
  "tough 0.22.0",
  "transceiver-controller 0.1.1 (git+https://github.com/oxidecomputer/transceiver-control)",
- "tufaceous 0.2.0",
+ "tufaceous",
  "tufaceous-artifact 0.2.0",
  "uuid",
  "wicket",
@@ -17811,6 +17749,7 @@ dependencies = [
  "sled-hardware-types",
  "slog-error-chain",
  "test-strategy",
+ "thiserror 2.0.18",
  "toml 0.8.23",
  "uuid",
 ]
@@ -17843,7 +17782,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
@@ -18302,6 +18241,9 @@ name = "winnow"
 version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0592e1c9d151f854e6fd382574c3a0855250e1d9b2f99d9281c6e6391af352f1"
+dependencies = [
+ "memchr",
+]
 
 [[package]]
 name = "winreg"

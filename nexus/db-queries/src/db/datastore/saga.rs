@@ -110,10 +110,8 @@ impl DataStore {
     ) -> Result<(), Error> {
         use nexus_db_schema::schema::saga::dsl;
 
-        // Lower the validated saga into its raw row for insertion.
-        let row = db::saga_types::SagaRow::from(saga);
         diesel::insert_into(dsl::saga)
-            .values(row)
+            .values(saga)
             .execute_async(&*self.pool_connection_unauthorized().await?)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
@@ -180,7 +178,7 @@ impl DataStore {
             .filter(dsl::id.eq(saga_id))
             .filter(dsl::current_sec.eq(current_sec))
             .set::<SagaStateDbFields>(new_state.clone().into())
-            .check_if_exists::<db::saga_types::SagaRow>(saga_id)
+            .check_if_exists::<db::saga_types::Saga>(saga_id)
             .execute_and_check(&*self.pool_connection_unauthorized().await?)
             .await
             .map_err(|e| {
@@ -204,8 +202,8 @@ impl DataStore {
                     saga_id,
                     new_state,
                     current_sec,
-                    result.found.current_sec(),
-                    result.found.saga_state(),
+                    result.found.current_sec,
+                    result.found.saga_state,
                 )))
             }
         }
@@ -233,8 +231,8 @@ impl DataStore {
                         .eq_any(SagaState::RECOVERY_CANDIDATE_STATES),
                 )
                 .filter(dsl::current_sec.eq(sec_id))
-                .select(db::saga_types::SagaRow::as_select())
-                .load_async::<db::saga_types::SagaRow>(&*conn)
+                .select(db::saga_types::LoadedSaga::as_select())
+                .load_async::<db::saga_types::LoadedSaga>(&*conn)
                 .await
                 .map_err(|e| {
                     public_error_from_diesel(e, ErrorHandler::Server)
@@ -271,14 +269,14 @@ impl DataStore {
         use nexus_db_schema::schema::saga::dsl;
         let conn = self.pool_connection_authorized(opctx).await?;
 
-        let rows: Vec<db::saga_types::SagaRow> = dsl::saga
+        let rows: Vec<db::saga_types::LoadedSaga> = dsl::saga
             .filter(
                 dsl::saga_state
                     .eq_any(vec![SagaState::Running, SagaState::Unwinding]),
             )
             .filter(dsl::time_created.lt(time_limit))
             .limit(500)
-            .select(db::saga_types::SagaRow::as_select())
+            .select(db::saga_types::LoadedSaga::as_select())
             .load_async(&*conn)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
@@ -301,6 +299,79 @@ impl DataStore {
             .collect();
 
         Ok(valid_rows)
+    }
+
+    /// Returns all unfinished sagas: running, unwinding, or abandoned. Makes
+    /// as many queries as needed (in batches) to get them all.
+    ///
+    /// Returns [`db::saga_types::SagaSummary`] rather than the full row: the
+    /// callers of this method classify sagas but never execute them, so the
+    /// DAG would be dead weight.
+    pub async fn saga_list_unfinished_batched(
+        &self,
+        opctx: &OpContext,
+    ) -> Result<Vec<db::saga_types::SagaSummary>, Error> {
+        let mut sagas = vec![];
+        let mut paginator = Paginator::new(
+            SQL_BATCH_SIZE,
+            dropshot::PaginationOrder::Ascending,
+        );
+        let conn = self.pool_connection_authorized(opctx).await?;
+        while let Some(p) = paginator.next() {
+            use nexus_db_schema::schema::saga::dsl;
+
+            // `SagaSummary` validates during deserialization, so a row whose
+            // abandonment metadata is inconsistent with its state fails the
+            // whole listing rather than being skipped the way saga recovery
+            // skips it: a saga silently missing from this listing looks to
+            // fault management like the saga was removed, which would wrongly
+            // close its case.
+            let batch = paginated(dsl::saga, dsl::id, &p.current_pagparams())
+                .filter(dsl::saga_state.ne(SagaState::Done))
+                .select(db::saga_types::SagaSummary::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+
+            paginator = p.found_batch(&batch, &|row| row.id);
+            sagas.extend(batch);
+        }
+        Ok(sagas)
+    }
+
+    /// For each of the given sagas, returns the timestamp of its most recent
+    /// node event (`MAX(event_time)`), i.e. the last durably-recorded forward
+    /// or undo step. Sagas with no node events are absent from the result.
+    ///
+    /// The query seeks by the `saga_node_event` primary-key prefix
+    /// (`saga_id`), so it does not scan the whole table.
+    pub async fn saga_latest_node_event_times(
+        &self,
+        opctx: &OpContext,
+        saga_ids: &[db::saga_types::SagaId],
+    ) -> Result<Vec<(db::saga_types::SagaId, Option<DateTime<Utc>>)>, Error>
+    {
+        use nexus_db_schema::schema::saga_node_event::dsl;
+        let conn = self.pool_connection_authorized(opctx).await?;
+        let mut results = Vec::with_capacity(saga_ids.len());
+        // Chunk the IDs so a large non-terminal saga count doesn't produce one
+        // giant statement.
+        for chunk in saga_ids.chunks(SQL_BATCH_SIZE.get() as usize) {
+            let batch: Vec<(db::saga_types::SagaId, Option<DateTime<Utc>>)> =
+                dsl::saga_node_event
+                    .filter(dsl::saga_id.eq_any(chunk.to_vec()))
+                    .group_by(dsl::saga_id)
+                    .select((dsl::saga_id, diesel::dsl::max(dsl::event_time)))
+                    .load_async(&*conn)
+                    .await
+                    .map_err(|e| {
+                        public_error_from_diesel(e, ErrorHandler::Server)
+                    })?;
+            results.extend(batch);
+        }
+        Ok(results)
     }
 
     /// Returns a list of all saga log entries for the given saga, making as
@@ -406,9 +477,8 @@ mod test {
     use chrono::TimeDelta;
     use db::queries::ALLOW_FULL_TABLE_SCAN_SQL;
     use nexus_db_model::Saga;
+    use nexus_db_model::SagaExecState;
     use nexus_db_model::SagaReasonAbandoned;
-    use nexus_db_model::SagaRow;
-    use nexus_db_model::SagaState;
     use nexus_db_model::{SagaNodeEvent, SecId};
     use omicron_common::api::external::Generation;
     use omicron_test_utils::dev;
@@ -446,12 +516,7 @@ mod test {
             .await
             .expect("Failed to access db connection");
         diesel::insert_into(nexus_db_schema::schema::saga::dsl::saga)
-            .values(
-                inserted_sagas
-                    .iter()
-                    .map(db::saga_types::SagaRow::from)
-                    .collect::<Vec<_>>(),
-            )
+            .values(inserted_sagas.iter().collect::<Vec<_>>())
             .execute_async(&*conn)
             .await
             .expect("Failed to insert test setup data");
@@ -466,12 +531,13 @@ mod test {
         assert!(
             !observed_sagas
                 .iter()
-                .any(|s| s.saga_state == SagaState::Abandoned)
+                .any(|s| matches!(s.saga_state, SagaExecState::Abandoned(_)))
         );
 
         // Remove the abandoned saga from the inserted set so that it can be
         // compared to the observed set.
-        inserted_sagas.retain(|s| s.saga_state != SagaState::Abandoned);
+        inserted_sagas
+            .retain(|s| !matches!(s.saga_state, SagaExecState::Abandoned(_)));
 
         // The observed list is sorted by ID, so sort the inserted list that way
         // too so that the lists can be tested for equality.
@@ -492,6 +558,180 @@ mod test {
         assert_eq!(
             inserted_sagas, observed_sagas,
             "Observed sagas did not match inserted sagas"
+        );
+
+        // Test cleanup
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    // Tests that `saga_list_unfinished_batched` includes running, unwinding,
+    // and abandoned sagas (unlike recovery candidate listing, which skips
+    // abandoned ones), excludes done sagas, and paginates correctly.
+    #[tokio::test]
+    async fn test_list_unfinished_batched() {
+        // Test setup
+        let logctx = dev::test_setup_log("test_list_unfinished_batched");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+        let sec_id = db::SecId(uuid::Uuid::new_v4());
+
+        // More than one batch of running sagas, so pagination is exercised,
+        // plus a few sagas in each of the other states.
+        let mut inserted_sagas = (0..SQL_BATCH_SIZE.get() * 2)
+            .map(|_| SagaTestContext::new(sec_id).new_running_db_saga())
+            .collect::<Vec<_>>();
+        for _ in 0..3 {
+            inserted_sagas
+                .push(SagaTestContext::new(sec_id).new_unwinding_db_saga());
+            inserted_sagas
+                .push(SagaTestContext::new(sec_id).new_abandoned_db_saga());
+            inserted_sagas
+                .push(SagaTestContext::new(sec_id).new_done_db_saga());
+        }
+
+        // Shuffle these sagas into a random order to check that the
+        // pagination order is working as intended on the read path.
+        inserted_sagas.shuffle(&mut rand::rng());
+
+        let conn = datastore
+            .pool_connection_unauthorized()
+            .await
+            .expect("Failed to access db connection");
+        diesel::insert_into(nexus_db_schema::schema::saga::dsl::saga)
+            .values(inserted_sagas.iter().collect::<Vec<_>>())
+            .execute_async(&*conn)
+            .await
+            .expect("Failed to insert test setup data");
+
+        let mut observed_sagas = datastore
+            .saga_list_unfinished_batched(&opctx)
+            .await
+            .expect("Failed to list unfinished sagas");
+
+        // Every state but Done should be present in the result, as
+        // `SagaSummary` projections of the inserted rows.
+        inserted_sagas.retain(|s| s.saga_state != SagaExecState::Done);
+        inserted_sagas.sort_by_key(|a| a.id);
+        let mut expected_sagas: Vec<db::saga_types::SagaSummary> =
+            inserted_sagas
+                .into_iter()
+                .map(|s| db::saga_types::SagaSummary {
+                    id: s.id,
+                    name: s.name,
+                    time_created: s.time_created,
+                    saga_state: s.saga_state,
+                    current_sec: s.current_sec,
+                })
+                .collect();
+
+        // Timestamps can change slightly when we insert them.
+        //
+        // Sanitize them to make input/output equality checks easier. The
+        // abandonment reason and comment are left alone so this test still
+        // checks that they round-trip through the summary projection.
+        let sanitize_timestamps = |sagas: &mut Vec<
+            db::saga_types::SagaSummary,
+        >| {
+            for saga in sagas {
+                saga.time_created = chrono::DateTime::UNIX_EPOCH;
+                if let SagaExecState::Abandoned(metadata) = &mut saga.saga_state
+                {
+                    metadata.time = chrono::DateTime::UNIX_EPOCH;
+                }
+            }
+        };
+        sanitize_timestamps(&mut observed_sagas);
+        sanitize_timestamps(&mut expected_sagas);
+
+        assert_eq!(
+            expected_sagas, observed_sagas,
+            "Observed sagas did not match inserted unfinished sagas"
+        );
+
+        // Test cleanup
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    // Tests that `saga_latest_node_event_times` returns MAX(event_time) per
+    // saga, omits sagas with no events, and stitches chunks together when
+    // given more IDs than one chunk holds.
+    #[tokio::test]
+    async fn test_latest_node_event_times() {
+        // Test setup
+        let logctx = dev::test_setup_log("test_latest_node_event_times");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+        let sec_id = SecId(Uuid::new_v4());
+
+        // Explicit whole-second timestamps: CockroachDB stores microseconds,
+        // so higher-precision values would not round-trip.
+        let t = |secs: i64| {
+            chrono::DateTime::from_timestamp(secs, 0).expect("valid timestamp")
+        };
+
+        // More sagas than one chunk holds, so the results must be stitched
+        // together from more than one query. Each saga gets one event.
+        let num_sagas = i64::from(SQL_BATCH_SIZE.get()) + 5;
+        let mut event_batch = Vec::new();
+        let mut expected = Vec::new();
+        for i in 0..num_sagas {
+            let cx = SagaTestContext::new(sec_id);
+            let mut event =
+                cx.new_db_event(0, steno::SagaNodeEventType::Started);
+            event.event_time = t(1_000 + i);
+            event_batch.push(event);
+            expected.push((
+                db::saga_types::SagaId::from(cx.saga_id),
+                Some(t(1_000 + i)),
+            ));
+        }
+
+        // One saga with several events: only the latest time is returned.
+        let multi_cx = SagaTestContext::new(sec_id);
+        for (i, secs) in [10_000, 30_000, 20_000].into_iter().enumerate() {
+            let mut event = multi_cx
+                .new_db_event(i as u32, steno::SagaNodeEventType::Started);
+            event.event_time = t(secs);
+            event_batch.push(event);
+        }
+        expected.push((
+            db::saga_types::SagaId::from(multi_cx.saga_id),
+            Some(t(30_000)),
+        ));
+
+        // One saga with no events at all: absent from the result.
+        let no_events_cx = SagaTestContext::new(sec_id);
+
+        let conn = datastore
+            .pool_connection_unauthorized()
+            .await
+            .expect("Failed to access db connection");
+        diesel::insert_into(
+            nexus_db_schema::schema::saga_node_event::dsl::saga_node_event,
+        )
+        .values(event_batch)
+        .execute_async(&*conn)
+        .await
+        .expect("Failed to insert test setup data");
+
+        let queried_ids: Vec<_> = expected
+            .iter()
+            .map(|(id, _)| *id)
+            .chain([db::saga_types::SagaId::from(no_events_cx.saga_id)])
+            .collect();
+        let mut observed = datastore
+            .saga_latest_node_event_times(&opctx, &queried_ids)
+            .await
+            .expect("Failed to load latest node event times");
+
+        observed.sort();
+        expected.sort();
+        assert_eq!(
+            observed, expected,
+            "expected MAX(event_time) per saga with events; the saga with \
+             no events should be absent"
         );
 
         // Test cleanup
@@ -727,19 +967,17 @@ mod test {
         let saga_id: db::saga_types::SagaId = node_cx.saga_id.into();
         let found_saga = {
             use nexus_db_schema::schema::saga::dsl;
-            let row = dsl::saga
+            dsl::saga
                 .filter(dsl::id.eq(saga_id))
-                .select(SagaRow::as_select())
-                .first_async(&*conn)
+                .select(Saga::as_select())
+                .first_async::<Saga>(&*conn)
                 .await
-                .unwrap();
-            Saga::try_from(row).expect("row is a valid saga")
+                .expect("row is a valid saga")
         };
 
-        assert_eq!(found_saga.saga_state, SagaState::Abandoned);
-        let abandon = found_saga
-            .abandon_metadata
-            .expect("an abandoned saga should have abandonment metadata");
+        let SagaExecState::Abandoned(abandon) = found_saga.saga_state else {
+            panic!("an abandoned saga should be in the Abandoned state");
+        };
         assert_eq!(abandon.reason, SagaReasonAbandoned::Unrecoverable);
         assert_eq!(abandon.comment, "test".to_string());
 
@@ -875,8 +1113,8 @@ mod test {
             .iter()
             .filter_map(|saga| {
                 ((saga.creator == sec_b || saga.creator == sec_c)
-                    && (saga.saga_state == SagaState::Running
-                        || saga.saga_state == SagaState::Unwinding))
+                    && (saga.saga_state == SagaExecState::Running
+                        || saga.saga_state == SagaExecState::Unwinding))
                     .then(|| saga.id)
             })
             .collect();
@@ -885,7 +1123,7 @@ mod test {
             .filter_map(|saga| {
                 (saga.creator == sec_a
                     || saga.creator == sec_d
-                    || saga.saga_state == SagaState::Done)
+                    || saga.saga_state == SagaExecState::Done)
                     .then(|| saga.id)
             })
             .collect();
@@ -902,12 +1140,7 @@ mod test {
             use nexus_db_schema::schema::saga::dsl;
             let conn = datastore.pool_connection_for_tests().await.unwrap();
             diesel::insert_into(dsl::saga)
-                .values(
-                    sagas_to_insert
-                        .iter()
-                        .map(db::saga_types::SagaRow::from)
-                        .collect::<Vec<_>>(),
-                )
+                .values(sagas_to_insert.iter().collect::<Vec<_>>())
                 .execute_async(&*conn)
                 .await
                 .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
@@ -931,8 +1164,8 @@ mod test {
                 use nexus_db_schema::schema::saga::dsl;
                 conn.batch_execute_async(ALLOW_FULL_TABLE_SCAN_SQL).await?;
                 dsl::saga
-                    .select(nexus_db_model::SagaRow::as_select())
-                    .load_async(&conn)
+                    .select(Saga::as_select())
+                    .load_async::<Saga>(&conn)
                     .await
             })
             .await
@@ -940,18 +1173,18 @@ mod test {
 
         for saga in all_sagas {
             println!("checking saga: {:?}", saga);
-            let current_sec = saga.current_sec().unwrap();
-            if sagas_affected.contains(&saga.id()) {
-                assert!(saga.creator() == sec_b || saga.creator() == sec_c);
+            let current_sec = saga.current_sec.unwrap();
+            if sagas_affected.contains(&saga.id) {
+                assert!(saga.creator == sec_b || saga.creator == sec_c);
                 assert_eq!(current_sec, sec_a);
-                assert_eq!(*saga.adopt_generation(), Generation::from(2));
+                assert_eq!(*saga.adopt_generation, Generation::from(2));
                 assert!(
-                    saga.saga_state() == SagaState::Running
-                        || saga.saga_state() == SagaState::Unwinding
+                    saga.saga_state == SagaExecState::Running
+                        || saga.saga_state == SagaExecState::Unwinding
                 );
-            } else if sagas_unaffected.contains(&saga.id()) {
-                assert_eq!(current_sec, saga.creator());
-                assert_eq!(*saga.adopt_generation(), Generation::from(1));
+            } else if sagas_unaffected.contains(&saga.id) {
+                assert_eq!(current_sec, saga.creator);
+                assert_eq!(*saga.adopt_generation, Generation::from(1));
                 // Its SEC and state could be anything since we've deliberately
                 // included sagas with various states and SECs that should not
                 // be affected by the reassignment.
@@ -996,13 +1229,7 @@ mod test {
 
         let conn = datastore.pool_connection_for_tests().await.unwrap();
         diesel::insert_into(nexus_db_schema::schema::saga::dsl::saga)
-            .values(vec![
-                db::saga_types::SagaRow::from(&running),
-                db::saga_types::SagaRow::from(&running2),
-                db::saga_types::SagaRow::from(&unwinding),
-                db::saga_types::SagaRow::from(&done),
-                db::saga_types::SagaRow::from(&abandoned),
-            ])
+            .values(vec![&running, &running2, &unwinding, &done, &abandoned])
             .execute_async(&*conn)
             .await
             .expect("Failed to insert test setup data");

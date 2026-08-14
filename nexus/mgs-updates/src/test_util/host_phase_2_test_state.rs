@@ -262,7 +262,6 @@ mod api_impl {
     use sled_agent_types::support_bundle::SupportBundleMetadata;
     use sled_agent_types::support_bundle::SupportBundlePathParam;
     use sled_agent_types::support_bundle::SupportBundleTransferQueryParams;
-    use sled_agent_types::uplink::SwitchPorts;
     use sled_agent_types::zone_bundle::BundleUtilization;
     use sled_agent_types::zone_bundle::CleanupContext;
     use sled_agent_types::zone_bundle::CleanupContextUpdate;
@@ -762,13 +761,6 @@ mod api_impl {
             _rqctx: RequestContext<Self::Context>,
         ) -> Result<HttpResponseOk<Vec<VirtualNetworkInterfaceHost>>, HttpError>
         {
-            unimplemented!()
-        }
-
-        async fn uplink_ensure(
-            _rqctx: RequestContext<Self::Context>,
-            _body: TypedBody<SwitchPorts>,
-        ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
             unimplemented!()
         }
 
