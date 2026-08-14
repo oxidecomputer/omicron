@@ -26,7 +26,6 @@ use slog::{Logger, info};
 use slog_error_chain::{InlineErrorChain, SlogInlineError};
 use std::{
     collections::{BTreeMap, BTreeSet},
-    sync::{Arc, Mutex},
     time::Duration,
 };
 use thiserror::Error;
@@ -81,15 +80,15 @@ impl From<RunRssError> for MultirackJoinServiceError {
 /// The state of the commit phase of the trust quorum protocol
 #[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
 pub struct CommitState {
-    rack_id: RackUuid,
-    members: BTreeSet<BaseboardId>,
-    epoch: Epoch,
-    last_committed_epoch: Option<Epoch>,
-    threshold: Threshold,
-    commit_crash_tolerance: u8,
-    acked: BTreeSet<BaseboardId>,
-    fatal_errors: BTreeMap<BaseboardId, String>,
-    transient_errors: BTreeMap<BaseboardId, String>,
+    pub rack_id: RackUuid,
+    pub members: BTreeSet<BaseboardId>,
+    pub epoch: Epoch,
+    pub last_committed_epoch: Option<Epoch>,
+    pub threshold: Threshold,
+    pub commit_crash_tolerance: u8,
+    pub acked: BTreeSet<BaseboardId>,
+    pub fatal_errors: BTreeMap<BaseboardId, String>,
+    pub transient_errors: BTreeMap<BaseboardId, String>,
 }
 
 /// The current state of the `MultirackJoinService` as retrieved from the
@@ -105,6 +104,7 @@ pub enum MultirackJoinServiceState {
     TrustQuorumCommitting(CommitState),
     Completed,
     Failed { message: String },
+    InvalidMembershipSize { message: String },
     TaskPanicked,
 }
 
@@ -215,6 +215,37 @@ impl MultirackJoinServiceTask {
         mut last_committed_epoch: Option<Epoch>,
     ) -> Result<(), MultirackJoinServiceError> {
         loop {
+            // We put the check inside this loop, rather than in
+            // `init_trust_quorum` because the operator can change the
+            // membership at any time.
+            if members.len() < 3 || members.len() > 32 {
+                let msg = format!(
+                    "Rack membership must be between 3 and 32 sleds \
+                    (inclusive). Received {} sleds.",
+                    members.len()
+                );
+                error!(self.log, "{msg}");
+
+                // Inform the operator about the mess they've made
+                self.output_tx.send_modify(|state| {
+                    *state = MultirackJoinServiceState::InvalidMembershipSize {
+                        message: msg,
+                    }
+                });
+
+                // Wait for the operator to clean up said mess.
+                self.input_rx.changed().await?;
+                members = self
+                    .input_rx
+                    .borrow_and_update()
+                    .trust_quorum_peers
+                    .clone();
+
+                // We don't need to bump the epoch because we never attempted a
+                // reconfiguration with the invalid membership.
+                continue;
+            }
+
             self.tq_reconfigure(
                 rack_id,
                 members.clone(),
@@ -421,7 +452,8 @@ impl MultirackJoinServiceTask {
             (threshold.0 + commit_crash_tolerance) as usize;
 
         // Transient errors are updated inside proxy commit tasks
-        let transient_errors = Arc::new(Mutex::new(BTreeMap::new()));
+        let (transient_errors_tx, mut transient_errors_rx) =
+            watch::channel(BTreeMap::new());
 
         // Update our state as we start
         let mut commit_state = CommitState {
@@ -446,12 +478,14 @@ impl MultirackJoinServiceTask {
                 rack_id,
                 peer,
                 epoch,
-                transient_errors.clone(),
+                transient_errors_tx.clone(),
                 &mut set,
             );
         }
 
         loop {
+            // All arms are cancel-safe and we do not `.await` within the body
+            // of any arm, avoiding any opportunity for futurelock.
             tokio::select! {
                 Some(res) = set.join_next() => {
                     match res? {
@@ -470,6 +504,14 @@ impl MultirackJoinServiceTask {
                                 "peer_id" => %peer_id,
                                 "err" => %err
                             );
+                            // If we get here, the operator will notice that
+                            // not all sleds have acked and must issue a member
+                            // change wihout this sled to complete the setup.
+                            //
+                            // This is the same choice we make in RSS: All sleds
+                            // are required to become full trust quorum members
+                            // before we allow the rack to be considered ready
+                            // for business.
                             commit_state.fatal_errors.insert(peer_id, err);
 
                         }
@@ -509,12 +551,41 @@ impl MultirackJoinServiceTask {
                                 just_committed_epoch
                             });
                         }
+                        // We can't perform a reconfiguration if we haven't
+                        // committed at enough nodes. Yet that's exactly what
+                        // the operator asked us to do here.
+                        //
+                        // We could theoretically continue waiting for more
+                        // acks, but presumably the operator decided they
+                        // had waited long enough and desired to reconfigure.
+                        // If we try to do this, how long should we wait to
+                        // acknowledge the operator's choice?
+                        //
+                        // Instead we take the pragamatic path, where not being
+                        // able to commit at enough nodes means that quite a lot
+                        // of nodes are having trouble. For example, in clusters
+                        // larger than 24 nodes, only 17 nodes have to ack
+                        // commit. If we can't ack 17 nodes, a support call, and
+                        // then a clean-slate, is likely warranted.
                         return Err(MultirackJoinServiceError::TqCommitFailed(
                             commit_state
                         ));
                     } else {
                         // Something other than membership changed. Ignore.
                     }
+                }
+                res = transient_errors_rx.changed() => {
+                    res?;
+                    let transient_errors =
+                        transient_errors_rx.borrow_and_update().clone();
+                    commit_state.transient_errors = transient_errors;
+                    self.output_tx.send_modify(|state| {
+                        *state =
+                            MultirackJoinServiceState::TrustQuorumCommitting(
+                                commit_state.clone()
+                            )
+                    });
+
                 }
             }
         }
@@ -531,7 +602,7 @@ impl MultirackJoinServiceTask {
         rack_id: RackUuid,
         peer: BaseboardId,
         epoch: Epoch,
-        transient_errors: Arc<Mutex<BTreeMap<BaseboardId, String>>>,
+        transient_errors_tx: watch::Sender<BTreeMap<BaseboardId, String>>,
         set: &mut JoinSet<Result<BaseboardId, (BaseboardId, String)>>,
     ) {
         let proxy = self.ctx.trust_quorum_handle.proxy();
@@ -560,9 +631,12 @@ impl MultirackJoinServiceTask {
                         let s = InlineErrorChain::new(&e).to_string();
                         return Err((peer, s));
                     }
-                    Err(e) => {
+                    Err(e @ ProxyError::Disconnected)
+                    | Err(e @ ProxyError::Busy) => {
                         let s = InlineErrorChain::new(&e).to_string();
-                        transient_errors.lock().unwrap().insert(peer, s);
+                        transient_errors_tx.send_modify(|errs| {
+                            errs.insert(peer, s);
+                        });
                         tokio::time::sleep(TRUST_QUORUM_RETRY_TIMEOUT).await;
                     }
                 }

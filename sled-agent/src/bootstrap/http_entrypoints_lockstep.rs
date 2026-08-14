@@ -39,6 +39,7 @@ use sprockets_tls::keys::SprocketsConfig;
 use std::sync::Arc;
 
 use crate::bootstrap::rack_ops::RssAccess;
+use crate::bootstrap::rack_ops::RssConflictError;
 
 #[derive(Clone)]
 pub(crate) struct BootstrapServerContext {
@@ -172,9 +173,7 @@ impl BootstrapAgentLockstepApi for BootstrapAgentLockstepImpl {
     ) -> Result<HttpResponseOk<MultirackJoinUuid>, HttpError> {
         let ctx = rqctx.context();
         let request = body.into_inner();
-        let id = ctx
-            .start_multirack_join(request)
-            .map_err(|err| HttpError::for_bad_request(None, err.to_string()))?;
+        let id = ctx.start_multirack_join(request)?;
         Ok(HttpResponseOk(id))
     }
 
@@ -182,15 +181,16 @@ impl BootstrapAgentLockstepApi for BootstrapAgentLockstepImpl {
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<MultirackJoinServiceState>, HttpError> {
         let ctx = rqctx.context();
-        let state =
-            ctx.rss_access.get_multirack_join_state().map_err(|_| {
+        let state = ctx.rss_access.get_multirack_join_state().map_err(
+            |RssConflictError| {
                 HttpError::for_client_error(
                     Some("Conflict".to_string()),
                     ClientErrorStatusCode::CONFLICT,
                     "Cannot run multirack join: RSS has been run on this rack"
                         .to_string(),
                 )
-            })?;
+            },
+        )?;
 
         Ok(HttpResponseOk(state))
     }
