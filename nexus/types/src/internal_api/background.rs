@@ -1032,7 +1032,6 @@ pub struct FmAnalysisStatus {
 pub mod fm_analysis {
     use super::*;
     use crate::fm::FmConfigSource;
-    use crate::fm::analysis_reports;
     use std::num::{NonZeroU32, NonZeroU64};
 
     #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -1040,7 +1039,6 @@ pub mod fm_analysis {
         /// Errors encountered during the preparation step which did *not*
         /// prevent the analysis step from completing.
         pub warnings: Vec<String>,
-        pub report: analysis_reports::InputReport,
     }
 
     #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -1081,7 +1079,6 @@ pub mod fm_analysis {
     pub struct AnalysisStatus {
         pub start_time: DateTime<Utc>,
         pub end_time: DateTime<Utc>,
-        pub report: crate::fm::analysis_reports::AnalysisReport,
         pub outcome: AnalysisOutcome,
         pub capacity: Option<SitrepCapacity>,
     }

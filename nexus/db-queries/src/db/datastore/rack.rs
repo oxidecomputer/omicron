@@ -310,9 +310,6 @@ impl DataStore {
     /// 3. Save the new allocation, if there isn't one for the given
     ///    `hw_baseboard_id`
     /// 4. Return the new allocation
-    ///
-    // TODO: This could all actually be done in SQL using a `next_item` query.
-    // See https://github.com/oxidecomputer/omicron/issues/4544
     pub async fn allocate_sled_underlay_subnet_octets(
         &self,
         opctx: &OpContext,

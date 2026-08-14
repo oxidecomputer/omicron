@@ -52,8 +52,6 @@ progenitor::generate_api!(
         DatasetsConfig = omicron_common::disk::DatasetsConfig,
         DatasetKind = omicron_common::api::internal::shared::DatasetKind,
         DiskIdentity = omicron_common::disk::DiskIdentity,
-        DiskManagementStatus = omicron_common::disk::DiskManagementStatus,
-        DiskManagementError = omicron_common::disk::DiskManagementError,
         DiskVariant = omicron_common::disk::DiskVariant,
         Epoch = trust_quorum_types::types::Epoch,
         ExternalIpGatewayMap = omicron_common::api::internal::shared::ExternalIpGatewayMap,

@@ -1156,6 +1156,14 @@ impl PortTicket {
         Self { id, kind, manager }
     }
 
+    pub fn id(&self) -> Uuid {
+        self.id
+    }
+
+    pub fn kind(&self) -> NetworkInterfaceKind {
+        self.kind
+    }
+
     fn release_inner(&mut self) -> Result<(), Error> {
         let mut ports = self.manager.ports.lock().unwrap();
         let Some(port) = ports.remove(&(self.id, self.kind)) else {

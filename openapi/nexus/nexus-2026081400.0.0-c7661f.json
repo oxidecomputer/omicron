@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "2026081100.0.0"
+    "version": "2026081400.0.0"
   },
   "paths": {
     "/device/auth": {
@@ -28190,6 +28190,13 @@
             "description": "The rack to which this Sled is currently attached",
             "type": "string",
             "format": "uuid"
+          },
+          "slot": {
+            "nullable": true,
+            "description": "The physical slot in the rack where this sled was last observed to be located, or null if its location is not known at this time.",
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
           },
           "state": {
             "description": "The current state of the sled.",

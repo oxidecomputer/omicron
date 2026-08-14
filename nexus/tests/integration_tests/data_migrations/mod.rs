@@ -24,6 +24,7 @@ use semver::Version;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 
+mod add_sled_update_disposition;
 mod audit_log_credential_id;
 mod bgp_config_max_paths_not_null;
 mod bgp_unnumbered_peer_cleanup;
@@ -104,6 +105,7 @@ pub(crate) fn get_migration_checks() -> BTreeMap<Version, DataMigrationFns> {
     register!(ereporter_restart_latest_ereport);
     register!(tufaceous_v2);
     register!(prune_service_nat_entries);
+    register!(add_sled_update_disposition);
 
     map
 }
