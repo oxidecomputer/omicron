@@ -29,7 +29,7 @@
 //!
 //! ## Group State Lifecycle
 //! ```text
-//! "Creating"                  → "Active" → "Deleting" → "Deleted" (removed from DB)
+//! "Creating"                  → "Active" → "Deleting" → (row removed)
 //!     ↓                            ↓           ↓
 //!   (saga=external+underlay)  (check+sync)  (cleanup)
 //! ```
@@ -53,19 +53,19 @@
 //! ### DELETING State Transitions
 //! | Condition | DPD cleanup (external+underlay) | DB cleanup (row) | Action | Next State |
 //! |-----------|-------------------------------|-------------------|--------|------------|
-//! | 1 | Success | Success | Delete DB row | "Deleted" (no row) |
+//! | 1 | Success | Success | Delete DB row | (row removed) |
 //! | 2 | Failed | N/A | Log error, retry next pass | "Deleting" (NoChange) |
 //! | 3 | Success | Failed | Log error, retry next pass | "Deleting" (NoChange) |
 //!
-//! Note: "Deleted" is a terminal outcome (the group row no longer exists). All
-//! DPD cleanup happens while in "Deleting"; there are no transitions for
-//! "Deleted" because the reconciler no longer sees the group.
+//! Note: deletion is terminal by row removal. All DPD cleanup happens while
+//! in "Deleting", and once the row is gone the reconciler no longer sees the
+//! group.
 //!
 //! ## Triggering Events
 //! - **"Creating"**: Instance joins group (implicitly creates if needed) → DB inserts with "Creating" state
 //! - **"Active"**: DPD ensure saga completes successfully → state = "Active"
 //! - **"Deleting"**: Last member leaves group → state = "Deleting" (implicit lifecycle)
-//! - **"Deleted"**: RPW reconciler completes DPD cleanup → removes from DB
+//! - **Row removal**: RPW reconciler completes DPD cleanup → removes from DB
 //!
 //! ## Error Handling
 //! - **Saga failures**: Group stays in "Creating", reconciler retries
@@ -401,7 +401,6 @@ impl MulticastGroupReconciler {
                             StateTransition::StateChanged
                                 | StateTransition::NoChange
                         ),
-                        MulticastGroupState::Deleted => true,
                     };
 
                     if should_count {
@@ -512,35 +511,6 @@ impl MulticastGroupReconciler {
                     .process_active(self, opctx, group, dataplane_client)
                     .await
             }
-            MulticastGroupState::Deleted => {
-                debug!(
-                    opctx.log,
-                    "cleaning up deleted multicast group from local database";
-                    "group_id" => %group.id(),
-                    "group_name" => group.name().as_str()
-                );
-
-                // Try to delete underlay group record if it exists
-                if let Some(underlay_group_id) = group.underlay_group_id {
-                    self.datastore
-                        .underlay_multicast_group_delete(
-                            opctx,
-                            underlay_group_id,
-                        )
-                        .await
-                        .ok();
-                }
-                // Try to delete external group record
-                self.datastore
-                    .multicast_group_delete(
-                        opctx,
-                        MulticastGroupUuid::from_untyped_uuid(group.id()),
-                    )
-                    .await
-                    .ok();
-
-                Ok(StateTransition::StateChanged)
-            }
         }
     }
 
@@ -641,7 +611,7 @@ impl MulticastGroupReconciler {
     ) -> Result<StateTransition, anyhow::Error> {
         debug!(
             opctx.log,
-            "processing external multicast group transition: 'Deleting' → 'Deleted' (switch cleanup)";
+            "processing external multicast group 'Deleting' cleanup (switch teardown)";
             "group_id" => %group.id(),
             "group_name" => group.name().as_str(),
             "multicast_ip" => %group.multicast_ip,

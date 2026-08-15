@@ -103,7 +103,6 @@ pub enum CliGroupState {
     Creating,
     Active,
     Deleting,
-    Deleted,
 }
 
 impl From<CliGroupState> for MulticastGroupState {
@@ -112,7 +111,6 @@ impl From<CliGroupState> for MulticastGroupState {
             CliGroupState::Creating => MulticastGroupState::Creating,
             CliGroupState::Active => MulticastGroupState::Active,
             CliGroupState::Deleting => MulticastGroupState::Deleting,
-            CliGroupState::Deleted => MulticastGroupState::Deleted,
         }
     }
 }

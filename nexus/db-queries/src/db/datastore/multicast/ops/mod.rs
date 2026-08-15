@@ -7,7 +7,7 @@
 //! ## Operations
 //!
 //! - **member_attach**: Atomic CTE for attaching instances to groups
-//!   - Validates group is "Creating" or "Active" (rejects "Deleting"/"Deleted" groups)
+//!   - Validates group is "Creating" or "Active" (rejects "Deleting" groups)
 //!   - Performs member upsert (insert or reactivate from "Left")
 //!   - TOCTOU-safe: single atomic database operation
 //!
@@ -36,7 +36,6 @@ pub(super) const fn group_state_as_sql_literal(
         MulticastGroupState::Creating => "'creating'",
         MulticastGroupState::Active => "'active'",
         MulticastGroupState::Deleting => "'deleting'",
-        MulticastGroupState::Deleted => "'deleted'",
     }
 }
 

@@ -3078,10 +3078,10 @@ table! {
         multicast_ip -> Inet,
         underlay_group_id -> Nullable<Uuid>,
         tag -> Nullable<Text>,
-        state -> crate::enums::MulticastGroupStateEnum,
         version_added -> Int8,
         version_removed -> Nullable<Int8>,
         underlay_salt -> Nullable<Int2>,
+        state -> crate::enums::MulticastGroupStateEnum,
     }
 }
 

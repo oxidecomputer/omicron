@@ -107,7 +107,6 @@ impl_enum_type!(
     Creating => b"creating"
     Active => b"active"
     Deleting => b"deleting"
-    Deleted => b"deleted"
 );
 
 impl_enum_type!(
@@ -127,7 +126,6 @@ impl std::fmt::Display for MulticastGroupState {
             MulticastGroupState::Creating => "Creating",
             MulticastGroupState::Active => "Active",
             MulticastGroupState::Deleting => "Deleting",
-            MulticastGroupState::Deleted => "Deleted",
         })
     }
 }
@@ -189,9 +187,6 @@ pub struct ExternalMulticastGroup {
     /// uniqueness across the group's lifecycle and prevent tag collision
     /// when group names are reused after deletion.
     pub tag: Option<String>,
-    /// Current state of the multicast group (RPW pattern).
-    /// See [MulticastGroupState] for possible values.
-    pub state: MulticastGroupState,
     /// Version when this group was added.
     pub version_added: Generation,
     /// Version when this group was removed.
@@ -207,6 +202,9 @@ pub struct ExternalMulticastGroup {
     /// - `None` or `0`: Default, no salt applied
     /// - `1..255`: Salt value used for collision avoidance
     pub underlay_salt: Option<SqlU8>,
+    /// Current state of the multicast group (RPW pattern).
+    /// See [MulticastGroupState] for possible values.
+    pub state: MulticastGroupState,
 }
 
 /// Values used to create a [MulticastGroupMember] in the database.
