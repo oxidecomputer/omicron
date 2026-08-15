@@ -500,10 +500,9 @@ impl MulticastDataplaneClient {
                 "multicast_scope" => if external_group.multicast_ip.ip().is_ipv4() { "IPv4_External" } else { "IPv6_External" },
                 "switch_count" => self.switch_count(),
                 "dpd_error" => %e,
-                "recovery" => "saga_will_rollback_partial_configuration",
+                "recovery" => "reconciler_retry_converges_partial_configuration",
                 "dpd_operation" => "create_groups"
             );
-            // Rollback handled by saga layer
             e
         })?;
 

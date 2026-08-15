@@ -4,14 +4,14 @@
 
 //! Saga for applying multicast dataplane configuration via DPD.
 //!
-//! Atomically applies external and underlay multicast configuration via DPD.
-//! Either both are successfully applied on all switches, or partial changes
-//! are rolled back.
+//! Applies external and underlay multicast configuration via DPD. A partial
+//! failure leaves the group in "Creating", and the reconciler restarts the
+//! saga on subsequent passes until every switch converges on the intended
+//! configuration.
 //!
 //! Triggered by RPW reconciler when a multicast group is in "Creating" state
 //! and needs dataplane updates.
 
-use anyhow::Context;
 use serde::{Deserialize, Serialize};
 use slog::{debug, warn};
 use steno::{ActionError, DagBuilder, Node};
@@ -64,6 +64,13 @@ declare_saga_actions! {
     FETCH_GROUP_DATA -> "group_data" {
         + mgde_fetch_group_data
     }
+    // Steno does not run a failed node's own undo, so a `create_groups`
+    // call that partially configures switches before erroring is not
+    // rolled back here. That is deliberate: the group stays "Creating",
+    // the reconciler restarts the saga, and the dataplane client's
+    // CONFLICT paths fill in missing switches while leaving configured
+    // ones forwarding. Attribute drift on configured switches heals in
+    // the "Active" drift check.
     UPDATE_DATAPLANE -> "update_responses" {
         + mgde_update_dataplane
         - mgde_rollback_dataplane
@@ -249,6 +256,12 @@ async fn mgde_update_dataplane(
     })
 }
 
+/// Undo `mgde_update_dataplane` by removing the groups written to DPD.
+///
+/// Errors are logged rather than returned because a failed undo action
+/// permanently strands the saga in Steno. DPD state left behind is keyed
+/// by the group tag. The next reconciler pass rewrites it while the group
+/// is still "Creating" or removes it by tag once the group is "Deleting".
 async fn mgde_rollback_dataplane(
     sagactx: NexusActionContext,
 ) -> Result<(), anyhow::Error> {
@@ -258,17 +271,33 @@ async fn mgde_rollback_dataplane(
     let GroupData { external_group, .. } =
         sagactx.lookup::<GroupData>("group_data")?;
 
-    let multicast_tag = external_group.tag.clone().ok_or_else(|| {
-        saga_action_failed(Error::internal_error("multicast group missing tag"))
-    })?;
+    let Some(multicast_tag) = external_group.tag.clone() else {
+        warn!(
+            osagactx.log(),
+            "multicast group missing tag, skipping dataplane rollback";
+            "external_group_id" => %params.external_group_id,
+        );
+        return Ok(());
+    };
 
-    // Use MulticastDataplaneClient for consistent cleanup
-    let dataplane = MulticastDataplaneClient::new(
+    let dataplane = match MulticastDataplaneClient::new(
         osagactx.nexus().resolver().clone(),
         osagactx.log().clone(),
     )
     .await
-    .map_err(saga_action_failed)?;
+    {
+        Ok(client) => client,
+        Err(e) => {
+            warn!(
+                osagactx.log(),
+                "failed to create dataplane client during saga rollback, \
+                 next reconciler pass converges the dataplane";
+                "tag" => %multicast_tag,
+                "error" => ?e,
+            );
+            return Ok(());
+        }
+    };
 
     debug!(
         osagactx.log(),
@@ -279,10 +308,16 @@ async fn mgde_rollback_dataplane(
         "external_group_name" => external_group.name().as_str(),
     );
 
-    dataplane
-        .remove_groups(&multicast_tag)
-        .await
-        .context("failed to cleanup multicast groups during saga rollback")?;
+    if let Err(e) = dataplane.remove_groups(&multicast_tag).await {
+        warn!(
+            osagactx.log(),
+            "failed to remove multicast groups during saga rollback, \
+             next reconciler pass converges the dataplane";
+            "tag" => %multicast_tag,
+            "error" => ?e,
+        );
+        return Ok(());
+    }
 
     debug!(
         osagactx.log(),
