@@ -27,6 +27,9 @@ use crate::config::SidecarRevision;
 use crate::ddm_reconciler::DdmReconciler;
 use crate::metrics::MetricsRequestQueue;
 use crate::profile::*;
+use crate::sush::{
+    SUSH_PROXY_CERT_CHAIN_PATH, SUSH_PROXY_KEY_PATH, mint_proxy_identity,
+};
 use camino::{Utf8Path, Utf8PathBuf};
 use clickhouse_admin_types::CLICKHOUSE_KEEPER_CONFIG_DIR;
 use clickhouse_admin_types::CLICKHOUSE_KEEPER_CONFIG_FILE;
@@ -67,6 +70,7 @@ use omicron_common::address::MGS_PORT;
 use omicron_common::address::NTP_ADMIN_PORT;
 use omicron_common::address::RACK_PREFIX_LENGTH;
 use omicron_common::address::SLED_PREFIX_LENGTH;
+use omicron_common::address::SUSH_PROXY_PORT;
 use omicron_common::address::TFPORTD_PORT;
 use omicron_common::address::WICKETD_COMMISSION_PORT;
 use omicron_common::address::WICKETD_NEXUS_PROXY_PORT;
@@ -476,6 +480,27 @@ enum SwitchService {
     MgDdm { mode: String },
     Mgd,
     SpSim,
+    SushProxy { tls: SushProxyTls, baseboard: Baseboard },
+}
+
+/// How the sush proxy authenticates itself to clients.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum SushProxyTls {
+    /// The sled's platform identity: an ephemeral key whose certificate
+    /// the RoT signs once at zone startup.
+    Platform,
+    /// None. For development images, which have no RoT to mint an
+    /// identity with.
+    Insecure,
+}
+
+impl SushProxyTls {
+    fn as_str(&self) -> &'static str {
+        match self {
+            SushProxyTls::Platform => "platform",
+            SushProxyTls::Insecure => "insecure",
+        }
+    }
 }
 
 impl illumos_utils::smf_helper::Service for SwitchService {
@@ -491,6 +516,7 @@ impl illumos_utils::smf_helper::Service for SwitchService {
             SwitchService::MgDdm { .. } => "mg-ddm",
             SwitchService::Mgd => "mgd",
             SwitchService::SpSim => "sp-sim",
+            SwitchService::SushProxy { .. } => "sush-proxy",
         }
     }
     fn smf_name(&self) -> String {
@@ -2574,6 +2600,7 @@ impl ServiceManager {
         let mut mgd_service = ServiceBuilder::new("oxide/mgd");
         let mut mg_ddm_service = ServiceBuilder::new("oxide/mg-ddm");
         let mut uplink_service = ServiceBuilder::new("oxide/uplink");
+        let mut sush_proxy_service = ServiceBuilder::new("oxide/sush-proxy");
 
         let mut switch_zone_setup_config = PropertyGroupBuilder::new("config")
             .add_property(
@@ -2648,6 +2675,60 @@ impl ServiceManager {
                 }
                 SwitchService::SpSim => {
                     info!(self.inner.log, "Setting up Simulated SP service");
+                }
+                SwitchService::SushProxy { tls, baseboard } => {
+                    info!(self.inner.log, "Setting up sush-proxy service");
+                    if let SushProxyTls::Platform = tls {
+                        if let Err(err) = mint_proxy_identity(
+                            &self.inner.log,
+                            &installed_zone.root(),
+                        )
+                        .await
+                        {
+                            error!(
+                                self.inner.log,
+                                "failed to mint the sush proxy TLS identity";
+                                "error" => format!("{err:#}"),
+                            );
+                        }
+                    }
+                    let config = PropertyGroupBuilder::new("config")
+                        // Bind `::` so the proxy serves all interfaces,
+                        // particularly the tech ports.
+                        .add_property(
+                            "address",
+                            "astring",
+                            &format!("[::]:{SUSH_PROXY_PORT}"),
+                        )
+                        .add_property(
+                            "mgs-address",
+                            "astring",
+                            &format!("[::1]:{MGS_PORT}"),
+                        )
+                        .add_property("tls", "astring", tls.as_str())
+                        .add_property(
+                            "home",
+                            "astring",
+                            &format!(
+                                "{}:{}",
+                                baseboard.model(),
+                                baseboard.identifier()
+                            ),
+                        )
+                        .add_property(
+                            "priv-key",
+                            "astring",
+                            SUSH_PROXY_KEY_PATH,
+                        )
+                        .add_property(
+                            "cert-chain",
+                            "astring",
+                            SUSH_PROXY_CERT_CHAIN_PATH,
+                        );
+                    sush_proxy_service = sush_proxy_service.add_instance(
+                        ServiceInstanceBuilder::new("default")
+                            .add_property_group(config),
+                    );
                 }
                 SwitchService::Wicketd { baseboard } => {
                     info!(self.inner.log, "Setting up wicketd service");
@@ -3167,7 +3248,8 @@ impl ServiceManager {
             .add_service(pumpkind_service)
             .add_service(mgd_service)
             .add_service(mg_ddm_service)
-            .add_service(uplink_service);
+            .add_service(uplink_service)
+            .add_service(sush_proxy_service);
 
         // If we have the rack subnet, also set up /etc/resolv.conf.
         if let Some(info) = info {
@@ -3298,6 +3380,10 @@ impl ServiceManager {
                     SwitchService::Wicketd { baseboard: baseboard.clone() },
                     SwitchService::Mgd,
                     SwitchService::MgDdm { mode: "transit".to_string() },
+                    SwitchService::SushProxy {
+                        tls: SushProxyTls::Platform,
+                        baseboard: baseboard.clone(),
+                    },
                 ]
             }
 
@@ -3318,6 +3404,10 @@ impl ServiceManager {
                         asic,
                     },
                     SwitchService::SpSim,
+                    SwitchService::SushProxy {
+                        tls: SushProxyTls::Insecure,
+                        baseboard: baseboard.clone(),
+                    },
                 ]
             }
 
@@ -3349,6 +3439,10 @@ impl ServiceManager {
                         asic,
                     },
                     SwitchService::SpSim,
+                    SwitchService::SushProxy {
+                        tls: SushProxyTls::Insecure,
+                        baseboard: baseboard.clone(),
+                    },
                 ]
             }
         };
@@ -3718,6 +3812,9 @@ impl ServiceManager {
                             // Only configured by scrimlet reconcilers
                         }
                         SwitchService::SpSim => {
+                            // nothing to configure
+                        }
+                        SwitchService::SushProxy { .. } => {
                             // nothing to configure
                         }
                         SwitchService::Mgd => {

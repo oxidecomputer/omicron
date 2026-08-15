@@ -169,6 +169,7 @@ members = [
     "sled-storage/zfs-test-harness",
     "sp-sim",
     "support-bundle-collection",
+    "sush-proxy",
     "test-utils",
     "trust-quorum",
     "trust-quorum/gfss",
@@ -364,6 +365,7 @@ default-members = [
     "sled-storage/zfs-test-harness",
     "sp-sim",
     "support-bundle-collection",
+    "sush-proxy",
     "trust-quorum",
     "trust-quorum/gfss",
     "trust-quorum/protocol",
@@ -838,8 +840,8 @@ slog-term = "2.9.1"
 smf = "0.2"
 socket2 = { version = "0.5", features = ["all"] }
 sp-sim = { path = "sp-sim" }
-sprockets-tls = { git = "https://github.com/oxidecomputer/sprockets.git", rev = "68a4b3bf819722f9f57a3f0c99e1393ed01ba392" }
-sprockets-tls-test-utils = { git = "https://github.com/oxidecomputer/sprockets.git", rev = "68a4b3bf819722f9f57a3f0c99e1393ed01ba392" }
+sprockets-tls = { git = "https://github.com/oxidecomputer/sprockets.git", rev = "b8782742d1bd91546887fbc1757a7d024a5469ef", default-features = false }
+sprockets-tls-test-utils = { git = "https://github.com/oxidecomputer/sprockets.git", rev = "b8782742d1bd91546887fbc1757a7d024a5469ef" }
 sqlformat = "0.3.5"
 sqlparser = { version = "0.61.0", features = [ "visitor" ] }
 static_assertions = "1.1.0"
@@ -853,6 +855,9 @@ subtle = "2.6.1"
 supports-color = "3.0.2"
 support-bundle-collection = { path = "support-bundle-collection" }
 support-bundle-viewer = "0.1.2"
+sush-api = { git = "https://github.com/oxidecomputer/sush", rev = "c987748c331dd8f78873f77fc5a39c11520d9fc9" }
+sush-common = { git = "https://github.com/oxidecomputer/sush", rev = "c987748c331dd8f78873f77fc5a39c11520d9fc9" }
+sush-server = { git = "https://github.com/oxidecomputer/sush", rev = "c987748c331dd8f78873f77fc5a39c11520d9fc9", features = ["embedded"] }
 swrite = "0.1.0"
 sync-ptr = "0.1.4"
 libsw = { version = "3.5.0", features = ["tokio"] }
@@ -1156,3 +1161,8 @@ path = "workspace-hack"
 [patch."https://github.com/oxidecomputer/omicron"]
 omicron-uuid-kinds = { path = "uuid-kinds" }
 omicron-common = { path = "common" }
+# sush depends on this repo's sled-hardware-types as a Git dependency, for
+# BaseboardId. Without this directive the build gets two distinct copies of the
+# crate, and the BaseboardId that sush's API expects is a *different type* from
+# the one sled-agent derives from HardwareManager::baseboard().
+sled-hardware-types = { path = "sled-hardware/types" }

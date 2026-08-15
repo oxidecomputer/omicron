@@ -511,6 +511,27 @@ impl AvailableDatasetsReceiver {
         }
     }
 
+    /// Wait until the set of available datasets may have changed.
+    ///
+    /// Returns immediately if it has changed since this receiver last observed
+    /// it, and never returns for the test variants, whose datasets are fixed.
+    pub async fn changed(&mut self) {
+        match &mut self.inner {
+            AvailableDatasetsReceiverInner::Real(receiver) => {
+                // An error means the reconciler task is gone, in which case the
+                // set can never change again.
+                if receiver.changed().await.is_err() {
+                    std::future::pending().await
+                }
+            }
+            #[cfg(feature = "testing")]
+            AvailableDatasetsReceiverInner::FakeTempDir { .. }
+            | AvailableDatasetsReceiverInner::FakeStatic(_) => {
+                std::future::pending().await
+            }
+        }
+    }
+
     pub fn all_mounted_debug_datasets(&self) -> Vec<PathInPool> {
         match &self.inner {
             AvailableDatasetsReceiverInner::Real(receiver) => {

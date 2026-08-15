@@ -120,6 +120,55 @@ pub struct Config {
     /// root certificates and whether to use local certificate chain or
     /// one over IPCC
     pub sprockets: SprocketsConfig,
+
+    /// Settings for the Support Shell server (RFD 620). If this is absent, no
+    /// Support Shell server runs on this sled.
+    #[serde(default)]
+    pub sush: Option<SushConfig>,
+}
+
+/// Configuration for the Support Shell (`sush`) server that runs in the global
+/// zone. See RFD 620.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SushConfig {
+    /// PEM files holding the trusted root certificates for job requests,
+    /// one certificate per file. A job whose signature does not chain to
+    /// one of these is refused, so an empty list means no job can ever run.
+    pub roots: Vec<Utf8PathBuf>,
+
+    /// Where to record job output before an encrypted dataset is available.
+    /// This is on the ramdisk, so it costs global zone memory and does not
+    /// survive a reboot.
+    #[serde(default = "SushConfig::default_ramdisk_dir")]
+    pub ramdisk_dir: Utf8PathBuf,
+
+    /// Maximum output a single job may record while it is being written to
+    /// `ramdisk_dir`. Deliberately small: this is memory.
+    #[serde(default = "SushConfig::default_ramdisk_max_output_mb")]
+    pub ramdisk_max_output_mb: u32,
+
+    /// Maximum output a single job may record once it is being written to an
+    /// encrypted dataset.
+    #[serde(default = "SushConfig::default_max_output_mb")]
+    pub max_output_mb: u32,
+}
+
+impl SushConfig {
+    // TODO: check that this is the right default. `/var/run/oxide` is tmpfs
+    // and is created during bootstrap, but it exists to hold ZFS key files
+    // (see `illumos_utils::zfs::KEYPATH_ROOT`), not bulk job output.
+    fn default_ramdisk_dir() -> Utf8PathBuf {
+        "/var/run/oxide/sush".into()
+    }
+
+    fn default_ramdisk_max_output_mb() -> u32 {
+        64
+    }
+
+    fn default_max_output_mb() -> u32 {
+        10 * 1024
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -209,5 +258,33 @@ mod test {
             }
         }
         assert!(configs_seen > 0, "No sled-agent configs found");
+    }
+
+    #[test]
+    fn test_sush_config() {
+        // Only `roots` is required. The rest have defaults.
+        let sush: SushConfig =
+            toml::from_str(r#"roots = ["/pkg/sush-root.pem"]"#).unwrap();
+        assert_eq!(sush.roots, vec![Utf8PathBuf::from("/pkg/sush-root.pem")]);
+        assert_eq!(sush.ramdisk_dir, SushConfig::default_ramdisk_dir());
+        assert_eq!(
+            sush.ramdisk_max_output_mb,
+            SushConfig::default_ramdisk_max_output_mb()
+        );
+        assert_eq!(sush.max_output_mb, SushConfig::default_max_output_mb());
+
+        let sush: SushConfig = toml::from_str(
+            r#"
+            roots = []
+            ramdisk_dir = "/var/run/sush"
+            ramdisk_max_output_mb = 8
+            max_output_mb = 128
+            "#,
+        )
+        .unwrap();
+        assert!(sush.roots.is_empty());
+        assert_eq!(sush.ramdisk_dir, "/var/run/sush");
+        assert_eq!(sush.ramdisk_max_output_mb, 8);
+        assert_eq!(sush.max_output_mb, 128);
     }
 }
