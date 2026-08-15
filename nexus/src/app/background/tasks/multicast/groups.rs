@@ -58,8 +58,8 @@
 //! | 3 | Success | Failed | Log error, retry next pass | "Deleting" (NoChange) |
 //!
 //! Note: deletion is terminal by row removal. All DPD cleanup happens while
-//! in "Deleting", and once the row is gone the reconciler no longer sees the
-//! group.
+//! in "Deleting", and once the row is gone, the reconciler has nothing to
+//! process.
 //!
 //! ## Triggering Events
 //! - **"Creating"**: Instance joins group (implicitly creates if needed) → DB inserts with "Creating" state

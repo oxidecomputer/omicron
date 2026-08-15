@@ -95,8 +95,10 @@ pub(crate) mod dataplane;
 ///
 /// # Arguments
 /// - `group_ip`: The multicast group's IP address
-/// - `source_ips`: The source IPs for the membership (None = no sources,
-///   Some([]) = empty, both invalid for SSM)
+/// - `source_ips`: Requested source IPs. `None` is missing for a new
+///   membership (a repeat join that omits it preserves the stored filter and
+///   skips this validation). `Some([])` is an explicit empty list. Both are
+///   invalid for a new SSM membership.
 ///
 /// # Returns
 /// - `Ok(())` if validation passes (ASM address, or SSM with sources)
