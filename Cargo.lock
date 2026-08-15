@@ -15570,7 +15570,7 @@ checksum = "b7401a30af6cb5818bb64852270bb722533397edcfc7344954a38f420819ece2"
 [[package]]
 name = "sush-api"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/sush?rev=5027fcb346a62c32a4e6cf1135cbc3d8a30158fc#5027fcb346a62c32a4e6cf1135cbc3d8a30158fc"
+source = "git+https://github.com/oxidecomputer/sush?rev=9916585f2ecd8fe14db203e00969acecd32e6ace#9916585f2ecd8fe14db203e00969acecd32e6ace"
 dependencies = [
  "borsh",
  "chrono",
@@ -15587,7 +15587,7 @@ dependencies = [
 [[package]]
 name = "sush-common"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/sush?rev=5027fcb346a62c32a4e6cf1135cbc3d8a30158fc#5027fcb346a62c32a4e6cf1135cbc3d8a30158fc"
+source = "git+https://github.com/oxidecomputer/sush?rev=9916585f2ecd8fe14db203e00969acecd32e6ace#9916585f2ecd8fe14db203e00969acecd32e6ace"
 dependencies = [
  "blake3",
  "borsh",
@@ -15648,7 +15648,7 @@ dependencies = [
 [[package]]
 name = "sush-server"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/sush?rev=5027fcb346a62c32a4e6cf1135cbc3d8a30158fc#5027fcb346a62c32a4e6cf1135cbc3d8a30158fc"
+source = "git+https://github.com/oxidecomputer/sush?rev=9916585f2ecd8fe14db203e00969acecd32e6ace#9916585f2ecd8fe14db203e00969acecd32e6ace"
 dependencies = [
  "async-trait",
  "blake3",
