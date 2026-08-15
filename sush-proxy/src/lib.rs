@@ -18,6 +18,7 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use camino::Utf8PathBuf;
+use futures::future::join_all;
 use gateway_client::Client as MgsClient;
 use gateway_types::component::SpType;
 use omicron_common::address::SUSH_API_PORT;
@@ -51,6 +52,7 @@ pub struct Config {
     pub address: SocketAddr,
     pub mgs_address: SocketAddrV6,
     pub tls: Tls,
+    pub home: Option<BaseboardId>,
 }
 
 /// Serve the proxy and its discovery loops.
@@ -68,6 +70,7 @@ pub async fn run(log: &Logger, config: Config) -> Result<()> {
         config.address,
         tls,
         rx_targets,
+        config.home,
         CancellationToken::new(),
     )
     .await
@@ -92,10 +95,12 @@ fn mgs_client(log: &Logger, address: SocketAddrV6) -> MgsClient {
     )
 }
 
-/// Keep `Targets::sleds` current: every sled address advertised via
-/// DDM that answers `/target` is routable. Sleds answer on their
-/// bootstrap addresses from boot and on their underlay addresses once
-/// RSS assigns them; we probe both, and underlay wins.
+/// Keep `Targets::sleds` current. Every DDM-advertised address that
+/// answers `/target` is routable. Sleds answer on their bootstrap
+/// addresses from boot and on their underlay addresses once RSS
+/// assigns them. We probe both, and underlay wins. Answers merge
+/// over what we already know, so a missed probe never evicts a
+/// sled. A stale address fails at forwarding time instead.
 async fn sleds(log: &Logger, ddm: DdmClient, targets: &watch::Sender<Targets>) {
     let probe = reqwest::ClientBuilder::new()
         .connect_timeout(PROBE_TIMEOUT)
@@ -127,20 +132,23 @@ async fn sleds(log: &Logger, ddm: DdmClient, targets: &watch::Sender<Targets>) {
             }
             Err(err) => warn!(log, "unable to fetch prefixes"; "error" => %err),
         }
-        targets.send_modify(|t| t.sleds = sleds);
+        targets.send_modify(|t| t.sleds.extend(sleds));
         sleep(POLL_INTERVAL).await;
     }
 }
 
-/// Probe candidate addresses and record the sleds that answer.
+/// Probe candidate addresses concurrently and record the sleds that
+/// answer.
 async fn discover(
     log: &Logger,
     probe: &reqwest::Client,
     addrs: impl Iterator<Item = SocketAddrV6>,
     sleds: &mut BTreeMap<BaseboardId, SocketAddr>,
 ) {
-    for addr in addrs {
-        match target(probe, addr).await {
+    let probes =
+        addrs.map(|addr| async move { (addr, target(probe, addr).await) });
+    for (addr, result) in join_all(probes).await {
+        match result {
             Ok(baseboard) => {
                 sleds.insert(baseboard, SocketAddr::V6(addr));
             }
@@ -174,9 +182,13 @@ async fn cubbies(
     targets: &watch::Sender<Targets>,
 ) {
     loop {
+        let polls = (0..=MAX_CUBBY).map(|cubby| {
+            let mgs = &mgs;
+            async move { (cubby, mgs.sp_get(&SpType::Sled, cubby.into()).await) }
+        });
         let mut cubbies = Cubbies::new();
-        for cubby in 0..=MAX_CUBBY {
-            match mgs.sp_get(&SpType::Sled, cubby.into()).await {
+        for (cubby, result) in join_all(polls).await {
+            match result {
                 Ok(state) => {
                     let state = state.into_inner();
                     cubbies.insert(

@@ -855,9 +855,9 @@ subtle = "2.6.1"
 supports-color = "3.0.2"
 support-bundle-collection = { path = "support-bundle-collection" }
 support-bundle-viewer = "0.1.2"
-sush-api = { git = "https://github.com/oxidecomputer/sush", rev = "9916585f2ecd8fe14db203e00969acecd32e6ace" }
-sush-common = { git = "https://github.com/oxidecomputer/sush", rev = "9916585f2ecd8fe14db203e00969acecd32e6ace" }
-sush-server = { git = "https://github.com/oxidecomputer/sush", rev = "9916585f2ecd8fe14db203e00969acecd32e6ace", features = ["embedded"] }
+sush-api = { git = "https://github.com/oxidecomputer/sush", rev = "853d935e08b2e7a0b28326bbb5e72eea91e00670" }
+sush-common = { git = "https://github.com/oxidecomputer/sush", rev = "853d935e08b2e7a0b28326bbb5e72eea91e00670" }
+sush-server = { git = "https://github.com/oxidecomputer/sush", rev = "853d935e08b2e7a0b28326bbb5e72eea91e00670", features = ["embedded"] }
 swrite = "0.1.0"
 sync-ptr = "0.1.4"
 libsw = { version = "3.5.0", features = ["tokio"] }

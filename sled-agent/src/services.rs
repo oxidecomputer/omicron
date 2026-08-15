@@ -480,7 +480,7 @@ enum SwitchService {
     MgDdm { mode: String },
     Mgd,
     SpSim,
-    SushProxy { tls: SushProxyTls },
+    SushProxy { tls: SushProxyTls, baseboard: Baseboard },
 }
 
 /// How the sush proxy authenticates itself to clients.
@@ -2676,7 +2676,7 @@ impl ServiceManager {
                 SwitchService::SpSim => {
                     info!(self.inner.log, "Setting up Simulated SP service");
                 }
-                SwitchService::SushProxy { tls } => {
+                SwitchService::SushProxy { tls, baseboard } => {
                     info!(self.inner.log, "Setting up sush-proxy service");
                     if let SushProxyTls::Platform = tls {
                         if let Err(err) = mint_proxy_identity(
@@ -2706,6 +2706,15 @@ impl ServiceManager {
                             &format!("[::1]:{MGS_PORT}"),
                         )
                         .add_property("tls", "astring", tls.as_str())
+                        .add_property(
+                            "home",
+                            "astring",
+                            &format!(
+                                "{}:{}",
+                                baseboard.model(),
+                                baseboard.identifier()
+                            ),
+                        )
                         .add_property(
                             "priv-key",
                             "astring",
@@ -3371,7 +3380,10 @@ impl ServiceManager {
                     SwitchService::Wicketd { baseboard: baseboard.clone() },
                     SwitchService::Mgd,
                     SwitchService::MgDdm { mode: "transit".to_string() },
-                    SwitchService::SushProxy { tls: SushProxyTls::Platform },
+                    SwitchService::SushProxy {
+                        tls: SushProxyTls::Platform,
+                        baseboard: baseboard.clone(),
+                    },
                 ]
             }
 
@@ -3392,7 +3404,10 @@ impl ServiceManager {
                         asic,
                     },
                     SwitchService::SpSim,
-                    SwitchService::SushProxy { tls: SushProxyTls::Insecure },
+                    SwitchService::SushProxy {
+                        tls: SushProxyTls::Insecure,
+                        baseboard: baseboard.clone(),
+                    },
                 ]
             }
 
@@ -3424,7 +3439,10 @@ impl ServiceManager {
                         asic,
                     },
                     SwitchService::SpSim,
-                    SwitchService::SushProxy { tls: SushProxyTls::Insecure },
+                    SwitchService::SushProxy {
+                        tls: SushProxyTls::Insecure,
+                        baseboard: baseboard.clone(),
+                    },
                 ]
             }
         };

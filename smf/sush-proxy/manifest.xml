@@ -17,7 +17,7 @@
   </dependency>
 
   <exec_method type='method' name='start'
-      exec='ctrun -l child -o noorphan,regent /opt/oxide/sush-proxy/bin/sush-proxy --address %{config/address} --mgs-address %{config/mgs-address} --tls %{config/tls} --priv-key %{config/priv-key} --cert-chain %{config/cert-chain} &amp;'
+      exec='ctrun -l child -o noorphan,regent /opt/oxide/sush-proxy/bin/sush-proxy --address %{config/address} --mgs-address %{config/mgs-address} --tls %{config/tls} --priv-key %{config/priv-key} --cert-chain %{config/cert-chain} --home %{config/home} &amp;'
     timeout_seconds='0' />
   <exec_method type='method' name='stop' exec=':kill' timeout_seconds='0' />
 
@@ -28,6 +28,7 @@
   <property_group name='config' type='application'>
     <propval name='address' type='astring' value='unknown' />
     <propval name='mgs-address' type='astring' value='unknown' />
+    <propval name='home' type='astring' value='unknown:unknown' />
     <propval name='tls' type='astring' value='unknown' />
     <propval name='priv-key' type='astring' value='unknown' />
     <propval name='cert-chain' type='astring' value='unknown' />

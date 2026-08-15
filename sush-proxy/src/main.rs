@@ -34,6 +34,11 @@ struct Args {
     /// The TLS certificate chain (PEM), for `--tls platform`
     #[clap(long, required_if_eq("tls", "platform"))]
     cert_chain: Option<Utf8PathBuf>,
+
+    /// The baseboard (part:serial) of the sled hosting the proxy,
+    /// preferred for requests that name no target
+    #[clap(long)]
+    home: Option<String>,
 }
 
 /// How the proxy authenticates itself to clients.
@@ -50,8 +55,14 @@ fn main() -> anyhow::Result<()> {
 }
 
 async fn run_proxy() -> anyhow::Result<()> {
-    let Args { address, mgs_address, tls, priv_key, cert_chain } =
+    let Args { address, mgs_address, tls, priv_key, cert_chain, home } =
         Args::parse();
+    let home = home
+        .map(|home| {
+            home.parse()
+                .map_err(|err| anyhow::anyhow!("bad --home `{home}`: {err}"))
+        })
+        .transpose()?;
     let tls = match tls {
         TlsArg::Platform => Tls::Platform {
             priv_key: priv_key.unwrap(),
@@ -68,7 +79,7 @@ async fn run_proxy() -> anyhow::Result<()> {
     if let slog_dtrace::ProbeRegistration::Failed(err) = registration {
         anyhow::bail!("failed to register DTrace probes: {err}");
     }
-    run(&log, Config { address, mgs_address, tls })
+    run(&log, Config { address, mgs_address, tls, home })
         .await
         .context("running the proxy")
 }
