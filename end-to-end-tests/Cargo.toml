@@ -22,7 +22,7 @@ clap.workspace = true
 colored.workspace = true
 # On Git commit for trust-dns -> hickory switch.
 # Switch back to released versions of dhcproto on next release.
-dhcproto = { git = "https://github.com/bluecatengineering/dhcproto.git", rev = "120da6fcd8a7be84d417d372634ead84ce07e6da" }
+dhcproto = { git = "https://github.com/bluecatengineering/dhcproto.git", rev = "60719e5df11359b12bf74e743b3c7e0831351c2d" }
 futures.workspace = true
 hickory-resolver.workspace = true
 http.workspace = true
