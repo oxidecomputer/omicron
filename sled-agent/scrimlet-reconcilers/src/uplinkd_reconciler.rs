@@ -13,6 +13,7 @@ use crate::reconciler_task::Reconciler;
 use crate::switch_zone_slot::ThisSledSwitchSlot;
 use anyhow::anyhow;
 use anyhow::bail;
+use bootstrap_agent_lockstep_types::scrimlet_reconcilers::uplinkd::UplinkdReconcilerStatus;
 use scuffle::AddPropertyGroupFlags;
 use scuffle::EditPropertyGroups;
 use scuffle::HasComposedPropertyGroups;
@@ -34,31 +35,6 @@ use std::time::Duration;
 const UPLINK_SERVICE_NAME: &str = "oxide/uplink";
 const UPLINK_INSTANCE_NAME: &str = "default";
 const UPLINKS_PG_NAME: &str = "uplinks";
-
-#[derive(Debug, Clone)]
-pub enum UplinkdReconcilerStatus {
-    Failed(String),
-    SkippedConfigUpToDate,
-    Reconciled { ports: BTreeMap<String, Vec<String>> },
-}
-
-impl slog::KV for UplinkdReconcilerStatus {
-    fn serialize(
-        &self,
-        _record: &slog::Record<'_>,
-        serializer: &mut dyn slog::Serializer,
-    ) -> slog::Result {
-        match self {
-            UplinkdReconcilerStatus::Failed(reason) => {
-                serializer.emit_str("uplinkd".into(), &reason)
-            }
-            UplinkdReconcilerStatus::SkippedConfigUpToDate => serializer
-                .emit_str("uplinkd".into(), "skipped: config up-to-date"),
-            UplinkdReconcilerStatus::Reconciled { ports } => serializer
-                .emit_usize("uplinkd-reconciled-ports".into(), ports.len()),
-        }
-    }
-}
 
 #[derive(Debug)]
 pub(crate) struct UplinkdReconciler {

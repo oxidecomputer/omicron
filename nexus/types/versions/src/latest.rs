@@ -56,6 +56,9 @@ pub mod alert {
     pub use crate::v2025_11_20_00::alert::WebhookSecretCreate;
     pub use crate::v2025_11_20_00::alert::WebhookSecretSelector;
     pub use crate::v2025_11_20_00::alert::WebhookSecrets;
+
+    pub use crate::v2026_08_14_00::alert::Alert;
+    pub use crate::v2026_08_14_00::alert::AlertListParams;
 }
 
 pub mod audit {
@@ -547,7 +550,6 @@ pub mod external_subnet {
 }
 
 pub mod sled {
-    pub use crate::v2025_11_20_00::sled::Sled;
     pub use crate::v2025_11_20_00::sled::SledId;
     pub use crate::v2025_11_20_00::sled::SledInstance;
     pub use crate::v2025_11_20_00::sled::SledPolicy;
@@ -557,6 +559,7 @@ pub mod sled {
     pub use crate::v2025_11_20_00::sled::SledSelector;
     pub use crate::v2025_11_20_00::sled::SledState;
     pub use crate::v2025_11_20_00::sled::SwitchSelector;
+    pub use crate::v2026_08_12_00::sled::Sled;
 }
 
 pub mod ssh_key {

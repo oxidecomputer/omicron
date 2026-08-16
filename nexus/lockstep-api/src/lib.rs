@@ -51,6 +51,7 @@ use omicron_uuid_kinds::*;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
+use sled_hardware_types::BaseboardId;
 use trust_quorum_types::types::Epoch;
 use uuid::Uuid;
 
@@ -579,15 +580,21 @@ pub trait NexusLockstepApi {
     ///
     /// This is a required first step towards expunging a sled
     ///
+    /// The sled is identified by its baseboard, since trust quorum membership
+    /// is tracked by baseboard and the sled may have no database record.
+    ///
     /// Return the epoch of the proposed configuration so it can be polled
     /// asynchronously.
     #[endpoint {
         method = POST,
-        path = "/trust-quorum/remove/{sled}"
+        path = "/trust-quorum/remove/{rack_id}"
     }]
     async fn trust_quorum_remove_sled(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<SledSelector>,
+        path_params: Path<
+            nexus_types::external_api::rack::RackMembershipConfigPathParams,
+        >,
+        sled: TypedBody<BaseboardId>,
     ) -> Result<HttpResponseOk<Epoch>, HttpError>;
 
     // Fault management
