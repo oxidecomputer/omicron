@@ -9,14 +9,14 @@ use super::setup::{
     Cond, WicketdTestContext, assert_client_error, assert_client_error_message,
     wait_for_sled0_progress,
 };
-use camino_tempfile::Utf8TempDir;
-use clap::Parser;
 use gateway_messages::SpPort;
 use gateway_test_utils::setup as gateway_setup;
 use http::StatusCode;
 use iddqd::{IdOrdMap, id_ord_map};
 use omicron_test_utils::dev::poll::{CondCheckError, wait_for_condition};
+use semver::Version;
 use sp_sim::ROT_STAGING_DEVEL_SIGN;
+use tufaceous::edit::RepositoryEditor;
 use wicket_common::example::ExampleRackSetupData;
 use wicket_common::rack_setup::CurrentRssUserConfigInsensitive;
 use wicketd_commission_types::rack_setup::PutRssUserConfigInsensitive;
@@ -266,13 +266,12 @@ async fn test_commission_inventory() {
     ctx.teardown().await;
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[tokio::test]
 async fn test_commission_start_update() {
     let gateway =
         gateway_setup::test_setup("test_commission_start_update", SpPort::One)
             .await;
     let ctx = WicketdTestContext::setup(gateway).await;
-    let log = ctx.log();
 
     // Since a repository hasn't been uploaded yet, the described system version
     // is absent.
@@ -315,18 +314,18 @@ async fn test_commission_start_update() {
     );
 
     // Now upload a fake TUF repository so a real update can start.
-    let temp_dir = Utf8TempDir::new().expect("temp dir created");
-    let archive_path = temp_dir.path().join("archive.zip");
-    let args = tufaceous::Args::try_parse_from([
-        "tufaceous",
-        "assemble",
-        "../update-common/manifests/fake.toml",
-        archive_path.as_str(),
-    ])
-    .expect("args parsed correctly");
-    args.exec(log).await.expect("assemble command completed successfully");
-    let zip_bytes =
-        fs_err::read(&archive_path).expect("archive read correctly");
+    let zip_bytes = RepositoryEditor::fake(Version::new(1, 0, 0))
+        .unwrap()
+        .finish()
+        .await
+        .unwrap()
+        .generate_root()
+        .sign()
+        .await
+        .unwrap()
+        .write_zip(Vec::new(), chrono::Utc::now())
+        .await
+        .unwrap();
     ctx.commission_client
         .put_repository(zip_bytes)
         .await
@@ -484,7 +483,7 @@ async fn test_commission_rss_config() {
         bootstrap_sleds: expected_slots,
         ntp_servers: expected_ntp_servers,
         dns_servers: expected_dns_servers,
-        internal_services_ip_pool_ranges: expected_pool_ranges,
+        service_ip_pools: expected_service_ip_pools,
         external_dns_ips: expected_external_dns_ips,
         external_dns_zone_name: expected_dns_zone_name,
         rack_network_config: expected_rack_network_config,
@@ -496,7 +495,7 @@ async fn test_commission_rss_config() {
         bootstrap_sleds,
         ntp_servers,
         dns_servers,
-        internal_services_ip_pool_ranges,
+        service_ip_pools,
         external_dns_ips,
         external_dns_zone_name,
         rack_network_config,
@@ -510,8 +509,8 @@ async fn test_commission_rss_config() {
     assert_eq!(ntp_servers, expected_ntp_servers, "ntp_servers stored");
     assert_eq!(dns_servers, expected_dns_servers, "dns_servers stored");
     assert_eq!(
-        internal_services_ip_pool_ranges, expected_pool_ranges,
-        "internal_services_ip_pool_ranges stored"
+        service_ip_pools, expected_service_ip_pools,
+        "service_ip_pools stored"
     );
     assert_eq!(
         external_dns_ips, expected_external_dns_ips,

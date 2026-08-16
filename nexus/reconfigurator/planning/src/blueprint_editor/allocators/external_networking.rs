@@ -301,8 +301,11 @@ impl ExternalNetworkingAllocator {
     pub fn for_new_nexus(
         &mut self,
     ) -> Result<ExternalNetworkingChoice, ExternalNetworkingError> {
-        // TODO-completeness: Support dual-stack external networking for
-        // services. See https://github.com/oxidecomputer/omicron/issues/9314.
+        // TODO(#8949): We need to consider how the IP Pools are assigned
+        // to services in order to generate the right public IP(s). Then we
+        // can generate the private IP configuration that's required to
+        // support that. See also
+        // https://github.com/oxidecomputer/omicron/issues/9313.
         let external_ip = self.external_ip_alloc.claim_next_exclusive_ip()?;
         let nic_ip_config = match external_ip {
             IpAddr::V4(_) => {
@@ -333,8 +336,11 @@ impl ExternalNetworkingAllocator {
     pub fn for_new_boundary_ntp(
         &mut self,
     ) -> Result<ExternalSnatNetworkingChoice, ExternalNetworkingError> {
-        // TODO-completeness: Support dual-stack external networking for
-        // services. See https://github.com/oxidecomputer/omicron/issues/9314.
+        // TODO(#8949): We need to consider how the IP Pools are assigned
+        // to services in order to generate the right public IP(s). Then we
+        // can generate the private IP configuration that's required to
+        // support that. See also
+        // https://github.com/oxidecomputer/omicron/issues/9313.
         let snat_cfg = self.external_ip_alloc.claim_next_snat_ip()?;
         let nic_ip_config = match snat_cfg.ip {
             IpAddr::V4(_) => {
@@ -365,8 +371,11 @@ impl ExternalNetworkingAllocator {
     pub fn for_new_external_dns(
         &mut self,
     ) -> Result<ExternalNetworkingChoice, ExternalNetworkingError> {
-        // TODO-completeness: Support dual-stack external networking for
-        // services. See https://github.com/oxidecomputer/omicron/issues/9314.
+        // TODO(#8949): We need to consider how the IP Pools are assigned
+        // to services in order to generate the right public IP(s). Then we
+        // can generate the private IP configuration that's required to
+        // support that. See also
+        // https://github.com/oxidecomputer/omicron/issues/9313.
         let external_ip = self
             .available_external_dns_ips
             .pop_first()

@@ -86,6 +86,9 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyy_mm_dd_nn, IDENT),
+    (2026_08_14_00, ALERT_LIST),
+    (2026_08_12_00, SLED_SLOT),
+    (2026_07_31_00, SET_TARGET_RELEASE_UPDATE_RECOVERY_DOCS),
     (2026_07_28_00, INTERNET_GATEWAY_CASCADE_DOCS),
     (2026_06_11_00, ADD_SYSTEM_IP_POOL_APIS),
     (2026_06_10_00, BGP_CONFIGURATION_UPDATE),
@@ -7546,22 +7549,58 @@ pub trait NexusExternalApi {
         method = GET,
         path = "/v1/system/hardware/sleds",
         tags = ["system/hardware"],
+        versions = VERSION_SLED_SLOT..,
     }]
     async fn sled_list(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<PaginatedById>,
     ) -> Result<HttpResponseOk<ResultsPage<latest::sled::Sled>>, HttpError>;
 
+    #[endpoint {
+        operation_id = "sled_list",
+        method = GET,
+        path = "/v1/system/hardware/sleds",
+        tags = ["system/hardware"],
+        versions = ..VERSION_SLED_SLOT,
+    }]
+    async fn sled_list_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedById>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<v2025_11_20_00::sled::Sled>>,
+        HttpError,
+    > {
+        let HttpResponseOk(ResultsPage { items, next_page }) =
+            Self::sled_list(rqctx, query_params).await?;
+        let items = items.into_iter().map(Into::into).collect();
+        Ok(HttpResponseOk(ResultsPage { items, next_page }))
+    }
+
     /// Fetch sled
     #[endpoint {
         method = GET,
         path = "/v1/system/hardware/sleds/{sled_id}",
         tags = ["system/hardware"],
+        versions = VERSION_SLED_SLOT..,
     }]
     async fn sled_view(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<latest::path_params::SledPath>,
     ) -> Result<HttpResponseOk<latest::sled::Sled>, HttpError>;
+
+    #[endpoint {
+        operation_id = "sled_view",
+        method = GET,
+        path = "/v1/system/hardware/sleds/{sled_id}",
+        tags = ["system/hardware"],
+        versions = ..VERSION_SLED_SLOT,
+    }]
+    async fn sled_view_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v2025_11_20_00::path_params::SledPath>,
+    ) -> Result<HttpResponseOk<v2025_11_20_00::sled::Sled>, HttpError> {
+        Ok(Self::sled_view(rqctx, path_params).await?.map(Into::into))
+    }
 
     /// Set sled provision policy
     #[endpoint {
@@ -8004,7 +8043,12 @@ pub trait NexusExternalApi {
     /// instructing it that the specified software (which is also what's
     /// currently running) is what's supposed to be deployed.
     ///
-    /// If the provided version does not match what's currently running, the
+    /// If the control plane knows the version of all running software (e.g., a
+    /// single sled was recovered to the same version as the rest of the rack),
+    /// requests where the provided version does not match what's currently
+    /// running will fail. If the control plane does not know the version of all
+    /// running software (e.g., the entire rack was mupdated to a new release),
+    /// requests with an incorrect provided version will succeed, but the
     /// control plane will continue to avoid changing deployed software until
     /// this operation is invoked with the correct version.
     ///
@@ -9019,6 +9063,33 @@ pub trait NexusExternalApi {
     ) -> Result<Response<Body>, HttpError>;
 
     // Alerts
+
+    /// List alerts
+    ///
+    /// Alerts may be filtered by alert class or alert class glob and by an
+    /// inclusive creation time range.
+    #[endpoint {
+        method = GET,
+        path = "/v1/alerts",
+        tags = ["system/alerts"],
+        versions = VERSION_ALERT_LIST..
+    }]
+    async fn alert_list(
+        rqctx: RequestContext<Self::Context>,
+        pagination: Query<PaginatedByTimeAndId<latest::alert::AlertListParams>>,
+    ) -> Result<HttpResponseOk<ResultsPage<latest::alert::Alert>>, HttpError>;
+
+    /// Fetch alert
+    #[endpoint {
+        method = GET,
+        path = "/v1/alerts/{alert_id}",
+        tags = ["system/alerts"],
+        versions = VERSION_ALERT_LIST..
+    }]
+    async fn alert_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::alert::AlertSelector>,
+    ) -> Result<HttpResponseOk<latest::alert::Alert>, HttpError>;
 
     /// List alert classes
     #[endpoint {

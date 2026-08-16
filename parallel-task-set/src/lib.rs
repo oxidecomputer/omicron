@@ -61,9 +61,15 @@ impl<T: 'static + Send> ParallelTaskSet<T> {
         Self { semaphore, set }
     }
 
-    /// Spawn the provided `next_future`, potentially waiting until a previously
-    /// spawned task completes if the `ParallelTaskSet` is at its concurrency
-    /// limit.
+    /// Spawn the provided `next_future`, potentially returning the output of a
+    /// previously-spawned task.
+    ///
+    /// If this `ParallelTaskSet` is at its `max_parallelism`, this method will
+    /// first wait until a previously-spawned task is complete, so that no more
+    /// than `max_parallelism` tasks are active. If this occurs, this method
+    /// will return that task's output. Otherwise, if waiting for an existing
+    /// task is not necessary, this method returns `None`, even if some tasks
+    /// are ready.
     ///
     /// Note that, *unlike* [`join_next()`], this method returning `None` does
     /// NOT indicate that the set is empty, just that it was not necessary to
@@ -73,6 +79,8 @@ impl<T: 'static + Send> ParallelTaskSet<T> {
     /// once all tasks have been spawned.
     ///
     /// [`join_next()`]: Self::join_next
+    #[must_use = "ParallelTaskSet::spawn returns a task output once \
+        `max_parallelism` tasks are spawned"]
     pub async fn spawn<F>(&mut self, future: F) -> Option<T>
     where
         F: Future<Output = T> + Send + 'static,
@@ -111,12 +119,16 @@ impl<T: 'static + Send> ParallelTaskSet<T> {
         self.set.join_next().await.map(|r| r.expect("Failed to join task"))
     }
 
-    /// Wait for all commands to execute and return their output.
+    /// Wait for all remaining tasks to complete and return their output.
+    ///
+    /// Note that, unlike [`JoinSet`], this **cannot** be used to collect all of
+    /// the output at once, because [`spawn`][Self::spawn] will return outputs
+    /// once `max_parallelism` tasks are added to the set.
     ///
     /// # Panics
     ///
     /// This method panics any of the tasks return a JoinError
-    pub async fn join_all(self) -> Vec<T> {
+    pub async fn join_remaining(self) -> Vec<T> {
         self.set.join_all().await
     }
 }
@@ -177,7 +189,7 @@ mod test {
             }
         }
 
-        let watermarks = set.join_all().await;
+        let watermarks = set.join_remaining().await;
         for watermark in watermarks {
             check_watermark(watermark);
         }

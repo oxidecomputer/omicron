@@ -85,7 +85,6 @@ impl_typed_uuid_kinds! {
         Propolis = {},
         Rack = {},
         RackInit = {},
-        RackReset = {},
         ReconfiguratorSimOp = {},
         ReconfiguratorSimState = {},
         Region = {},

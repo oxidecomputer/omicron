@@ -433,7 +433,8 @@ versioned_how = "server"
 notes = """
 Stable rack commissioning API (RFD 710), served by wicketd on its own port. The
 production consumer is rkdeploy, which lives outside this workspace and is
-not currently modeled by ls-apis.
+not currently modeled by ls-apis. Wicket also uses it, and is deployed in a
+unit with wicketd.
 """
 
 [[apis]]
@@ -754,15 +755,12 @@ permalinks = [
 server = "omicron-sled-agent"
 client = "mg-admin-client"
 note = """
-Sled Agent invokes EarlyNetworkSetup::init_switch_config
-(services.rs:3431) to configure uplinks on the local switch zone.  This in turn
-constructs an MgdClient pointed at the local switch zone
-(early-networking/lib.rs:442), which is within the same deployment unit as the
-global zone.
+Sled Agent's scrimlet reconcilers (sled-agent-scrimlet-reconcilers) includes
+an `mgd` reconciler responsible for configuring BGP, BFD, etc., within the
+local switch zone. This is within the same deployment unit as the global zone.
 """
 permalinks = [
-    "https://github.com/oxidecomputer/omicron/blob/32de20c/sled-agent/src/services.rs#L3431",
-    "https://github.com/oxidecomputer/omicron/blob/32de20c/sled-agent/early-networking/src/lib.rs#L442",
+    "https://github.com/oxidecomputer/omicron/blob/fbc091a3/sled-agent/scrimlet-reconcilers/src/handle.rs#L136-L138",
 ]
 
 [[intra_deployment_unit_only_edges]]
@@ -800,10 +798,9 @@ permalinks = [
 server = "omicron-sled-agent"
 client = "gateway-client"
 note = """
-BUG: Sled Agent creates two MGS clients. One of them
-(early-networking/lib.rs:331, called from services.rs:3431) queries the
-switch zone on the same sled, which is within the same deployment unit as the
-global zone, so this is okay.
+BUG: Sled Agent creates two MGS clients. One of them (in the
+sled-agent-scrimlet-reconcilers crate) queries the switch zone on the same sled,
+which is within the same deployment unit as the global zone, so this is okay.
 
 The other one (early-networking/lib.rs:259, called from services.rs:1095)
 queries both switch zones, so it crosses deployment units. This needs to be
@@ -812,8 +809,7 @@ fixed.
 Reference: https://github.com/oxidecomputer/omicron/issues/9708
 """
 permalinks = [
-    "https://github.com/oxidecomputer/omicron/blob/32de20c/sled-agent/src/services.rs#L3431",
-    "https://github.com/oxidecomputer/omicron/blob/32de20c/sled-agent/early-networking/src/lib.rs#L331",
+    "https://github.com/oxidecomputer/omicron/blob/fbc091a3/sled-agent/scrimlet-reconcilers/src/switch_zone_slot.rs#L46-L59",
     "https://github.com/oxidecomputer/omicron/blob/32de20c/sled-agent/src/services.rs#L1095-L1102",
     "https://github.com/oxidecomputer/omicron/blob/32de20c/sled-agent/early-networking/src/lib.rs#L259-L262",
 ]
@@ -822,9 +818,9 @@ permalinks = [
 server = "omicron-sled-agent"
 client = "dpd-client"
 note = """
-BUG: Sled Agent creates two DPD clients.  One of them
-(early-networking/lib.rs:378, called from services.rs:3431) is always to the
-switch zone on the same sled, which is in the same deployment unit.
+BUG: Sled Agent creates two DPD clients.  One of them (in the
+sled-agent-scrimlet-reconcilers crate) is always to the switch zone on the same
+sled, which is in the same deployment unit.
 
 The other one (services.rs:1104, iterating addresses returned by
 EarlyNetworkSetup::lookup_uplinked_switch_zone_underlay_addrs) queries both
@@ -833,8 +829,7 @@ switch zones, so it crosses deployment units.  This needs to be fixed.
 Reference: https://github.com/oxidecomputer/omicron/issues/9708
 """
 permalinks = [
-    "https://github.com/oxidecomputer/omicron/blob/32de20c/sled-agent/src/services.rs#L3431",
-    "https://github.com/oxidecomputer/omicron/blob/32de20c/sled-agent/early-networking/src/lib.rs#L378",
+    "https://github.com/oxidecomputer/omicron/blob/fbc091a3/sled-agent/scrimlet-reconcilers/src/switch_zone_slot.rs#L46-L59",
     "https://github.com/oxidecomputer/omicron/blob/32de20c/sled-agent/src/services.rs#L1104-L1115",
 ]
 
