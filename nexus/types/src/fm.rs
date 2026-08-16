@@ -12,8 +12,17 @@ pub mod ereport;
 pub use ereport::{Ereport, EreportId};
 pub mod case;
 pub use case::Case;
+pub mod config;
+pub use config::{
+    FmConfig, FmConfigParam, FmConfigSource, FmConfigView, Setting,
+};
+
 pub mod fact;
-pub use fact::{DiskFact, FactPayload, ZpoolUnhealthyFactPayload};
+pub use fact::{
+    DiskFact, FactPayload, SagaAbandonedFactPayload, SagaFact,
+    SagaNotProgressingFactPayload, SagaOwnerNotCurrentFactPayload,
+    ZpoolUnhealthyFactPayload,
+};
 pub mod display;
 
 use case::AlertRequest;
@@ -240,4 +249,5 @@ pub struct SitrepVersion {
 pub enum DiagnosisEngineKind {
     PowerShelf,
     PhysicalDisk,
+    Saga,
 }

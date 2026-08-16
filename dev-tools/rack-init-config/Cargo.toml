@@ -1,0 +1,23 @@
+[package]
+name = "rack-init-config"
+version = "0.1.0"
+edition.workspace = true
+license = "MPL-2.0"
+
+[lints]
+workspace = true
+
+[dependencies]
+bootstrap-agent-lockstep-types.workspace = true
+iddqd.workspace = true
+omicron-common.workspace = true
+omicron-passwords.workspace = true
+omicron-workspace-hack.workspace = true
+oxnet.workspace = true
+sled-agent-types.workspace = true
+sled-hardware-types.workspace = true
+toml.workspace = true
+
+[dev-dependencies]
+camino-tempfile.workspace = true
+sled-agent-rack-setup.workspace = true

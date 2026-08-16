@@ -34,6 +34,7 @@ parse-display.workspace = true
 pq-sys = "*"
 rand.workspace = true
 ref-cast.workspace = true
+regex.workspace = true
 schemars = { workspace = true, features = ["chrono", "uuid1"] }
 semver.workspace = true
 serde.workspace = true

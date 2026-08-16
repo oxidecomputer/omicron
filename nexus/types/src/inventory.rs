@@ -324,7 +324,11 @@ impl Collection {
             .filter_map(|sled_agent| {
                 match &sled_agent.smf_services_enabled_not_online {
                     SvcsEnabledNotOnlineResult::SvcsEnabledNotOnline(svcs)
-                        if svcs.is_empty() =>
+                        // This should check if svcs.is_empty() which includes
+                        // parsing errors. We have a bug with this at the moment
+                        // https://github.com/oxidecomputer/omicron/issues/10997
+                        // This check should change once that issue is resolved
+                        if svcs.services.is_empty() =>
                     {
                         None
                     }
@@ -347,6 +351,16 @@ impl Collection {
     pub fn display(&self) -> CollectionDisplay<'_> {
         CollectionDisplay::new(self)
     }
+}
+
+impl IdOrdItem for Collection {
+    type Key<'a> = CollectionUuid;
+
+    fn key(&self) -> Self::Key<'_> {
+        self.id
+    }
+
+    id_upcast!();
 }
 
 /// Caboose contents found during a collection

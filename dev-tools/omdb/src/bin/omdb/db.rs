@@ -7335,9 +7335,10 @@ async fn cmd_db_validate_artifact_replication(
     check_limit(&sleds, limit, || String::from("listing sleds"));
 
     let mut task_set = ParallelTaskSet::new();
+    let mut outputs = Vec::new();
     for sled in sleds {
         let log = opctx.log.clone();
-        task_set
+        if let Some(output) = task_set
             .spawn(async move {
                 let url = format!("http://{}", sled.address());
                 let client = sled_agent_client::Client::new(&url, log);
@@ -7347,10 +7348,14 @@ async fn cmd_db_validate_artifact_replication(
                     .map(|res| res.into_inner());
                 (sled, sled_config)
             })
-            .await;
+            .await
+        {
+            outputs.push(output);
+        }
     }
     let mut rows = Vec::new();
-    for (sled, sled_config_result) in task_set.join_all().await {
+    outputs.extend(task_set.join_remaining().await);
+    for (sled, sled_config_result) in outputs {
         let state = match sled_config_result {
             Ok(sled_config) => {
                 match config.generation.cmp(&sled_config.generation) {
