@@ -1245,6 +1245,24 @@
           {
             "type": "object",
             "properties": {
+              "message": {
+                "type": "string"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "invalid_membership_size"
+                ]
+              }
+            },
+            "required": [
+              "message",
+              "state"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
               "state": {
                 "type": "string",
                 "enum": [
