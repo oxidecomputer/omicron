@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "45.0.0"
+    "version": "46.0.0"
   },
   "paths": {
     "/artifacts": {
@@ -9906,6 +9906,13 @@
             "type": "string",
             "enum": [
               "maintenance"
+            ]
+          },
+          {
+            "description": "An instance whose state is absent or unrecognized. Note: as per `man svcs`, \"Absent or unrecognized states are denoted by a question mark (?) character\". So there is not an \"unrecognized\" state per se in svcs.",
+            "type": "string",
+            "enum": [
+              "unrecognized"
             ]
           }
         ]
