@@ -24,16 +24,22 @@ use omicron_common::api::external::UserId;
 use omicron_common::api::internal::nexus::Certificate;
 use omicron_uuid_kinds::MultirackJoinUuid;
 use omicron_uuid_kinds::RackInitUuid;
+use omicron_uuid_kinds::RackUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sled_agent_types::early_networking::RackNetworkConfig;
 use sled_hardware_types::BaseboardId;
+use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::net::IpAddr;
 use std::net::Ipv6Addr;
 use strum::EnumCount;
 use strum::EnumIter;
 use strum::IntoEnumIterator;
+use trust_quorum_types::messages::ReconfigureMsg as TqReconfigureMsg;
+use trust_quorum_types::status::CoordinatorStatus;
+use trust_quorum_types::types::Epoch;
+use trust_quorum_types::types::Threshold;
 pub use wicketd_commission_types::rack_setup::ServiceIpPoolConfig;
 pub use wicketd_commission_types::rack_setup::ServiceIpPoolError;
 
@@ -434,4 +440,35 @@ impl IdOrdItem for BootstrapIpOfBaseboardId {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct BaseboardIds {
     pub data: IdOrdMap<BootstrapIpOfBaseboardId>,
+}
+
+/// The state of the commit phase of the trust quorum protocol
+#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+pub struct CommitState {
+    pub rack_id: RackUuid,
+    pub members: BTreeSet<BaseboardId>,
+    pub epoch: Epoch,
+    pub last_committed_epoch: Option<Epoch>,
+    pub threshold: Threshold,
+    pub commit_crash_tolerance: u8,
+    pub acked: BTreeSet<BaseboardId>,
+    pub fatal_errors: BTreeMap<BaseboardId, String>,
+    pub transient_errors: BTreeMap<BaseboardId, String>,
+}
+
+/// The current state of the `MultirackJoinService` as retrieved from the
+/// `output_rx` watch channel.
+#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case", tag = "state")]
+pub enum MultirackJoinServiceState {
+    Uninitialized,
+    Requested,
+    Starting,
+    TrustQuorumReconfigure(TqReconfigureMsg),
+    TrustQuorumPreparing(CoordinatorStatus),
+    TrustQuorumCommitting(CommitState),
+    Completed,
+    Failed { message: String },
+    InvalidMembershipSize { message: String },
+    TaskPanicked,
 }

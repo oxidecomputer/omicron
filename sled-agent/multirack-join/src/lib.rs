@@ -15,11 +15,11 @@
 
 #[macro_use]
 extern crate slog;
-use bootstrap_agent_lockstep_types::MultirackJoinRequest;
+use bootstrap_agent_lockstep_types::{
+    CommitState, MultirackJoinRequest, MultirackJoinServiceState,
+};
 use nexus_types::trust_quorum::TrustQuorumConfig;
 use omicron_uuid_kinds::RackUuid;
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
 use sled_agent_bootstrap_common::{RssContext, RunRssError};
 use sled_hardware_types::BaseboardId;
 use slog::{Logger, info};
@@ -35,9 +35,7 @@ use tokio::{
 };
 use trust_quorum::{NodeApiError, ProxyError};
 use trust_quorum_types::{
-    messages::ReconfigureMsg as TqReconfigureMsg,
-    status::CoordinatorStatus,
-    types::{Epoch, Threshold},
+    messages::ReconfigureMsg as TqReconfigureMsg, types::Epoch,
 };
 
 const INITIAL_TRUST_QUORUM_EPOCH: Epoch = Epoch(1);
@@ -75,37 +73,6 @@ impl From<RunRssError> for MultirackJoinServiceError {
             RunRssError::RackInitInterrupted => Self::RackInitInterrupted,
         }
     }
-}
-
-/// The state of the commit phase of the trust quorum protocol
-#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
-pub struct CommitState {
-    pub rack_id: RackUuid,
-    pub members: BTreeSet<BaseboardId>,
-    pub epoch: Epoch,
-    pub last_committed_epoch: Option<Epoch>,
-    pub threshold: Threshold,
-    pub commit_crash_tolerance: u8,
-    pub acked: BTreeSet<BaseboardId>,
-    pub fatal_errors: BTreeMap<BaseboardId, String>,
-    pub transient_errors: BTreeMap<BaseboardId, String>,
-}
-
-/// The current state of the `MultirackJoinService` as retrieved from the
-/// `output_rx` watch channel.
-#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
-#[serde(rename_all = "snake_case", tag = "state")]
-pub enum MultirackJoinServiceState {
-    Uninitialized,
-    Requested,
-    Starting,
-    TrustQuorumReconfigure(TqReconfigureMsg),
-    TrustQuorumPreparing(CoordinatorStatus),
-    TrustQuorumCommitting(CommitState),
-    Completed,
-    Failed { message: String },
-    InvalidMembershipSize { message: String },
-    TaskPanicked,
 }
 
 // The value returned from `MultirackJoinServiceTask::tq_prepare`

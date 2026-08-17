@@ -11,13 +11,13 @@
 
 use bootstrap_agent_lockstep_types::BaseboardIds;
 use bootstrap_agent_lockstep_types::MultirackJoinRequest;
+use bootstrap_agent_lockstep_types::MultirackJoinServiceState;
 use bootstrap_agent_lockstep_types::RackInitializeRequest;
 use bootstrap_agent_lockstep_types::RackOperationStatus;
 use bootstrap_agent_lockstep_types::ReplicatedNetworkConfig;
 use dropshot::{HttpError, HttpResponseOk, RequestContext, TypedBody};
 use omicron_uuid_kinds::MultirackJoinUuid;
 use omicron_uuid_kinds::RackInitUuid;
-use sled_agent_multirack_join::MultirackJoinServiceState;
 
 #[dropshot::api_description]
 pub trait BootstrapAgentLockstepApi {
