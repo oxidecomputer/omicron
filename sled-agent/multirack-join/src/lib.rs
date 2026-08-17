@@ -338,6 +338,19 @@ impl MultirackJoinServiceTask {
         members: BTreeSet<BaseboardId>,
         epoch: Epoch,
     ) -> Result<TqPrepareResult, MultirackJoinServiceError> {
+        // Read unconditionally from `input_rx` so that we can ensure we are up
+        // to date with the latest membership. Then in the loop below, anytime
+        // the watch channel indicates a change we know that it must have
+        // changed. This makes our reasonining local to this function.
+        let new_members =
+            self.input_rx.borrow_and_update().trust_quorum_peers.clone();
+        if new_members != members {
+            return Ok(TqPrepareResult::ReconfigurationNeeded {
+                new_members,
+                new_epoch: epoch.next(),
+            });
+        }
+
         loop {
             let status = self
                 .ctx
