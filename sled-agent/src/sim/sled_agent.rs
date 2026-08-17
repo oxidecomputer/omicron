@@ -118,8 +118,7 @@ pub struct SledAgent {
     /// counter and return 503 Service Unavailable.
     local_storage_error_count: AtomicU32,
     pub bootstore_network_config: Mutex<bootstore::NetworkConfig>,
-    pub(super) repo_depot:
-        dropshot::HttpServer<ArtifactStore<SimArtifactStorage>>,
+    pub repo_depot: dropshot::HttpServer<ArtifactStore<SimArtifactStorage>>,
     pub log: Logger,
     health_monitor: HealthMonitorHandle,
 }

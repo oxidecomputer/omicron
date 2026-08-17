@@ -37,6 +37,7 @@ use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use ref_cast::RefCast;
 use std::matches;
+use std::num::NonZeroU32;
 use uuid::Uuid;
 
 /// Validate multicast-specific constraints for IP ranges.
@@ -592,15 +593,49 @@ impl super::Nexus {
     //
     // Remove the service-specific methods when the HTTP endpoints they back
     // are also removed.
+
+    // Resolve the single system-service IP pool of the given version backing
+    // the deprecated `ip-pools-service` endpoints. These endpoints predate
+    // support for more than one service pool per IP version and can't express
+    // which they mean. So at this point, we require exactly one, and return an
+    // error if that's not the case. This can only really happen if the client
+    // is using mixed API versions: a new one to create a second pool, and the
+    // old one to manipulate them. That should be really unlikely, but also
+    // point the user to the new API version if they do happen to land here.
+    async fn ip_pool_service_single(
+        &self,
+        opctx: &OpContext,
+        version: IpVersion,
+    ) -> LookupResult<(authz::IpPool, db::model::IpPool)> {
+        // Fetch up to two, so we can distinguish none / one / more-than-one.
+        let mut pools = self
+            .db_datastore
+            .ip_pools_service_lookup_by_version(
+                opctx,
+                version,
+                NonZeroU32::new(2).unwrap(),
+            )
+            .await?;
+        if pools.len() > 1 {
+            return Err(Error::invalid_request(
+                "more than one system-service IP pool of the requested IP \
+                 version exists; update the client to manage these pools",
+            ));
+        }
+        let pool = pools.pop().ok_or_else(|| {
+            Error::non_resourcetype_not_found(
+                "no system-service IP pool of the requested IP version",
+            )
+        })?;
+        Ok((pool.authz_pool, pool.db_pool))
+    }
+
     pub(crate) async fn ip_pool_service_fetch(
         &self,
         opctx: &OpContext,
     ) -> LookupResult<db::model::IpPool> {
-        // TODO: https://github.com/oxidecomputer/omicron/issues/8881
-        let (authz_pool, db_pool) = self
-            .db_datastore
-            .ip_pools_service_lookup(opctx, IpVersion::V4)
-            .await?;
+        let (authz_pool, db_pool) =
+            self.ip_pool_service_single(opctx, IpVersion::V4).await?;
         opctx.authorize(authz::Action::Read, &authz_pool).await?;
         Ok(db_pool)
     }
@@ -610,11 +645,8 @@ impl super::Nexus {
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, IpNetwork>,
     ) -> ListResultVec<db::model::IpPoolRange> {
-        // TODO: https://github.com/oxidecomputer/omicron/issues/8881
-        let (authz_pool, ..) = self
-            .db_datastore
-            .ip_pools_service_lookup(opctx, IpVersion::V4)
-            .await?;
+        let (authz_pool, ..) =
+            self.ip_pool_service_single(opctx, IpVersion::V4).await?;
         opctx.authorize(authz::Action::Read, &authz_pool).await?;
         self.db_datastore
             .ip_pool_list_ranges(opctx, &authz_pool, pagparams)
@@ -626,21 +658,13 @@ impl super::Nexus {
         opctx: &OpContext,
         range: &ip_pool::IpRange,
     ) -> UpdateResult<db::model::IpPoolRange> {
-        let (authz_pool, db_pool) = self
-            .db_datastore
-            .ip_pools_service_lookup(opctx, range.version().into())
-            .await?;
+        let (authz_pool, db_pool) =
+            self.ip_pool_service_single(opctx, range.version().into()).await?;
         opctx.authorize(authz::Action::Modify, &authz_pool).await?;
 
-        // Disallow V6 ranges until IPv6 is fully supported by the networking
-        // subsystem. Instead of changing the API to reflect that (making this
-        // endpoint inconsistent with the rest) and changing it back when we
-        // add support, we accept them at the API layer and error here. It
-        // would be nice if we could do it in the datastore layer, but we'd
-        // have no way of creating IPv6 ranges for the purpose of testing IP
-        // pool utilization.
-        //
-        // See https://github.com/oxidecomputer/omicron/issues/8761.
+        // IPv6 ranges are supported, but only through the current
+        // `/v1/system/ip-pools` endpoints. This deprecated service-pool
+        // endpoint is still IPv4-only, so we reject V6 ranges.
         if matches!(range, ip_pool::IpRange::V6(_)) {
             return Err(Error::invalid_request(
                 "IPv6 ranges are not allowed yet",
@@ -726,9 +750,14 @@ impl super::Nexus {
         opctx: &OpContext,
         range: &ip_pool::IpRange,
     ) -> DeleteResult {
+        // The range already lives in a specific pool; resolve it by a contained
+        // address rather than assuming a single service pool.
         let (authz_pool, ..) = self
             .db_datastore
-            .ip_pools_service_lookup(opctx, range.version().into())
+            .ip_pool_fetch_containing_address_for_services(
+                opctx,
+                range.first_address(),
+            )
             .await?;
         opctx.authorize(authz::Action::Modify, &authz_pool).await?;
         self.db_datastore.ip_pool_delete_range(opctx, &authz_pool, range).await
@@ -738,8 +767,84 @@ impl super::Nexus {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use nexus_db_queries::db::pub_test_utils::helpers::create_service_ip_pool;
+    use nexus_test_utils_macros::nexus_test;
     use omicron_common::address::IpRange;
+    use omicron_common::address::Ipv4Range;
+    use slog::o;
     use std::net::{Ipv4Addr, Ipv6Addr};
+
+    type ControlPlaneTestContext =
+        nexus_test_utils::ControlPlaneTestContext<crate::Server>;
+
+    // The deprecated `ip-pools-service` range endpoints resolve "the" service
+    // pool by IP version. With exactly one such pool they behave as before.
+    // With more than one, they can no longer tell which pool the caller means
+    // and must fail rather than guess.
+    #[nexus_test(server = crate::Server)]
+    async fn test_ip_pool_service_add_range_requires_single_pool(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        let nexus = &cptestctx.server.server_context().nexus;
+        let datastore = nexus.datastore();
+        let opctx = nexus_db_queries::context::OpContext::for_tests(
+            cptestctx.logctx.log.new(o!()),
+            datastore.clone(),
+        );
+
+        // Test context has exactly one IPv4 service pool, so the API should
+        // work fine in this case.
+        let range = IpRange::V4(
+            Ipv4Range::new(
+                "203.0.113.10".parse().unwrap(),
+                "203.0.113.20".parse().unwrap(),
+            )
+            .unwrap(),
+        );
+        nexus
+            .ip_pool_service_add_range(&opctx, &range)
+            .await
+            .expect("add range succeeds with a single service pool");
+
+        // Create a second IPv4 system-service pool. The deprecated path can no
+        // longer disambiguate, so it fails rather than guessing.
+        create_service_ip_pool(
+            &opctx,
+            datastore,
+            "oxide-service-pool-v4",
+            omicron_common::api::external::IpVersion::V4,
+        )
+        .await;
+        let v4_service_pools = datastore
+            .ip_pools_service_lookup_by_version(
+                &opctx,
+                IpVersion::V4,
+                NonZeroU32::new(3).unwrap(),
+            )
+            .await
+            .expect("listed v4 system-service pools");
+        assert_eq!(
+            v4_service_pools.len(),
+            2,
+            "expected exactly two IPv4 system-service pools",
+        );
+
+        let range2 = IpRange::V4(
+            Ipv4Range::new(
+                "203.0.113.30".parse().unwrap(),
+                "203.0.113.40".parse().unwrap(),
+            )
+            .unwrap(),
+        );
+        let err = nexus
+            .ip_pool_service_add_range(&opctx, &range2)
+            .await
+            .expect_err("add range fails with more than one service pool");
+        assert!(
+            err.to_string().contains("more than one system-service IP pool"),
+            "unexpected error: {err}",
+        );
+    }
 
     // IPv6 underlay validation tests
 

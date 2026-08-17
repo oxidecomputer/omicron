@@ -93,15 +93,15 @@ pub mod firewall_rules {
 }
 
 pub mod multicast {
-    pub use crate::v45::multicast::ClearMcast2Phys;
-    pub use crate::v45::multicast::ClearMcastForwarding;
-    pub use crate::v45::multicast::Mcast2PhysMapping;
-    pub use crate::v45::multicast::McastFilterMode;
-    pub use crate::v45::multicast::McastForwardingEntry;
-    pub use crate::v45::multicast::McastForwardingNextHop;
-    pub use crate::v45::multicast::McastReplication;
-    pub use crate::v45::multicast::McastSourceFilter;
-    pub use crate::v45::multicast::MulticastGroupCfg;
+    pub use crate::v47::multicast::ClearMcast2Phys;
+    pub use crate::v47::multicast::ClearMcastForwarding;
+    pub use crate::v47::multicast::Mcast2PhysMapping;
+    pub use crate::v47::multicast::McastFilterMode;
+    pub use crate::v47::multicast::McastForwardingEntry;
+    pub use crate::v47::multicast::McastForwardingNextHop;
+    pub use crate::v47::multicast::McastReplication;
+    pub use crate::v47::multicast::McastSourceFilter;
+    pub use crate::v47::multicast::MulticastGroupCfg;
 }
 
 pub mod instance {
@@ -188,14 +188,7 @@ pub mod inventory {
     pub use crate::v24::inventory::InventoryZpool;
     pub use crate::v24::inventory::ZpoolHealth;
 
-    pub use crate::v34::inventory::Svc;
-    pub use crate::v34::inventory::SvcState;
     pub use crate::v34::inventory::SvcsError;
-
-    pub use crate::v37::inventory::SvcEnabledNotOnline;
-    pub use crate::v37::inventory::SvcEnabledNotOnlineState;
-    pub use crate::v37::inventory::SvcsEnabledNotOnline;
-    pub use crate::v37::inventory::SvcsEnabledNotOnlineResult;
 
     pub use crate::v40::inventory::FMD_MAX_CASES;
     pub use crate::v40::inventory::FMD_MAX_RESOURCES;
@@ -204,7 +197,14 @@ pub mod inventory {
     pub use crate::v40::inventory::FmdInventoryError;
     pub use crate::v40::inventory::FmdInventoryErrorKind;
     pub use crate::v40::inventory::FmdResource;
-    pub use crate::v43::inventory::Inventory;
+
+    pub use crate::v46::inventory::Inventory;
+    pub use crate::v46::inventory::Svc;
+    pub use crate::v46::inventory::SvcEnabledNotOnline;
+    pub use crate::v46::inventory::SvcEnabledNotOnlineState;
+    pub use crate::v46::inventory::SvcState;
+    pub use crate::v46::inventory::SvcsEnabledNotOnline;
+    pub use crate::v46::inventory::SvcsEnabledNotOnlineResult;
 
     pub use crate::impls::inventory::FmdHostCaseDisplay;
     pub use crate::impls::inventory::FmdInventoryDisplay;

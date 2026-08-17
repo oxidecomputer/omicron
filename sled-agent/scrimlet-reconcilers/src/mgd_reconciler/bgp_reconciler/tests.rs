@@ -446,7 +446,13 @@ async fn run_one_proptest_input(
     )
     .await
     {
-        MgdBgpReconcilerStatus::Success { .. } => {}
+        MgdBgpReconcilerStatus::Complete {
+            counts: _,
+            did_change_max_paths: _,
+            errors,
+        } => {
+            assert_eq!(errors, Vec::<String>::new());
+        }
         status => {
             panic!("unexpected status: {status:?}")
         }

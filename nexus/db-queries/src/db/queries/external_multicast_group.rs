@@ -264,10 +264,10 @@ impl QueryFragment<Pg> for NextExternalMulticastGroup {
         out.push_sql("INSERT INTO ");
         schema::multicast_group::table.walk_ast(out.reborrow())?;
         out.push_sql(
-            " (id, name, description, time_created, time_modified, time_deleted, vni, ip_pool_id, ip_pool_range_id, multicast_ip, underlay_group_id, tag, state, version_added, version_removed, underlay_salt)
-             SELECT id, name, description, time_created, time_modified, time_deleted, vni, ip_pool_id, ip_pool_range_id, multicast_ip, underlay_group_id, tag, state, version_added, version_removed, underlay_salt FROM next_external_multicast_group
+            " (id, name, description, time_created, time_modified, time_deleted, vni, ip_pool_id, ip_pool_range_id, multicast_ip, underlay_group_id, tag, version_added, version_removed, underlay_salt, state)
+             SELECT id, name, description, time_created, time_modified, time_deleted, vni, ip_pool_id, ip_pool_range_id, multicast_ip, underlay_group_id, tag, version_added, version_removed, underlay_salt, state FROM next_external_multicast_group
                 WHERE NOT EXISTS (SELECT 1 FROM previously_allocated_group)
-                RETURNING id, name, description, time_created, time_modified, time_deleted, vni, ip_pool_id, ip_pool_range_id, multicast_ip, underlay_group_id, tag, state, version_added, version_removed, underlay_salt",
+                RETURNING id, name, description, time_created, time_modified, time_deleted, vni, ip_pool_id, ip_pool_range_id, multicast_ip, underlay_group_id, tag, version_added, version_removed, underlay_salt, state",
         );
         out.push_sql("), ");
 
@@ -278,9 +278,9 @@ impl QueryFragment<Pg> for NextExternalMulticastGroup {
 
         // Return either the newly inserted or previously allocated group
         out.push_sql(
-            "SELECT id, name, description, time_created, time_modified, time_deleted, vni, ip_pool_id, ip_pool_range_id, multicast_ip, underlay_group_id, tag, state, version_added, version_removed, underlay_salt FROM previously_allocated_group
+            "SELECT id, name, description, time_created, time_modified, time_deleted, vni, ip_pool_id, ip_pool_range_id, multicast_ip, underlay_group_id, tag, version_added, version_removed, underlay_salt, state FROM previously_allocated_group
             UNION ALL
-            SELECT id, name, description, time_created, time_modified, time_deleted, vni, ip_pool_id, ip_pool_range_id, multicast_ip, underlay_group_id, tag, state, version_added, version_removed, underlay_salt FROM multicast_group",
+            SELECT id, name, description, time_created, time_modified, time_deleted, vni, ip_pool_id, ip_pool_range_id, multicast_ip, underlay_group_id, tag, version_added, version_removed, underlay_salt, state FROM multicast_group",
         );
 
         Ok(())

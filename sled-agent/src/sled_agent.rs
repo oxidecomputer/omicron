@@ -69,9 +69,11 @@ use sled_agent_config_reconciler::{
     InternalDisksReceiver, LedgerNewConfigError, LedgerTaskError,
     ReconcilerInventory, SledAgentFacilities,
 };
-use sled_agent_early_networking::EarlyNetworkSetupError;
 use sled_agent_health_monitor::handle::HealthMonitorHandle;
 use sled_agent_measurements::MeasurementsHandle;
+use sled_agent_scrimlet_reconcilers::{
+    ScrimletReconcilersMode, SledAgentNetworkingInfo,
+};
 use sled_agent_types::attached_subnet::AttachedSubnet;
 use sled_agent_types::attached_subnet::AttachedSubnets;
 use sled_agent_types::dataset::LocalStorageDatasetDeleteRequest;
@@ -98,7 +100,6 @@ use sled_agent_types::sled::{
     StartSledAgentRequest, ThisSledSwitchZoneUnderlayIpAddr,
 };
 use sled_agent_types::system_networking::SystemNetworkingConfig;
-use sled_agent_types::uplink::HostPortConfig;
 use sled_agent_types::zone_bundle::{
     BundleUtilization, CleanupContext, CleanupCount, CleanupPeriod,
     PriorityOrder, StorageLimit, ZoneBundleMetadata,
@@ -177,9 +178,6 @@ pub enum Error {
 
     #[error(transparent)]
     ZpoolList(#[from] illumos_utils::zpool::ListError),
-
-    #[error(transparent)]
-    EarlyNetworkError(#[from] EarlyNetworkSetupError),
 
     #[error("Bootstore Error")]
     Bootstore(#[from] bootstore::NodeRequestError),
@@ -696,6 +694,19 @@ impl SledAgent {
                 .new(o!("component" => "NetworkConfigDeserializationTask")),
         ));
 
+        // Hand our scrimlet reconcilers the information they need, now that we
+        // have it available.
+        let this_sled_switch_zone_ip =
+            ThisSledSwitchZoneUnderlayIpAddr::from_sled_agent_request(&request);
+        long_running_task_handles
+            .scrimlet_reconcilers
+            .set_sled_agent_networking_info_once(SledAgentNetworkingInfo {
+                system_networking_config_rx: network_config_rx.clone(),
+                mode: ScrimletReconcilersMode::SwitchZone(
+                    this_sled_switch_zone_ip,
+                ),
+            });
+
         // Start reconciling against our ledgered sled config.
         config_reconciler.spawn_reconciliation_task(
             ReconcilerFacilities {
@@ -719,10 +730,7 @@ impl SledAgent {
                     *sled_address.ip(),
                 )?,
                 underlay_address: *sled_address.ip(),
-                local_switch_zone_ip:
-                    ThisSledSwitchZoneUnderlayIpAddr::from_sled_agent_request(
-                        &request,
-                    ),
+                local_switch_zone_ip: this_sled_switch_zone_ip,
                 rack_id: request.body.rack_id,
                 network_config_rx,
                 metrics_queue: metrics_manager.request_queue(),
@@ -1194,17 +1202,6 @@ impl SledAgent {
         &self,
     ) -> Result<Vec<McastForwardingEntry>, Error> {
         self.inner.port_manager.list_mcast_fwd().map_err(Error::from)
-    }
-
-    pub async fn ensure_scrimlet_host_ports(
-        &self,
-        uplinks: Vec<HostPortConfig>,
-    ) -> Result<(), Error> {
-        self.inner
-            .services
-            .ensure_scrimlet_host_ports(uplinks)
-            .await
-            .map_err(Error::from)
     }
 
     /// Validate if the given [`SocketAddr`] represents a peer on the same

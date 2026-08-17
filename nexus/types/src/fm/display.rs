@@ -363,6 +363,21 @@ impl std::fmt::Display for Comment<'_> {
     }
 }
 
+/// Computes the maximum length of a set of labels, for aligning columns in
+/// the `Display` implementations in this module's submodules.
+pub(crate) const fn const_max_len(strs: &[&str]) -> usize {
+    let mut max = 0;
+    let mut i = 0;
+    while i < strs.len() {
+        let len = strs[i].len();
+        if len > max {
+            max = len;
+        }
+        i += 1;
+    }
+    max
+}
+
 /// Test helpers for asserting that colored displayer output differs from
 /// uncolored output only in ANSI escape sequences.
 #[cfg(test)]

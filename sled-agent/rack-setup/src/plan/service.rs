@@ -21,11 +21,12 @@ use nexus_types::deployment::{
     Blueprint, BlueprintDatasetConfig, BlueprintDatasetDisposition,
     BlueprintHostPhase2DesiredSlots, BlueprintMeasurements,
     BlueprintPhysicalDiskConfig, BlueprintPhysicalDiskDisposition,
-    BlueprintSledConfig, BlueprintSource, BlueprintZoneConfig,
-    BlueprintZoneDisposition, BlueprintZoneImageSource, BlueprintZoneType,
-    CockroachDbPreserveDowngrade, OmicronZoneExternalFloatingAddr,
-    OmicronZoneExternalFloatingIp, OmicronZoneExternalSnatIp, OximeterReadMode,
-    PendingMgsUpdates, blueprint_zone_type,
+    BlueprintSledConfig, BlueprintSledUpdateDisposition, BlueprintSource,
+    BlueprintZoneConfig, BlueprintZoneDisposition, BlueprintZoneImageSource,
+    BlueprintZoneType, CockroachDbPreserveDowngrade,
+    OmicronZoneExternalFloatingAddr, OmicronZoneExternalFloatingIp,
+    OmicronZoneExternalSnatIp, OximeterReadMode, PendingMgsUpdates,
+    blueprint_zone_type,
 };
 use nexus_types::external_api::sled::SledState;
 use omicron_common::address::{
@@ -945,6 +946,8 @@ impl ServicePlan {
                 sled_description.sled_id,
                 BlueprintSledConfig {
                     state: SledState::Active,
+                    update_disposition: BlueprintSledUpdateDisposition::initial(
+                    ),
                     subnet: sled_description.subnet,
                     last_allocated_ip_subnet_offset: sled_description
                         .last_allocated_ip_subnet_offset,

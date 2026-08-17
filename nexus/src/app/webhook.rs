@@ -78,6 +78,7 @@ use std::sync::Arc;
 use std::sync::LazyLock;
 use std::time::Duration;
 use std::time::Instant;
+use url::Url;
 
 impl Nexus {
     pub fn webhook_secret_lookup<'a>(
@@ -97,6 +98,12 @@ impl Nexus {
         opctx: &OpContext,
         params: alert::WebhookCreate,
     ) -> CreateResult<WebhookReceiverConfig> {
+        // First, check if the endpoint URL has an IP host that will be rejected
+        // by the external IP policy. This doesn't check if a DNS name resolves
+        // to invalid IPs, since they must be checked at the time when we
+        // actually establish a connection. But, checking IP hosts now lets us
+        // fail fast for URLs that will *never* be acceptable.
+        self.check_endpoint_url(&opctx.log, &params.endpoint)?;
         self.datastore().webhook_rx_create(&opctx, params).await
     }
 
@@ -107,6 +114,17 @@ impl Nexus {
         params: alert::WebhookReceiverUpdate,
     ) -> UpdateResult<()> {
         let (authz_rx,) = rx.lookup_for(authz::Action::Modify).await?;
+
+        if let Some(ref url) = params.endpoint {
+            // Before updating the receiver in the database, check if the new
+            // endpoint URL has an IP host that will be rejected by the external
+            // IP policy. This doesn't check if a DNS name resolves to invalid
+            // IPs, since they must be checked at the time when we actually
+            // establish a connection. But, checking IP hosts now lets us fail
+            // fast for URLs that will *never* be acceptable.
+            self.check_endpoint_url(&opctx.log, url)?;
+        }
+
         let _ = self
             .datastore()
             .webhook_rx_update(opctx, &authz_rx, params)
@@ -320,6 +338,64 @@ impl Nexus {
             resends_started,
         })
     }
+
+    /// Check that a webhook receiver endpoint passed to
+    /// [`Self::webhook_receiver_create`] or [`Self::webhook_receiver_update`]
+    /// is not an underlay or loopback IP address.
+    ///
+    /// This does not resolve domain names, so it does not catch all possible
+    /// underlay IP addresses. Webhook receivers whose endpoint URLs are DNS
+    /// names that resolve to underlay network IP addresses will instead fail
+    /// when we attempt to actually send a delivery request to them. Resolving
+    /// the domain name now and checking the resolved IPs against the external
+    /// URL policy would be insufficient, since a domain that resolves to okay
+    /// addresses now may resolve to disallowed addresses later. This check is
+    /// NOT intended as the only place we reject disallowed addresses. Instead,
+    /// it is intended to fail fast so that an operator who has indadvertantly
+    /// attempted to create a webhook receiver with an endpoint URL that will
+    /// *never* work can be informed of their mistake immediately, rather than
+    /// waiting until we actually try to send a request to it.
+    ///
+    /// The webhook delivery client will always check URLs immediately before
+    /// sending a delivery request, and will check resolved IPs when
+    /// establishing connections. Thus, it's fine for *this* check to be
+    /// best-effort.
+    fn check_endpoint_url(
+        &self,
+        log: &slog::Logger,
+        endpoint: &Url,
+    ) -> Result<(), Error> {
+        match self.external_resolver.ip_policy().ensure_external_url(endpoint) {
+            Ok(()) => Ok(()),
+            Err(ExternalUrlError::IntoUrl(_)) => Err(Error::internal_error(
+                "this shouldn't happen, since the URL \
+                     has already been parsed as a URL",
+            )),
+            Err(ExternalUrlError::NotExternalIp(
+                ExternalIpError::RackNotInitialized { .. },
+            )) => Err(Error::internal_error(
+                "attempted to create a webhook receiver before RSS has \
+                     completed. this shouldn't happen, as the external API \
+                     should not be served at this point!",
+            )),
+            Err(error) => {
+                let error = InlineErrorChain::new(&error);
+                slog::warn!(
+                    &log,
+                    "{ERR_IP_POLICY} (while creating/updating a receiver)";
+                    "endpoint" => %endpoint,
+                    &error,
+                );
+                Err(Error::invalid_value(
+                    "endpoint",
+                    format!(
+                        "the URL '{endpoint}' contains an address that may not \
+                         be used for a webhook receiver endpoint. {error}"
+                    ),
+                ))
+            }
+        }
+    }
 }
 
 /// Construct an [`ExternalHttpClient`] configured for webhook delivery
@@ -366,6 +442,9 @@ pub(crate) struct ReceiverClient<'a> {
     hdr_rx_id: http::HeaderValue,
     nexus_id: OmicronZoneUuid,
 }
+
+const ERR_IP_POLICY: &str =
+    "webhook receiver endpoint URL rejected by external IP policy";
 
 impl<'a> ReceiverClient<'a> {
     pub(crate) fn new(
@@ -483,8 +562,6 @@ impl<'a> ReceiverClient<'a> {
         };
         const ERR_BEFORE_RSS: &str =
             "cannot deliver webhook requests before RSS";
-        const ERR_IP_POLICY: &str =
-            "webhook receiver endpoint URL rejected by external IP policy";
         let handle_ext_url_error = |err: ExternalUrlError| {
             // Log a different message depending on whether the webhook
             // receiver URL is an invalid URL, or if it was rejected by the
