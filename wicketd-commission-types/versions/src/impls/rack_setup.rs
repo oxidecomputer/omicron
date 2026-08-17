@@ -6,17 +6,18 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::str::FromStr;
 
-use omicron_common::api::external::Name;
+use omicron_common::address::{IpRange, IpVersion};
+use omicron_common::api::external::{Error, Name};
 use sled_agent_types_versions::latest::early_networking::{
     BgpPeerConfig, ImportExportPolicy, SwitchSlot,
 };
 use sled_agent_types_versions::v30::early_networking::UplinkAddressConfig;
 
 use crate::latest::rack_setup::{
-    BgpAuthKeyId, ManualPortConfig, UplinkAddress, UplinkIpNet,
-    UserSpecifiedBgpPeerConfig, UserSpecifiedImportExportPolicy,
-    UserSpecifiedPortConfig, UserSpecifiedRackNetworkConfig,
-    UserSpecifiedUplinkAddressConfig,
+    BgpAuthKeyId, ManualPortConfig, ServiceIpPoolConfig, ServiceIpPoolError,
+    UplinkAddress, UplinkIpNet, UserSpecifiedBgpPeerConfig,
+    UserSpecifiedImportExportPolicy, UserSpecifiedPortConfig,
+    UserSpecifiedRackNetworkConfig, UserSpecifiedUplinkAddressConfig,
 };
 
 impl UserSpecifiedRackNetworkConfig {
@@ -176,10 +177,35 @@ impl From<UserSpecifiedImportExportPolicy> for ImportExportPolicy {
     }
 }
 
+impl ServiceIpPoolConfig {
+    /// The ranges belonging to this pool.
+    ///
+    /// Guaranteed to be non-empty and all of the same IP version.
+    pub fn ranges(&self) -> &[IpRange] {
+        &self.ranges
+    }
+
+    /// The IP version of this pool, derived from its ranges.
+    pub fn ip_version(&self) -> IpVersion {
+        // Safety: the constructor guarantees at least one range, and that all
+        // ranges share an IP version.
+        self.ranges[0].version()
+    }
+}
+
+impl From<ServiceIpPoolError> for omicron_common::api::external::Error {
+    fn from(value: ServiceIpPoolError) -> Self {
+        Error::internal_error(format!(
+            "error constructing service IP pool config: {value}"
+        ))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::latest::rack_setup::{
-        LinkFec, LinkSpeed, ManualPortConfig, UplinkAddress,
+        LinkFec, LinkSpeed, ManualPortConfig, RackOperation,
+        RackOperationState, RssStepInfo, UplinkAddress,
         UserSpecifiedImportExportPolicy, UserSpecifiedPortConfig,
         UserSpecifiedRouterPeerAddr, UserSpecifiedUplinkAddressConfig,
     };
@@ -469,5 +495,47 @@ mod tests {
     #[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
     struct PortConfigWrapper {
         port: UserSpecifiedPortConfig,
+    }
+
+    #[test]
+    fn rack_operation_kind_is_an_open_set() {
+        let operation: RackOperation =
+            serde_json::from_value(serde_json::json!({
+                "kind": "multirack_join",
+                "id": "66666666-6666-4666-8666-666666666666",
+                "state": { "state": "completed" },
+            }))
+            .expect("an unknown kind deserializes");
+        assert_eq!(
+            operation.kind.as_str(),
+            "multirack_join",
+            "the unknown kind is preserved verbatim"
+        );
+        assert_eq!(operation.state, RackOperationState::Completed);
+
+        let value = serde_json::to_value(&operation).expect("serializes");
+        assert_eq!(
+            value["kind"],
+            serde_json::json!("multirack_join"),
+            "the unknown kind survives a round-trip"
+        );
+    }
+
+    #[test]
+    fn rss_step_info_rejects_zero() {
+        for field in ["step", "total_steps"] {
+            let mut value = serde_json::json!({
+                "step": 4,
+                "total_steps": 16,
+                "description": "Initializing sleds",
+            });
+            value[field] = serde_json::json!(0);
+            let err = serde_json::from_value::<RssStepInfo>(value)
+                .expect_err("a zero value is rejected");
+            assert!(
+                err.to_string().contains("nonzero"),
+                "the {field} error should mention nonzero, got: {err}"
+            );
+        }
     }
 }

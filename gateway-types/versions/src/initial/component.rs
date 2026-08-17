@@ -43,6 +43,7 @@ pub enum SpType {
     Deserialize,
     JsonSchema,
 )]
+#[cfg_attr(any(test, feature = "testing"), derive(test_strategy::Arbitrary))]
 pub struct SpIdentifier {
     #[serde(rename = "type")]
     pub typ: SpType,
@@ -114,6 +115,7 @@ pub struct SpState {
     Copy,
     PartialEq,
     Eq,
+    Hash,
     PartialOrd,
     Ord,
     Serialize,

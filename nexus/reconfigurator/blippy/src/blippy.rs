@@ -16,7 +16,7 @@ use nexus_types::deployment::PlanningInput;
 use nexus_types::inventory::ZpoolName;
 use omicron_common::address::DnsSubnet;
 use omicron_common::address::Ipv6Subnet;
-use omicron_common::address::SLED_PREFIX;
+use omicron_common::address::SLED_PREFIX_LENGTH;
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::MacAddr;
 use omicron_common::disk::DatasetKind;
@@ -138,7 +138,7 @@ pub enum SledKind {
     /// A sled has a zone with an IP that isn't a member of its subnet.
     UnderlayIpOnWrongSubnet {
         zone: BlueprintZoneConfig,
-        subnet: Ipv6Subnet<SLED_PREFIX>,
+        subnet: Ipv6Subnet<SLED_PREFIX_LENGTH>,
     },
     /// A sled has a zone with an IP that is above the sled's overall "last
     /// allocated IP" value.
@@ -149,7 +149,7 @@ pub enum SledKind {
     /// Two sleds are using the same sled subnet.
     ConflictingSledSubnets {
         other_sled: SledUuid,
-        subnet: Ipv6Subnet<SLED_PREFIX>,
+        subnet: Ipv6Subnet<SLED_PREFIX_LENGTH>,
     },
     /// An internal DNS zone has an IP that is not one of the expected rack DNS
     /// subnets.

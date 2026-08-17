@@ -115,7 +115,7 @@ impl<'a> ResourceBuilder<'a> {
             let role_name = role.to_database_string();
             let username = format!("{}-{}", resource_name, role_name);
             let user_id = SiloUserUuid::new_v4();
-            println!("creating user: {}", &username);
+            println!("creating user: {}", username);
             self.users.push((username.clone(), user_id));
 
             let authz_silo = authz::Silo::new(
@@ -310,6 +310,7 @@ impl_dyn_authorized_resource_for_global!(authz::ConsoleSessionList);
 impl_dyn_authorized_resource_for_global!(authz::Database);
 impl_dyn_authorized_resource_for_global!(authz::DeviceAuthRequestList);
 impl_dyn_authorized_resource_for_global!(authz::DnsConfig);
+impl_dyn_authorized_resource_for_global!(authz::FmConfig);
 impl_dyn_authorized_resource_for_global!(authz::IpPoolList);
 impl_dyn_authorized_resource_for_global!(authz::MulticastGroupList);
 impl_dyn_authorized_resource_for_global!(authz::AuditLog);

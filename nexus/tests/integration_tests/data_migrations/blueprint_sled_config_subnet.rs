@@ -5,7 +5,7 @@
 use super::super::schema::{DataMigrationFns, MigrationContext};
 use futures::future::BoxFuture;
 use omicron_common::address::Ipv6Subnet;
-use omicron_common::address::SLED_PREFIX;
+use omicron_common::address::SLED_PREFIX_LENGTH;
 use pretty_assertions::assert_eq;
 use std::collections::BTreeSet;
 use uuid::Uuid;
@@ -68,17 +68,17 @@ async fn after_impl(ctx: &MigrationContext<'_>) {
     let expected = [
         (
             sled_id_1,
-            Ipv6Subnet::<SLED_PREFIX>::new(SLED_IP_1.parse().unwrap())
+            Ipv6Subnet::<SLED_PREFIX_LENGTH>::new(SLED_IP_1.parse().unwrap())
                 .to_string(),
         ),
         (
             sled_id_2,
-            Ipv6Subnet::<SLED_PREFIX>::new(SLED_IP_2.parse().unwrap())
+            Ipv6Subnet::<SLED_PREFIX_LENGTH>::new(SLED_IP_2.parse().unwrap())
                 .to_string(),
         ),
         (
             sled_id_3,
-            Ipv6Subnet::<SLED_PREFIX>::new(SLED_IP_3.parse().unwrap())
+            Ipv6Subnet::<SLED_PREFIX_LENGTH>::new(SLED_IP_3.parse().unwrap())
                 .to_string(),
         ),
     ]

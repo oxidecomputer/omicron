@@ -602,7 +602,21 @@ pub fn sled_insert_resource_query(
                             .into_untyped_uuid(),
                     );
 
-                query.sql(")");
+                query.sql(") AND (");
+
+                // and the disk must still be attached and not be deleted
+
+                query
+                    .sql(
+                        "SELECT time_deleted IS NULL AND attach_instance_id = ",
+                    )
+                    .param()
+                    .bind::<sql_types::Uuid, _>(instance_id)
+                    .sql(" FROM DISK WHERE ID = ")
+                    .param()
+                    .bind::<sql_types::Uuid, _>(allocation.disk_id);
+
+                query.sql(") ");
 
                 if index != (allocations.len() - 1) {
                     query.sql(" AND ");

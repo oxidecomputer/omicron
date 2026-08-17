@@ -114,15 +114,15 @@ pub mod instance {
     pub use crate::v7::instance::InstanceMulticastBody;
     pub use crate::v7::instance::InstanceMulticastMembership;
 
-    pub use crate::v29::instance::VmmSpec;
-
     pub use crate::v31::instance::ResolvedVpcFirewallRule;
     pub use crate::v32::instance::ExternalIpConfig;
     pub use crate::v32::instance::ExternalIps;
     pub use crate::v32::instance::ExternalIpv4Config;
     pub use crate::v32::instance::ExternalIpv6Config;
-    pub use crate::v41::instance::InstanceEnsureBody;
     pub use crate::v41::instance::InstanceSledLocalConfig;
+
+    pub use crate::v44::instance::InstanceEnsureBody;
+    pub use crate::v44::instance::VmmSpec;
 }
 
 pub mod inventory {
@@ -176,14 +176,7 @@ pub mod inventory {
     pub use crate::v24::inventory::InventoryZpool;
     pub use crate::v24::inventory::ZpoolHealth;
 
-    pub use crate::v34::inventory::Svc;
-    pub use crate::v34::inventory::SvcState;
     pub use crate::v34::inventory::SvcsError;
-
-    pub use crate::v37::inventory::SvcEnabledNotOnline;
-    pub use crate::v37::inventory::SvcEnabledNotOnlineState;
-    pub use crate::v37::inventory::SvcsEnabledNotOnline;
-    pub use crate::v37::inventory::SvcsEnabledNotOnlineResult;
 
     pub use crate::v40::inventory::FMD_MAX_CASES;
     pub use crate::v40::inventory::FMD_MAX_RESOURCES;
@@ -192,7 +185,14 @@ pub mod inventory {
     pub use crate::v40::inventory::FmdInventoryError;
     pub use crate::v40::inventory::FmdInventoryErrorKind;
     pub use crate::v40::inventory::FmdResource;
-    pub use crate::v40::inventory::Inventory;
+
+    pub use crate::v46::inventory::Inventory;
+    pub use crate::v46::inventory::Svc;
+    pub use crate::v46::inventory::SvcEnabledNotOnline;
+    pub use crate::v46::inventory::SvcEnabledNotOnlineState;
+    pub use crate::v46::inventory::SvcState;
+    pub use crate::v46::inventory::SvcsEnabledNotOnline;
+    pub use crate::v46::inventory::SvcsEnabledNotOnlineResult;
 
     pub use crate::impls::inventory::FmdHostCaseDisplay;
     pub use crate::impls::inventory::FmdInventoryDisplay;

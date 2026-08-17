@@ -195,12 +195,14 @@ OPERATION ID                             METHOD   URL PATH
 alert_class_list                         GET      /v1/alert-classes
 alert_delivery_list                      GET      /v1/alert-receivers/{receiver}/deliveries
 alert_delivery_resend                    POST     /v1/alerts/{alert_id}/resend
+alert_list                               GET      /v1/alerts
 alert_receiver_delete                    DELETE   /v1/alert-receivers/{receiver}
 alert_receiver_list                      GET      /v1/alert-receivers
 alert_receiver_probe                     POST     /v1/alert-receivers/{receiver}/probe
 alert_receiver_subscription_add          POST     /v1/alert-receivers/{receiver}/subscriptions
 alert_receiver_subscription_remove       DELETE   /v1/alert-receivers/{receiver}/subscriptions/{subscription}
 alert_receiver_view                      GET      /v1/alert-receivers/{receiver}
+alert_view                               GET      /v1/alerts/{alert_id}
 webhook_receiver_create                  POST     /v1/webhook-receivers
 webhook_receiver_update                  PUT      /v1/webhook-receivers/{receiver}
 webhook_secrets_add                      POST     /v1/webhook-secrets

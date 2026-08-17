@@ -1392,6 +1392,7 @@ Commands:
   support-bundles        interact with support bundles [aliases: sb]
   trust-quorum           interact with the trust quorum
   update-status          show running artifact versions
+  fm-config              view or modify fault management config
   help                   Print this message or the help of the given subcommand(s)
 
 Options:
@@ -1814,4 +1815,172 @@ error: the following required arguments were not provided:
 Usage: omdb reconfigurator archive <OUTPUT_FILE>
 
 For more information, try '--help'.
+=============================================
+EXECUTING COMMAND: omdb ["nexus", "fm-config"]
+termination: Exited(2)
+---------------------------------------------
+stdout:
+---------------------------------------------
+stderr:
+view or modify fault management config
+
+Usage: omdb nexus fm-config [OPTIONS] <COMMAND>
+
+Commands:
+  current        Show the current fault management configuration
+  show           Show a configuration at a given version
+  show-defaults  Show the system-defined default values for all config settings, as of the current
+                 Oxide system software version
+  set            Override one or more config option(s), creating a new version
+  help           Print this message or the help of the given subcommand(s)
+
+Options:
+      --log-level <LOG_LEVEL>  log level filter [env: LOG_LEVEL=] [default: warn]
+      --color <COLOR>          Color output [default: auto] [possible values: auto, always, never]
+  -h, --help                   Print help
+
+Connection Options:
+      --nexus-internal-url <NEXUS_INTERNAL_URL>
+          URL of the Nexus internal lockstep API [env: OMDB_NEXUS_URL=]
+      --dns-server <DNS_SERVER>
+          [env: OMDB_DNS_SERVER=]
+
+Safety Options:
+  -w, --destructive  Allow potentially-destructive subcommands
+=============================================
+EXECUTING COMMAND: omdb ["nexus", "fm-config", "show", "--help"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+Show a configuration at a given version
+
+Usage: omdb nexus fm-config show [OPTIONS] <VERSION|current|default>
+
+Arguments:
+  <VERSION|current|default>
+          The config version to show
+          
+          A value of 'current' or 'latest' selects the currently active config version, while a
+          value of 'default' displays the default values as defined by the current Oxide system
+          software release. An integer version will select that config version if it exists.
+
+Options:
+      --json
+          If set, output the config in JSON rather than pretty-printing it
+
+      --log-level <LOG_LEVEL>
+          log level filter
+          
+          [env: LOG_LEVEL=]
+          [default: warn]
+
+      --color <COLOR>
+          Color output
+          
+          [default: auto]
+          [possible values: auto, always, never]
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+Connection Options:
+      --nexus-internal-url <NEXUS_INTERNAL_URL>
+          URL of the Nexus internal lockstep API
+          
+          [env: OMDB_NEXUS_URL=]
+
+      --dns-server <DNS_SERVER>
+          [env: OMDB_DNS_SERVER=]
+
+Safety Options:
+  -w, --destructive
+          Allow potentially-destructive subcommands
+---------------------------------------------
+stderr:
+=============================================
+EXECUTING COMMAND: omdb ["nexus", "fm-config", "set", "--help"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+Override one or more config option(s), creating a new version.
+
+The flags listed under 'Config Options' provide values for settings in the fault-management config.
+Any number of these flags may be provided to set multiple config values. If a flag is *not*
+provided, the previous value of that setting (which may be an override from an earlier config
+version or the system-defined default) is preserved.
+
+A value of 'default' may also be provided for any flag. This will explicitly restore that setting to
+its system-provided default value. Note that default values may change in new Oxide system software
+releases. Therefore, there is a semantic difference between an override that explicitly sets a
+config option to a value that *happens* to be the default, and restoring the default value through
+this mechanism: if the default value changes in a new system software version, the override will
+remain the same, while the restored default will use the value defined by the current software
+version.
+
+Use the `omdb nexus fm-config show-defaults` command to view the default values for all config
+options.
+
+Usage: omdb nexus fm-config set [OPTIONS] --comment <COMMENT> <--sitrep-limit <SITREP_LIMIT>|--history-pruning-threshold <HISTORY_PRUNING_THRESHOLD>|--analysis-enabled <ANALYSIS_ENABLED>>
+
+Options:
+      --comment <COMMENT>
+          A comment describing this config change.
+          
+          Note that comments are mandatory and may not be empty.
+
+      --log-level <LOG_LEVEL>
+          log level filter
+          
+          [env: LOG_LEVEL=]
+          [default: warn]
+
+      --color <COLOR>
+          Color output
+          
+          [default: auto]
+          [possible values: auto, always, never]
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+Config Options:
+      --sitrep-limit <SITREP_LIMIT>
+          Configures the maximum number of sitreps permitted in the database.
+          
+          If the number of sitreps in the database, including orphaned sitreps, reaches or exceeds
+          this limit, fault management analysis will not produce new sitreps until some are deleted.
+          
+          This must be a non-zero integer, or 'default'. If it is set to 'default', any previous
+          override will be removed, and the system will revert this setting to the default value.
+
+      --history-pruning-threshold <HISTORY_PRUNING_THRESHOLD>
+          Sets the number of sitreps in the history table after which the oldest sitreps will be
+          removed from the history.
+          
+          This must be a non-zero integer, or 'default'. If it is set to 'default', any previous
+          override will be removed, and the system will revert this setting to the default value.
+          
+          If an integer value is provided, it must be less than the total sitrep limit.
+
+      --analysis-enabled <ANALYSIS_ENABLED>
+          BREAK GLASS IN CASE OF EMERGENCY: COMPLETELY DISABLE FM ANALYSIS
+          
+          This must be a boolean ('true' or 'false'), or 'default'. If it is set to 'default', any
+          previous override will be removed, and the system will revert this setting to the default
+          value.
+
+Connection Options:
+      --nexus-internal-url <NEXUS_INTERNAL_URL>
+          URL of the Nexus internal lockstep API
+          
+          [env: OMDB_NEXUS_URL=]
+
+      --dns-server <DNS_SERVER>
+          [env: OMDB_DNS_SERVER=]
+
+Safety Options:
+  -w, --destructive
+          Allow potentially-destructive subcommands
+---------------------------------------------
+stderr:
 =============================================

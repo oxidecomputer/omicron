@@ -20,6 +20,7 @@ use nexus_types::fm::{
 use nexus_types::in_service_disk::InServiceDisk;
 use nexus_types::inventory;
 use nexus_types::inventory::ZpoolHealth;
+use nexus_types::observed_saga::ObservedSaga;
 use omicron_common::api::external::Generation;
 use omicron_test_utils::dev;
 use omicron_uuid_kinds::CaseUuid;
@@ -82,8 +83,11 @@ impl FmTest {
         parent_sitrep: Option<Arc<(SitrepVersion, Sitrep)>>,
         inv: Arc<inventory::Collection>,
         in_service_disks: Arc<IdOrdMap<InServiceDisk>>,
+        observed_sagas: Arc<IdOrdMap<ObservedSaga>>,
     ) -> Result<Builder, InvalidInputs> {
-        let mut builder = Input::builder(parent_sitrep, inv, in_service_disks)?;
+        let mut builder = Input::builder(parent_sitrep, inv)?
+            .in_service_disks(in_service_disks)
+            .observed_sagas(observed_sagas);
         builder.add_ereporter_restarts(
             self.reporters.ereporter_restarts().iter().cloned(),
         );
@@ -447,10 +451,11 @@ pub fn build_input(
             s,
         ))
     });
-    let builder =
-        Input::builder(parent, Arc::new(collection), Arc::new(in_service))
-            .expect("input builder should accept fresh inventory");
-    let (input, _report) = builder.build();
+    let builder = Input::builder(parent, Arc::new(collection))
+        .expect("input builder should accept fresh inventory")
+        .in_service_disks(Arc::new(in_service))
+        .with_empty_defaults();
+    let (input, _report) = builder.build().expect("all inputs provided");
     input
 }
 

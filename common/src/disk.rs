@@ -14,16 +14,14 @@ use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
 use std::fmt;
 use std::str::FromStr;
 
 use crate::api::internal::shared::DatasetKindParseError;
 use crate::{
-    api::external::{ByteCount, Generation},
+    api::external::ByteCount,
     zpool_name::{ZpoolKind, ZpoolName},
 };
-use omicron_ledger::Ledgerable;
 
 pub use crate::api::internal::shared::DatasetKind;
 
@@ -53,44 +51,6 @@ impl IdOrdItem for OmicronPhysicalDiskConfig {
     }
 
     id_upcast!();
-}
-
-#[derive(
-    Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
-)]
-pub struct OmicronPhysicalDisksConfig {
-    /// generation number of this configuration
-    ///
-    /// This generation number is owned by the control plane (i.e., RSS or
-    /// Nexus, depending on whether RSS-to-Nexus handoff has happened).  It
-    /// should not be bumped within Sled Agent.
-    ///
-    /// Sled Agent rejects attempts to set the configuration to a generation
-    /// older than the one it's currently running.
-    pub generation: Generation,
-
-    pub disks: Vec<OmicronPhysicalDiskConfig>,
-}
-
-impl Default for OmicronPhysicalDisksConfig {
-    fn default() -> Self {
-        Self { generation: Generation::new(), disks: vec![] }
-    }
-}
-
-impl Ledgerable for OmicronPhysicalDisksConfig {
-    fn is_newer_than(&self, other: &OmicronPhysicalDisksConfig) -> bool {
-        self.generation > other.generation
-    }
-
-    // No need to do this, the generation number is provided externally.
-    fn generation_bump(&mut self) {}
-}
-
-impl OmicronPhysicalDisksConfig {
-    pub fn new() -> Self {
-        Self { generation: Generation::new(), disks: vec![] }
-    }
 }
 
 #[derive(
@@ -423,70 +383,6 @@ impl IdOrdItem for DatasetConfig {
     id_upcast!();
 }
 
-#[derive(
-    Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
-)]
-pub struct DatasetsConfig {
-    /// generation number of this configuration
-    ///
-    /// This generation number is owned by the control plane (i.e., RSS or
-    /// Nexus, depending on whether RSS-to-Nexus handoff has happened).  It
-    /// should not be bumped within Sled Agent.
-    ///
-    /// Sled Agent rejects attempts to set the configuration to a generation
-    /// older than the one it's currently running.
-    ///
-    /// Note that "Generation::new()", AKA, the first generation number,
-    /// is reserved for "no datasets". This is the default configuration
-    /// for a sled before any requests have been made.
-    pub generation: Generation,
-
-    pub datasets: BTreeMap<DatasetUuid, DatasetConfig>,
-}
-
-impl Default for DatasetsConfig {
-    fn default() -> Self {
-        Self { generation: Generation::new(), datasets: BTreeMap::new() }
-    }
-}
-
-impl Ledgerable for DatasetsConfig {
-    fn is_newer_than(&self, other: &Self) -> bool {
-        self.generation > other.generation
-    }
-
-    // No need to do this, the generation number is provided externally.
-    fn generation_bump(&mut self) {}
-}
-
-/// Identifies how a single dataset management operation may have succeeded or
-/// failed.
-#[derive(Clone, Debug, JsonSchema, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub struct DatasetManagementStatus {
-    pub dataset_name: DatasetName,
-    pub err: Option<String>,
-}
-
-/// The result from attempting to manage datasets.
-#[derive(Default, Debug, JsonSchema, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-#[must_use = "this `DatasetManagementResult` may contain errors, which should be handled"]
-pub struct DatasetsManagementResult {
-    pub status: Vec<DatasetManagementStatus>,
-}
-
-impl DatasetsManagementResult {
-    pub fn has_error(&self) -> bool {
-        for status in &self.status {
-            if status.err.is_some() {
-                return true;
-            }
-        }
-        false
-    }
-}
-
 /// Uniquely identifies a disk.
 #[derive(
     Debug,
@@ -530,83 +426,6 @@ impl From<ZpoolKind> for DiskVariant {
         match kind {
             ZpoolKind::External => DiskVariant::U2,
             ZpoolKind::Internal => DiskVariant::M2,
-        }
-    }
-}
-
-/// Identifies how a single disk management operation may have succeeded or
-/// failed.
-#[derive(Clone, Debug, JsonSchema, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub struct DiskManagementStatus {
-    pub identity: DiskIdentity,
-    pub err: Option<DiskManagementError>,
-}
-
-/// The result from attempting to manage underlying disks.
-///
-/// This is more complex than a simple "Error" type because it's possible
-/// for some disks to be initialized correctly, while others can fail.
-///
-/// This structure provides a mechanism for callers to learn about partial
-/// failures, and handle them appropriately on a per-disk basis.
-#[derive(Default, Debug, JsonSchema, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-#[must_use = "this `DiskManagementResult` may contain errors, which should be handled"]
-pub struct DisksManagementResult {
-    pub status: Vec<DiskManagementStatus>,
-}
-
-impl DisksManagementResult {
-    pub fn has_error(&self) -> bool {
-        for status in &self.status {
-            if status.err.is_some() {
-                return true;
-            }
-        }
-        false
-    }
-
-    pub fn has_retryable_error(&self) -> bool {
-        for status in &self.status {
-            if let Some(err) = &status.err {
-                if err.retryable() {
-                    return true;
-                }
-            }
-        }
-        false
-    }
-}
-
-#[derive(
-    Clone, Debug, thiserror::Error, JsonSchema, Serialize, Deserialize,
-)]
-#[serde(rename_all = "snake_case", tag = "type", content = "value")]
-pub enum DiskManagementError {
-    #[error("Disk requested by control plane, but not found on device")]
-    NotFound,
-
-    #[error("Disk requested by control plane is an internal disk: {0}")]
-    InternalDiskControlPlaneRequest(PhysicalDiskUuid),
-
-    #[error("Expected zpool UUID of {expected}, but saw {observed}")]
-    ZpoolUuidMismatch { expected: ZpoolUuid, observed: ZpoolUuid },
-
-    #[error(
-        "Failed to access keys necessary to unlock storage. This error may be transient."
-    )]
-    KeyManager(String),
-
-    #[error("Other error starting disk management: {0}")]
-    Other(String),
-}
-
-impl DiskManagementError {
-    pub fn retryable(&self) -> bool {
-        match self {
-            DiskManagementError::KeyManager(_) => true,
-            _ => false,
         }
     }
 }

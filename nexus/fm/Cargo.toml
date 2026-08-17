@@ -33,6 +33,7 @@ serde_json.workspace = true
 strum.workspace = true
 slog.workspace = true
 slog-error-chain.workspace = true
+steno.workspace = true
 thiserror.workspace = true
 typed-rng.workspace = true
 
@@ -50,3 +51,4 @@ nexus-fm-slippy.workspace = true
 nexus-inventory.workspace = true
 nexus-reconfigurator-planning.workspace = true
 ereport-types.workspace = true
+uuid.workspace = true

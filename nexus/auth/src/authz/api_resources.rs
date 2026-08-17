@@ -328,6 +328,49 @@ impl AuthorizedResource for BlueprintConfig {
     }
 }
 
+/// Synthetic resource describing access to the fault management
+/// configuration (the `fm_config` table)
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FmConfig;
+
+pub const FM_CONFIG: FmConfig = FmConfig;
+
+impl oso::PolarClass for FmConfig {
+    fn get_polar_class_builder() -> oso::ClassBuilder<Self> {
+        oso::Class::builder()
+            .with_equality_check()
+            .add_attribute_getter("fleet", |_: &FmConfig| FLEET)
+    }
+}
+
+impl AuthorizedResource for FmConfig {
+    fn load_roles<'fut>(
+        &'fut self,
+        opctx: &'fut OpContext,
+        authn: &'fut authn::Context,
+        roleset: &'fut mut RoleSet,
+    ) -> futures::future::BoxFuture<'fut, Result<(), Error>> {
+        // There are no roles on the FmConfig, only permissions. But we still
+        // need to load the Fleet-related roles to verify that the actor has
+        // the "admin" role on the Fleet (possibly conferred from a Silo role).
+        load_roles_for_resource_tree(&FLEET, opctx, authn, roleset).boxed()
+    }
+
+    fn on_unauthorized(
+        &self,
+        _: &Authz,
+        error: Error,
+        _: AnyActor,
+        _: Action,
+    ) -> Error {
+        error
+    }
+
+    fn polar_class(&self) -> oso::Class {
+        Self::get_polar_class()
+    }
+}
+
 /// ConsoleSessionList is a synthetic resource used for modeling who has access
 /// to create sessions.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

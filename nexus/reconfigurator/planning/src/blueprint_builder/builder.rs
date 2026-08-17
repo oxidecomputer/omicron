@@ -33,6 +33,7 @@ use nexus_types::deployment::BlueprintHostPhase2DesiredSlots;
 use nexus_types::deployment::BlueprintMeasurements;
 use nexus_types::deployment::BlueprintPhysicalDiskConfig;
 use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
+use nexus_types::deployment::BlueprintSledUpdateDispositionKind;
 use nexus_types::deployment::BlueprintSource;
 use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneDisposition;
@@ -62,7 +63,7 @@ use omicron_common::address::DnsSubnet;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::NTP_PORT;
 use omicron_common::address::ReservedRackSubnet;
-use omicron_common::address::SLED_PREFIX;
+use omicron_common::address::SLED_PREFIX_LENGTH;
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::Vni;
 use omicron_common::disk::M2Slot;
@@ -297,6 +298,8 @@ impl From<StorageEditCounts> for SledEditCounts {
 pub struct EditedSledScalarEdits {
     /// Whether the remove_mupdate_override field was modified.
     pub remove_mupdate_override: bool,
+    /// Whether the update disposition kind was modified.
+    pub update_disposition: bool,
     /// Whether the debug operation to force a Sled Agent generation bump was
     /// set.
     pub debug_force_generation_bump: bool,
@@ -307,11 +310,14 @@ impl EditedSledScalarEdits {
         Self {
             debug_force_generation_bump: false,
             remove_mupdate_override: false,
+            update_disposition: false,
         }
     }
 
     pub fn has_edits(&self) -> bool {
-        self.debug_force_generation_bump || self.remove_mupdate_override
+        self.debug_force_generation_bump
+            || self.remove_mupdate_override
+            || self.update_disposition
     }
 }
 
@@ -675,7 +681,7 @@ impl<'a> BlueprintBuilder<'a> {
     pub fn ensure_sled_exists(
         &mut self,
         sled_id: SledUuid,
-        sled_subnet: Ipv6Subnet<SLED_PREFIX>,
+        sled_subnet: Ipv6Subnet<SLED_PREFIX_LENGTH>,
     ) {
         if let Entry::Vacant(slot) = self.sled_editors.entry(sled_id) {
             slot.insert(SledEditor::for_new_active(sled_subnet));
@@ -960,6 +966,7 @@ impl<'a> BlueprintBuilder<'a> {
                 let EditedSledScalarEdits {
                     debug_force_generation_bump,
                     remove_mupdate_override,
+                    update_disposition,
                 } = scalar_edits;
                 debug!(
                     self.log, "sled modified in new blueprint";
@@ -973,6 +980,7 @@ impl<'a> BlueprintBuilder<'a> {
                         debug_force_generation_bump,
                     "remove_mupdate_override_modified" =>
                         remove_mupdate_override,
+                    "update_disposition_modified" => update_disposition,
                 );
             } else {
                 debug!(
@@ -2176,6 +2184,21 @@ impl<'a> BlueprintBuilder<'a> {
             ))
         })?;
         editor.set_remove_mupdate_override(remove_mupdate_override);
+        Ok(())
+    }
+
+    /// Set the update disposition kind of the given sled.
+    pub fn sled_set_update_disposition_kind(
+        &mut self,
+        sled_id: SledUuid,
+        kind: BlueprintSledUpdateDispositionKind,
+    ) -> Result<(), Error> {
+        let editor = self.sled_editors.get_mut(&sled_id).ok_or_else(|| {
+            Error::Planner(anyhow!(
+                "tried to set update disposition for unknown sled {sled_id}"
+            ))
+        })?;
+        editor.set_update_disposition_kind(kind);
         Ok(())
     }
 

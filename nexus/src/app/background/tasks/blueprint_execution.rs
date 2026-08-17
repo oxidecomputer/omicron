@@ -18,11 +18,11 @@ use nexus_reconfigurator_execution::{
 };
 use nexus_types::deployment::{PendingMgsUpdates, execution::EventBuffer};
 use omicron_uuid_kinds::OmicronZoneUuid;
+use oxide_update_engine_types::spec::SerializableError;
 use serde_json::json;
 use slog_error_chain::InlineErrorChain;
 use std::sync::Arc;
 use tokio::sync::watch;
-use update_engine::NestedError;
 
 /// Background task that takes a `Blueprint` and realizes the change to
 /// the state of the system based on the `Blueprint`.
@@ -136,7 +136,7 @@ impl BlueprintExecutor {
             });
         }
 
-        let (sender, mut receiver) = update_engine::channel();
+        let (sender, mut receiver) = oxide_update_engine::channel();
 
         let receiver_task = tokio::spawn(async move {
             // TODO: report progress
@@ -165,7 +165,7 @@ impl BlueprintExecutor {
 
         // Get the report for the receiver task.
         let event_report =
-            receiver_task.await.map_err(|error| NestedError::new(&error));
+            receiver_task.await.map_err(|error| SerializableError::new(&error));
 
         // Trigger anybody waiting for this to finish.
         self.tx.send_modify(|count| *count = *count + 1);
@@ -198,7 +198,7 @@ impl BlueprintExecutor {
                     // Note: The field "error" is treated as special by omdb,
                     // and if that field is present then nothing else is
                     // displayed.
-                    "execution_error": NestedError::new(error.as_ref()),
+                    "execution_error": SerializableError::new(error.as_ref()),
                     "event_report": event_report,
                 })
             }
@@ -242,8 +242,8 @@ mod test {
     };
     use nexus_types::deployment::{
         Blueprint, BlueprintHostPhase2DesiredSlots, BlueprintMeasurements,
-        BlueprintSledConfig, BlueprintSource, BlueprintTarget,
-        BlueprintZoneConfig, BlueprintZoneDisposition,
+        BlueprintSledConfig, BlueprintSledUpdateDisposition, BlueprintSource,
+        BlueprintTarget, BlueprintZoneConfig, BlueprintZoneDisposition,
         BlueprintZoneImageSource, BlueprintZoneType,
         CockroachDbPreserveDowngrade, OximeterReadMode, PendingMgsUpdates,
         blueprint_zone_type,
@@ -259,6 +259,8 @@ mod test {
     use omicron_uuid_kinds::RackUuid;
     use omicron_uuid_kinds::SledUuid;
     use omicron_uuid_kinds::ZpoolUuid;
+    use oxide_update_engine_types::buffer::{CompletionReason, TerminalKind};
+    use oxide_update_engine_types::spec::SerializableError;
     use serde_json::json;
     use sled_agent_types::inventory::OmicronZoneDataset;
     use std::collections::BTreeMap;
@@ -266,7 +268,6 @@ mod test {
     use std::net::SocketAddr;
     use std::sync::Arc;
     use tokio::sync::watch;
-    use update_engine::{CompletionReason, NestedError, TerminalKind};
 
     type ControlPlaneTestContext =
         nexus_test_utils::ControlPlaneTestContext<crate::Server>;
@@ -286,6 +287,8 @@ mod test {
                     sled_id,
                     BlueprintSledConfig {
                         state: SledState::Active,
+                        update_disposition:
+                            BlueprintSledUpdateDisposition::initial(),
                         subnet: Ipv6Subnet::new(Ipv6Addr::LOCALHOST),
                         last_allocated_ip_subnet_offset:
                             LastAllocatedSubnetIpOffset::initial(),
@@ -680,7 +683,7 @@ mod test {
             .expect("value is an object")
             .remove("event_report")
             .expect("event_report exists");
-        let event_report: Result<EventReport, NestedError> =
+        let event_report: Result<EventReport, SerializableError> =
             serde_json::from_value(event_report)
                 .expect("event_report is valid");
         let event_report = event_report.expect("event_report is Ok");

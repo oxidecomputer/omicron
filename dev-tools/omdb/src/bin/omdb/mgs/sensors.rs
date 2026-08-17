@@ -412,7 +412,7 @@ fn sp_info_csv<R: std::io::Read>(
         if &headers[ndx] != expected[ndx] {
             bail!(
                 "malformed headers: expected {}, found {} ({headers:?})",
-                &expected[ndx],
+                expected[ndx],
                 &headers[ndx]
             );
         }

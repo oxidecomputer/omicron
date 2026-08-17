@@ -15,9 +15,9 @@ use omicron_common::address::Ip;
 use omicron_common::address::NUM_SOURCE_NAT_PORTS;
 use omicron_common::api::external::Generation;
 use omicron_common::disk::{DatasetKind, DatasetName, M2Slot};
-use omicron_common::update::{ArtifactId, OmicronInstallManifestSource};
+use omicron_common::update::OmicronInstallManifestSource;
 use omicron_uuid_kinds::MupdateUuid;
-use tufaceous_artifact::{ArtifactHash, KnownArtifactKind};
+use tufaceous_artifact::ArtifactHash;
 
 use crate::latest::inventory::{
     BootImageHeader, BootPartitionContents, BootPartitionDetails,
@@ -160,20 +160,6 @@ impl ZoneKind {
             ZoneKind::Nexus => "nexus",
             ZoneKind::Oximeter => "oximeter",
         }
-    }
-
-    /// Return true if an artifact represents a control plane zone image
-    /// of this kind.
-    pub fn is_control_plane_zone_artifact(
-        self,
-        artifact_id: &ArtifactId,
-    ) -> bool {
-        artifact_id
-            .kind
-            .to_known()
-            .map(|kind| matches!(kind, KnownArtifactKind::Zone))
-            .unwrap_or(false)
-            && artifact_id.name == self.artifact_id_name()
     }
 
     /// Map an artifact ID name to the corresponding file name in the install
@@ -585,6 +571,17 @@ impl SvcsEnabledNotOnline {
     /// for tests.
     pub fn new_fake() -> Self {
         Self { services: vec![], errors: vec![], time_of_status: Utc::now() }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        let SvcsEnabledNotOnline { services, errors, time_of_status: _ } = self;
+        services.is_empty() && errors.is_empty()
+    }
+
+    /// Removes all services that are not in the `Maintenance` state.
+    pub fn retain_in_maintenance(&mut self) {
+        self.services
+            .retain(|svc| svc.state == SvcEnabledNotOnlineState::Maintenance);
     }
 }
 
@@ -1064,6 +1061,7 @@ impl From<SvcEnabledNotOnlineState> for SvcState {
             SvcEnabledNotOnlineState::Degraded => Self::Degraded,
             SvcEnabledNotOnlineState::Maintenance => Self::Maintenance,
             SvcEnabledNotOnlineState::Offline => Self::Offline,
+            SvcEnabledNotOnlineState::Unrecognized => Self::Unrecognized,
         }
     }
 }
@@ -1078,6 +1076,7 @@ impl fmt::Display for SvcState {
             SvcState::Maintenance => "maintenance",
             SvcState::Disabled => "disabled",
             SvcState::LegacyRun => "legacy_run",
+            SvcState::Unrecognized => "unrecognized",
         };
 
         write!(f, "{state}")
@@ -1090,6 +1089,7 @@ impl fmt::Display for SvcEnabledNotOnlineState {
             SvcEnabledNotOnlineState::Offline => "offline",
             SvcEnabledNotOnlineState::Degraded => "degraded",
             SvcEnabledNotOnlineState::Maintenance => "maintenance",
+            SvcEnabledNotOnlineState::Unrecognized => "unrecognized",
         };
 
         write!(f, "{state}")

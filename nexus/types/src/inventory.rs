@@ -324,7 +324,7 @@ impl Collection {
             .filter_map(|sled_agent| {
                 match &sled_agent.smf_services_enabled_not_online {
                     SvcsEnabledNotOnlineResult::SvcsEnabledNotOnline(svcs)
-                        if svcs.services.is_empty() =>
+                        if svcs.is_empty() =>
                     {
                         None
                     }
@@ -347,6 +347,16 @@ impl Collection {
     pub fn display(&self) -> CollectionDisplay<'_> {
         CollectionDisplay::new(self)
     }
+}
+
+impl IdOrdItem for Collection {
+    type Key<'a> = CollectionUuid;
+
+    fn key(&self) -> Self::Key<'_> {
+        self.id
+    }
+
+    id_upcast!();
 }
 
 /// Caboose contents found during a collection

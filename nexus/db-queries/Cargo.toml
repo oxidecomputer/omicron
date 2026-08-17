@@ -124,6 +124,10 @@ sha2.workspace = true
 subprocess.workspace = true
 term.workspace = true
 
+[target.'cfg(target_os = "illumos")'.dev-dependencies]
+# socket2 is used for an illumos-only test.
+socket2.workspace = true
+
 [[bench]]
 name = "sled_reservation"
 harness = false

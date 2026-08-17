@@ -6,6 +6,7 @@
 
 use anyhow::Context;
 use futures::StreamExt;
+use iddqd::IdOrdMap;
 use nexus_db_model::DbMetadataNexusState;
 use nexus_db_model::DnsGroup;
 use nexus_db_model::Generation;
@@ -42,7 +43,7 @@ use nexus_types::identity::Resource;
 use nexus_types::inventory::Collection;
 use omicron_common::address::IpRange;
 use omicron_common::address::Ipv6Subnet;
-use omicron_common::address::SLED_PREFIX;
+use omicron_common::address::SLED_PREFIX_LENGTH;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::LookupType;
@@ -206,7 +207,7 @@ impl PlanningInputFromDb<'_> {
                     .tuf_repo_get_by_id(opctx, repo_id.into())
                     .await
                     .internal_context("fetching target release repo")?
-                    .into_external(),
+                    .into(),
             ),
         };
         let tuf_repo = TufRepoPolicy {
@@ -234,7 +235,7 @@ impl PlanningInputFromDb<'_> {
                             .internal_context(
                                 "fetching previous target release repo",
                             )?
-                            .into_external(),
+                            .into(),
                     )
                 } else {
                     TargetReleaseDescription::Initial
@@ -409,7 +410,7 @@ impl PlanningInputFromDb<'_> {
 
         for sled_row in self.sled_rows {
             let sled_id = sled_row.id();
-            let subnet = Ipv6Subnet::<SLED_PREFIX>::new(sled_row.ip());
+            let subnet = Ipv6Subnet::<SLED_PREFIX_LENGTH>::new(sled_row.ip());
             let zpools = zpools_by_sled_id
                 .remove(&sled_id)
                 .unwrap_or_else(BTreeMap::new);
@@ -543,7 +544,7 @@ pub async fn reconfigurator_state_load(
             // They can be removed since we fetched the list.
             read.ok()
         })
-        .collect::<Vec<Collection>>()
+        .collect::<IdOrdMap<Collection>>()
         .await;
 
     // Grab the latest target blueprint.
@@ -594,7 +595,7 @@ pub async fn reconfigurator_state_load(
             // They can be removed since we fetched the list.
             read.ok()
         })
-        .collect::<Vec<Blueprint>>()
+        .collect::<IdOrdMap<Blueprint>>()
         .await;
 
     // It's also useful to include information about any DNS generations
