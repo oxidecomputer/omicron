@@ -86,7 +86,7 @@ impl fmt::Display for ScrimletReconcilersStatusDisplay<'_> {
             ScrimletReconcilersStatus::WaitingForSledAgentNetworkingInfo => {
                 write!(
                     f,
-                    "not running: sled-agent has not yet initialized \
+                    "not running: sled-agent has not initialized \
                      the reconciler subsystem with networking information"
                 )
             }
@@ -832,13 +832,13 @@ impl fmt::Display for MgdStaticRouteReconcilerStatusDisplay<'_> {
                 writeln!(f, "reconciliation completed")?;
                 let mut f = IndentWriter::new(INDENT, f);
 
-                writeln!(f, "routes unchanged: {unchanged}")?;
+                writeln!(f, "routes left unchanged: {unchanged}")?;
 
                 if let (&Ok(deleted), &Ok(added)) =
                     (delete_v4_result, add_v4_result)
                 {
                     if deleted == 0 && added == 0 {
-                        writeln!(f, "v4 routes: unchanged")?;
+                        writeln!(f, "v4 routes modified: none")?;
                     } else {
                         writeln!(f, "v4 routes:")?;
                         let mut f = IndentWriter::new(INDENT, &mut f);
@@ -868,7 +868,7 @@ impl fmt::Display for MgdStaticRouteReconcilerStatusDisplay<'_> {
                     (delete_v6_result, add_v6_result)
                 {
                     if deleted == 0 && added == 0 {
-                        write!(f, "v6 routes: unchanged")?;
+                        write!(f, "v6 routes modified: none")?;
                     } else {
                         writeln!(f, "v6 routes:")?;
                         let mut f = IndentWriter::new(INDENT, &mut f);
