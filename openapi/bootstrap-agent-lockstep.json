@@ -59,9 +59,65 @@
         }
       }
     },
+    "/multirack-join": {
+      "get": {
+        "summary": "Get the current state of the multirack join",
+        "operationId": "multirack_join_state",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MultirackJoinServiceState"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "summary": "Configure the rack to join a multirack regional cluster",
+        "operationId": "multirack_join",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MultirackJoinRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MultirackJoinUuid"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/rack-initialize": {
       "get": {
-        "summary": "Get the current status of rack initialization or reset.",
+        "summary": "Get the current status of rack initialization.",
         "operationId": "rack_initialization_status",
         "responses": {
           "200": {
@@ -513,6 +569,106 @@
           "key"
         ]
       },
+      "Configuration": {
+        "description": "The configuration for a given epoch.\n\nOnly valid for non-lrtq configurations.",
+        "type": "object",
+        "properties": {
+          "coordinator": {
+            "description": "Who was the coordinator of this reconfiguration?",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/BaseboardId"
+              }
+            ]
+          },
+          "encrypted_rack_secrets": {
+            "nullable": true,
+            "description": "There are no encrypted rack secrets for the initial configuration.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/EncryptedRackSecrets"
+              }
+            ]
+          },
+          "epoch": {
+            "description": "Unique, monotonically increasing identifier for a configuration.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "members": {
+            "description": "All members of the current configuration and the hash of their key shares.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ConfigurationMember"
+            }
+          },
+          "rack_id": {
+            "description": "Unique Id of the rack.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RackUuid"
+              }
+            ]
+          },
+          "threshold": {
+            "description": "The number of sleds required to reconstruct the rack secret.",
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "coordinator",
+          "epoch",
+          "members",
+          "rack_id",
+          "threshold"
+        ]
+      },
+      "ConfigurationMember": {
+        "description": "A member entry in a trust quorum configuration.\n\nThis type is used for OpenAPI schema generation since OpenAPI v3.0.x doesn't support tuple arrays.",
+        "type": "object",
+        "properties": {
+          "id": {
+            "description": "The baseboard ID of the member.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/BaseboardId"
+              }
+            ]
+          },
+          "share_digest": {
+            "description": "The SHA3-256 hash of the member's key share.",
+            "type": "string",
+            "format": "hex string (32 bytes)"
+          }
+        },
+        "required": [
+          "id",
+          "share_digest"
+        ]
+      },
+      "EncryptedRackSecrets": {
+        "description": "All possibly relevant __encrypted__ rack secrets for _prior_ committed configurations.",
+        "type": "object",
+        "properties": {
+          "data": {
+            "description": "Encrypted data.",
+            "type": "string",
+            "format": "hex string"
+          },
+          "salt": {
+            "description": "A random value used to derive the key to encrypt the rack secrets for prior committed epochs.",
+            "type": "string",
+            "format": "hex string (32 bytes)"
+          }
+        },
+        "required": [
+          "data",
+          "salt"
+        ]
+      },
       "Error": {
         "description": "Error information from a response.",
         "type": "object",
@@ -839,6 +995,296 @@
         "minimum": 1,
         "maximum": 32
       },
+      "MultirackJoinRequest": {
+        "type": "object",
+        "properties": {
+          "rack_network_config": {
+            "description": "The rack network configuration for this joining rack",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RackNetworkConfig"
+              }
+            ]
+          },
+          "trust_quorum_peers": {
+            "description": "The set of peers required to initialize trust quorum\n\nUnlike RSS, this is not optional for multirack setups. Bootstrap addresses are discovered by the bootstrap agent and mapped to the `BaseboardId`s.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BaseboardId"
+            },
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "rack_network_config",
+          "trust_quorum_peers"
+        ]
+      },
+      "MultirackJoinServiceState": {
+        "description": "The current state of the `MultirackJoinService` as retrieved from the `output_rx` watch channel.",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "uninitialized"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "requested"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "starting"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          {
+            "description": "A request from Nexus informing a node to start coordinating a reconfiguration.",
+            "type": "object",
+            "properties": {
+              "epoch": {
+                "type": "integer",
+                "format": "uint64",
+                "minimum": 0
+              },
+              "last_committed_epoch": {
+                "nullable": true,
+                "type": "integer",
+                "format": "uint64",
+                "minimum": 0
+              },
+              "members": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/BaseboardId"
+                },
+                "uniqueItems": true
+              },
+              "rack_id": {
+                "$ref": "#/components/schemas/RackUuid"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "trust_quorum_reconfigure"
+                ]
+              },
+              "threshold": {
+                "type": "integer",
+                "format": "uint8",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "epoch",
+              "members",
+              "rack_id",
+              "state",
+              "threshold"
+            ]
+          },
+          {
+            "description": "Status of the node coordinating the reconfiguration or LRTQ upgrade.",
+            "type": "object",
+            "properties": {
+              "acked_prepares": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/BaseboardId"
+                },
+                "uniqueItems": true
+              },
+              "config": {
+                "$ref": "#/components/schemas/Configuration"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "trust_quorum_preparing"
+                ]
+              }
+            },
+            "required": [
+              "acked_prepares",
+              "config",
+              "state"
+            ]
+          },
+          {
+            "description": "The state of the commit phase of the trust quorum protocol",
+            "type": "object",
+            "properties": {
+              "acked": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/BaseboardId"
+                },
+                "uniqueItems": true
+              },
+              "commit_crash_tolerance": {
+                "type": "integer",
+                "format": "uint8",
+                "minimum": 0
+              },
+              "epoch": {
+                "type": "integer",
+                "format": "uint64",
+                "minimum": 0
+              },
+              "fatal_errors": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                }
+              },
+              "last_committed_epoch": {
+                "nullable": true,
+                "type": "integer",
+                "format": "uint64",
+                "minimum": 0
+              },
+              "members": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/BaseboardId"
+                },
+                "uniqueItems": true
+              },
+              "rack_id": {
+                "$ref": "#/components/schemas/RackUuid"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "trust_quorum_committing"
+                ]
+              },
+              "threshold": {
+                "type": "integer",
+                "format": "uint8",
+                "minimum": 0
+              },
+              "transient_errors": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "acked",
+              "commit_crash_tolerance",
+              "epoch",
+              "fatal_errors",
+              "members",
+              "rack_id",
+              "state",
+              "threshold",
+              "transient_errors"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "completed"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "message": {
+                "type": "string"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "failed"
+                ]
+              }
+            },
+            "required": [
+              "message",
+              "state"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "message": {
+                "type": "string"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "invalid_membership_size"
+                ]
+              }
+            },
+            "required": [
+              "message",
+              "state"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "task_panicked"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          }
+        ]
+      },
+      "MultirackJoinUuid": {
+        "x-rust-type": {
+          "crate": "omicron-uuid-kinds",
+          "path": "omicron_uuid_kinds::MultirackJoinUuid",
+          "version": "*"
+        },
+        "type": "string",
+        "format": "uuid"
+      },
       "Name": {
         "title": "A name unique within the parent collection",
         "description": "Names must begin with a lower case ASCII letter, be composed exclusively of lowercase ASCII, uppercase ASCII, numbers, and '-', and may not end with a '-'. Names cannot be a UUID, but they may contain a UUID. They can be at most 63 characters long.",
@@ -1118,6 +1564,20 @@
           {
             "type": "object",
             "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "uninitialized"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
               "id": {
                 "$ref": "#/components/schemas/RackInitUuid"
               },
@@ -1203,18 +1663,93 @@
           {
             "type": "object",
             "properties": {
+              "id": {
+                "$ref": "#/components/schemas/MultirackJoinUuid"
+              },
               "status": {
                 "type": "string",
                 "enum": [
-                  "uninitialized"
+                  "multirack_join_in_progress"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "status"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "nullable": true,
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/MultirackJoinUuid"
+                  }
+                ]
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "multirack_join_completed"
                 ]
               }
             },
             "required": [
               "status"
             ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "$ref": "#/components/schemas/MultirackJoinUuid"
+              },
+              "message": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "multirack_join_failed"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "message",
+              "status"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "$ref": "#/components/schemas/MultirackJoinUuid"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "multirack_join_panicked"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "status"
+            ]
           }
         ]
+      },
+      "RackUuid": {
+        "x-rust-type": {
+          "crate": "omicron-uuid-kinds",
+          "path": "omicron_uuid_kinds::RackUuid",
+          "version": "*"
+        },
+        "type": "string",
+        "format": "uuid"
       },
       "RecoverySiloConfig": {
         "description": "Configuration for the recovery silo created during rack setup.",
