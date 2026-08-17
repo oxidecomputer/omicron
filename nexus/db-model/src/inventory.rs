@@ -2303,6 +2303,7 @@ impl_enum_type!(
     Offline => b"offline"
     Degraded => b"degraded"
     Maintenance => b"maintenance"
+    Unrecognized => b"unrecognized"
 );
 
 impl From<SvcEnabledNotOnlineState> for InvSvcEnabledNotOnlineState {
@@ -2316,6 +2317,9 @@ impl From<SvcEnabledNotOnlineState> for InvSvcEnabledNotOnlineState {
             }
             SvcEnabledNotOnlineState::Maintenance => {
                 InvSvcEnabledNotOnlineState::Maintenance
+            }
+            SvcEnabledNotOnlineState::Unrecognized => {
+                InvSvcEnabledNotOnlineState::Unrecognized
             }
         }
     }
@@ -2332,6 +2336,9 @@ impl From<InvSvcEnabledNotOnlineState> for SvcEnabledNotOnlineState {
             }
             InvSvcEnabledNotOnlineState::Maintenance => {
                 SvcEnabledNotOnlineState::Maintenance
+            }
+            InvSvcEnabledNotOnlineState::Unrecognized => {
+                SvcEnabledNotOnlineState::Unrecognized
             }
         }
     }
