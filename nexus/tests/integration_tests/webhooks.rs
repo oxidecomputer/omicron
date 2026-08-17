@@ -579,11 +579,10 @@ async fn test_cannot_subscribe_to_probes(cptestctx: &ControlPlaneTestContext) {
         http::StatusCode::BAD_REQUEST,
     )
     .await;
-    assert!(
-        dbg!(&error)
-            .message
-            .contains("webhook receivers cannot subscribe to probes"),
-    );
+    assert!(dbg!(&error).message.contains(
+        "the 'probe' alert class is a synthetic alert used only for \
+         webhook liveness probes"
+    ),);
 }
 
 #[nexus_test]
