@@ -155,7 +155,7 @@ impl super::Nexus {
         // new target blueprint.
         let (blueprint, debug_intent) =
             self.assemble_state_for_new_target(opctx, new_target).await?;
-        let debug_intent_str = serde_json::to_string(&debug_intent)
+        let debug_str_intent = serde_json::to_string(&debug_intent)
             .context("serializing Reconfigurator state file")
             .map_err(|error| {
                 Error::internal_error(&format!(
@@ -165,13 +165,13 @@ impl super::Nexus {
             })?;
 
         // Archive the Reconfigurator state file.
-        let debug_name = blueprint_debug_filename(
+        let debug_name_intent = blueprint_debug_filename(
             &blueprint,
             BlueprintDebugAction::TargetIntent,
         );
-        let deposit = self
+        let deposit_intent = self
             .debug_dropbox_reconfigurator
-            .deposit_file(&debug_name, &debug_intent_str)
+            .deposit_file(&debug_name_intent, &debug_str_intent)
             .await
             .map_err(|error| {
                 Error::internal_error(&format!(
@@ -187,7 +187,7 @@ impl super::Nexus {
         {
             // Try to cancel the dropbox deposit.  This information is
             // useless now.  It's not a problem if this doesn't work.
-            deposit.cancel_and_attempt_delete().await;
+            deposit_intent.cancel_and_attempt_delete().await;
             return Err(error);
         }
 
@@ -201,11 +201,11 @@ impl super::Nexus {
         let mut debug_committed = debug_intent;
         debug_committed.target_blueprint = new_target;
         debug_committed.intended_target_blueprint = None;
-        if let Ok(debug_committed_str) = serde_json::to_string(&debug_committed)
+        if let Ok(debug_str_committed) = serde_json::to_string(&debug_committed)
         {
             if let Err(error) = self
                 .debug_dropbox_reconfigurator
-                .deposit_file(&debug_name_committed, &debug_committed_str)
+                .deposit_file(&debug_name_committed, &debug_str_committed)
                 .await
             {
                 warn!(
@@ -220,7 +220,7 @@ impl super::Nexus {
             // intermediate state that's not relevant as long as we have the new
             // file.  (It's not a problem if this doesn't work.  We'll just wind
             // up with this extra intent file.)
-            deposit.cancel_and_attempt_delete().await;
+            deposit_intent.cancel_and_attempt_delete().await;
         }
 
         // Trigger the background task to load this blueprint.

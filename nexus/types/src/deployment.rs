@@ -3474,7 +3474,7 @@ impl From<&crate::inventory::Dataset> for CollectionDatasetIdentifier {
 /// backwards-compatibility guarantees.**
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UnstableReconfiguratorState {
-    /// The planning input contents a variety of state that Reconfigurator uses
+    /// The planning input contains a variety of state that Reconfigurator uses
     /// to decide what to do
     ///
     /// For state files created to debug planning, this will be the actual
