@@ -9,6 +9,7 @@
 
 mod address_lots;
 mod affinity;
+mod alerts;
 mod allow_list;
 mod audit_log;
 mod authn_http;
