@@ -28,7 +28,8 @@ pub static KNOWN_VERSIONS: LazyLock<Vec<KnownVersion>> = LazyLock::new(|| {
         // |  leaving the first copy as an example for the next person.
         // v
         // KnownVersion::new(next_int, "unique-dirname-with-the-sql-files"),
-        KnownVersion::new(288, "normalize-service-external-ips"),
+        KnownVersion::new(289, "normalize-service-external-ips"),
+        KnownVersion::new(288, "add-unrecognized-svc-enabled-not-online-state"),
         KnownVersion::new(287, "fm-saga-de"),
         KnownVersion::new(286, "add-sled-update-disposition"),
         KnownVersion::new(285, "fm-config"),
