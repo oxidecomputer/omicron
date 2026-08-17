@@ -125,7 +125,8 @@ impl super::Nexus {
             planning_context.planning_input,
             IdOrdMap::from_iter([inventory]),
             IdOrdMap::from_iter([blueprint.clone()]),
-            new_target,
+            planning_context.target,
+            Some(blueprint.id),
         )
         .await
         .and_then(|s| {
@@ -310,6 +311,7 @@ impl super::Nexus {
             IdOrdMap::from_iter([inventory]),
             IdOrdMap::from_iter([parent, blueprint.clone()]),
             planning_context.target,
+            None,
         )
         .await
         .and_then(|s| {

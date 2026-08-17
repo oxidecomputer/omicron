@@ -312,6 +312,7 @@ impl BlueprintPlanner {
             IdOrdMap::from_iter([(*collection).clone()]),
             IdOrdMap::from_iter([(*parent).clone(), blueprint.clone()]),
             target,
+            Some(blueprint.id),
         )
         .await
         .and_then(|s| {

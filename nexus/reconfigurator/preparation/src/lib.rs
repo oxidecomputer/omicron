@@ -55,6 +55,7 @@ use omicron_common::policy::CRUCIBLE_PANTRY_REDUNDANCY;
 use omicron_common::policy::INTERNAL_DNS_REDUNDANCY;
 use omicron_common::policy::NEXUS_REDUNDANCY;
 use omicron_common::policy::OXIMETER_REDUNDANCY;
+use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use sled_hardware_types::BaseboardId;
@@ -608,6 +609,7 @@ pub async fn reconfigurator_state_load(
         collections,
         blueprints,
         target_blueprint,
+        None,
     )
     .await
 }
@@ -628,6 +630,7 @@ pub async fn reconfigurator_state_assemble(
     collections: IdOrdMap<Collection>,
     blueprints: IdOrdMap<Blueprint>,
     target_blueprint: BlueprintTarget,
+    intended_target_blueprint: Option<BlueprintUuid>,
 ) -> Result<UnstableReconfiguratorState, anyhow::Error> {
     // It's also useful to include information about any DNS generations
     // mentioned in any blueprints.
@@ -681,6 +684,7 @@ pub async fn reconfigurator_state_assemble(
         planning_input,
         collections,
         target_blueprint,
+        intended_target_blueprint,
         blueprints,
         internal_dns,
         external_dns,
