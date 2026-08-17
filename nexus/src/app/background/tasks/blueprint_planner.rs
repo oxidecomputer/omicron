@@ -305,21 +305,20 @@ impl BlueprintPlanner {
         // would be easy to not notice if some *bug* caused this to stop working
         // altogether, and then we'd silently lose valuable debugging
         // information from deployed systems.  So we just treat this as fatal.
-        let debug = reconfigurator_state_assemble(
+        let debug_intent = reconfigurator_state_assemble(
             opctx,
             &self.datastore,
             input,
             IdOrdMap::from_iter([(*collection).clone()]),
             IdOrdMap::from_iter([(*parent).clone(), blueprint.clone()]),
             target,
-            Some(blueprint.id),
+            Some(blueprint_id),
         )
         .await
-        .and_then(|s| {
-            serde_json::to_string(&s)
-                .context("serializing Reconfigurator state file")
-        })
         .map_err(PlanError::AssembleDebugState)?;
+        let debug_str = serde_json::to_string(&debug_intent)
+            .context("serializing Reconfigurator state file")
+            .map_err(PlanError::AssembleDebugState)?;
 
         // Insert the new blueprint into the database.
         self.datastore.blueprint_insert(opctx, &blueprint).await.map_err(
@@ -330,10 +329,10 @@ impl BlueprintPlanner {
         // this succeed.
         let debug_name = blueprint_debug_filename(
             &blueprint,
-            BlueprintDebugAction::Autoplan,
+            BlueprintDebugAction::AutoplanIntent,
         );
         let deposit =
-            self.debug_dropbox.deposit_file(&debug_name, &debug).await?;
+            self.debug_dropbox.deposit_file(&debug_name, &debug_str).await?;
 
         // Try to make it the current target.
         let target = BlueprintTarget {
@@ -387,6 +386,38 @@ impl BlueprintPlanner {
         }
 
         // We have a new target!
+        //
+        // There's no point in failing after this, whatever happens.
+
+        // Write a new state file for the dropbox that reflects the new target.
+        let debug_name_committed = blueprint_debug_filename(
+            &blueprint,
+            BlueprintDebugAction::Autoplan,
+        );
+        let mut debug_committed = debug_intent;
+        debug_committed.target_blueprint = target;
+        debug_committed.intended_target_blueprint = None;
+        if let Ok(debug_committed_str) = serde_json::to_string(&debug_committed)
+        {
+            if let Err(error) = self
+                .debug_dropbox
+                .deposit_file(&debug_name_committed, &debug_committed_str)
+                .await
+            {
+                warn!(
+                    &opctx.log,
+                    "failed to save Reconfigurator state file for new target";
+                    "error" => %error,
+                    "blueprint_id" => %blueprint_id,
+                );
+            }
+
+            // If possible, cancel the previous deposit.  It represents an
+            // intermediate state that's not relevant as long as we have the new
+            // file.  (It's not a problem if this doesn't work.  We'll just wind
+            // up with this extra intent file.)
+            deposit.cancel_and_attempt_delete().await;
+        }
 
         self.tx_planned.send_replace(Some(blueprint.id));
         Ok(BlueprintPlannerStatus::Targeted {

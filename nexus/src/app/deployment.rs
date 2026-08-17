@@ -24,6 +24,7 @@ use nexus_types::deployment::BlueprintZoneImageSource;
 use nexus_types::deployment::PlannerConfig;
 use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::SledFilter;
+use nexus_types::deployment::UnstableReconfiguratorState;
 use nexus_types::external_api::update;
 use nexus_types::internal_api::views::UpdateStatus;
 use nexus_types::inventory::Collection;
@@ -110,7 +111,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         new_target: BlueprintTarget,
-    ) -> Result<(Blueprint, String), Error> {
+    ) -> Result<(Blueprint, UnstableReconfiguratorState), Error> {
         let planning_context = self.blueprint_planning_context(opctx).await?;
         let inventory = planning_context.inventory.ok_or_else(|| {
             Error::internal_error("no recent inventory collection found")
@@ -119,7 +120,7 @@ impl super::Nexus {
         let blueprint = self
             .blueprint_view(opctx, *new_target.target_id.as_untyped_uuid())
             .await?;
-        let debug = reconfigurator_state_assemble(
+        let debug_intent = reconfigurator_state_assemble(
             opctx,
             datastore,
             planning_context.planning_input,
@@ -129,17 +130,14 @@ impl super::Nexus {
             Some(blueprint.id),
         )
         .await
-        .and_then(|s| {
-            serde_json::to_string(&s)
-                .context("serializing Reconfigurator state file")
-        })
         .map_err(|error| {
             Error::internal_error(&format!(
                 "error assembling Reconfigurator state: {}",
                 InlineErrorChain::new(&*error),
             ))
         })?;
-        Ok((blueprint, debug))
+
+        Ok((blueprint, debug_intent))
     }
 
     pub async fn blueprint_target_set(
@@ -155,15 +153,25 @@ impl super::Nexus {
 
         // Assemble a Reconfigurator state file so that we have a record of the
         // new target blueprint.
-        let (blueprint, debug) =
+        let (blueprint, debug_intent) =
             self.assemble_state_for_new_target(opctx, new_target).await?;
+        let debug_intent_str = serde_json::to_string(&debug_intent)
+            .context("serializing Reconfigurator state file")
+            .map_err(|error| {
+                Error::internal_error(&format!(
+                    "error serializing Reconfigurator state: {}",
+                    InlineErrorChain::new(&*error),
+                ))
+            })?;
 
         // Archive the Reconfigurator state file.
-        let debug_name =
-            blueprint_debug_filename(&blueprint, BlueprintDebugAction::Target);
+        let debug_name = blueprint_debug_filename(
+            &blueprint,
+            BlueprintDebugAction::TargetIntent,
+        );
         let deposit = self
             .debug_dropbox_reconfigurator
-            .deposit_file(&debug_name, &debug)
+            .deposit_file(&debug_name, &debug_intent_str)
             .await
             .map_err(|error| {
                 Error::internal_error(&format!(
@@ -183,8 +191,39 @@ impl super::Nexus {
             return Err(error);
         }
 
-        // We have a new target: trigger the background task to load this
-        // blueprint.
+        // We've got a new target.
+        //
+        // There's no point in failing after this, whatever happens.
+        //
+        // Write a second Reconfigurator state file reflecting the new target.
+        let debug_name_committed =
+            blueprint_debug_filename(&blueprint, BlueprintDebugAction::Target);
+        let mut debug_committed = debug_intent;
+        debug_committed.target_blueprint = new_target;
+        debug_committed.intended_target_blueprint = None;
+        if let Ok(debug_committed_str) = serde_json::to_string(&debug_committed)
+        {
+            if let Err(error) = self
+                .debug_dropbox_reconfigurator
+                .deposit_file(&debug_name_committed, &debug_committed_str)
+                .await
+            {
+                warn!(
+                    &opctx.log,
+                    "failed to save Reconfigurator state file for new target";
+                    "error" => %error,
+                    "blueprint_id" => %blueprint.id,
+                );
+            };
+
+            // If possible, cancel the previous deposit.  It represents an
+            // intermediate state that's not relevant as long as we have the new
+            // file.  (It's not a problem if this doesn't work.  We'll just wind
+            // up with this extra intent file.)
+            deposit.cancel_and_attempt_delete().await;
+        }
+
+        // Trigger the background task to load this blueprint.
         self.background_tasks
             .activate(&self.background_tasks.task_blueprint_loader);
 
@@ -1067,12 +1106,18 @@ impl SledUpdateStatus {
 pub enum BlueprintDebugAction {
     /// the autoplanner generated this blueprint and will try to make it the
     /// target
+    AutoplanIntent,
+    /// the autoplanner generated this blueprint and made it the target
     Autoplan,
     /// someone explicitly ran the planner using the Nexus internal API
     /// (likely a person running `omdb`)
     Plan,
+    /// someone explicitly requested to set the target blueprint using the Nexus
+    /// internal API (likely a person running `omdb`) and the system will try to
+    /// make this the new target
+    TargetIntent,
     /// someone explicitly set the target blueprint using the Nexus internal API
-    /// (likely a person running `omdb`)
+    /// (likely a person running `omdb`) and the system made it the new target
     Target,
 }
 
@@ -1082,8 +1127,10 @@ pub fn blueprint_debug_filename(
     action: BlueprintDebugAction,
 ) -> String {
     let action_str = match action {
+        BlueprintDebugAction::AutoplanIntent => "autoplan-intent",
         BlueprintDebugAction::Autoplan => "autoplan",
         BlueprintDebugAction::Plan => "plan",
+        BlueprintDebugAction::TargetIntent => "target-intent",
         BlueprintDebugAction::Target => "target",
     };
     let time_str = blueprint.time_created.format("%Y%m%dT%H%MZ");
