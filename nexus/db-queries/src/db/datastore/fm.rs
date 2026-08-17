@@ -407,10 +407,11 @@ impl DataStore {
                         })
                         .map_err(|_| {
                             let internal_message = format!(
-                                "encountered multiple case ereports for case \
-                                 {case_id} with the same UUID {id}. this \
-                                 should really not be possible, as the \
-                                 assignment UUID is a primary key!",
+                                "ereport {ereport_id} is assigned to case \
+                                 {case_id} more than once (assignment {id} \
+                                 collides with a previously loaded one). an \
+                                 ereport may be assigned to a case at most \
+                                 once",
                             );
                             Error::InternalError { internal_message }
                         })?;

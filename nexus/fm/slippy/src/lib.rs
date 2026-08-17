@@ -26,6 +26,7 @@ pub use asserts::assert_sitrep_is_slippy_clean;
 pub use report::SlippyReport;
 pub use report::SlippyReportSortKey;
 pub use slippy::CaseKind as SlippyCaseKind;
+pub use slippy::DerivedKind as SlippyDerivedKind;
 pub use slippy::Kind as SlippyKind;
 pub use slippy::Note as SlippyNote;
 pub use slippy::PhysicalDiskCaseKind as SlippyPhysicalDiskCaseKind;

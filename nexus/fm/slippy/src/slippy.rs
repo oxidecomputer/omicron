@@ -51,6 +51,8 @@ impl fmt::Display for Severity {
 pub enum Kind {
     /// Problems with the structure of the sitrep as a whole.
     Sitrep(SitrepKind),
+    /// Problems with the sitrep's derived data (see [`DerivedKind`]).
+    Derived(DerivedKind),
     /// Problems attached to a specific case.
     Case { case_id: CaseUuid, kind: Box<CaseKind> },
 }
@@ -59,6 +61,7 @@ impl Kind {
     pub fn display_component(&self) -> impl fmt::Display + '_ {
         enum Component<'a> {
             Sitrep,
+            Derived,
             Case(&'a CaseUuid),
         }
 
@@ -66,6 +69,7 @@ impl Kind {
             fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
                 match self {
                     Component::Sitrep => write!(f, "sitrep"),
+                    Component::Derived => write!(f, "derived data"),
                     Component::Case(id) => write!(f, "case {id}"),
                 }
             }
@@ -73,6 +77,7 @@ impl Kind {
 
         match self {
             Kind::Sitrep(_) => Component::Sitrep,
+            Kind::Derived(_) => Component::Derived,
             Kind::Case { case_id, .. } => Component::Case(case_id),
         }
     }
@@ -80,6 +85,7 @@ impl Kind {
     pub fn display_subkind(&self) -> impl fmt::Display + '_ {
         enum Subkind<'a> {
             Sitrep(&'a SitrepKind),
+            Derived(&'a DerivedKind),
             Case(&'a CaseKind),
         }
 
@@ -87,6 +93,7 @@ impl Kind {
             fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
                 match self {
                     Subkind::Sitrep(kind) => write!(f, "{kind}"),
+                    Subkind::Derived(kind) => write!(f, "{kind}"),
                     Subkind::Case(kind) => write!(f, "{kind}"),
                 }
             }
@@ -94,13 +101,19 @@ impl Kind {
 
         match self {
             Kind::Sitrep(kind) => Subkind::Sitrep(kind),
+            Kind::Derived(kind) => Subkind::Derived(kind),
             Kind::Case { kind, .. } => Subkind::Case(kind),
         }
     }
 }
 
+/// Problems in the sitrep's derived data.
+///
+/// Derived data is never persisted; it is rebuilt from the cases whenever a
+/// sitrep is loaded. A note here means the code that built this sitrep has
+/// a bug, not that the stored data is bad.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub enum SitrepKind {
+pub enum DerivedKind {
     /// A case references an ereport that is missing from the sitrep's
     /// `ereports_by_id` index.
     EreportMissingFromIndex { case_id: CaseUuid, ereport_id: EreportId },
@@ -109,7 +122,44 @@ pub enum SitrepKind {
     /// A case's copy of an ereport differs from the `ereports_by_id` entry
     /// with the same ereport ID.
     IndexedEreportContentMismatch { case_id: CaseUuid, ereport_id: EreportId },
+}
+
+impl fmt::Display for DerivedKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            DerivedKind::EreportMissingFromIndex { case_id, ereport_id } => {
+                write!(
+                    f,
+                    "ereport {ereport_id} (assigned to case {case_id}) is \
+                     missing from the sitrep's ereports_by_id index",
+                )
+            }
+            DerivedKind::OrphanedIndexedEreport { ereport_id } => {
+                write!(
+                    f,
+                    "ereports_by_id contains ereport {ereport_id}, which is \
+                     not referenced by any case",
+                )
+            }
+            DerivedKind::IndexedEreportContentMismatch {
+                case_id,
+                ereport_id,
+            } => {
+                write!(
+                    f,
+                    "case {case_id}'s copy of ereport {ereport_id} differs \
+                     from the ereports_by_id entry with the same ID",
+                )
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub enum SitrepKind {
     /// Two cases have ereport assignments with the same `CaseEreportUuid`.
+    /// Unrepresentable in the database: `fm_ereport_in_case`'s primary key
+    /// is `(sitrep_id, id)`.
     DuplicateCaseEreportId {
         id: CaseEreportUuid,
         case1: CaseUuid,
@@ -118,9 +168,12 @@ pub enum SitrepKind {
     /// Two cases have facts with the same `FactUuid`.
     DuplicateFactId { fact_id: FactUuid, case1: CaseUuid, case2: CaseUuid },
     /// Two cases have alert requests with the same `AlertUuid`.
+    /// Unrepresentable in the database: `fm_alert_request`'s primary key is
+    /// `(sitrep_id, id)`.
     DuplicateAlertId { alert_id: AlertUuid, case1: CaseUuid, case2: CaseUuid },
     /// Two cases have support bundle requests with the same
-    /// `SupportBundleUuid`.
+    /// `SupportBundleUuid`. Unrepresentable in the database:
+    /// `fm_support_bundle_request`'s primary key is `(sitrep_id, id)`.
     DuplicateSupportBundleId {
         bundle_id: SupportBundleUuid,
         case1: CaseUuid,
@@ -131,30 +184,6 @@ pub enum SitrepKind {
 impl fmt::Display for SitrepKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            SitrepKind::EreportMissingFromIndex { case_id, ereport_id } => {
-                write!(
-                    f,
-                    "ereport {ereport_id} (assigned to case {case_id}) is \
-                     missing from the sitrep's ereports_by_id index",
-                )
-            }
-            SitrepKind::OrphanedIndexedEreport { ereport_id } => {
-                write!(
-                    f,
-                    "ereports_by_id contains ereport {ereport_id}, which is \
-                     not referenced by any case",
-                )
-            }
-            SitrepKind::IndexedEreportContentMismatch {
-                case_id,
-                ereport_id,
-            } => {
-                write!(
-                    f,
-                    "case {case_id}'s copy of ereport {ereport_id} differs \
-                     from the ereports_by_id entry with the same ID",
-                )
-            }
             SitrepKind::DuplicateCaseEreportId { id, case1, case2 } => {
                 if case1 == case2 {
                     write!(
@@ -344,6 +373,14 @@ impl<'a> Slippy<'a> {
         kind: SitrepKind,
     ) {
         self.notes.push(Note { severity, kind: Kind::Sitrep(kind) });
+    }
+
+    pub(crate) fn push_derived_note(
+        &mut self,
+        severity: Severity,
+        kind: DerivedKind,
+    ) {
+        self.notes.push(Note { severity, kind: Kind::Derived(kind) });
     }
 
     pub(crate) fn push_case_note(

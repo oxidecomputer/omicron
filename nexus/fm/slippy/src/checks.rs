@@ -7,6 +7,7 @@
 mod physical_disk;
 
 use crate::slippy::CaseKind;
+use crate::slippy::DerivedKind;
 use crate::slippy::Severity;
 use crate::slippy::SitrepKind;
 use crate::slippy::Slippy;
@@ -46,9 +47,9 @@ fn check_ereport_index(slippy: &mut Slippy<'_>) {
             referenced.insert(ereport_id);
             match sitrep.ereports_by_id.get(&ereport_id) {
                 None => {
-                    slippy.push_sitrep_note(
+                    slippy.push_derived_note(
                         Severity::Fatal,
-                        SitrepKind::EreportMissingFromIndex {
+                        DerivedKind::EreportMissingFromIndex {
                             case_id: case.id,
                             ereport_id,
                         },
@@ -58,9 +59,9 @@ fn check_ereport_index(slippy: &mut Slippy<'_>) {
                 // distinct allocations, and two cases can hold different
                 // ereports under the same ID.
                 Some(indexed) if **indexed != *case_ereport.ereport => {
-                    slippy.push_sitrep_note(
+                    slippy.push_derived_note(
                         Severity::Fatal,
-                        SitrepKind::IndexedEreportContentMismatch {
+                        DerivedKind::IndexedEreportContentMismatch {
                             case_id: case.id,
                             ereport_id,
                         },
@@ -72,9 +73,9 @@ fn check_ereport_index(slippy: &mut Slippy<'_>) {
     }
     for indexed in &sitrep.ereports_by_id {
         if !referenced.contains(&indexed.id) {
-            slippy.push_sitrep_note(
+            slippy.push_derived_note(
                 Severity::Fatal,
-                SitrepKind::OrphanedIndexedEreport { ereport_id: indexed.id },
+                DerivedKind::OrphanedIndexedEreport { ereport_id: indexed.id },
             );
         }
     }
@@ -196,6 +197,7 @@ fn check_fact_payload_engines(slippy: &mut Slippy<'_>) {
 pub(crate) mod test_helpers {
     use crate::report::SlippyReportSortKey;
     use crate::slippy::CaseKind;
+    use crate::slippy::DerivedKind;
     use crate::slippy::Kind;
     use crate::slippy::Note;
     use crate::slippy::Severity;
@@ -267,6 +269,10 @@ pub(crate) mod test_helpers {
         Note { severity: Severity::Fatal, kind: Kind::Sitrep(kind) }
     }
 
+    pub(crate) fn derived_note(kind: DerivedKind) -> Note {
+        Note { severity: Severity::Fatal, kind: Kind::Derived(kind) }
+    }
+
     /// The ID of the sole case in `sitrep`.
     pub(crate) fn sole_case_id(sitrep: &Sitrep) -> CaseUuid {
         assert_eq!(sitrep.cases.len(), 1, "expected exactly one case");
@@ -297,6 +303,7 @@ pub(crate) mod test_helpers {
 mod tests {
     use super::test_helpers::*;
     use crate::slippy::CaseKind;
+    use crate::slippy::DerivedKind;
     use crate::slippy::SitrepKind;
     use chrono::Utc;
     use nexus_fm::test_util::{make_degraded_fact, make_disk_case};
@@ -386,7 +393,7 @@ mod tests {
         );
         assert_eq!(
             slippy_notes_for(&sitrep),
-            [sitrep_note(SitrepKind::EreportMissingFromIndex {
+            [derived_note(DerivedKind::EreportMissingFromIndex {
                 case_id,
                 ereport_id,
             })]
@@ -405,7 +412,7 @@ mod tests {
         sitrep.ereports_by_id.insert_overwrite(ereport);
         assert_eq!(
             slippy_notes_for(&sitrep),
-            [sitrep_note(SitrepKind::OrphanedIndexedEreport { ereport_id })]
+            [derived_note(DerivedKind::OrphanedIndexedEreport { ereport_id })]
         );
         logctx.cleanup_successful();
     }
@@ -432,7 +439,7 @@ mod tests {
         sitrep.ereports_by_id.insert_overwrite(Arc::new(doppelganger));
         assert_eq!(
             slippy_notes_for(&sitrep),
-            [sitrep_note(SitrepKind::IndexedEreportContentMismatch {
+            [derived_note(DerivedKind::IndexedEreportContentMismatch {
                 case_id,
                 ereport_id,
             })]
