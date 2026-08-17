@@ -36,6 +36,15 @@ versions = [
 ]
 
 [[metrics]]
+name = "database_inserts_failed"
+description = "Total number of failed inserts into the database"
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [ "collector_sink" ] }
+]
+
+[[metrics]]
 name = "database_queue_depth"
 description = "Size of the database insertion queue, sampled at queue insert time"
 units = "count"
