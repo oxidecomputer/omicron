@@ -83,6 +83,7 @@ fn dpd_port_settings(
                 lane: Some(link_id),
                 speed,
                 tx_eq: None,
+                allow_ddm_traffic: false,
             },
         },
     );
@@ -456,6 +457,7 @@ fn plan_rejects_multi_link_dpd_port() {
         lane: Some(link0),
         speed: DpdPortSpeed::Speed100G,
         tx_eq: None,
+        allow_ddm_traffic: false,
     };
     links.insert(
         link0.to_string(),
@@ -564,6 +566,7 @@ impl ArbitraryPortSettings {
                     UplinkAddress::Static { ip_net } => Some(ip_net.addr()),
                 })
                 .collect(),
+            allow_ddm_traffic: false,
         })
     }
 }

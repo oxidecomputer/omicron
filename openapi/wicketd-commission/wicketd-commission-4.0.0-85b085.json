@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "3.0.0"
+    "version": "4.0.0"
   },
   "paths": {
     "/bootstrap-sleds": {
@@ -1419,6 +1419,58 @@
           "last"
         ]
       },
+      "L1PortConfig": {
+        "description": "Configuration for the physical layer of a port",
+        "type": "object",
+        "properties": {
+          "autoneg": {
+            "description": "Whether autonegotiation is enabled.",
+            "type": "boolean"
+          },
+          "fec": {
+            "nullable": true,
+            "description": "The forward error correction mode, if any.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/LinkFec"
+              }
+            ]
+          },
+          "lldp": {
+            "nullable": true,
+            "description": "LLDP configuration for this port.",
+            "default": null,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/LldpPortConfig"
+              }
+            ]
+          },
+          "speed": {
+            "description": "The port speed.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/LinkSpeed"
+              }
+            ]
+          },
+          "tx_eq": {
+            "nullable": true,
+            "description": "Transmit equalization overrides for this port.",
+            "default": null,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TxEqConfig"
+              }
+            ]
+          }
+        },
+        "required": [
+          "autoneg",
+          "speed"
+        ],
+        "additionalProperties": false
+      },
       "LaneMonitors": {
         "description": "The optical power monitors of one lane of a transceiver module.",
         "type": "object",
@@ -1648,82 +1700,6 @@
           "switch_slot"
         ]
       },
-      "ManualPortConfig": {
-        "description": "User-specified per-port configuration.\n\nThis contains all of the fields of a port configuration other than the port name, which is used as the map key.",
-        "type": "object",
-        "properties": {
-          "addresses": {
-            "description": "Addresses configured on this port.",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/UserSpecifiedUplinkAddressConfig"
-            }
-          },
-          "autoneg": {
-            "description": "Whether autonegotiation is enabled.",
-            "type": "boolean"
-          },
-          "bgp_peers": {
-            "description": "BGP peers reachable on this port.",
-            "default": [],
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/UserSpecifiedBgpPeerConfig"
-            }
-          },
-          "lldp": {
-            "nullable": true,
-            "description": "LLDP configuration for this port.",
-            "default": null,
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/LldpPortConfig"
-              }
-            ]
-          },
-          "routes": {
-            "description": "Static routes for this port.",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/RouteConfig"
-            }
-          },
-          "tx_eq": {
-            "nullable": true,
-            "description": "Transmit equalization overrides for this port.",
-            "default": null,
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/TxEqConfig"
-              }
-            ]
-          },
-          "uplink_port_fec": {
-            "nullable": true,
-            "description": "The forward error correction mode, if any.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/LinkFec"
-              }
-            ]
-          },
-          "uplink_port_speed": {
-            "description": "The port speed.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/LinkSpeed"
-              }
-            ]
-          }
-        },
-        "required": [
-          "addresses",
-          "autoneg",
-          "routes",
-          "uplink_port_speed"
-        ],
-        "additionalProperties": false
-      },
       "MaxPathConfig": {
         "type": "integer",
         "format": "uint8",
@@ -1766,7 +1742,7 @@
         "additionalProperties": false
       },
       "PutRssUserConfigInsensitive": {
-        "description": "The portion of the RSS configuration that can be posted in one shot.\n\nIt is provided by the operator uploading a TOML file. Sensitive values (certificates, the recovery password hash, and BGP authentication keys) are set separately.\n\nThis version updates the [`UserSpecifiedRackNetworkConfig`] to use an updated bgp peer config that allows specification of the source address that will be used for the TCP socket for the peering session for numbered peers.",
+        "description": "The portion of the RSS configuration that can be posted in one shot.\n\nIt is provided by the operator uploading a TOML file. Sensitive values (certificates, the recovery password hash, and BGP authentication keys) are set separately.",
         "type": "object",
         "properties": {
           "allowed_source_ips": {
@@ -3996,6 +3972,82 @@
         "minItems": 1,
         "uniqueItems": true
       },
+      "UplinkPortConfig": {
+        "description": "User-specified per-port configuration.\n\nThis contains all of the fields of a port configuration other than the port name, which is used as the map key.",
+        "type": "object",
+        "properties": {
+          "addresses": {
+            "description": "Addresses configured on this port.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UserSpecifiedUplinkAddressConfig"
+            }
+          },
+          "autoneg": {
+            "description": "Whether autonegotiation is enabled.",
+            "type": "boolean"
+          },
+          "bgp_peers": {
+            "description": "BGP peers reachable on this port.",
+            "default": [],
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UserSpecifiedBgpPeerConfig"
+            }
+          },
+          "lldp": {
+            "nullable": true,
+            "description": "LLDP configuration for this port.",
+            "default": null,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/LldpPortConfig"
+              }
+            ]
+          },
+          "routes": {
+            "description": "Static routes for this port.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RouteConfig"
+            }
+          },
+          "tx_eq": {
+            "nullable": true,
+            "description": "Transmit equalization overrides for this port.",
+            "default": null,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TxEqConfig"
+              }
+            ]
+          },
+          "uplink_port_fec": {
+            "nullable": true,
+            "description": "The forward error correction mode, if any.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/LinkFec"
+              }
+            ]
+          },
+          "uplink_port_speed": {
+            "description": "The port speed.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/LinkSpeed"
+              }
+            ]
+          }
+        },
+        "required": [
+          "addresses",
+          "autoneg",
+          "routes",
+          "uplink_port_speed"
+        ],
+        "additionalProperties": false
+      },
       "UserSpecifiedBgpPeerConfig": {
         "description": "User-specified configuration for a BGP peer.\n\nThis is similar to the internal BGP peer configuration, except it does not carry the sensitive `md5_auth_key`; the operator provides the key separately, referenced by `auth_key_id`.",
         "type": "object",
@@ -4171,17 +4223,20 @@
         "description": "A user-specified port configuration.",
         "anyOf": [
           {
-            "description": "A manually-configured port.",
+            "description": "A front port intended for use as an uplink",
             "allOf": [
               {
-                "$ref": "#/components/schemas/ManualPortConfig"
+                "$ref": "#/components/schemas/UplinkPortConfig"
               }
             ]
           },
           {
-            "description": "A port configured automatically via DDM.",
-            "type": "object",
-            "additionalProperties": false
+            "description": "A front port running DDM for multirack",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/L1PortConfig"
+              }
+            ]
           }
         ]
       },
