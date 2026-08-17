@@ -18,11 +18,10 @@ use nexus_db_model::AuthenticationMode;
 use nexus_types::external_api::console;
 use nexus_types::external_api::saml::RelativeUri;
 use nexus_types::identity::Resource;
-use nix::errno::Errno;
-use nix::fcntl::{OFlag, open, openat};
-use nix::sys::stat::Mode;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::{DataPageParams, Error, NameOrId};
+use rustix::fs::{Mode, OFlags, open, openat};
+use rustix::io::Errno;
 use serde_urlencoded;
 use slog_error_chain::InlineErrorChain;
 use std::collections::HashMap;
@@ -449,7 +448,7 @@ fn find_file(
 ) -> Result<std::fs::File, HttpError> {
     let mut current = open(
         root_dir.as_std_path(),
-        OFlag::O_RDONLY | OFlag::O_DIRECTORY | OFlag::O_CLOEXEC,
+        OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC,
         Mode::empty(),
     )
     .map_err(open_error)?;
@@ -459,15 +458,15 @@ fn find_file(
         let Utf8Component::Normal(segment) = component else {
             return Err(not_found("illegal path segment"));
         };
-        let base = OFlag::O_RDONLY | OFlag::O_NOFOLLOW | OFlag::O_CLOEXEC;
+        let base = OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::CLOEXEC;
         let flags = if segments.peek().is_some() {
             // Intermediate segments must be directories; O_DIRECTORY makes
             // the kernel enforce that atomically at open time.
-            base | OFlag::O_DIRECTORY
+            base | OFlags::DIRECTORY
         } else {
             // O_NONBLOCK prevents open from hanging if the final segment is
             // a FIFO; it has no effect on regular files.
-            base | OFlag::O_NONBLOCK
+            base | OFlags::NONBLOCK
         };
         current = openat(&current, segment, flags, Mode::empty())
             .map_err(open_error)?;
@@ -487,8 +486,8 @@ fn find_file(
 
 fn open_error(error: Errno) -> HttpError {
     match error {
-        Errno::ELOOP => not_found("attempted to follow a symlink"),
-        Errno::ENOTDIR => not_found("expected a directory"),
+        Errno::LOOP => not_found("attempted to follow a symlink"),
+        Errno::NOTDIR => not_found("expected a directory"),
         _ => not_found("failed to open file"),
     }
 }
