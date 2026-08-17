@@ -683,10 +683,10 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "11a5d4343e97ec377fe3b139436c7074fa6c93d4"
+source.commit = "b0c192ae209ff7c14c52c54b22f32b5eac48bcbf"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mg-ddm-gz.sha256.txt
-source.sha256 = "5a5311d3666a15cae54744aaa309cbd9a1130f2a7376f53b7a5a8e4608d6ffc1"
+source.sha256 = "9c678fd2d05f8e282da85e5ab84ff47f7e7aaf7b22d1509974ee3c37525b03f4"
 output.type = "tarball"
 
 [package.mg-ddm]
@@ -699,10 +699,10 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "11a5d4343e97ec377fe3b139436c7074fa6c93d4"
+source.commit = "b0c192ae209ff7c14c52c54b22f32b5eac48bcbf"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mg-ddm.sha256.txt
-source.sha256 = "21fcff06ceed8200d8cb3984479bc483c60a617a45fe41a7e49503909bad73d2"
+source.sha256 = "e213ea02e23e7a74b3f97427622d5069d960460835608460031440b2cbba4223"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -714,7 +714,7 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "11a5d4343e97ec377fe3b139436c7074fa6c93d4"
+source.commit = "b0c192ae209ff7c14c52c54b22f32b5eac48bcbf"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mgd.sha256.txt
 source.sha256 = "5e4a1885d851ddf0d0c3968193d023df4bb5ad04f7699daabb9ab732a9e4d857"
