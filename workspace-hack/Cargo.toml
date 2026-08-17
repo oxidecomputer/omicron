@@ -122,8 +122,8 @@ rustls = { version = "0.23.41" }
 schemars = { version = "0.8.22", features = ["bytes", "chrono", "semver", "url", "uuid1"] }
 scopeguard = { version = "1.2.0" }
 semver = { version = "1.0.28", features = ["serde"] }
-serde = { version = "1.0.228", features = ["alloc", "derive", "rc"] }
-serde_core = { version = "1.0.228", features = ["alloc", "rc"] }
+serde = { version = "1.0.229", features = ["alloc", "derive", "rc"] }
+serde_core = { version = "1.0.229", features = ["alloc", "rc"] }
 serde_json = { version = "1.0.151", features = ["alloc", "raw_value", "unbounded_depth"] }
 serde_with = { version = "3.21.0", features = ["hex", "schemars_0_8"] }
 sha2 = { version = "0.10.9", features = ["oid"] }
@@ -272,8 +272,8 @@ rustls = { version = "0.23.41" }
 schemars = { version = "0.8.22", features = ["bytes", "chrono", "semver", "url", "uuid1"] }
 scopeguard = { version = "1.2.0" }
 semver = { version = "1.0.28", features = ["serde"] }
-serde = { version = "1.0.228", features = ["alloc", "derive", "rc"] }
-serde_core = { version = "1.0.228", features = ["alloc", "rc"] }
+serde = { version = "1.0.229", features = ["alloc", "derive", "rc"] }
+serde_core = { version = "1.0.229", features = ["alloc", "rc"] }
 serde_json = { version = "1.0.151", features = ["alloc", "raw_value", "unbounded_depth"] }
 serde_with = { version = "3.21.0", features = ["hex", "schemars_0_8"] }
 serde_with_macros = { version = "3.21.0", default-features = false, features = ["schemars_0_8"] }
