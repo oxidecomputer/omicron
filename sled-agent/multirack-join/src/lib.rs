@@ -167,8 +167,8 @@ impl MultirackJoinServiceTask {
         self.output_tx
             .send_modify(|state| *state = MultirackJoinServiceState::Starting);
 
-        // Check to see if we've already finished RSS or multirack join
-        self.ctx.is_rss_complete(&self.log).await?;
+        // Check to see if we've already started RSS or multirack join
+        self.ctx.is_rss_safe_to_run(&self.log).await?;
         info!(&self.log, "No RSS ledger found. Starting Multirack Join Setup");
 
         let rack_id = RackUuid::new_v4();

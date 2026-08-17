@@ -1022,8 +1022,8 @@ impl ServiceInner {
             config.az_subnet(),
         )?;
 
-        // Check to see if we've already finished RSS or multirack join
-        ctx.is_rss_complete(&self.log).await?;
+        // Check to see if we've already started RSS or multirack join
+        ctx.is_rss_safe_to_run(&self.log).await?;
 
         info!(self.log, "RSS not previously run. Creating plans.");
 

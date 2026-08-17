@@ -85,13 +85,19 @@ impl RssContext {
             .collect()
     }
 
-    /// Check if a previous RSS or multirack join has completed successfully.
+    /// Check if a previous RSS initialization or multirack join has started or
+    /// completed. Return an error if it has.
+    ///
+    /// This should only be called when starting an RSS initialization or multirack
+    /// join to see if it is safe to proceed. It's not a a general purpose
+    /// status check, as it returns an error in the case that RSS has started
+    /// or completed.
     ///
     /// If we see the completion marker in the `completed_ledger` then the
     /// system should be up-and-running. If we see the started marker in
     /// the `started_ledger`, then RSS or multirack join did not complete and
     /// the rack should be clean-slated before either is run again.
-    pub async fn is_rss_complete(
+    pub async fn is_rss_safe_to_run(
         &self,
         log: &Logger,
     ) -> Result<(), RunRssError> {
