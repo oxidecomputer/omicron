@@ -18,7 +18,11 @@ pub use config::{
 };
 
 pub mod fact;
-pub use fact::{DiskFact, FactPayload, ZpoolUnhealthyFactPayload};
+pub use fact::{
+    DiskFact, FactPayload, SagaAbandonedFactPayload, SagaFact,
+    SagaNotProgressingFactPayload, SagaOwnerNotCurrentFactPayload,
+    ZpoolUnhealthyFactPayload,
+};
 pub mod display;
 
 use case::AlertRequest;
@@ -245,4 +249,5 @@ pub struct SitrepVersion {
 pub enum DiagnosisEngineKind {
     PowerShelf,
     PhysicalDisk,
+    Saga,
 }
