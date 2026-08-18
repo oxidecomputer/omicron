@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "2026073100.0.0"
+    "version": "2026081700.0.0"
   },
   "paths": {
     "/device/auth": {
@@ -297,426 +297,6 @@
           },
           "5XX": {
             "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/experimental/v1/system/support-bundles": {
-      "get": {
-        "tags": [
-          "experimental"
-        ],
-        "summary": "List all support bundles",
-        "operationId": "support_bundle_list",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "limit",
-            "description": "Maximum number of items returned by a single call",
-            "schema": {
-              "nullable": true,
-              "type": "integer",
-              "format": "uint32",
-              "minimum": 1
-            }
-          },
-          {
-            "in": "query",
-            "name": "page_token",
-            "description": "Token returned by previous call to retrieve the subsequent page",
-            "schema": {
-              "nullable": true,
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "sort_by",
-            "schema": {
-              "$ref": "#/components/schemas/TimeAndIdSortMode"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SupportBundleInfoResultsPage"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "x-dropshot-pagination": {
-          "required": []
-        }
-      },
-      "post": {
-        "tags": [
-          "experimental"
-        ],
-        "summary": "Create support bundle",
-        "operationId": "support_bundle_create",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SupportBundleCreate"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "description": "successful creation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SupportBundleInfo"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/experimental/v1/system/support-bundles/{bundle_id}": {
-      "get": {
-        "tags": [
-          "experimental"
-        ],
-        "summary": "View support bundle",
-        "operationId": "support_bundle_view",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "bundle_id",
-            "description": "ID of the support bundle",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SupportBundleInfo"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      },
-      "put": {
-        "tags": [
-          "experimental"
-        ],
-        "summary": "Update support bundle",
-        "operationId": "support_bundle_update",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "bundle_id",
-            "description": "ID of the support bundle",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SupportBundleUpdate"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SupportBundleInfo"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      },
-      "delete": {
-        "tags": [
-          "experimental"
-        ],
-        "summary": "Delete support bundle",
-        "description": "May also be used to cancel a support bundle which is currently being collected, or to remove metadata for a support bundle that has failed.",
-        "operationId": "support_bundle_delete",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "bundle_id",
-            "description": "ID of the support bundle",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "successful deletion"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/experimental/v1/system/support-bundles/{bundle_id}/download": {
-      "get": {
-        "tags": [
-          "experimental"
-        ],
-        "summary": "Download support bundle contents",
-        "operationId": "support_bundle_download",
-        "parameters": [
-          {
-            "in": "header",
-            "name": "range",
-            "description": "A request to access a portion of the resource, such as `bytes=0-499`\n\nSee: <https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Range>",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "bundle_id",
-            "description": "ID of the support bundle",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "responses": {
-          "default": {
-            "description": "",
-            "content": {
-              "*/*": {
-                "schema": {}
-              }
-            }
-          }
-        }
-      },
-      "head": {
-        "tags": [
-          "experimental"
-        ],
-        "summary": "Download support bundle metadata",
-        "operationId": "support_bundle_head",
-        "parameters": [
-          {
-            "in": "header",
-            "name": "range",
-            "description": "A request to access a portion of the resource, such as `bytes=0-499`\n\nSee: <https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Range>",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "bundle_id",
-            "description": "ID of the support bundle",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "responses": {
-          "default": {
-            "description": "",
-            "content": {
-              "*/*": {
-                "schema": {}
-              }
-            }
-          }
-        }
-      }
-    },
-    "/experimental/v1/system/support-bundles/{bundle_id}/download/{file}": {
-      "get": {
-        "tags": [
-          "experimental"
-        ],
-        "summary": "Download file from support bundle",
-        "operationId": "support_bundle_download_file",
-        "parameters": [
-          {
-            "in": "header",
-            "name": "range",
-            "description": "A request to access a portion of the resource, such as `bytes=0-499`\n\nSee: <https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Range>",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "bundle_id",
-            "description": "ID of the support bundle",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          },
-          {
-            "in": "path",
-            "name": "file",
-            "description": "The file within the bundle to download",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "default": {
-            "description": "",
-            "content": {
-              "*/*": {
-                "schema": {}
-              }
-            }
-          }
-        }
-      },
-      "head": {
-        "tags": [
-          "experimental"
-        ],
-        "summary": "Download metadata of file in support bundle",
-        "operationId": "support_bundle_head_file",
-        "parameters": [
-          {
-            "in": "header",
-            "name": "range",
-            "description": "A request to access a portion of the resource, such as `bytes=0-499`\n\nSee: <https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Range>",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "bundle_id",
-            "description": "ID of the support bundle",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          },
-          {
-            "in": "path",
-            "name": "file",
-            "description": "The file within the bundle to download",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "default": {
-            "description": "",
-            "content": {
-              "*/*": {
-                "schema": {}
-              }
-            }
-          }
-        }
-      }
-    },
-    "/experimental/v1/system/support-bundles/{bundle_id}/index": {
-      "get": {
-        "tags": [
-          "experimental"
-        ],
-        "summary": "Download support bundle index",
-        "operationId": "support_bundle_index",
-        "parameters": [
-          {
-            "in": "header",
-            "name": "range",
-            "description": "A request to access a portion of the resource, such as `bytes=0-499`\n\nSee: <https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Range>",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "bundle_id",
-            "description": "ID of the support bundle",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "responses": {
-          "default": {
-            "description": "",
-            "content": {
-              "*/*": {
-                "schema": {}
-              }
-            }
           }
         }
       }
@@ -1663,6 +1243,133 @@
         "responses": {
           "204": {
             "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/alerts": {
+      "get": {
+        "tags": [
+          "system/alerts"
+        ],
+        "summary": "List alerts",
+        "description": "Alerts may be filtered by alert class or alert class glob and by an inclusive creation time range.",
+        "operationId": "alert_list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "alert_class",
+            "description": "Optional alert class or glob pattern used to filter alerts.\n\nIf this is included, only alerts with the specified class or matching the glob pattern (as appropriate) will be returned. Otherwise, alerts of all classes will be returned.\n\nSee the guide-level documentation on alerts for details on alert classes and alert class glob patterns.",
+            "schema": {
+              "$ref": "#/components/schemas/AlertSubscription"
+            }
+          },
+          {
+            "in": "query",
+            "name": "end_time",
+            "description": "Inclusive upper bound on the alert creation time\n\nIf this is included, only alerts created at or before this time will be returned.",
+            "schema": {
+              "nullable": true,
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/TimeAndIdSortMode"
+            }
+          },
+          {
+            "in": "query",
+            "name": "start_time",
+            "description": "Inclusive lower bound on the alert creation time.\n\nIf this is included, only alerts created at or after this time will be returned.",
+            "schema": {
+              "nullable": true,
+              "type": "string",
+              "format": "date-time"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AlertResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": []
+        }
+      }
+    },
+    "/v1/alerts/{alert_id}": {
+      "get": {
+        "tags": [
+          "system/alerts"
+        ],
+        "summary": "Fetch alert",
+        "operationId": "alert_view",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "alert_id",
+            "description": "UUID of the alert",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Alert"
+                }
+              }
+            }
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -12843,6 +12550,426 @@
         }
       }
     },
+    "/v1/system/support-bundles": {
+      "get": {
+        "tags": [
+          "system/support-bundles"
+        ],
+        "summary": "List all support bundles",
+        "operationId": "support_bundle_list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/TimeAndIdSortMode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SupportBundleInfoResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": []
+        }
+      },
+      "post": {
+        "tags": [
+          "system/support-bundles"
+        ],
+        "summary": "Create support bundle",
+        "operationId": "support_bundle_create",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SupportBundleCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SupportBundleInfo"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/support-bundles/{bundle_id}": {
+      "get": {
+        "tags": [
+          "system/support-bundles"
+        ],
+        "summary": "View support bundle",
+        "operationId": "support_bundle_view",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "bundle_id",
+            "description": "ID of the support bundle",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SupportBundleInfo"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "system/support-bundles"
+        ],
+        "summary": "Update support bundle",
+        "operationId": "support_bundle_update",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "bundle_id",
+            "description": "ID of the support bundle",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SupportBundleUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SupportBundleInfo"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "system/support-bundles"
+        ],
+        "summary": "Delete support bundle",
+        "description": "May also be used to cancel a support bundle which is currently being collected, or to remove metadata for a support bundle that has failed.",
+        "operationId": "support_bundle_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "bundle_id",
+            "description": "ID of the support bundle",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/support-bundles/{bundle_id}/download": {
+      "get": {
+        "tags": [
+          "system/support-bundles"
+        ],
+        "summary": "Download support bundle contents",
+        "operationId": "support_bundle_download",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "range",
+            "description": "A request to access a portion of the resource, such as `bytes=0-499`\n\nSee: <https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Range>",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "bundle_id",
+            "description": "ID of the support bundle",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "",
+            "content": {
+              "*/*": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      },
+      "head": {
+        "tags": [
+          "system/support-bundles"
+        ],
+        "summary": "Download support bundle metadata",
+        "operationId": "support_bundle_head",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "range",
+            "description": "A request to access a portion of the resource, such as `bytes=0-499`\n\nSee: <https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Range>",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "bundle_id",
+            "description": "ID of the support bundle",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "",
+            "content": {
+              "*/*": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/system/support-bundles/{bundle_id}/download/{file}": {
+      "get": {
+        "tags": [
+          "system/support-bundles"
+        ],
+        "summary": "Download file from support bundle",
+        "operationId": "support_bundle_download_file",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "range",
+            "description": "A request to access a portion of the resource, such as `bytes=0-499`\n\nSee: <https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Range>",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "bundle_id",
+            "description": "ID of the support bundle",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "file",
+            "description": "The file within the bundle to download",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "",
+            "content": {
+              "*/*": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      },
+      "head": {
+        "tags": [
+          "system/support-bundles"
+        ],
+        "summary": "Download metadata of file in support bundle",
+        "operationId": "support_bundle_head_file",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "range",
+            "description": "A request to access a portion of the resource, such as `bytes=0-499`\n\nSee: <https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Range>",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "bundle_id",
+            "description": "ID of the support bundle",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "file",
+            "description": "The file within the bundle to download",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "",
+            "content": {
+              "*/*": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/system/support-bundles/{bundle_id}/index": {
+      "get": {
+        "tags": [
+          "system/support-bundles"
+        ],
+        "summary": "Download support bundle index",
+        "operationId": "support_bundle_index",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "range",
+            "description": "A request to access a portion of the resource, such as `bytes=0-499`\n\nSee: <https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Range>",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "bundle_id",
+            "description": "ID of the support bundle",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "",
+            "content": {
+              "*/*": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/system/timeseries/query": {
       "post": {
         "tags": [
@@ -16112,6 +16239,48 @@
           "switch_histories"
         ]
       },
+      "Alert": {
+        "description": "An alert.\n\nAlerts provide notifications about events that occurred in the system at a point in time. See the guide-level documentation on alerts for details.",
+        "type": "object",
+        "properties": {
+          "alert": {
+            "description": "The alert's data payload.\n\nThe schema for this object depends on the alert class and version."
+          },
+          "class": {
+            "description": "The alert's class.\n\nSee the guide-level documentation on alerts for details on alert classes.",
+            "type": "string"
+          },
+          "id": {
+            "description": "Unique, immutable, system-controlled identifier for each resource",
+            "type": "string",
+            "format": "uuid"
+          },
+          "time_created": {
+            "description": "Timestamp when this resource was created",
+            "type": "string",
+            "format": "date-time"
+          },
+          "time_modified": {
+            "description": "Timestamp when this resource was last modified",
+            "type": "string",
+            "format": "date-time"
+          },
+          "version": {
+            "description": "The schema version of this alert's data payload.\n\nAlert schemas are versioned on a per-alert-class basis. The schema version for a particular alert class does not correspond to an Oxide API version. Clients should expect to encounter earlier schema versions when retrieving alerts recorded by an earlier version of the system software.\n\nSee the guide-level documentation on alerts for details.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "alert",
+          "class",
+          "id",
+          "time_created",
+          "time_modified",
+          "version"
+        ]
+      },
       "AlertClass": {
         "description": "An alert class.",
         "type": "object",
@@ -16445,6 +16614,27 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/AlertReceiver"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "AlertResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Alert"
             }
           },
           "next_page": {
@@ -28001,6 +28191,13 @@
             "type": "string",
             "format": "uuid"
           },
+          "slot": {
+            "nullable": true,
+            "description": "The physical slot in the rack where this sled was last observed to be located, or null if its location is not known at this time.",
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          },
           "state": {
             "description": "The current state of the sled.",
             "allOf": [
@@ -32228,6 +32425,13 @@
       "description": "Subnet pools are collections of external subnets. Linking a pool to a silo makes it available for allocation by users in that silo.",
       "externalDocs": {
         "url": "http://docs.oxide.computer/api/system-subnet-pools"
+      }
+    },
+    {
+      "name": "system/support-bundles",
+      "description": "Support bundles collect debugging information from the rack for use by Oxide support.",
+      "externalDocs": {
+        "url": "http://docs.oxide.computer/api/system-support-bundles"
       }
     },
     {
