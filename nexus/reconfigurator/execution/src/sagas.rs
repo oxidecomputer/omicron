@@ -544,6 +544,189 @@ mod test {
         logctx.cleanup_successful();
     }
 
+    #[test]
+    fn test_find_expunged_older_generation() {
+        const TEST_NAME: &str = "test_find_expunged_older_generation";
+
+        let logctx = test_setup_log(TEST_NAME);
+        let log = &logctx.log;
+
+        // To do an exhaustive test of `find_expunged_older_generation()`, we
+        // want some expunged zones and some non-expunged zones in each of two
+        // different generations.
+
+        // First, create a basic blueprint with several Nexus zones in
+        // generation 1.
+        let (example, blueprint1) =
+            ExampleSystemBuilder::new(log, TEST_NAME).nexus_count(4).build();
+        let g1 = Generation::new();
+        let g1_nexus_ids: Vec<_> = blueprint1
+            .in_service_nexus_zones()
+            .map(|(sled_id, zone_config, nexus_config)| {
+                assert_eq!(nexus_config.nexus_generation, g1);
+                (sled_id, zone_config.id, zone_config.image_source.clone())
+            })
+            .collect();
+
+        // Expunge two of these Nexus zones and mark them ready for cleanup
+        // immediately.
+        let (g1_expunge_ids, g1_keep_ids) = g1_nexus_ids.split_at(2);
+        let mut builder = BlueprintBuilder::new_based_on(
+            log,
+            &blueprint1,
+            "test suite",
+            PlannerRng::from_entropy(),
+        )
+        .expect("new blueprint builder");
+
+        for (sled_id, expunge_id, _image_source) in g1_expunge_ids {
+            builder
+                .sled_expunge_zone(*sled_id, *expunge_id)
+                .expect("expunge zone");
+            builder
+                .sled_mark_expunged_zone_ready_for_cleanup(
+                    *sled_id,
+                    *expunge_id,
+                )
+                .expect("mark zone for cleanup");
+        }
+
+        // Create the same number of Nexus zones in the next generation.
+        // We'll use the same images.
+        let g2 = g1.next();
+        let mut external_networking_alloc =
+            ExternalNetworkingAllocator::from_current_zones(
+                &builder,
+                example.input.external_ip_policy(),
+            )
+            .expect("constructed ExternalNetworkingAllocator");
+        let nexus_config = example
+            .input
+            .external_service_networking_policy()
+            .operator_nexus_config();
+        for (sled_id, _zone_id, image_source) in &g1_nexus_ids {
+            let external_ip = external_networking_alloc
+                .for_new_nexus()
+                .expect("found external IP for Nexus");
+            builder
+                .sled_add_zone_nexus(
+                    *sled_id,
+                    image_source.clone(),
+                    external_ip,
+                    g2,
+                    &nexus_config,
+                )
+                .expect("add Nexus zone");
+        }
+
+        let blueprint2 = builder.build(BlueprintSource::Test);
+        let g2_nexus_ids: Vec<_> = blueprint2
+            .in_service_nexus_zones()
+            .filter_map(|(sled_id, zone_config, nexus_config)| {
+                (nexus_config.nexus_generation == g2)
+                    .then_some((sled_id, zone_config.id))
+            })
+            .collect();
+
+        // Now expunge a few of those, too.  This time, only the first is going
+        // to be marked ready for cleanup.
+        let (g2_expunge_ids, g2_keep_ids) = g2_nexus_ids.split_at(2);
+        let mut builder = BlueprintBuilder::new_based_on(
+            log,
+            &blueprint2,
+            "test suite",
+            PlannerRng::from_entropy(),
+        )
+        .expect("new blueprint builder");
+
+        let (sled_id, g2_expunged_cleaned_up) = g2_expunge_ids[0];
+        builder
+            .sled_expunge_zone(sled_id, g2_expunged_cleaned_up)
+            .expect("expunge zone");
+        builder
+            .sled_mark_expunged_zone_ready_for_cleanup(
+                g2_expunge_ids[0].0,
+                g2_expunged_cleaned_up,
+            )
+            .expect("mark zone for cleanup");
+
+        let (sled_id, g2_expunged_not_cleaned_up) = g2_expunge_ids[1];
+        builder
+            .sled_expunge_zone(sled_id, g2_expunged_not_cleaned_up)
+            .expect("expunge zone");
+
+        let blueprint3 = builder.build(BlueprintSource::Test);
+
+        // Finally, we have:
+        //
+        // - g1_keep_ids:    two in-service Nexus zones in generation 1
+        // - g1_expunge_ids: two expunged Nexus zones in generation 1,
+        //                   both cleaned up
+        // - g2_keep_ids:    two in-service Nexus zones in generation 2
+        // - g2_expunge_ids: expunged Nexus zones in generation 2,
+        //                   only the first of which is ready for cleanup
+        //
+        // Now we can exhaustively test various cases.
+
+        // For the in-service zones in generation 1, there are no expunged zones
+        // of an older generation (generation 1 is the oldest), so we find
+        // nothing.
+        for (_sled_id, zone_id, _image_source) in g1_keep_ids {
+            let matched = find_expunged_older_generation(
+                &blueprint3,
+                SecId(zone_id.into_untyped_uuid()),
+            )
+            .unwrap();
+            assert!(matched.is_empty());
+        }
+
+        // For the in-service zones in generation 2, we should find the
+        // expunged-and-ready-for-cleanup zones in generation 1. We should NOT
+        // find the generation-2 expunged zone, since that's the same
+        // generation, not older.
+        let g1_matched: BTreeSet<SecId> = g1_expunge_ids
+            .into_iter()
+            .map(|(_sled_id, zone_id, _image_source)| {
+                SecId(zone_id.into_untyped_uuid())
+            })
+            .collect();
+        for (_sled_id, zone_id) in g2_keep_ids {
+            let matched = find_expunged_older_generation(
+                &blueprint3,
+                SecId(zone_id.into_untyped_uuid()),
+            )
+            .unwrap();
+            assert_eq!(matched.len(), 2);
+            assert_eq!(
+                matched.into_iter().collect::<BTreeSet<_>>(),
+                g1_matched
+            );
+        }
+
+        // It is possible for the expunged and NOT ready-for-cleanup zone in
+        // generation 2 to wind up calling this function. From its (generation
+        // 2) perspective, the only older expunged and ready-for-cleanup zones
+        // are the generation-1 ones; it finds neither the same-generation
+        // expunged zone nor itself.
+        let matched = find_expunged_older_generation(
+            &blueprint3,
+            SecId(g2_expunged_not_cleaned_up.into_untyped_uuid()),
+        )
+        .unwrap();
+        assert_eq!(matched.len(), 2);
+        assert_eq!(matched.into_iter().collect::<BTreeSet<_>>(), g1_matched);
+
+        // There should be an error if the id of the current nexus is not in
+        // the blueprint
+        let error =
+            find_expunged_older_generation(&blueprint3, SecId(Uuid::new_v4()))
+                .expect_err("made-up Nexus should not exist");
+        assert!(matches!(error, Error::InternalError { internal_message }
+            if internal_message.contains("did not find Nexus")));
+
+        logctx.cleanup_successful();
+    }
+
     #[tokio::test]
     async fn test_abandon_orphan_sagas() {
         let logctx = test_setup_log("test_abandon_orphan_sagas");
