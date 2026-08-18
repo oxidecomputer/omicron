@@ -20409,22 +20409,28 @@
             ]
           },
           "reachable_time": {
-            "description": "Reachable time from RA (milliseconds)",
-            "type": "integer",
-            "format": "uint32",
-            "minimum": 0
+            "description": "Reachable time from RA",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Duration"
+              }
+            ]
           },
           "retrans_timer": {
-            "description": "Retransmit timer from RA (milliseconds)",
-            "type": "integer",
-            "format": "uint32",
-            "minimum": 0
+            "description": "Retransmit timer from RA",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Duration"
+              }
+            ]
           },
           "router_lifetime": {
-            "description": "Router lifetime from RA (seconds)",
-            "type": "integer",
-            "format": "uint16",
-            "minimum": 0
+            "description": "Router lifetime from RA",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Duration"
+              }
+            ]
           },
           "time_since_discovered": {
             "description": "Time elapsed since the router was first discovered",

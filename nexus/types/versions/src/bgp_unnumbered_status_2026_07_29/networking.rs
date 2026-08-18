@@ -420,12 +420,12 @@ pub struct DiscoveredRouter {
     pub time_since_last_rx: Duration,
     /// Effective reachable time governing expiry of this entry
     pub effective_reachable_time: Duration,
-    /// Router lifetime from RA (seconds)
-    pub router_lifetime: u16,
-    /// Reachable time from RA (milliseconds)
-    pub reachable_time: u32,
-    /// Retransmit timer from RA (milliseconds)
-    pub retrans_timer: u32,
+    /// Router lifetime from RA
+    pub router_lifetime: Duration,
+    /// Reachable time from RA
+    pub reachable_time: Duration,
+    /// Retransmit timer from RA
+    pub retrans_timer: Duration,
 }
 
 impl From<MgDiscoveredRouter> for DiscoveredRouter {
