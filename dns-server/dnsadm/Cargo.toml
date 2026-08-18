@@ -17,12 +17,12 @@ chrono.workspace = true
 clap.workspace = true
 dns-service-client.workspace = true
 internal-dns-types.workspace = true
+omicron-workspace-hack.workspace = true
 oxide-tokio-rt.workspace = true
 slog.workspace = true
 slog-async.workspace = true
 slog-envlogger.workspace = true
 slog-term.workspace = true
-omicron-workspace-hack.workspace = true
 
 [dev-dependencies]
 camino-tempfile.workspace = true

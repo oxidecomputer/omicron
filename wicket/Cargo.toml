@@ -50,16 +50,16 @@ unicode-width.workspace = true
 zeroize.workspace = true
 
 omicron-passwords.workspace = true
-oxide-update-engine-types.workspace = true
+omicron-workspace-hack.workspace = true
 oxide-update-engine-display.workspace = true
+oxide-update-engine-types.workspace = true
+semver.workspace = true
+slog-error-chain.workspace = true
+tufaceous-artifact.workspace = true
 wicket-common.workspace = true
 wicketd-client.workspace = true
 wicketd-commission-client.workspace = true
 wicketd-commission-types.workspace = true
-omicron-workspace-hack.workspace = true
-semver.workspace = true
-tufaceous-artifact.workspace = true
-slog-error-chain.workspace = true
 
 [dev-dependencies]
 assert_cmd.workspace = true

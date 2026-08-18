@@ -12,5 +12,5 @@ dropshot.workspace = true
 dropshot-api-manager-types.workspace = true
 iddqd.workspace = true
 omicron-uuid-kinds.workspace = true
-wicketd-commission-types-versions.workspace = true
 omicron-workspace-hack.workspace = true
+wicketd-commission-types-versions.workspace = true

@@ -11,6 +11,6 @@ proc-macro = true
 workspace = true
 
 [dependencies]
-quote.workspace = true
-syn = { workspace = true, features = [ "fold", "parsing" ] }
 omicron-workspace-hack.workspace = true
+quote.workspace = true
+syn = { workspace = true, features = ["fold", "parsing"] }

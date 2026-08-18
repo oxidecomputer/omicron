@@ -12,13 +12,13 @@ workspace = true
 async-trait.workspace = true
 atomicwrites.workspace = true
 camino.workspace = true
+omicron-workspace-hack.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 slog.workspace = true
+slog-error-chain.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["fs"] }
-omicron-workspace-hack.workspace = true
-slog-error-chain.workspace = true
 
 [dev-dependencies]
 camino-tempfile.workspace = true

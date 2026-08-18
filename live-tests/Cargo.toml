@@ -8,9 +8,9 @@ license = "MPL-2.0"
 omicron-rpaths.workspace = true
 
 [dependencies]
+omicron-workspace-hack.workspace = true
 # See omicron-rpaths for more about the "pq-sys" dependency.
 pq-sys = "*"
-omicron-workspace-hack.workspace = true
 
 [dev-dependencies]
 anyhow.workspace = true
@@ -29,12 +29,12 @@ nexus-lockstep-client.workspace = true
 nexus-reconfigurator-planning.workspace = true
 nexus-reconfigurator-preparation.workspace = true
 nexus-types.workspace = true
-sled-agent-types.workspace = true
 omicron-common.workspace = true
 omicron-test-utils.workspace = true
 omicron-uuid-kinds.workspace = true
 reqwest.workspace = true
 serde.workspace = true
+sled-agent-types.workspace = true
 slog.workspace = true
 slog-error-chain.workspace = true
 textwrap.workspace = true
