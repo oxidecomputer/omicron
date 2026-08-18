@@ -551,8 +551,8 @@ impl MulticastDataplaneClient {
 
     /// Update a multicast group's tag (name) and/or sources in the dataplane.
     ///
-    /// Membership is left untouched: the underlay member list is written only
-    /// by the member add and remove paths.
+    /// Membership is left untouched here: underlay members are owned by
+    /// mg-lower/DDM and are not rewritten by this client.
     pub(crate) async fn update_groups(
         &self,
         params: GroupUpdateParams<'_>,
@@ -607,13 +607,12 @@ impl MulticastDataplaneClient {
                 async move {
                     // Read the underlay group, creating it if absent.
                     //
-                    // The member list is never written back from here. A tag
-                    // and source update does not change membership, and
-                    // `multicast_group_update_underlay` is a full-list
-                    // replace whose only concurrency control is the tag,
-                    // which is per-group rather than per-version, so a write
-                    // would silently revert a member add or remove that
-                    // landed since the read.
+                    // The member list is never written back from here.
+                    // Underlay membership is owned by mg-lower/DDM, and a tag
+                    // or source update does not change it. Writing the
+                    // full-list `multicast_group_update_underlay` value would
+                    // silently overwrite membership changes made since the
+                    // read.
                     let underlay = match client
                         .multicast_group_get_underlay(&underlay_ip_admin)
                         .await
