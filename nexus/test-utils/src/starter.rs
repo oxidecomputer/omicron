@@ -66,6 +66,7 @@ use omicron_common::address::DNS_OPTE_IPV4_SUBNET;
 use omicron_common::address::DNS_OPTE_IPV6_SUBNET;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::NEXUS_OPTE_IPV4_SUBNET;
+use omicron_common::address::NEXUS_OPTE_IPV6_SUBNET;
 use omicron_common::address::NTP_OPTE_IPV4_SUBNET;
 use omicron_common::address::NTP_PORT;
 use omicron_common::api::external::Generation;
@@ -704,13 +705,28 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
             .mac_addrs
             .next()
             .expect("ran out of MAC addresses");
-        let ip_config = PrivateIpConfig::new_ipv4(
-            NEXUS_OPTE_IPV4_SUBNET
-                .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES + 1 + which)
+        let ip_config =
+            match config.deployment.dropshot_external.dropshot.bind_address {
+                SocketAddr::V4(_) => PrivateIpConfig::new_ipv4(
+                    NEXUS_OPTE_IPV4_SUBNET
+                        .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES + 1 + which)
+                        .unwrap(),
+                    *NEXUS_OPTE_IPV4_SUBNET,
+                )
                 .unwrap(),
-            *NEXUS_OPTE_IPV4_SUBNET,
-        )
-        .unwrap();
+                SocketAddr::V6(_) => PrivateIpConfig::new_ipv6(
+                    NEXUS_OPTE_IPV6_SUBNET
+                        .nth(
+                            u128::try_from(
+                                NUM_INITIAL_RESERVED_IP_ADDRESSES + 1 + which,
+                            )
+                            .unwrap(),
+                        )
+                        .unwrap(),
+                    *NEXUS_OPTE_IPV6_SUBNET,
+                )
+                .unwrap(),
+            };
         self.blueprint_zones.push(BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
             id,
