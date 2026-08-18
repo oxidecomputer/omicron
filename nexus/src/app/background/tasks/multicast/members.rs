@@ -94,7 +94,7 @@
 //! |---|----------------|--------------|-------------|---------|------------|
 //! | 1 | Invalid | Any | Any | Unsubscribe VMM + clear sled_id → "Left" | "Left" |
 //! | 2 | Valid | Yes | Yes | Unsubscribe old + update sled_id + subscribe new | "Joined" |
-//! | 3 | Valid | No | Yes | Verify config, no changes needed | "Joined" |
+//! | 3 | Valid | No | Yes | Ensure VMM OPTE subscription | "Joined" |
 //! | 4 | Valid | N/A | No | DB state only → "Left" (edge case) | "Left" |
 //!
 //! ### LEFT State Transitions
@@ -816,12 +816,31 @@ impl MulticastGroupReconciler {
                 self.handle_sled_migration(ctx, sled_id).await
             }
 
-            (true, Some(_)) => {
+            (true, Some(sled_id)) => {
+                // `ddmd` owns DPD member programming, but the OPTE port
+                // subscription remains Nexus-owned, so re-issue it every
+                // pass. This retries a subscribe that failed after the
+                // "Joining" → "Joined" CAS, and pushes source filters
+                // rewritten by a repeat join. Sled-agent replaces the OPTE
+                // filter only when the requested one differs.
+                ctx.sled_client
+                    .subscribe_instance(
+                        ctx.opctx,
+                        ctx.group,
+                        ctx.member,
+                        sled_id,
+                    )
+                    .await
+                    .context(
+                        "failed to ensure OPTE subscription for 'Joined' member",
+                    )?;
+
                 trace!(
                     ctx.opctx.log,
-                    "member configuration verified, no changes needed";
+                    "ensured OPTE subscription for 'Joined' member";
                     "member_id" => %ctx.member.id,
-                    "group_id" => %ctx.group.id()
+                    "group_id" => %ctx.group.id(),
+                    "sled_id" => %sled_id
                 );
                 Ok(StateTransition::NoChange)
             }
@@ -1430,8 +1449,9 @@ impl MulticastGroupReconciler {
         // At this point the member is "Joined" in the database, so propagation
         // includes this sled in forwarding next-hops. If propagation or
         // subscribe fails below, the member remains "Joined" with incomplete
-        // sled state. The reconciler's next pass re-converges sled state. DPD
-        // members are programmed by `ddmd` from DDM peer subscriptions.
+        // sled state. The next reconciler pass re-propagates and re-issues the
+        // subscription from `handle_instance_joined`. DPD members are
+        // programmed by `ddmd` from DDM peer subscriptions.
         //
         // Propagation failures are best-effort since the reconciler will
         // re-converge all sleds on the next cycle. Subscribe failures
@@ -1570,7 +1590,6 @@ impl MulticastGroupReconciler {
             ) {
                 continue;
             }
-
 
             // Atomically mark for deletion only if no members exist.
             // This is race-safe: the NOT EXISTS guard in the datastore method

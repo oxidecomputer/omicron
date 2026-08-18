@@ -16,7 +16,7 @@ use std::collections::HashMap;
 use std::net::{IpAddr, Ipv6Addr, SocketAddrV6};
 use std::time::Duration;
 
-use anyhow::anyhow;
+use anyhow::{Context, anyhow};
 use futures::future::{join_all, try_join_all};
 use internal_dns_resolver::Resolver;
 use sled_agent_types::early_networking::SwitchSlot;
@@ -271,26 +271,21 @@ impl MulticastSwitchZoneClient {
         let mut index = MribRouteIndex::new();
 
         for (slot, client) in &self.mgd_clients {
-            match client.static_list_mcast_routes().await {
-                Ok(routes) => {
-                    for route in routes.into_inner() {
-                        let (group_ip, source) = route_identifier(&route.key);
-                        index
-                            .entry(group_ip)
-                            .or_default()
-                            .entry(source)
-                            .or_default()
-                            .insert(*slot, route.underlay_group);
-                    }
-                }
-                Err(e) => {
-                    warn!(
-                        self.log,
-                        "failed to list multicast routes from switch zone";
-                        "switch" => ?slot,
-                        "error" => %e,
-                    );
-                }
+            let routes =
+                client.static_list_mcast_routes().await.with_context(|| {
+                    format!(
+                        "failed to list multicast routes from switch {slot:?}"
+                    )
+                })?;
+
+            for route in routes.into_inner() {
+                let (group_ip, source) = route_identifier(&route.key);
+                index
+                    .entry(group_ip)
+                    .or_default()
+                    .entry(source)
+                    .or_default()
+                    .insert(*slot, route.underlay_group);
             }
         }
 

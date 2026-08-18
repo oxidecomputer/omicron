@@ -79,6 +79,9 @@
 //! - **DB failures**: Operations retried in subsequent reconciler passes
 //! - **Partial cleanup**: "Deleting" state preserved until complete cleanup
 
+use std::collections::HashSet;
+use std::net::IpAddr;
+
 use anyhow::Context;
 use futures::future::try_join_all;
 use futures::stream::{self, StreamExt};
@@ -678,41 +681,49 @@ impl MulticastGroupReconciler {
         // before cleaning up DPD and DB state. Return early on failure so
         // the next pass can retry. Proceeding would delete DB rows and
         // leave stale DDM advertisements.
+        //
+        // The switch snapshot, not the member source filter, drives which
+        // routes are withdrawn. The member cleanup pass hard-deletes rows
+        // before this handler runs in the same activation, so a group that
+        // reaches "Deleting" may not contain the source list that
+        // produced the installed (S,G) routes. Those routes would otherwise
+        // remain in the MRIB with no group row left for any later pass to
+        // reconcile.
         let group_ip = group.multicast_ip.ip();
-        let group_id = MulticastGroupUuid::from_untyped_uuid(group.id());
-
-        // Remove (*,G) route.
-        switch_zone_client
-            .remove_route(group_ip, None)
-            .await
-            .context("failed to remove MRIB (*,G) route for deleting group")?;
-
-        // Remove (S,G) routes for any sources. Return early on failure
-        // to preserve DB state for retry on the next pass.
-        let source_filter = self
-            .datastore
-            .multicast_groups_source_filter_state(opctx, &[group_id])
-            .await
-            .context(
-                "failed to load source filter for MRIB cleanup; \
+        let installed_routes =
+            switch_zone_client.list_routes_indexed().await.context(
+                "failed to list MRIB routes for cleanup; \
                  returning early to preserve DB state for retry",
             )?;
 
-        if let Some(filter) = source_filter.get(&group.id()) {
-            // Per-source removals target distinct (S,G) keys. We fan out so
-            // a group with N sources doesn't pay N round-trips serially.
-            try_join_all(filter.specific_sources.iter().map(
-                |source| async move {
-                    switch_zone_client
-                        .remove_route(group_ip, Some(*source))
-                        .await
-                        .with_context(|| format!(
-                            "failed to remove MRIB (S,G) route for source {source}"
-                        ))
-                }),
-            )
-            .await?;
-        }
+        // The (*,G) key is withdrawn unconditionally so a listing that
+        // omits it, such as one assembled while a switch was unreachable,
+        // still leaves the group route removed.
+        let mut route_keys: HashSet<Option<IpAddr>> = HashSet::from([None]);
+        route_keys.extend(
+            installed_routes
+                .get(&group_ip)
+                .into_iter()
+                .flat_map(|sources| sources.keys().copied()),
+        );
+
+        // Each key is a distinct route. We fan out so a group with N routes
+        // doesn't pay N round-trips serially.
+        try_join_all(route_keys.into_iter().map(|source| async move {
+            switch_zone_client
+                .remove_route(group_ip, source)
+                .await
+                .with_context(|| match source {
+                    Some(source) => format!(
+                        "failed to remove MRIB (S,G) route for source {source}"
+                    ),
+                    None => {
+                        "failed to remove MRIB (*,G) route for deleting group"
+                            .to_string()
+                    }
+                })
+        }))
+        .await?;
 
         self.process_deleting_group_inner(
             opctx,
