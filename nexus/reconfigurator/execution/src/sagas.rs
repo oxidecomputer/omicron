@@ -10,7 +10,6 @@ use nexus_db_queries::db::DataStore;
 use nexus_types::deployment::{Blueprint, BlueprintExpungedZoneAccessReason};
 use omicron_common::api::external::Error;
 use omicron_uuid_kinds::{GenericUuid, OmicronZoneUuid};
-use slog::Logger;
 use slog::{debug, error, info, warn};
 
 /// For each expunged Nexus zone in the same generation as the current Nexus,
@@ -108,23 +107,9 @@ fn find_expunged_same_generation(
 /// These sagas also never go through saga recovery, as each Nexus only attempts
 /// to recover sagas assigned to itself.
 ///
-/// We abandon these, as there is no way to salvage them. Note that abandoning a
-/// saga does not unwind it: any partial work it has already done is left in
-/// place.
-///
-/// To be conservative, we only abandon sagas whose `current_sec` is an expunged
-/// (and ready-for-cleanup) Nexus zone in the target blueprint whose generation
-/// is strictly older than the oldest generation of running Nexus zones.
-///
-/// For a brief moment during an update, after deploying a new-generation Nexus,
-/// and immediately after handoff, there will be zones at generation N and N + 1
-/// (although the zones at generation N must be fully quiesced and not using the
-/// database). By retrieving all in-service Nexus zones and choosing the oldest
-/// generation that we find, we handle the case where for some reason we end up
-/// in this state for a "longer than expected" amount of time. In this scenario,
-/// we give any saga that could still finish gracefully a chance to do so. If
-/// they really should be abandoned, then they will be once the planner creates
-/// a blueprint that expunges the older zones and that blueprint is executed.
+/// We abandon all sagas from an earlier generation than the current running
+/// Nexus, as there is no way to salvage them. Note that abandoning a saga does
+/// not unwind it: any partial work it has already done is left in place.
 ///
 /// Any Nexus that isn't in the target blueprint is left untouched, since we
 /// can't confirm its state.
@@ -138,17 +123,18 @@ pub(crate) async fn abandon_orphan_sagas(
     opctx: &OpContext,
     datastore: &DataStore,
     blueprint: &Blueprint,
+    nexus_id: SecId,
 ) -> Result<(), anyhow::Error> {
     let log = &opctx.log;
 
     // Find ids of stale expunged Nexus zones
-    let stale_sec_ids = find_expunged_older_than_all_running(log, blueprint);
+    let stale_sec_ids = find_expunged_older_generation(blueprint, nexus_id)?;
 
     info!(
         log,
         "abandon orphan sagas: abandoning running or unwinding sagas from \
         expunged (and ready-for-cleanup) Nexus zones of an older generation \
-        than all running Nexus zones";
+        than the current running Nexus zone";
         "stale_expunged_sec_ids" => ?stale_sec_ids,
     );
     let result = datastore
@@ -186,46 +172,30 @@ pub(crate) async fn abandon_orphan_sagas(
 }
 
 /// Returns the ids of expunged (and ready-for-cleanup) Nexus zones whose
-/// generation is older than the oldest generation of running Nexus zones
-/// in the blueprint.
-fn find_expunged_older_than_all_running(
-    log: &Logger,
+/// generation is older than the generation of the given Nexus id
+fn find_expunged_older_generation(
     blueprint: &Blueprint,
-) -> Vec<SecId> {
-    // We chose the oldest of the live generations for a few reasons. During
-    // Nexus handover there is a possibility that there will be more than one
-    // generation of Nexuses in-service, and the target blueprint could become
-    // stale before this code executes. We are conservative and only take sagas
-    // that are strictly older than this generation and could never be
-    // reassigned.
-    let Some(oldest_live_generation) = blueprint
-        .in_service_nexus_zones()
-        .map(|(_, _, nexus)| nexus.nexus_generation)
-        .min()
-    else {
-        return vec![];
-    };
-    debug!(
-        log,
-        "abandon orphan sagas: retrieved oldest in-service Nexus generation";
-        "oldest_in_service_generation" => %oldest_live_generation,
-    );
+    nexus_id: SecId,
+) -> Result<Vec<SecId>, Error> {
+    let nexus_zone_id = OmicronZoneUuid::from_untyped_uuid(nexus_id.0);
+    let active_nexus_generation =
+        blueprint.find_generation_for_self(nexus_zone_id)?;
 
     // SEC ids of expunged and ready-for-cleanup Nexus zones whose generation is
-    // strictly older than the oldest in-service Nexus generation.
+    // strictly older than the given Nexus generation.
     //
     // We source SEC ids strictly from the target blueprint as these are the
     // only Nexuses we can confidently confirm the state of. Any Nexus not in
     // the target blueprint is effectively ignored.
-    blueprint
+    Ok(blueprint
         .expunged_nexus_zones_ready_for_cleanup(
             BlueprintExpungedZoneAccessReason::NexusOrphanSagaAbandonment,
         )
         .filter_map(|(_sled_id, config, nexus)| {
-            (nexus.nexus_generation < oldest_live_generation)
+            (nexus.nexus_generation < active_nexus_generation)
                 .then_some(SecId(config.id.into_untyped_uuid()))
         })
-        .collect()
+        .collect())
 }
 
 #[cfg(test)]
@@ -589,8 +559,8 @@ mod test {
         // - an expunged + ready_for_cleanup Nexus at the live generation (g2)
         // - an expunged + ready_for_cleanup Nexus at an older generation (g1)
         //
-        // Only the orphan_zone, with a generation older than every in-service
-        // Nexus, has sagas that can never be reassigned.
+        // Only the orphan_zone, with a generation older than the current Nexus,
+        // has sagas that can never be reassigned.
         let in_service_zone = OmicronZoneUuid::new_v4();
         let expunged_same_gen_zone = OmicronZoneUuid::new_v4();
         let orphan_zone = OmicronZoneUuid::new_v4();
@@ -624,7 +594,7 @@ mod test {
         // - `expunged_same_gen_sec`: expunged, but same generation as the live
         //                            Nexus (so still reassignable)
         // - `absent_sec`:            a Nexus that isn't in the blueprint at all
-        // - `orphan_sec`:            expunged and older than every live Nexus
+        // - `orphan_sec`:            expunged and older than the live Nexus
         //
         // Only `orphan_sec`'s running/unwinding sagas should be abandoned. All
         // other sagas, for every SEC and in every state, must be left untouched
@@ -702,7 +672,7 @@ mod test {
         }
 
         // Run the orphan saga abandoner.
-        abandon_orphan_sagas(opctx, datastore, &blueprint)
+        abandon_orphan_sagas(opctx, datastore, &blueprint, in_service_sec)
             .await
             .expect("abandon_orphan_sagas failed");
 

@@ -287,6 +287,7 @@ pub async fn realize_blueprint(
         &opctx,
         datastore,
         blueprint,
+        nexus_id,
     );
 
     register_cockroachdb_settings_step(
@@ -657,15 +658,24 @@ fn register_abandon_orphan_sagas_step<'a>(
     opctx: &'a OpContext,
     datastore: &'a DataStore,
     blueprint: &'a Blueprint,
+    nexus_id: Option<OmicronZoneUuid>,
 ) {
     registrar
         .new_step(
             ExecutionStepId::Cleanup,
             "Abandon orphan sagas",
             async move |_cx| {
-                let res =
-                    sagas::abandon_orphan_sagas(opctx, datastore, blueprint)
-                        .await;
+                let Some(nexus_id) = nexus_id else {
+                    return Ok(
+                        StepSkipped::new((), "not running as Nexus").build()
+                    );
+                };
+
+                let sec_id = nexus_db_model::SecId::from(nexus_id);
+                let res = sagas::abandon_orphan_sagas(
+                    opctx, datastore, blueprint, sec_id,
+                )
+                .await;
                 Ok(map_err_to_step_warning(res))
             },
         )
