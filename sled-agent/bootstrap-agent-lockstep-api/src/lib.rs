@@ -10,18 +10,21 @@
 //! it's expected that software components are on the same version.
 
 use bootstrap_agent_lockstep_types::BaseboardIds;
+use bootstrap_agent_lockstep_types::MultirackJoinRequest;
+use bootstrap_agent_lockstep_types::MultirackJoinServiceState;
 use bootstrap_agent_lockstep_types::RackInitializeRequest;
 use bootstrap_agent_lockstep_types::RackOperationStatus;
 use bootstrap_agent_lockstep_types::ReplicatedNetworkConfig;
 use bootstrap_agent_lockstep_types::scrimlet_reconcilers;
 use dropshot::{HttpError, HttpResponseOk, RequestContext, TypedBody};
+use omicron_uuid_kinds::MultirackJoinUuid;
 use omicron_uuid_kinds::RackInitUuid;
 
 #[dropshot::api_description]
 pub trait BootstrapAgentLockstepApi {
     type Context;
 
-    /// Get the current status of rack initialization or reset.
+    /// Get the current status of rack initialization.
     #[endpoint {
         method = GET,
         path = "/rack-initialize",
@@ -81,4 +84,23 @@ pub trait BootstrapAgentLockstepApi {
     async fn baseboard_ids(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<BaseboardIds>, HttpError>;
+
+    /// Configure the rack to join a multirack regional cluster
+    #[endpoint {
+        method = POST,
+        path = "/multirack-join",
+    }]
+    async fn multirack_join(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<MultirackJoinRequest>,
+    ) -> Result<HttpResponseOk<MultirackJoinUuid>, HttpError>;
+
+    /// Get the current state of the multirack join
+    #[endpoint {
+        method = GET,
+        path = "/multirack-join",
+    }]
+    async fn multirack_join_state(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<MultirackJoinServiceState>, HttpError>;
 }
