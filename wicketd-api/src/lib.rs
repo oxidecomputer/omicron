@@ -34,7 +34,6 @@ use wicket_common::update_events::EventReport;
 use wicketd_commission_types::rack_setup::BgpAuthKey;
 use wicketd_commission_types::rack_setup::BgpAuthKeyId;
 use wicketd_commission_types::rack_setup::CertificateUploadResponse;
-use wicketd_commission_types::rack_setup::PutRssUserConfigInsensitive;
 use wicketd_commission_types::rack_setup::SetBgpAuthKeyStatus;
 use wicketd_commission_types::update::ClearUpdateStateResponse;
 use wicketd_commission_types::update::UpdateTargets;
@@ -61,19 +60,6 @@ pub trait WicketdApi {
     async fn get_rss_config(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<CurrentRssUserConfig>, HttpError>;
-
-    /// Update (a subset of) the current RSS configuration.
-    ///
-    /// Sensitive values (certificates and password hash) are not set through
-    /// this endpoint.
-    #[endpoint {
-        method = PUT,
-        path = "/rack-setup/config"
-    }]
-    async fn put_rss_config(
-        rqctx: RequestContext<Self::Context>,
-        body: TypedBody<PutRssUserConfigInsensitive>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
     /// Get the current status of the multirack join configuration.
     #[endpoint {
