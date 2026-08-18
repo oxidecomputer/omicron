@@ -99,3 +99,7 @@ pub mod v2026_06_10_00;
 pub mod v2026_06_11_00;
 #[path = "bgp_unnumbered_status_2026_07_29/mod.rs"]
 pub mod v2026_07_29_00;
+#[path = "sled_slot/mod.rs"]
+pub mod v2026_08_12_00;
+#[path = "alert_list/mod.rs"]
+pub mod v2026_08_14_00;

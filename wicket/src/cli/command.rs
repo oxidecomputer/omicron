@@ -48,7 +48,7 @@ impl ShellApp {
                 args.exec(log, addrs.wicketd, self.global_opts, output).await
             }
             ShellCommand::Setup(args) => {
-                args.exec(log, addrs.wicketd, self.global_opts).await?;
+                args.exec(log, addrs, self.global_opts).await?;
                 Ok(ExitCode::SUCCESS)
             }
             ShellCommand::Preflight(args) => {

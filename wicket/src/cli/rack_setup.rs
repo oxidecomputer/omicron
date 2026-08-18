@@ -7,6 +7,8 @@
 use crate::ui::defaults::style::BULLET_ICON;
 use crate::ui::defaults::style::CHECK_ICON;
 use crate::ui::defaults::style::WARN_ICON;
+use crate::wicketd::WicketdAddrs;
+use crate::wicketd::create_commission_client;
 use crate::wicketd::create_wicketd_client;
 use anyhow::Context;
 use anyhow::Result;
@@ -24,7 +26,6 @@ use std::fmt;
 use std::io;
 use std::io::Read;
 use std::mem;
-use std::net::SocketAddrV6;
 use std::time::Duration;
 use wicket_common::rack_setup::BgpAuthKeyInfo;
 use wicket_common::rack_setup::BgpAuthKeyStatus;
@@ -36,6 +37,7 @@ use wicketd_client::types::PutRssRecoveryUserPasswordHash;
 use wicketd_client::types::SetBgpAuthKeyStatus;
 use wicketd_commission_types::rack_setup::BgpAuthKey;
 use wicketd_commission_types::rack_setup::BgpAuthKeyId;
+use wicketd_commission_types::rack_setup::CertificatePem;
 use wicketd_commission_types::rack_setup::CertificateUploadResponse;
 use wicketd_commission_types::rack_setup::PutRssUserConfigInsensitive;
 use zeroize::Zeroizing;
@@ -87,10 +89,13 @@ impl SetupArgs {
     pub(crate) async fn exec(
         self,
         log: Logger,
-        wicketd_addr: SocketAddrV6,
+        addrs: WicketdAddrs,
         global_opts: GlobalOpts,
     ) -> Result<()> {
-        let client = create_wicketd_client(&log, wicketd_addr, WICKETD_TIMEOUT);
+        let client =
+            create_wicketd_client(&log, addrs.wicketd, WICKETD_TIMEOUT);
+        let commission_client =
+            create_commission_client(&log, addrs.commission, WICKETD_TIMEOUT);
 
         match self {
             SetupArgs::GetConfig => {
@@ -119,7 +124,7 @@ impl SetupArgs {
                         .context("failed to parse config TOML")?;
 
                 slog::info!(log, "uploading config to wicketd...");
-                client
+                commission_client
                     .put_rss_config(&config)
                     .await
                     .context("error uploading config to wicketd")?;
@@ -158,8 +163,8 @@ impl SetupArgs {
                     .context("failed to read certificate from stdin")?;
 
                 slog::info!(log, "uploading cert to wicketd...");
-                let result = client
-                    .post_rss_config_cert(&cert)
+                let result = commission_client
+                    .post_rss_config_cert(&CertificatePem(cert))
                     .await
                     .context("failed to upload cert to wicketd")?
                     .into_inner();
