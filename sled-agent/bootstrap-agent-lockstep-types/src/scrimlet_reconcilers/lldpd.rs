@@ -12,6 +12,7 @@ use std::collections::BTreeMap;
 
 /// Status of the `lldpd` scrimlet reconciler.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case", tag = "status", content = "value")]
 pub enum LldpdReconcilerStatus {
     Failed(String),
     SkippedConfigUpToDate,

@@ -914,6 +914,7 @@ name = "bootstrap-agent-lockstep-client"
 version = "0.1.0"
 dependencies = [
  "bootstrap-agent-lockstep-types",
+ "chrono",
  "iddqd",
  "omicron-common",
  "omicron-uuid-kinds",
@@ -9385,6 +9386,7 @@ dependencies = [
  "async-trait",
  "base64 0.22.1",
  "bootstrap-agent-lockstep-client",
+ "bootstrap-agent-lockstep-types",
  "bytes",
  "camino",
  "camino-tempfile",

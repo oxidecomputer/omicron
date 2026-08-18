@@ -8,10 +8,9 @@
 use omicron_uuid_kinds::OmicronZoneUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    net::IpAddr,
-};
+use std::collections::BTreeMap;
+use std::collections::BTreeSet;
+use std::net::IpAddr;
 
 /// Description of a failure to perform some dpd operation on a specific port.
 #[derive(
@@ -32,6 +31,7 @@ pub struct DpdPortOperationFailure {
 
 /// Status of reconciling QSFP port settings with `dpd`.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case", tag = "status", content = "value")]
 pub enum DpdPortReconcilerStatus {
     /// Reconciliation failed while attempting to read the current settings from
     /// `dpd`.
@@ -149,6 +149,7 @@ pub struct DpdNatReconcilerStatusNatEntryFailure {
 
 /// Status of reconciling service zone NAT entries with `dpd`.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case", tag = "status", content = "value")]
 pub enum DpdNatReconcilerStatus {
     /// Reconciliation was skipped because the bootstore contains no NAT entry
     /// config information.
