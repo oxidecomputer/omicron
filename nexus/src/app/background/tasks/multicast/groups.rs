@@ -82,7 +82,7 @@
 use std::collections::HashSet;
 use std::net::IpAddr;
 
-use anyhow::Context;
+use anyhow::{Context, anyhow};
 use futures::future::try_join_all;
 use futures::stream::{self, StreamExt};
 use slog::{debug, error, info, trace, warn};
@@ -1046,6 +1046,19 @@ impl MulticastGroupReconciler {
         // programming and never clears it, so an absent link proves there
         // is no DPD state to remove.
         if group.underlay_group_id.is_some() {
+            // A tag reset issued with no DPD clients returns success without
+            // reaching a switch. The DB rows deleted below are what drive a
+            // later reset for this tag, so the switch state would be left
+            // behind with nothing to reconcile it. We fail here so the rows
+            // survive and then a later pass tears the group down against
+            // reachable switches.
+            if dataplane_client.switch_count() == 0 {
+                return Err(anyhow!(
+                    "no DPD clients available for 'Deleting' group dataplane \
+                     teardown, retrying on a later pass"
+                ));
+            }
+
             debug!(
                 opctx.log,
                 "executing DPD multicast group cleanup by tag";
