@@ -67,7 +67,7 @@ impl FileLister for FilesystemLister {
                     return vec![];
                 } else {
                     return vec![Err(
-                        anyhow!(error).context("readdir {path:?}")
+                        anyhow!(error).context(format!("readdir {path:?}"))
                     )];
                 }
             }

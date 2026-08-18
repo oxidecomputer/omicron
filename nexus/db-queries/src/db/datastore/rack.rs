@@ -297,9 +297,9 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
         match subnet {
             Some(subnet) => Ok(subnet),
-            None => Err(Error::internal_error(
-                "DB Error(bug): returned a null subnet for {rack_id}",
-            )),
+            None => Err(Error::internal_error(&format!(
+                "DB Error(bug): returned a null subnet for {rack_id}"
+            ))),
         }
     }
 

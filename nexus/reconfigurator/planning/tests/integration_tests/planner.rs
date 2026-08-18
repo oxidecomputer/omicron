@@ -4260,7 +4260,7 @@ fn test_update_boundary_ntp() {
             let config = &sled
                 .last_reconciliation
                 .as_ref()
-                .expect("Sled missing ledger? {sled:?}")
+                .unwrap_or_else(|| panic!("Sled missing ledger? {sled:?}"))
                 .last_reconciled_config;
 
             let Some(zone_id) =
