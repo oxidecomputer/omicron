@@ -2003,9 +2003,11 @@ mod test {
             use async_bb8_diesel::AsyncRunQueryDsl;
             use diesel::prelude::*;
             use nexus_db_schema::schema::vmm::dsl as vmm_dsl;
-            let datastore = cptestctx.server.server_context().nexus.datastore();
+            use omicron_uuid_kinds::SledUuid;
+            let nexus = &cptestctx.server.server_context().nexus;
+            let datastore = nexus.datastore();
             let conn = datastore.pool_connection_for_tests().await.unwrap();
-            diesel::update(vmm_dsl::vmm)
+            let vmms: Vec<(Uuid, Uuid)> = diesel::update(vmm_dsl::vmm)
                 .filter(vmm_dsl::instance_id.eq(instance.id()))
                 .filter(vmm_dsl::time_deleted.is_null())
                 .set((
@@ -2018,9 +2020,22 @@ mod test {
                     vmm_dsl::time_state_updated.eq(Utc::now()),
                     vmm_dsl::time_deleted.eq(Utc::now()),
                 ))
-                .execute_async(&*conn)
+                .returning((vmm_dsl::id, vmm_dsl::sled_id))
+                .get_results_async(&*conn)
                 .await
                 .expect("should be able to mark the test VMMs as deleted");
+
+            // Also unregister the VMMs from their simulated sled-agents, so
+            // that the sim agents' state stays consistent with the database.
+            for (vmm_id, sled_id) in vmms {
+                nexus
+                    .sled_client(&SledUuid::from_untyped_uuid(sled_id))
+                    .await
+                    .expect("the VMM's sled should exist")
+                    .vmm_unregister(&PropolisUuid::from_untyped_uuid(vmm_id))
+                    .await
+                    .expect("should be able to unregister the VMM");
+            }
         }
 
         test_helpers::instance_delete_by_name(
