@@ -834,6 +834,7 @@ impl DataStore {
         authz_pool: &authz::IpPool,
         db_pool: &IpPool,
     ) -> DeleteResult {
+        use nexus_db_schema::schema::external_service_ip_pool;
         use nexus_db_schema::schema::ip_pool::dsl;
         use nexus_db_schema::schema::ip_pool_range;
         use nexus_db_schema::schema::ip_pool_resource;
@@ -854,6 +855,29 @@ impl DataStore {
         if range.is_some() {
             return Err(Error::invalid_request(
                 "IP Pool cannot be deleted while it contains IP ranges",
+            ));
+        }
+
+        // Verify the pool is not assigned to any external service. A concurrent
+        // assignment is caught separately by the `rcgen` check on the delete
+        // below, since assigning a pool to a service bumps its `rcgen`.
+        let assignment =
+            external_service_ip_pool::dsl::external_service_ip_pool
+                .filter(
+                    external_service_ip_pool::dsl::ip_pool_id
+                        .eq(authz_pool.id()),
+                )
+                .select(external_service_ip_pool::dsl::ip_pool_id)
+                .limit(1)
+                .first_async::<Uuid>(&*conn)
+                .await
+                .optional()
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+        if assignment.is_some() {
+            return Err(Error::invalid_request(
+                "IP Pool cannot be deleted while it is assigned to a service",
             ));
         }
 

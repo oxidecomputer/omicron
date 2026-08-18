@@ -670,6 +670,13 @@ table! {
 }
 
 table! {
+    external_service_ip_pool (service, ip_pool_id) {
+        service -> crate::enums::ExternalServiceKindEnum,
+        ip_pool_id -> Uuid,
+    }
+}
+
+table! {
     ip_pool_resource (ip_pool_id, resource_type, resource_id) {
         ip_pool_id -> Uuid,
         resource_type -> crate::enums::IpPoolResourceTypeEnum,
