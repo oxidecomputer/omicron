@@ -469,7 +469,7 @@ impl MulticastGroupReconciler {
                     (member, res)
                 }
             })
-            .buffer_unordered(self.member_concurrency_limit) // Configurable concurrency
+            .buffer_unordered(self.member_concurrency_limit.get()) // Configurable concurrency
             .collect::<Vec<_>>()
             .await;
 

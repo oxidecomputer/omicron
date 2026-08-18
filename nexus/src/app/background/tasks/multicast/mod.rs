@@ -173,6 +173,7 @@
 //! [`instance_updater`]: crate::app::background::tasks::instance_updater
 //! [`MulticastGroupReconcilerConfig`]: nexus_config::MulticastGroupReconcilerConfig
 
+use std::num::NonZeroUsize;
 use std::sync::Arc;
 
 use futures::FutureExt;
@@ -216,9 +217,9 @@ pub(crate) struct MulticastGroupReconciler {
     resolver: Resolver,
     sagas: Arc<dyn StartSaga>,
     /// Maximum number of members to process concurrently per group.
-    member_concurrency_limit: usize,
+    member_concurrency_limit: NonZeroUsize,
     /// Maximum number of groups to process concurrently.
-    group_concurrency_limit: usize,
+    group_concurrency_limit: NonZeroUsize,
     /// Grace period before an orphaned "Creating" group with no members is
     /// reaped by the emptiness sweep (`cleanup_empty_groups`).
     orphan_grace_period: chrono::TimeDelta,
@@ -232,8 +233,8 @@ impl MulticastGroupReconciler {
         resolver: Resolver,
         sagas: Arc<dyn StartSaga>,
         enabled: bool,
-        group_concurrency_limit: usize,
-        member_concurrency_limit: usize,
+        group_concurrency_limit: NonZeroUsize,
+        member_concurrency_limit: NonZeroUsize,
         orphan_grace_period: chrono::TimeDelta,
     ) -> Self {
         Self {

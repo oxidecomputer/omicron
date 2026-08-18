@@ -29,6 +29,7 @@ use std::fmt;
 use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::num::NonZeroU32;
+use std::num::NonZeroUsize;
 use std::time::Duration;
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
@@ -956,10 +957,14 @@ pub struct MulticastGroupReconcilerConfig {
     /// Each slot may hold an in-flight `dpd_ensure` saga that the reconciler
     /// awaits in the same pass. A wedged dependency holds a slot until the
     /// saga unwinds, so this cap bounds the worst-case in-flight saga count.
+    ///
+    /// The limit feeds `buffer_unordered`, which never polls its input when
+    /// given zero, so a zero value would stall the reconciler rather than
+    /// serialize it. The type rejects zero at deserialization time.
     #[serde(
         default = "MulticastGroupReconcilerConfig::default_group_concurrency_limit"
     )]
-    pub group_concurrency_limit: usize,
+    pub group_concurrency_limit: NonZeroUsize,
 
     /// Maximum number of members to process concurrently per group.
     ///
@@ -967,10 +972,12 @@ pub struct MulticastGroupReconcilerConfig {
     /// DPD and sled-agent. The default accounts for the outer
     /// `group_concurrency_limit` multiplier, since peak in-flight
     /// per-member futures is the product of the two limits.
+    ///
+    /// Zero is rejected for the same reason as `group_concurrency_limit`.
     #[serde(
         default = "MulticastGroupReconcilerConfig::default_member_concurrency_limit"
     )]
-    pub member_concurrency_limit: usize,
+    pub member_concurrency_limit: NonZeroUsize,
 
     /// Grace period before an orphaned "Creating" group with no members is
     /// reaped by the emptiness sweep.
@@ -994,12 +1001,14 @@ pub struct MulticastGroupReconcilerConfig {
 }
 
 impl MulticastGroupReconcilerConfig {
-    const fn default_group_concurrency_limit() -> usize {
-        16
+    const fn default_group_concurrency_limit() -> NonZeroUsize {
+        // Safe to unwrap: the literal is nonzero.
+        NonZeroUsize::new(16).unwrap()
     }
 
-    const fn default_member_concurrency_limit() -> usize {
-        32
+    const fn default_member_concurrency_limit() -> NonZeroUsize {
+        // Safe to unwrap: the literal is nonzero.
+        NonZeroUsize::new(32).unwrap()
     }
 
     const fn default_orphan_grace_secs() -> Duration {
@@ -1929,6 +1938,29 @@ mod test {
         )
         .expect_err("retention_days = 0 should be rejected");
         assert!(error.message().contains("nonzero"), "error = {}", error);
+    }
+
+    #[test]
+    fn test_invalid_multicast_reconciler_concurrency_limits() {
+        // A zero limit would leave `buffer_unordered` never polling its
+        // input, wedging the reconciler instead of serializing it.
+        for field in ["group_concurrency_limit", "member_concurrency_limit"] {
+            let error = toml::from_str::<MulticastGroupReconcilerConfig>(
+                &format!("period_secs = 60\n{field} = 0\n"),
+            )
+            .unwrap_err();
+            assert!(
+                error.message().contains("nonzero"),
+                "{field} = 0 should be rejected, error = {error}"
+            );
+        }
+
+        // Defaults apply when the limits are omitted.
+        let config = toml::from_str::<MulticastGroupReconcilerConfig>(
+            "period_secs = 60\n",
+        )
+        .expect("config without concurrency limits should parse");
+        assert_eq!(config, MulticastGroupReconcilerConfig::default());
     }
 
     #[test]

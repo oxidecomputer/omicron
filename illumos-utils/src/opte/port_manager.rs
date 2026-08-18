@@ -141,14 +141,12 @@ impl MulticastFilterMap {
         Self { sockets: Mutex::new(HashMap::new()) }
     }
 
-    /// Join the underlay multicast group `addr` on every NIC in
-    /// `underlay_nics`, holding a UDP socket open per address to keep
-    /// the NIC MAC filter installed.
+    /// Join the underlay multicast group `addr` on every configured NIC,
+    /// holding a UDP socket open per address to keep the NIC MAC filters
+    /// installed.
     ///
-    /// # Returns
-    ///
-    /// `true` if a socket already exists or was successfully created on
-    /// at least one NIC; `false` otherwise.
+    /// The operation is all-or-nothing: callers can keep the corresponding
+    /// M2P entry only when every configured NIC has joined successfully.
     fn join(
         &self,
         log: &Logger,
@@ -198,62 +196,71 @@ impl MulticastFilterMap {
             &1,
         );
 
-        let joined_any = underlay_nics
-            .iter()
-            .filter_map(|nic| {
-                let nic_name = nic.interface();
-                let if_index = nix::net::if_::if_nametoindex(nic_name)
-                    .map_err(|e| {
-                        warn!(
-                            log,
-                            "Failed to resolve underlay NIC index";
-                            "nic" => nic_name,
-                            "error" => %e,
-                        );
-                    })
-                    .ok()?;
-
-                sock.join_multicast_v6(&addr, if_index)
-                    .map_err(|e| {
-                        warn!(
-                            log,
-                            "Failed to join underlay multicast group on NIC";
-                            "addr" => %addr,
-                            "nic" => nic_name,
-                            "if_index" => if_index,
-                            "error" => %e,
-                        );
-                    })
-                    .ok()?;
-
-                debug!(
-                    log,
-                    "Joined underlay multicast group on NIC";
-                    "addr" => %addr,
-                    "nic" => nic_name,
-                    "if_index" => if_index,
-                );
-                Some(())
-            })
-            .count()
-            > 0;
-
-        if joined_any {
-            sockets.insert(addr, sock);
-            true
-        } else {
+        if !Self::join_nics(log, addr, &sock, underlay_nics) {
             warn!(
                 log,
-                "no NIC joins succeeded for underlay multicast group, \
+                "not all NIC joins succeeded for underlay multicast group, \
                  will retry on next call";
                 "addr" => %addr,
             );
-            false
+            return false;
         }
+
+        sockets.insert(addr, sock);
+        true
     }
 
-    /// Drop the UDP socket for an underlay multicast address, removing
-    /// the NIC MAC filter entries.
+    /// Join `addr` on every configured NIC.
+    fn join_nics(
+        log: &Logger,
+        addr: Ipv6Addr,
+        sock: &UdpSocket,
+        underlay_nics: &[AddrObject],
+    ) -> bool {
+        for nic in underlay_nics {
+            let nic_name = nic.interface();
+            let if_index = match nix::net::if_::if_nametoindex(nic_name) {
+                Ok(if_index) => if_index,
+                Err(e) => {
+                    warn!(
+                        log,
+                        "Failed to resolve underlay NIC index";
+                        "nic" => nic_name,
+                        "error" => %e,
+                    );
+                    return false;
+                }
+            };
+
+            match sock.join_multicast_v6(&addr, if_index) {
+                Ok(()) => {
+                    debug!(
+                        log,
+                        "Joined underlay multicast group on NIC";
+                        "addr" => %addr,
+                        "nic" => nic_name,
+                        "if_index" => if_index,
+                    );
+                }
+                Err(e) => {
+                    warn!(
+                        log,
+                        "Failed to join underlay multicast group on NIC";
+                        "addr" => %addr,
+                        "nic" => nic_name,
+                        "if_index" => if_index,
+                        "error" => %e,
+                    );
+                    return false;
+                }
+            }
+        }
+
+        true
+    }
+
+    /// Drop the UDP socket for an underlay multicast address, removing the
+    /// NIC MAC filter entries with it.
     fn leave(&self, log: &Logger, addr: Ipv6Addr) {
         let mut sockets = self.sockets.lock().unwrap();
         if sockets.remove(&addr).is_some() {
@@ -3387,27 +3394,26 @@ mod tests {
         logctx.cleanup_successful();
     }
 
-    /// Verify that when the NIC multicast MAC filter join fails (no NIC
-    /// accepts the join), `set_mcast_m2p` rolls back the xde M2P entry
-    /// and returns the proper error.
+    /// Verify that when any NIC multicast MAC filter join fails,
+    /// `set_mcast_m2p` rolls back the xde M2P entry and returns the proper
+    /// error, even when another NIC joined successfully.
     ///
     /// Without rollback the xde entry would stay present and the
     /// `list_mcast_m2p`-checked convergence loop would treat the mapping
     /// as already applied, silently dropping traffic for the group.
     ///
-    /// We force the failure by handing PortManager an `AddrObject`
-    /// whose interface name does not exist on the host, so every
-    /// per-NIC `nix::if_nametoindex` lookup fails and the join returns
-    /// false.
+    /// We force a partial failure with one real interface and one
+    /// nonexistent interface.
     #[cfg(target_os = "illumos")]
     #[test]
-    fn multicast_m2p_set_rolls_back_on_nic_join_failure() {
-        let logctx =
-            test_setup_log("multicast_m2p_set_rolls_back_on_nic_join_failure");
-        // Fake NIC name that `if_nametoindex` will reject. `AddrObject`
-        // only validates that the name contains no slashes, so this
-        // constructs fine.
+    fn multicast_m2p_set_rolls_back_on_partial_nic_join_failure() {
+        let logctx = test_setup_log(
+            "multicast_m2p_set_rolls_back_on_partial_nic_join_failure",
+        );
+        // `AddrObject` only validates that the name contains no slashes, so
+        // the fake interface constructs successfully.
         let nics = vec![
+            AddrObject::new_control(LOOPBACK_IF).unwrap(),
             AddrObject::new_control("nonexistent_xyz_nic_for_test").unwrap(),
         ];
         let handle = Handle::new().unwrap();
@@ -3423,7 +3429,7 @@ mod tests {
 
         let err = manager
             .set_mcast_m2p(&req)
-            .expect_err("set_mcast_m2p must fail when every NIC join fails");
+            .expect_err("set_mcast_m2p must fail when any NIC join fails");
         assert!(
             matches!(err, Error::UnderlayMcastJoinFailed(addr) if addr == underlay),
             "expected UnderlayMcastJoinFailed({underlay}), got {err:?}",

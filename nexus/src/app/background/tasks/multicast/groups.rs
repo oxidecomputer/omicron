@@ -433,7 +433,7 @@ impl MulticastGroupReconciler {
                     .await;
                 (group, result)
             })
-            .buffer_unordered(self.group_concurrency_limit)
+            .buffer_unordered(self.group_concurrency_limit.get())
             .collect::<Vec<_>>()
             .await;
 
@@ -692,8 +692,7 @@ impl MulticastGroupReconciler {
         let group_ip = group.multicast_ip.ip();
         let installed_routes =
             switch_zone_client.list_routes_indexed().await.context(
-                "failed to list MRIB routes for cleanup; \
-                 returning early to preserve DB state for retry",
+                "failed to list MRIB routes for 'Deleting' group cleanup",
             )?;
 
         // The (*,G) key is withdrawn unconditionally so a listing that
@@ -718,7 +717,7 @@ impl MulticastGroupReconciler {
                         "failed to remove MRIB (S,G) route for source {source}"
                     ),
                     None => {
-                        "failed to remove MRIB (*,G) route for deleting group"
+                        "failed to remove MRIB (*,G) route for 'Deleting' group"
                             .to_string()
                     }
                 })
