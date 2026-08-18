@@ -992,7 +992,7 @@ impl MulticastGroupReconciler {
                     "group_name" => ctx.group.name().as_str(),
                     "group_multicast_ip" => %ctx.group.multicast_ip,
                     "new_sled_id" => %new_sled_id,
-                    "action" => "re_add_member_to_underlay_multicast_group",
+                    "action" => "reapply_member_sled_configuration",
                     "joined" => joined
                 );
                 if joined {

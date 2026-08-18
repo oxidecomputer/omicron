@@ -341,7 +341,7 @@ impl MulticastGroupReconciler {
         //
         // The non-gated cleanup steps never touch the dataplane.
         // `cleanup_empty_groups` only marks "Deleting", and the terminal
-        // "Deleting" → "Deleted" transition lives in the gated
+        // teardown and row removal live in the gated
         // `reconcile_deleting_groups`. A group therefore cannot vanish
         // from the reconciler's view while its MRIB route still exists.
 
