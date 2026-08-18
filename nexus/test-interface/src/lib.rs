@@ -55,7 +55,7 @@ pub trait NexusServer: Send + Sync + 'static {
     async fn start_internal(
         config: &NexusConfig,
         log: &Logger,
-        debug_dropbox: Arc<DebugDropbox>,
+        debug_dropbox: DebugDropbox,
     ) -> Result<Self::InternalServer, String>;
 
     /// Stops the execution of a `Self::InternalServer`.

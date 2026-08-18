@@ -70,7 +70,7 @@ impl ApiContext {
         rack_id: RackUuid,
         log: Logger,
         config: &NexusConfig,
-        debug_dropbox: Arc<DebugDropbox>,
+        debug_dropbox: DebugDropbox,
     ) -> Result<Self, String> {
         ServerContext::new(rack_id, log, config, debug_dropbox)
             .await
@@ -137,7 +137,7 @@ impl ServerContext {
         rack_id: RackUuid,
         log: Logger,
         config: &NexusConfig,
-        debug_dropbox: Arc<DebugDropbox>,
+        debug_dropbox: DebugDropbox,
     ) -> Result<Arc<ServerContext>, String> {
         let nexus_schemes = config
             .pkg

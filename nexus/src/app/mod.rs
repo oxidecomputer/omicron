@@ -344,7 +344,7 @@ impl Nexus {
         producer_registry: &ProducerRegistry,
         config: &NexusConfig,
         authz: Arc<authz::Authz>,
-        debug_dropbox: Arc<DebugDropbox>,
+        debug_dropbox: DebugDropbox,
     ) -> Result<Arc<Nexus>, String> {
         let all_versions = config
             .pkg

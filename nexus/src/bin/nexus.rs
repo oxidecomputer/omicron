@@ -22,7 +22,6 @@ use omicron_debug_dropbox::DebugDropbox;
 use omicron_nexus::run_server;
 use slog::debug;
 use slog::error;
-use std::sync::Arc;
 
 #[derive(Debug, Parser)]
 #[clap(name = "nexus", about = "See README.adoc for more information")]
@@ -72,12 +71,10 @@ async fn do_run() -> Result<(), CmdError> {
         debug!(log, "registered DTrace probes");
     }
 
-    let debug_dropbox = Arc::new(
-        DebugDropbox::for_non_global_non_switch_zone(&log)
-            .await
-            .context("creating debug dropbox")
-            .map_err(CmdError::Failure)?,
-    );
+    let debug_dropbox = DebugDropbox::for_non_global_non_switch_zone(&log)
+        .await
+        .context("creating debug dropbox")
+        .map_err(CmdError::Failure)?;
 
     run_server(&config, log, debug_dropbox)
         .await

@@ -87,7 +87,7 @@ impl InternalServer {
     pub async fn start(
         config: &NexusConfig,
         log: &Logger,
-        debug_dropbox: Arc<DebugDropbox>,
+        debug_dropbox: DebugDropbox,
     ) -> Result<InternalServer, String> {
         let log = log.new(o!("name" => config.deployment.id.to_string()));
         info!(log, "setting up nexus server");
@@ -329,7 +329,7 @@ impl nexus_test_interface::NexusServer for Server {
     async fn start_internal(
         config: &NexusConfig,
         log: &Logger,
-        debug_dropbox: Arc<DebugDropbox>,
+        debug_dropbox: DebugDropbox,
     ) -> Result<InternalServer, String> {
         let internal_server =
             InternalServer::start(config, &log, debug_dropbox).await?;
@@ -689,7 +689,7 @@ impl nexus_test_interface::NexusServer for Server {
 pub async fn run_server(
     config: &NexusConfig,
     log: slog::Logger,
-    debug_dropbox: Arc<DebugDropbox>,
+    debug_dropbox: DebugDropbox,
 ) -> Result<(), String> {
     let internal_server =
         InternalServer::start(config, &log, debug_dropbox).await?;
