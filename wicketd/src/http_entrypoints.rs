@@ -159,25 +159,6 @@ impl WicketdApi for WicketdApiImpl {
         Ok(HttpResponseUpdatedNoContent())
     }
 
-    async fn post_rss_config_cert(
-        rqctx: RequestContext<Self::Context>,
-        body: TypedBody<String>,
-    ) -> Result<HttpResponseOk<CertificateUploadResponse>, HttpError> {
-        let ctx = rqctx.context();
-
-        let mut config = ctx.rss_or_multirack_join_config.lock().unwrap();
-
-        let rss_config = config.rss_config_mut_or_conflict(
-            "cannot post certificates when not preparing for RSS",
-        )?;
-
-        let response = rss_config
-            .push_cert(body.into_inner())
-            .map_err(|err| HttpError::for_bad_request(None, err))?;
-
-        Ok(HttpResponseOk(response))
-    }
-
     async fn post_rss_config_key(
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<String>,

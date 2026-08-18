@@ -83,19 +83,6 @@ pub trait WicketdApi {
         body: TypedBody<MultirackJoinConfigBaseUserInput>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
-    /// Add an external certificate.
-    ///
-    /// This must be paired with its private key. They may be posted in either
-    /// order, but one cannot post two certs in a row (or two keys in a row).
-    #[endpoint {
-        method = POST,
-        path = "/rack-setup/config/cert"
-    }]
-    async fn post_rss_config_cert(
-        rqctx: RequestContext<Self::Context>,
-        body: TypedBody<String>,
-    ) -> Result<HttpResponseOk<CertificateUploadResponse>, HttpError>;
-
     /// Add the private key of an external certificate.
     ///
     /// This must be paired with its certificate. They may be posted in either

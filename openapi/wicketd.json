@@ -440,42 +440,6 @@
         }
       }
     },
-    "/rack-setup/config/cert": {
-      "post": {
-        "summary": "Add an external certificate.",
-        "description": "This must be paired with its private key. They may be posted in either order, but one cannot post two certs in a row (or two keys in a row).",
-        "operationId": "post_rss_config_cert",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "title": "String",
-                "type": "string"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CertificateUploadResponse"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
     "/rack-setup/config/key": {
       "post": {
         "summary": "Add the private key of an external certificate.",

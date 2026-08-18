@@ -37,6 +37,7 @@ use wicketd_client::types::PutRssRecoveryUserPasswordHash;
 use wicketd_client::types::SetBgpAuthKeyStatus;
 use wicketd_commission_types::rack_setup::BgpAuthKey;
 use wicketd_commission_types::rack_setup::BgpAuthKeyId;
+use wicketd_commission_types::rack_setup::CertificatePem;
 use wicketd_commission_types::rack_setup::CertificateUploadResponse;
 use wicketd_commission_types::rack_setup::PutRssUserConfigInsensitive;
 use zeroize::Zeroizing;
@@ -162,8 +163,8 @@ impl SetupArgs {
                     .context("failed to read certificate from stdin")?;
 
                 slog::info!(log, "uploading cert to wicketd...");
-                let result = client
-                    .post_rss_config_cert(&cert)
+                let result = commission_client
+                    .post_rss_config_cert(&CertificatePem(cert))
                     .await
                     .context("failed to upload cert to wicketd")?
                     .into_inner();
