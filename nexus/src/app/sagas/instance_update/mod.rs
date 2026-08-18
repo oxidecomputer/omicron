@@ -1991,6 +1991,38 @@ mod test {
             .await
             .unwrap();
 
+        // Mark any remaining VMM records for this instance as destroyed and
+        // deleted. The instance-update saga doesn't unwind changes to VMM
+        // records, and we are about to delete the instance record directly
+        // rather than going through the normal deletion path, which requires
+        // the VMMs to be cleaned up first. If we leave live VMM rows behind
+        // pointing at a deleted instance, the `instance_watcher` background
+        // task may try to health check them and trip debug assertions on the
+        // (deleted instance, live VMM) state pair.
+        {
+            use async_bb8_diesel::AsyncRunQueryDsl;
+            use diesel::prelude::*;
+            use nexus_db_schema::schema::vmm::dsl as vmm_dsl;
+            let datastore = cptestctx.server.server_context().nexus.datastore();
+            let conn = datastore.pool_connection_for_tests().await.unwrap();
+            diesel::update(vmm_dsl::vmm)
+                .filter(vmm_dsl::instance_id.eq(instance.id()))
+                .filter(vmm_dsl::time_deleted.is_null())
+                .set((
+                    vmm_dsl::state.eq(db::model::VmmState::Destroyed),
+                    // `failure_reason` must be NULL for any state other than
+                    // `Failed`, per the `failure_reason_iff_failed` CHECK
+                    // constraint.
+                    vmm_dsl::failure_reason
+                        .eq(Option::<db::model::VmmFailureReason>::None),
+                    vmm_dsl::time_state_updated.eq(Utc::now()),
+                    vmm_dsl::time_deleted.eq(Utc::now()),
+                ))
+                .execute_async(&*conn)
+                .await
+                .expect("should be able to mark the test VMMs as deleted");
+        }
+
         test_helpers::instance_delete_by_name(
             cptestctx,
             INSTANCE_NAME,
