@@ -300,14 +300,10 @@ pub struct SimulateMigrationSource {
 
 /// The result of a simulated migration out from an instance's current active
 /// VMM.
-#[derive(Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub enum SimulatedMigrationResult {
     /// Simulate a successful migration out.
     Success,
     /// Simulate a failed migration out.
-    ///
-    /// # Note
-    ///
-    /// This is not currently implemented by the simulated sled-agent.
     Failure,
 }
