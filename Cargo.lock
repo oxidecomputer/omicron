@@ -9267,6 +9267,7 @@ dependencies = [
  "ref-cast",
  "regex",
  "reqwest 0.13.2",
+ "rustix 1.1.3",
  "rustls",
  "rustls-pemfile",
  "samael",
