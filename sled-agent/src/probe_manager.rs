@@ -6,7 +6,7 @@
 //! running a full VM.
 
 use crate::metrics::MetricsRequestQueue;
-use anyhow::{Result, anyhow};
+use anyhow::{Context, Result, anyhow};
 use dropshot::HttpError;
 use iddqd::IdHashItem;
 use iddqd::IdHashMap;
@@ -16,6 +16,7 @@ use illumos_utils::link::VnicAllocator;
 use illumos_utils::opte::{DhcpCfg, PortCreateParams, PortManager};
 use illumos_utils::running_zone::{RunningZone, ZoneBuilderFactory};
 use illumos_utils::smf_helper::SmfHelper;
+use illumos_utils::zone::IPADM;
 use illumos_utils::zpool::ZpoolOrRamdisk;
 use omicron_common::api::external::{
     VpcFirewallRuleAction, VpcFirewallRuleDirection, VpcFirewallRulePriority,
@@ -883,11 +884,25 @@ impl ProbeManagerInner {
                 iface.to_string(),
             )?;
         }
-        // TODO: set `config/ipv6_scope` (the overlay port's ifindex) once
-        // probes carry IPv6 multicast memberships. `config/multicast_iface`
-        // only pins IPv4 joins. IPv6 has no address-based IP_MULTICAST_IF
-        // equivalent, so the joiner takes a numeric scope for
-        // IPV6_MULTICAST_IF and leaves it kernel-selected when unset.
+        // IPv6 has no address-based equivalent of IP_MULTICAST_IF. Resolve
+        // the overlay port's in-zone interface index and pass it to
+        // IPV6_MULTICAST_IF whenever the target set contains an IPv6 group.
+        if cfg.multicast_groups.iter().any(|m| m.group_ip.is_ipv6()) {
+            let port_name = running_zone
+                .opte_port_names()
+                .next()
+                .context("probe has no overlay OPTE port")?;
+            let ifindex = running_zone
+                .run_cmd([IPADM, "show-if", "-p", "-o", "IFINDEX", port_name])
+                .context("failed to query probe overlay interface index")?
+                .trim()
+                .parse::<u32>()
+                .context("probe overlay interface index was not numeric")?;
+            smf.setprop_default_instance(
+                "config/ipv6_scope",
+                ifindex.to_string(),
+            )?;
+        }
         for membership in &cfg.multicast_groups {
             // A source-specific (SSM) membership cannot be joined any-source:
             // the kernel requires an INCLUDE-mode (S, G) join, so the sources
