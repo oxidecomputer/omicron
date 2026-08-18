@@ -446,34 +446,39 @@ impl ProbeManagerInner {
         }
 
         for probe in &target {
-            match current.get(&probe.id) {
-                None => {
-                    info!(self.log, "adding probe {}", probe.id);
-                    if let Err(e) = self.add_probe(probe).await {
-                        error!(self.log, "add probe: {e}");
-                    }
+            let Some(running) = current.get(&probe.id) else {
+                info!(self.log, "adding probe {}", probe.id);
+                if let Err(e) = self.add_probe(probe).await {
+                    error!(self.log, "add probe: {e}");
                 }
-                Some(running) => {
-                    if probe_requires_recreate(probe, running) {
-                        info!(
-                            self.log,
-                            "probe diverged from desired state, recreating";
-                            "probe" => %probe.id,
-                            "status" => ?running.status,
-                        );
-                        self.remove_probe(probe.id).await;
-                        if let Err(e) = self.add_probe(probe).await {
-                            error!(self.log, "recreate probe: {e}");
-                        }
-                    } else {
-                        // The probe stays up, so reconcile its multicast
-                        // membership in place. This runs even when the
-                        // membership appears unchanged so the OPTE
-                        // subscription self-heals drift we cannot observe
-                        // from our own local record.
-                        self.reconcile_membership(probe).await;
-                    }
-                }
+                continue;
+            };
+
+            if !probe_requires_recreate(probe, running) {
+                // The probe stays up, so reconcile its multicast membership
+                // in place. This runs even when the membership appears
+                // unchanged so the OPTE subscription self-heals drift we
+                // cannot observe from our own local record.
+                self.reconcile_membership(probe).await;
+                continue;
+            }
+
+            info!(
+                self.log,
+                "probe diverged from desired state, recreating";
+                "probe" => %probe.id,
+                "status" => ?running.status,
+            );
+            if !self.remove_probe(probe.id).await {
+                warn!(
+                    self.log,
+                    "could not remove diverged probe, deferring recreate";
+                    "probe" => %probe.id,
+                );
+                continue;
+            }
+            if let Err(e) = self.add_probe(probe).await {
+                error!(self.log, "recreate probe: {e}");
             }
         }
 
@@ -1178,7 +1183,11 @@ impl ProbeManagerInner {
 
     /// Remove a probe from this sled. This tears down the zone and its
     /// network resources.
-    async fn remove_probe(&mut self, id: ProbeUuid) {
+    /// Returns `true` once the zone and its network resources have been
+    /// removed. A failed halt leaves a defunct probe tracked so a later
+    /// reconciliation can retry without creating a second zone or releasing
+    /// ports underneath the live one.
+    async fn remove_probe(&mut self, id: ProbeUuid) -> bool {
         match self.running_probes.remove(&id) {
             Some(mut running_probe) => {
                 // TODO-correctness: There are no physical links in the zone, is
@@ -1238,12 +1247,13 @@ impl ProbeManagerInner {
                     // releasing them under a live zone.
                     running_probe.defunct = true;
                     self.running_probes.insert(id, running_probe);
-                    return;
+                    return false;
                 }
                 // Consume the zone ID so the drop path does not spawn a
                 // redundant halt of the already-removed zone.
                 let _ = running_probe.zone.stop().await;
                 running_probe.zone.release_opte_ports();
+                true
             }
             None => {
                 // The probe zone is live on the sled but absent from
@@ -1270,7 +1280,9 @@ impl ProbeManagerInner {
                         "zone_name" => %zone_name,
                         "error" => %e,
                     );
+                    return false;
                 }
+                true
             }
         }
     }
