@@ -1022,10 +1022,12 @@ impl DataStore {
             // nothing further about them.
             .filter(vmm_dsl::state.ne_all(VmmState::TERMINAL_STATES));
         // Now, join with the `instance` table on the instance's VMM ID.
-        let query = query.inner_join(
-            instance_dsl::instance
-                .on(instance_dsl::id.eq(vmm_dsl::instance_id)),
-        );
+        let query = query
+            .inner_join(
+                instance_dsl::instance
+                    .on(instance_dsl::id.eq(vmm_dsl::instance_id)),
+            )
+            .filter(instance_dsl::time_deleted.is_null());
         // Finally, join with the `project` table on the instance's project ID,
         // to return the project that each instance belongs to.
         let query = query.inner_join(
@@ -3616,6 +3618,32 @@ mod tests {
                 *state,
             )
             .await;
+        }
+
+        // A deleted instance whose VMM row still exists should not be listed.
+        {
+            let ids = create_test_instance_with_vmm(
+                &datastore,
+                &opctx,
+                &authz_project,
+                sled_ids[0],
+                "deleted",
+                VmmState::Running,
+            )
+            .await;
+            use nexus_db_schema::schema::instance::dsl as instance_dsl;
+            diesel::update(instance_dsl::instance)
+                .filter(instance_dsl::id.eq(ids.instance_id))
+                .set((
+                    instance_dsl::state.eq(InstanceState::Destroyed),
+                    instance_dsl::active_propolis_id.eq(Option::<Uuid>::None),
+                    instance_dsl::time_deleted.eq(Utc::now()),
+                ))
+                .execute_async(
+                    &*datastore.pool_connection_for_tests().await.unwrap(),
+                )
+                .await
+                .expect("instance should be marked deleted");
         }
 
         // Okay, now list instances by sled.
