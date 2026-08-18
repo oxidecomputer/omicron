@@ -7,7 +7,7 @@
 //! Changes in this version:
 //!
 //! * Add `src_addr` to [`RouterPeerType::Numbered`]
-//! * [`BgpPeer::addr`] now uses the v43 [`RouterPeerType`] (with `src_addr`
+//! * [`BgpPeer::addr`] now uses the new [`RouterPeerType`] (with `src_addr`
 //!   inside `Numbered`).
 //! * Define new versions of types that transitively include [`BgpPeer`]:
 //!   * [`BgpPeerConfig`]
@@ -27,7 +27,9 @@ use omicron_common::api::external::NameOrId;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sled_agent_types_versions::v1::early_networking::ImportExportPolicy;
-use sled_agent_types_versions::v45::early_networking::RouterPeerType;
+use sled_agent_types_versions::v45::early_networking::{
+    NumberedPeerWithSrcAddrError, RouterPeerType,
+};
 
 // Re-export the error type unchanged from the previous version.
 pub use crate::v2026_04_16_00::networking::BgpPeerConversionError;
@@ -118,7 +120,7 @@ impl From<crate::v2026_04_16_00::networking::BgpPeer> for BgpPeer {
 }
 
 impl TryFrom<BgpPeer> for crate::v2026_04_16_00::networking::BgpPeer {
-    type Error = anyhow::Error;
+    type Error = NumberedPeerWithSrcAddrError;
 
     fn try_from(value: BgpPeer) -> Result<Self, Self::Error> {
         Ok(Self {
@@ -166,7 +168,7 @@ impl From<crate::v2026_04_16_00::networking::BgpPeerConfig> for BgpPeerConfig {
 impl TryFrom<BgpPeerConfig>
     for crate::v2026_04_16_00::networking::BgpPeerConfig
 {
-    type Error = anyhow::Error;
+    type Error = NumberedPeerWithSrcAddrError;
 
     fn try_from(value: BgpPeerConfig) -> Result<Self, Self::Error> {
         Ok(Self {
@@ -235,7 +237,7 @@ impl From<crate::v2026_04_16_00::networking::SwitchPortSettingsCreate>
 impl TryFrom<SwitchPortSettingsCreate>
     for crate::v2026_04_16_00::networking::SwitchPortSettingsCreate
 {
-    type Error = anyhow::Error;
+    type Error = NumberedPeerWithSrcAddrError;
 
     fn try_from(value: SwitchPortSettingsCreate) -> Result<Self, Self::Error> {
         Ok(Self {
@@ -285,12 +287,11 @@ pub struct SwitchPortSettings {
     pub addresses: Vec<SwitchPortAddressView>,
 }
 
-/// Downgrade to v2026_05_07_00 (REMOVE_DUPLICATED_NETWORKING_TYPES) —
-/// drop `src_addr` from each BGP peer.
+/// Downgrade to v2026_05_07_00 (REMOVE_DUPLICATED_NETWORKING_TYPES)
 impl TryFrom<SwitchPortSettings>
     for crate::v2026_05_07_00::networking::SwitchPortSettings
 {
-    type Error = anyhow::Error;
+    type Error = NumberedPeerWithSrcAddrError;
 
     fn try_from(value: SwitchPortSettings) -> Result<Self, Self::Error> {
         Ok(Self {
@@ -310,12 +311,11 @@ impl TryFrom<SwitchPortSettings>
     }
 }
 
-/// Downgrade to v2026_04_16_00 (STRONGER_BGP_UNNUMBERED_TYPES) —
-/// drop `src_addr` field.
+/// Downgrade to v2026_04_16_00 (STRONGER_BGP_UNNUMBERED_TYPES)
 impl TryFrom<SwitchPortSettings>
     for crate::v2026_04_16_00::networking::SwitchPortSettings
 {
-    type Error = anyhow::Error;
+    type Error = NumberedPeerWithSrcAddrError;
 
     fn try_from(value: SwitchPortSettings) -> Result<Self, Self::Error> {
         crate::v2026_05_07_00::networking::SwitchPortSettings::try_from(value)

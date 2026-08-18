@@ -43,7 +43,7 @@ use sled_agent_types::early_networking::RouterPeerIpAddrError;
 use sled_agent_types::early_networking::RouterPeerType;
 use sled_agent_types::early_networking::SwitchSlot;
 use sled_agent_types::early_networking::{
-    AddressFamilyConfigError, UnnumberedRouter,
+    AddressFamilyMismatchError, UnnumberedRouter,
 };
 use sled_agent_types::early_networking::{ImportExportPolicy, NumberedRouter};
 use std::net::IpAddr;
@@ -772,7 +772,7 @@ pub enum SwitchPortBgpPeerConfigInvalidData {
     AddressFamily {
         port_settings_id: Uuid,
         #[source]
-        err: AddressFamilyConfigError,
+        err: AddressFamilyMismatchError,
     },
 }
 

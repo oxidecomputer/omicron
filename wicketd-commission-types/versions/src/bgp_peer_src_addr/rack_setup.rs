@@ -434,11 +434,10 @@ impl From<crate::v2::rack_setup::PutRssUserConfigInsensitive>
 /// (certificates, the recovery password hash, and BGP authentication keys) are
 /// set separately.
 ///
-/// This version replaces the flat `internal_services_ip_pool_ranges` of the
-/// initial version with fully-specified [`service_ip_pools`], letting operators
-/// name and describe each pool.
+/// This version updates the [`UserSpecifiedRackNetworkConfig`] to use an updated
+/// bgp peer config that allows specification of the source address that will
+/// be used for the TCP socket for the peering session for numbered peers.
 ///
-/// [`service_ip_pools`]: Self::service_ip_pools
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
 #[serde(try_from = "UnvalidatedPutRssUserConfigInsensitive")]
 pub struct PutRssUserConfigInsensitive {

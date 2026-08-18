@@ -27,6 +27,7 @@ use omicron_common::address::Ipv4Range;
 use omicron_common::address::Ipv6Range;
 use omicron_common::api::external::AllowedSourceIps;
 use oxnet::Ipv6Net;
+use sled_agent_types::early_networking::AddressFamilyMismatchError;
 use sled_agent_types::early_networking::NumberedRouter;
 use sled_agent_types::early_networking::PortConfig;
 use sled_agent_types::early_networking::RouterLifetimeConfig;
@@ -491,7 +492,7 @@ fn validate_rack_network_config(
                             (false, true) => {
                                 bail!(
                                     "numbered BGP peer {ip} specifies \
-                                    an IPv6 src_addr when it should be
+                                    an IPv6 src_addr when it should be \
                                     IPv4"
                                 );
                             }
@@ -518,12 +519,17 @@ fn validate_rack_network_config(
 
     // TODO Add more client side checks on `rack_network_config` contents?
 
-    let ports = config
+    let ports = match config
         .iter_uplinks()
         .map(|(switch, port, config)| {
             build_port_config(switch, port, config, bgp_auth_keys)
         })
-        .collect::<Vec<_>>();
+        .collect::<Result<Vec<_>, AddressFamilyMismatchError>>()
+    {
+        Ok(v) => v,
+        Err(e) => bail!(e),
+    };
+
     let ports = UplinkPorts::new(ports)
         .context("rack network config must specify at least one uplink port")?;
 
@@ -600,75 +606,72 @@ fn build_port_config(
     port: &str,
     config: &ManualPortConfig,
     bgp_auth_keys: &BgpAuthKeys,
-) -> PortConfig {
+) -> Result<PortConfig, AddressFamilyMismatchError> {
     use sled_agent_types::early_networking::BgpPeerConfig;
 
-    PortConfig {
+    let mut bgp_peers = vec![];
+    for p in &config.bgp_peers {
+        let md5_auth_key = p.auth_key_id.as_ref().map(|key_id| {
+            let BgpAuthKey::TcpMd5 { key } = bgp_auth_keys
+                .get(key_id)
+                .unwrap_or_else(|| {
+                    panic!("invariant violation: auth key ID {} exists", key_id)
+                })
+                .clone()
+                .unwrap_or_else(|| {
+                    panic!(
+                        "invariant violation: auth key ID {} has a key",
+                        key_id
+                    )
+                });
+            key
+        });
+
+        let addr = match p.addr {
+            UserSpecifiedRouterPeerAddr::Unnumbered => {
+                UnnumberedRouter { router_lifetime: p.router_lifetime }.into()
+            }
+            UserSpecifiedRouterPeerAddr::Numbered(ip) => {
+                NumberedRouter::new(ip, p.src_addr)?.into()
+            }
+        };
+
+        let config = BgpPeerConfig {
+            addr,
+            asn: p.asn,
+            port: p.port.clone(),
+            hold_time: p.hold_time,
+            connect_retry: p.connect_retry,
+            delay_open: p.delay_open,
+            idle_hold_time: p.idle_hold_time,
+            keepalive: p.keepalive,
+            communities: Vec::new(),
+            enforce_first_as: p.enforce_first_as,
+            local_pref: p.local_pref,
+            md5_auth_key,
+            min_ttl: p.min_ttl,
+            multi_exit_discriminator: p.multi_exit_discriminator,
+            remote_asn: p.remote_asn,
+            allowed_export: p.allowed_export.clone().into(),
+            allowed_import: p.allowed_import.clone().into(),
+            vlan_id: p.vlan_id,
+        };
+
+        bgp_peers.push(config);
+    }
+
+    Ok(PortConfig {
         port: port.to_owned(),
         routes: config.routes.clone(),
         addresses: config.addresses.iter().copied().map(From::from).collect(),
-        bgp_peers: config
-            .bgp_peers
-            .iter()
-            .map(|p| {
-                let md5_auth_key = p.auth_key_id.as_ref().map(|key_id| {
-                    let BgpAuthKey::TcpMd5 { key } = bgp_auth_keys
-                        .get(key_id)
-                        .unwrap_or_else(|| {
-                            panic!(
-                                "invariant violation: auth key ID {} exists",
-                                key_id
-                            )
-                        })
-                        .clone()
-                        .unwrap_or_else(|| {
-                            panic!(
-                                "invariant violation: auth key ID {} has a key",
-                                key_id
-                            )
-                        });
-                    key
-                });
-
-                let addr = match p.addr {
-                    UserSpecifiedRouterPeerAddr::Unnumbered => {
-                        UnnumberedRouter { router_lifetime: p.router_lifetime }
-                            .into()
-                    }
-                    UserSpecifiedRouterPeerAddr::Numbered(ip) => {
-                        NumberedRouter::new(ip, p.src_addr).unwrap().into()
-                    }
-                };
-
-                BgpPeerConfig {
-                    addr,
-                    asn: p.asn,
-                    port: p.port.clone(),
-                    hold_time: p.hold_time,
-                    connect_retry: p.connect_retry,
-                    delay_open: p.delay_open,
-                    idle_hold_time: p.idle_hold_time,
-                    keepalive: p.keepalive,
-                    communities: Vec::new(),
-                    enforce_first_as: p.enforce_first_as,
-                    local_pref: p.local_pref,
-                    md5_auth_key,
-                    min_ttl: p.min_ttl,
-                    multi_exit_discriminator: p.multi_exit_discriminator,
-                    remote_asn: p.remote_asn,
-                    allowed_export: p.allowed_export.clone().into(),
-                    allowed_import: p.allowed_import.clone().into(),
-                    vlan_id: p.vlan_id,
-                }
-            })
-            .collect(),
+        bgp_peers,
         switch,
         uplink_port_speed: config.uplink_port_speed,
         uplink_port_fec: config.uplink_port_fec,
         autoneg: config.autoneg,
         lldp: config.lldp.clone(),
         tx_eq: config.tx_eq,
-    }
+    })
 }
 
 // Thin wrapper around an `omicron_certificates::CertificateValidator` that we

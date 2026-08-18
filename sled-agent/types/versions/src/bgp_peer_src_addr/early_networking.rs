@@ -46,13 +46,11 @@ impl From<UnnumberedRouter> for RouterPeerType {
     }
 }
 
-#[derive(
-    Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq, Hash, JsonSchema,
-)]
+#[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq, Hash, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub struct NumberedRouter {
     /// Target IP address for numbered BGP peers.
-    target_addr: v30::RouterPeerIpAddr,
+    pub(crate) target_addr: v30::RouterPeerIpAddr,
     /// Optional local IP address to bind when establishing outbound TCP
     /// connections to this peer. If `None`, the OS selects the source
     /// address.
@@ -60,7 +58,7 @@ pub struct NumberedRouter {
     // Nexus external api, and many users will not need to specify this
     // parameter for their configurations
     #[serde(default)]
-    src_addr: Option<v30::RouterPeerIpAddr>,
+    pub(crate) src_addr: Option<v30::RouterPeerIpAddr>,
 }
 
 impl From<NumberedRouter> for RouterPeerType {
@@ -71,26 +69,48 @@ impl From<NumberedRouter> for RouterPeerType {
 
 impl NumberedRouter {
     pub fn new(
-        ip: v30::RouterPeerIpAddr,
+        target_addr: v30::RouterPeerIpAddr,
         src_addr: Option<v30::RouterPeerIpAddr>,
-    ) -> Result<Self, AddressFamilyConfigError> {
+    ) -> Result<Self, AddressFamilyMismatchError> {
         match src_addr {
-            Some(src) if src.is_ipv4() && ip.is_ipv6() => {
-                Err(AddressFamilyConfigError::V4toV6)
+            Some(src) if src.is_ipv4() != target_addr.is_ipv4() => {
+                Err(AddressFamilyMismatchError(
+                    src.into(),
+                    target_addr.into(),
+                ))
             }
-            Some(src) if src.is_ipv6() && ip.is_ipv4() => {
-                Err(AddressFamilyConfigError::V6toV4)
-            }
-            _ => Ok(Self { target_addr: ip, src_addr }),
+            _ => Ok(Self { target_addr, src_addr })
         }
     }
+}
 
-    pub fn target_addr(&self) -> v30::RouterPeerIpAddr {
-        self.target_addr
-    }
+impl<'de> Deserialize<'de> for NumberedRouter {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::Error;
 
-    pub fn src_addr(&self) -> Option<v30::RouterPeerIpAddr> {
-        self.src_addr
+        // The fields of `NumberedRouterShadow` should exactly match the
+        // fields of `NumberedRouter`. We're not really using serde's remote
+        // derive, but by adding the attribute we get compile-time checking that
+        // all the field names and types match. (It doesn't check the _order_,
+        // but that should be fine as long as we're using JSON or similar
+        // formats.)
+        #[derive(Deserialize)]
+        #[serde(remote = "NumberedRouter")]
+        struct NumberedRouterShadow {
+            target_addr: v30::RouterPeerIpAddr,
+            #[serde(default)]
+            src_addr: Option<v30::RouterPeerIpAddr>,
+        }
+
+        // We deserialize, then re-run the input through the constructor
+        // to ensure the input is valid
+        let to_validate = NumberedRouterShadow::deserialize(deserializer)?;
+
+        NumberedRouter::new(to_validate.target_addr, to_validate.src_addr)
+            .map_err(D::Error::custom)
     }
 }
 
@@ -117,7 +137,6 @@ impl From<v30::RouterPeerType> for RouterPeerType {
 )]
 pub struct NumberedPeerWithSrcAddrError;
 
-/// Downgrade to v30: drop `src_addr`.
 impl TryFrom<RouterPeerType> for v30::RouterPeerType {
     type Error = NumberedPeerWithSrcAddrError;
 
@@ -127,7 +146,7 @@ impl TryFrom<RouterPeerType> for v30::RouterPeerType {
                 Ok(Self::Unnumbered { router_lifetime: peer.router_lifetime })
             }
             RouterPeerType::Numbered(peer) => {
-                if let Some(_) = peer.src_addr {
+                if peer.src_addr.is_some() {
                     return Err(NumberedPeerWithSrcAddrError);
                 };
                 Ok(Self::Numbered { ip: peer.target_addr })
@@ -216,7 +235,7 @@ impl From<v30::BgpPeerConfig> for BgpPeerConfig {
 }
 
 impl TryFrom<BgpPeerConfig> for v30::BgpPeerConfig {
-    type Error = anyhow::Error;
+    type Error = NumberedPeerWithSrcAddrError;
 
     fn try_from(value: BgpPeerConfig) -> Result<Self, Self::Error> {
         Ok(Self {
@@ -287,7 +306,8 @@ impl From<v30::PortConfig> for PortConfig {
 }
 
 impl TryFrom<PortConfig> for v30::PortConfig {
-    type Error = anyhow::Error;
+    type Error = NumberedPeerWithSrcAddrError;
+
     fn try_from(value: PortConfig) -> Result<Self, Self::Error> {
         Ok(Self {
             routes: value.routes,
@@ -395,7 +415,7 @@ impl From<v42::RackNetworkConfig> for RackNetworkConfig {
 }
 
 impl TryFrom<RackNetworkConfig> for v42::RackNetworkConfig {
-    type Error = anyhow::Error;
+    type Error = NumberedPeerWithSrcAddrError;
 
     fn try_from(new: RackNetworkConfig) -> Result<Self, Self::Error> {
         Ok(Self {
@@ -425,9 +445,5 @@ impl From<v42::UplinkPorts> for UplinkPorts {
 }
 
 #[derive(Debug, thiserror::Error)]
-pub enum AddressFamilyConfigError {
-    #[error("src_addr is IPv4 but the peer addr is IPv6")]
-    V4toV6,
-    #[error("src_addr is IPv6 but the peer addr is IPv4")]
-    V6toV4,
-}
+#[error("{0} does not have the same address family as {1}")]
+pub struct AddressFamilyMismatchError(IpAddr, IpAddr);

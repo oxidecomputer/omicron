@@ -11,6 +11,7 @@ use crate::latest::early_networking::LinkSpeed;
 use crate::latest::early_networking::LldpAdminStatus;
 use crate::latest::early_networking::MaxPathConfig;
 use crate::latest::early_networking::MaxPathConfigError;
+use crate::latest::early_networking::NumberedRouter;
 use crate::latest::early_networking::PortConfig;
 use crate::latest::early_networking::RouterLifetimeConfig;
 use crate::latest::early_networking::RouterLifetimeConfigError;
@@ -32,6 +33,16 @@ use std::net::AddrParseError;
 use std::net::IpAddr;
 use std::net::Ipv6Addr;
 use std::str::FromStr;
+
+impl NumberedRouter {
+    pub fn target_addr(&self) -> RouterPeerIpAddr {
+        self.target_addr
+    }
+
+    pub fn src_addr(&self) -> Option<RouterPeerIpAddr> {
+        self.src_addr
+    }
+}
 
 impl BgpPeerConfig {
     /// The default hold time for a BGP peer in seconds.
@@ -161,12 +172,12 @@ impl FromStr for RouterPeerIpAddr {
 }
 
 impl RouterPeerIpAddr {
-    // Returns true if `Self` contains an IPv4 address; false otherwise.
+    /// Returns true if `Self` contains an IPv4 address; false otherwise.
     pub fn is_ipv4(&self) -> bool {
         self.0.is_ipv4()
     }
 
-    // Returns true if `Self` contains an IPv6 address; false otherwise.
+    /// Returns true if `Self` contains an IPv6 address; false otherwise.
     pub fn is_ipv6(&self) -> bool {
         self.0.is_ipv6()
     }
