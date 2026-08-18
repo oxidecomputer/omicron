@@ -1156,11 +1156,11 @@ async fn sic_join_instance_multicast_group(
     // re-create it (unique conflict on the stable ID).
     //
     // Recovery via the stable ID spans the orphan pass: a re-execution that
-    // finds its group already reaped (ORPHAN_GROUP_MIN_AGE) restores the
-    // soft-deleted row, which is safe because a memberless group never
+    // finds its group already reaped (after the orphan grace period) restores
+    // the soft-deleted row, which is safe because a memberless group never
     // reaches the dataplane. What remains unrecoverable is a row the
-    // reconciler has since hard-deleted while another group claimed its IP
-    // or name, which surfaces as an expired recovery window.
+    // reconciler has since hard-deleted while another group claimed its IP or
+    // name, which surfaces as an expired recovery window.
     let attach_result = datastore
         .multicast_group_member_attach_to_instance_with_id(
             &opctx,

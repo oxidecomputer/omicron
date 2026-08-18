@@ -19,7 +19,10 @@
 //! ## Operations Handled
 //! - **"Creating" state**: Initiate DPD "ensure" to apply configuration
 //! - **"Active" state**: Detect DPD drift and sync directly
-//! - **"Deleting" state**: Switch cleanup and database removal
+//! - **MRIB programming**: For Active groups, reconcile switch MRIB
+//!   routes against a per-pass snapshot (see [`super::mrib`])
+//! - **"Deleting" state**: Switch cleanup, MRIB route withdrawal, and
+//!   database removal
 //! - **M2P/forwarding propagation**: Convergent per-sled propagation of
 //!   M2P mappings and forwarding entries via sled-agent after member
 //!   state changes
@@ -77,10 +80,11 @@
 //! - **Partial cleanup**: "Deleting" state preserved until complete cleanup
 
 use anyhow::Context;
-use chrono::Utc;
+use futures::future::try_join_all;
 use futures::stream::{self, StreamExt};
 use slog::{debug, error, info, trace, warn};
 
+use dpd_client::types::IpSrc;
 use nexus_db_model::{MulticastGroup, MulticastGroupState, SqlU8};
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::datastore::multicast::EnsureUnderlayResult;
@@ -90,25 +94,17 @@ use omicron_common::address::is_ssm_address;
 use omicron_common::api::external::{self, DataPageParams};
 use omicron_uuid_kinds::{GenericUuid, MulticastGroupUuid};
 
-use super::{
-    MulticastGroupReconciler, StateTransition, map_external_to_underlay_ip,
-};
+use super::{MulticastGroupReconciler, StateTransition};
 use crate::app::multicast::dataplane::{
     GroupUpdateParams, MulticastDataplaneClient,
 };
+use crate::app::multicast::map_external_to_underlay_ip;
 use crate::app::multicast::sled::MulticastSledClient;
+use crate::app::multicast::switch_zone::{
+    MribRouteIndex, MulticastSwitchZoneClient,
+};
 use crate::app::saga::create_saga_dag;
 use crate::app::sagas;
-
-/// Minimum age before a memberless group can be cleaned up.
-///
-/// This grace period avoids racing with in-progress member attachment
-/// operations that occur immediately after group creation. It applies both to
-/// orphaned groups still in "Creating" state and to the empty-group sweep of
-/// "Active" groups, since an implicitly created group can be activated before
-/// its first member attach lands.
-pub(super) const ORPHAN_GROUP_MIN_AGE: chrono::TimeDelta =
-    chrono::TimeDelta::seconds(10);
 
 /// Check if DPD tag matches the database group's tag.
 ///
@@ -146,7 +142,7 @@ fn dpd_state_matches_sources(
                 let mut dpd_ips: Vec<_> = dpd_srcs
                     .into_iter()
                     .filter_map(|src| match src {
-                        dpd_client::types::IpSrc::Exact(ip) => Some(ip),
+                        IpSrc::Exact(ip) => Some(ip),
                         _ => None,
                     })
                     .collect();
@@ -168,7 +164,7 @@ fn dpd_state_matches_sources(
                 let mut dpd_ips: Vec<_> = dpd_srcs
                     .into_iter()
                     .filter_map(|src| match src {
-                        dpd_client::types::IpSrc::Exact(ip) => Some(ip),
+                        IpSrc::Exact(ip) => Some(ip),
                         _ => None,
                     })
                     .collect();
@@ -182,6 +178,13 @@ fn dpd_state_matches_sources(
             }
         }
     }
+}
+
+/// Switch-side clients threaded through group state processors.
+struct GroupReconcileClients<'a> {
+    dataplane: &'a MulticastDataplaneClient,
+    sled: &'a MulticastSledClient,
+    switch_zone: &'a MulticastSwitchZoneClient,
 }
 
 /// Trait for processing different types of multicast groups
@@ -200,8 +203,7 @@ trait GroupStateProcessor {
         reconciler: &MulticastGroupReconciler,
         opctx: &OpContext,
         group: &MulticastGroup,
-        dataplane_client: &MulticastDataplaneClient,
-        sled_client: &MulticastSledClient,
+        clients: &GroupReconcileClients<'_>,
     ) -> Result<StateTransition, anyhow::Error>;
 
     /// Process a group in "Active" state (check DPD sync status).
@@ -210,8 +212,8 @@ trait GroupStateProcessor {
         reconciler: &MulticastGroupReconciler,
         opctx: &OpContext,
         group: &MulticastGroup,
-        dataplane_client: &MulticastDataplaneClient,
-        sled_client: &MulticastSledClient,
+        clients: &GroupReconcileClients<'_>,
+        mrib_route_index: Option<&MribRouteIndex>,
     ) -> Result<StateTransition, anyhow::Error>;
 }
 
@@ -235,34 +237,35 @@ impl GroupStateProcessor for ExternalGroupProcessor {
         reconciler: &MulticastGroupReconciler,
         opctx: &OpContext,
         group: &MulticastGroup,
-        dataplane_client: &MulticastDataplaneClient,
-        sled_client: &MulticastSledClient,
+        clients: &GroupReconcileClients<'_>,
     ) -> Result<StateTransition, anyhow::Error> {
         reconciler
             .handle_deleting_external_group(
                 opctx,
                 group,
-                dataplane_client,
-                sled_client,
+                clients.dataplane,
+                clients.sled,
+                clients.switch_zone,
             )
             .await
     }
 
-    /// Handle groups in "Active" state (check DPD sync status).
     async fn process_active(
         &self,
         reconciler: &MulticastGroupReconciler,
         opctx: &OpContext,
         group: &MulticastGroup,
-        dataplane_client: &MulticastDataplaneClient,
-        sled_client: &MulticastSledClient,
+        clients: &GroupReconcileClients<'_>,
+        mrib_route_index: Option<&MribRouteIndex>,
     ) -> Result<StateTransition, anyhow::Error> {
         reconciler
             .handle_active_external_group(
                 opctx,
                 group,
-                dataplane_client,
-                sled_client,
+                clients.dataplane,
+                clients.sled,
+                clients.switch_zone,
+                mrib_route_index,
             )
             .await
     }
@@ -372,6 +375,7 @@ impl MulticastGroupReconciler {
         state: MulticastGroupState,
         dataplane_client: Option<&MulticastDataplaneClient>,
         sled_client: Option<&MulticastSledClient>,
+        switch_zone_client: Option<&MulticastSwitchZoneClient>,
     ) -> Result<usize, String> {
         trace!(opctx.log, "searching for multicast groups"; "state" => %state);
 
@@ -395,8 +399,24 @@ impl MulticastGroupReconciler {
 
         trace!(opctx.log, "found multicast groups"; "count" => groups.len(), "state" => %state);
 
+        let mrib_route_index = match (state, switch_zone_client) {
+            (MulticastGroupState::Active, Some(client)) => client
+                .list_routes_indexed()
+                .await
+                .inspect_err(|e| {
+                    warn!(
+                        opctx.log,
+                        "failed to build per-pass MRIB route snapshot";
+                        "error" => %e,
+                    )
+                })
+                .ok(),
+            _ => None,
+        };
+        let mrib_route_index = mrib_route_index.as_ref();
+
         // Process groups concurrently with configurable parallelism
-        let results = stream::iter(groups)
+        let group_outcomes = stream::iter(groups)
             .map(|group| async move {
                 let result = self
                     .process_group_state(
@@ -404,6 +424,8 @@ impl MulticastGroupReconciler {
                         &group,
                         dataplane_client,
                         sled_client,
+                        switch_zone_client,
+                        mrib_route_index,
                     )
                     .await;
                 (group, result)
@@ -414,8 +436,8 @@ impl MulticastGroupReconciler {
 
         // Handle results with state-appropriate logging and counting
         let mut processed = 0;
-        let total_results = results.len();
-        for (group, result) in results {
+        let total = group_outcomes.len();
+        for (group, result) in group_outcomes {
             match result {
                 Ok(transition) => {
                     // Count successful transitions based on state expectations
@@ -464,13 +486,13 @@ impl MulticastGroupReconciler {
             }
         }
 
-        if total_results > 0 {
+        if total > 0 {
             debug!(
                 opctx.log,
                 "group reconciliation completed";
                 "state" => %state,
                 "processed" => processed,
-                "total" => total_results
+                "total" => total
             );
         }
 
@@ -478,7 +500,7 @@ impl MulticastGroupReconciler {
     }
 
     /// Process multicast groups that are in "Creating" state.
-    pub async fn reconcile_creating_groups(
+    pub(super) async fn reconcile_creating_groups(
         &self,
         opctx: &OpContext,
     ) -> Result<usize, String> {
@@ -487,38 +509,43 @@ impl MulticastGroupReconciler {
             MulticastGroupState::Creating,
             None,
             None,
+            None,
         )
         .await
     }
 
     /// Process multicast groups that are in "Deleting" state.
-    pub async fn reconcile_deleting_groups(
+    pub(super) async fn reconcile_deleting_groups(
         &self,
         opctx: &OpContext,
         dataplane_client: &MulticastDataplaneClient,
         sled_client: &MulticastSledClient,
+        switch_zone_client: &MulticastSwitchZoneClient,
     ) -> Result<usize, String> {
         self.reconcile_groups_by_state(
             opctx,
             MulticastGroupState::Deleting,
             Some(dataplane_client),
             Some(sled_client),
+            Some(switch_zone_client),
         )
         .await
     }
 
     /// Reconcile active multicast groups with DPD (drift detection and correction).
-    pub async fn reconcile_active_groups(
+    pub(super) async fn reconcile_active_groups(
         &self,
         opctx: &OpContext,
         dataplane_client: &MulticastDataplaneClient,
         sled_client: &MulticastSledClient,
+        switch_zone_client: &MulticastSwitchZoneClient,
     ) -> Result<usize, String> {
         self.reconcile_groups_by_state(
             opctx,
             MulticastGroupState::Active,
             Some(dataplane_client),
             Some(sled_client),
+            Some(switch_zone_client),
         )
         .await
     }
@@ -531,6 +558,8 @@ impl MulticastGroupReconciler {
         group: &MulticastGroup,
         dataplane_client: Option<&MulticastDataplaneClient>,
         sled_client: Option<&MulticastSledClient>,
+        switch_zone_client: Option<&MulticastSwitchZoneClient>,
+        mrib_route_index: Option<&MribRouteIndex>,
     ) -> Result<StateTransition, anyhow::Error> {
         // Future: Match on group type to select different processors if
         // we add more nuanced group types
@@ -541,32 +570,36 @@ impl MulticastGroupReconciler {
                 processor.process_creating(self, opctx, group).await
             }
             MulticastGroupState::Deleting => {
-                let dataplane_client = dataplane_client
-                    .context("dataplane client required for deleting state")?;
-                let sled_client = sled_client
-                    .context("sled client required for deleting state")?;
-                processor
-                    .process_deleting(
-                        self,
-                        opctx,
-                        group,
-                        dataplane_client,
-                        sled_client,
-                    )
-                    .await
+                let clients = GroupReconcileClients {
+                    dataplane: dataplane_client.context(
+                        "dataplane client required for deleting state",
+                    )?,
+                    sled: sled_client
+                        .context("sled client required for deleting state")?,
+                    switch_zone: switch_zone_client.context(
+                        "switch zone client required for deleting state",
+                    )?,
+                };
+                processor.process_deleting(self, opctx, group, &clients).await
             }
             MulticastGroupState::Active => {
-                let dataplane_client = dataplane_client
-                    .context("dataplane client required for active state")?;
-                let sled_client = sled_client
-                    .context("sled client required for active state")?;
+                let clients = GroupReconcileClients {
+                    dataplane: dataplane_client.context(
+                        "dataplane client required for active state",
+                    )?,
+                    sled: sled_client
+                        .context("sled client required for active state")?,
+                    switch_zone: switch_zone_client.context(
+                        "switch zone client required for active state",
+                    )?,
+                };
                 processor
                     .process_active(
                         self,
                         opctx,
                         group,
-                        dataplane_client,
-                        sled_client,
+                        &clients,
+                        mrib_route_index,
                     )
                     .await
             }
@@ -592,72 +625,32 @@ impl MulticastGroupReconciler {
 
         // A memberless group is never activated. An implicit creation whose
         // first attach has not landed, or whose attach failed, stays in
-        // "Creating" until it gains a member or is reaped below. This keeps
-        // failed creations out of the dataplane entirely.
+        // "Creating" until it gains a member or is reaped by the unified
+        // emptiness sweep (`cleanup_empty_groups`). This keeps failed
+        // creations out of the dataplane entirely.
         let members = self
             .get_group_members(opctx, group.id())
             .await
             .context("failed to list members for group in 'Creating' state")?;
 
         if members.is_empty() {
-            // Reap orphans past the grace window. The grace avoids racing
-            // an in-progress first attach, such as implicit group creation
-            // whose member attachment failed transiently (e.g., SSM
-            // validation error). The NOT EXISTS guard in the datastore
-            // method declines if a member attached since the list above.
-            let age = Utc::now() - group.time_created();
-            if age > ORPHAN_GROUP_MIN_AGE {
-                let group_id =
-                    MulticastGroupUuid::from_untyped_uuid(group.id());
-                match self
-                    .datastore
-                    .multicast_group_mark_removal_if_empty(opctx, group_id)
-                    .await
-                {
-                    Ok(true) => {
-                        info!(
-                            opctx.log,
-                            "cleaned up orphaned multicast group in 'Creating' state with no members";
-                            "group_id" => %group.id(),
-                            "group_name" => group.name().as_str(),
-                            "age_seconds" => age.num_seconds(),
-                        );
-                        return Ok(StateTransition::NeedsCleanup);
-                    }
-                    Ok(false) => {
-                        // Lost the race to an attach, activate next pass.
-                    }
-                    Err(e) => {
-                        warn!(
-                            opctx.log,
-                            "failed to check/cleanup orphaned group";
-                            "group_id" => %group.id(),
-                            "error" => ?e,
-                        );
-                    }
-                }
-            }
             return Ok(StateTransition::NoChange);
         }
 
-        // TODO: Add front port selection for egress traffic (instances →
-        // external). When transitioning groups to Active, we need to identify
-        // and validate front ports against DPD's QSFP topology (similar to
-        // `backplane_map` validation for rear ports). These uplink members use
-        // `Direction::External` and follow a different lifecycle - added when
-        // first instance joins, removed when last instance leaves.
-        // Should integrate with `switch_ports_with_uplinks()` or
-        // equivalent front port discovery mechanism, which would be
-        // configurable, and later learned (i.e., via `mcastd`/IGMP).
+        // TODO: Front port selection for egress (instance → external) is
+        // not yet implemented. See RFD 488 (§sect-external-mcast) for
+        // the design (mcastd / PIM-SM).
 
         // Handle underlay group creation/linking (same logic as before)
         if !self.process_creating_group_inner(opctx, group).await? {
             return Ok(StateTransition::EntityGone);
         }
 
-        // Successfully started saga - the saga will handle state transition to "Active".
-        // We return NoChange because the reconciler shouldn't change the state;
-        // the saga applies external + underlay configuration via DPD.
+        // The blocking await above ensures the saga has finished
+        // applying external + underlay DPD configuration before we
+        // return. The reconciler does not write "Active" itself; the
+        // saga is the writer. `NoChange` here means this pass made no
+        // further state change beyond what the saga already committed.
         Ok(StateTransition::NoChange)
     }
 
@@ -668,6 +661,7 @@ impl MulticastGroupReconciler {
         group: &MulticastGroup,
         dataplane_client: &MulticastDataplaneClient,
         sled_client: &MulticastSledClient,
+        switch_zone_client: &MulticastSwitchZoneClient,
     ) -> Result<StateTransition, anyhow::Error> {
         debug!(
             opctx.log,
@@ -679,6 +673,46 @@ impl MulticastGroupReconciler {
             "underlay_group_id" => ?group.underlay_group_id,
             "dpd_cleanup_required" => true
         );
+
+        // Remove MRIB routes so `mg-lower` withdraws DDM advertisements
+        // before cleaning up DPD and DB state. Return early on failure so
+        // the next pass can retry. Proceeding would delete DB rows and
+        // leave stale DDM advertisements.
+        let group_ip = group.multicast_ip.ip();
+        let group_id = MulticastGroupUuid::from_untyped_uuid(group.id());
+
+        // Remove (*,G) route.
+        switch_zone_client
+            .remove_route(group_ip, None)
+            .await
+            .context("failed to remove MRIB (*,G) route for deleting group")?;
+
+        // Remove (S,G) routes for any sources. Return early on failure
+        // to preserve DB state for retry on the next pass.
+        let source_filter = self
+            .datastore
+            .multicast_groups_source_filter_state(opctx, &[group_id])
+            .await
+            .context(
+                "failed to load source filter for MRIB cleanup; \
+                 returning early to preserve DB state for retry",
+            )?;
+
+        if let Some(filter) = source_filter.get(&group.id()) {
+            // Per-source removals target distinct (S,G) keys. We fan out so
+            // a group with N sources doesn't pay N round-trips serially.
+            try_join_all(filter.specific_sources.iter().map(
+                |source| async move {
+                    switch_zone_client
+                        .remove_route(group_ip, Some(*source))
+                        .await
+                        .with_context(|| format!(
+                            "failed to remove MRIB (S,G) route for source {source}"
+                        ))
+                }),
+            )
+            .await?;
+        }
 
         self.process_deleting_group_inner(
             opctx,
@@ -700,6 +734,8 @@ impl MulticastGroupReconciler {
         group: &MulticastGroup,
         dataplane_client: &MulticastDataplaneClient,
         sled_client: &MulticastSledClient,
+        switch_zone_client: &MulticastSwitchZoneClient,
+        mrib_route_index: Option<&MribRouteIndex>,
     ) -> Result<StateTransition, anyhow::Error> {
         let underlay_group_id = group
             .underlay_group_id
@@ -765,7 +801,14 @@ impl MulticastGroupReconciler {
             }
         };
 
-        if needs_update {
+        // Track whether DPD is in the desired state for this group, either
+        // because we just synced it or because it was already in sync. MRIB
+        // advertisement below is gated on this. Advertising via MGD/DDM
+        // while the switch dataplane state is stale would cause peer sleds
+        // to forward traffic to a switch that cannot deliver it.
+        let mut dpd_synced = false;
+
+        let res = if needs_update {
             debug!(
                 opctx.log,
                 "updating active multicast group in DPD";
@@ -801,6 +844,8 @@ impl MulticastGroupReconciler {
                         "multicast_ip" => %group.multicast_ip
                     );
 
+                    dpd_synced = true;
+
                     // Propagate M2P/forwarding to member sleds after DPD
                     // sync to ensure OPTE state is also consistent.
                     if let Err(e) = sled_client
@@ -830,6 +875,9 @@ impl MulticastGroupReconciler {
                 }
             }
         } else {
+            // DPD was already in sync (no update needed).
+            dpd_synced = true;
+
             // Even when DPD is in sync, propagate M2P/forwarding to
             // member sleds to correct any sled-level drift.
             if let Err(e) =
@@ -844,7 +892,38 @@ impl MulticastGroupReconciler {
             }
 
             Ok(StateTransition::NoChange)
+        };
+
+        // Reconcile MRIB routes based on whether the group has active
+        // ("Joined") members. If all members are "Left", withdraw the DDM
+        // advertisement so peer sleds stop sending traffic.
+        //
+        // Gate on `dpd_synced` so we never advertise via MGD/DDM while
+        // the switch DPD state is stale. Advertising peer sleds toward
+        // a switch that cannot deliver the traffic would just drop
+        // packets at the switch. We retry on the next reconciler pass
+        // once DPD is back in sync.
+        if dpd_synced {
+            super::mrib::reconcile_group(
+                opctx,
+                &self.datastore,
+                switch_zone_client,
+                mrib_route_index,
+                group,
+                &source_filter,
+                underlay_group_id,
+            )
+            .await;
+        } else {
+            debug!(
+                opctx.log,
+                "skipping MRIB reconcile: DPD update failed for this group";
+                "group_id" => %group.id(),
+                "multicast_ip" => %group.multicast_ip,
+            );
         }
+
+        res
     }
 
     /// Process a single multicast group in "Creating" state.
@@ -885,7 +964,7 @@ impl MulticastGroupReconciler {
                     "creating new underlay group";
                     "group" => ?group
                 );
-                match self.ensure_underlay_for_external(opctx, &group).await? {
+                match self.ensure_underlay_for_external(opctx, group).await? {
                     Some(underlay) => underlay,
                     None => return Ok(false), // Group deleted during processing
                 }
@@ -917,9 +996,9 @@ impl MulticastGroupReconciler {
         >(saga_params)
         .context("failed to create multicast group transaction saga")?;
 
-        let saga_id = self
+        let (saga_id, completion) = self
             .sagas
-            .saga_start(dag)
+            .saga_run(dag)
             .await
             .context("failed to start multicast group transaction saga")?;
 
@@ -932,6 +1011,11 @@ impl MulticastGroupReconciler {
             "pending_dpd_operations" => "[create_external_group, create_underlay_group, configure_nat_mapping]",
             "expected_outcome" => "Creating → Active"
         );
+
+        // Block this pass on saga completion so subsequent reconciler
+        // steps observe "Active" within the same pass. See mod-level
+        // "RPW Saga Coordination" for rationale.
+        completion.await.context("multicast group transaction saga failed")?;
 
         Ok(true)
     }
@@ -1024,7 +1108,7 @@ mod tests {
     use omicron_common::api::external::IdentityMetadataCreateParams;
 
     fn create_dpd_group(
-        sources: Option<Vec<dpd_client::types::IpSrc>>,
+        sources: Option<Vec<IpSrc>>,
     ) -> dpd_client::types::MulticastGroupExternalResponse {
         dpd_client::types::MulticastGroupExternalResponse {
             group_ip: "232.1.1.1".parse().unwrap(),
@@ -1077,15 +1161,15 @@ mod tests {
 
         // DPD has matching sources
         let dpd_group = create_dpd_group(Some(vec![
-            dpd_client::types::IpSrc::Exact("10.0.0.1".parse().unwrap()),
-            dpd_client::types::IpSrc::Exact("10.0.0.2".parse().unwrap()),
+            IpSrc::Exact("10.0.0.1".parse().unwrap()),
+            IpSrc::Exact("10.0.0.2".parse().unwrap()),
         ]));
         assert!(dpd_state_matches_sources(&dpd_group, &source_filter, &group));
 
         // DPD has sources in different order (should still match)
         let dpd_group = create_dpd_group(Some(vec![
-            dpd_client::types::IpSrc::Exact("10.0.0.2".parse().unwrap()),
-            dpd_client::types::IpSrc::Exact("10.0.0.1".parse().unwrap()),
+            IpSrc::Exact("10.0.0.2".parse().unwrap()),
+            IpSrc::Exact("10.0.0.1".parse().unwrap()),
         ]));
         assert!(dpd_state_matches_sources(&dpd_group, &source_filter, &group));
 
@@ -1095,8 +1179,8 @@ mod tests {
 
         // DPD has wrong sources (mismatch)
         let dpd_group = create_dpd_group(Some(vec![
-            dpd_client::types::IpSrc::Exact("10.0.0.1".parse().unwrap()),
-            dpd_client::types::IpSrc::Exact("10.0.0.3".parse().unwrap()), // wrong
+            IpSrc::Exact("10.0.0.1".parse().unwrap()),
+            IpSrc::Exact("10.0.0.3".parse().unwrap()), // wrong
         ]));
         assert!(!dpd_state_matches_sources(&dpd_group, &source_filter, &group));
     }
@@ -1119,8 +1203,8 @@ mod tests {
 
         // DPD should have specific sources (RFC 4607 compliance)
         let dpd_group = create_dpd_group(Some(vec![
-            dpd_client::types::IpSrc::Exact("10.0.0.1".parse().unwrap()),
-            dpd_client::types::IpSrc::Exact("10.0.0.2".parse().unwrap()),
+            IpSrc::Exact("10.0.0.1".parse().unwrap()),
+            IpSrc::Exact("10.0.0.2".parse().unwrap()),
         ]));
         assert!(dpd_state_matches_sources(&dpd_group, &source_filter, &group));
 
@@ -1142,10 +1226,9 @@ mod tests {
         let group = create_group("224.1.1.1"); // ASM address
 
         // DPD has matching specific sources
-        let dpd_group =
-            create_dpd_group(Some(vec![dpd_client::types::IpSrc::Exact(
-                "10.0.0.1".parse().unwrap(),
-            )]));
+        let dpd_group = create_dpd_group(Some(vec![IpSrc::Exact(
+            "10.0.0.1".parse().unwrap(),
+        )]));
         assert!(dpd_state_matches_sources(&dpd_group, &source_filter, &group));
 
         // DPD has None (mismatch: should have specific sources)
@@ -1153,8 +1236,7 @@ mod tests {
         assert!(!dpd_state_matches_sources(&dpd_group, &source_filter, &group));
 
         // DPD has IpSrc::Any (mismatch: should have specific sources)
-        let dpd_group =
-            create_dpd_group(Some(vec![dpd_client::types::IpSrc::Any]));
+        let dpd_group = create_dpd_group(Some(vec![IpSrc::Any]));
         assert!(!dpd_state_matches_sources(&dpd_group, &source_filter, &group));
     }
 
@@ -1174,10 +1256,9 @@ mod tests {
         assert!(dpd_state_matches_sources(&dpd_group, &source_filter, &group));
 
         // DPD has specific sources (mismatch)
-        let dpd_group =
-            create_dpd_group(Some(vec![dpd_client::types::IpSrc::Exact(
-                "10.0.0.1".parse().unwrap(),
-            )]));
+        let dpd_group = create_dpd_group(Some(vec![IpSrc::Exact(
+            "10.0.0.1".parse().unwrap(),
+        )]));
         assert!(!dpd_state_matches_sources(&dpd_group, &source_filter, &group));
     }
 
@@ -1196,10 +1277,9 @@ mod tests {
         assert!(dpd_state_matches_sources(&dpd_group, &source_filter, &group));
 
         // DPD has sources (mismatch)
-        let dpd_group =
-            create_dpd_group(Some(vec![dpd_client::types::IpSrc::Exact(
-                "10.0.0.1".parse().unwrap(),
-            )]));
+        let dpd_group = create_dpd_group(Some(vec![IpSrc::Exact(
+            "10.0.0.1".parse().unwrap(),
+        )]));
         assert!(!dpd_state_matches_sources(&dpd_group, &source_filter, &group));
     }
 }

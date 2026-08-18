@@ -1334,6 +1334,7 @@ impl super::Nexus {
         {
             if let (InstanceStateChangeError::SledAgent(inner), Some(vmm)) =
                 (&e, state.vmm())
+                && inner.vmm_gone()
             {
                 if let Some(reason) = inner.vmm_failure_reason() {
                     let _ = self
@@ -1451,13 +1452,21 @@ impl super::Nexus {
             return Err(e);
         }
 
-        // Idempotent stop: with no active VMM, the instance-update saga will
-        // not fire (no terminal transition to drive it), so nudge the
-        // reconciler to converge any stale "Joined" rows now rather than wait
-        // a full reconciler tick.
-        if state.vmm().is_none() && self.multicast_enabled() {
-            self.background_tasks.task_multicast_reconciler.activate();
+        // Detach multicast members (state -> "Left", clear `sled_id`) only
+        // after sled-agent has acknowledged the Stop request. Doing it
+        // before the request would tear down M2P/forwarding for a guest
+        // that is still running if the request fails.
+        if self.multicast_enabled() {
+            self.db_datastore
+                .multicast_group_members_detach_by_instance(
+                    opctx,
+                    InstanceUuid::from_untyped_uuid(authz_instance.id()),
+                )
+                .await?;
         }
+
+        // Activate multicast reconciler to handle switch-level changes
+        self.background_tasks.task_multicast_reconciler.activate();
 
         self.db_datastore
             .instance_fetch_with_vmm(opctx, &authz_instance)
@@ -3314,7 +3323,8 @@ mod tests {
     use ipnetwork::IpNetwork;
     use nexus_db_model::{
         Generation, Instance as DbInstance, InstanceState as DbInstanceState,
-        MulticastGroupMemberState, VmmCpuPlatform, VmmState as DbVmmState,
+        MulticastGroupMemberOrigin, MulticastGroupMemberState, VmmCpuPlatform,
+        VmmState as DbVmmState,
     };
     use nexus_types::external_api::instance;
     use omicron_common::api::external::{
@@ -3650,6 +3660,7 @@ mod tests {
             parent_id: Uuid::new_v4(),
             sled_id: None,
             state: MulticastGroupMemberState::Joined,
+            membership_origin: MulticastGroupMemberOrigin::Static,
             version_added: Generation::new(),
             version_removed: None,
             multicast_ip: IpNetwork::from(IpAddr::V4(Ipv4Addr::new(
