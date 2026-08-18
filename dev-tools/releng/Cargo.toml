@@ -33,7 +33,10 @@ tokio = { workspace = true, features = ["full"] }
 toml.workspace = true
 tufaceous.workspace = true
 tufaceous-artifact.workspace = true
-tufaceous-artifact-v1 = { git = "https://github.com/oxidecomputer/tufaceous", branch = "v1", package = "tufaceous-artifact", features = ["proptest", "schemars"] }
+tufaceous-artifact-v1 = { git = "https://github.com/oxidecomputer/tufaceous", branch = "v1", package = "tufaceous-artifact", features = [
+    "proptest",
+    "schemars"
+] }
 tufaceous-lib-v1 = { git = "https://github.com/oxidecomputer/tufaceous", branch = "v1", package = "tufaceous-lib" }
 
 [lints]

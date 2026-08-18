@@ -14,8 +14,8 @@ clap.workspace = true
 libc.workspace = true
 omicron-workspace-hack.workspace = true
 oxide-tokio-rt.workspace = true
-tokio.workspace = true
 rcgen.workspace = true
+tokio.workspace = true
 
 [dev-dependencies]
 camino-tempfile.workspace = true

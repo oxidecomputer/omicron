@@ -8,5 +8,5 @@ license = "MPL-2.0"
 workspace = true
 
 [dependencies]
-wicketd-commission-types-versions.workspace = true
 omicron-workspace-hack.workspace = true
+wicketd-commission-types-versions.workspace = true

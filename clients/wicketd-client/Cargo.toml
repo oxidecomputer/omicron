@@ -14,6 +14,7 @@ installinator-common.workspace = true
 omicron-common.workspace = true
 omicron-uuid-kinds.workspace = true
 omicron-workspace-hack.workspace = true
+oxide-update-engine-types.workspace = true
 progenitor.workspace = true
 regress.workspace = true
 reqwest = { workspace = true, features = ["rustls", "stream"] }
@@ -24,7 +25,6 @@ serde_json.workspace = true
 sled-agent-types.workspace = true
 sled-hardware-types.workspace = true
 slog.workspace = true
-oxide-update-engine-types.workspace = true
 uuid.workspace = true
 wicket-common.workspace = true
 wicketd-commission-types-versions.workspace = true

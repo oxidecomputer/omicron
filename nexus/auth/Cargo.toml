@@ -22,10 +22,10 @@ headers.workspace = true
 http.workspace = true
 hyper.workspace = true
 newtype_derive.workspace = true
-# See omicron-rpaths for more about the "pq-sys" dependency.
-pq-sys = "*"
 openssl.workspace = true
 oso.workspace = true
+# See omicron-rpaths for more about the "pq-sys" dependency.
+pq-sys = "*"
 samael.workspace = true
 serde.workspace = true
 serde_urlencoded.workspace = true

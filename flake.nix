@@ -103,7 +103,8 @@
             prefix = "${upperName}=\"";
           in
           trivial.pipe shas [
-            (lists.findFirst (strings.hasPrefix prefix) "")
+            (lists.findFirst (strings.hasPrefix prefix)
+              (throw "findSha: no '${upperName}' entry found in the provided checksums; add it to the corresponding tools/*_checksums file"))
             (strings.removePrefix prefix)
             (strings.removeSuffix "\"")
           ]);
@@ -350,10 +351,36 @@
               cp ./${binName} $out/bin/${binName}
             '';
           };
+
+      tombi = with pkgs;
+        let
+          name = "tombi";
+          version = readVersionFile "${name}_version";
+          sha256 =
+            let
+              shaFile = builtins.readFile ./tools/${name}_checksums;
+              shas = lib.strings.splitString "\n" shaFile;
+            in
+            findSha shas "CIDL_SHA256_LINUX_X86_64";
+          src = builtins.fetchurl
+            {
+              inherit sha256;
+              url = "https://github.com/tombi-toml/tombi/releases/download/v${version}/tombi-cli-${version}-x86_64-unknown-linux-musl.tar.gz";
+            };
+        in
+        stdenv.mkDerivation
+          {
+            inherit src name version;
+            # The tombi release binary is static musl, so autoPatchelfHook isn't needed.
+            installPhase = ''
+              mkdir -p $out/bin
+              cp ./${name} $out/bin/${name}
+            '';
+          };
     in
     {
       packages.x86_64-linux = {
-        inherit dendrite-stub mgd mgDdmd cockroachdb clickhouse;
+        inherit dendrite-stub mgd mgDdmd cockroachdb clickhouse tombi;
       };
 
       checks.x86_64-linux = with pkgs;
@@ -391,6 +418,12 @@
             {
               pkg = cockroachdb;
               cmd = "cockroach version --build-tag | tr -d 'v'";
+            };
+
+          tombiVersion = mkVersionCheck
+            {
+              pkg = tombi;
+              cmd = "tombi --version | cut -d ' ' -f 2";
             };
 
           mgdCanExec = mkExecCheck {
@@ -434,6 +467,7 @@
               mgDdmd
               clickhouse
               cockroachdb
+              tombi
             ];
 
             name = "omicron";

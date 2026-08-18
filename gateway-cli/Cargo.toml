@@ -13,7 +13,7 @@ clap.workspace = true
 futures.workspace = true
 omicron-common.workspace = true
 omicron-uuid-kinds.workspace = true
-oxide-tokio-rt.workspace= true
+oxide-tokio-rt.workspace = true
 reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -21,7 +21,12 @@ slog.workspace = true
 slog-async.workspace = true
 slog-term.workspace = true
 termios.workspace = true
-tokio = { workspace = true, features = [ "io-std", "rt-multi-thread", "macros", "time" ] }
+tokio = { workspace = true, features = [
+    "io-std",
+    "rt-multi-thread",
+    "macros",
+    "time"
+] }
 tokio-tungstenite.workspace = true
 tufaceous-artifact.workspace = true
 uuid.workspace = true

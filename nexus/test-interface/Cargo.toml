@@ -16,12 +16,12 @@ bootstrap-agent-lockstep-types.workspace = true
 nexus-config.workspace = true
 nexus-db-queries.workspace = true
 nexus-types.workspace = true
-sled-agent-types.workspace = true
 omicron-common.workspace = true
+omicron-uuid-kinds.workspace = true
+omicron-workspace-hack.workspace = true
 # See omicron-rpaths for more about the "pq-sys" dependency.
 pq-sys = "*"
+sled-agent-types.workspace = true
 slog.workspace = true
 tokio.workspace = true
 uuid.workspace = true
-omicron-workspace-hack.workspace = true
-omicron-uuid-kinds.workspace = true

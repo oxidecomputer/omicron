@@ -14,10 +14,10 @@ chrono.workspace = true
 clap.workspace = true
 glob.workspace = true
 jiff.workspace = true
+omicron-workspace-hack.workspace = true
 rayon.workspace = true
 sigpipe.workspace = true
 uuid.workspace = true
-omicron-workspace-hack.workspace = true
 
 [[bin]]
 name = "oxlog"

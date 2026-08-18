@@ -28,7 +28,12 @@ iddqd.workspace = true
 illumos-utils.workspace = true
 ipcc.workspace = true
 omicron-common.workspace = true
+omicron-uuid-kinds.workspace = true
+omicron-workspace-hack.workspace = true
 oxide-tokio-rt.workspace = true
+oximeter.workspace = true
+oximeter-instruments = { workspace = true, features = ["http-instruments"] }
+oximeter-producer.workspace = true
 schemars.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -44,11 +49,6 @@ tokio-tungstenite.workspace = true
 toml.workspace = true
 tufaceous-artifact.workspace = true
 uuid.workspace = true
-omicron-workspace-hack.workspace = true
-omicron-uuid-kinds.workspace = true
-oximeter.workspace = true
-oximeter-producer.workspace = true
-oximeter-instruments = { workspace = true, features = ["http-instruments"] }
 zip.workspace = true
 
 [dev-dependencies]

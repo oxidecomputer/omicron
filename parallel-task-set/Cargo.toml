@@ -5,8 +5,8 @@ edition.workspace = true
 license = "MPL-2.0"
 
 [dependencies]
-tokio.workspace = true
 omicron-workspace-hack.workspace = true
+tokio.workspace = true
 
 [dev-dependencies]
 rand.workspace = true

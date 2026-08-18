@@ -9,8 +9,8 @@ workspace = true
 
 [dependencies]
 anyhow.workspace = true
-clap.workspace = true
 chrono.workspace = true
+clap.workspace = true
 dropshot.workspace = true
 futures.workspace = true
 gateway-client.workspace = true
@@ -22,6 +22,7 @@ nexus-mgs-updates.workspace = true
 nexus-types.workspace = true
 omicron-common.workspace = true
 omicron-repl-utils.workspace = true
+omicron-workspace-hack.workspace = true
 oxide-tokio-rt.workspace = true
 qorb.workspace = true
 serde_json.workspace = true
@@ -31,7 +32,6 @@ slog.workspace = true
 swrite.workspace = true
 tokio = { workspace = true, features = ["full"] }
 tufaceous-artifact.workspace = true
-omicron-workspace-hack.workspace = true
 
 [[bin]]
 name = "reconfigurator-sp-updater"
