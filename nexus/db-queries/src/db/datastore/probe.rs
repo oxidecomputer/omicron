@@ -739,11 +739,46 @@ impl super::DataStore {
 
         self.probe_delete_all_network_interfaces(opctx, id).await?;
 
-        diesel::update(dsl::probe)
-            .filter(dsl::id.eq(id))
-            .filter(dsl::project_id.eq(authz_project.id()))
-            .set(dsl::time_deleted.eq(Utc::now()))
-            .execute_async(&*conn)
+        use nexus_db_schema::schema::multicast_group_member;
+
+        let project_id = authz_project.id();
+        self.transaction_retry_wrapper("probe_delete")
+            .transaction(&conn, |conn| async move {
+                // Delete the probe and mark its multicast memberships in the
+                // same transaction. Until this commits, the probe remains
+                // active and its distributor target still includes its
+                // memberships.
+                let now = Utc::now();
+                let updated = diesel::update(dsl::probe)
+                    .filter(dsl::id.eq(id))
+                    .filter(dsl::project_id.eq(project_id))
+                    .filter(dsl::time_deleted.is_null())
+                    .set(dsl::time_deleted.eq(now))
+                    .execute_async(&conn)
+                    .await?;
+
+                if updated == 0 {
+                    return Err(diesel::result::Error::NotFound);
+                }
+
+                diesel::update(multicast_group_member::table)
+                    .filter(multicast_group_member::parent_id.eq(id))
+                    .filter(
+                        multicast_group_member::parent_kind
+                            .eq(MulticastGroupMemberParentKind::Probe),
+                    )
+                    .filter(multicast_group_member::time_deleted.is_null())
+                    .set((
+                        multicast_group_member::state
+                            .eq(MulticastGroupMemberState::Left),
+                        multicast_group_member::time_deleted.eq(Some(now)),
+                        multicast_group_member::time_modified.eq(now),
+                    ))
+                    .execute_async(&conn)
+                    .await?;
+
+                Ok(())
+            })
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 

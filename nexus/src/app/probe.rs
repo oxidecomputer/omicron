@@ -17,7 +17,7 @@ use omicron_common::api::external::{
     CreateResult, DeleteResult, ListResultVec, LookupResult, NameOrId,
     http_pagination::PaginatedBy,
 };
-use omicron_uuid_kinds::{GenericUuid, MulticastGroupUuid, ProbeUuid};
+use omicron_uuid_kinds::{GenericUuid, MulticastGroupUuid};
 
 use super::MAX_MULTICAST_GROUPS_PER_INSTANCE;
 
@@ -160,6 +160,7 @@ impl super::Nexus {
     /// # Errors
     ///
     /// - More than [`MAX_MULTICAST_GROUPS_PER_INSTANCE`] groups requested
+    /// - A source list exceeds the per-member cap or holds duplicates
     /// - A group identifier fails to resolve
     /// - The same group appears more than once in the request
     ///
@@ -185,6 +186,10 @@ impl super::Nexus {
         let mut seen = HashSet::with_capacity(params.multicast_groups.len());
         for spec in &params.multicast_groups {
             let source_ips = spec.source_ips.as_deref();
+            // Per-member source list shape (count + duplicates), mirroring
+            // instance create. The group resolution below checks SSM
+            // semantics but not the list shape.
+            crate::app::multicast::validate_member_source_ips(source_ips)?;
             let group_id = self
                 .resolve_multicast_group_identifier_with_sources(
                     opctx,
@@ -221,27 +226,15 @@ impl super::Nexus {
         name_or_id: NameOrId,
     ) -> DeleteResult {
         let probe = self.probe_get(opctx, project_lookup, &name_or_id).await?;
-        // Mark memberships for permanent removal (sets `time_deleted`)
-        // before soft-deleting the probe, mirroring the `instance_delete`
-        // saga. The probe-"Left" reconciler finalizes dataplane teardown
-        // on rows with `time_deleted` set.
-        if self.multicast_enabled() {
-            self.db_datastore
-                .multicast_group_members_mark_for_removal_by_parent(
-                    opctx,
-                    nexus_db_model::MemberParentRef::Probe(
-                        ProbeUuid::from_untyped_uuid(probe.id),
-                    ),
-                )
-                .await?;
-            self.background_tasks.task_multicast_reconciler.activate();
-        }
         self.probe_delete_dpd_config(opctx, probe.id).await?;
         let (.., authz_project) =
             project_lookup.lookup_for(authz::Action::CreateChild).await?;
         self.db_datastore
             .probe_delete(opctx, &authz_project, &name_or_id)
             .await?;
+        if self.multicast_enabled() {
+            self.background_tasks.task_multicast_reconciler.activate();
+        }
         self.background_tasks.task_probe_distributor.activate();
         Ok(())
     }

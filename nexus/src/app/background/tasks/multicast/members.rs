@@ -307,6 +307,20 @@ impl MulticastGroupReconciler {
             return Ok(false);
         };
 
+        // Probe subscriptions are owned by the probe distributor and are
+        // removed when the soft-deleted probe leaves its desired set. There
+        // is no VMM or propolis record to pass to the instance unsubscribe
+        // path, so only release the durable cleanup handle here.
+        if matches!(member.parent_ref(), MemberParentRef::Probe(_)) {
+            return self
+                .datastore
+                .multicast_group_member_clear_sled_id_if_current(
+                    opctx, member.id, sled_id,
+                )
+                .await
+                .context("failed to clear pending probe member sled_id");
+        }
+
         // A new live row for the same address and parent supersedes this
         // deleted row. Its normal joined-member reconciliation owns the
         // current OPTE subscription. Use the address rather than the group ID
@@ -1757,6 +1771,21 @@ impl MulticastGroupReconciler {
         ctx: &MemberReconcileCtx<'_>,
     ) -> Result<(), anyhow::Error> {
         let MemberReconcileCtx { opctx, group, member, sled_client, .. } = ctx;
+        // Probe subscriptions are owned by the probe distributor, so there is
+        // no VMM unsubscribe to issue. Release the durable cleanup handle so
+        // the hard-delete sweep can reap the row.
+        if matches!(member.parent_ref(), MemberParentRef::Probe(_)) {
+            if let Some(sled_id) = member.sled_id {
+                self.datastore
+                    .multicast_group_member_clear_sled_id_if_current(
+                        opctx, member.id, sled_id,
+                    )
+                    .await
+                    .context("failed to clear deleted probe member sled_id")?;
+            }
+            return Ok(());
+        }
+
         // Unsubscribe from sled-agent (best-effort, VMM may be gone).
         if let Some(sled_id) = member.sled_id {
             if let Err(e) = sled_client

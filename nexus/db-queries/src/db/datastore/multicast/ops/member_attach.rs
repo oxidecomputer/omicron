@@ -202,7 +202,7 @@ impl From<AttachMemberError> for external::Error {
 /// sled_id, and performs member upsert. Returns member ID.
 ///
 /// Source IPs handling:
-/// - `None` → preserve existing source_ips on reactivation, empty for new inserts
+/// - `None` → preserve existing source_ips, empty for new inserts
 /// - `Some([])` → clear source_ips (only valid for ASM addresses as SSM requires sources)
 /// - `Some([a,b])` → set/replace with new source_ips
 ///
@@ -560,8 +560,8 @@ impl AttachMemberToGroupStatement {
             MulticastGroupMemberState::Left,
         ));
         if self.update_source_ips {
-            // A source filter rewrite modifies a live member, so it advances
-            // time_modified even though the state and sled columns hold.
+            // A source filter rewrite modifies a live member, so advance
+            // time_modified only when the stored filter actually changes.
             out.push_sql(
                 " OR multicast_group_member.source_ips IS DISTINCT FROM \
                  EXCLUDED.source_ips",
@@ -573,8 +573,9 @@ impl AttachMemberToGroupStatement {
         ));
         out.push_sql(" THEN NULL ELSE multicast_group_member.time_deleted END");
 
-        // source_ips: replace whenever the caller named a filter, regardless
-        // of the member's current state
+        // Rewrite the source filter for any live member when the caller
+        // supplied one. `None` omits this assignment and preserves the
+        // existing filter.
         if self.update_source_ips {
             out.push_sql(", source_ips = EXCLUDED.source_ips");
         }
