@@ -27,6 +27,7 @@ PACKAGES=(
 CRATES=(
   "mg-admin-client"
   "ddm-admin-client"
+  "mg-api-types"
 )
 REPO="oxidecomputer/maghemite"
 . "$SOURCE_DIR/update_helpers.sh"

@@ -38,37 +38,36 @@ impl super::Nexus {
     pub async fn bfd_status(
         &self,
         _opctx: &OpContext,
-    ) -> Result<Vec<bfd::BfdStatus>, Error> {
+    ) -> Result<networking::SwitchResults<bfd::BfdPeerStatuses>, Error> {
         // ask each rack switch about all its BFD sessions. This will need to
         // be updated for multirack.
         let mg_clients = self.mg_clients().await.map_err(|err| {
             Error::internal_error(&format!("failed to get mg clients: {err}"))
         })?;
-        let mut result = Vec::new();
-        for switch_slot in [SwitchSlot::Switch0, SwitchSlot::Switch1] {
-            // If we only have one scrimlet, we won't have an entry in
-            // `mg_clients` for one of the switch locations. Log that, but
-            // continue so we can still report status from whichever switch we
-            // do have.
-            let Some(mg_client) = mg_clients.get(&switch_slot) else {
-                warn!(
-                    self.log, "no mgd client found for switch slot";
-                    "switch-slot" => ?switch_slot,
-                );
-                continue;
-            };
-            let status = mg_client
-                .get_bfd_peers()
-                .await
-                .map_err(|e| {
-                    Error::internal_error(&format!(
-                        "maghemite get bfd peers: {e}"
-                    ))
-                })?
-                .into_inner();
-
-            for info in status.iter() {
-                result.push(bfd::BfdStatus {
+        let query = |switch_slot| {
+            let mg_clients = &mg_clients;
+            async move {
+                // If we only have one scrimlet, we won't have an entry in
+                // `mg_clients` for one of the switch locations. Log that, but
+                // continue so we can still report status from whichever switch we
+                // do have.
+                let Some(mg_client) = mg_clients.get(&switch_slot) else {
+                    warn!(
+                        self.log, "no mgd client found for switch slot";
+                        "switch-slot" => ?switch_slot,
+                    );
+                    return networking::SwitchResult::Err {
+                        error: networking::SwitchError::MgdUnresolved,
+                    };
+                };
+                match mg_client.get_bfd_peers().await {
+                    Ok(status) => networking::SwitchResult::Ok {
+                        value: bfd::BfdPeerStatuses(
+                            status
+                                .into_inner()
+                                .iter()
+                                .map(|info| {
+                                    bfd::BfdPeerStatus {
                     peer: info.config.peer,
                     state: match info.state {
                         BfdPeerState::Up => bfd::BfdState::Up,
@@ -76,7 +75,6 @@ impl super::Nexus {
                         BfdPeerState::Init => bfd::BfdState::Init,
                         BfdPeerState::AdminDown => bfd::BfdState::AdminDown,
                     },
-                    switch_slot,
                     local: Some(info.config.listen),
                     detection_threshold: info.config.detection_threshold.into(),
                     required_rx: info.config.required_rx,
@@ -88,9 +86,25 @@ impl super::Nexus {
                             BfdMode::MultiHop
                         }
                     },
-                })
+                        }
+                                })
+                                .collect(),
+                        ),
+                    },
+                    Err(err) => {
+                        error!(
+                            self.log, "failed to get BFD peers";
+                            "switch-slot" => ?switch_slot,
+                            "error" => %err,
+                        );
+                        networking::SwitchResult::Err { error: err.into() }
+                    }
+                }
             }
-        }
-        Ok(result)
+        };
+        Ok(networking::SwitchResults {
+            switch0: query(SwitchSlot::Switch0).await,
+            switch1: query(SwitchSlot::Switch1).await,
+        })
     }
 }

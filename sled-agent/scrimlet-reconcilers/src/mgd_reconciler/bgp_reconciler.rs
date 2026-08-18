@@ -26,6 +26,7 @@ use mg_api_types::bgp::history::Origin6 as MgdOrigin6;
 use mg_api_types::bgp::policy::ImportExportPolicy4 as MgdImportExportPolicy4;
 use mg_api_types::bgp::policy::ImportExportPolicy6 as MgdImportExportPolicy6;
 use mg_api_types::rib::BestpathFanoutRequest as MgdBestpathFanoutRequest;
+use omicron_common::tfport::TfportInterfaceName;
 use oxnet::IpNet;
 use oxnet::Ipv4Net;
 use oxnet::Ipv6Net;
@@ -1426,7 +1427,10 @@ impl DiffableBgpConfig {
 
             match addr {
                 RouterPeerType::Unnumbered { router_lifetime } => {
-                    let interface = format!("tfport{port_name}_0");
+                    let interface =
+                        TfportInterfaceName::from_port_name(port_name)
+                            .context("invalid port name for tfport interface")?
+                            .to_string();
                     if let Some(_prev) = unnumbered_peers.insert(
                         interface.clone(),
                         DiffableBgpUnnumberedPeerConfig {

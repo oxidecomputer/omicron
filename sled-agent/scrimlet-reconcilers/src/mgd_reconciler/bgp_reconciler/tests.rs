@@ -90,7 +90,7 @@ struct TestInput {
 
     #[strategy(
         btree_map(
-            "[0-9a-zA-Z]{0,16}",
+            "[0-9a-z]{1,16}",
             any::<(RouterLifetimeConfig, BgpPeerConfig)>()
                 .prop_map(move |(router_lifetime, mut peer)| {
                     peer.asn = #asn;

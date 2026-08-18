@@ -6,7 +6,70 @@ use crate::latest;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::SimpleIdentity;
 use oxnet::IpNet;
+use sled_agent_types_versions::v1::early_networking::SwitchSlot;
 use uuid::Uuid;
+
+impl<T> latest::networking::SwitchResult<T> {
+    pub fn into_result(self) -> Result<T, latest::networking::SwitchError> {
+        match self {
+            Self::Ok { value } => Ok(value),
+            Self::Err { error } => Err(error),
+        }
+    }
+
+    pub fn is_operational_failure(&self) -> bool {
+        matches!(
+            self,
+            Self::Err {
+                error: latest::networking::SwitchError::UpstreamUnavailable { .. }
+                    | latest::networking::SwitchError::MgdUnresolved
+                    | latest::networking::SwitchError::QueryFailed,
+            }
+        )
+    }
+}
+
+impl<T> latest::networking::SwitchResults<T> {
+    pub fn iter(
+        &self,
+    ) -> std::array::IntoIter<
+        (SwitchSlot, &latest::networking::SwitchResult<T>),
+        2,
+    > {
+        [
+            (SwitchSlot::Switch0, &self.switch0),
+            (SwitchSlot::Switch1, &self.switch1),
+        ]
+        .into_iter()
+    }
+
+    pub fn all_operational_failures(&self) -> bool {
+        self.switch0.is_operational_failure()
+            && self.switch1.is_operational_failure()
+    }
+}
+
+impl<'a, T> IntoIterator for &'a latest::networking::SwitchResults<T> {
+    type Item = (SwitchSlot, &'a latest::networking::SwitchResult<T>);
+    type IntoIter = std::array::IntoIter<Self::Item, 2>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
+
+impl<T> IntoIterator for latest::networking::SwitchResults<T> {
+    type Item = (SwitchSlot, latest::networking::SwitchResult<T>);
+    type IntoIter = std::array::IntoIter<Self::Item, 2>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        [
+            (SwitchSlot::Switch0, self.switch0),
+            (SwitchSlot::Switch1, self.switch1),
+        ]
+        .into_iter()
+    }
+}
 
 impl From<IpNet> for latest::networking::AddressLotBlockCreate {
     fn from(ipnet: IpNet) -> Self {
@@ -47,14 +110,6 @@ impl latest::networking::BgpMessageHistory {
     }
 }
 
-impl latest::networking::AggregateBgpMessageHistory {
-    pub fn new(
-        switch_histories: Vec<latest::networking::SwitchBgpHistory>,
-    ) -> Self {
-        Self { switch_histories }
-    }
-}
-
 impl latest::networking::SwitchPortSettingsCreate {
     pub fn new(identity: IdentityMetadataCreateParams) -> Self {
         Self {
@@ -75,5 +130,41 @@ impl latest::networking::SwitchPortSettingsCreate {
 impl SimpleIdentity for latest::networking::LldpNeighbor {
     fn id(&self) -> Uuid {
         self.id
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn switch_results_iterators_include_slots_in_order() {
+        use latest::networking::{SwitchResult, SwitchResults};
+
+        let results = SwitchResults {
+            switch0: SwitchResult::Ok { value: 0 },
+            switch1: SwitchResult::Ok { value: 1 },
+        };
+
+        let borrowed: Vec<_> = results
+            .iter()
+            .map(|(slot, result)| {
+                let SwitchResult::Ok { value } = result else {
+                    panic!("expected an available result");
+                };
+                (slot, *value)
+            })
+            .collect();
+        assert_eq!(
+            borrowed,
+            vec![(SwitchSlot::Switch0, 0), (SwitchSlot::Switch1, 1)]
+        );
+        assert_eq!((&results).into_iter().count(), 2);
+
+        let owned: Vec<_> = results
+            .into_iter()
+            .map(|(slot, result)| (slot, result.into_result().unwrap()))
+            .collect();
+        assert_eq!(owned, borrowed);
     }
 }

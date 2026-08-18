@@ -124,8 +124,8 @@ rustls = { version = "0.23.41" }
 schemars = { version = "0.8.22", features = ["bytes", "chrono", "semver", "url", "uuid1"] }
 scopeguard = { version = "1.2.0" }
 semver = { version = "1.0.28", features = ["serde"] }
-serde = { version = "1.0.228", features = ["alloc", "derive", "rc"] }
-serde_core = { version = "1.0.228", features = ["alloc", "rc"] }
+serde = { version = "1.0.229", features = ["alloc", "derive", "rc"] }
+serde_core = { version = "1.0.229", features = ["alloc", "rc"] }
 serde_json = { version = "1.0.151", features = ["alloc", "raw_value", "unbounded_depth"] }
 serde_with = { version = "3.21.0", features = ["hex", "schemars_0_8"] }
 sha2 = { version = "0.10.9", features = ["oid"] }
@@ -152,6 +152,7 @@ tokio-util = { version = "0.7.18", features = ["codec", "io-util", "rt", "time"]
 toml = { version = "0.7.8" }
 toml_datetime = { version = "0.6.11", default-features = false, features = ["serde"] }
 toml_edit-3c51e837cfc5589a = { package = "toml_edit", version = "0.22.27", features = ["serde"] }
+toml_edit-cdcf2f9584511fe6 = { package = "toml_edit", version = "0.19.15", features = ["serde"] }
 toml_parser = { version = "1.1.2" }
 tough = { version = "0.22.0", default-features = false, features = ["http"] }
 tracing = { version = "0.1.44", features = ["log"] }
@@ -277,8 +278,8 @@ rustls = { version = "0.23.41" }
 schemars = { version = "0.8.22", features = ["bytes", "chrono", "semver", "url", "uuid1"] }
 scopeguard = { version = "1.2.0" }
 semver = { version = "1.0.28", features = ["serde"] }
-serde = { version = "1.0.228", features = ["alloc", "derive", "rc"] }
-serde_core = { version = "1.0.228", features = ["alloc", "rc"] }
+serde = { version = "1.0.229", features = ["alloc", "derive", "rc"] }
+serde_core = { version = "1.0.229", features = ["alloc", "rc"] }
 serde_json = { version = "1.0.151", features = ["alloc", "raw_value", "unbounded_depth"] }
 serde_with = { version = "3.21.0", features = ["hex", "schemars_0_8"] }
 serde_with_macros = { version = "3.21.0", default-features = false, features = ["schemars_0_8"] }
@@ -308,6 +309,7 @@ tokio-util = { version = "0.7.18", features = ["codec", "io-util", "rt", "time"]
 toml = { version = "0.7.8" }
 toml_datetime = { version = "0.6.11", default-features = false, features = ["serde"] }
 toml_edit-3c51e837cfc5589a = { package = "toml_edit", version = "0.22.27", features = ["serde"] }
+toml_edit-cdcf2f9584511fe6 = { package = "toml_edit", version = "0.19.15", features = ["serde"] }
 toml_parser = { version = "1.1.2" }
 tough = { version = "0.22.0", default-features = false, features = ["http"] }
 tracing = { version = "0.1.44", features = ["log"] }
@@ -432,7 +434,6 @@ object = { version = "0.37.3", default-features = false, features = ["read", "st
 rustix-d585fab2519d2d1 = { package = "rustix", version = "0.38.44", features = ["fs", "stdio", "system", "termios"] }
 rustix-dff4ba8e3ae991db = { package = "rustix", version = "1.1.4", features = ["fs", "stdio", "termios"] }
 tokio-rustls = { version = "0.26.4", default-features = false, features = ["aws-lc-rs"] }
-toml_edit-cdcf2f9584511fe6 = { package = "toml_edit", version = "0.19.15", features = ["serde"] }
 winnow = { version = "1.0.3" }
 
 [target.x86_64-unknown-illumos.build-dependencies]
@@ -453,7 +454,6 @@ object = { version = "0.37.3", default-features = false, features = ["read", "st
 rustix-d585fab2519d2d1 = { package = "rustix", version = "0.38.44", features = ["fs", "stdio", "system", "termios"] }
 rustix-dff4ba8e3ae991db = { package = "rustix", version = "1.1.4", features = ["fs", "stdio", "termios"] }
 tokio-rustls = { version = "0.26.4", default-features = false, features = ["aws-lc-rs"] }
-toml_edit-cdcf2f9584511fe6 = { package = "toml_edit", version = "0.19.15", features = ["serde"] }
 winnow = { version = "1.0.3" }
 
 ### END HAKARI SECTION

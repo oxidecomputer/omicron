@@ -16,6 +16,7 @@ mod authn_http;
 mod authz;
 mod basic;
 mod bfd;
+mod bgp_unnumbered;
 mod certificates;
 mod cockroach;
 mod commands;

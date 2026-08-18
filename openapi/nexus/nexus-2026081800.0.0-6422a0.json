@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "2026081700.0.0"
+    "version": "2026081800.0.0"
   },
   "paths": {
     "/device/auth": {
@@ -10241,11 +10241,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "title": "Array_of_BfdStatus",
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/BfdStatus"
-                  }
+                  "$ref": "#/components/schemas/BfdPeerStatusesSwitchResults"
                 }
               }
             }
@@ -10614,11 +10610,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "title": "Array_of_BgpExported",
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/BgpExported"
-                  }
+                  "$ref": "#/components/schemas/BgpExportedRoutesSwitchResults"
                 }
               }
             }
@@ -10658,11 +10650,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "title": "Array_of_BgpImported",
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/BgpImported"
-                  }
+                  "$ref": "#/components/schemas/BgpImportedRoutesSwitchResults"
                 }
               }
             }
@@ -10702,7 +10690,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AggregateBgpMessageHistory"
+                  "$ref": "#/components/schemas/BgpMessageHistoriesSwitchResults"
                 }
               }
             }
@@ -10729,11 +10717,106 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "title": "Array_of_BgpPeerStatus",
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/BgpPeerStatus"
-                  }
+                  "$ref": "#/components/schemas/BgpPeerStatusesSwitchResults"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/networking/bgp-unnumbered-interfaces": {
+      "get": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "List BGP Unnumbered interfaces",
+        "operationId": "networking_bgp_unnumbered_interface_list",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnnumberedInterfacesSwitchResults"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/networking/bgp-unnumbered-interfaces/{switch_slot}/{interface_name}": {
+      "get": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "Get BGP Unnumbered interface state",
+        "operationId": "networking_bgp_unnumbered_interface_view",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "interface_name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "switch_slot",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SwitchSlot"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SwitchUnnumberedInterface"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/networking/bgp-unnumbered-manager": {
+      "get": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "Get BGP Unnumbered manager state",
+        "operationId": "networking_bgp_unnumbered_manager_status",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnnumberedManagerStateSwitchResults"
                 }
               }
             }
@@ -16223,22 +16306,6 @@
           }
         ]
       },
-      "AggregateBgpMessageHistory": {
-        "description": "BGP message history for rack switches.",
-        "type": "object",
-        "properties": {
-          "switch_histories": {
-            "description": "BGP history organized by switch.",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/SwitchBgpHistory"
-            }
-          }
-        },
-        "required": [
-          "switch_histories"
-        ]
-      },
       "Alert": {
         "description": "An alert.\n\nAlerts provide notifications about events that occurred in the system at a point in time. See the guide-level documentation on alerts for details.",
         "type": "object",
@@ -17311,6 +17378,106 @@
           "multi_hop"
         ]
       },
+      "BfdPeerStatus": {
+        "type": "object",
+        "properties": {
+          "detection_threshold": {
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
+          },
+          "local": {
+            "nullable": true,
+            "type": "string",
+            "format": "ip"
+          },
+          "mode": {
+            "$ref": "#/components/schemas/BfdMode"
+          },
+          "peer": {
+            "type": "string",
+            "format": "ip"
+          },
+          "required_rx": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "state": {
+            "$ref": "#/components/schemas/BfdState"
+          }
+        },
+        "required": [
+          "detection_threshold",
+          "mode",
+          "peer",
+          "required_rx",
+          "state"
+        ]
+      },
+      "BfdPeerStatuses": {
+        "type": "array",
+        "items": {
+          "$ref": "#/components/schemas/BfdPeerStatus"
+        }
+      },
+      "BfdPeerStatusesSwitchResult": {
+        "description": "The outcome of querying one switch.",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "ok"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/BfdPeerStatuses"
+              }
+            },
+            "required": [
+              "status",
+              "value"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "error": {
+                "$ref": "#/components/schemas/SwitchError"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "err"
+                ]
+              }
+            },
+            "required": [
+              "error",
+              "status"
+            ]
+          }
+        ]
+      },
+      "BfdPeerStatusesSwitchResults": {
+        "description": "Results of querying both switches.",
+        "type": "object",
+        "properties": {
+          "switch0": {
+            "$ref": "#/components/schemas/BfdPeerStatusesSwitchResult"
+          },
+          "switch1": {
+            "$ref": "#/components/schemas/BfdPeerStatusesSwitchResult"
+          }
+        },
+        "required": [
+          "switch0",
+          "switch1"
+        ]
+      },
       "BfdSessionDisable": {
         "description": "Information needed to disable a BFD session",
         "type": "object",
@@ -17416,47 +17583,6 @@
               "up"
             ]
           }
-        ]
-      },
-      "BfdStatus": {
-        "type": "object",
-        "properties": {
-          "detection_threshold": {
-            "type": "integer",
-            "format": "uint8",
-            "minimum": 0
-          },
-          "local": {
-            "nullable": true,
-            "type": "string",
-            "format": "ip"
-          },
-          "mode": {
-            "$ref": "#/components/schemas/BfdMode"
-          },
-          "peer": {
-            "type": "string",
-            "format": "ip"
-          },
-          "required_rx": {
-            "type": "integer",
-            "format": "uint64",
-            "minimum": 0
-          },
-          "state": {
-            "$ref": "#/components/schemas/BfdState"
-          },
-          "switch_slot": {
-            "$ref": "#/components/schemas/SwitchSlot"
-          }
-        },
-        "required": [
-          "detection_threshold",
-          "mode",
-          "peer",
-          "required_rx",
-          "state",
-          "switch_slot"
         ]
       },
       "BgpAnnounceSet": {
@@ -17742,7 +17868,7 @@
         }
       },
       "BgpExported": {
-        "description": "Route exported to a peer.",
+        "description": "A route exported to a BGP peer.",
         "type": "object",
         "properties": {
           "peer_id": {
@@ -17756,20 +17882,74 @@
                 "$ref": "#/components/schemas/IpNet"
               }
             ]
-          },
-          "switch": {
-            "description": "Switch the route is exported from.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/SwitchSlot"
-              }
-            ]
           }
         },
         "required": [
           "peer_id",
-          "prefix",
-          "switch"
+          "prefix"
+        ]
+      },
+      "BgpExportedRoutes": {
+        "type": "array",
+        "items": {
+          "$ref": "#/components/schemas/BgpExported"
+        }
+      },
+      "BgpExportedRoutesSwitchResult": {
+        "description": "The outcome of querying one switch.",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "ok"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/BgpExportedRoutes"
+              }
+            },
+            "required": [
+              "status",
+              "value"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "error": {
+                "$ref": "#/components/schemas/SwitchError"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "err"
+                ]
+              }
+            },
+            "required": [
+              "error",
+              "status"
+            ]
+          }
+        ]
+      },
+      "BgpExportedRoutesSwitchResults": {
+        "description": "Results of querying both switches.",
+        "type": "object",
+        "properties": {
+          "switch0": {
+            "$ref": "#/components/schemas/BgpExportedRoutesSwitchResult"
+          },
+          "switch1": {
+            "$ref": "#/components/schemas/BgpExportedRoutesSwitchResult"
+          }
+        },
+        "required": [
+          "switch0",
+          "switch1"
         ]
       },
       "BgpImported": {
@@ -17794,21 +17974,139 @@
                 "$ref": "#/components/schemas/IpNet"
               }
             ]
-          },
-          "switch": {
-            "description": "Switch the route is imported into.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/SwitchSlot"
-              }
-            ]
           }
         },
         "required": [
           "id",
           "nexthop",
-          "prefix",
-          "switch"
+          "prefix"
+        ]
+      },
+      "BgpImportedRoutes": {
+        "type": "array",
+        "items": {
+          "$ref": "#/components/schemas/BgpImported"
+        }
+      },
+      "BgpImportedRoutesSwitchResult": {
+        "description": "The outcome of querying one switch.",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "ok"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/BgpImportedRoutes"
+              }
+            },
+            "required": [
+              "status",
+              "value"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "error": {
+                "$ref": "#/components/schemas/SwitchError"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "err"
+                ]
+              }
+            },
+            "required": [
+              "error",
+              "status"
+            ]
+          }
+        ]
+      },
+      "BgpImportedRoutesSwitchResults": {
+        "description": "Results of querying both switches.",
+        "type": "object",
+        "properties": {
+          "switch0": {
+            "$ref": "#/components/schemas/BgpImportedRoutesSwitchResult"
+          },
+          "switch1": {
+            "$ref": "#/components/schemas/BgpImportedRoutesSwitchResult"
+          }
+        },
+        "required": [
+          "switch0",
+          "switch1"
+        ]
+      },
+      "BgpMessageHistories": {
+        "description": "BGP message history indexed by peer address.",
+        "type": "object",
+        "additionalProperties": {
+          "$ref": "#/components/schemas/BgpMessageHistory"
+        }
+      },
+      "BgpMessageHistoriesSwitchResult": {
+        "description": "The outcome of querying one switch.",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "ok"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/BgpMessageHistories"
+              }
+            },
+            "required": [
+              "status",
+              "value"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "error": {
+                "$ref": "#/components/schemas/SwitchError"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "err"
+                ]
+              }
+            },
+            "required": [
+              "error",
+              "status"
+            ]
+          }
+        ]
+      },
+      "BgpMessageHistoriesSwitchResults": {
+        "description": "Results of querying both switches.",
+        "type": "object",
+        "properties": {
+          "switch0": {
+            "$ref": "#/components/schemas/BgpMessageHistoriesSwitchResult"
+          },
+          "switch1": {
+            "$ref": "#/components/schemas/BgpMessageHistoriesSwitchResult"
+          }
+        },
+        "required": [
+          "switch0",
+          "switch1"
         ]
       },
       "BgpMessageHistory": {},
@@ -18046,7 +18344,7 @@
             "minimum": 0
           },
           "peer_id": {
-            "description": "Interface name",
+            "description": "Interface name.",
             "type": "string"
           },
           "remote_asn": {
@@ -18068,14 +18366,6 @@
             "type": "integer",
             "format": "uint64",
             "minimum": 0
-          },
-          "switch": {
-            "description": "Switch with the peer session.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/SwitchSlot"
-              }
-            ]
           }
         },
         "required": [
@@ -18084,8 +18374,70 @@
           "peer_id",
           "remote_asn",
           "state",
-          "state_duration_millis",
-          "switch"
+          "state_duration_millis"
+        ]
+      },
+      "BgpPeerStatuses": {
+        "type": "array",
+        "items": {
+          "$ref": "#/components/schemas/BgpPeerStatus"
+        }
+      },
+      "BgpPeerStatusesSwitchResult": {
+        "description": "The outcome of querying one switch.",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "ok"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/BgpPeerStatuses"
+              }
+            },
+            "required": [
+              "status",
+              "value"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "error": {
+                "$ref": "#/components/schemas/SwitchError"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "err"
+                ]
+              }
+            },
+            "required": [
+              "error",
+              "status"
+            ]
+          }
+        ]
+      },
+      "BgpPeerStatusesSwitchResults": {
+        "description": "Results of querying both switches.",
+        "type": "object",
+        "properties": {
+          "switch0": {
+            "$ref": "#/components/schemas/BgpPeerStatusesSwitchResult"
+          },
+          "switch1": {
+            "$ref": "#/components/schemas/BgpPeerStatusesSwitchResult"
+          }
+        },
+        "required": [
+          "switch0",
+          "switch1"
         ]
       },
       "BinRangedouble": {
@@ -20039,6 +20391,74 @@
           }
         ]
       },
+      "DiscoveredRouter": {
+        "description": "Information about a router discovered through router advertisements.",
+        "type": "object",
+        "properties": {
+          "address": {
+            "description": "Router IPv6 address",
+            "type": "string",
+            "format": "ipv6"
+          },
+          "effective_reachable_time": {
+            "description": "Effective reachable time governing expiry of this entry",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Duration"
+              }
+            ]
+          },
+          "reachable_time": {
+            "description": "Reachable time from RA",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Duration"
+              }
+            ]
+          },
+          "retrans_timer": {
+            "description": "Retransmit timer from RA",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Duration"
+              }
+            ]
+          },
+          "router_lifetime": {
+            "description": "Router lifetime from RA",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Duration"
+              }
+            ]
+          },
+          "time_since_discovered": {
+            "description": "Time elapsed since the router was first discovered",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Duration"
+              }
+            ]
+          },
+          "time_since_last_rx": {
+            "description": "Time elapsed since the most recent Router Advertisement was received",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Duration"
+              }
+            ]
+          }
+        },
+        "required": [
+          "address",
+          "effective_reachable_time",
+          "reachable_time",
+          "retrans_timer",
+          "router_lifetime",
+          "time_since_discovered",
+          "time_since_last_rx"
+        ]
+      },
       "Disk": {
         "description": "View of a Disk",
         "type": "object",
@@ -20657,6 +21077,25 @@
           "counts",
           "squared_mean",
           "sum_of_samples"
+        ]
+      },
+      "Duration": {
+        "type": "object",
+        "properties": {
+          "nanos": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "secs": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "nanos",
+          "secs"
         ]
       },
       "EphemeralIpCreate": {
@@ -27092,6 +27531,23 @@
           }
         ]
       },
+      "RouterDiscoveryRuntimeState": {
+        "type": "object",
+        "properties": {
+          "rx": {
+            "description": "ICMPv6 Router Advertisement receive loop is running",
+            "type": "boolean"
+          },
+          "tx": {
+            "description": "ICMPv6 Router Advertisement transmit loop is running",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "rx",
+          "tx"
+        ]
+      },
       "RouterLifetimeConfig": {
         "description": "Router lifetime in seconds for unnumbered BGP peers",
         "type": "integer",
@@ -29158,29 +29614,93 @@
           "time_modified"
         ]
       },
-      "SwitchBgpHistory": {
-        "description": "BGP message history for a particular switch.",
-        "type": "object",
-        "properties": {
-          "history": {
-            "description": "Message history indexed by peer address.",
+      "SwitchError": {
+        "description": "A normalized failure from one switch query.",
+        "oneOf": [
+          {
+            "description": "The switch authoritatively rejected the query.",
             "type": "object",
-            "additionalProperties": {
-              "$ref": "#/components/schemas/BgpMessageHistory"
-            }
-          },
-          "switch": {
-            "description": "Switch this message history is associated with.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/SwitchSlot"
+            "properties": {
+              "error_code": {
+                "nullable": true,
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "request_rejected"
+                ]
+              },
+              "upstream_request_id": {
+                "type": "string"
               }
+            },
+            "required": [
+              "message",
+              "type",
+              "upstream_request_id"
+            ]
+          },
+          {
+            "description": "The switch returned an operational error.",
+            "type": "object",
+            "properties": {
+              "error_code": {
+                "nullable": true,
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "upstream_unavailable"
+                ]
+              },
+              "upstream_request_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "message",
+              "type",
+              "upstream_request_id"
+            ]
+          },
+          {
+            "description": "Nexus could not resolve an MGD client for the switch.",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "mgd_unresolved"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "Nexus could not obtain a valid response from the switch.",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "query_failed"
+                ]
+              }
+            },
+            "required": [
+              "type"
             ]
           }
-        },
-        "required": [
-          "history",
-          "switch"
         ]
       },
       "SwitchInterfaceConfig": {
@@ -29931,6 +30451,21 @@
           }
         ]
       },
+      "SwitchUnnumberedInterface": {
+        "type": "object",
+        "properties": {
+          "interface": {
+            "$ref": "#/components/schemas/UnnumberedInterface"
+          },
+          "switch_slot": {
+            "$ref": "#/components/schemas/SwitchSlot"
+          }
+        },
+        "required": [
+          "interface",
+          "switch_slot"
+        ]
+      },
       "SystemNetworkingSettings": {
         "description": "Fleet-wide networking settings. Only fleet viewers may view these settings. Only fleet admins can modify them.",
         "type": "object",
@@ -30340,6 +30875,271 @@
               "rpm"
             ]
           }
+        ]
+      },
+      "UnnumberedInterface": {
+        "type": "object",
+        "properties": {
+          "discovered_peer": {
+            "nullable": true,
+            "description": "Information about discovered peer",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/DiscoveredRouter"
+              }
+            ]
+          },
+          "interface": {
+            "description": "Interface name (e.g. \"qsfp0\")",
+            "type": "string"
+          },
+          "local_address": {
+            "description": "IPv6 link-local address of this interface.",
+            "type": "string",
+            "format": "ipv6"
+          },
+          "ndp_state": {
+            "description": "State of rx/tx loops (None if interface not active in NDP)",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RouterDiscoveryRuntimeState"
+              }
+            ]
+          },
+          "router_lifetime": {
+            "description": "Router Lifetime advertised in ICMPv6 Router Advertisements sent on this interface.",
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "interface",
+          "local_address",
+          "ndp_state",
+          "router_lifetime"
+        ]
+      },
+      "UnnumberedInterfaceStatus": {
+        "description": "Status of an interface configured for unnumbered operation.",
+        "oneOf": [
+          {
+            "description": "Configured but not yet available on the system.",
+            "type": "object",
+            "properties": {
+              "pending": {
+                "type": "object",
+                "properties": {
+                  "router_lifetime": {
+                    "description": "Configured router lifetime (seconds)",
+                    "type": "integer",
+                    "format": "uint16",
+                    "minimum": 0
+                  }
+                },
+                "required": [
+                  "router_lifetime"
+                ]
+              }
+            },
+            "required": [
+              "pending"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "description": "Active for unnumbered operation.",
+            "type": "object",
+            "properties": {
+              "active": {
+                "type": "object",
+                "properties": {
+                  "discovered_peer": {
+                    "nullable": true,
+                    "description": "Information about the discovered peer. None if no peer has been discovered or the discovered entry has expired.",
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/DiscoveredRouter"
+                      }
+                    ]
+                  },
+                  "local_address": {
+                    "description": "Local IPv6 link-local address",
+                    "type": "string",
+                    "format": "ipv6"
+                  },
+                  "router_lifetime": {
+                    "description": "Router lifetime advertised by this router (seconds)",
+                    "type": "integer",
+                    "format": "uint16",
+                    "minimum": 0
+                  },
+                  "runtime_state": {
+                    "description": "Runtime state for router discovery on this interface",
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/RouterDiscoveryRuntimeState"
+                      }
+                    ]
+                  },
+                  "scope_id": {
+                    "description": "IPv6 scope ID (interface index)",
+                    "type": "integer",
+                    "format": "uint32",
+                    "minimum": 0
+                  }
+                },
+                "required": [
+                  "local_address",
+                  "router_lifetime",
+                  "runtime_state",
+                  "scope_id"
+                ]
+              }
+            },
+            "required": [
+              "active"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      },
+      "UnnumberedInterfaces": {
+        "type": "array",
+        "items": {
+          "$ref": "#/components/schemas/UnnumberedInterface"
+        }
+      },
+      "UnnumberedInterfacesSwitchResult": {
+        "description": "The outcome of querying one switch.",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "ok"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/UnnumberedInterfaces"
+              }
+            },
+            "required": [
+              "status",
+              "value"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "error": {
+                "$ref": "#/components/schemas/SwitchError"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "err"
+                ]
+              }
+            },
+            "required": [
+              "error",
+              "status"
+            ]
+          }
+        ]
+      },
+      "UnnumberedInterfacesSwitchResults": {
+        "description": "Results of querying both switches.",
+        "type": "object",
+        "properties": {
+          "switch0": {
+            "$ref": "#/components/schemas/UnnumberedInterfacesSwitchResult"
+          },
+          "switch1": {
+            "$ref": "#/components/schemas/UnnumberedInterfacesSwitchResult"
+          }
+        },
+        "required": [
+          "switch0",
+          "switch1"
+        ]
+      },
+      "UnnumberedManagerState": {
+        "type": "object",
+        "properties": {
+          "interfaces": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/UnnumberedInterfaceStatus"
+            }
+          },
+          "monitor_running": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "interfaces",
+          "monitor_running"
+        ]
+      },
+      "UnnumberedManagerStateSwitchResult": {
+        "description": "The outcome of querying one switch.",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "ok"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/UnnumberedManagerState"
+              }
+            },
+            "required": [
+              "status",
+              "value"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "error": {
+                "$ref": "#/components/schemas/SwitchError"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "err"
+                ]
+              }
+            },
+            "required": [
+              "error",
+              "status"
+            ]
+          }
+        ]
+      },
+      "UnnumberedManagerStateSwitchResults": {
+        "description": "Results of querying both switches.",
+        "type": "object",
+        "properties": {
+          "switch0": {
+            "$ref": "#/components/schemas/UnnumberedManagerStateSwitchResult"
+          },
+          "switch1": {
+            "$ref": "#/components/schemas/UnnumberedManagerStateSwitchResult"
+          }
+        },
+        "required": [
+          "switch0",
+          "switch1"
         ]
       },
       "UpdateStatus": {
