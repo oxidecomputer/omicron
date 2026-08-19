@@ -32,6 +32,11 @@ use tufaceous::edit::{Ed25519Key, RepositoryEditor, Root};
 use tufaceous_artifact::{Artifact, ArtifactSet, KnownArtifactTags, SpTags};
 
 use crate::integration_tests::target_release::set_target_release_for_mupdate_recovery_with_expected_status;
+use camino::Utf8Path;
+use nexus_lockstep_client::types::BlueprintTargetSet;
+use nexus_types::deployment::UnstableReconfiguratorState;
+use omicron_nexus::app::DEBUG_DROPBOX_PRODUCER_RECONFIGURATOR;
+use std::collections::BTreeSet;
 
 const TRUST_ROOTS_URL: &str = "/v1/system/update/trust-roots";
 
@@ -1052,4 +1057,150 @@ async fn test_request_without_api_version(cptestctx: &ControlPlaneTestContext) {
         NexusRequest::new(req_builder).authn_as(AuthnMode::PrivilegedUser);
     let status: update::UpdateStatus = req.execute_and_parse_unwrap().await;
     assert_eq!(status.target_release.0, None);
+}
+
+/// Tests creation of debug files by the autoplanner and blueprint APIs
+#[nexus_test]
+async fn test_debug_files(cptestctx: &ControlPlaneTestContext) {
+    let datastore = cptestctx.server.server_context().nexus.datastore();
+    let opctx =
+        OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
+    let dropbox_path = cptestctx.debug_dropbox_path();
+    let dropbox_reconfigurator_path =
+        dropbox_path.join(DEBUG_DROPBOX_PRODUCER_RECONFIGURATOR);
+    let mut dropbox = DropboxFiles::new(&dropbox_reconfigurator_path);
+
+    // Verify initial state of the dropbox.
+    let initial = dropbox.load_new();
+    assert!(initial.is_empty(), "dropbox was not initially empty");
+
+    // Fetch the initial blueprint information.
+    let target_initial = datastore
+        .blueprint_target_get_current(&opctx)
+        .await
+        .expect("initial target blueprint");
+    let bp1_id = target_initial.target_id;
+
+    // Case: creating a new blueprint via the lockstep API creates a debug file.
+    // We'll actually create two and verify both.  We'll set the target to one
+    // and use the second one in a subsequent test case.
+    let nexus_client = cptestctx.lockstep_client();
+    let bp2_id = nexus_client
+        .blueprint_regenerate()
+        .await
+        .expect("creating new blueprint")
+        .into_inner()
+        .id;
+    let bp3_id = nexus_client
+        .blueprint_regenerate()
+        .await
+        .expect("creating new blueprint")
+        .into_inner()
+        .id;
+
+    // This should have created two debug files.  Each should contain both
+    // the initial target blueprint and the new blueprint (bp2 or bp3,
+    // respectively).  In both files, the target should still be the initial one
+    // and the state should reflect no intended change to the target blueprint.
+    let files = dropbox.load_new();
+    assert_eq!(files.len(), 2);
+    assert!(files[0].blueprints.contains_key(&bp2_id));
+    assert!(files[1].blueprints.contains_key(&bp3_id));
+    for file in files {
+        assert!(file.blueprints.contains_key(&bp1_id));
+        assert_eq!(file.target_blueprint.target_id, bp1_id);
+        assert!(file.intended_target_blueprint.is_none());
+    }
+
+    // Case: making a blueprint the target creates another debug file.  (This
+    // process also creates an intent file, but removes it before we have a
+    // chance to observe it.)
+    nexus_client
+        .blueprint_target_set(&BlueprintTargetSet {
+            enabled: target_initial.enabled,
+            target_id: bp2_id,
+        })
+        .await
+        .expect("setting target bp2");
+    let files = dropbox.load_new();
+    assert_eq!(files.len(), 1);
+    let file = files.into_iter().next().expect("non-empty Vec");
+    assert!(file.blueprints.contains_key(&bp2_id));
+    assert_eq!(file.target_blueprint.target_id, bp2_id);
+    assert!(file.intended_target_blueprint.is_none());
+
+    // Case: failing to make a blueprint the target does not create any debug
+    // files (or rather, does not leave any around).  To test this, we'll create
+    // a second blueprint based on the first, try to set it as the target (which
+    // will fail), and verify that on net, no new files have been created.
+    // Ignore the file created just for having created the blueprint.
+    let error = nexus_client
+        .blueprint_target_set(&BlueprintTargetSet {
+            enabled: target_initial.enabled,
+            target_id: bp3_id,
+        })
+        .await
+        .expect_err("unexpectedly succeeded in setting target bp3");
+    // Make sure that the error involved that it was the wrong parent blueprint.
+    // Otherwise, we're simulating a different failure mode than we intend.
+    let nexus_lockstep_client::Error::ErrorResponse(error_response) = error
+    else {
+        panic!("unexpected error setting stale blueprint as target: {error:?}");
+    };
+    assert!(
+        error_response
+            .into_inner()
+            .message
+            .contains("parent blueprint is not the current target blueprint")
+    );
+
+    let files = dropbox.load_new();
+    assert!(files.is_empty());
+
+    // XXX-dap autoplanner generates one file when generating a new blueprint
+    // XXX-dap autoplanner generates no files when it does nothing
+    // XXX-dap catch the "intent" state by taking a database lock?
+    // XXX-dap load them all into reconfigurator-cli?
+    // XXX-dap test that the import path works?  if we don't already have one
+}
+
+struct DropboxFiles<'a> {
+    path: &'a Utf8Path,
+    seen: BTreeSet<String>,
+}
+
+impl<'a> DropboxFiles<'a> {
+    fn new(path: &'a Utf8Path) -> DropboxFiles<'a> {
+        DropboxFiles { path, seen: BTreeSet::new() }
+    }
+
+    fn load_new(&mut self) -> Vec<UnstableReconfiguratorState> {
+        let mut rv = Vec::new();
+
+        // Since this is a test environment, we have control over the conditions
+        // that might cause transient failures or any unexpected data to appear.
+        // That's why we assert that the world looks precisely like we expect.
+        let dirents =
+            self.path.read_dir_utf8().expect("successfully list directory");
+        for maybe_entry in dirents {
+            let entry = maybe_entry.expect("successfully traverse directory");
+
+            // Ignore anything we've seen before.
+            if self.seen.contains(entry.file_name()) {
+                continue;
+            }
+            self.seen.insert(entry.file_name().to_string());
+
+            // We don't expect to find any non-files here.
+            assert!(entry.file_type().unwrap().is_file());
+            let file_str = std::fs::read_to_string(entry.path())
+                .expect("read dropbox file");
+            let state_file: UnstableReconfiguratorState =
+                serde_json::from_str(&file_str)
+                    .expect("valid Reconfigurator state file");
+            rv.push(state_file);
+        }
+
+        rv
+    }
 }

@@ -185,6 +185,9 @@ pub const MAX_SSH_KEYS_PER_INSTANCE: u32 = 100;
 pub const CONTROL_PLANE_STORAGE_BUFFER: ByteCount =
     ByteCount::from_gibibytes_u32(250);
 
+/// Name of the Debug Dropbox producer for Reconfiguator
+pub const DEBUG_DROPBOX_PRODUCER_RECONFIGURATOR: &str = "reconfigurator";
+
 /// Manages an Oxide fleet -- the heart of the control plane
 pub struct Nexus {
     /// uuid for this nexus instance.
@@ -540,14 +543,15 @@ impl Nexus {
         let (sitrep_load_tx, sitrep_load_rx) = watch::channel(None);
 
         let debug_dropbox_reconfigurator = Arc::new(
-            debug_dropbox.initialize_producer("reconfigurator").await.map_err(
-                |message| {
+            debug_dropbox
+                .initialize_producer(DEBUG_DROPBOX_PRODUCER_RECONFIGURATOR)
+                .await
+                .map_err(|message| {
                     format!(
                         "failed to create reconfigurator dropbox \
                          producer: {message}"
                     )
-                },
-            )?,
+                })?,
         );
 
         let nexus = Nexus {
