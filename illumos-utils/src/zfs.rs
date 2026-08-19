@@ -595,10 +595,9 @@ pub struct DatasetProperties {
     pub reservation: Option<ByteCount>,
     /// The compression algorithm used for this dataset.
     ///
-    /// This probably aligns with a value from
-    /// [omicron_common::disk::CompressionAlgorithm], but is left as an untyped
-    /// string so that unexpected compression formats don't prevent inventory
-    /// from being collected.
+    /// This probably aligns with a value from [`CompressionAlgorithm`], but is
+    /// left as an untyped string so that unexpected compression formats don't
+    /// prevent inventory from being collected.
     pub compression: String,
     /// The encryption key epoch for this dataset.
     ///

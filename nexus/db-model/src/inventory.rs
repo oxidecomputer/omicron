@@ -2888,7 +2888,7 @@ impl From<sled_agent_types::inventory::ZoneKind> for ZoneType {
     }
 }
 
-/// See [`omicron_common::disk::OmicronPhysicalDiskConfig`].
+/// See [`OmicronPhysicalDiskConfig`].
 #[derive(Queryable, Clone, Debug, Selectable, Insertable)]
 #[diesel(table_name = inv_omicron_sled_config_disk)]
 pub struct InvOmicronSledConfigDisk {
@@ -2935,7 +2935,7 @@ impl From<InvOmicronSledConfigDisk> for OmicronPhysicalDiskConfig {
     }
 }
 
-/// See [`omicron_common::disk::DatasetConfig`].
+/// See [`DatasetConfig`].
 #[derive(Queryable, Clone, Debug, Selectable, Insertable)]
 #[diesel(table_name = inv_omicron_sled_config_dataset)]
 pub struct InvOmicronSledConfigDataset {
