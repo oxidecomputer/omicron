@@ -36,13 +36,7 @@ use omicron_common::address::get_sled_address;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Generation;
 use omicron_common::api::internal::shared::DatasetKind;
-use omicron_common::disk::CompressionAlgorithm;
-use omicron_common::disk::DatasetConfig;
 use omicron_common::disk::DatasetName;
-use omicron_common::disk::DiskIdentity;
-use omicron_common::disk::M2Slot;
-use omicron_common::disk::OmicronPhysicalDiskConfig;
-use omicron_common::disk::SharedDatasetConfig;
 use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::MupdateOverrideUuid;
@@ -53,6 +47,12 @@ use omicron_uuid_kinds::ZpoolUuid;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
+use sled_agent_types::disk::CompressionAlgorithm;
+use sled_agent_types::disk::DatasetConfig;
+use sled_agent_types::disk::DiskIdentity;
+use sled_agent_types::disk::M2Slot;
+use sled_agent_types::disk::OmicronPhysicalDiskConfig;
+use sled_agent_types::disk::SharedDatasetConfig;
 use sled_agent_types::system_networking::ServiceZoneNatEntries;
 use sled_agent_types::system_networking::ServiceZoneNatEntriesError;
 use sled_agent_types::system_networking::ServiceZoneNatEntry;
@@ -865,6 +865,14 @@ pub enum BlueprintExpungedZoneAccessReason {
     /// remaining with the set of configuration.
     NexusExternalConfig,
 
+    /// Sagas assigned to any expunged Nexus whose generation is older than the
+    /// current running Nexus zone are considered orphaned and marked as
+    /// abandoned.
+    ///
+    /// The planner must not prune a Nexus zone if it still has any sagas
+    /// assigned to it.
+    NexusOrphanSagaAbandonment,
+
     /// Nexus needs to whether it itself should be quiescing. If the
     /// actively-running Nexus has been expunged (but not yet shut down), it
     /// should still be able to determine this!
@@ -872,8 +880,8 @@ pub enum BlueprintExpungedZoneAccessReason {
     /// The planner does not need to account for this when pruning Nexus zones.
     NexusSelfIsQuiescing,
 
-    /// Sagas assigneed to any expunged Nexus must be reassigned to an
-    /// in-service Nexus.
+    /// Sagas assigned to any expunged Nexus must be reassigned to an in-service
+    /// Nexus.
     ///
     /// The planner must not prune a Nexus zone if it still has any sagas
     /// assigned to it.

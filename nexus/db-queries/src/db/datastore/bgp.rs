@@ -18,9 +18,8 @@ use ipnetwork::IpNetwork;
 use nexus_db_errors::OptionalError;
 use nexus_db_errors::{ErrorHandler, public_error_from_diesel};
 use nexus_db_model::{
-    BgpPeerView, DbSwitchSlot, RouterPeerTypeDbRepresentation,
-    SwitchPortBgpPeerConfigAllowExport, SwitchPortBgpPeerConfigAllowImport,
-    SwitchPortBgpPeerConfigCommunity,
+    RouterPeerTypeDbRepresentation, SwitchPortBgpPeerConfigAllowExport,
+    SwitchPortBgpPeerConfigAllowImport, SwitchPortBgpPeerConfigCommunity,
 };
 use nexus_types::external_api::networking;
 use nexus_types::identity::Resource;
@@ -33,7 +32,6 @@ use omicron_common::api::external::{
 use omicron_uuid_kinds::{BgpConfigUuid, GenericUuid};
 use ref_cast::RefCast;
 use sled_agent_types::early_networking::RouterPeerType;
-use sled_agent_types::early_networking::SwitchSlot;
 use uuid::Uuid;
 
 impl DataStore {
@@ -781,30 +779,6 @@ impl DataStore {
             })
     }
 
-    pub async fn bgp_peer_configs(
-        &self,
-        opctx: &OpContext,
-        switch: SwitchSlot,
-        port: String,
-    ) -> ListResultVec<BgpPeerView> {
-        use nexus_db_schema::schema::bgp_peer_view::dsl;
-
-        let switch = DbSwitchSlot::from(switch);
-        let results = dsl::bgp_peer_view
-            .filter(dsl::switch_slot.eq(switch))
-            .filter(dsl::port_name.eq(port))
-            .select(BgpPeerView::as_select())
-            .load_async(&*self.pool_connection_authorized(opctx).await?)
-            .await
-            .map_err(|e| {
-                let msg = "bgp_peer_configs failed";
-                error!(opctx.log, "{msg}"; "error" => ?e);
-                public_error_from_diesel(e, ErrorHandler::Server)
-            })?;
-
-        Ok(results)
-    }
-
     /// Look up communities for a BGP peer.
     pub async fn communities_for_peer(
         &self,
@@ -1028,7 +1002,9 @@ mod tests {
     use oxnet::IpNet;
     use sled_agent_types::early_networking::ImportExportPolicy;
     use sled_agent_types::early_networking::MaxPathConfig;
+    use sled_agent_types::early_networking::NumberedRouter;
     use sled_agent_types::early_networking::RouterLifetimeConfig;
+    use sled_agent_types::early_networking::UnnumberedRouter;
     use std::net::IpAddr;
 
     /// A `BgpConfigCreate` for a test config named `name` that references
@@ -1359,11 +1335,14 @@ mod tests {
         let iface_db: nexus_db_model::Name = iface_ext.clone().into();
 
         // Set up peer types: one numbered, one unnumbered.
-        let numbered =
-            RouterPeerType::Numbered { ip: "192.168.1.1".parse().unwrap() };
-        let unnumbered = RouterPeerType::Unnumbered {
+        let numbered: RouterPeerType =
+            NumberedRouter::new("192.168.1.1".parse().unwrap(), None)
+                .unwrap()
+                .into();
+        let unnumbered: RouterPeerType = UnnumberedRouter {
             router_lifetime: RouterLifetimeConfig::default(),
-        };
+        }
+        .into();
 
         let rows = [
             // insert communities 100, 200 for the numbered peer
@@ -1431,8 +1410,10 @@ mod tests {
 
         // A different numbered IP returns nothing.
         let other_ip: IpAddr = "10.0.0.1".parse().unwrap();
-        let other =
-            RouterPeerType::Numbered { ip: other_ip.try_into().unwrap() };
+        let other: RouterPeerType =
+            NumberedRouter::new(other_ip.try_into().unwrap(), None)
+                .unwrap()
+                .into();
         let empty = datastore
             .communities_for_peer(&opctx, port_settings_id, &iface_ext, other)
             .await
@@ -1494,12 +1475,17 @@ mod tests {
         // Set up peer types: two numbered (one with imports, one without), one
         // unnumbered.
         let numbered =
-            RouterPeerType::Numbered { ip: "192.168.1.1".parse().unwrap() };
+            NumberedRouter::new("192.168.1.1".parse().unwrap(), None)
+                .unwrap()
+                .into();
         let numbered_no_filtering =
-            RouterPeerType::Numbered { ip: "192.168.1.2".parse().unwrap() };
-        let unnumbered = RouterPeerType::Unnumbered {
+            NumberedRouter::new("192.168.1.2".parse().unwrap(), None)
+                .unwrap()
+                .into();
+        let unnumbered = UnnumberedRouter {
             router_lifetime: RouterLifetimeConfig::default(),
-        };
+        }
+        .into();
 
         let expected_numbered_prefixes: Vec<IpNet> = vec![
             "192.168.1.0/24".parse().unwrap(),
@@ -1650,13 +1636,18 @@ mod tests {
 
         // Set up peer types: two numbered (one with exports, one without), one
         // unnumbered.
-        let numbered =
-            RouterPeerType::Numbered { ip: "192.168.1.1".parse().unwrap() };
-        let numbered_no_filtering =
-            RouterPeerType::Numbered { ip: "192.168.1.2".parse().unwrap() };
-        let unnumbered = RouterPeerType::Unnumbered {
+        let numbered: RouterPeerType =
+            NumberedRouter::new("192.168.1.1".parse().unwrap(), None)
+                .unwrap()
+                .into();
+        let numbered_no_filtering: RouterPeerType =
+            NumberedRouter::new("192.168.1.2".parse().unwrap(), None)
+                .unwrap()
+                .into();
+        let unnumbered: RouterPeerType = UnnumberedRouter {
             router_lifetime: RouterLifetimeConfig::default(),
-        };
+        }
+        .into();
 
         let expected_numbered_prefixes: Vec<IpNet> = vec![
             "192.168.1.0/24".parse().unwrap(),

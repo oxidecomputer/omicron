@@ -45,10 +45,17 @@ pub mod diagnostics {
 }
 
 pub mod disk {
+    pub use crate::v1::disk::CompressionAlgorithm;
+    pub use crate::v1::disk::DatasetConfig;
     pub use crate::v1::disk::DiskEnsureBody;
+    pub use crate::v1::disk::DiskIdentity;
     pub use crate::v1::disk::DiskPathParam;
     pub use crate::v1::disk::DiskStateRequested;
-    pub use crate::v1::disk::DiskType;
+    pub use crate::v1::disk::DiskVariant;
+    pub use crate::v1::disk::GzipLevel;
+    pub use crate::v1::disk::M2Slot;
+    pub use crate::v1::disk::OmicronPhysicalDiskConfig;
+    pub use crate::v1::disk::SharedDatasetConfig;
     pub use crate::v1::disk::Zpool;
 }
 
@@ -72,20 +79,23 @@ pub mod early_networking {
     pub use crate::v20::early_networking::RouterLifetimeConfig;
     pub use crate::v20::early_networking::RouterLifetimeConfigError;
 
-    pub use crate::v30::early_networking::BgpPeerConfig;
     pub use crate::v30::early_networking::InvalidIpAddrError;
-    pub use crate::v30::early_networking::PortConfig;
     pub use crate::v30::early_networking::RouterPeerIpAddr;
     pub use crate::v30::early_networking::RouterPeerIpAddrError;
-    pub use crate::v30::early_networking::RouterPeerType;
     pub use crate::v30::early_networking::UplinkAddress;
     pub use crate::v30::early_networking::UplinkAddressConfig;
     pub use crate::v30::early_networking::UplinkIpNet;
     pub use crate::v30::early_networking::UplinkIpNetError;
 
-    pub use crate::v42::early_networking::EmptyUplinkPortsError;
-    pub use crate::v42::early_networking::RackNetworkConfig;
-    pub use crate::v42::early_networking::UplinkPorts;
+    pub use crate::v47::early_networking::AddressFamilyMismatchError;
+    pub use crate::v47::early_networking::BgpPeerConfig;
+    pub use crate::v47::early_networking::EmptyUplinkPortsError;
+    pub use crate::v47::early_networking::NumberedRouter;
+    pub use crate::v47::early_networking::PortConfig;
+    pub use crate::v47::early_networking::RackNetworkConfig;
+    pub use crate::v47::early_networking::RouterPeerType;
+    pub use crate::v47::early_networking::UnnumberedRouter;
+    pub use crate::v47::early_networking::UplinkPorts;
 }
 
 pub mod firewall_rules {
@@ -254,8 +264,8 @@ pub mod system_networking {
 
     pub use crate::v39::system_networking::BlueprintExternalNetworkingConfig;
 
-    pub use crate::v42::system_networking::SystemNetworkingConfig;
-    pub use crate::v42::system_networking::WriteNetworkConfigRequest;
+    pub use crate::v47::system_networking::SystemNetworkingConfig;
+    pub use crate::v47::system_networking::WriteNetworkConfigRequest;
 }
 
 pub mod trust_quorum {
