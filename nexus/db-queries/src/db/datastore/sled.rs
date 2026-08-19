@@ -66,6 +66,9 @@ use omicron_uuid_kinds::RackKind;
 use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
+use rand::SeedableRng;
+use rand::rngs::StdRng;
+use rand::seq::IndexedRandom;
 use sled_hardware_types::BaseboardId;
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
@@ -392,9 +395,9 @@ enum LocalStorageUnsatisfiable {
     )]
     NotEnoughPools { requests: usize, pools: usize },
 
-    /// After pairing the Nth largest request with the pool having the Nth
-    /// largest headroom, this pair did not fit. No assignment of these
-    /// requests to these pools exists.
+    /// No unused pool fits this request. Requests are placed largest first,
+    /// so when even the roomiest remaining pool (reported here) does not fit
+    /// the request, no assignment of these requests to these pools exists.
     #[error(
         "disk {disk_id} requires {required_dataset_size} bytes, \
          but pool {pool_id} only has {headroom} bytes of headroom"
@@ -410,28 +413,32 @@ enum LocalStorageUnsatisfiable {
 /// Pair each local storage request with a distinct pool, or return an error
 /// if that isn't possible.
 ///
-/// Sort the requests by size, sort the pools by headroom, pair them up
-/// largest-to-largest, and check that every request fits its pool. This
-/// either produces a valid pairing or proves that none exists:
+/// Place the requests largest-first, each on a pool chosen uniformly at
+/// random from the unused pools that fit it. This either produces a valid
+/// pairing or proves that none exists:
 ///
-/// - If the biggest request doesn't fit in the roomiest pool, no pool can
-///   hold it.
+/// - A pool fits a request iff the request is strictly smaller than the
+///   pool's free space, so any pool that fits a request also fits every
+///   smaller request.
 ///
-/// - If it does fit, placing it there gives nothing up: any other pool big
-///   enough for the biggest request is also big enough for whichever
-///   smaller request would have used that pool instead.
+/// - Placing the largest remaining request on any pool that fits it therefore
+///   does not inhibit subsequent requests. If a valid pairing uses that pool for
+///   a different (necessarily smaller) subsequent request, that request can
+///   instead use whichever pool the larger one would have taken.
 ///
-/// - The same reasoning applies at each step down the two sorted lists.
+/// - Applying that argument at each step down the sorted list means no
+///   backtracking is needed. If some request has no fitting pool left, no
+///   assignment of these requests to these pools exists at all.
 ///
 /// A caller seeing an error can conclude that these requests cannot fit on
 /// this sled at all, rather than needing to try other arrangements.
 ///
-/// Ties are broken by disk id and pool id, so for a given set of requests
-/// and pools the output is deterministic. Only the freshly generated
-/// allocation ids differ between calls.
+/// For a given rng state and inputs the output is deterministic; tests rely
+/// on this by passing a seeded rng.
 fn pair_local_storage_requests_to_pools(
     mut requests: Vec<LocalStorageRequest>,
     mut pools: Vec<LocalStorageCandidatePool>,
+    rng: &mut StdRng,
 ) -> Result<NonEmpty<LocalStorageAllocation>, LocalStorageUnsatisfiable> {
     if requests.is_empty() {
         return Err(LocalStorageUnsatisfiable::NoAllocationsRequired);
@@ -451,23 +458,31 @@ fn pair_local_storage_requests_to_pools(
             .then(a.disk_id.cmp(&b.disk_id))
     });
 
-    pools.sort_by(|a, b| {
-        b.headroom.cmp(&a.headroom).then(a.pool_id.cmp(&b.pool_id))
-    });
-
     let mut allocations = Vec::with_capacity(requests.len());
 
-    for (request, pool) in requests.iter().zip(pools.iter()) {
-        // Both lists are sorted largest-first, so if this pair does not fit,
-        // no other assignment of these requests to these pools fits either.
-        if request.required_dataset_size >= pool.headroom {
+    for request in &requests {
+        let fitting: Vec<usize> = (0..pools.len())
+            .filter(|&i| request.required_dataset_size < pools[i].headroom)
+            .collect();
+
+        let Some(&choice) = fitting.choose(rng) else {
+            // Requests are placed largest-first, so if not even the roomiest
+            // remaining pool fits this request, no assignment of these
+            // requests to these pools fits either.
+            let roomiest = pools
+                .iter()
+                .max_by_key(|pool| pool.headroom)
+                .expect("more pools than remaining requests");
+
             return Err(LocalStorageUnsatisfiable::RequestDoesNotFit {
                 disk_id: request.disk_id,
                 required_dataset_size: request.required_dataset_size,
-                pool_id: pool.pool_id,
-                headroom: pool.headroom,
+                pool_id: roomiest.pool_id,
+                headroom: roomiest.headroom,
             });
-        }
+        };
+
+        let pool = pools.swap_remove(choice);
 
         allocations.push(LocalStorageAllocation {
             disk_id: request.disk_id,
@@ -505,6 +520,7 @@ fn pair_local_storage_requests_to_pools(
 fn choose_local_storage_allocations(
     zpools_for_sled: &IdOrdMap<ZpoolGetForSledReservationResult>,
     local_storage_disks: &[LocalStorageDisk],
+    rng: &mut StdRng,
 ) -> Result<NonEmpty<LocalStorageAllocation>, LocalStorageUnsatisfiable> {
     // Each disk either still needs an allocation, or already has one whose
     // pool (encrypted or unencrypted) is not eligible for further
@@ -541,7 +557,7 @@ fn choose_local_storage_allocations(
         })
         .collect();
 
-    pair_local_storage_requests_to_pools(requests, pools)
+    pair_local_storage_requests_to_pools(requests, pools, rng)
 }
 
 /// Return true if any local storage disk still requiring an allocation has
@@ -614,6 +630,10 @@ mod local_storage_pairing_test {
         }
     }
 
+    fn test_rng() -> StdRng {
+        StdRng::seed_from_u64(0)
+    }
+
     /// An allocation fits only if it is strictly smaller than the pool's
     /// headroom, matching the comparison in `sled_insert_resource_query`.
     #[test]
@@ -621,6 +641,7 @@ mod local_storage_pairing_test {
         let err = pair_local_storage_requests_to_pools(
             vec![request(1, 100)],
             vec![pool(1, 100)],
+            &mut test_rng(),
         )
         .unwrap_err();
 
@@ -632,31 +653,83 @@ mod local_storage_pairing_test {
         pair_local_storage_requests_to_pools(
             vec![request(1, 99)],
             vec![pool(1, 100)],
+            &mut test_rng(),
         )
         .unwrap();
     }
 
+    /// If our selection of local disk allocation always picked "the pool
+    /// with the most free space first", this workload of allocations
+    /// would reliably fail.
+    ///
+    /// Instead, our allocation pattern identifies all pools where a the
+    /// largest disk request COULD fit, and then randomly picks from
+    /// those options. This does make the selection non-deterministic
+    /// (hence our supplied RNG).
+    ///
+    /// However, for the sake of a test, we're trying to validate
+    /// that this works "well enough" - we use hard-coded RNGs for determinism,
+    /// and then validate that "an overwhelming majority" pass.
     #[test]
-    fn heterogeneous_sizes_spread_over_pools() {
-        let allocations = pair_local_storage_requests_to_pools(
-            vec![request(1, 100), request(2, 900), request(3, 500)],
-            vec![pool(1, 200), pool(2, 1000), pool(3, 600)],
-        )
-        .unwrap();
+    fn descending_workload_across_seeds() {
+        // 774 GiB of headroom, in MiB.
+        const POOL_HEADROOM: i64 = 774 * 1024;
 
-        // Largest request lands on the pool with the most headroom.
-        let pairs: Vec<(i64, ZpoolUuid)> = allocations
-            .iter()
-            .map(|a| (a.required_dataset_size, a.pool_id))
-            .collect();
+        // Disk sizes in GiB. Local storage charges 70 MiB of dataset
+        // overhead per GiB, so each request costs 1094 MiB per GiB.
+        const DISK_GB: [i64; 7] = [388, 195, 98, 50, 26, 14, 8];
 
-        assert_eq!(
-            pairs,
-            vec![
-                (900, ZpoolUuid::from_untyped_uuid(Uuid::from_u128(2))),
-                (500, ZpoolUuid::from_untyped_uuid(Uuid::from_u128(3))),
-                (100, ZpoolUuid::from_untyped_uuid(Uuid::from_u128(1))),
-            ],
+        let mut succeeded = 0;
+
+        for seed in 0..100u64 {
+            let mut rng = StdRng::seed_from_u64(seed);
+            let mut headrooms = [POOL_HEADROOM; 10];
+
+            let all_rounds_placed = (0..7).all(|_| {
+                let requests: Vec<LocalStorageRequest> = DISK_GB
+                    .iter()
+                    .enumerate()
+                    .map(|(i, gb)| request(i as u128 + 1, gb * 1094))
+                    .collect();
+
+                let pools: Vec<LocalStorageCandidatePool> = headrooms
+                    .iter()
+                    .enumerate()
+                    .map(|(i, headroom)| pool(i as u128 + 1, *headroom))
+                    .collect();
+
+                match pair_local_storage_requests_to_pools(
+                    requests, pools, &mut rng,
+                ) {
+                    Ok(allocations) => {
+                        for allocation in &allocations {
+                            let i = usize::try_from(
+                                allocation
+                                    .pool_id
+                                    .into_untyped_uuid()
+                                    .as_u128()
+                                    - 1,
+                            )
+                            .unwrap();
+                            headrooms[i] -= allocation.required_dataset_size;
+                        }
+                        true
+                    }
+                    Err(_) => false,
+                }
+            });
+
+            if all_rounds_placed {
+                succeeded += 1;
+            }
+        }
+
+        // The exact count depends on the rng draw pattern, so leave slack;
+        // anything far from 100 means placement is systematically stranding
+        // space. (At the time of writing, 99 of the 100 seeds succeed.)
+        assert!(
+            succeeded >= 90,
+            "only {succeeded}/100 seeds placed the workload"
         );
     }
 
@@ -667,6 +740,7 @@ mod local_storage_pairing_test {
         let err = pair_local_storage_requests_to_pools(
             vec![request(1, 500), request(2, 500)],
             vec![pool(1, 1200), pool(2, 300)],
+            &mut test_rng(),
         )
         .unwrap_err();
 
@@ -681,6 +755,7 @@ mod local_storage_pairing_test {
         let err = pair_local_storage_requests_to_pools(
             vec![request(1, 1), request(2, 1), request(3, 1)],
             vec![pool(1, 100), pool(2, 100)],
+            &mut test_rng(),
         )
         .unwrap_err();
 
@@ -689,9 +764,12 @@ mod local_storage_pairing_test {
             LocalStorageUnsatisfiable::NotEnoughPools { requests: 3, pools: 2 }
         ));
 
-        let err =
-            pair_local_storage_requests_to_pools(vec![request(1, 1)], vec![])
-                .unwrap_err();
+        let err = pair_local_storage_requests_to_pools(
+            vec![request(1, 1)],
+            vec![],
+            &mut test_rng(),
+        )
+        .unwrap_err();
 
         assert!(matches!(
             err,
@@ -701,46 +779,17 @@ mod local_storage_pairing_test {
 
     #[test]
     fn no_requests() {
-        let err =
-            pair_local_storage_requests_to_pools(vec![], vec![pool(1, 100)])
-                .unwrap_err();
+        let err = pair_local_storage_requests_to_pools(
+            vec![],
+            vec![pool(1, 100)],
+            &mut test_rng(),
+        )
+        .unwrap_err();
 
         assert!(matches!(
             err,
             LocalStorageUnsatisfiable::NoAllocationsRequired
         ));
-    }
-
-    /// Equal sizes and equal headrooms pair deterministically: ascending
-    /// disk id onto ascending pool id.
-    #[test]
-    fn ties_are_deterministic() {
-        let allocations = pair_local_storage_requests_to_pools(
-            vec![request(3, 100), request(1, 100), request(2, 100)],
-            vec![pool(2, 500), pool(3, 500), pool(1, 500)],
-        )
-        .unwrap();
-
-        let pairs: Vec<(DiskUuid, ZpoolUuid)> =
-            allocations.iter().map(|a| (a.disk_id, a.pool_id)).collect();
-
-        assert_eq!(
-            pairs,
-            vec![
-                (
-                    DiskUuid::from_untyped_uuid(Uuid::from_u128(1)),
-                    ZpoolUuid::from_untyped_uuid(Uuid::from_u128(1))
-                ),
-                (
-                    DiskUuid::from_untyped_uuid(Uuid::from_u128(2)),
-                    ZpoolUuid::from_untyped_uuid(Uuid::from_u128(2))
-                ),
-                (
-                    DiskUuid::from_untyped_uuid(Uuid::from_u128(3)),
-                    ZpoolUuid::from_untyped_uuid(Uuid::from_u128(3))
-                ),
-            ],
-        );
     }
 
     fn local_storage_disk(disk_id: Uuid) -> LocalStorageDisk {
@@ -820,6 +869,7 @@ mod local_storage_pairing_test {
         let allocations = choose_local_storage_allocations(
             &zpools_for_sled,
             &[allocated_disk, unallocated_disk],
+            &mut test_rng(),
         )
         .unwrap();
 
@@ -864,6 +914,7 @@ mod local_storage_pairing_test {
         fn greedy_matches_brute_force(
             request_sizes in proptest::collection::vec(0..16i64, 1..=6),
             pool_headrooms in proptest::collection::vec(0..16i64, 0..=8),
+            seed in proptest::prelude::any::<u64>(),
         ) {
             let requests: Vec<LocalStorageRequest> = request_sizes
                 .iter()
@@ -881,7 +932,11 @@ mod local_storage_pairing_test {
             let expect_feasible = pool_headrooms.len() >= request_sizes.len()
                 && matching_exists(&request_sizes, &pool_headrooms, &mut used);
 
-            match pair_local_storage_requests_to_pools(requests, pools) {
+            match pair_local_storage_requests_to_pools(
+                requests,
+                pools,
+                &mut StdRng::seed_from_u64(seed),
+            ) {
                 Ok(allocations) => {
                     prop_assert!(expect_feasible);
 
@@ -1141,6 +1196,7 @@ impl DataStore {
             resources,
             constraints,
             reservation_reason,
+            &mut StdRng::from_os_rng(),
         )
         .await
         .map_err(|e| match e {
@@ -1152,6 +1208,7 @@ impl DataStore {
         })
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn sled_reservation_create_inner(
         &self,
         opctx: &OpContext,
@@ -1160,6 +1217,7 @@ impl DataStore {
         resources: db::model::Resources,
         constraints: db::model::SledReservationConstraints,
         reservation_reason: SledReservationReason,
+        rng: &mut StdRng,
     ) -> Result<db::model::SledResourceVmm, SledReservationTransactionError>
     {
         let log = opctx.log.new(o!(
@@ -1599,6 +1657,7 @@ impl DataStore {
                     let allocations = match choose_local_storage_allocations(
                         &zpools_for_sled,
                         &local_storage_disks,
+                        rng,
                     ) {
                         Ok(allocations) => allocations,
 
@@ -2925,6 +2984,7 @@ pub(in crate::db::datastore) mod test {
                 instance.resources.clone(),
                 constraints.build(),
                 SledReservationReason::Start,
+                &mut StdRng::from_os_rng(),
             )
             .await?;
 
@@ -6441,6 +6501,7 @@ pub(in crate::db::datastore) mod test {
                             instance.resources(),
                             db::model::SledReservationConstraints::none(),
                             SledReservationReason::Start,
+                            &mut StdRng::from_os_rng(),
                         )
                         .await
                         .unwrap()
@@ -6582,6 +6643,7 @@ pub(in crate::db::datastore) mod test {
                                     db::model::SledReservationConstraints::none(
                                     ),
                                     SledReservationReason::Start,
+                                    &mut StdRng::from_os_rng(),
                                 )
                                 .await
                         }
@@ -6766,6 +6828,7 @@ pub(in crate::db::datastore) mod test {
                             instance.resources(),
                             db::model::SledReservationConstraints::none(),
                             SledReservationReason::Start,
+                            &mut StdRng::from_os_rng(),
                         )
                         .await
                         .unwrap()
@@ -7769,6 +7832,7 @@ pub(in crate::db::datastore) mod test {
                 instance.resources(),
                 db::model::SledReservationConstraints::none(),
                 SledReservationReason::Start,
+                &mut StdRng::from_os_rng(),
             )
             .await;
 
@@ -7880,6 +7944,7 @@ pub(in crate::db::datastore) mod test {
                 instance.resources(),
                 db::model::SledReservationConstraints::none(),
                 SledReservationReason::Start,
+                &mut StdRng::from_os_rng(),
             )
             .await;
 
@@ -7987,6 +8052,7 @@ pub(in crate::db::datastore) mod test {
                 instance.resources(),
                 db::model::SledReservationConstraints::none(),
                 SledReservationReason::Start,
+                &mut StdRng::from_os_rng(),
             )
             .await;
 
@@ -8099,6 +8165,7 @@ pub(in crate::db::datastore) mod test {
                 instance.resources(),
                 db::model::SledReservationConstraints::none(),
                 SledReservationReason::Start,
+                &mut StdRng::from_os_rng(),
             )
             .await;
 
@@ -8214,6 +8281,7 @@ pub(in crate::db::datastore) mod test {
                 instance.resources(),
                 db::model::SledReservationConstraints::none(),
                 SledReservationReason::Start,
+                &mut StdRng::from_os_rng(),
             )
             .await
             .unwrap();
@@ -8321,6 +8389,7 @@ pub(in crate::db::datastore) mod test {
                 instance.resources(),
                 db::model::SledReservationConstraints::none(),
                 SledReservationReason::Start,
+                &mut StdRng::from_os_rng(),
             )
             .await
             .unwrap();
@@ -8429,6 +8498,7 @@ pub(in crate::db::datastore) mod test {
                 instance.resources(),
                 db::model::SledReservationConstraints::none(),
                 SledReservationReason::Start,
+                &mut StdRng::from_os_rng(),
             )
             .await
             .unwrap();
@@ -8556,6 +8626,7 @@ pub(in crate::db::datastore) mod test {
             choose_local_storage_allocations(
                 &zpools_for_sled,
                 &local_storage_disks,
+                &mut StdRng::from_os_rng(),
             )
             .unwrap()
         };
@@ -8765,6 +8836,7 @@ pub(in crate::db::datastore) mod test {
             choose_local_storage_allocations(
                 &zpools_for_sled,
                 &local_storage_disks,
+                &mut StdRng::from_os_rng(),
             )
             .unwrap()
         };
@@ -8884,8 +8956,9 @@ pub(in crate::db::datastore) mod test {
         let conn = datastore.pool_connection_for_tests().await.unwrap();
 
         // Compute an assignment for the second instance's disk. The chooser
-        // is deterministic, so this picks the same pool the first instance's
-        // reservation is about to consume.
+        // is deterministic for a given rng seed, and the first instance's
+        // reservation below runs against an identical snapshot with the same
+        // seed, so both pick the same pool.
 
         let instance_two =
             Instance::from_local_storage_test_instance(&config.instances[1]);
@@ -8923,12 +8996,13 @@ pub(in crate::db::datastore) mod test {
             choose_local_storage_allocations(
                 &zpools_for_sled,
                 &instance_two_disks,
+                &mut StdRng::seed_from_u64(0),
             )
             .unwrap()
         };
 
-        // Reserve the first instance; this consumes the pool the stale
-        // assignment chose.
+        // Reserve the first instance with the same seed; this consumes the
+        // pool the stale assignment chose.
 
         {
             let instance = Instance::from_local_storage_test_instance(
@@ -8936,13 +9010,14 @@ pub(in crate::db::datastore) mod test {
             );
 
             datastore
-                .sled_reservation_create(
+                .sled_reservation_create_inner(
                     &opctx,
                     instance.id,
                     PropolisUuid::new_v4(),
                     instance.resources(),
                     db::model::SledReservationConstraints::none(),
                     SledReservationReason::Start,
+                    &mut StdRng::seed_from_u64(0),
                 )
                 .await
                 .unwrap();
@@ -9106,6 +9181,114 @@ pub(in crate::db::datastore) mod test {
         };
 
         assert_eq!(allocation_records.len(), 0);
+
+        validate_local_storage_allocations(&datastore).await;
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    /// Reserve seven instances one at a time, each with seven local storage
+    /// disks sized in descending halves of a pool's usable space. The disks
+    /// fit in aggregate, but whether each reservation succeeds depends on the
+    /// placement choices made for the reservations before it: a pool must
+    /// survive with room for the largest disk.
+    ///
+    /// A placement rule that always picks the roomiest fitting pool levels
+    /// every pool down together and fails this workload at the seventh
+    /// instance, for every rng seed. Random placement succeeds for nearly
+    /// every seed; this test pins one such seed, along with fixed zpool ids
+    /// so the seed selects the same pools on every run.
+    #[tokio::test]
+    async fn local_storage_allocation_descending_serial() {
+        let logctx =
+            dev::test_setup_log("local_storage_allocation_descending_serial");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let mut rng = StdRng::seed_from_u64(0);
+
+        // Each disk is sized just over half of what remains of a pool's 774
+        // GiB of usable space after the disks larger than it.
+        let disk_gb: Vec<u32> = vec![388, 195, 98, 50, 26, 14, 8];
+
+        let config = LocalStorageTest {
+            // One sled, with ten U2
+            sleds: vec![LocalStorageTestSled {
+                sled_id: SledUuid::new_v4(),
+                sled_serial: String::from("sled_0"),
+                u2s: (0..10)
+                    .map(|i| LocalStorageTestSledU2 {
+                        physical_disk_id: PhysicalDiskUuid::new_v4(),
+                        physical_disk_serial: format!("phys{i}"),
+
+                        zpool_id: ZpoolUuid::from_untyped_uuid(
+                            Uuid::from_u128(0x51ed_2001 + i),
+                        ),
+                        control_plane_storage_buffer:
+                            external::ByteCount::from_gibibytes_u32(250),
+
+                        inventory_total_size:
+                            external::ByteCount::from_gibibytes_u32(1024),
+
+                        crucible_dataset_id: DatasetUuid::new_v4(),
+                        crucible_dataset_addr: format!(
+                            "[fd00:1122:3344:10{i}::1]:12345"
+                        )
+                        .parse()
+                        .unwrap(),
+
+                        local_storage_unencrypted_dataset_id:
+                            DatasetUuid::new_v4(),
+                    })
+                    .collect(),
+            }],
+            affinity_groups: vec![],
+            anti_affinity_groups: vec![],
+            // 7 instances, each with 7 disks
+            instances: (0..7)
+                .map(|i| LocalStorageTestInstance {
+                    id: InstanceUuid::new_v4(),
+                    name: format!("local{i}"),
+                    affinity: None,
+                    ncpus: 2,
+                    memory: external::ByteCount::from_gibibytes_u32(2),
+                    disks: (0..7)
+                        .map(|j| LocalStorageTestInstanceDisk {
+                            id: Uuid::new_v4(),
+                            name: external::Name::try_from(format!(
+                                "local{i}-{j}"
+                            ))
+                            .unwrap(),
+                            size: external::ByteCount::from_gibibytes_u32(
+                                disk_gb[j],
+                            ),
+                        })
+                        .collect(),
+                })
+                .collect(),
+        };
+
+        setup_local_storage_allocation_test(&opctx, datastore, &config).await;
+
+        // All reservations should succeed, issued one at a time.
+        for config_instance in &config.instances {
+            let instance =
+                Instance::from_local_storage_test_instance(config_instance);
+
+            datastore
+                .sled_reservation_create_inner(
+                    &opctx,
+                    instance.id,
+                    PropolisUuid::new_v4(),
+                    instance.resources(),
+                    db::model::SledReservationConstraints::none(),
+                    SledReservationReason::Start,
+                    &mut rng,
+                )
+                .await
+                .unwrap();
+        }
 
         validate_local_storage_allocations(&datastore).await;
 
