@@ -259,6 +259,12 @@ impl MulticastFilterMap {
         true
     }
 
+    /// Report whether a filter socket is already held for `addr`, which
+    /// means every configured NIC joined successfully on a prior call.
+    fn is_joined(&self, addr: &Ipv6Addr) -> bool {
+        self.sockets.lock().unwrap().contains_key(addr)
+    }
+
     /// Drop the UDP socket for an underlay multicast address, removing the
     /// NIC MAC filter entries with it.
     fn leave(&self, log: &Logger, addr: Ipv6Addr) {
@@ -583,15 +589,17 @@ impl PortManager {
 
         let mgr = Self { inner };
 
-        // Rehydrate MAC filter sockets for any M2P mappings that
+        // Re-open MAC filter sockets for any M2P mappings that
         // survived in the xde kernel module across a sled-agent
         // restart. Without this, the NIC's multicast MAC filters
         // are lost when the old process exits.
         //
-        // Eager rehydration occurs here, not a lazy approach: the Nexus
-        // convergence loop's `converge_m2p` treats an M2P present on both
-        // DB and sled as already converged and never reapplies `set_mcast_m2p`,
-        // so a missing MAC filter would never be healed by convergence alone.
+        // This runs eagerly at startup rather than deferring to the
+        // reconciler. The Nexus convergence loop re-runs `set_mcast_m2p`
+        // for active groups and would eventually re-create the filters,
+        // but that waits on the next reconciler pass and covers only
+        // groups still active in the database. Re-opening here closes
+        // that window.
         //
         // Cost accrued: one `dump_m2p` ioctl + one `setsockopt(IPV6_JOIN_GROUP)`
         // per remaining group per underlay NIC. This is bounded by active
@@ -1236,6 +1244,35 @@ impl PortManager {
     pub fn set_mcast_m2p(&self, req: &Mcast2PhysMapping) -> Result<(), Error> {
         let addr: Ipv6Addr = req.underlay;
 
+        let underlay = MulticastUnderlay::new(addr.into())
+            .map_err(|_| Error::InvalidMcastUnderlay(addr))?;
+
+        // The convergence loop re-runs this for active groups on every
+        // pass, even when the mapping is already listed, so that a mapping
+        // stranded by a failed join rollback is retried.
+        //
+        // We return early when both halves are already in place: the NIC
+        // MAC filters (tracked by the filter socket) and the xde entry.
+        // This keeps the repeated calls from re-issuing the `set_m2p` upsert
+        // ioctl when nothing changed.
+        let nics_joined = self.inner.underlay_nics.is_empty()
+            || self.inner.mcast_underlay_sockets.is_joined(&addr);
+
+        if nics_joined
+            && self
+                .list_mcast_m2p()?
+                .iter()
+                .any(|m| m.group == req.group && m.underlay == addr)
+        {
+            debug!(
+                self.inner.log,
+                "multicast overlay-to-underlay mapping already in place";
+                "group" => %req.group,
+                "underlay" => %addr,
+            );
+            return Ok(());
+        }
+
         info!(
             self.inner.log,
             "Setting multicast overlay-to-underlay mapping";
@@ -1243,18 +1280,16 @@ impl PortManager {
             "underlay" => %addr,
         );
 
-        let underlay = MulticastUnderlay::new(addr.into())
-            .map_err(|_| Error::InvalidMcastUnderlay(addr))?;
         let hdl = Handle::new()?;
         hdl.set_m2p(&SetMcast2PhysReq { group: req.group.into(), underlay })?;
 
         // In legit scenarios, install the NIC multicast MAC filter via a
         // UDP socket join. If no NIC accepts the join, roll back the
-        // xde M2P entry so the convergence loop (discovery via `list_mcast_m2p`)
-        // sees the gap on the next pass and retries `set_mcast_m2p`. Without
-        // this rollback mechanism the xde entry would remain and convergence
-        // would treat the mapping as already applied, silently dropping traffic
-        // for this group until the agent restarts or the mapping is cycled.
+        // xde M2P entry so the failure is visible in `list_mcast_m2p`
+        // right away. The convergence loop re-runs `set_mcast_m2p` for
+        // active groups even when the mapping is listed, so a failed
+        // rollback leaves a stale xde entry but does not block the
+        // group indefinitely. The join is retried on the next pass.
         //
         // In tests / sim mode, `underlay_nics` is empty and there is no
         // MAC filter to install, so this whole step is skipped.
@@ -1279,7 +1314,8 @@ impl PortManager {
                     warn!(
                         self.inner.log,
                         "failed to roll back xde M2P entry after NIC \
-                         join failure, convergence may still drift";
+                         join failure, next convergence pass retries \
+                         the join";
                         "group" => %req.group,
                         "underlay" => %addr,
                         "error" => %e,
@@ -3453,6 +3489,94 @@ mod tests {
                 "no filter socket should exist after join failure",
             );
         }
+
+        logctx.cleanup_successful();
+    }
+
+    /// Verify that a mapping stranded by a failed join rollback is healed
+    /// by a later `set_mcast_m2p` call, mirroring the convergence loop
+    /// re-running the set for an active group.
+    ///
+    /// The stranded scenario occurs in this way: a NIC join fails and the
+    /// rollback `clear_m2p` also fails, cascadingly, leaving the xde entry
+    /// present with no NIC MAC filter. A convergence check based only on
+    /// `list_mcast_m2p` would treat the group as applied indefinitely.
+    /// So, the re-run must retry the join rather than short-circuiting on the
+    /// listed entry.
+    #[cfg(target_os = "illumos")]
+    #[test]
+    fn multicast_m2p_set_retries_join_after_failed_rollback() {
+        let logctx = test_setup_log(
+            "multicast_m2p_set_retries_join_after_failed_rollback",
+        );
+        let handle = Handle::new().unwrap();
+        let _state = ensure_xde_underlay(&handle);
+
+        // Manager whose NIC join always fails: a nonexistent interface.
+        // Constructed before the fault is injected, as is the healing
+        // manager below, because `PortManager::new` re-joins mappings
+        // listed in the shared state and would otherwise heal the
+        // stranded entry before `set_mcast_m2p` gets the chance.
+        let bad_nics = vec![
+            AddrObject::new_control("nonexistent_xyz_nic_for_test").unwrap(),
+        ];
+        let bad_manager = PortManager::new(
+            logctx.log.clone(),
+            Ipv6Addr::LOCALHOST,
+            &bad_nics,
+        );
+
+        // Manager with a joinable interface, standing in for the retry
+        // path after the fault clears.
+        let good_nics = vec![AddrObject::new_control(LOOPBACK_IF).unwrap()];
+        let good_manager = PortManager::new(
+            logctx.log.clone(),
+            Ipv6Addr::LOCALHOST,
+            &good_nics,
+        );
+
+        let group: IpAddr = "239.10.10.62".parse().unwrap();
+        let underlay: Ipv6Addr = "ff04::c2".parse().unwrap();
+        let req =
+            sled_agent_types::multicast::Mcast2PhysMapping { group, underlay };
+
+        // Strand the mapping: the NIC join fails and the rollback clear
+        // fails too, so the xde entry survives.
+        handle.state().lock().unwrap().fail_next_clear_m2p = true;
+        let err = bad_manager
+            .set_mcast_m2p(&req)
+            .expect_err("set_mcast_m2p must fail when the NIC join fails");
+        assert!(
+            matches!(err, Error::UnderlayMcastJoinFailed(addr) if addr == underlay),
+            "expected UnderlayMcastJoinFailed({underlay}), got {err:?}",
+        );
+
+        // The stranded state, i.e., mapping listed, no NIC membership.
+        let listed = bad_manager.list_mcast_m2p().unwrap();
+        assert!(
+            listed.iter().any(|m| m.group == group && m.underlay == underlay),
+            "xde entry must survive the failed rollback, found {listed:?}",
+        );
+        assert!(
+            !netstat_v6_has_membership(LOOPBACK_IF, &underlay),
+            "unexpected NIC membership {underlay} while stranded",
+        );
+
+        // A later pass re-runs the set even though the mapping is listed
+        // and must complete the NIC join.
+        good_manager
+            .set_mcast_m2p(&req)
+            .expect("retried set_mcast_m2p must heal the stranded mapping");
+        poll_v6_membership(LOOPBACK_IF, &underlay, true);
+
+        // Cleanup for shared static OPTE_STATE.
+        good_manager
+            .clear_mcast_m2p(&sled_agent_types::multicast::ClearMcast2Phys {
+                group,
+                underlay,
+            })
+            .unwrap();
+        poll_v6_membership(LOOPBACK_IF, &underlay, false);
 
         logctx.cleanup_successful();
     }

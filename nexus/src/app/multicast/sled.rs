@@ -499,9 +499,12 @@ async fn converge_sled_m2p_and_forwarding(
 
 /// Converge a single sled's M2P mapping for one group.
 ///
-/// Sets the mapping when the group is active and missing, clears it
-/// when the group is inactive and present. Already-correct state
-/// is left alone. Same-group mappings under any other underlay are
+/// Active groups re-run the set unconditionally. The sled applies it
+/// as an upsert and re-joins any missing underlay NIC memberships, so
+/// a mapping stranded by a failed join rollback (xde entry present,
+/// NIC join missing) is healed on a later pass instead of being
+/// skipped as already converged. Inactive groups have a present
+/// mapping cleared. Same-group mappings under any other underlay are
 /// cleared in either case. These can only arise when a clear failed
 /// during group teardown and the group IP was later reused with a
 /// fresh underlay allocation.
@@ -531,27 +534,25 @@ async fn converge_m2p(
             .context("failed to clear stale M2P from sled")?;
     }
 
-    match (params.group_is_active, has_m2p) {
-        // Active group missing M2P: install it.
-        (true, false) => {
-            client
-                .set_mcast_m2p(params.desired_m2p)
-                .await
-                .context("failed to add M2P mapping to sled")?;
-        }
+    if params.group_is_active {
+        // This is set even when the mapping is already listed. A listed
+        // mapping does not prove the underlay NIC joins exist, since a failed
+        // join rollback can leave the xde entry behind, and the upsert
+        // is the retry path for those joins.
+        client
+            .set_mcast_m2p(params.desired_m2p)
+            .await
+            .context("failed to add M2P mapping to sled")?;
+    } else if has_m2p {
         // Inactive group has stale M2P: remove it.
-        (false, true) => {
-            let clear = ClearMcast2Phys {
-                group: params.group_ip,
-                underlay: params.underlay_ip,
-            };
-            client
-                .clear_mcast_m2p(&clear)
-                .await
-                .context("failed to clear stale M2P from sled")?;
-        }
-        // Already converged.
-        _ => {}
+        let clear = ClearMcast2Phys {
+            group: params.group_ip,
+            underlay: params.underlay_ip,
+        };
+        client
+            .clear_mcast_m2p(&clear)
+            .await
+            .context("failed to clear stale M2P from sled")?;
     }
 
     Ok(())

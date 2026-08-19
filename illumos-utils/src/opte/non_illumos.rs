@@ -56,6 +56,9 @@ pub enum OpteError {
     DuplicatePort(String),
     #[error("no such port '{0}'")]
     NoPort(String),
+    /// Failure requested by a test via `State::fail_next_clear_m2p`.
+    #[error("injected clear_m2p failure")]
+    InjectedClearM2pFailure,
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -211,6 +214,11 @@ pub(crate) struct State {
     /// surviving sled-agent restarts. Mirrors the upsert-by-group
     /// semantics of xde's `Mcast2Phys`.
     pub m2p: BTreeMap<oxide_vpc::api::IpAddr, MulticastUnderlay>,
+    /// When set, the next `clear_m2p` call fails and resets the flag.
+    ///
+    /// Lets tests exercise the path where a join-failure rollback
+    /// cannot remove the xde entry, leaving it stranded.
+    pub fail_next_clear_m2p: bool,
 }
 
 const NO_RESPONSE: NoResp = NoResp { unused: 99 };
@@ -222,6 +230,7 @@ fn opte_state() -> &'static Mutex<State> {
             ports: HashMap::new(),
             underlay_initialized: false,
             m2p: BTreeMap::new(),
+            fail_next_clear_m2p: false,
         })
     })
 }
@@ -410,6 +419,10 @@ impl Handle {
         req: &ClearMcast2PhysReq,
     ) -> Result<NoResp, OpteError> {
         let mut state = opte_state().lock().unwrap();
+        if state.fail_next_clear_m2p {
+            state.fail_next_clear_m2p = false;
+            return Err(OpteError::InjectedClearM2pFailure);
+        }
         if state.m2p.get(&req.group) == Some(&req.underlay) {
             state.m2p.remove(&req.group);
         }
