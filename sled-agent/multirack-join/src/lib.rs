@@ -259,10 +259,9 @@ impl MultirackJoinServiceTask {
             // Unwrap is safe, because we constructed both bootstrap_ips and
             // status from trust_quorum_peers.
             let bootstrap_ip = *bootstrap_ips.get(&info.baseboard_id).unwrap();
-            self.spawn_start_sled_agent_task(
-                &mut set,
+            set.spawn(self.spawn_start_sled_agent_task(
                 StartSledAgentInfo::new(rack_id, bootstrap_ip, info),
-            );
+            ));
         }
 
         let mut failed = BTreeSet::new();
@@ -328,15 +327,15 @@ impl MultirackJoinServiceTask {
     /// `StartSledAgentRequest`.
     fn spawn_start_sled_agent_task(
         &mut self,
-        set: &mut JoinSet<Result<BaseboardId, SledSpecificSprocketsError>>,
         info: StartSledAgentInfo,
-    ) {
+    ) -> impl Future<Output = Result<BaseboardId, SledSpecificSprocketsError>>
+    + 'static {
         let log = self.log.new(o!(
             "baseboard_id" => info.baseboard_id.to_string(),
             "bootstrap_ip" => info.bootstrap_ip.to_string()
         ));
 
-        info!(log, "Attempting to start sled agent");
+        info!(log, "Attempting to start sled agent";);
 
         let bootstrap_addr = SocketAddrV6::new(
             info.bootstrap_ip,
@@ -352,7 +351,7 @@ impl MultirackJoinServiceTask {
             self.log.clone(),
         );
 
-        set.spawn(async move {
+        async move {
             match client.start_sled_agent(&info.req).await {
                 Ok(_) => Ok(info.baseboard_id),
                 Err(err) => {
@@ -384,7 +383,7 @@ impl MultirackJoinServiceTask {
                     })
                 }
             }
-        });
+        }
     }
 
     /// Start initializing trust quorum given the the existing
