@@ -822,36 +822,6 @@ impl MultirackJoinServiceTask {
                             "epoch" => %epoch
                         );
 
-                        // At this point, we still have to check
-                        // one more time to see if membership has
-                        // changed.
-                        //
-                        // If we don't do this, we can silently
-                        // ignore a submission from an operator.
-                        //
-                        // We must hold the read lock while
-                        // checking. If membership has not changed
-                        // we update our gate to prevent it from
-                        // changing in the future. Otherwise
-                        // we start a reconfiguration.
-                        let guard = self.input_rx.borrow_and_update();
-                        if guard.trust_quorum_peers != members {
-                            let new_members = guard.trust_quorum_peers.clone();
-                            let just_committed_epoch = epoch;
-                            return Ok(TqCommitResult::ReconfigurationNeeded {
-                                new_members,
-                                new_epoch: epoch.next(),
-                                just_committed_epoch
-                            });
-                        }
-
-                        // If a user tries to change the set of peers for
-                        // rack membership after this point they will get
-                        // an error response.
-                        self.membership_change_still_possible.store(
-                            false,
-                            Ordering::Relaxed
-                        );
                         break;
                     }
 
@@ -915,7 +885,34 @@ impl MultirackJoinServiceTask {
             }
         }
 
-        Ok(TqCommitResult::Committed)
+        // At this point all members have acked the commit and trust quorum
+        // is fully commited. However, we still have to check one more time to
+        // see if membership has changed. If we don't do this, we can silently
+        // ignore a submission from an operator.
+        //
+        // We must hold the read lock while checking. If membership has not
+        // changed we update our gate to prevent it from changing in the future.
+        // Otherwise we start a reconfiguration.
+        let guard = self.input_rx.borrow_and_update();
+        if guard.trust_quorum_peers == members {
+            // No membership change
+            //
+            // If an operator tries to change the set of peers for rack
+            // membership after this point they will get an error response.
+            self.membership_change_still_possible
+                .store(false, Ordering::Relaxed);
+
+            Ok(TqCommitResult::Committed)
+        } else {
+            // Membership change
+            let new_members = guard.trust_quorum_peers.clone();
+            let just_committed_epoch = epoch;
+            Ok(TqCommitResult::ReconfigurationNeeded {
+                new_members,
+                new_epoch: epoch.next(),
+                just_committed_epoch,
+            })
+        }
     }
 
     // Check if we have received an updated membership set from an operator.
