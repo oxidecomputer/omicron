@@ -102,7 +102,7 @@ fn find_expunged_same_generation(
 ///
 /// Sagas are only ever reassigned to an in-service Nexus of the *same*
 /// generation (see [`reassign_sagas_from_expunged`]). So once a Nexus has been
-/// expunged and no in-service Nexus remains in its generation, any saga still
+/// expunged and the active Nexuses are of a higher generation, any saga still
 /// assigned to it can never be adopted and would otherwise stay stuck forever.
 /// These sagas also never go through saga recovery, as each Nexus only attempts
 /// to recover sagas assigned to itself.
