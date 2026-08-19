@@ -116,7 +116,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         new_target: BlueprintTarget,
-    ) -> Result<(Blueprint, UnstableReconfiguratorState), Error> {
+    ) -> Result<UnstableReconfiguratorState, Error> {
         let planning_context = self.blueprint_planning_context(opctx).await?;
         let inventory = planning_context.inventory.ok_or_else(|| {
             Error::internal_error("no recent inventory collection found")
@@ -142,7 +142,7 @@ impl super::Nexus {
             ))
         })?;
 
-        Ok((blueprint, debug_intent))
+        Ok(debug_intent)
     }
 
     pub async fn blueprint_target_set(
@@ -158,32 +158,37 @@ impl super::Nexus {
 
         // Assemble a Reconfigurator state file so that we have a record of the
         // new target blueprint.
-        let (blueprint, debug_intent) =
-            self.assemble_state_for_new_target(opctx, new_target).await?;
-        let debug_str_intent = serde_json::to_string(&debug_intent)
-            .context("serializing Reconfigurator state file")
+        //
+        // We make this best-effort because in an emergency, support should be
+        // able to set a new target even if we can't assemble this.
+        let step1 = self.assemble_state_for_new_target(opctx, new_target).await;
+        let maybe_debug_files = step1.and_then(|debug_intent| {
+            SetTargetDebugFile::new(
+                &opctx.log,
+                &self.debug_dropbox_reconfigurator,
+                debug_intent,
+            )
             .map_err(|error| {
                 Error::internal_error(&format!(
-                    "error serializing Reconfigurator state: {}",
+                    "error assembling intended Reconfigurator state: {}",
                     InlineErrorChain::new(&*error),
                 ))
-            })?;
+            })
+        });
 
-        // Archive the Reconfigurator state file.
-        let debug_name_intent = blueprint_debug_filename(
-            &blueprint,
-            BlueprintDebugAction::TargetIntent,
-        );
-        let deposit_intent = self
-            .debug_dropbox_reconfigurator
-            .deposit_file(&debug_name_intent, &debug_str_intent)
-            .await
-            .map_err(|error| {
-                Error::internal_error(&format!(
-                    "error saving Reconfigurator state: {}",
-                    InlineErrorChain::new(&error),
-                ))
-            })?;
+        let maybe_debug_files = match maybe_debug_files {
+            Ok(debug_files) => debug_files
+                .write_intent(BlueprintDebugAction::TargetIntent)
+                .await
+                .context("saving intent debug file")
+                .map_err(|error| {
+                    Error::internal_error(&format!(
+                        "error saving intended Reconfigurator state: {}",
+                        InlineErrorChain::new(&*error),
+                    ))
+                }),
+            Err(error) => Err(error),
+        };
 
         if let Err(error) = self
             .db_datastore
@@ -192,7 +197,9 @@ impl super::Nexus {
         {
             // Try to cancel the dropbox deposit.  This information is
             // useless now.  It's not a problem if this doesn't work.
-            deposit_intent.cancel_and_attempt_delete().await;
+            if let Ok(debug_files) = maybe_debug_files {
+                debug_files.cancel().await;
+            }
             return Err(error);
         }
 
@@ -201,31 +208,10 @@ impl super::Nexus {
         // There's no point in failing after this, whatever happens.
         //
         // Write a second Reconfigurator state file reflecting the new target.
-        let debug_name_committed =
-            blueprint_debug_filename(&blueprint, BlueprintDebugAction::Target);
-        let mut debug_committed = debug_intent;
-        debug_committed.target_blueprint = new_target;
-        debug_committed.intended_target_blueprint = None;
-        if let Ok(debug_str_committed) = serde_json::to_string(&debug_committed)
-        {
-            if let Err(error) = self
-                .debug_dropbox_reconfigurator
-                .deposit_file(&debug_name_committed, &debug_str_committed)
-                .await
-            {
-                warn!(
-                    &opctx.log,
-                    "failed to save Reconfigurator state file for new target";
-                    "error" => %error,
-                    "blueprint_id" => %blueprint.id,
-                );
-            };
-
-            // If possible, cancel the previous deposit.  It represents an
-            // intermediate state that's not relevant as long as we have the new
-            // file.  (It's not a problem if this doesn't work.  We'll just wind
-            // up with this extra intent file.)
-            deposit_intent.cancel_and_attempt_delete().await;
+        if let Ok(debug_files) = maybe_debug_files {
+            debug_files
+                .write_committed(new_target, BlueprintDebugAction::Target)
+                .await;
         }
 
         // Trigger the background task to load this blueprint.
@@ -1145,6 +1131,9 @@ pub fn blueprint_debug_filename(
 /// Typestate-based helper to manage writing out two Reconfigurator state files
 /// as part of setting a new target blueprint: the first is an "intent" file and
 /// the second is a "committed" file.
+// This is currently used in two places, but the main reason to factor it
+// separately is to test the intent file behavior.  This is otherwise difficult
+// to orchestrate in either of the consumers.
 pub struct SetTargetDebugFile<'a> {
     log: &'a Logger,
     producer: &'a Producer,
@@ -1159,7 +1148,6 @@ impl<'a> SetTargetDebugFile<'a> {
         producer: &'a Producer,
         intent_state: UnstableReconfiguratorState,
     ) -> Result<SetTargetDebugFile<'a>, anyhow::Error> {
-        // XXX-dap assert initial_state has intended blueprint id
         let Some(intended_blueprint_id) =
             intent_state.intended_target_blueprint
         else {
@@ -1231,8 +1219,6 @@ impl<'a> SetTargetDebugFileWroteIntent<'a> {
     ) {
         // Writing the commited state is best-effort, since the action has
         // already been done.
-
-        // XXX-dap what if the new_target blueprint id doesn't match
 
         let committed_state = UnstableReconfiguratorState {
             intended_target_blueprint: None,
@@ -1867,4 +1853,32 @@ mod tests {
 
         logctx.cleanup_successful();
     }
+
+    // /// Verifies writing Reconfigurator state in the success path
+    // XXX-dap
+    // #[test]
+    // async fn test_debug_files_success() {
+    //     const TEST_NAME: &str = "test_debug_files_success";
+    //     let logctx = test_setup_log(TEST_NAME);
+
+    //     // We need an UnstableReconfiguratorState from a realistic system to
+    //     // start with.  Use a simulated system.
+    //     // XXX-dap all of this is private :(
+    //     let mut sim = ReconfiguratorSim::new(
+    //         &logctx.log.clone(),
+    //         Some(TEST_NAME.to_string()),
+    //     );
+    //     let msg = sim
+    //         .load_example(|builder| {
+    //             Ok(builder
+    //                 .nsleds(3)
+    //                 .ndisks_per_sled(3)
+    //                 .external_dns_count(3)
+    //                 .unwrap())
+    //         })
+    //         .expect("loaded example system");
+    //     eprintln!("{msg}");
+
+    //     let initial_state = sim.current_state().to_serializable().unwrap();
+    // }
 }
