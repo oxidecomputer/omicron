@@ -386,11 +386,20 @@ async fn proptest_full_reconciliation() {
         match status {
             DpdNatReconcilerStatus::NoNatEntriesConfig
             | DpdNatReconcilerStatus::FailedReadingCurrentDpdNatEntries(_)
-            | DpdNatReconcilerStatus::InvalidSystemNetworkingConfig(_)
-            | DpdNatReconcilerStatus::PartialSuccess { .. } => {
+            | DpdNatReconcilerStatus::InvalidSystemNetworkingConfig(_) => {
                 panic!("unexpected reconciler status: {status:?}");
             }
-            DpdNatReconcilerStatus::Success { .. } => {
+            DpdNatReconcilerStatus::Complete {
+                // checked by `validate_post_reconciliation()`
+                unchanged: _,
+                removed: _,
+                created: _,
+
+                remove_failures,
+                create_failures,
+            } => {
+                assert_eq!(remove_failures, Vec::new());
+                assert_eq!(create_failures, BTreeMap::new());
                 input
                     .validate_post_reconciliation(&client)
                     .await

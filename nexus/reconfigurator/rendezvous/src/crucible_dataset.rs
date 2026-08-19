@@ -135,8 +135,8 @@ mod tests {
     use nexus_db_queries::db::queries::ALLOW_FULL_TABLE_SCAN_SQL;
     use nexus_types::inventory::ZpoolName;
     use omicron_common::api::external::ByteCount;
-    use omicron_common::disk::CompressionAlgorithm;
     use omicron_test_utils::dev;
+    use sled_agent_types::disk::CompressionAlgorithm;
 
     use omicron_uuid_kinds::PhysicalDiskUuid;
     use omicron_uuid_kinds::RackUuid;

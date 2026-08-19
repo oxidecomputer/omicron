@@ -171,7 +171,7 @@ impl UpdateContactSupportChecksInput {
             .map(|(sled, zpools)| (sled, zpools.into_iter().cloned().collect()))
             .collect();
 
-        let enabled_smf_services_not_online_by_sled = self
+        let smf_services_in_maintenance_by_sled = self
             .inventory
             .enabled_smf_services_not_online()
             .into_iter()
@@ -187,6 +187,10 @@ impl UpdateContactSupportChecksInput {
                         // services from propolis zones from the problems list.
                         svcs.services
                             .retain(|svc| !is_propolis_zone(&svc.zone));
+
+                        // From the remaining services, we only report those in maintenace
+                        svcs.retain_in_maintenance();
+
                         // If there are no services or errors left then we drop
                         // the sled entirely.
                         if svcs.is_empty() {
@@ -211,7 +215,7 @@ impl UpdateContactSupportChecksInput {
             stuck_update_last_blueprint_created_time,
             stale_inventory_last_collection_time_done,
             unhealthy_zpools_by_sled,
-            enabled_smf_services_not_online_by_sled,
+            smf_services_in_maintenance_by_sled,
             missing_sleds,
         }
     }
@@ -254,8 +258,8 @@ struct UpdateStatusProblems {
     stale_inventory_last_collection_time_done: Option<DateTime<Utc>>,
     /// Zpools that are not in an `Online` state.
     unhealthy_zpools_by_sled: BTreeMap<SledUuid, Vec<Zpool>>,
-    /// Enabled SMF services that are not in an `online` state.
-    enabled_smf_services_not_online_by_sled:
+    /// Enabled SMF services that are in a `maintenance` state.
+    smf_services_in_maintenance_by_sled:
         BTreeMap<SledUuid, SvcsEnabledNotOnlineResult>,
     /// IDs of sleds that aren't present in inventory or haven't reported a
     /// reconciliation result yet.
@@ -270,7 +274,7 @@ impl UpdateStatusProblems {
             stuck_update_last_blueprint_created_time,
             stale_inventory_last_collection_time_done,
             unhealthy_zpools_by_sled,
-            enabled_smf_services_not_online_by_sled,
+            smf_services_in_maintenance_by_sled,
             missing_sleds,
         } = self;
         stuck_sagas.is_empty()
@@ -278,7 +282,7 @@ impl UpdateStatusProblems {
             && stuck_update_last_blueprint_created_time.is_none()
             && stale_inventory_last_collection_time_done.is_none()
             && unhealthy_zpools_by_sled.is_empty()
-            && enabled_smf_services_not_online_by_sled.is_empty()
+            && smf_services_in_maintenance_by_sled.is_empty()
             && missing_sleds.is_empty()
     }
 }
@@ -297,7 +301,7 @@ impl KV for UpdateStatusProblems {
             stuck_update_last_blueprint_created_time,
             stale_inventory_last_collection_time_done,
             unhealthy_zpools_by_sled,
-            enabled_smf_services_not_online_by_sled,
+            smf_services_in_maintenance_by_sled,
             missing_sleds,
         } = self;
 
@@ -335,10 +339,10 @@ impl KV for UpdateStatusProblems {
                 &format_args!("{:?}", unhealthy_zpools_by_sled),
             )?;
         }
-        if !enabled_smf_services_not_online_by_sled.is_empty() {
+        if !smf_services_in_maintenance_by_sled.is_empty() {
             serializer.emit_arguments(
-                "enabled_smf_services_not_online_by_sled".into(),
-                &format_args!("{:?}", enabled_smf_services_not_online_by_sled),
+                "smf_services_in_maintenance_by_sled".into(),
+                &format_args!("{:?}", smf_services_in_maintenance_by_sled),
             )?;
         }
         if !missing_sleds.is_empty() {
@@ -893,6 +897,7 @@ mod test {
     use omicron_uuid_kinds::PropolisUuid;
     use omicron_uuid_kinds::SledUuid;
     use omicron_uuid_kinds::ZpoolUuid;
+    use sled_agent_types::disk::M2Slot;
     use sled_agent_types::inventory::ConfigReconcilerInventoryStatus;
     use sled_agent_types::inventory::FmdInventory;
     use sled_agent_types::inventory::Inventory;
@@ -983,6 +988,25 @@ mod test {
                     fmri: "svc:/system/test:default".to_string(),
                     zone: "global".to_string(),
                     state: SvcEnabledNotOnlineState::Maintenance,
+                },
+                SvcEnabledNotOnline {
+                    fmri: "svc:/system/test2:default".to_string(),
+                    zone: "global".to_string(),
+                    state: SvcEnabledNotOnlineState::Offline,
+                },
+            ],
+            errors: vec![],
+            time_of_status: Utc::now(),
+        })
+    }
+
+    fn unhealthy_services_not_in_maintenance() -> SvcsEnabledNotOnlineResult {
+        SvcsEnabledNotOnlineResult::SvcsEnabledNotOnline(SvcsEnabledNotOnline {
+            services: vec![
+                SvcEnabledNotOnline {
+                    fmri: "svc:/system/test:default".to_string(),
+                    zone: "global".to_string(),
+                    state: SvcEnabledNotOnlineState::Degraded,
                 },
                 SvcEnabledNotOnline {
                     fmri: "svc:/system/test2:default".to_string(),
@@ -1171,7 +1195,7 @@ mod test {
             sled_id,
             zones: iddqd::IdOrdMap::new(),
             host_phase_2: internal_views::HostPhase2Status {
-                boot_disk: Ok(omicron_common::disk::M2Slot::A),
+                boot_disk: Ok(M2Slot::A),
                 slot_a_version: internal_views::TufRepoVersion::Version(
                     fake_target_version(),
                 ),
@@ -1378,6 +1402,48 @@ mod test {
     }
 
     #[nexus_test(server = crate::Server)]
+    async fn test_contact_support_unhealthy_svcs_not_in_maintenace(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        let nexus = &cptestctx.server.server_context().nexus;
+        let opctx = fake_opctx(cptestctx);
+
+        insert_fake_collection(
+            cptestctx,
+            &opctx,
+            healthy_zpools(),
+            unhealthy_services_not_in_maintenance(),
+        )
+        .await;
+        let inventory = Arc::new(
+            nexus
+                .datastore()
+                .inventory_get_latest_collection(&opctx)
+                .await
+                .unwrap()
+                .unwrap(),
+        );
+        let version = fake_target_version();
+        let blueprint =
+            fake_blueprint(&cptestctx.logctx.log, &version, Utc::now(), false);
+
+        // None of the unhealthy services are in maintenance, so they are
+        // ignored and contact support should be false.
+        assert!(
+            !nexus
+                .contact_support(
+                    &opctx,
+                    inventory,
+                    blueprint,
+                    Some(&version),
+                    empty_internal_update_status(),
+                )
+                .await
+                .unwrap()
+        );
+    }
+
+    #[nexus_test(server = crate::Server)]
     async fn test_contact_support_mixed_propolis_and_other_services(
         cptestctx: &ControlPlaneTestContext,
     ) {
@@ -1395,7 +1461,7 @@ mod test {
                     SvcEnabledNotOnline {
                         fmri: "svc:/system/test:default".to_string(),
                         zone: "global".to_string(),
-                        state: SvcEnabledNotOnlineState::Offline,
+                        state: SvcEnabledNotOnlineState::Maintenance,
                     },
                 ],
                 errors: vec![],
@@ -1433,9 +1499,6 @@ mod test {
     }
 
     #[nexus_test(server = crate::Server)]
-    // TODO-K: Enable once https://github.com/oxidecomputer/omicron/issues/10997
-    // is worked on
-    #[ignore]
     async fn test_contact_support_services_errors_only(
         cptestctx: &ControlPlaneTestContext,
     ) {
@@ -2066,9 +2129,20 @@ mod test {
             internal_update_status: empty_internal_update_status(),
         };
 
+        let expected_services = match services {
+            SvcsEnabledNotOnlineResult::SvcsEnabledNotOnline(mut svcs) => {
+                svcs.retain_in_maintenance();
+                SvcsEnabledNotOnlineResult::SvcsEnabledNotOnline(svcs)
+            }
+            _ => panic!(
+                "found unexpected variant {services:?}; should be SvcsEnabledNotOnline"
+            ),
+        };
+
         let expected = UpdateStatusProblems {
-            enabled_smf_services_not_online_by_sled: BTreeMap::from([(
-                sled_id, services,
+            smf_services_in_maintenance_by_sled: BTreeMap::from([(
+                sled_id,
+                expected_services,
             )]),
             ..Default::default()
         };
@@ -2098,7 +2172,7 @@ mod test {
         let non_propolis_svc = SvcEnabledNotOnline {
             fmri: "svc:/system/test:default".to_string(),
             zone: "global".to_string(),
-            state: SvcEnabledNotOnlineState::Offline,
+            state: SvcEnabledNotOnlineState::Maintenance,
         };
         let non_propolis_svc2 = SvcEnabledNotOnline {
             fmri: "svc:/system/test2:default".to_string(),
@@ -2139,7 +2213,7 @@ mod test {
                 },
             );
         let expected = UpdateStatusProblems {
-            enabled_smf_services_not_online_by_sled: BTreeMap::from([(
+            smf_services_in_maintenance_by_sled: BTreeMap::from([(
                 sled_id,
                 expected_services,
             )]),
@@ -2192,6 +2266,39 @@ mod test {
     }
 
     #[test]
+    fn test_problems_unhealthy_svcs_not_in_maintenace() {
+        let logctx =
+            test_setup_log("test_problems_unhealthy_svcs_not_in_maintenace");
+        let blueprint = fake_blueprint(
+            &logctx.log,
+            &fake_target_version(),
+            Utc::now(),
+            false,
+        );
+        let sled_id = sled_id();
+
+        let collection = fake_collection_with_ids(
+            sled_id,
+            healthy_zpools(),
+            unhealthy_services_not_in_maintenance(),
+        );
+
+        let checks = UpdateContactSupportChecksInput {
+            inventory: Arc::new(collection),
+            stuck_sagas: Ok(vec![]),
+            blueprint,
+            current_target_version: Some(fake_target_version()),
+            internal_update_status: empty_internal_update_status(),
+        };
+
+        // Neither unhealthy service is in maintenance, so the sled drops out
+        // of the map entirely and there are no problems.
+        assert_eq!(checks.problems(), UpdateStatusProblems::default());
+
+        logctx.cleanup_successful();
+    }
+
+    #[test]
     fn test_problems_unhealthy_services_command_error() {
         let logctx = test_setup_log("test_problems_services_command_error");
         let blueprint = fake_blueprint(
@@ -2221,7 +2328,7 @@ mod test {
         };
 
         let expected = UpdateStatusProblems {
-            enabled_smf_services_not_online_by_sled: BTreeMap::from([(
+            smf_services_in_maintenance_by_sled: BTreeMap::from([(
                 sled_id,
                 svcs_result,
             )]),
@@ -2237,9 +2344,6 @@ mod test {
     }
 
     #[test]
-    // TODO-K: Enable once https://github.com/oxidecomputer/omicron/issues/10997
-    // is worked on
-    #[ignore]
     fn test_problems_unhealthy_services_errors_only() {
         let logctx =
             test_setup_log("test_problems_unhealthy_services_errors_only");
@@ -2274,7 +2378,7 @@ mod test {
         };
 
         let expected = UpdateStatusProblems {
-            enabled_smf_services_not_online_by_sled: BTreeMap::from([(
+            smf_services_in_maintenance_by_sled: BTreeMap::from([(
                 sled_id,
                 svcs_result,
             )]),
@@ -2386,6 +2490,17 @@ mod test {
             total_size: ByteCount::from(1024 * 1024),
             health: ZpoolHealth::Degraded,
         };
+
+        let expected_services = match services {
+            SvcsEnabledNotOnlineResult::SvcsEnabledNotOnline(mut svcs) => {
+                svcs.retain_in_maintenance();
+                SvcsEnabledNotOnlineResult::SvcsEnabledNotOnline(svcs)
+            }
+            _ => panic!(
+                "found unexpected variant {services:?}; should be SvcsEnabledNotOnline"
+            ),
+        };
+
         let expected = UpdateStatusProblems {
             stuck_sagas: BTreeSet::from([expected_stuck_saga]),
             stuck_sagas_error_message: None,
@@ -2399,8 +2514,9 @@ mod test {
                 sled_id,
                 vec![expected_zpool],
             )]),
-            enabled_smf_services_not_online_by_sled: BTreeMap::from([(
-                sled_id, services,
+            smf_services_in_maintenance_by_sled: BTreeMap::from([(
+                sled_id,
+                expected_services,
             )]),
             missing_sleds: BTreeSet::from([missing_sled_id]),
         };

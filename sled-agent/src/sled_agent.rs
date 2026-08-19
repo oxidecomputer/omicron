@@ -78,6 +78,7 @@ use sled_agent_types::attached_subnet::AttachedSubnet;
 use sled_agent_types::attached_subnet::AttachedSubnets;
 use sled_agent_types::dataset::LocalStorageDatasetDeleteRequest;
 use sled_agent_types::dataset::LocalStorageDatasetEnsureRequest;
+use sled_agent_types::disk::CompressionAlgorithm;
 use sled_agent_types::disk::DiskStateRequested;
 use sled_agent_types::early_networking::EarlyNetworkConfigEnvelope;
 use sled_agent_types::instance::ResolvedVpcFirewallRule;
@@ -1440,7 +1441,7 @@ impl SledAgent {
             size_details: Some(SizeDetails {
                 quota: Some(dataset_size),
                 reservation: Some(dataset_size),
-                compression: omicron_common::disk::CompressionAlgorithm::Off,
+                compression: CompressionAlgorithm::Off,
             }),
             id: None,
             additional_options: None,
