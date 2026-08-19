@@ -34,6 +34,8 @@ use sled_hardware_types::BaseboardId;
 use slog::{Logger, error, info};
 use slog_error_chain::{InlineErrorChain, SlogInlineError};
 use std::net::{Ipv6Addr, SocketAddrV6};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::{
     collections::{BTreeMap, BTreeSet},
     time::Duration,
@@ -161,6 +163,11 @@ pub struct MultirackJoinServiceHandle {
         tokio::task::JoinHandle<Result<(), MultirackJoinServiceError>>,
     pub input_tx: watch::Sender<MultirackJoinRequest>,
     pub output_rx: watch::Receiver<MultirackJoinServiceState>,
+
+    // Once we've initialized trust quorum, we no longer allow membership
+    // changes. This allows helpful responses to user requests in case a
+    // membership change is attempted too late in the process.
+    pub membership_change_still_possible: Arc<AtomicBool>,
 }
 
 impl MultirackJoinServiceHandle {
@@ -168,16 +175,28 @@ impl MultirackJoinServiceHandle {
         let (input_tx, input_rx) = watch::channel(request);
         let state = MultirackJoinServiceState::Requested;
         let (output_tx, output_rx) = watch::channel(state.clone());
+        let membership_change_still_possible = Arc::new(AtomicBool::new(true));
+        let mcsp = membership_change_still_possible.clone();
         let join_handle = tokio::task::spawn(async move {
             let log =
                 ctx.base_log.new(o!("component" => "MultirackJoinService"));
             info!(log, "Starting Multirack Join Service");
-            let mut task =
-                MultirackJoinServiceTask { log, ctx, input_rx, output_tx };
+            let mut task = MultirackJoinServiceTask {
+                log,
+                ctx,
+                input_rx,
+                output_tx,
+                membership_change_still_possible: mcsp,
+            };
             task.run().await
         });
 
-        Self { join_handle, input_tx, output_rx }
+        Self {
+            join_handle,
+            input_tx,
+            output_rx,
+            membership_change_still_possible,
+        }
     }
 }
 
@@ -187,6 +206,11 @@ struct MultirackJoinServiceTask {
     ctx: RssContext,
     input_rx: watch::Receiver<MultirackJoinRequest>,
     output_tx: watch::Sender<MultirackJoinServiceState>,
+
+    // Once we've initialized trust quorum, we no longer allow membership
+    // changes. This allows helpful responses to user requests in case a
+    // membership change is attempted too late in the process.
+    pub membership_change_still_possible: Arc<AtomicBool>,
 }
 
 impl MultirackJoinServiceTask {
@@ -211,6 +235,10 @@ impl MultirackJoinServiceTask {
         self.ctx.write_rss_started_ledger(&self.log).await?;
 
         self.init_trust_quorum(rack_id).await?;
+
+        // If a user tries to change the set of peers for rack membership after
+        // this point they will get an error response.
+        self.membership_change_still_possible.store(false, Ordering::Relaxed);
 
         self.start_sled_agents(rack_id).await?;
 
