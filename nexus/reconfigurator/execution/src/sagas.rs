@@ -218,8 +218,9 @@ mod test {
     use nexus_reconfigurator_planning::planner::PlannerRng;
     use nexus_types::deployment::{
         BlueprintHostPhase2DesiredSlots, BlueprintMeasurements,
-        BlueprintSledConfig, BlueprintSource, BlueprintZoneConfig,
-        BlueprintZoneDisposition, BlueprintZoneImageSource, BlueprintZoneType,
+        BlueprintSledConfig, BlueprintSledUpdateDisposition, BlueprintSource,
+        BlueprintZoneConfig, BlueprintZoneDisposition,
+        BlueprintZoneImageSource, BlueprintZoneType,
         CockroachDbPreserveDowngrade, LastAllocatedSubnetIpOffset,
         OmicronZoneExternalFloatingIp, OximeterReadMode, PendingMgsUpdates,
         blueprint_zone_type,
@@ -318,6 +319,7 @@ mod test {
                 host_phase_2: BlueprintHostPhase2DesiredSlots::current_contents(
                 ),
                 measurements: BlueprintMeasurements::InstallDataset,
+                update_disposition: BlueprintSledUpdateDisposition::initial(),
             },
         );
 
