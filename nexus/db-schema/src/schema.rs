@@ -2319,6 +2319,9 @@ table! {
         subnet -> Inet,
         last_allocated_ip_subnet_offset -> Int4,
         measurements -> crate::enums::BpSledMeasurementsEnum,
+        update_disposition_generation -> Int8,
+        update_availability -> crate::enums::SledUpdateAvailabilityEnum,
+        update_disruption_policy -> Nullable<crate::enums::ReconfiguratorDisruptionPolicyEnum>,
     }
 }
 
@@ -3379,6 +3382,22 @@ table! {
 }
 
 table! {
+    fm_fact_saga (sitrep_id, id) {
+        id -> Uuid,
+        sitrep_id -> Uuid,
+        case_id -> Uuid,
+        created_sitrep_id -> Uuid,
+        comment -> Text,
+        saga_id -> Uuid,
+        kind -> crate::enums::FmFactSagaKindEnum,
+        saga_state -> Nullable<crate::enums::SagaStateEnum>,
+        last_event_time -> Nullable<Timestamptz>,
+        current_sec -> Nullable<Uuid>,
+        orphan_reason -> Nullable<crate::enums::FmFactSagaOrphanReasonEnum>,
+    }
+}
+
+table! {
     fm_ereport_in_case (sitrep_id, id) {
         id -> Uuid,
         restart_id -> Uuid,
@@ -3395,6 +3414,8 @@ allow_tables_to_appear_in_same_query!(fm_ereport_in_case, ereport);
 allow_tables_to_appear_in_same_query!(fm_sitrep, fm_case);
 allow_tables_to_appear_in_same_query!(fm_sitrep, fm_fact_physical_disk);
 allow_tables_to_appear_in_same_query!(fm_case, fm_fact_physical_disk);
+allow_tables_to_appear_in_same_query!(fm_sitrep, fm_fact_saga);
+allow_tables_to_appear_in_same_query!(fm_case, fm_fact_saga);
 
 table! {
     fm_alert_request (sitrep_id, id) {
@@ -3510,3 +3531,8 @@ table! {
 
 allow_tables_to_appear_in_same_query!(trust_quorum_member, hw_baseboard_id);
 joinable!(trust_quorum_member -> hw_baseboard_id(hw_baseboard_id));
+
+// Declared as separate pairs rather than one three-table invocation, which
+// would re-emit the `trust_quorum_member`/`hw_baseboard_id` impls above.
+allow_tables_to_appear_in_same_query!(sled, hw_baseboard_id);
+allow_tables_to_appear_in_same_query!(sled, trust_quorum_member);
