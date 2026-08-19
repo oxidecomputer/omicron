@@ -74,6 +74,7 @@ wicket-common.workspace = true
 wicketd-api.workspace = true
 wicketd-commission-api.workspace = true
 wicketd-commission-types.workspace = true
+wicketd-commission-types-versions.workspace = true
 wicketd-client.workspace = true
 omicron-workspace-hack.workspace = true
 semver.workspace = true
