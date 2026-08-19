@@ -2560,16 +2560,19 @@ CREATE TABLE IF NOT EXISTS omicron.public.external_ip (
 
     is_probe BOOL NOT NULL DEFAULT false,
 
-    /* The name must be non-NULL iff this is a floating IP. */
-    CONSTRAINT null_fip_name CHECK (
-        (kind != 'floating' AND name IS NULL) OR
-        (kind = 'floating' AND name IS NOT NULL)
+    /*
+     * Names and descriptions are required for instance floating IPs,
+     * and service IPs of any kind.
+     */
+    CONSTRAINT fips_and_services_need_names CHECK (
+        (is_service = TRUE AND name IS NOT NULL) OR
+        (is_service = FALSE AND kind != 'floating' AND name IS NULL) OR
+        (is_service = FALSE AND kind = 'floating' AND name IS NOT NULL)
     ),
-
-    /* The description must be non-NULL iff this is a floating IP. */
-    CONSTRAINT null_fip_description CHECK (
-        (kind != 'floating' AND description IS NULL) OR
-        (kind = 'floating' AND description IS NOT NULL)
+    CONSTRAINT fips_and_services_need_descriptions CHECK (
+        (is_service = TRUE AND description IS NOT NULL) OR
+        (is_service = FALSE AND kind != 'floating' AND description IS NULL) OR
+        (is_service = FALSE AND kind = 'floating' AND description IS NOT NULL)
     ),
 
     /* Only floating IPs can be attached to a project, and
@@ -5216,14 +5219,30 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_sled_config_zone_nic (
     sled_config_id UUID NOT NULL,
     id UUID NOT NULL,
     name TEXT NOT NULL,
-    ip INET NOT NULL,
+    -- NOTE: `ip` and `subnet` hold the IPv4 address and subnet, despite the
+    -- names. We kept the original names because renaming columns is not
+    -- idempotent in CRDB as of today.
+    ip INET,
     mac INT8 NOT NULL,
-    subnet INET NOT NULL,
+    subnet INET,
     vni INT8 NOT NULL,
     is_primary BOOLEAN NOT NULL,
     slot INT2 NOT NULL,
+    ipv6 INET,
+    ipv6_subnet INET,
 
-    PRIMARY KEY (inv_collection_id, sled_config_id, id)
+    PRIMARY KEY (inv_collection_id, sled_config_id, id),
+
+    -- A NIC must have at least one IP family, and may have both.
+    CONSTRAINT at_least_one_ip_address CHECK (
+        ip IS NOT NULL OR ipv6 IS NOT NULL
+    ),
+
+    -- Each family's address and subnet are present together or not at all.
+    CONSTRAINT ip_and_subnet_consistent CHECK (
+        (ip IS NULL) = (subnet IS NULL) AND
+        (ipv6 IS NULL) = (ipv6_subnet IS NULL)
+    )
 );
 
 CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_sled_config_dataset (
@@ -5304,7 +5323,8 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_internal_dns (
 CREATE TYPE IF NOT EXISTS omicron.public.inv_svc_enabled_not_online_state AS ENUM (
     'offline',
     'degraded',
-    'maintenance'
+    'maintenance',
+    'unrecognized'
 );
 
 CREATE TABLE IF NOT EXISTS omicron.public.inv_svc_enabled_not_online (
@@ -5590,6 +5610,14 @@ CREATE TYPE IF NOT EXISTS omicron.public.bp_sled_measurements AS ENUM (
     'artifacts'
 );
 
+-- The availability half of a sled's update disposition in a blueprint.
+CREATE TYPE IF NOT EXISTS omicron.public.sled_update_availability AS ENUM (
+    -- Available for use for all provisions.
+    'available',
+    -- Disallowed for all use + migratable instances are being evacuated.
+    'evacuating'
+);
+
 -- metadata associated with a single sled in a blueprint
 CREATE TABLE IF NOT EXISTS omicron.public.bp_sled_metadata (
     -- foreign key into `blueprint` table
@@ -5597,6 +5625,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_sled_metadata (
 
     sled_id UUID NOT NULL,
     sled_state omicron.public.sled_state NOT NULL,
+
     sled_agent_generation INT8 NOT NULL,
     -- NULL means do not remove any overrides
     remove_mupdate_override UUID,
@@ -5617,6 +5646,17 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_sled_metadata (
 
     -- the measurements for this sled
     measurements omicron.public.bp_sled_measurements NOT NULL,
+
+    -- the sled's update disposition
+    update_disposition_generation INT8 NOT NULL,
+    update_availability omicron.public.sled_update_availability NOT NULL,
+    update_disruption_policy omicron.public.reconfigurator_disruption_policy,
+
+    -- a disruption policy is recorded iff the sled is evacuating
+    CONSTRAINT update_disruption_policy_set_iff_evacuating CHECK (
+        (update_availability = 'evacuating')
+            = (update_disruption_policy IS NOT NULL)
+    ),
 
     PRIMARY KEY (blueprint_id, sled_id)
 );
@@ -5837,14 +5877,30 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_omicron_zone_nic (
     blueprint_id UUID NOT NULL,
     id UUID NOT NULL,
     name TEXT NOT NULL,
-    ip INET NOT NULL,
+    -- NOTE: `ip` and `subnet` hold the IPv4 address and subnet, despite the
+    -- names. We kept the original names because renaming columns is not
+    -- idempotent in CRDB as of today.
+    ip INET,
     mac INT8 NOT NULL,
-    subnet INET NOT NULL,
+    subnet INET,
     vni INT8 NOT NULL,
     is_primary BOOLEAN NOT NULL,
     slot INT2 NOT NULL,
+    ipv6 INET,
+    ipv6_subnet INET,
 
-    PRIMARY KEY (blueprint_id, id)
+    PRIMARY KEY (blueprint_id, id),
+
+    -- A NIC must have at least one IP family, and may have both.
+    CONSTRAINT at_least_one_ip_address CHECK (
+        ip IS NOT NULL OR ipv6 IS NOT NULL
+    ),
+
+    -- Each family's address and subnet are present together or not at all.
+    CONSTRAINT ip_and_subnet_consistent CHECK (
+        (ip IS NULL) = (subnet IS NULL) AND
+        (ipv6 IS NULL) = (ipv6_subnet IS NULL)
+    )
 );
 
 -- Blueprint information related to clickhouse cluster management
@@ -6308,6 +6364,11 @@ WHERE
 
 CREATE SEQUENCE IF NOT EXISTS omicron.public.nat_version START 1 INCREMENT 1;
 
+-- This table only holds NAT entries for instances, and is used in the dpd ->
+-- Nexus "pull" API we eventually want to rework
+-- (<https://github.com/oxidecomputer/dendrite/issues/83>). Omicron services
+-- that require NAT entries (NTP, Nexus, etc.) are managed by sled-agent on the
+-- scrimlets based on information in the bootstore.
 CREATE TABLE IF NOT EXISTS omicron.public.nat_entry (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     external_address INET NOT NULL,
@@ -7973,7 +8034,8 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_sitrep_analysis_report (
 
 CREATE TYPE IF NOT EXISTS omicron.public.diagnosis_engine AS ENUM (
     'power_shelf',
-    'physical_disk'
+    'physical_disk',
+    'saga'
 );
 
 CREATE TABLE IF NOT EXISTS omicron.public.fm_case (
@@ -8040,15 +8102,80 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_fact_physical_disk (
 
     PRIMARY KEY (sitrep_id, id),
 
-    -- Each variant validates that the columns it expects are present.
-    -- Future variants should add their own constraint like this one,
-    -- leaving existing constraints untouched.
+    -- Each kind's constraint checks only that its own columns are present,
+    -- not that others are NULL, so future kinds may share columns.
     CONSTRAINT zpool_unhealthy_columns_present CHECK (
         kind != 'zpool_unhealthy' OR (
             zpool_id IS NOT NULL
             AND last_seen_health IS NOT NULL
             AND observed_in_inv IS NOT NULL
             AND time_observed IS NOT NULL
+        )
+    )
+);
+
+-- The saga diagnosis engine's facts. See the comment on the physical-disk
+-- engine above: one table per engine, fact content as typed columns.
+CREATE TYPE IF NOT EXISTS omicron.public.fm_fact_saga_kind AS ENUM (
+    'not_progressing',
+    'owner_not_current_generation',
+    'abandoned'
+);
+
+CREATE TYPE IF NOT EXISTS omicron.public.fm_fact_saga_orphan_reason AS ENUM (
+    'quiesced',
+    'expunged'
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.fm_fact_saga (
+    -- Stable UUID for this fact across sitreps.
+    id UUID NOT NULL,
+    -- Sitrep this row belongs to.
+    sitrep_id UUID NOT NULL,
+    -- UUID of the case this fact attaches to.
+    case_id UUID NOT NULL,
+    -- UUID of the sitrep in which this fact was first added. Preserved
+    -- unchanged when the fact is carried forward into a child sitrep.
+    -- Debug-only.
+    created_sitrep_id UUID NOT NULL,
+    -- Free-form, debug-only comment.
+    comment TEXT NOT NULL,
+
+    -- The saga this fact is about. Common to every kind of saga fact (the
+    -- case is keyed by it), so it is always present regardless of `kind`.
+    --
+    -- Fact payloads carry only the fields that define the condition; data
+    -- that merely describes the saga (e.g., its name) is looked up from the
+    -- saga table when a case is acted on.
+    saga_id UUID NOT NULL,
+
+    -- Which saga fact this row represents. The columns below are populated
+    -- according to this discriminant (see the CHECK constraint).
+    kind omicron.public.fm_fact_saga_kind NOT NULL,
+
+    -- Columns for a 'not_progressing' fact. NULL for any other kind.
+    saga_state omicron.public.saga_state,
+    last_event_time TIMESTAMPTZ,
+
+    -- Columns for an 'owner_not_current_generation' fact. NULL for any other
+    -- kind.
+    current_sec UUID,
+    orphan_reason omicron.public.fm_fact_saga_orphan_reason,
+
+    PRIMARY KEY (sitrep_id, id),
+
+    -- Each kind's constraint checks only that its own columns are present,
+    -- not that others are NULL, so future kinds may share columns.
+    CONSTRAINT not_progressing_columns_present CHECK (
+        kind != 'not_progressing' OR (
+            saga_state IN ('running', 'unwinding')
+            AND last_event_time IS NOT NULL
+        )
+    ),
+    CONSTRAINT owner_not_current_generation_columns_present CHECK (
+        kind != 'owner_not_current_generation' OR (
+            current_sec IS NOT NULL
+            AND orphan_reason IS NOT NULL
         )
     )
 );
@@ -9073,6 +9200,70 @@ CREATE TABLE IF NOT EXISTS omicron.public.trust_quorum_member (
     PRIMARY KEY (rack_id, epoch DESC, hw_baseboard_id)
 );
 
+
+-- Overrides to the fault management system's global configuration.
+--
+-- If no overrides are set, this table is empty and the system uses the default
+-- configuration. Otherwise, the row in this table with the highest `version` is
+-- selected and used as the active configuration.
+--
+-- All values that represent config settings (i.e. every column except for
+-- `version` and `comment`) are nullable. If they are NULL, the system will use
+-- the default value defined in the current software version for that setting.
+CREATE TABLE IF NOT EXISTS omicron.public.fm_config (
+    -- The version number of the configuration.
+    --
+    -- Configuration changes are made by inserting a new row with a higher
+    -- version number.
+    version INT8 PRIMARY KEY,
+    -- A comment describing why this override was created.
+    comment TEXT NOT NULL,
+    -- The time at which this config version was created.
+    time_modified TIMESTAMPTZ NOT NULL,
+    -- BREAK GLASS TO COMPLETELY DISABLE FAULT MANAGEMENT ANALYSIS
+    analysis_enabled BOOL,
+    -- The maximum number of sitreps to keep in the database.
+    --
+    -- If the number of records in the `omicron.public.fm_sitrep` table
+    -- (including both sitreps in the history and orphaned sitreps that have
+    -- yet to be garbage-collected) exceeds this limit, the FM analysis
+    -- background task will not produce a new sitrep until old ones are
+    -- deleted.
+    sitrep_limit INT8,
+    -- The number of entries in the `omicron.public.fm_sitrep_history` table at
+    -- which the `fm_sitrep_history_pruner` background task will begin deleting
+    -- the oldest sitreps from the history.
+    --
+    -- This must be less than `sitrep_limit`, and must be at least 2.
+    history_pruning_threshold INT8,
+
+    CONSTRAINT versions_are_positive CHECK (version > 0),
+
+    -- Comments are mandatory when overriding the default config, so we enforce
+    -- that this is both non-NULL and not the empty string. We can't force the
+    -- operator to write a *good* comment, but at least we can force you to type
+    -- SOMETHING if you really don't want to say anything... :)
+    CONSTRAINT comment_required CHECK (comment != '' AND comment != ' '),
+
+    CONSTRAINT sitrep_limit_validity CHECK (
+        sitrep_limit IS NULL OR (
+            sitrep_limit >= 5 AND
+            sitrep_limit <= 5000
+        )
+    ),
+    CONSTRAINT history_pruning_threshold_validity CHECK (
+        history_pruning_threshold IS NULL OR (
+            history_pruning_threshold <= 5000 AND
+            history_pruning_threshold >= 2
+        )
+    ),
+    CONSTRAINT history_limit_is_less_than_sirep_limit CHECK (
+        (history_pruning_threshold IS NULL OR sitrep_limit IS NULL) OR
+            history_pruning_threshold < sitrep_limit
+    )
+);
+
+
 -- Keep this at the end of file so that the database does not contain a version
 -- until it is fully populated.
 INSERT INTO omicron.public.db_metadata (
@@ -9082,7 +9273,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '282.0.0', NULL)
+    (TRUE, NOW(), NOW(), '290.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

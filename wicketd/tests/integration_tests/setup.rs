@@ -10,6 +10,7 @@ use gateway_test_utils::setup::GatewayTestContext;
 use http::StatusCode;
 use omicron_test_utils::dev::poll::{CondCheckError, wait_for_condition};
 use sled_hardware_types::BaseboardId;
+use wicket::WicketdAddrs;
 use wicketd_commission_client::Error;
 use wicketd_commission_types_versions::latest::inventory::{
     SpIdentifier, SpType,
@@ -17,7 +18,7 @@ use wicketd_commission_types_versions::latest::inventory::{
 use wicketd_commission_types_versions::latest::update::SpUpdateProgress;
 
 pub struct WicketdTestContext {
-    pub wicketd_addr: SocketAddrV6,
+    pub wicketd_addrs: WicketdAddrs,
     pub wicketd_client: wicketd_client::Client,
     // This is not currently used but is kept here because it's easier to debug
     // this way.
@@ -114,7 +115,10 @@ impl WicketdTestContext {
         };
 
         Self {
-            wicketd_addr,
+            wicketd_addrs: WicketdAddrs {
+                wicketd: wicketd_addr,
+                commission: commission_addr,
+            },
             wicketd_client,
             wicketd_raw_client,
             artifact_addr,

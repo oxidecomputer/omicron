@@ -354,7 +354,7 @@ impl CockroachClusterAdminClient {
                 results.push(result);
             }
         }
-        results.append(&mut tasks.join_all().await);
+        results.append(&mut tasks.join_remaining().await);
 
         // Collect all successful results
         let mut successful_results = Vec::new();
@@ -431,7 +431,7 @@ impl CockroachClusterAdminClient {
                 results.push(result);
             }
         }
-        results.append(&mut tasks.join_all().await);
+        results.append(&mut tasks.join_remaining().await);
 
         // Collect all successful results
         let mut successful_results = Vec::new();

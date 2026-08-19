@@ -308,6 +308,49 @@ fn draw_rack_status_details_popup(
                 style::plain_text(),
             )]));
         }
+        Ok(RackOperationStatus::MultirackJoinInProgress { id }) => {
+            body.lines.push(Line::from(vec![
+                status,
+                Span::styled("Multirack Join In Progress", style::plain_text()),
+            ]));
+            body.lines.push(Line::from(vec![Span::styled(
+                format!("Current operation ID: {}", id),
+                style::plain_text(),
+            )]));
+        }
+        Ok(RackOperationStatus::MultirackJoinCompleted { id }) => {
+            body.lines.push(Line::from(vec![
+                status,
+                Span::styled("Multirack Join Completed", style::plain_text()),
+            ]));
+            if let Some(id) = id {
+                body.lines.push(Line::from(vec![Span::styled(
+                    format!("Last multirack join operation ID: {}", id),
+                    style::plain_text(),
+                )]));
+            }
+        }
+        Ok(RackOperationStatus::MultirackJoinFailed { id, message }) => {
+            body.lines.push(Line::from(vec![
+                status,
+                Span::styled("Multirack Join Failed", style::plain_text()),
+            ]));
+            body.lines.push(Line::from(vec![Span::styled(
+                format!("Last multirack join operation ID: {}", id),
+                style::plain_text(),
+            )]));
+            push_text_lines(message, prefix, &mut body.lines);
+        }
+        Ok(RackOperationStatus::MultirackJoinPanicked { id }) => {
+            body.lines.push(Line::from(vec![
+                status,
+                Span::styled("Multirack Join Panicked", style::plain_text()),
+            ]));
+            body.lines.push(Line::from(vec![Span::styled(
+                format!("Last multirack join operation ID: {}", id),
+                style::plain_text(),
+            )]));
+        }
         Err(message) => {
             body.lines.push(Line::from(vec![
                 status,
@@ -425,7 +468,11 @@ impl Control for RackSetupPane {
                 RackOperationStatus::Initialized { .. }
                 | RackOperationStatus::Initializing { .. }
                 | RackOperationStatus::InitializationFailed { .. }
-                | RackOperationStatus::InitializationPanicked { .. },
+                | RackOperationStatus::InitializationPanicked { .. }
+                | RackOperationStatus::MultirackJoinCompleted { .. }
+                | RackOperationStatus::MultirackJoinInProgress { .. }
+                | RackOperationStatus::MultirackJoinFailed { .. }
+                | RackOperationStatus::MultirackJoinPanicked { .. },
             )
             | Err(_) => &self.help,
         };
@@ -492,6 +539,16 @@ fn rss_config_text<'a>(
             RackOperationStatus::InitializationFailed { .. }
             | RackOperationStatus::InitializationPanicked { .. },
         ) => Span::styled("Initialization Failed", bad_style),
+        Ok(RackOperationStatus::MultirackJoinInProgress { .. }) => {
+            Span::styled("Multirack Join In Progress", warn_style)
+        }
+        Ok(RackOperationStatus::MultirackJoinCompleted { .. }) => {
+            Span::styled("Multirack Join Completed", ok_style)
+        }
+        Ok(
+            RackOperationStatus::MultirackJoinFailed { .. }
+            | RackOperationStatus::MultirackJoinPanicked { .. },
+        ) => Span::styled("Multirack Join Failed", bad_style),
         Err(_) => Span::styled("Unknown", bad_style),
     };
 

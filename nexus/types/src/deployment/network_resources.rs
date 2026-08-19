@@ -9,6 +9,7 @@ use iddqd::TriHashMap;
 use iddqd::tri_upcast;
 use omicron_common::api::external::IpVersion;
 use omicron_common::api::external::MacAddr;
+use omicron_common::api::internal::shared::PrivateIpConfig;
 use omicron_uuid_kinds::ExternalIpUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::VnicUuid;
@@ -17,6 +18,8 @@ use serde::Deserialize;
 use serde::Serialize;
 use sled_agent_types::inventory::SourceNatConfigGeneric;
 use std::net::IpAddr;
+use std::net::Ipv4Addr;
+use std::net::Ipv6Addr;
 use std::net::SocketAddr;
 use thiserror::Error;
 
@@ -79,11 +82,73 @@ impl OmicronZoneNetworkResources {
         self.omicron_zone_nics.iter().copied()
     }
 
+    // When adding a new external IP, check that if we already have a NIC for
+    // this zone, it has a private IP of the same version as the external IP.
+    fn check_existing_nic_supports_external_ip(
+        &self,
+        zone_id: &OmicronZoneUuid,
+        ip: &OmicronZoneExternalIp,
+    ) -> Result<(), AddNetworkResourceError> {
+        if let Some(OmicronZoneNicEntry { nic, .. }) =
+            self.omicron_zone_nics.get1(zone_id)
+        {
+            return self.check_external_and_private_ips_are_consistent(
+                zone_id,
+                ip.ip(),
+                nic,
+            );
+        }
+        Ok(())
+    }
+
+    // When adding a new NIC, check that if we already have an external IP for
+    // this zone, it has a private IP of the same version as the external IP.
+    fn check_nic_supports_existing_external_ip(
+        &self,
+        zone_id: &OmicronZoneUuid,
+        nic: &OmicronZoneNic,
+    ) -> Result<(), AddNetworkResourceError> {
+        if let Some(OmicronZoneExternalIpEntry { ip, .. }) =
+            self.omicron_zone_external_ips.get1(zone_id)
+        {
+            return self.check_external_and_private_ips_are_consistent(
+                zone_id,
+                ip.ip(),
+                nic,
+            );
+        }
+        Ok(())
+    }
+
+    fn check_external_and_private_ips_are_consistent(
+        &self,
+        zone_id: &OmicronZoneUuid,
+        external_ip: IpAddr,
+        nic: &OmicronZoneNic,
+    ) -> Result<(), AddNetworkResourceError> {
+        if external_ip.is_ipv4() && nic.ip.ipv4().is_none() {
+            return Err(AddNetworkResourceError::NoPrivateIpForExternalIp {
+                zone_id: *zone_id,
+                nic_id: nic.id,
+                external_ip,
+            });
+        }
+        if external_ip.is_ipv6() && nic.ip.ipv6().is_none() {
+            return Err(AddNetworkResourceError::NoPrivateIpForExternalIp {
+                zone_id: *zone_id,
+                nic_id: nic.id,
+                external_ip,
+            });
+        }
+        Ok(())
+    }
+
     pub fn add_external_ip(
         &mut self,
         zone_id: OmicronZoneUuid,
         ip: OmicronZoneExternalIp,
     ) -> Result<(), AddNetworkResourceError> {
+        self.check_existing_nic_supports_external_ip(&zone_id, &ip)?;
         let entry = OmicronZoneExternalIpEntry { zone_id, ip };
         self.omicron_zone_external_ips.insert_unique(entry).map_err(|err| {
             AddNetworkResourceError::DuplicateOmicronZoneExternalIp {
@@ -99,6 +164,7 @@ impl OmicronZoneNetworkResources {
         zone_id: OmicronZoneUuid,
         nic: OmicronZoneNic,
     ) -> Result<(), AddNetworkResourceError> {
+        self.check_nic_supports_existing_external_ip(&zone_id, &nic)?;
         let entry = OmicronZoneNicEntry { zone_id, nic };
         self.omicron_zone_nics.insert_unique(entry).map_err(|err| {
             AddNetworkResourceError::DuplicateOmicronZoneNic {
@@ -288,6 +354,78 @@ pub struct OmicronZoneExternalSnatIp {
     pub snat_cfg: SourceNatConfigGeneric,
 }
 
+/// The private IP address(es) of an Omicron zone's network interface.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize,
+)]
+#[serde(rename_all = "snake_case", tag = "type", content = "value")]
+pub enum OmicronZoneNicIp {
+    /// The interface has only an IPv4 address.
+    Ipv4Only(Ipv4Addr),
+    /// The interface has only an IPv6 address.
+    Ipv6Only(Ipv6Addr),
+    /// The interface is dual-stack.
+    DualStack { v4: Ipv4Addr, v6: Ipv6Addr },
+}
+
+impl OmicronZoneNicIp {
+    /// Return the IPv4 address, if this configuration has one.
+    pub fn ipv4(&self) -> Option<Ipv4Addr> {
+        match self {
+            OmicronZoneNicIp::Ipv4Only(v4)
+            | OmicronZoneNicIp::DualStack { v4, .. } => Some(*v4),
+            OmicronZoneNicIp::Ipv6Only(_) => None,
+        }
+    }
+
+    /// Return the IPv6 address, if this configuration has one.
+    pub fn ipv6(&self) -> Option<Ipv6Addr> {
+        match self {
+            OmicronZoneNicIp::Ipv6Only(v6)
+            | OmicronZoneNicIp::DualStack { v6, .. } => Some(*v6),
+            OmicronZoneNicIp::Ipv4Only(_) => None,
+        }
+    }
+
+    /// Return true if this is a dual-stack configuration.
+    pub fn is_dual_stack(&self) -> bool {
+        matches!(self, OmicronZoneNicIp::DualStack { .. })
+    }
+
+    /// Iterate over all addresses: one for a single-stack NIC, two for a
+    /// dual-stack NIC (IPv4 first).
+    pub fn addrs(&self) -> impl Iterator<Item = IpAddr> {
+        self.ipv4()
+            .map(IpAddr::V4)
+            .into_iter()
+            .chain(self.ipv6().map(IpAddr::V6))
+    }
+}
+
+impl From<&PrivateIpConfig> for OmicronZoneNicIp {
+    fn from(cfg: &PrivateIpConfig) -> Self {
+        match cfg {
+            PrivateIpConfig::V4(v4) => OmicronZoneNicIp::Ipv4Only(*v4.ip()),
+            PrivateIpConfig::V6(v6) => OmicronZoneNicIp::Ipv6Only(*v6.ip()),
+            PrivateIpConfig::DualStack { v4, v6 } => {
+                OmicronZoneNicIp::DualStack { v4: *v4.ip(), v6: *v6.ip() }
+            }
+        }
+    }
+}
+
+impl std::fmt::Display for OmicronZoneNicIp {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            OmicronZoneNicIp::Ipv4Only(v4) => write!(f, "{v4}"),
+            OmicronZoneNicIp::Ipv6Only(v6) => write!(f, "{v6}"),
+            OmicronZoneNicIp::DualStack { v4, v6 } => {
+                write!(f, "{v4} | {v6}")
+            }
+        }
+    }
+}
+
 /// Network interface allocated to an Omicron-managed zone.
 ///
 /// This is a slimmer `nexus_db_model::ServiceNetworkInterface` that only stores
@@ -298,9 +436,7 @@ pub struct OmicronZoneExternalSnatIp {
 pub struct OmicronZoneNic {
     pub id: VnicUuid,
     pub mac: MacAddr,
-    // TODO-completeness: Support dual-stack NICs for Omicron zones. See
-    // https://github.com/oxidecomputer/omicron/issues/9314.
-    pub ip: IpAddr,
+    pub ip: OmicronZoneNicIp,
     pub slot: u8,
     pub primary: bool,
 }
@@ -389,4 +525,248 @@ pub enum AddNetworkResourceError {
         #[source]
         err: anyhow::Error,
     },
+    #[error(
+        "the Omicron zone {zone_id} with NIC {nic_id} has no private IP \
+        address for the external IP {external_ip}"
+    )]
+    NoPrivateIpForExternalIp {
+        zone_id: OmicronZoneUuid,
+        nic_id: VnicUuid,
+        external_ip: IpAddr,
+    },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use omicron_common::api::internal::shared::PrivateIpv4Config;
+    use omicron_common::api::internal::shared::PrivateIpv6Config;
+
+    fn v4_config() -> PrivateIpv4Config {
+        PrivateIpv4Config::new(
+            "172.30.2.5".parse().unwrap(),
+            "172.30.2.0/24".parse().unwrap(),
+        )
+        .unwrap()
+    }
+
+    fn v6_config() -> PrivateIpv6Config {
+        PrivateIpv6Config::new(
+            "fd00:1122:3344:100::5".parse().unwrap(),
+            "fd00:1122:3344:100::/64".parse().unwrap(),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn from_private_ip_config_and_accessors() {
+        let v4: Ipv4Addr = "172.30.2.5".parse().unwrap();
+        let v6: Ipv6Addr = "fd00:1122:3344:100::5".parse().unwrap();
+
+        let v4_only = OmicronZoneNicIp::from(&PrivateIpConfig::V4(v4_config()));
+        assert_eq!(v4_only, OmicronZoneNicIp::Ipv4Only(v4));
+        assert_eq!(v4_only.ipv4(), Some(v4));
+        assert_eq!(v4_only.ipv6(), None);
+        assert!(!v4_only.is_dual_stack());
+        assert_eq!(v4_only.addrs().collect::<Vec<_>>(), vec![IpAddr::V4(v4)]);
+
+        let v6_only = OmicronZoneNicIp::from(&PrivateIpConfig::V6(v6_config()));
+        assert_eq!(v6_only, OmicronZoneNicIp::Ipv6Only(v6));
+        assert_eq!(v6_only.ipv4(), None);
+        assert_eq!(v6_only.ipv6(), Some(v6));
+        assert!(!v6_only.is_dual_stack());
+        assert_eq!(v6_only.addrs().collect::<Vec<_>>(), vec![IpAddr::V6(v6)]);
+
+        let dual = OmicronZoneNicIp::from(&PrivateIpConfig::DualStack {
+            v4: v4_config(),
+            v6: v6_config(),
+        });
+        assert_eq!(dual, OmicronZoneNicIp::DualStack { v4, v6 });
+        assert_eq!(dual.ipv4(), Some(v4));
+        assert_eq!(dual.ipv6(), Some(v6));
+        assert!(dual.is_dual_stack());
+        // blippy relies on `addrs()` yielding both addresses (IPv4 first) so it
+        // can check each against the known OPTE subnets.
+        assert_eq!(
+            dual.addrs().collect::<Vec<_>>(),
+            vec![IpAddr::V4(v4), IpAddr::V6(v6)],
+        );
+    }
+
+    #[test]
+    fn display() {
+        let v4: Ipv4Addr = "172.30.2.5".parse().unwrap();
+        let v6: Ipv6Addr = "fd00:1122:3344:100::5".parse().unwrap();
+        assert_eq!(OmicronZoneNicIp::Ipv4Only(v4).to_string(), "172.30.2.5");
+        assert_eq!(
+            OmicronZoneNicIp::Ipv6Only(v6).to_string(),
+            "fd00:1122:3344:100::5",
+        );
+        assert_eq!(
+            OmicronZoneNicIp::DualStack { v4, v6 }.to_string(),
+            "172.30.2.5 | fd00:1122:3344:100::5",
+        );
+    }
+
+    fn zone_nic(ip: OmicronZoneNicIp) -> OmicronZoneNic {
+        OmicronZoneNic {
+            id: VnicUuid::new_v4(),
+            mac: "a8:40:25:ff:00:01".parse().unwrap(),
+            ip,
+            slot: 0,
+            primary: true,
+        }
+    }
+
+    fn floating_external_ip(ip: IpAddr) -> OmicronZoneExternalIp {
+        OmicronZoneExternalIp::Floating(OmicronZoneExternalFloatingIp {
+            id: ExternalIpUuid::new_v4(),
+            ip,
+        })
+    }
+
+    fn v4_only_nic_ip() -> OmicronZoneNicIp {
+        OmicronZoneNicIp::Ipv4Only("172.30.2.5".parse().unwrap())
+    }
+
+    fn v6_only_nic_ip() -> OmicronZoneNicIp {
+        OmicronZoneNicIp::Ipv6Only("fd00:1122:3344:100::5".parse().unwrap())
+    }
+
+    fn dual_stack_nic_ip() -> OmicronZoneNicIp {
+        OmicronZoneNicIp::DualStack {
+            v4: "172.30.2.5".parse().unwrap(),
+            v6: "fd00:1122:3344:100::5".parse().unwrap(),
+        }
+    }
+
+    fn v4_external_ip() -> OmicronZoneExternalIp {
+        floating_external_ip("192.0.2.1".parse().unwrap())
+    }
+
+    fn v6_external_ip() -> OmicronZoneExternalIp {
+        floating_external_ip("2001:db8::1".parse().unwrap())
+    }
+
+    #[track_caller]
+    fn assert_consistency_result(
+        result: Result<(), AddNetworkResourceError>,
+        expect_ok: bool,
+        direction: &str,
+    ) {
+        match (expect_ok, result) {
+            (true, Ok(())) => {}
+            (
+                false,
+                Err(AddNetworkResourceError::NoPrivateIpForExternalIp {
+                    ..
+                }),
+            ) => {}
+            (true, Err(err)) => {
+                panic!("expected success ({direction}), got error: {err}")
+            }
+            (false, Ok(())) => {
+                panic!("expected failure ({direction}), but it succeeded")
+            }
+            (false, Err(err)) => panic!(
+                "expected NoPrivateIpForExternalIp ({direction}), got: {err}"
+            ),
+        }
+    }
+
+    // Associate `external` and a NIC carrying `nic_ip` on the same zone and
+    // assert the outcome is `expect_ok`, no matter which one we add first.
+    #[track_caller]
+    fn assert_external_ip_nic_consistency(
+        external: OmicronZoneExternalIp,
+        nic_ip: OmicronZoneNicIp,
+        expect_ok: bool,
+    ) {
+        // External IP first, then NIC.
+        {
+            let mut resources = OmicronZoneNetworkResources::new();
+            let zone_id = OmicronZoneUuid::new_v4();
+            resources
+                .add_external_ip(zone_id, external)
+                .expect("adding the external IP first always succeeds");
+            assert_consistency_result(
+                resources.add_nic(zone_id, zone_nic(nic_ip)),
+                expect_ok,
+                "add NIC after external IP",
+            );
+        }
+        // NIC first, then external IP.
+        {
+            let mut resources = OmicronZoneNetworkResources::new();
+            let zone_id = OmicronZoneUuid::new_v4();
+            resources
+                .add_nic(zone_id, zone_nic(nic_ip))
+                .expect("adding the NIC first always succeeds");
+            assert_consistency_result(
+                resources.add_external_ip(zone_id, external),
+                expect_ok,
+                "add external IP after NIC",
+            );
+        }
+    }
+
+    #[test]
+    fn external_ip_consistent_with_nic_passes() {
+        assert_external_ip_nic_consistency(
+            v4_external_ip(),
+            v4_only_nic_ip(),
+            true,
+        );
+        assert_external_ip_nic_consistency(
+            v4_external_ip(),
+            dual_stack_nic_ip(),
+            true,
+        );
+        assert_external_ip_nic_consistency(
+            v6_external_ip(),
+            v6_only_nic_ip(),
+            true,
+        );
+        assert_external_ip_nic_consistency(
+            v6_external_ip(),
+            dual_stack_nic_ip(),
+            true,
+        );
+    }
+
+    #[test]
+    fn external_ip_without_matching_nic_family_fails() {
+        assert_external_ip_nic_consistency(
+            v4_external_ip(),
+            v6_only_nic_ip(),
+            false,
+        );
+        assert_external_ip_nic_consistency(
+            v6_external_ip(),
+            v4_only_nic_ip(),
+            false,
+        );
+    }
+
+    #[test]
+    fn adding_a_resource_without_the_other_passes() {
+        // An external IP of either family is fine when the zone has no NIC yet.
+        for external in [v4_external_ip(), v6_external_ip()] {
+            let mut resources = OmicronZoneNetworkResources::new();
+            let zone_id = OmicronZoneUuid::new_v4();
+            resources
+                .add_external_ip(zone_id, external)
+                .expect("external IP with no NIC should be accepted");
+        }
+        // A NIC of either family, or dual-stack, is fine when the zone has no
+        // external IP yet.
+        for nic_ip in [v4_only_nic_ip(), v6_only_nic_ip(), dual_stack_nic_ip()]
+        {
+            let mut resources = OmicronZoneNetworkResources::new();
+            let zone_id = OmicronZoneUuid::new_v4();
+            resources
+                .add_nic(zone_id, zone_nic(nic_ip))
+                .expect("NIC with no external IP should be accepted");
+        }
+    }
 }

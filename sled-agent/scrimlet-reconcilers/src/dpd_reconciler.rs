@@ -8,6 +8,9 @@
 use crate::handle::ScrimletReconcilersMode;
 use crate::reconciler_task::Reconciler;
 use crate::switch_zone_slot::ThisSledSwitchSlot;
+use bootstrap_agent_lockstep_types::scrimlet_reconcilers::dpd::{
+    DpdNatReconcilerStatus, DpdReconcilerStatus,
+};
 use dpd_client::Client;
 use sled_agent_types::system_networking::SystemNetworkingConfig;
 use slog::Logger;
@@ -16,33 +19,7 @@ use std::time::Duration;
 mod nat;
 mod port_reconciler;
 
-pub use nat::DpdNatReconcilerStatus;
-pub use nat::DpdNatReconcilerStatusNatEntry;
-pub use nat::DpdNatReconcilerStatusNatEntryFailure;
-pub use port_reconciler::DpdPortOperationFailure;
-pub use port_reconciler::DpdPortReconcilerStatus;
 use port_reconciler::PortReconciler;
-
-#[derive(Debug, Clone)]
-pub struct DpdReconcilerStatus {
-    /// Result of reconciling port settings
-    pub port_settings_status: DpdPortReconcilerStatus,
-    /// Result of reconciling service zone NAT entries
-    pub nat_status: DpdNatReconcilerStatus,
-}
-
-impl slog::KV for DpdReconcilerStatus {
-    fn serialize(
-        &self,
-        record: &slog::Record<'_>,
-        serializer: &mut dyn slog::Serializer,
-    ) -> slog::Result {
-        let Self { port_settings_status, nat_status } = self;
-        port_settings_status.serialize(record, serializer)?;
-        nat_status.serialize(record, serializer)?;
-        Ok(())
-    }
-}
 
 #[derive(Debug)]
 pub(crate) struct DpdReconciler {
