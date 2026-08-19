@@ -23,9 +23,7 @@ use nexus_types::trust_quorum::TrustQuorumConfig;
 use omicron_common::address::BOOTSTRAP_AGENT_RACK_INIT_PORT;
 use omicron_ledger::{self as ledger};
 use omicron_uuid_kinds::RackUuid;
-use sled_agent_bootstrap_common::sprockets::{
-    SprocketsClient, SprocketsClientError,
-};
+use sled_agent_bootstrap_common::sprockets::SprocketsClient;
 use sled_agent_bootstrap_common::{RssContext, RunRssError};
 use sled_agent_types::sled::{
     StartSledAgentRequest, StartSledAgentRequestBody,
@@ -82,19 +80,8 @@ pub enum MultirackJoinServiceError {
     )]
     MissingSledConnections(BTreeSet<BaseboardId>),
 
-    #[error("Failed to start sled-agents: {0:#?}")]
-    StartSledAgents(BTreeSet<BaseboardId>),
-
     #[error("Failed to access ledger")]
     Ledger(#[from] ledger::Error),
-}
-
-#[derive(Error, Debug, SlogInlineError)]
-#[error("Failed to start sled agent on {baseboard_id}")]
-pub struct SledSpecificSprocketsError {
-    baseboard_id: BaseboardId,
-    #[source]
-    err: SprocketsClientError,
 }
 
 impl From<RunRssError> for MultirackJoinServiceError {
@@ -300,73 +287,43 @@ impl MultirackJoinServiceTask {
             ));
         }
 
-        let mut failed = BTreeSet::new();
-
-        // Wait for the result of each sled-agent
+        // Wait for each sled-agent to start
         while let Some(res) = set.join_next().await {
             // We unwrap because we build with `abort=panic`, and don't want to
             // handle join errors here.
-            match res.unwrap() {
-                Ok(baseboard_id) => {
-                    info!(
-                        self.log,
-                        "Started sled agent";
-                        "baseboard_id" => %baseboard_id
-                    );
-                    self.output_tx.send_modify(|state| {
-                        let MultirackJoinServiceState::StartSledAgents(status) =
-                            state
-                        else {
-                            panic!(
-                                "MultirackJoinService in wrong state: {:#?}",
-                                state
-                            );
-                        };
-                        // Safe to unwrap since we only start tasks that return
-                        // baseboards that already exist in status.
-                        let mut info =
-                            status.sleds.get1_mut(&baseboard_id).unwrap();
-                        info.start_state = SledAgentStartState::Started;
-                    });
-                }
-                Err(err) => {
-                    // We already logged this error in the spawn task
-                    self.output_tx.send_modify(|state| {
-                        let MultirackJoinServiceState::StartSledAgents(status) =
-                            state
-                        else {
-                            panic!(
-                                "MultirackJoinService in wrong state: {:#?}",
-                                state
-                            );
-                        };
-                        // Safe to unwrap since we only start tasks that return
-                        // baseboards that already exist in status.
-                        let mut info =
-                            status.sleds.get1_mut(&err.baseboard_id).unwrap();
-                        info.start_state = SledAgentStartState::Failed {
-                            reason: InlineErrorChain::new(&err).to_string(),
-                        };
-                    });
-                    failed.insert(err.baseboard_id);
-                }
-            }
+            let baseboard_id = res.unwrap();
+            info!(
+                self.log,
+                "Started sled agent";
+                "baseboard_id" => %baseboard_id
+            );
+            self.output_tx.send_modify(|state| {
+                let MultirackJoinServiceState::StartSledAgents(status) = state
+                else {
+                    panic!("MultirackJoinService in wrong state: {:#?}", state);
+                };
+                // Safe to unwrap since we only start tasks that return
+                // baseboards that already exist in status.
+                let mut info = status.sleds.get1_mut(&baseboard_id).unwrap();
+                info.start_state = SledAgentStartState::Started;
+            });
         }
 
-        if failed.is_empty() {
-            Ok(())
-        } else {
-            Err(MultirackJoinServiceError::StartSledAgents(failed))
-        }
+        Ok(())
     }
 
     /// Spawn a task that connects to the remote sprockets server and sends a
     /// `StartSledAgentRequest`.
+    ///
+    /// Runs indefinitely until success.
+    ///
+    /// We assume all errors are transient and will correct themselves, or can
+    /// be corrected by support. In the case this is not true, a clean-slate
+    /// will be required.
     fn spawn_start_sled_agent_task(
         &mut self,
         info: StartSledAgentInfo,
-    ) -> impl Future<Output = Result<BaseboardId, SledSpecificSprocketsError>>
-    + 'static {
+    ) -> impl Future<Output = BaseboardId> + 'static {
         let log = self.log.new(o!(
             "baseboard_id" => info.baseboard_id.to_string(),
             "bootstrap_ip" => info.bootstrap_ip.to_string()
@@ -388,36 +345,42 @@ impl MultirackJoinServiceTask {
             log.clone(),
         );
 
+        let output_tx = self.output_tx.clone();
+        let mut retry_count = 0;
         async move {
-            match client.start_sled_agent(&info.req).await {
-                Ok(_) => Ok(info.baseboard_id),
-                Err(err) => {
-                    // There really aren't any transient errors worth worrying
-                    // about here. At this point we've already established trust
-                    // quorum and know that we can reach each sled. We should
-                    // be able to open another sprockets connection and start a
-                    // sled-agent. We could backoff on failure to connect (the
-                    // only possible transient error), but then how long do we
-                    // wait until we give up?
-                    //
-                    // The client could see the transient error and then issue
-                    // a new request with new sled membership that comes in
-                    // on `input_rx`. We would then restart the trust quorum
-                    // configuration. However, that's a bunch of extra code for
-                    // a situation where the debugging of the issue by support
-                    // is likely to take longer than doing the clean slate and
-                    // join again. And we will want to debug this, as it should
-                    // basically never happen, and means bootstrap network
-                    // endpoints are becoming unavailable for some reason.
-                    error!(
-                        log,
-                        "Failed to start sled agent";
-                        InlineErrorChain::new(&err)
-                    );
-                    Err(SledSpecificSprocketsError {
-                        baseboard_id: info.baseboard_id,
-                        err,
-                    })
+            // Retry indefinitely to start sled-agent.
+            loop {
+                match client.start_sled_agent(&info.req).await {
+                    Ok(_) => {
+                        return info.baseboard_id;
+                    }
+                    Err(err) => {
+                        // Update state with the latest error seen.
+                        //
+                        output_tx.send_modify(|state| {
+                            let MultirackJoinServiceState::StartSledAgents(status) =
+                                state
+                            else {
+                                panic!(
+                                    "MultirackJoinService in wrong state: {:#?}",
+                                    state
+                                );
+                            };
+                            let errstr = InlineErrorChain::new(&err).to_string();
+                            // Safe to unwrap since we only start tasks that return
+                            // baseboards that already exist in status.
+                            let mut info =
+                                status.sleds.get1_mut(&info.baseboard_id).unwrap();
+                            info.start_state = SledAgentStartState::InProgress { last_error: Some(errstr) };
+
+                        });
+                        // Only log every minute, given the 6 second sleep below
+                        if retry_count % 10 == 0 {
+                            warn!(log, "Failed to start sled agent"; &err);
+                        }
+                        tokio::time::sleep(Duration::from_secs(6)).await;
+                        retry_count += 1;
+                    }
                 }
             }
         }

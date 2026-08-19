@@ -462,7 +462,7 @@ pub struct CommitState {
 #[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case", tag = "type")]
 pub enum SledAgentStartState {
-    InProgress,
+    InProgress { last_error: Option<String> },
     Started,
     Failed { reason: String },
 }
@@ -516,7 +516,9 @@ impl StartSledAgentsStatus {
                     rack_subnet,
                     u8::try_from(idx + 1).expect("too many sleds"),
                 ),
-                start_state: SledAgentStartState::InProgress,
+                start_state: SledAgentStartState::InProgress {
+                    last_error: None,
+                },
             })
             .collect();
 
