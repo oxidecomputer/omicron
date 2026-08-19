@@ -47,7 +47,12 @@ pub(crate) async fn reassign_sagas_from_expunged(
 ) -> Result<bool, Error> {
     let log = &opctx.log;
 
-    let nexus_zone_ids = find_expunged_same_generation(blueprint, nexus_id)?;
+    let nexus_zone_ids = find_expunged_nexus_ids(
+        blueprint,
+        nexus_id,
+        BlueprintExpungedZoneAccessReason::NexusSagaReassignment,
+        FindExpungedNexusFilter::SameGeneration,
+    )?;
     debug!(
         log,
         "re-assign sagas: found expunged Nexus instances with matching generation";
@@ -75,27 +80,6 @@ pub(crate) async fn reassign_sagas_from_expunged(
             Err(error)
         }
     }
-}
-
-/// Returns the list of Nexus ids for expunged (and ready-to-cleanup) Nexus
-/// zones in the same generation as the given Nexus id
-fn find_expunged_same_generation(
-    blueprint: &Blueprint,
-    nexus_id: SecId,
-) -> Result<Vec<SecId>, Error> {
-    let nexus_zone_id = OmicronZoneUuid::from_untyped_uuid(nexus_id.0);
-    let active_nexus_generation =
-        blueprint.find_generation_for_self(nexus_zone_id)?;
-    Ok(blueprint
-        .expunged_nexus_zones_ready_for_cleanup(
-            BlueprintExpungedZoneAccessReason::NexusSagaReassignment,
-        )
-        .filter_map(|(_sled_id, zone_config, nexus_config)| {
-            (nexus_config.nexus_generation == active_nexus_generation)
-                .then_some(zone_config.id)
-        })
-        .map(|id| SecId(id.into_untyped_uuid()))
-        .collect())
 }
 
 /// Abandon sagas that can never be reassigned.
@@ -128,7 +112,12 @@ pub(crate) async fn abandon_orphan_sagas(
     let log = &opctx.log;
 
     // Find ids of stale expunged Nexus zones
-    let stale_sec_ids = find_expunged_older_generation(blueprint, nexus_id)?;
+    let stale_sec_ids = find_expunged_nexus_ids(
+        blueprint,
+        nexus_id,
+        BlueprintExpungedZoneAccessReason::NexusOrphanSagaAbandonment,
+        FindExpungedNexusFilter::OlderGeneration,
+    )?;
 
     info!(
         log,
@@ -171,30 +160,42 @@ pub(crate) async fn abandon_orphan_sagas(
     }
 }
 
-/// Returns the ids of expunged (and ready-for-cleanup) Nexus zones whose
-/// generation is older than the generation of the given Nexus id
-fn find_expunged_older_generation(
+enum FindExpungedNexusFilter {
+    // Include only Nexus zones of the same generation.
+    SameGeneration,
+    // Include only Nexus zones of an older generation.
+    OlderGeneration,
+}
+
+/// Returns the SEC ids of expunged (and ready-for-cleanup) Nexus zones whose
+/// generation relates to the given Nexus's generation as specified by `filter`
+fn find_expunged_nexus_ids(
     blueprint: &Blueprint,
     nexus_id: SecId,
+    reason: BlueprintExpungedZoneAccessReason,
+    filter: FindExpungedNexusFilter,
 ) -> Result<Vec<SecId>, Error> {
     let nexus_zone_id = OmicronZoneUuid::from_untyped_uuid(nexus_id.0);
     let active_nexus_generation =
         blueprint.find_generation_for_self(nexus_zone_id)?;
 
-    // SEC ids of expunged and ready-for-cleanup Nexus zones whose generation is
-    // strictly older than the given Nexus generation.
-    //
     // We source SEC ids strictly from the target blueprint as these are the
     // only Nexuses we can confidently confirm the state of. Any Nexus not in
     // the target blueprint is effectively ignored.
     Ok(blueprint
-        .expunged_nexus_zones_ready_for_cleanup(
-            BlueprintExpungedZoneAccessReason::NexusOrphanSagaAbandonment,
-        )
-        .filter_map(|(_sled_id, config, nexus)| {
-            (nexus.nexus_generation < active_nexus_generation)
-                .then_some(SecId(config.id.into_untyped_uuid()))
+        .expunged_nexus_zones_ready_for_cleanup(reason)
+        .filter_map(|(_sled_id, zone_config, nexus_config)| {
+            let include = match filter {
+                FindExpungedNexusFilter::SameGeneration => {
+                    nexus_config.nexus_generation == active_nexus_generation
+                }
+                FindExpungedNexusFilter::OlderGeneration => {
+                    nexus_config.nexus_generation < active_nexus_generation
+                }
+            };
+            include.then_some(zone_config.id)
         })
+        .map(|id| SecId(id.into_untyped_uuid()))
         .collect())
 }
 
@@ -367,9 +368,9 @@ mod test {
         let logctx = test_setup_log(TEST_NAME);
         let log = &logctx.log;
 
-        // To do an exhaustive test of `find_expunged_same_generation()`, we
-        // want some expunged zones and some non-expunged zones in each of two
-        // different generations.
+        // To do an exhaustive test of `find_expunged_nexus_ids()` with the
+        // `SameGeneration` filter, we want some expunged zones and some
+        // non-expunged zones in each of two different generations.
 
         // First, create a basic blueprint with several Nexus zones in
         // generation 1.
@@ -493,9 +494,11 @@ mod test {
             })
             .collect();
         for (_sled_id, zone_id, _image_source) in g1_keep_ids {
-            let matched = find_expunged_same_generation(
+            let matched = find_expunged_nexus_ids(
                 &blueprint3,
                 SecId(zone_id.into_untyped_uuid()),
+                BlueprintExpungedZoneAccessReason::NexusSagaReassignment,
+                FindExpungedNexusFilter::SameGeneration,
             )
             .unwrap();
             assert_eq!(
@@ -513,9 +516,11 @@ mod test {
         // expunged-and-ready-for-cleanup zone in generation 2.
         let g2_matched = SecId(g2_expunged_cleaned_up.into_untyped_uuid());
         for (_sled_id, zone_id) in g2_keep_ids {
-            let matched = find_expunged_same_generation(
+            let matched = find_expunged_nexus_ids(
                 &blueprint3,
                 SecId(zone_id.into_untyped_uuid()),
+                BlueprintExpungedZoneAccessReason::NexusSagaReassignment,
+                FindExpungedNexusFilter::SameGeneration,
             )
             .unwrap();
             assert_eq!(matched.len(), 1);
@@ -525,9 +530,11 @@ mod test {
         // It is possible for the expunged and not-yet-ready-for-cleanup zone in
         // generation 2 to wind up calling this function.  It should not find
         // itself!
-        let matched = find_expunged_same_generation(
+        let matched = find_expunged_nexus_ids(
             &blueprint3,
             SecId(g2_expunged_not_cleaned_up.into_untyped_uuid()),
+            BlueprintExpungedZoneAccessReason::NexusSagaReassignment,
+            FindExpungedNexusFilter::SameGeneration,
         )
         .unwrap();
         assert_eq!(matched.len(), 1);
@@ -535,9 +542,13 @@ mod test {
 
         // Test the sole error case: if we cannot figure out which generation we
         // were given.
-        let error =
-            find_expunged_same_generation(&blueprint3, SecId(Uuid::new_v4()))
-                .expect_err("made-up Nexus should not exist");
+        let error = find_expunged_nexus_ids(
+            &blueprint3,
+            SecId(Uuid::new_v4()),
+            BlueprintExpungedZoneAccessReason::NexusSagaReassignment,
+            FindExpungedNexusFilter::SameGeneration,
+        )
+        .expect_err("made-up Nexus should not exist");
         assert!(matches!(error, Error::InternalError { internal_message }
             if internal_message.contains("did not find Nexus")));
 
@@ -623,9 +634,11 @@ mod test {
         // of an older generation (generation 1 is the oldest), so we find
         // nothing.
         for zone_id in [g1_in_service_a, g1_in_service_b] {
-            let matched = find_expunged_older_generation(
+            let matched = find_expunged_nexus_ids(
                 &blueprint,
                 SecId(zone_id.into_untyped_uuid()),
+                BlueprintExpungedZoneAccessReason::NexusOrphanSagaAbandonment,
+                FindExpungedNexusFilter::OlderGeneration,
             )
             .unwrap();
             assert!(matched.is_empty());
@@ -636,9 +649,11 @@ mod test {
         // find the generation-2 expunged zone, since that's the same
         // generation, not older.
         for zone_id in [g2_in_service_a, g2_in_service_b] {
-            let matched = find_expunged_older_generation(
+            let matched = find_expunged_nexus_ids(
                 &blueprint,
                 SecId(zone_id.into_untyped_uuid()),
+                BlueprintExpungedZoneAccessReason::NexusOrphanSagaAbandonment,
+                FindExpungedNexusFilter::OlderGeneration,
             )
             .unwrap();
             assert_eq!(matched.len(), 2);
@@ -653,9 +668,11 @@ mod test {
         // 2) perspective, the only older expunged and ready-for-cleanup zones
         // are the generation-1 ones; it finds neither the same-generation
         // expunged zone nor itself.
-        let matched = find_expunged_older_generation(
+        let matched = find_expunged_nexus_ids(
             &blueprint,
             SecId(g2_expunged_not_ready.into_untyped_uuid()),
+            BlueprintExpungedZoneAccessReason::NexusOrphanSagaAbandonment,
+            FindExpungedNexusFilter::OlderGeneration,
         )
         .unwrap();
         assert_eq!(matched.len(), 2);
@@ -663,9 +680,13 @@ mod test {
 
         // There should be an error if the id of the current nexus is not in the
         // blueprint
-        let error =
-            find_expunged_older_generation(&blueprint, SecId(Uuid::new_v4()))
-                .expect_err("made-up Nexus should not exist");
+        let error = find_expunged_nexus_ids(
+            &blueprint,
+            SecId(Uuid::new_v4()),
+            BlueprintExpungedZoneAccessReason::NexusOrphanSagaAbandonment,
+            FindExpungedNexusFilter::OlderGeneration,
+        )
+        .expect_err("made-up Nexus should not exist");
         assert!(matches!(error, Error::InternalError { internal_message }
             if internal_message.contains("did not find Nexus")));
 
