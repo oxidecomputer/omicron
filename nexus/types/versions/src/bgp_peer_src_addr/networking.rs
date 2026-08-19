@@ -27,7 +27,7 @@ use omicron_common::api::external::NameOrId;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sled_agent_types_versions::v1::early_networking::ImportExportPolicy;
-use sled_agent_types_versions::v45::early_networking::{
+use sled_agent_types_versions::v47::early_networking::{
     NumberedPeerWithSrcAddrError, RouterPeerType,
 };
 

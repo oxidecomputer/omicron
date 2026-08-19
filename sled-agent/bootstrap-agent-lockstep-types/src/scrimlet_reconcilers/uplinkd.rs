@@ -11,6 +11,7 @@ use std::collections::BTreeMap;
 
 /// Status of the `uplinkd` scrimlet reconciler.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case", tag = "status", content = "value")]
 pub enum UplinkdReconcilerStatus {
     Failed(String),
     SkippedConfigUpToDate,

@@ -365,8 +365,8 @@ mod complicated_arbitrary_impls {
     use crate::latest::early_networking::BfdPeerConfig;
     use crate::latest::early_networking::BgpConfig;
     use crate::latest::early_networking::ImportExportPolicy;
-    use crate::v45::early_networking::NumberedRouter;
-    use crate::v45::early_networking::UnnumberedRouter;
+    use crate::v47::early_networking::NumberedRouter;
+    use crate::v47::early_networking::UnnumberedRouter;
     use oxnet::Ipv4Net;
     use proptest::prelude::*;
     use std::net::Ipv4Addr;

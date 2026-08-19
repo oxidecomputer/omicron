@@ -74,12 +74,9 @@ impl NumberedRouter {
     ) -> Result<Self, AddressFamilyMismatchError> {
         match src_addr {
             Some(src) if src.is_ipv4() != target_addr.is_ipv4() => {
-                Err(AddressFamilyMismatchError(
-                    src.into(),
-                    target_addr.into(),
-                ))
+                Err(AddressFamilyMismatchError(src.into(), target_addr.into()))
             }
-            _ => Ok(Self { target_addr, src_addr })
+            _ => Ok(Self { target_addr, src_addr }),
         }
     }
 }

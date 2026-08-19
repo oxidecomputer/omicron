@@ -2560,16 +2560,19 @@ CREATE TABLE IF NOT EXISTS omicron.public.external_ip (
 
     is_probe BOOL NOT NULL DEFAULT false,
 
-    /* The name must be non-NULL iff this is a floating IP. */
-    CONSTRAINT null_fip_name CHECK (
-        (kind != 'floating' AND name IS NULL) OR
-        (kind = 'floating' AND name IS NOT NULL)
+    /*
+     * Names and descriptions are required for instance floating IPs,
+     * and service IPs of any kind.
+     */
+    CONSTRAINT fips_and_services_need_names CHECK (
+        (is_service = TRUE AND name IS NOT NULL) OR
+        (is_service = FALSE AND kind != 'floating' AND name IS NULL) OR
+        (is_service = FALSE AND kind = 'floating' AND name IS NOT NULL)
     ),
-
-    /* The description must be non-NULL iff this is a floating IP. */
-    CONSTRAINT null_fip_description CHECK (
-        (kind != 'floating' AND description IS NULL) OR
-        (kind = 'floating' AND description IS NOT NULL)
+    CONSTRAINT fips_and_services_need_descriptions CHECK (
+        (is_service = TRUE AND description IS NOT NULL) OR
+        (is_service = FALSE AND kind != 'floating' AND description IS NULL) OR
+        (is_service = FALSE AND kind = 'floating' AND description IS NOT NULL)
     ),
 
     /* Only floating IPs can be attached to a project, and
@@ -2926,7 +2929,9 @@ CREATE TYPE IF NOT EXISTS omicron.public.saga_abandon_reason AS ENUM (
     /* the saga was explicitly abandoned via omdb */
     'omdb',
     /* during saga recovery, the persistent state was unable to processed */
-    'unrecoverable'
+    'unrecoverable',
+    /* the saga was discovered assigned to an SEC that's been long-expunged */
+    'orphaned'
 );
 
 
@@ -5330,7 +5335,8 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_internal_dns (
 CREATE TYPE IF NOT EXISTS omicron.public.inv_svc_enabled_not_online_state AS ENUM (
     'offline',
     'degraded',
-    'maintenance'
+    'maintenance',
+    'unrecognized'
 );
 
 CREATE TABLE IF NOT EXISTS omicron.public.inv_svc_enabled_not_online (
@@ -9255,7 +9261,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '288.0.0', NULL)
+    (TRUE, NOW(), NOW(), '291.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

@@ -46,8 +46,10 @@ use wicket_common::rack_setup::GetBgpAuthKeyInfoResponse;
 use wicketd_api::CurrentRssUserConfig;
 use wicketd_api::CurrentRssUserConfigSensitive;
 use wicketd_commission_types::rack_setup::BgpAuthKey;
+use wicketd_commission_types::rack_setup::CertificatePem;
 use wicketd_commission_types::rack_setup::CertificateUploadResponse;
 use wicketd_commission_types::rack_setup::ManualPortConfig;
+use wicketd_commission_types::rack_setup::PrivateKeyPem;
 use wicketd_commission_types::rack_setup::PutRssUserConfigInsensitive;
 use wicketd_commission_types::rack_setup::UserSpecifiedRackNetworkConfig;
 use wicketd_commission_types::rack_setup::UserSpecifiedRouterPeerAddr;
@@ -249,17 +251,17 @@ impl CurrentRssConfig {
 
     pub(crate) fn push_cert(
         &mut self,
-        cert: String,
+        cert: CertificatePem,
     ) -> Result<CertificateUploadResponse, String> {
-        self.partial_external_certificate.cert = Some(cert);
+        self.partial_external_certificate.cert = Some(cert.0);
         self.maybe_promote_external_certificate()
     }
 
     pub(crate) fn push_key(
         &mut self,
-        key: String,
+        key: PrivateKeyPem,
     ) -> Result<CertificateUploadResponse, String> {
-        self.partial_external_certificate.key = Some(key);
+        self.partial_external_certificate.key = Some(key.0.to_string());
         self.maybe_promote_external_certificate()
     }
 
@@ -727,6 +729,7 @@ mod tests {
     use wicket_common::rack_setup::BgpAuthKeyStatus;
     use wicketd_commission_types::rack_setup::BgpAuthKeyId;
     use wicketd_commission_types::rack_setup::SetBgpAuthKeyStatus;
+    use zeroize::Zeroizing;
 
     use super::*;
 
@@ -1106,11 +1109,13 @@ mod tests {
         let mut config = CurrentRssConfig::default();
 
         assert_eq!(
-            config.push_cert(cert.clone()).unwrap(),
+            config.push_cert(CertificatePem(cert.clone())).unwrap(),
             CertificateUploadResponse::WaitingOnKey,
         );
         assert_eq!(
-            config.push_key(key.clone()).unwrap(),
+            config
+                .push_key(PrivateKeyPem(Zeroizing::new(key.clone())))
+                .unwrap(),
             CertificateUploadResponse::CertKeyAccepted,
         );
         assert_eq!(config.external_certificates.len(), 1);
@@ -1118,11 +1123,13 @@ mod tests {
         // Re-uploading the same pair reports CertKeyDuplicateIgnored and adds
         // no second entry.
         assert_eq!(
-            config.push_cert(cert.clone()).unwrap(),
+            config.push_cert(CertificatePem(cert.clone())).unwrap(),
             CertificateUploadResponse::WaitingOnKey,
         );
         assert_eq!(
-            config.push_key(key.clone()).unwrap(),
+            config
+                .push_key(PrivateKeyPem(Zeroizing::new(key.clone())))
+                .unwrap(),
             CertificateUploadResponse::CertKeyDuplicateIgnored,
         );
         assert_eq!(config.external_certificates.len(), 1);
@@ -1135,11 +1142,13 @@ mod tests {
         let other_key = other.end_cert_private_key_as_pem();
         assert_ne!(other_cert, cert);
         assert_eq!(
-            config.push_cert(other_cert.clone()).unwrap(),
+            config.push_cert(CertificatePem(other_cert.clone())).unwrap(),
             CertificateUploadResponse::WaitingOnKey,
         );
         assert_eq!(
-            config.push_key(other_key.clone()).unwrap(),
+            config
+                .push_key(PrivateKeyPem(Zeroizing::new(other_key.clone())))
+                .unwrap(),
             CertificateUploadResponse::CertKeyAccepted,
         );
         assert_eq!(config.external_certificates.len(), 2);
