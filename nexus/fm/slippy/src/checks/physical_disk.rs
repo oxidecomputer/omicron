@@ -107,7 +107,7 @@ mod tests {
     use crate::slippy::Kind;
     use crate::slippy::PhysicalDiskCaseKind;
     use crate::slippy::Severity;
-    use nexus_fm::test_util::{make_zpool_degraded_fact, make_disk_case};
+    use nexus_fm::test_util::{make_disk_case, make_zpool_degraded_fact};
     use nexus_types::fm::Sitrep;
     use omicron_uuid_kinds::CaseUuid;
     use omicron_uuid_kinds::FactUuid;

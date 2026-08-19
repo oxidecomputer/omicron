@@ -312,8 +312,8 @@ pub(super) fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
 mod tests {
     use super::*;
     use crate::test_util::{
-        FmTest, build_input, make_zpool_degraded_fact, make_disk_case,
-        make_in_service_disks, make_parent_sitrep, run_analyze, set_health,
+        FmTest, build_input, make_disk_case, make_in_service_disks,
+        make_parent_sitrep, make_zpool_degraded_fact, run_analyze, set_health,
     };
     use nexus_types::fm::{self, Sitrep};
     use nexus_types::in_service_disk::InServiceDisk;

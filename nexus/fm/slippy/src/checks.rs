@@ -315,8 +315,8 @@ mod tests {
     use crate::slippy::SitrepKind;
     use chrono::Utc;
     use nexus_fm::test_util::{
-        make_abandoned_saga_fact, make_zpool_degraded_fact, make_disk_case,
-        make_saga_case,
+        make_abandoned_saga_fact, make_disk_case, make_saga_case,
+        make_zpool_degraded_fact,
     };
     use nexus_types::fm;
     use nexus_types::fm::DiagnosisEngineKind;
