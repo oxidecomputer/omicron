@@ -339,6 +339,10 @@ pub(super) fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
                          recovery failure: {})",
                         info.time, info.comment,
                     ),
+                    SagaAbandonReason::Orphaned => format!(
+                        "abandoned by reconfigurator at {} ({})",
+                        info.time, info.comment,
+                    ),
                 };
                 let comment = format!(
                     "saga {} ({}) {}; created at {}, last node event: {}",

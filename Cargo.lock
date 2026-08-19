@@ -7949,10 +7949,12 @@ dependencies = [
  "oxnet",
  "pq-sys",
  "reqwest 0.13.2",
+ "serde_json",
  "sled-agent-client",
  "sled-agent-types",
  "slog",
  "slog-error-chain 0.1.0 (git+https://github.com/oxidecomputer/slog-error-chain?branch=main)",
+ "steno",
  "tokio",
  "uuid",
 ]

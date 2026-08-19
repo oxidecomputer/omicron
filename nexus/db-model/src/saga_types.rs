@@ -178,6 +178,7 @@ impl_enum_type!(
 
     Omdb => b"omdb"
     Unrecoverable => b"unrecoverable"
+    Orphaned => b"orphaned"
 );
 
 impl_enum_type!(
@@ -208,6 +209,14 @@ impl SagaState {
     /// Sagas that are Done don't need to be run anymore. Sagas that are
     /// Abandoned have been explicitly opted out of being recovered.
     pub const RECOVERY_CANDIDATE_STATES: &'static [Self] =
+        &[Self::Running, Self::Unwinding];
+
+    /// A saga must be in this set of states to be a candidate for orphan
+    /// saga abandonment.
+    ///
+    /// Sagas that are Done finished successfully and are not orphans. Sagas
+    /// that are Abandoned do not need to be abandoned again.
+    pub const ORPHAN_ABANDONMENT_CANDIDATE_STATES: &'static [Self] =
         &[Self::Running, Self::Unwinding];
 }
 
