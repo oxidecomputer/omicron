@@ -20,9 +20,7 @@ use omicron_common::api::external::Generation;
 use omicron_common::api::external::MacAddr;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::Vni;
-use omicron_common::disk::{
-    DatasetConfig, DatasetName, DiskVariant, M2Slot, OmicronPhysicalDiskConfig,
-};
+use omicron_common::disk::DatasetName;
 use omicron_common::snake_case_result;
 use omicron_common::snake_case_result::SnakeCaseResult;
 use omicron_common::update::OmicronInstallManifestSource;
@@ -42,6 +40,11 @@ use strum::EnumIter;
 use tufaceous_artifact::ArtifactHash;
 use uuid::Uuid;
 
+use super::disk::DatasetConfig;
+use super::disk::DiskIdentity;
+use super::disk::DiskVariant;
+use super::disk::M2Slot;
+use super::disk::OmicronPhysicalDiskConfig;
 use crate::impls::inventory::SourceNatConfigError;
 
 /// Describes properties that should uniquely identify a Gimlet.
@@ -91,7 +94,7 @@ impl From<sled_hardware_types::Baseboard> for Baseboard {
 /// Identifies information about disks which may be attached to Sleds.
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
 pub struct InventoryDisk {
-    pub identity: omicron_common::disk::DiskIdentity,
+    pub identity: DiskIdentity,
     pub variant: DiskVariant,
     pub slot: i64,
     // Today we only have NVMe disks so we embedded the firmware metadata here.

@@ -481,6 +481,9 @@ impl FmAnalysis {
                             SagaReasonAbandoned::Unrecoverable => {
                                 SagaAbandonReason::Unrecoverable
                             }
+                            SagaReasonAbandoned::Orphaned => {
+                                SagaAbandonReason::Orphaned
+                            }
                         },
                         comment: metadata.comment,
                     })

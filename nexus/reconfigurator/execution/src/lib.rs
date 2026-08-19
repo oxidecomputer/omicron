@@ -282,6 +282,14 @@ pub async fn realize_blueprint(
         saga_quiesce,
     );
 
+    register_abandon_orphan_sagas_step(
+        &engine.for_component(ExecutionComponent::OmicronZones),
+        &opctx,
+        datastore,
+        blueprint,
+        nexus_id,
+    );
+
     register_cockroachdb_settings_step(
         &engine.for_component(ExecutionComponent::Cockroach),
         &opctx,
@@ -639,6 +647,35 @@ fn register_deploy_clickhouse_single_node_step<'a>(
             async move |_cx| {
                 let res =
                     clickhouse::deploy_single_node(opctx, blueprint).await;
+                Ok(map_err_to_step_warning(res))
+            },
+        )
+        .register();
+}
+
+fn register_abandon_orphan_sagas_step<'a>(
+    registrar: &ComponentRegistrar<'_, 'a>,
+    opctx: &'a OpContext,
+    datastore: &'a DataStore,
+    blueprint: &'a Blueprint,
+    nexus_id: Option<OmicronZoneUuid>,
+) {
+    registrar
+        .new_step(
+            ExecutionStepId::Cleanup,
+            "Abandon orphan sagas",
+            async move |_cx| {
+                let Some(nexus_id) = nexus_id else {
+                    return Ok(
+                        StepSkipped::new((), "not running as Nexus").build()
+                    );
+                };
+
+                let sec_id = nexus_db_model::SecId::from(nexus_id);
+                let res = sagas::abandon_orphan_sagas(
+                    opctx, datastore, blueprint, sec_id,
+                )
+                .await;
                 Ok(map_err_to_step_warning(res))
             },
         )

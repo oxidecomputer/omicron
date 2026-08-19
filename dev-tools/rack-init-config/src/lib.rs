@@ -62,6 +62,7 @@ mod tests {
     use super::*;
 
     use sled_agent_rack_setup::rack_initialize_request_from_file;
+    use sled_agent_types::early_networking::UnnumberedRouter;
     use std::collections::BTreeSet;
     use std::net::IpAddr;
     use std::net::Ipv6Addr;
@@ -195,9 +196,10 @@ mod tests {
             bgp_peers: vec![BgpPeerConfig {
                 asn: 65002,
                 port: "qsfp0".to_string(),
-                addr: RouterPeerType::Unnumbered {
+                addr: UnnumberedRouter {
                     router_lifetime: RouterLifetimeConfig::new(3600).unwrap(),
-                },
+                }
+                .into(),
                 hold_time: None,
                 idle_hold_time: None,
                 delay_open: None,
