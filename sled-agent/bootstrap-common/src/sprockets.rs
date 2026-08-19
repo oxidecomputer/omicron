@@ -123,8 +123,9 @@ impl SprocketsClient {
     }
 
     /// Start sled agent by sending an initialization request determined from
-    /// RSS input. This client is on the same scrimlet as RSS, and is talking
-    /// over TCP to all other bootstrap agents.
+    /// RSS or multirack join service input. This client is on the same scrimlet
+    /// as RSS or the multirack join service, and is talking over sprockets to
+    /// all other bootstrap agents.
     pub async fn start_sled_agent(
         &self,
         request: &StartSledAgentRequest,

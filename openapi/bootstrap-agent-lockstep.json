@@ -3795,25 +3795,71 @@
           "baseboard_id": {
             "$ref": "#/components/schemas/BaseboardId"
           },
-          "fatal_error": {
-            "nullable": true,
-            "type": "string"
-          },
           "sled_id": {
             "$ref": "#/components/schemas/SledUuid"
           },
           "sled_subnet": {
             "$ref": "#/components/schemas/Ipv6Subnet"
           },
-          "started": {
-            "type": "boolean"
+          "start_state": {
+            "$ref": "#/components/schemas/SledAgentStartState"
           }
         },
         "required": [
           "baseboard_id",
           "sled_id",
           "sled_subnet",
-          "started"
+          "start_state"
+        ]
+      },
+      "SledAgentStartState": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "in_progress"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "started"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "reason": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "failed"
+                ]
+              }
+            },
+            "required": [
+              "reason",
+              "type"
+            ]
+          }
         ]
       },
       "SledUuid": {

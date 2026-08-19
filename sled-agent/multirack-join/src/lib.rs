@@ -17,7 +17,7 @@
 extern crate slog;
 use bootstrap_agent_lockstep_types::{
     CommitState, MultirackJoinRequest, MultirackJoinServiceState,
-    SledAgentInfo, StartSledAgentsStatus,
+    SledAgentInfo, SledAgentStartState, StartSledAgentsStatus,
 };
 use nexus_types::trust_quorum::TrustQuorumConfig;
 use omicron_common::address::BOOTSTRAP_AGENT_RACK_INIT_PORT;
@@ -290,7 +290,7 @@ impl MultirackJoinServiceTask {
                         // baseboards that already exist in status.
                         let mut info =
                             status.sleds.get1_mut(&baseboard_id).unwrap();
-                        info.started = true;
+                        info.start_state = SledAgentStartState::Started;
                     });
                 }
                 Err(err) => {
@@ -308,8 +308,9 @@ impl MultirackJoinServiceTask {
                         // baseboards that already exist in status.
                         let mut info =
                             status.sleds.get1_mut(&err.baseboard_id).unwrap();
-                        info.fatal_error =
-                            Some(InlineErrorChain::new(&err).to_string());
+                        info.start_state = SledAgentStartState::Failed {
+                            reason: InlineErrorChain::new(&err).to_string(),
+                        };
                     });
                     failed.insert(err.baseboard_id);
                 }
@@ -348,7 +349,7 @@ impl MultirackJoinServiceTask {
             bootstrap_addr,
             self.ctx.sprockets_config.clone(),
             self.ctx.measurements.clone(),
-            self.log.clone(),
+            log.clone(),
         );
 
         async move {

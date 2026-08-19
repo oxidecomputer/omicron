@@ -458,14 +458,22 @@ pub struct CommitState {
     pub transient_errors: BTreeMap<BaseboardId, String>,
 }
 
+// Information about the state of a sled agent start request
+#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case", tag = "type")]
+pub enum SledAgentStartState {
+    InProgress,
+    Started,
+    Failed { reason: String },
+}
+
 /// Status information for a given sled agent
 #[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
 pub struct SledAgentInfo {
     pub baseboard_id: BaseboardId,
     pub sled_id: SledUuid,
     pub sled_subnet: Ipv6Subnet<SLED_PREFIX_LENGTH>,
-    pub started: bool,
-    pub fatal_error: Option<String>,
+    pub start_state: SledAgentStartState,
 }
 
 impl BiHashItem for SledAgentInfo {
@@ -504,8 +512,7 @@ impl StartSledAgentsStatus {
                     rack_subnet,
                     u8::try_from(idx + 1).expect("too many sleds"),
                 ),
-                started: false,
-                fatal_error: None,
+                start_state: SledAgentStartState::InProgress,
             })
             .collect();
 
