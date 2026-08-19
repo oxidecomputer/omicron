@@ -269,7 +269,9 @@ impl MultirackJoinServiceTask {
 
         // Wait for the result of each sled-agent
         while let Some(res) = set.join_next().await {
-            match res? {
+            // We unwrap because we build with `abort=panic`, and don't want to
+            // handle join errors here.
+            match res.unwrap() {
                 Ok(baseboard_id) => {
                     info!(
                         self.log,
@@ -334,8 +336,7 @@ impl MultirackJoinServiceTask {
             "bootstrap_ip" => info.bootstrap_ip.to_string()
         ));
 
-        info!(log, "Attempting to start sled agent";
-        );
+        info!(log, "Attempting to start sled agent");
 
         let bootstrap_addr = SocketAddrV6::new(
             info.bootstrap_ip,
@@ -386,9 +387,6 @@ impl MultirackJoinServiceTask {
         });
     }
 
-    // We have already initialized the trust quorum on all nodes at this
-    // point, and so the number of bootstrap ips should match our expected
-    // configuration.
     /// Start initializing trust quorum given the the existing
     /// `MultirackJoinRequest` in input_rx.
     ///
@@ -856,9 +854,6 @@ impl MultirackJoinServiceTask {
     // Check if we have received an updated membership set from an operator.
     //
     // If we have received a new set, return it. Otherwise, return `None`.
-    // We have already initialized the trust quorum on all nodes at this
-    // point, and so the number of bootstrap ips should match our expected
-    // configuration.
     // Return an error if checking for the update fails.
     async fn has_membership_changed(
         &mut self,
