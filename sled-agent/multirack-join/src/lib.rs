@@ -356,7 +356,6 @@ impl MultirackJoinServiceTask {
                     }
                     Err(err) => {
                         // Update state with the latest error seen.
-                        //
                         output_tx.send_modify(|state| {
                             let MultirackJoinServiceState::StartSledAgents(status) =
                                 state
