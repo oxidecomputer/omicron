@@ -78,7 +78,6 @@ use omicron_common::api::internal::nexus::ProducerEndpoint;
 use omicron_common::api::internal::nexus::ProducerKind;
 use omicron_common::api::internal::shared::DatasetKind;
 use omicron_common::api::internal::shared::PrivateIpConfig;
-use omicron_common::disk::CompressionAlgorithm;
 use omicron_common::zpool_name::ZpoolName;
 use omicron_sled_agent::sim;
 use omicron_test_utils::dev;
@@ -93,6 +92,8 @@ use omicron_uuid_kinds::ZpoolUuid;
 use oximeter_collector::Oximeter;
 use oximeter_producer::LogConfig;
 use oximeter_producer::Server as ProducerServer;
+use sled_agent_types::disk::CompressionAlgorithm;
+use sled_agent_types::disk::DiskIdentity;
 use sled_agent_types::early_networking::PortConfig;
 use sled_agent_types::early_networking::RackNetworkConfig;
 use sled_agent_types::early_networking::SwitchSlot;
@@ -1360,7 +1361,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
                         .insert_unique(BlueprintPhysicalDiskConfig {
                             disposition:
                                 BlueprintPhysicalDiskDisposition::InService,
-                            identity: omicron_common::disk::DiskIdentity {
+                            identity: DiskIdentity {
                                 vendor: "nexus-tests".to_string(),
                                 model: "nexus-test-model".to_string(),
                                 serial: format!("nexus-test-disk-{disk_index}"),
@@ -1401,7 +1402,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
                         .insert_unique(BlueprintPhysicalDiskConfig {
                             disposition:
                                 BlueprintPhysicalDiskDisposition::InService,
-                            identity: omicron_common::disk::DiskIdentity {
+                            identity: DiskIdentity {
                                 vendor: "nexus-tests".to_string(),
                                 model: "nexus-test-model".to_string(),
                                 serial: format!("nexus-test-disk-{disk_index}"),

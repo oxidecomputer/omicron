@@ -897,6 +897,7 @@ mod test {
     use omicron_uuid_kinds::PropolisUuid;
     use omicron_uuid_kinds::SledUuid;
     use omicron_uuid_kinds::ZpoolUuid;
+    use sled_agent_types::disk::M2Slot;
     use sled_agent_types::inventory::ConfigReconcilerInventoryStatus;
     use sled_agent_types::inventory::FmdInventory;
     use sled_agent_types::inventory::Inventory;
@@ -1194,7 +1195,7 @@ mod test {
             sled_id,
             zones: iddqd::IdOrdMap::new(),
             host_phase_2: internal_views::HostPhase2Status {
-                boot_disk: Ok(omicron_common::disk::M2Slot::A),
+                boot_disk: Ok(M2Slot::A),
                 slot_a_version: internal_views::TufRepoVersion::Version(
                     fake_target_version(),
                 ),

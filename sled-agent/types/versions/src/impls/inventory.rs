@@ -14,11 +14,12 @@ use indent_write::fmt::IndentWriter;
 use omicron_common::address::Ip;
 use omicron_common::address::NUM_SOURCE_NAT_PORTS;
 use omicron_common::api::external::Generation;
-use omicron_common::disk::{DatasetKind, DatasetName, M2Slot};
+use omicron_common::disk::{DatasetKind, DatasetName};
 use omicron_common::update::OmicronInstallManifestSource;
 use omicron_uuid_kinds::MupdateUuid;
 use tufaceous_artifact::ArtifactHash;
 
+use crate::latest::disk::M2Slot;
 use crate::latest::inventory::{
     BootImageHeader, BootPartitionContents, BootPartitionDetails,
     ConfigReconcilerInventory, ConfigReconcilerInventoryResult, FmdHostCase,

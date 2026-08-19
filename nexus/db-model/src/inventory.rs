@@ -56,11 +56,7 @@ use nexus_types::inventory::{
     NvmeFirmware, PowerState, RotPage, RotSlot, TimeSync,
 };
 use omicron_common::api::external;
-use omicron_common::disk::DatasetConfig;
 use omicron_common::disk::DatasetName;
-use omicron_common::disk::DiskIdentity;
-use omicron_common::disk::M2Slot;
-use omicron_common::disk::OmicronPhysicalDiskConfig;
 use omicron_common::update::OmicronInstallManifestSource;
 use omicron_common::zpool_name::ZpoolName;
 use omicron_uuid_kinds::DatasetKind;
@@ -85,6 +81,11 @@ use omicron_uuid_kinds::SvcEnabledNotOnlineUuid;
 use omicron_uuid_kinds::ZpoolKind;
 use omicron_uuid_kinds::{CollectionKind, OmicronZoneKind};
 use omicron_uuid_kinds::{CollectionUuid, OmicronZoneUuid};
+use sled_agent_types::disk::DatasetConfig;
+use sled_agent_types::disk::DiskIdentity;
+use sled_agent_types::disk::M2Slot;
+use sled_agent_types::disk::OmicronPhysicalDiskConfig;
+use sled_agent_types::disk::SharedDatasetConfig;
 use sled_agent_types::inventory::BootImageHeader;
 use sled_agent_types::inventory::BootPartitionDetails;
 use sled_agent_types::inventory::ConfigReconcilerInventoryStatus;
@@ -2887,7 +2888,7 @@ impl From<sled_agent_types::inventory::ZoneKind> for ZoneType {
     }
 }
 
-/// See [`omicron_common::disk::OmicronPhysicalDiskConfig`].
+/// See [`OmicronPhysicalDiskConfig`].
 #[derive(Queryable, Clone, Debug, Selectable, Insertable)]
 #[diesel(table_name = inv_omicron_sled_config_disk)]
 pub struct InvOmicronSledConfigDisk {
@@ -2934,7 +2935,7 @@ impl From<InvOmicronSledConfigDisk> for OmicronPhysicalDiskConfig {
     }
 }
 
-/// See [`omicron_common::disk::DatasetConfig`].
+/// See [`DatasetConfig`].
 #[derive(Queryable, Clone, Debug, Selectable, Insertable)]
 #[diesel(table_name = inv_omicron_sled_config_dataset)]
 pub struct InvOmicronSledConfigDataset {
@@ -2986,7 +2987,7 @@ impl TryFrom<InvOmicronSledConfigDataset> for DatasetConfig {
         Ok(Self {
             id: dataset.id.into(),
             name: DatasetName::new(pool, kind),
-            inner: omicron_common::disk::SharedDatasetConfig {
+            inner: SharedDatasetConfig {
                 quota: dataset.quota.map(|b| b.into()),
                 reservation: dataset.reservation.map(|b| b.into()),
                 compression: dataset.compression.parse()?,
