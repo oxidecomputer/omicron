@@ -15,7 +15,8 @@ use nexus_types::fm::ereport::{
     Ena, Ereport, EreportData, EreportId, Reporter,
 };
 use nexus_types::fm::{
-    DiskFact, Sitrep, SitrepVersion, ZpoolUnhealthyFactPayload,
+    DiskFact, SagaAbandonedFactPayload, SagaFact, Sitrep, SitrepVersion,
+    ZpoolUnhealthyFactPayload,
 };
 use nexus_types::in_service_disk::InServiceDisk;
 use nexus_types::inventory;
@@ -479,7 +480,7 @@ pub fn run_analyze(
 }
 
 /// Make a `ZpoolUnhealthy` (Degraded) fact for the given disk and zpool.
-pub fn make_degraded_fact(
+pub fn make_zpool_degraded_fact(
     parent_sitrep_id: SitrepUuid,
     inv_collection_id: CollectionUuid,
     physical_disk_id: PhysicalDiskUuid,
@@ -499,6 +500,48 @@ pub fn make_degraded_fact(
             time_observed: Utc::now(),
         })
         .into(),
+    }
+}
+
+/// Make an `Abandoned` fact for the saga whose ID is built from `saga_n`.
+pub fn make_abandoned_saga_fact(
+    parent_sitrep_id: SitrepUuid,
+    saga_n: u128,
+) -> fm::case::Fact {
+    let saga_id = steno::SagaId(uuid::Uuid::from_u128(saga_n));
+    fm::case::Fact {
+        metadata: fm::case::FactMetadata {
+            id: FactUuid::new_v4(),
+            created_sitrep_id: parent_sitrep_id,
+            comment: format!("saga {saga_id} abandoned"),
+        },
+        payload: SagaFact::Abandoned(SagaAbandonedFactPayload { saga_id })
+            .into(),
+    }
+}
+
+/// Make an open `Saga` case carrying the given facts.
+pub fn make_saga_case(
+    case_id: CaseUuid,
+    parent_sitrep_id: SitrepUuid,
+    facts: impl IntoIterator<Item = fm::case::Fact>,
+) -> fm::Case {
+    let mut fact_map = IdOrdMap::new();
+    for fact in facts {
+        fact_map.insert_unique(fact).unwrap();
+    }
+    fm::Case {
+        id: case_id,
+        metadata: fm::case::Metadata {
+            created_sitrep_id: parent_sitrep_id,
+            closed_sitrep_id: None,
+            de: fm::DiagnosisEngineKind::Saga,
+            comment: "a saga case".to_string(),
+        },
+        ereports: Default::default(),
+        alerts_requested: Default::default(),
+        support_bundles_requested: Default::default(),
+        facts: fact_map,
     }
 }
 

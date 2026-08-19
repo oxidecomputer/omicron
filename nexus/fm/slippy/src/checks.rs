@@ -11,6 +11,7 @@ use crate::slippy::DerivedKind;
 use crate::slippy::Severity;
 use crate::slippy::SitrepKind;
 use crate::slippy::Slippy;
+use nexus_types::fm::DiagnosisEngineKind;
 use omicron_uuid_kinds::AlertUuid;
 use omicron_uuid_kinds::CaseEreportUuid;
 use omicron_uuid_kinds::CaseUuid;
@@ -97,7 +98,8 @@ fn check_ereport_index(slippy: &mut Slippy<'_>) {
 /// ID, same-case or cross-case.
 fn check_cross_case_id_uniqueness(slippy: &mut Slippy<'_>) {
     let mut ereport_ids: BTreeMap<CaseEreportUuid, CaseUuid> = BTreeMap::new();
-    let mut fact_ids: BTreeMap<FactUuid, CaseUuid> = BTreeMap::new();
+    let mut fact_ids: BTreeMap<FactUuid, (CaseUuid, DiagnosisEngineKind)> =
+        BTreeMap::new();
     let mut alert_ids: BTreeMap<AlertUuid, CaseUuid> = BTreeMap::new();
     let mut bundle_ids: BTreeMap<SupportBundleUuid, CaseUuid> = BTreeMap::new();
 
@@ -120,13 +122,19 @@ fn check_cross_case_id_uniqueness(slippy: &mut Slippy<'_>) {
             }
         }
         for fact in &case.facts {
-            if let Some(case1) = fact_ids.insert(fact.metadata.id, case.id)
+            // Record the payload's engine, not the case's: the payload is
+            // what picks the fact table the fact is stored in.
+            let de = fact.payload.engine();
+            if let Some((case1, de1)) =
+                fact_ids.insert(fact.metadata.id, (case.id, de))
                 && case1 != case.id
             {
                 notes.push(SitrepKind::DuplicateFactId {
                     fact_id: fact.metadata.id,
                     case1,
+                    de1,
                     case2: case.id,
+                    de2: de,
                 });
             }
         }
@@ -306,7 +314,10 @@ mod tests {
     use crate::slippy::DerivedKind;
     use crate::slippy::SitrepKind;
     use chrono::Utc;
-    use nexus_fm::test_util::{make_degraded_fact, make_disk_case};
+    use nexus_fm::test_util::{
+        make_abandoned_saga_fact, make_zpool_degraded_fact, make_disk_case,
+        make_saga_case,
+    };
     use nexus_types::fm;
     use nexus_types::fm::DiagnosisEngineKind;
     use nexus_types::fm::Sitrep;
@@ -459,7 +470,7 @@ mod tests {
             .insert_unique(make_disk_case(
                 added,
                 sitrep.metadata.id,
-                [make_degraded_fact(
+                [make_zpool_degraded_fact(
                     sitrep.metadata.id,
                     sitrep.metadata.inv_collection_id,
                     PhysicalDiskUuid::new_v4(),
@@ -550,7 +561,7 @@ mod tests {
         let existing = sole_case_id(&sitrep);
         let fact_id = sole_fact(&sitrep).metadata.id;
         // A second case (about a different disk) reusing the same FactUuid.
-        let mut dup_fact = make_degraded_fact(
+        let mut dup_fact = make_zpool_degraded_fact(
             sitrep.metadata.id,
             sitrep.metadata.inv_collection_id,
             PhysicalDiskUuid::new_v4(),
@@ -576,7 +587,59 @@ mod tests {
             [sitrep_note(SitrepKind::DuplicateFactId {
                 fact_id,
                 case1,
+                de1: DiagnosisEngineKind::PhysicalDisk,
                 case2,
+                de2: DiagnosisEngineKind::PhysicalDisk,
+            })]
+        );
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn cross_engine_duplicate_fact_id_is_flagged() {
+        let (logctx, mut sitrep) = clean_sitrep_with_one_degraded_disk(
+            "cross_engine_duplicate_fact_id_is_flagged",
+        );
+        let existing = sole_case_id(&sitrep);
+        let fact_id = sole_fact(&sitrep).metadata.id;
+        // A saga case whose fact reuses the disk fact's FactUuid. This
+        // collision is representable in the database (the two facts live in
+        // different engines' fact tables), so the note should identify each
+        // fact's engine.
+        let mut dup_fact = make_abandoned_saga_fact(sitrep.metadata.id, 1);
+        dup_fact.metadata.id = fact_id;
+        let added = CaseUuid::new_v4();
+        sitrep
+            .cases
+            .insert_unique(make_saga_case(
+                added,
+                sitrep.metadata.id,
+                [dup_fact],
+            ))
+            .unwrap();
+        let (case1, de1, case2, de2) = if existing < added {
+            (
+                existing,
+                DiagnosisEngineKind::PhysicalDisk,
+                added,
+                DiagnosisEngineKind::Saga,
+            )
+        } else {
+            (
+                added,
+                DiagnosisEngineKind::Saga,
+                existing,
+                DiagnosisEngineKind::PhysicalDisk,
+            )
+        };
+        assert_eq!(
+            slippy_notes_for(&sitrep),
+            [sitrep_note(SitrepKind::DuplicateFactId {
+                fact_id,
+                case1,
+                de1,
+                case2,
+                de2,
             })]
         );
         logctx.cleanup_successful();

@@ -109,9 +109,9 @@ impl Kind {
 
 /// Problems in the sitrep's derived data.
 ///
-/// Derived data is never persisted; it is rebuilt from the cases whenever a
-/// sitrep is loaded. A note here means the code that built this sitrep has
-/// a bug, not that the stored data is bad.
+/// _Derived data_ is data which is rebuilt from a sitrep's cases when it
+/// is loaded, rather than persisted directly. A note here means the code
+/// that built this sitrep has a bug, not that the stored data is bad.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum DerivedKind {
     /// A case references an ereport that is missing from the sitrep's
@@ -166,7 +166,19 @@ pub enum SitrepKind {
         case2: CaseUuid,
     },
     /// Two cases have facts with the same `FactUuid`.
-    DuplicateFactId { fact_id: FactUuid, case1: CaseUuid, case2: CaseUuid },
+    ///
+    /// Unlike the other duplicate-ID notes, this can be representable in
+    /// the database: each diagnosis engine has its own fact table, so the
+    /// same fact ID in two different engines' tables does not violate a
+    /// primary key. `de1` and `de2` identify the fact table each fact
+    /// lives in.
+    DuplicateFactId {
+        fact_id: FactUuid,
+        case1: CaseUuid,
+        de1: DiagnosisEngineKind,
+        case2: CaseUuid,
+        de2: DiagnosisEngineKind,
+    },
     /// Two cases have alert requests with the same `AlertUuid`.
     /// Unrepresentable in the database: `fm_alert_request`'s primary key is
     /// `(sitrep_id, id)`.
@@ -199,11 +211,21 @@ impl fmt::Display for SitrepKind {
                     )
                 }
             }
-            SitrepKind::DuplicateFactId { fact_id, case1, case2 } => {
-                write!(
-                    f,
-                    "duplicate fact ID {fact_id} (cases {case1} and {case2})",
-                )
+            SitrepKind::DuplicateFactId { fact_id, case1, de1, case2, de2 } => {
+                if de1 == de2 {
+                    write!(
+                        f,
+                        "duplicate fact ID {fact_id} in the {de1} fact \
+                         table (cases {case1} and {case2})",
+                    )
+                } else {
+                    write!(
+                        f,
+                        "duplicate fact ID {fact_id} (case {case1} in the \
+                         {de1} fact table, case {case2} in the {de2} fact \
+                         table)",
+                    )
+                }
             }
             SitrepKind::DuplicateAlertId { alert_id, case1, case2 } => {
                 write!(

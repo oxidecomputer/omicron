@@ -107,7 +107,7 @@ mod tests {
     use crate::slippy::Kind;
     use crate::slippy::PhysicalDiskCaseKind;
     use crate::slippy::Severity;
-    use nexus_fm::test_util::{make_degraded_fact, make_disk_case};
+    use nexus_fm::test_util::{make_zpool_degraded_fact, make_disk_case};
     use nexus_types::fm::Sitrep;
     use omicron_uuid_kinds::CaseUuid;
     use omicron_uuid_kinds::FactUuid;
@@ -149,7 +149,7 @@ mod tests {
             .unwrap()
             .physical_disk_id();
         let found = PhysicalDiskUuid::new_v4();
-        let intruder = make_degraded_fact(
+        let intruder = make_zpool_degraded_fact(
             sitrep.metadata.id,
             sitrep.metadata.inv_collection_id,
             found,
@@ -239,7 +239,7 @@ mod tests {
             .insert_unique(make_disk_case(
                 case2,
                 sitrep.metadata.id,
-                [make_degraded_fact(
+                [make_zpool_degraded_fact(
                     sitrep.metadata.id,
                     sitrep.metadata.inv_collection_id,
                     physical_disk_id,
@@ -273,7 +273,7 @@ mod tests {
             "disagreeing_disks_on_closed_case_is_quarantined",
         );
         let case_id = sole_case_id(&sitrep);
-        let intruder = make_degraded_fact(
+        let intruder = make_zpool_degraded_fact(
             sitrep.metadata.id,
             sitrep.metadata.inv_collection_id,
             PhysicalDiskUuid::new_v4(),
@@ -338,7 +338,7 @@ mod tests {
         let mut closed_case = make_disk_case(
             added,
             sitrep.metadata.id,
-            [make_degraded_fact(
+            [make_zpool_degraded_fact(
                 sitrep.metadata.id,
                 sitrep.metadata.inv_collection_id,
                 physical_disk_id,

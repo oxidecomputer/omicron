@@ -12,6 +12,7 @@ testing = [
     "nexus-fm-slippy",
     "nexus-reconfigurator-planning",
     "ereport-types",
+    "uuid",
 ]
 
 [build-dependencies]
@@ -42,6 +43,7 @@ omicron-test-utils = { workspace = true, optional = true }
 nexus-fm-slippy = { workspace = true, optional = true }
 nexus-reconfigurator-planning = { workspace = true, optional = true }
 ereport-types = { workspace = true, optional = true }
+uuid = { workspace = true, optional = true }
 
 omicron-workspace-hack.workspace = true
 

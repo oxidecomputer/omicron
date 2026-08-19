@@ -312,7 +312,7 @@ pub(super) fn analyze(builder: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
 mod tests {
     use super::*;
     use crate::test_util::{
-        FmTest, build_input, make_degraded_fact, make_disk_case,
+        FmTest, build_input, make_zpool_degraded_fact, make_disk_case,
         make_in_service_disks, make_parent_sitrep, run_analyze, set_health,
     };
     use nexus_types::fm::{self, Sitrep};
@@ -364,7 +364,7 @@ mod tests {
         physical_disk_id: PhysicalDiskUuid,
         zpool_id: ZpoolUuid,
     ) -> Sitrep {
-        let fact = make_degraded_fact(
+        let fact = make_zpool_degraded_fact(
             parent_sitrep_id,
             inv_collection_id,
             physical_disk_id,
@@ -641,14 +641,14 @@ mod tests {
         let id_b = omicron_uuid_kinds::CaseUuid::new_v4();
         let (kept_id, dup_id) =
             if id_a < id_b { (id_a, id_b) } else { (id_b, id_a) };
-        let kept_fact = make_degraded_fact(
+        let kept_fact = make_zpool_degraded_fact(
             parent_id,
             collection.id,
             target_disk_id,
             target,
         );
         let kept_fact_id = kept_fact.metadata.id;
-        let dup_fact = make_degraded_fact(
+        let dup_fact = make_zpool_degraded_fact(
             parent_id,
             collection.id,
             target_disk_id,
@@ -712,13 +712,13 @@ mod tests {
             corrupt_case_id,
             parent_id,
             [
-                make_degraded_fact(
+                make_zpool_degraded_fact(
                     parent_id,
                     collection.id,
                     target_disk_id,
                     target,
                 ),
-                make_degraded_fact(
+                make_zpool_degraded_fact(
                     parent_id,
                     collection.id,
                     PhysicalDiskUuid::new_v4(),
