@@ -497,7 +497,11 @@ pub struct StartSledAgentsStatus {
 }
 
 impl StartSledAgentsStatus {
-    pub fn new(req: MultirackJoinRequest) -> Self {
+    // Create the allocations necessary to start a sled-agent and return a
+    // preliminary state.
+    //
+    // This should only be called once.
+    pub fn assign_ids_and_subnets(req: MultirackJoinRequest) -> Self {
         let rack_subnet = Ipv6Subnet::<RACK_PREFIX_LENGTH>::new(
             req.rack_network_config.rack_subnet.addr(),
         );

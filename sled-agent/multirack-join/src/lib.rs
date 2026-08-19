@@ -21,6 +21,7 @@ use bootstrap_agent_lockstep_types::{
 };
 use nexus_types::trust_quorum::TrustQuorumConfig;
 use omicron_common::address::BOOTSTRAP_AGENT_RACK_INIT_PORT;
+use omicron_ledger::{self as ledger};
 use omicron_uuid_kinds::RackUuid;
 use sled_agent_bootstrap_common::sprockets::{
     SprocketsClient, SprocketsClientError,
@@ -81,6 +82,9 @@ pub enum MultirackJoinServiceError {
 
     #[error("Failed to start sled-agents: {0:#?}")]
     StartSledAgents(BTreeSet<BaseboardId>),
+
+    #[error("Failed to access ledger")]
+    Ledger(#[from] ledger::Error),
 }
 
 #[derive(Error, Debug, SlogInlineError)]
@@ -198,6 +202,14 @@ impl MultirackJoinServiceTask {
         let rack_id = RackUuid::new_v4();
         info!(&self.log, "Created RackId {rack_id}");
 
+        // Record that we have started RSS
+        //
+        // NOTE: This is a "point-of-no-return" -- before sending any requests
+        // to neighboring sleds, we record that RSS has started.
+        // This way, if the RSS power-cycles, it can be detected and we can
+        // clean-slate and try again.
+        self.ctx.write_rss_started_ledger(&self.log).await?;
+
         self.init_trust_quorum(rack_id).await?;
 
         self.start_sled_agents(rack_id).await?;
@@ -218,7 +230,7 @@ impl MultirackJoinServiceTask {
         info!(self.log, "Starting Sled agents");
         let req = self.input_rx.borrow_and_update().clone();
         let tq_members = req.trust_quorum_peers.clone();
-        let status = StartSledAgentsStatus::new(req);
+        let status = StartSledAgentsStatus::assign_ids_and_subnets(req);
         self.output_tx.send_modify(|state| {
             *state = MultirackJoinServiceState::StartSledAgents(status.clone())
         });
@@ -922,7 +934,7 @@ mod tests {
             rack_network_config: rack_network_config(),
         };
 
-        let status = StartSledAgentsStatus::new(req.clone());
+        let status = StartSledAgentsStatus::assign_ids_and_subnets(req.clone());
         assert_eq!(status.sleds.len(), req.trust_quorum_peers.len());
 
         let actual_sled_subnets: BTreeSet<_> =
