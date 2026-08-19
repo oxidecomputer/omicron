@@ -267,7 +267,7 @@ async fn test_repo_upload() -> Result<()> {
 
     // Wait for all the copy requests to complete.
     futures::future::join_all(cptestctx.sled_agents.iter().map(|sled_agent| {
-        sled_agent.sled_agent().artifact_store().wait_for_copy_tasks()
+        sled_agent.sled_agent().artifact_store().wait_for_writers()
     }))
     .await;
 

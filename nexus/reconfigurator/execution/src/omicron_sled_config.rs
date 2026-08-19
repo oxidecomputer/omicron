@@ -88,6 +88,7 @@ mod tests {
     use nexus_types::deployment::BlueprintMeasurements;
     use nexus_types::deployment::BlueprintPhysicalDiskConfig;
     use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
+    use nexus_types::deployment::BlueprintSledUpdateDisposition;
     use nexus_types::deployment::BlueprintZoneConfig;
     use nexus_types::deployment::BlueprintZoneDisposition;
     use nexus_types::deployment::BlueprintZoneImageSource;
@@ -101,13 +102,13 @@ mod tests {
     use omicron_common::address::REPO_DEPOT_PORT;
     use omicron_common::api::external::Generation;
     use omicron_common::api::internal::shared::DatasetKind;
-    use omicron_common::disk::CompressionAlgorithm;
-    use omicron_common::disk::DiskIdentity;
     use omicron_common::zpool_name::ZpoolName;
     use omicron_uuid_kinds::DatasetUuid;
     use omicron_uuid_kinds::OmicronZoneUuid;
     use omicron_uuid_kinds::PhysicalDiskUuid;
     use omicron_uuid_kinds::ZpoolUuid;
+    use sled_agent_types::disk::CompressionAlgorithm;
+    use sled_agent_types::disk::DiskIdentity;
     use sled_agent_types::inventory::SledRole;
     use std::net::Ipv6Addr;
     use std::net::SocketAddr;
@@ -261,6 +262,7 @@ mod tests {
 
         let sled_config = BlueprintSledConfig {
             state: SledState::Active,
+            update_disposition: BlueprintSledUpdateDisposition::initial(),
             subnet: Ipv6Subnet::new(Ipv6Addr::LOCALHOST),
             last_allocated_ip_subnet_offset:
                 LastAllocatedSubnetIpOffset::initial(),

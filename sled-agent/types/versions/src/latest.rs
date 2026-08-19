@@ -42,14 +42,21 @@ pub mod diagnostics {
     pub use crate::v1::diagnostics::SledDiagnosticsLogsDownloadPathParam;
     pub use crate::v1::diagnostics::SledDiagnosticsLogsDownloadPathParm;
 
-    pub use crate::v46::diagnostics::SledDiagnosticsLogsDownloadQueryParam;
+    pub use crate::v48::diagnostics::SledDiagnosticsLogsDownloadQueryParam;
 }
 
 pub mod disk {
+    pub use crate::v1::disk::CompressionAlgorithm;
+    pub use crate::v1::disk::DatasetConfig;
     pub use crate::v1::disk::DiskEnsureBody;
+    pub use crate::v1::disk::DiskIdentity;
     pub use crate::v1::disk::DiskPathParam;
     pub use crate::v1::disk::DiskStateRequested;
-    pub use crate::v1::disk::DiskType;
+    pub use crate::v1::disk::DiskVariant;
+    pub use crate::v1::disk::GzipLevel;
+    pub use crate::v1::disk::M2Slot;
+    pub use crate::v1::disk::OmicronPhysicalDiskConfig;
+    pub use crate::v1::disk::SharedDatasetConfig;
     pub use crate::v1::disk::Zpool;
 }
 
@@ -73,20 +80,23 @@ pub mod early_networking {
     pub use crate::v20::early_networking::RouterLifetimeConfig;
     pub use crate::v20::early_networking::RouterLifetimeConfigError;
 
-    pub use crate::v30::early_networking::BgpPeerConfig;
     pub use crate::v30::early_networking::InvalidIpAddrError;
-    pub use crate::v30::early_networking::PortConfig;
     pub use crate::v30::early_networking::RouterPeerIpAddr;
     pub use crate::v30::early_networking::RouterPeerIpAddrError;
-    pub use crate::v30::early_networking::RouterPeerType;
     pub use crate::v30::early_networking::UplinkAddress;
     pub use crate::v30::early_networking::UplinkAddressConfig;
     pub use crate::v30::early_networking::UplinkIpNet;
     pub use crate::v30::early_networking::UplinkIpNetError;
 
-    pub use crate::v42::early_networking::EmptyUplinkPortsError;
-    pub use crate::v42::early_networking::RackNetworkConfig;
-    pub use crate::v42::early_networking::UplinkPorts;
+    pub use crate::v47::early_networking::AddressFamilyMismatchError;
+    pub use crate::v47::early_networking::BgpPeerConfig;
+    pub use crate::v47::early_networking::EmptyUplinkPortsError;
+    pub use crate::v47::early_networking::NumberedRouter;
+    pub use crate::v47::early_networking::PortConfig;
+    pub use crate::v47::early_networking::RackNetworkConfig;
+    pub use crate::v47::early_networking::RouterPeerType;
+    pub use crate::v47::early_networking::UnnumberedRouter;
+    pub use crate::v47::early_networking::UplinkPorts;
 }
 
 pub mod firewall_rules {
@@ -177,14 +187,7 @@ pub mod inventory {
     pub use crate::v24::inventory::InventoryZpool;
     pub use crate::v24::inventory::ZpoolHealth;
 
-    pub use crate::v34::inventory::Svc;
-    pub use crate::v34::inventory::SvcState;
     pub use crate::v34::inventory::SvcsError;
-
-    pub use crate::v37::inventory::SvcEnabledNotOnline;
-    pub use crate::v37::inventory::SvcEnabledNotOnlineState;
-    pub use crate::v37::inventory::SvcsEnabledNotOnline;
-    pub use crate::v37::inventory::SvcsEnabledNotOnlineResult;
 
     pub use crate::v40::inventory::FMD_MAX_CASES;
     pub use crate::v40::inventory::FMD_MAX_RESOURCES;
@@ -193,7 +196,14 @@ pub mod inventory {
     pub use crate::v40::inventory::FmdInventoryError;
     pub use crate::v40::inventory::FmdInventoryErrorKind;
     pub use crate::v40::inventory::FmdResource;
-    pub use crate::v43::inventory::Inventory;
+
+    pub use crate::v46::inventory::Inventory;
+    pub use crate::v46::inventory::Svc;
+    pub use crate::v46::inventory::SvcEnabledNotOnline;
+    pub use crate::v46::inventory::SvcEnabledNotOnlineState;
+    pub use crate::v46::inventory::SvcState;
+    pub use crate::v46::inventory::SvcsEnabledNotOnline;
+    pub use crate::v46::inventory::SvcsEnabledNotOnlineResult;
 
     pub use crate::impls::inventory::FmdHostCaseDisplay;
     pub use crate::impls::inventory::FmdInventoryDisplay;
@@ -255,8 +265,8 @@ pub mod system_networking {
 
     pub use crate::v39::system_networking::BlueprintExternalNetworkingConfig;
 
-    pub use crate::v42::system_networking::SystemNetworkingConfig;
-    pub use crate::v42::system_networking::WriteNetworkConfigRequest;
+    pub use crate::v47::system_networking::SystemNetworkingConfig;
+    pub use crate::v47::system_networking::WriteNetworkConfigRequest;
 }
 
 pub mod trust_quorum {

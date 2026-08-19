@@ -12,7 +12,7 @@ use crate::addrobj::{
 use crate::contract;
 use crate::dladm::Etherstub;
 use crate::link::{Link, VnicAllocator};
-use crate::opte::{Port, PortTicket};
+use crate::opte::{Port, PortInfo, PortTicket};
 use crate::zone::Zones;
 use crate::zone::{AddressRequest, ROUTE};
 use crate::zpool::{PathInPool, ZpoolOrRamdisk};
@@ -496,6 +496,10 @@ impl RunningZone {
         self.inner.opte_ports()
     }
 
+    pub fn opte_port_info(&self) -> impl Iterator<Item = PortInfo> {
+        self.inner.opte_port_info()
+    }
+
     /// Remove the OPTE ports on this zone from the port manager.
     pub fn release_opte_ports(&mut self) {
         for (_, ticket) in self.inner.opte_ports.drain(..) {
@@ -750,6 +754,15 @@ impl InstalledZone {
     /// Returns references to the OPTE ports for this zone.
     pub fn opte_ports(&self) -> impl Iterator<Item = &Port> {
         self.opte_ports.iter().map(|(port, _)| port)
+    }
+
+    /// Returns references to the OPTE ports and metadata for this zone.
+    pub fn opte_port_info(&self) -> impl Iterator<Item = PortInfo> {
+        self.opte_ports.iter().map(|(port, ticket)| PortInfo {
+            port: port.clone(),
+            nic_id: ticket.id(),
+            nic_kind: ticket.kind(),
+        })
     }
 
     /// Returns the filesystem path to the zone's root in the GZ.

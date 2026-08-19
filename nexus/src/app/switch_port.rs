@@ -58,7 +58,6 @@ impl super::Nexus {
         }
     }
 
-    // TODO: more validation wanted
     fn switch_port_settings_validate(
         params: &networking::SwitchPortSettingsCreate,
     ) -> CreateResult<()> {
@@ -66,10 +65,10 @@ impl super::Nexus {
             for p in x.peers.iter() {
                 if let Some(ref key) = p.md5_auth_key {
                     let peer_id = match p.addr {
-                        RouterPeerType::Numbered { ip } => {
-                            format!("peer {ip}")
+                        RouterPeerType::Numbered(numbered_peer) => {
+                            format!("peer {}", numbered_peer.target_addr())
                         }
-                        RouterPeerType::Unnumbered { .. } => {
+                        RouterPeerType::Unnumbered(_) => {
                             format!("unnumbered peer {}", p.bgp_config)
                         }
                     };

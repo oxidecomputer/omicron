@@ -703,20 +703,6 @@ task: "fm_analysis"
     =================================
     no changes from the current situation report (Some(..........<REDACTED_UUID>........... (sitrep)))
 
-    preparation report:
-      parent sitrep:        ..........<REDACTED_UUID>...........
-      inventory collection: ..........<REDACTED_UUID>...........
-      <FM_INPUT_INV_COMPARISON_REDACTED>
-      total known ereport restart IDs: 0
-      no new ereports since the parent sitrep
-      no cases copied forward
-
-      no in-service control plane disks
-
-    analysis report:
-      sitrep ID: ..........<REDACTED_UUID>...........
-      no analysis log
-      no cases changed in this analysis step
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
 
 task: "fm_config_loader"
@@ -784,6 +770,8 @@ task: "fm_sitrep_gc"
     orphaned fm_ereport_in_case rows deleted:                                     0
       batches:                                                                    1
     orphaned fm_fact_physical_disk rows deleted:                                  0
+      batches:                                                                    1
+    orphaned fm_fact_saga rows deleted:                                           0
       batches:                                                                    1
     orphaned fm_sitrep_analysis_report rows deleted:                              <ORPHANED_FMSITREPANALYSISREPORT_ROWS_DELETED_REDACTED>
       batches:                                                                    1
@@ -1430,20 +1418,6 @@ task: "fm_analysis"
     =================================
     no changes from the current situation report (Some(..........<REDACTED_UUID>........... (sitrep)))
 
-    preparation report:
-      parent sitrep:        ..........<REDACTED_UUID>...........
-      inventory collection: ..........<REDACTED_UUID>...........
-      <FM_INPUT_INV_COMPARISON_REDACTED>
-      total known ereport restart IDs: 0
-      no new ereports since the parent sitrep
-      no cases copied forward
-
-      no in-service control plane disks
-
-    analysis report:
-      sitrep ID: ..........<REDACTED_UUID>...........
-      no analysis log
-      no cases changed in this analysis step
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
 
 task: "fm_config_loader"
@@ -1511,6 +1485,8 @@ task: "fm_sitrep_gc"
     orphaned fm_ereport_in_case rows deleted:                                     0
       batches:                                                                    1
     orphaned fm_fact_physical_disk rows deleted:                                  0
+      batches:                                                                    1
+    orphaned fm_fact_saga rows deleted:                                           0
       batches:                                                                    1
     orphaned fm_sitrep_analysis_report rows deleted:                              <ORPHANED_FMSITREPANALYSISREPORT_ROWS_DELETED_REDACTED>
       batches:                                                                    1
@@ -1906,10 +1882,11 @@ blueprint  ......<REDACTED_BLUEPRINT_ID>.......
 parent:    <none>
 
   sled: ..........<REDACTED_UUID>...........
-    state:::::::::::::   active
-    config generation:   2
-    subnet::::::::::::   ::/64
-    last allocated IP:   ::2
+    state::::::::::::::   active
+    update disposition:   available (generation 1)
+    config generation::   2
+    subnet:::::::::::::   ::/64
+    last allocated IP::   ::2
 
     host phase 2 contents:
     ------------------------
@@ -1956,10 +1933,11 @@ parent:    <none>
 
 
   sled: ..........<REDACTED_UUID>...........
-    state:::::::::::::   active
-    config generation:   2
-    subnet::::::::::::   ::/64
-    last allocated IP:   ::2
+    state::::::::::::::   active
+    update disposition:   available (generation 1)
+    config generation::   2
+    subnet:::::::::::::   ::/64
+    last allocated IP::   ::2
 
     host phase 2 contents:
     ------------------------
@@ -2053,10 +2031,11 @@ blueprint  ......<REDACTED_BLUEPRINT_ID>.......
 parent:    <none>
 
   sled: ..........<REDACTED_UUID>...........
-    state:::::::::::::   active
-    config generation:   2
-    subnet::::::::::::   ::/64
-    last allocated IP:   ::2
+    state::::::::::::::   active
+    update disposition:   available (generation 1)
+    config generation::   2
+    subnet:::::::::::::   ::/64
+    last allocated IP::   ::2
 
     host phase 2 contents:
     ------------------------
@@ -2103,10 +2082,11 @@ parent:    <none>
 
 
   sled: ..........<REDACTED_UUID>...........
-    state:::::::::::::   active
-    config generation:   2
-    subnet::::::::::::   ::/64
-    last allocated IP:   ::2
+    state::::::::::::::   active
+    update disposition:   available (generation 1)
+    config generation::   2
+    subnet:::::::::::::   ::/64
+    last allocated IP::   ::2
 
     host phase 2 contents:
     ------------------------

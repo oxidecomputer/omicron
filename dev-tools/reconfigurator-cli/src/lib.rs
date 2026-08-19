@@ -34,8 +34,9 @@ use nexus_reconfigurator_simulation::{SimStateBuilder, SimTufRepoSource};
 use nexus_reconfigurator_simulation::{SimTufRepoDescription, Simulator};
 use nexus_types::deployment::BlueprintHostPhase2DesiredContents;
 use nexus_types::deployment::BlueprintMeasurements;
+use nexus_types::deployment::BlueprintSledUpdateDispositionKind;
 use nexus_types::deployment::CockroachDbSettings;
-use nexus_types::deployment::ExpectedVersion;
+use nexus_types::deployment::ReconfiguratorDisruptionPolicy;
 use nexus_types::deployment::execution::blueprint_external_dns_config;
 use nexus_types::deployment::execution::blueprint_internal_dns_config;
 use nexus_types::deployment::{Blueprint, UnstableReconfiguratorState};
@@ -45,6 +46,7 @@ use nexus_types::deployment::{BlueprintSource, SledFilter};
 use nexus_types::deployment::{
     BlueprintZoneImageSource, PendingMgsUpdateDetails,
 };
+use nexus_types::deployment::{ExpectedVersion, ReconfiguratorStateInput};
 use nexus_types::deployment::{OmicronZoneNic, TargetReleaseDescription};
 use nexus_types::deployment::{PendingMgsUpdateSpDetails, PlanningInput};
 use nexus_types::external_api::sled::{SledPolicy, SledProvisionPolicy};
@@ -53,7 +55,6 @@ use nexus_types::tuf_repo::TufRepoDescription;
 use omicron_common::address::REPO_DEPOT_PORT;
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::Name;
-use omicron_common::disk::M2Slot;
 use omicron_common::policy::NEXUS_REDUNDANCY;
 use omicron_common::update::OmicronInstallManifestSource;
 use omicron_repl_utils::run_repl_from_file;
@@ -67,6 +68,7 @@ use omicron_uuid_kinds::VnicUuid;
 use omicron_uuid_kinds::{BlueprintUuid, MupdateOverrideUuid};
 use omicron_uuid_kinds::{CollectionUuid, MupdateUuid};
 use semver::Version;
+use sled_agent_types::disk::M2Slot;
 use sled_agent_types::inventory::ZoneKind;
 use slog_error_chain::InlineErrorChain;
 use std::borrow::Cow;
@@ -955,6 +957,15 @@ enum BlueprintEditCommands {
         /// the UUID to set the field to, or "unset"
         value: MupdateOverrideUuidOpt,
     },
+    /// set the update disposition for a sled
+    SetUpdateDisposition {
+        /// sled to set the field on
+        sled_id: SledOpt,
+
+        /// the disposition to set the sled to
+        #[command(subcommand)]
+        command: SledUpdateDispositionTarget,
+    },
     /// set the minimum generation for which target releases are accepted
     ///
     /// At the moment, this just sets the field to the given value. In the
@@ -1019,6 +1030,39 @@ enum SledMeasurementTarget {
     InstallDataset,
     // Unlike Omicron zones we don't have a need for the
     // `Artifact` kind for now
+}
+
+#[derive(Debug, Subcommand)]
+enum SledUpdateDispositionTarget {
+    /// mark the sled available for provisioning
+    Available,
+    /// mark the sled as evacuating, with the given disruption policy
+    Evacuating {
+        /// the disruption policy to apply while the sled is evacuating
+        #[clap(value_enum)]
+        policy: DisruptionPolicyOpt,
+    },
+}
+
+/// A clap-friendly mirror of [`ReconfiguratorDisruptionPolicy`].
+///
+/// We keep this local to the CLI (rather than deriving `ValueEnum` on the type
+/// itself) so the API type stays free of clap.
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum DisruptionPolicyOpt {
+    Terminate,
+    MigrateOrTerminate,
+    MigrateOnly,
+}
+
+impl From<DisruptionPolicyOpt> for ReconfiguratorDisruptionPolicy {
+    fn from(value: DisruptionPolicyOpt) -> Self {
+        match value {
+            DisruptionPolicyOpt::Terminate => Self::Terminate,
+            DisruptionPolicyOpt::MigrateOrTerminate => Self::MigrateOrTerminate,
+            DisruptionPolicyOpt::MigrateOnly => Self::MigrateOnly,
+        }
+    }
 }
 
 #[derive(Debug, Subcommand)]
@@ -1617,10 +1661,11 @@ struct GenerateFakeRepoArgs {
 #[derive(Debug, Args)]
 struct LoadArgs {
     /// input file
-    filename: Utf8PathBuf,
+    globs: Vec<glob::Pattern>,
 
     /// id of inventory collection to use for sled details
     /// (may be omitted only if the file contains only one collection)
+    #[clap(long)]
     collection_id: Option<CollectionUuid>,
 }
 
@@ -2638,6 +2683,23 @@ fn cmd_blueprint_edit(
                     format!("set remove_mupdate_override to {uuid}")
                 }
             }
+        }
+        BlueprintEditCommands::SetUpdateDisposition { sled_id, command } => {
+            let sled_id = sled_id.to_sled_id(system.description())?;
+            let kind = match command {
+                SledUpdateDispositionTarget::Available => {
+                    BlueprintSledUpdateDispositionKind::Available
+                }
+                SledUpdateDispositionTarget::Evacuating { policy } => {
+                    BlueprintSledUpdateDispositionKind::Evacuating {
+                        policy: policy.into(),
+                    }
+                }
+            };
+            builder
+                .sled_set_update_disposition_kind(sled_id, kind)
+                .context("failed to set update disposition")?;
+            format!("set sled {sled_id} update disposition kind to {kind}")
         }
         BlueprintEditCommands::SetTargetReleaseMinimumGeneration {
             generation,
@@ -3664,20 +3726,64 @@ fn cmd_load(
         );
     }
 
-    let input_path = args.filename;
     let collection_id = args.collection_id;
-    let loaded = read_file(&input_path)?;
 
-    let result = state.load_serialized(loaded, collection_id)?;
+    let mut inputs = Vec::new();
+    for pattern in args.globs {
+        // Work around the lack of rust-lang/glob#148: there is no way to
+        // iterate the paths matching a compiled `Pattern`.  We have to pass the
+        // underlying string to `glob::glob` and have it compile the pattern
+        // again.  It would be very surprising to get an error here since we
+        // have already parsed the string as a pattern before.
+        let paths = glob::glob(pattern.as_str())
+            .with_context(|| format!("parsing glob pattern {pattern:?}"))?;
+        for maybe_path in paths {
+            let input_path = maybe_path.with_context(|| {
+                format!("error globbing pattern {pattern:?}")
+            })?;
+            let input_path = Utf8PathBuf::from_path_buf(input_path).map_err(
+                |input_path| {
+                    anyhow!(
+                        "path was not valid UTF-8: {:?}",
+                        input_path.display()
+                    )
+                },
+            )?;
+            let file = std::fs::File::open(&input_path)
+                .with_context(|| format!("open {:?}", input_path))?;
+            let bufread = std::io::BufReader::new(file);
+            let input = ReconfiguratorStateInput {
+                label: input_path.as_str().to_owned(),
+                reader: bufread,
+            };
+            inputs.push(input);
+        }
+    }
+
+    let mut s = String::new();
+    let count = inputs.len();
+    let plural = if count == 1 { "" } else { "s" };
+    let loaded = UnstableReconfiguratorState::read_series(inputs)
+        .with_context(|| format!("loading {count} input{plural}"))?;
+    for warning in loaded.warnings {
+        swriteln!(s, "  {}", warning);
+    }
+    if count > 1 {
+        swriteln!(s, "latest of {count} file{plural}: {}", loaded.latest);
+    }
+
+    let result = state.load_serialized(loaded.state, collection_id)?;
 
     sim.commit_and_bump(
-        format!("reconfigurator-sim: load {:?}", input_path),
+        format!("reconfigurator-sim: load {count} file{plural}",),
         state,
     );
 
-    let mut s = String::new();
-
-    swriteln!(s, "loaded data from {:?}", input_path);
+    if count == 1 {
+        swriteln!(s, "loaded data from {:?}", loaded.latest);
+    } else {
+        swriteln!(s, "loaded data from {count} files");
+    }
 
     if !result.warnings.is_empty() {
         swriteln!(s, "warnings:");

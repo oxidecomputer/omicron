@@ -4,6 +4,7 @@
 
 use super::*;
 use assert_matches::assert_matches;
+use bootstrap_agent_lockstep_types::scrimlet_reconcilers::ScrimletReconcilersStatus;
 use dropshot::ConfigLogging;
 use dropshot::ConfigLoggingLevel;
 use dropshot::test_util::LogContext;

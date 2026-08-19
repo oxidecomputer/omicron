@@ -16,7 +16,7 @@ use sha3::Sha3_256;
 use slog::{Logger, o, warn};
 use tokio::sync::{mpsc, oneshot};
 
-use omicron_common::disk::DiskIdentity;
+use sled_agent_types::disk::DiskIdentity;
 
 /// Secret Input Key Material for a given rack reconfiguration epoch
 pub struct VersionedIkm {
