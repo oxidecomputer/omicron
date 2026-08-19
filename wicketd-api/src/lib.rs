@@ -10,12 +10,12 @@ use dropshot::Path;
 use dropshot::RequestContext;
 use dropshot::TypedBody;
 use gateway_client::types::IgnitionCommand;
+use iddqd::IdOrdMap;
 use schemars::JsonSchema;
 use semver::Version;
 use serde::Deserialize;
 use serde::Serialize;
 use sled_hardware_types::BaseboardId;
-use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::net::Ipv6Addr;
 use wicket_common::artifact::ArtifactId;
@@ -31,10 +31,8 @@ use wicket_common::rack_update::AbortUpdateOptions;
 use wicket_common::rack_update::ClearUpdateStateOptions;
 use wicket_common::rack_update::StartUpdateOptions;
 use wicket_common::update_events::EventReport;
-use wicketd_commission_types::rack_setup::BgpAuthKey;
+use wicket_common::update_events::SpEventReport;
 use wicketd_commission_types::rack_setup::BgpAuthKeyId;
-use wicketd_commission_types::rack_setup::CertificateUploadResponse;
-use wicketd_commission_types::rack_setup::SetBgpAuthKeyStatus;
 use wicketd_commission_types::update::ClearUpdateStateResponse;
 use wicketd_commission_types::update::UpdateTargets;
 
@@ -83,19 +81,6 @@ pub trait WicketdApi {
         body: TypedBody<MultirackJoinConfigBaseUserInput>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
-    /// Add the private key of an external certificate.
-    ///
-    /// This must be paired with its certificate. They may be posted in either
-    /// order, but one cannot post two keys in a row (or two certs in a row).
-    #[endpoint {
-        method = POST,
-        path = "/rack-setup/config/key"
-    }]
-    async fn post_rss_config_key(
-        rqctx: RequestContext<Self::Context>,
-        body: TypedBody<String>,
-    ) -> Result<HttpResponseOk<CertificateUploadResponse>, HttpError>;
-
     // -- BGP authentication key management
 
     /// Return information about BGP authentication keys, including checking
@@ -113,36 +98,6 @@ pub trait WicketdApi {
         // nice way to transmit this information as a batch.
         params: TypedBody<GetBgpAuthKeyParams>,
     ) -> Result<HttpResponseOk<GetBgpAuthKeyInfoResponse>, HttpError>;
-
-    /// Set the BGP authentication key for a particular key ID.
-    #[endpoint {
-        method = PUT,
-        path = "/rack-setup/config/bgp/auth-key/{key_id}"
-    }]
-    async fn put_bgp_auth_key(
-        rqctx: RequestContext<Self::Context>,
-        params: Path<PutBgpAuthKeyParams>,
-        body: TypedBody<PutBgpAuthKeyBody>,
-    ) -> Result<HttpResponseOk<PutBgpAuthKeyResponse>, HttpError>;
-
-    /// Update the RSS config recovery silo user password hash.
-    #[endpoint {
-        method = PUT,
-        path = "/rack-setup/config/recovery-user-password-hash"
-    }]
-    async fn put_rss_config_recovery_user_password_hash(
-        rqctx: RequestContext<Self::Context>,
-        body: TypedBody<PutRssRecoveryUserPasswordHash>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
-
-    /// Reset all RSS configuration to their default values.
-    #[endpoint {
-        method = DELETE,
-        path = "/rack-setup/config"
-    }]
-    async fn delete_rss_config(
-        rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
     /// Query current state of rack setup.
     #[endpoint {
@@ -343,26 +298,6 @@ pub struct GetBgpAuthKeyParams {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
-pub struct PutBgpAuthKeyParams {
-    pub key_id: BgpAuthKeyId,
-}
-
-#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Eq)]
-pub struct PutBgpAuthKeyBody {
-    pub key: BgpAuthKey,
-}
-
-#[derive(Clone, Debug, Serialize, JsonSchema, PartialEq)]
-pub struct PutBgpAuthKeyResponse {
-    pub status: SetBgpAuthKeyStatus,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
-pub struct PutRssRecoveryUserPasswordHash {
-    pub hash: omicron_passwords::NewPasswordHash,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct GetInventoryParams {
     /// Refresh the state of these SPs from MGS prior to returning (instead of
     /// returning cached data).
@@ -389,7 +324,7 @@ pub struct GetArtifactsAndEventReportsResponse {
     /// repository.
     pub artifacts: Vec<ArtifactId>,
 
-    pub event_reports: BTreeMap<SpType, BTreeMap<u16, EventReport>>,
+    pub event_reports: IdOrdMap<SpEventReport>,
 }
 
 #[derive(Clone, Debug, JsonSchema, Deserialize)]

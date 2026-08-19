@@ -31,15 +31,15 @@ use wicket_common::rack_setup::BgpAuthKeyInfo;
 use wicket_common::rack_setup::BgpAuthKeyStatus;
 use wicket_common::rack_setup::DisplaySlice;
 use wicketd_client::types::GetBgpAuthKeyParams;
-use wicketd_client::types::NewPasswordHash;
-use wicketd_client::types::PutBgpAuthKeyBody;
-use wicketd_client::types::PutRssRecoveryUserPasswordHash;
-use wicketd_client::types::SetBgpAuthKeyStatus;
 use wicketd_commission_types::rack_setup::BgpAuthKey;
 use wicketd_commission_types::rack_setup::BgpAuthKeyId;
 use wicketd_commission_types::rack_setup::CertificatePem;
 use wicketd_commission_types::rack_setup::CertificateUploadResponse;
+use wicketd_commission_types::rack_setup::NewPasswordHash;
+use wicketd_commission_types::rack_setup::PrivateKeyPem;
+use wicketd_commission_types::rack_setup::PutRecoveryUserPasswordHash;
 use wicketd_commission_types::rack_setup::PutRssUserConfigInsensitive;
+use wicketd_commission_types::rack_setup::SetBgpAuthKeyStatus;
 use zeroize::Zeroizing;
 
 mod config_toml;
@@ -133,7 +133,7 @@ impl SetupArgs {
             }
             SetupArgs::ResetConfig => {
                 slog::info!(log, "instructing wicketd to reset config...");
-                client
+                commission_client
                     .delete_rss_config()
                     .await
                     .context("failed to clear config")?;
@@ -144,16 +144,17 @@ impl SetupArgs {
                 let hash = NewPasswordHash(hash.to_string());
 
                 slog::info!(log, "uploading password hash to wicketd...");
-                client
+                commission_client
                     .put_rss_config_recovery_user_password_hash(
-                        &PutRssRecoveryUserPasswordHash { hash },
+                        &PutRecoveryUserPasswordHash { hash },
                     )
                     .await
                     .context("failed to upload password hash to wicketd")?;
                 slog::info!(log, "password set");
             }
             SetupArgs::SetBgpAuthKey(args) => {
-                args.exec(&log, &client, global_opts).await?;
+                args.exec(&log, &client, &commission_client, global_opts)
+                    .await?;
             }
             SetupArgs::UploadCert => {
                 slog::info!(log, "reading cert from stdin...");
@@ -207,8 +208,8 @@ impl SetupArgs {
                     .context("failed to read key from stdin")?;
 
                 slog::info!(log, "uploading key to wicketd...");
-                let result = client
-                    .post_rss_config_key(&key)
+                let result = commission_client
+                    .post_rss_config_key(&PrivateKeyPem(key))
                     .await
                     .context("failed to upload key to wicketd")?
                     .into_inner();
@@ -292,6 +293,7 @@ impl SetBgpAuthKeyArgs {
         self,
         log: &Logger,
         client: &wicketd_client::Client,
+        commission_client: &wicketd_commission_client::Client,
         global_opts: GlobalOpts,
     ) -> Result<()> {
         let mut styles = Styles::default();
@@ -401,12 +403,11 @@ impl SetBgpAuthKeyArgs {
                     let key = read_bgp_md5_key(&prompt)?;
                     let info = BgpAuthKeyInfo::for_key(&key)
                         .to_string_styled(styles.bold);
-                    let response = client
-                        .put_bgp_auth_key(&key_id, &PutBgpAuthKeyBody { key })
+                    let status = commission_client
+                        .put_bgp_auth_key(key_id, &key)
                         .await
-                        .context("failed to set BGP auth key")?;
-
-                    let status = response.into_inner().status;
+                        .context("failed to set BGP auth key")?
+                        .into_inner();
                     match status {
                         SetBgpAuthKeyStatus::Added => {
                             eprintln!(

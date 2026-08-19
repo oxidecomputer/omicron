@@ -344,21 +344,6 @@
             "$ref": "#/components/responses/Error"
           }
         }
-      },
-      "delete": {
-        "summary": "Reset all RSS configuration to their default values.",
-        "operationId": "delete_rss_config",
-        "responses": {
-          "204": {
-            "description": "resource updated"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
       }
     },
     "/rack-setup/config/bgp/auth-key": {
@@ -383,86 +368,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/GetBgpAuthKeyInfoResponse"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/rack-setup/config/bgp/auth-key/{key_id}": {
-      "put": {
-        "summary": "Set the BGP authentication key for a particular key ID.",
-        "operationId": "put_bgp_auth_key",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "key_id",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/BgpAuthKeyId"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/PutBgpAuthKeyBody"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PutBgpAuthKeyResponse"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/rack-setup/config/key": {
-      "post": {
-        "summary": "Add the private key of an external certificate.",
-        "description": "This must be paired with its certificate. They may be posted in either order, but one cannot post two keys in a row (or two certs in a row).",
-        "operationId": "post_rss_config_key",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "title": "String",
-                "type": "string"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CertificateUploadResponse"
                 }
               }
             }
@@ -508,33 +413,6 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/MultirackJoinConfigBaseUserInput"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "204": {
-            "description": "resource updated"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/rack-setup/config/recovery-user-password-hash": {
-      "put": {
-        "summary": "Update the RSS config recovery silo user password hash.",
-        "operationId": "put_rss_config_recovery_user_password_hash",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/PutRssRecoveryUserPasswordHash"
               }
             }
           },
@@ -957,31 +835,6 @@
           "serial_number"
         ]
       },
-      "BgpAuthKey": {
-        "description": "Describes the actual authentication key to use with a BGP peer.\n\nCurrently, only TCP-MD5 authentication is supported.",
-        "oneOf": [
-          {
-            "description": "TCP-MD5 authentication.",
-            "type": "object",
-            "properties": {
-              "key": {
-                "description": "The pre-shared key.",
-                "type": "string"
-              },
-              "kind": {
-                "type": "string",
-                "enum": [
-                  "tcp_md5"
-                ]
-              }
-            },
-            "required": [
-              "key",
-              "kind"
-            ]
-          }
-        ]
-      },
       "BgpAuthKeyId": {
         "description": "The key identifier for authentication to use with a BGP peer.",
         "allOf": [
@@ -1159,71 +1012,6 @@
         },
         "required": [
           "sleds"
-        ]
-      },
-      "CertificateUploadResponse": {
-        "description": "The result of uploading half of a certificate/key pair.",
-        "oneOf": [
-          {
-            "description": "The key has been uploaded, but we're waiting on its corresponding certificate chain.",
-            "type": "object",
-            "properties": {
-              "status": {
-                "type": "string",
-                "enum": [
-                  "waiting_on_cert"
-                ]
-              }
-            },
-            "required": [
-              "status"
-            ]
-          },
-          {
-            "description": "The cert chain has been uploaded, but we're waiting on its corresponding private key.",
-            "type": "object",
-            "properties": {
-              "status": {
-                "type": "string",
-                "enum": [
-                  "waiting_on_key"
-                ]
-              }
-            },
-            "required": [
-              "status"
-            ]
-          },
-          {
-            "description": "A cert chain and its key have been accepted.",
-            "type": "object",
-            "properties": {
-              "status": {
-                "type": "string",
-                "enum": [
-                  "cert_key_accepted"
-                ]
-              }
-            },
-            "required": [
-              "status"
-            ]
-          },
-          {
-            "description": "A cert chain and its key are valid, but have already been uploaded.",
-            "type": "object",
-            "properties": {
-              "status": {
-                "type": "string",
-                "enum": [
-                  "cert_key_duplicate_ignored"
-                ]
-              }
-            },
-            "required": [
-              "status"
-            ]
-          }
         ]
       },
       "ClearUpdateStateOptions": {
@@ -1814,13 +1602,22 @@
             }
           },
           "event_reports": {
-            "type": "object",
-            "additionalProperties": {
-              "type": "object",
-              "additionalProperties": {
-                "$ref": "#/components/schemas/EventReportForWicketdEngineSpec"
-              }
-            }
+            "title": "IdOrdMap",
+            "x-rust-type": {
+              "crate": "iddqd",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/SpEventReport"
+                }
+              ],
+              "path": "iddqd::IdOrdMap",
+              "version": "*"
+            },
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SpEventReport"
+            },
+            "uniqueItems": true
           },
           "system_version": {
             "nullable": true,
@@ -2520,11 +2317,6 @@
         "pattern": "^(?![0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$)^[a-z]([a-zA-Z0-9-]*[a-zA-Z0-9]+)?$",
         "minLength": 1,
         "maxLength": 63
-      },
-      "NewPasswordHash": {
-        "title": "A password hash in PHC string format",
-        "description": "Password hashes must be in PHC (Password Hashing Competition) string format.  Passwords must be hashed with Argon2id.  Password hashes may be rejected if the parameters appear not to be secure enough.",
-        "type": "string"
       },
       "Oui": {
         "description": "An Organization Unique Identifier.",
@@ -3355,39 +3147,6 @@
         },
         "type": "string"
       },
-      "PutBgpAuthKeyBody": {
-        "type": "object",
-        "properties": {
-          "key": {
-            "$ref": "#/components/schemas/BgpAuthKey"
-          }
-        },
-        "required": [
-          "key"
-        ]
-      },
-      "PutBgpAuthKeyResponse": {
-        "type": "object",
-        "properties": {
-          "status": {
-            "$ref": "#/components/schemas/SetBgpAuthKeyStatus"
-          }
-        },
-        "required": [
-          "status"
-        ]
-      },
-      "PutRssRecoveryUserPasswordHash": {
-        "type": "object",
-        "properties": {
-          "hash": {
-            "$ref": "#/components/schemas/NewPasswordHash"
-          }
-        },
-        "required": [
-          "hash"
-        ]
-      },
       "RackInitUuid": {
         "x-rust-type": {
           "crate": "omicron-uuid-kinds",
@@ -4188,31 +3947,6 @@
           "ranges"
         ]
       },
-      "SetBgpAuthKeyStatus": {
-        "oneOf": [
-          {
-            "description": "The key was accepted and replaced an old key.",
-            "type": "string",
-            "enum": [
-              "replaced"
-            ]
-          },
-          {
-            "description": "The key was accepted, and is the same as the existing key.",
-            "type": "string",
-            "enum": [
-              "unchanged"
-            ]
-          },
-          {
-            "description": "The key was accepted and is new.",
-            "type": "string",
-            "enum": [
-              "added"
-            ]
-          }
-        ]
-      },
       "Sff8636Datapath": {
         "description": "The datapath of an SFF-8636 module.\n\nThis describes the state of a single lane in an SFF module. It includes information about input and output signals, faults, and controls.",
         "type": "object",
@@ -4430,6 +4164,22 @@
               "error"
             ]
           }
+        ]
+      },
+      "SpEventReport": {
+        "description": "An event report for a single SP.",
+        "type": "object",
+        "properties": {
+          "event_report": {
+            "$ref": "#/components/schemas/EventReportForWicketdEngineSpec"
+          },
+          "sp": {
+            "$ref": "#/components/schemas/SpIdentifier"
+          }
+        },
+        "required": [
+          "event_report",
+          "sp"
         ]
       },
       "SpIdentifier": {
