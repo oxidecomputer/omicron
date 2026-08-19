@@ -430,8 +430,16 @@ mod test {
     use super::*;
     use crate::DiskPaths;
     use camino::Utf8PathBuf;
-    use omicron_test_utils::dev::{mock_disk_identity, test_setup_log};
+    use omicron_test_utils::dev::test_setup_log;
     use std::path::Path;
+
+    fn mock_disk_identity() -> DiskIdentity {
+        DiskIdentity {
+            vendor: "MockVendor".to_string(),
+            serial: "MOCKSERIAL".to_string(),
+            model: "MOCKMODEL".to_string(),
+        }
+    }
 
     struct FakePartition {
         index: usize,
