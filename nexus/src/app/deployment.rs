@@ -5,6 +5,7 @@
 //! Configuration of the deployment system
 
 use anyhow::Context;
+use anyhow::bail;
 use iddqd::IdOrdMap;
 use nexus_db_model::TargetReleaseSource;
 use nexus_db_queries::authz;
@@ -37,6 +38,10 @@ use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
+use omicron_debug_dropbox::DepositError;
+use omicron_debug_dropbox::DepositHandle;
+use omicron_debug_dropbox::Producer;
+use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SledUuid;
 use slog::Logger;
@@ -1135,6 +1140,150 @@ pub fn blueprint_debug_filename(
     };
     let time_str = blueprint.time_created.format("%Y%m%dT%H%MZ");
     format!("{time_str}-{action_str}-{}.json", blueprint.id)
+}
+
+/// Typestate-based helper to manage writing out two Reconfigurator state files
+/// as part of setting a new target blueprint: the first is an "intent" file and
+/// the second is a "committed" file.
+pub struct SetTargetDebugFile<'a> {
+    log: &'a Logger,
+    producer: &'a Producer,
+    intent_state: UnstableReconfiguratorState,
+    intent_state_str: String,
+    intended_blueprint_id: BlueprintUuid,
+}
+
+impl<'a> SetTargetDebugFile<'a> {
+    pub fn new(
+        log: &'a Logger,
+        producer: &'a Producer,
+        intent_state: UnstableReconfiguratorState,
+    ) -> Result<SetTargetDebugFile<'a>, anyhow::Error> {
+        // XXX-dap assert initial_state has intended blueprint id
+        let Some(intended_blueprint_id) =
+            intent_state.intended_target_blueprint
+        else {
+            bail!("intent_state does not have an intended_target_blueprint");
+        };
+
+        if !intent_state.blueprints.contains_key(&intended_blueprint_id) {
+            bail!(
+                "intent_state's intended_target_blueprint is missing \
+                 from `blueprints`"
+            );
+        }
+
+        let intent_state_str = serde_json::to_string(&intent_state)
+            .context("serializing intent Reconfigurator state file")?;
+
+        Ok(SetTargetDebugFile {
+            log,
+            producer,
+            intent_state,
+            intent_state_str,
+            intended_blueprint_id,
+        })
+    }
+
+    pub async fn write_intent(
+        self,
+        intent_reason: BlueprintDebugAction,
+    ) -> Result<SetTargetDebugFileWroteIntent<'a>, DepositError> {
+        // unwrap(): we checked in `new` that this was present.
+        let blueprint = self
+            .intent_state
+            .blueprints
+            .get(&self.intended_blueprint_id)
+            .unwrap();
+        let name = blueprint_debug_filename(blueprint, intent_reason);
+        let intent_deposit =
+            self.producer.deposit_file(&name, &self.intent_state_str).await?;
+
+        info!(&self.log, "saved intended debug state"; "filename" => name);
+
+        Ok(SetTargetDebugFileWroteIntent {
+            log: self.log,
+            producer: self.producer,
+            intent_state: self.intent_state,
+            intent_deposit,
+        })
+    }
+}
+
+pub struct SetTargetDebugFileWroteIntent<'a> {
+    log: &'a Logger,
+    producer: &'a Producer,
+    intent_state: UnstableReconfiguratorState,
+    intent_deposit: DepositHandle,
+}
+
+impl<'a> SetTargetDebugFileWroteIntent<'a> {
+    pub async fn cancel(self) {
+        debug!(self.log, "attempting to remove intent file after failure");
+        self.intent_deposit.cancel_and_attempt_delete().await;
+        warn!(self.log, "removed intent file after failure");
+    }
+
+    pub async fn write_committed(
+        self,
+        new_target: BlueprintTarget,
+        commit_reason: BlueprintDebugAction,
+    ) {
+        // Writing the commited state is best-effort, since the action has
+        // already been done.
+
+        // XXX-dap what if the new_target blueprint id doesn't match
+
+        let committed_state = UnstableReconfiguratorState {
+            intended_target_blueprint: None,
+            target_blueprint: new_target,
+            ..self.intent_state
+        };
+
+        // unwrap(): we checked this in `SetTargetDebugFile::new()`.
+        let blueprint = committed_state
+            .blueprints
+            .get(&committed_state.target_blueprint.target_id)
+            .unwrap();
+        let name = blueprint_debug_filename(&blueprint, commit_reason);
+
+        let committed_str = match serde_json::to_string(&committed_state) {
+            Ok(s) => s,
+            Err(error) => {
+                error!(
+                    &self.log,
+                    "failed to serialize committed debug state";
+                    InlineErrorChain::new(&error),
+                    "filename" => name,
+                );
+                return;
+            }
+        };
+
+        match self.producer.deposit_file(&name, &committed_str).await {
+            Ok(_deposit) => {
+                // We successfully deposited the "commit" state.
+                // Make a best-effort to cancel the intended state file.
+                self.intent_deposit.cancel_and_attempt_delete().await;
+
+                info!(
+                    &self.log,
+                    "saved committed debug state";
+                    "filename" => name,
+                );
+            }
+            Err(error) => {
+                // We failed to deposit the "commit" state.  Log the error and
+                // keep the intended state around.  There's nothing more to do.
+                error!(
+                    &self.log,
+                    "failed to save committed debug state";
+                    InlineErrorChain::new(&error),
+                    "filename" => name,
+                );
+            }
+        }
+    }
 }
 
 #[cfg(test)]

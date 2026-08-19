@@ -8,8 +8,7 @@ use super::reconfigurator_config::ReconfiguratorConfigLoaderState;
 use crate::app::BlueprintDebugAction;
 use crate::app::background::BackgroundTask;
 use crate::app::background::tasks::blueprint_load::LoadedTargetBlueprint;
-use crate::app::blueprint_debug_filename;
-use anyhow::Context;
+use crate::app::deployment::SetTargetDebugFile;
 use chrono::Utc;
 use futures::future::BoxFuture;
 use iddqd::IdOrdMap;
@@ -316,25 +315,31 @@ impl BlueprintPlanner {
         )
         .await
         .map_err(PlanError::AssembleDebugState)?;
-        let debug_str_intent = serde_json::to_string(&debug_intent)
-            .context("serializing Reconfigurator state file")
-            .map_err(PlanError::AssembleDebugState)?;
-
-        // Insert the new blueprint into the database.
-        self.datastore.blueprint_insert(opctx, &blueprint).await.map_err(
-            |error| PlanError::SaveBlueprint { blueprint_id, source: error },
-        )?;
+        let dropbox_files = SetTargetDebugFile::new(
+            &opctx.log,
+            &self.debug_dropbox,
+            debug_intent,
+        )
+        .map_err(PlanError::AssembleDebugState)?;
 
         // Archive the Reconfigurator state file.  As above, we require that
         // this succeed.
-        let debug_name_intent = blueprint_debug_filename(
-            &blueprint,
-            BlueprintDebugAction::AutoplanIntent,
-        );
-        let deposit_intent = self
-            .debug_dropbox
-            .deposit_file(&debug_name_intent, &debug_str_intent)
+        let dropbox_files = dropbox_files
+            .write_intent(BlueprintDebugAction::AutoplanIntent)
             .await?;
+
+        // Insert the new blueprint into the database.
+        if let Err(error) =
+            self.datastore.blueprint_insert(opctx, &blueprint).await.map_err(
+                |error| PlanError::SaveBlueprint {
+                    blueprint_id,
+                    source: error,
+                },
+            )
+        {
+            dropbox_files.cancel().await;
+            return Err(error);
+        }
 
         // Try to make it the current target.
         let target = BlueprintTarget {
@@ -375,7 +380,7 @@ impl BlueprintPlanner {
 
                 // Try to cancel the dropbox deposit.  This information is
                 // useless now.  It's not a problem if this doesn't work.
-                deposit_intent.cancel_and_attempt_delete().await;
+                dropbox_files.cancel().await;
 
                 return Ok(BlueprintPlannerStatus::Planned {
                     parent_blueprint_id,
@@ -392,34 +397,9 @@ impl BlueprintPlanner {
         // There's no point in failing after this, whatever happens.
 
         // Write a new state file for the dropbox that reflects the new target.
-        let debug_name_committed = blueprint_debug_filename(
-            &blueprint,
-            BlueprintDebugAction::Autoplan,
-        );
-        let mut debug_committed = debug_intent;
-        debug_committed.target_blueprint = target;
-        debug_committed.intended_target_blueprint = None;
-        if let Ok(debug_str_committed) = serde_json::to_string(&debug_committed)
-        {
-            if let Err(error) = self
-                .debug_dropbox
-                .deposit_file(&debug_name_committed, &debug_str_committed)
-                .await
-            {
-                warn!(
-                    &opctx.log,
-                    "failed to save Reconfigurator state file for new target";
-                    "error" => %error,
-                    "blueprint_id" => %blueprint_id,
-                );
-            }
-
-            // If possible, cancel the previous deposit.  It represents an
-            // intermediate state that's not relevant as long as we have the new
-            // file.  (It's not a problem if this doesn't work.  We'll just wind
-            // up with this extra intent file.)
-            deposit_intent.cancel_and_attempt_delete().await;
-        }
+        dropbox_files
+            .write_committed(target, BlueprintDebugAction::Autoplan)
+            .await;
 
         self.tx_planned.send_replace(Some(blueprint.id));
         Ok(BlueprintPlannerStatus::Targeted {
