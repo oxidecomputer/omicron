@@ -14551,6 +14551,7 @@ dependencies = [
  "regex",
  "schemars 0.8.22",
  "serde",
+ "sled-agent-types",
  "sled-storage",
  "slog",
  "slog-error-chain 0.1.0 (git+https://github.com/oxidecomputer/slog-error-chain?branch=main)",
