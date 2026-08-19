@@ -39,6 +39,7 @@ use wicketd_commission_types::rack_setup::BgpAuthKey;
 use wicketd_commission_types::rack_setup::BgpAuthKeyId;
 use wicketd_commission_types::rack_setup::CertificatePem;
 use wicketd_commission_types::rack_setup::CertificateUploadResponse;
+use wicketd_commission_types::rack_setup::PrivateKeyPem;
 use wicketd_commission_types::rack_setup::PutRssUserConfigInsensitive;
 use zeroize::Zeroizing;
 
@@ -207,8 +208,8 @@ impl SetupArgs {
                     .context("failed to read key from stdin")?;
 
                 slog::info!(log, "uploading key to wicketd...");
-                let result = client
-                    .post_rss_config_key(&key)
+                let result = commission_client
+                    .post_rss_config_key(&PrivateKeyPem(key))
                     .await
                     .context("failed to upload key to wicketd")?
                     .into_inner();

@@ -38,8 +38,6 @@ use wicket_common::rack_setup::GetBgpAuthKeyInfoResponse;
 use wicket_common::rack_update::AbortUpdateOptions;
 use wicket_common::update_events::EventReport;
 use wicketd_api::*;
-use wicketd_commission_types::rack_setup::CertificateUploadResponse;
-use wicketd_commission_types::rack_setup::PrivateKeyPem;
 use wicketd_commission_types::update::ClearUpdateStateResponse;
 
 use crate::ServerContext;
@@ -158,24 +156,6 @@ impl WicketdApi for WicketdApiImpl {
         }
 
         Ok(HttpResponseUpdatedNoContent())
-    }
-
-    async fn post_rss_config_key(
-        rqctx: RequestContext<Self::Context>,
-        body: TypedBody<String>,
-    ) -> Result<HttpResponseOk<CertificateUploadResponse>, HttpError> {
-        let ctx = rqctx.context();
-
-        let mut config = ctx.rss_or_multirack_join_config.lock().unwrap();
-        let rss_config = config.rss_config_mut_or_conflict(
-            "cannot post private keys when not preparing for RSS",
-        )?;
-
-        let response = rss_config
-            .push_key(PrivateKeyPem(body.into_inner().into()))
-            .map_err(|err| HttpError::for_bad_request(None, err))?;
-
-        Ok(HttpResponseOk(response))
     }
 
     async fn get_bgp_auth_key_info(

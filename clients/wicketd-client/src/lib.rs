@@ -47,7 +47,6 @@ progenitor::generate_api!(
         BgpPeerAuthKind = wicket_common::rack_setup::BgpPeerAuthKind,
         BgpPeerConfig = omicron_common::api::internal::shared::BgpPeerConfig,
         BootstrapSledDescription = wicket_common::rack_setup::BootstrapSledDescription,
-        CertificateUploadResponse = wicketd_commission_types_versions::latest::rack_setup::CertificateUploadResponse,
         ClearUpdateStateOptions = wicket_common::rack_update::ClearUpdateStateOptions,
         ClearUpdateStateResponse = wicketd_commission_types_versions::latest::update::ClearUpdateStateResponse,
         CurrentRssUserConfigInsensitive = wicket_common::rack_setup::CurrentRssUserConfigInsensitive,

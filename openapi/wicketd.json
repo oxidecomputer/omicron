@@ -440,42 +440,6 @@
         }
       }
     },
-    "/rack-setup/config/key": {
-      "post": {
-        "summary": "Add the private key of an external certificate.",
-        "description": "This must be paired with its certificate. They may be posted in either order, but one cannot post two keys in a row (or two certs in a row).",
-        "operationId": "post_rss_config_key",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "title": "String",
-                "type": "string"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CertificateUploadResponse"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
     "/rack-setup/config/multirack": {
       "get": {
         "summary": "Get the current status of the multirack join configuration.",
@@ -1159,71 +1123,6 @@
         },
         "required": [
           "sleds"
-        ]
-      },
-      "CertificateUploadResponse": {
-        "description": "The result of uploading half of a certificate/key pair.",
-        "oneOf": [
-          {
-            "description": "The key has been uploaded, but we're waiting on its corresponding certificate chain.",
-            "type": "object",
-            "properties": {
-              "status": {
-                "type": "string",
-                "enum": [
-                  "waiting_on_cert"
-                ]
-              }
-            },
-            "required": [
-              "status"
-            ]
-          },
-          {
-            "description": "The cert chain has been uploaded, but we're waiting on its corresponding private key.",
-            "type": "object",
-            "properties": {
-              "status": {
-                "type": "string",
-                "enum": [
-                  "waiting_on_key"
-                ]
-              }
-            },
-            "required": [
-              "status"
-            ]
-          },
-          {
-            "description": "A cert chain and its key have been accepted.",
-            "type": "object",
-            "properties": {
-              "status": {
-                "type": "string",
-                "enum": [
-                  "cert_key_accepted"
-                ]
-              }
-            },
-            "required": [
-              "status"
-            ]
-          },
-          {
-            "description": "A cert chain and its key are valid, but have already been uploaded.",
-            "type": "object",
-            "properties": {
-              "status": {
-                "type": "string",
-                "enum": [
-                  "cert_key_duplicate_ignored"
-                ]
-              }
-            },
-            "required": [
-              "status"
-            ]
-          }
         ]
       },
       "ClearUpdateStateOptions": {
