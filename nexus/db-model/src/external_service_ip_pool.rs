@@ -5,13 +5,14 @@
 //! Model types for assigning IP pools to individual external services.
 
 use super::impl_enum_type;
+use crate::DbTypedUuid;
 use diesel::Insertable;
 use diesel::Queryable;
 use diesel::Selectable;
 use nexus_db_schema::schema::external_service_ip_pool;
+use omicron_uuid_kinds::IpPoolKind;
 use serde::Deserialize;
 use serde::Serialize;
-use uuid::Uuid;
 
 impl_enum_type!(
     ExternalServiceKindEnum:
@@ -46,7 +47,7 @@ impl std::fmt::Display for ExternalServiceKind {
     }
 }
 
-/// Assignment of an IP pool to an external service (Nexus or boundary NTP).
+/// Assignment of an IP pool to an external service.
 //
 // NOTE: The associations here intentionally avoid any semantics like
 // exclusivity or what an assignment means for the application. Each service
@@ -60,5 +61,5 @@ impl std::fmt::Display for ExternalServiceKind {
 #[diesel(table_name = external_service_ip_pool)]
 pub struct ExternalServiceIpPool {
     pub service: ExternalServiceKind,
-    pub ip_pool_id: Uuid,
+    pub ip_pool_id: DbTypedUuid<IpPoolKind>,
 }

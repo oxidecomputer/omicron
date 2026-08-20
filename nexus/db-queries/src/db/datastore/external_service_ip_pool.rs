@@ -15,6 +15,7 @@ use crate::db::pagination::paginated;
 use crate::db::pagination::paginated_multicolumn;
 use crate::db::raw_query_builder::QueryBuilder;
 use crate::db::raw_query_builder::TypedSqlQuery;
+use crate::db::true_or_cast_error::matches_sentinel;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
 use diesel::result::DatabaseErrorKind;
@@ -73,13 +74,16 @@ impl DataStore {
                 _,
             )) => Ok(()),
             // Pool exists, but is a silo pool.
-            Err(DieselError::DatabaseError(
-                DatabaseErrorKind::Unknown,
-                ref info,
-            )) if info.message().ends_with("invalid bool value") => {
+            Err(e)
+                if matches_sentinel(
+                    &e,
+                    &[NOT_SYSTEM_SERVICES_POOL_SENTINEL],
+                )
+                .is_some() =>
+            {
                 Err(Error::invalid_request(
                     "only IP pools assigned for system services may be \
-                    assigned to a service",
+                    assigned to a specific service",
                 ))
             }
             Err(e) => Err(public_error_from_diesel(e, ErrorHandler::Server)),
@@ -107,10 +111,10 @@ impl DataStore {
             // A row was removed, or the pair wasn't assigned; either is success.
             Ok(_) => Ok(()),
             // The bool-cast sentinel fired: this was the service's last pool.
-            Err(DieselError::DatabaseError(
-                DatabaseErrorKind::Unknown,
-                ref info,
-            )) if info.message().ends_with("invalid bool value") => {
+            Err(e)
+                if matches_sentinel(&e, &[UNASSIGN_LAST_POOL_SENTINEL])
+                    .is_some() =>
+            {
                 Err(Error::invalid_request(UNASSIGN_LAST_POOL_ERROR))
             }
             Err(e) => Err(public_error_from_diesel(e, ErrorHandler::Server)),
@@ -258,7 +262,6 @@ mod test {
     use super::unassign_pool_from_service_query;
     use crate::authz;
     use crate::db::datastore::DataStore;
-    use crate::db::datastore::SQL_BATCH_SIZE;
     use crate::db::pagination::Paginator;
     use crate::db::pub_test_utils::TestDatabase;
     use crate::db::pub_test_utils::helpers::create_service_ip_pool;
@@ -267,7 +270,6 @@ mod test {
     use async_bb8_diesel::AsyncRunQueryDsl as _;
     use diesel::ExpressionMethods as _;
     use diesel::QueryDsl as _;
-    use dropshot::PaginationOrder;
     use nexus_db_model::ExternalServiceIpPool;
     use nexus_db_model::ExternalServiceKind;
     use nexus_db_model::IpPool;
@@ -279,7 +281,7 @@ mod test {
     use omicron_common::api::external::IpVersion;
     use omicron_common::api::external::LookupType;
     use omicron_test_utils::dev;
-    use std::num::NonZeroU32;
+    use omicron_uuid_kinds::GenericUuid as _;
     use uuid::Uuid;
 
     // Read a pool's current `rcgen`, to check that mutations bump it.
@@ -295,15 +297,6 @@ mod test {
             .first_async::<i64>(&*conn)
             .await
             .expect("read the pool's rcgen")
-    }
-
-    // A page big enough to hold all rows any of these tests create.
-    fn all<T>() -> DataPageParams<'static, T> {
-        DataPageParams {
-            marker: None,
-            limit: NonZeroU32::new(100).unwrap(),
-            direction: PaginationOrder::Ascending,
-        }
     }
 
     #[tokio::test]
@@ -339,7 +332,7 @@ mod test {
             .external_service_ip_pool_pools_for_service(
                 opctx,
                 ExternalServiceKind::Nexus,
-                &all(),
+                &DataPageParams::max_page(),
             )
             .await
             .expect("listing Nexus's pools should succeed");
@@ -390,7 +383,7 @@ mod test {
             .external_service_ip_pool_pools_for_service(
                 opctx,
                 ExternalServiceKind::Nexus,
-                &all(),
+                &DataPageParams::max_page(),
             )
             .await
             .expect("listing Nexus's pools should succeed");
@@ -439,7 +432,7 @@ mod test {
                 .external_service_ip_pool_pools_for_service(
                     opctx,
                     service,
-                    &all(),
+                    &DataPageParams::max_page(),
                 )
                 .await
                 .expect("listing a service's pools should succeed");
@@ -448,11 +441,13 @@ mod test {
 
         // Both rows show up in the full list, for any service.
         let all_rows = datastore
-            .external_service_ip_pool_list(opctx, &all())
+            .external_service_ip_pool_list(opctx, &DataPageParams::max_page())
             .await
             .expect("listing all assignments should succeed");
-        let got: Vec<(ExternalServiceKind, Uuid)> =
-            all_rows.iter().map(|r| (r.service, r.ip_pool_id)).collect();
+        let got: Vec<(ExternalServiceKind, Uuid)> = all_rows
+            .iter()
+            .map(|r| (r.service, r.ip_pool_id.into_untyped_uuid()))
+            .collect();
         assert_eq!(got.len(), 2);
         assert!(got.contains(&(ExternalServiceKind::Nexus, pool_id)));
         assert!(got.contains(&(ExternalServiceKind::BoundaryNtp, pool_id)));
@@ -586,7 +581,7 @@ mod test {
             .external_service_ip_pool_pools_for_service(
                 opctx,
                 ExternalServiceKind::Nexus,
-                &all(),
+                &DataPageParams::max_page(),
             )
             .await
             .expect("listing Nexus's pools should succeed");
@@ -637,7 +632,7 @@ mod test {
             .external_service_ip_pool_pools_for_service(
                 opctx,
                 ExternalServiceKind::Nexus,
-                &all(),
+                &DataPageParams::max_page(),
             )
             .await
             .expect("listing Nexus's pools should succeed");
@@ -679,7 +674,7 @@ mod test {
             .external_service_ip_pool_pools_for_service(
                 opctx,
                 ExternalServiceKind::Nexus,
-                &all(),
+                &DataPageParams::max_page(),
             )
             .await
             .expect("listing Nexus's pools should succeed");
@@ -755,7 +750,7 @@ mod test {
             .external_service_ip_pool_pools_for_service(
                 opctx,
                 ExternalServiceKind::Nexus,
-                &all(),
+                &DataPageParams::max_page(),
             )
             .await
             .expect("listing Nexus's pools should succeed");
@@ -768,7 +763,7 @@ mod test {
             .external_service_ip_pool_pools_for_service(
                 opctx,
                 ExternalServiceKind::BoundaryNtp,
-                &all(),
+                &DataPageParams::max_page(),
             )
             .await
             .expect("listing boundary NTP's pools should succeed");
@@ -782,7 +777,7 @@ mod test {
             .external_service_ip_pool_pools_for_service(
                 opctx,
                 ExternalServiceKind::ExternalDns,
-                &all(),
+                &DataPageParams::max_page(),
             )
             .await
             .expect("listing external DNS's pools should succeed");
@@ -791,7 +786,7 @@ mod test {
         // Walk the full list in pages of 2 to exercise pagination.
         let mut seen: Vec<(ExternalServiceKind, Uuid)> = Vec::new();
         let mut paginator = Paginator::new(
-            SQL_BATCH_SIZE,
+            2.try_into().unwrap(),
             dropshot::PaginationOrder::Ascending,
         );
         while let Some(p) = paginator.next() {
@@ -799,12 +794,14 @@ mod test {
                 .external_service_ip_pool_list(opctx, &p.current_pagparams())
                 .await
                 .expect("listing a page of assignments should succeed");
-            paginator = p
-                .found_batch(&batch, &|row: &ExternalServiceIpPool| {
-                    (row.service, row.ip_pool_id)
+            paginator =
+                p.found_batch(&batch, &|row: &ExternalServiceIpPool| {
+                    (row.service, row.ip_pool_id.into_untyped_uuid())
                 });
             seen.extend(
-                batch.into_iter().map(|row| (row.service, row.ip_pool_id)),
+                batch.into_iter().map(|row| {
+                    (row.service, row.ip_pool_id.into_untyped_uuid())
+                }),
             );
         }
         assert_eq!(seen.len(), 5);

@@ -2388,7 +2388,7 @@ CREATE TYPE IF NOT EXISTS omicron.public.external_service_kind AS ENUM (
 );
 
 /*
- * Join table assigning IP pools to external services (Nexus, boundary NTP).
+ * Join table assigning IP pools to external services.
  *
  * This represents the operator's intent about which pools should be used for
  * those services, but we're intentionally not specifying the semantics yet
