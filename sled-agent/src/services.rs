@@ -93,7 +93,7 @@ use sled_agent_resolvable_files::{
 use sled_agent_types::instance::ExternalIpConfig;
 use sled_agent_types::instance::ExternalIps;
 use sled_agent_types::inventory::{
-    OmicronZoneConfig, OmicronZoneType, ZoneKind,
+    OmicronZoneConfig, OmicronZoneType, ZoneKind, ZoneSnatConfig,
 };
 use sled_agent_types::resolvable_files::{
     MupdateOverrideReadError, PreparedOmicronZone,
@@ -106,6 +106,7 @@ use sled_hardware::underlay;
 use sled_hardware_types::Baseboard;
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
+use std::collections::BTreeSet;
 use std::net::{IpAddr, Ipv6Addr, SocketAddr};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
@@ -1115,47 +1116,29 @@ impl ServiceManager {
 
         let (zone_kind, nic, external_ips) = match &zone_args.omicron_type() {
             Some(
-                zone_type @ OmicronZoneType::Nexus { external_ip, nic, .. },
+                zone_type @ OmicronZoneType::Nexus { external_ips, nic, .. },
             ) => {
-                let eip = match external_ip {
-                    IpAddr::V4(ipv4) => {
-                        ExternalIpConfig::new_floating_ipv4(*ipv4)
-                    }
-                    IpAddr::V6(ipv6) => {
-                        ExternalIpConfig::new_floating_ipv6(*ipv6)
-                    }
-                };
+                let eip = external_ip_config_from_floating_ips(
+                    external_ips.iter().copied(),
+                );
                 (zone_type.kind(), nic, eip)
             }
             Some(
                 zone_type @ OmicronZoneType::ExternalDns {
-                    dns_address,
+                    dns_addresses,
                     nic,
                     ..
                 },
             ) => {
-                let eip = match dns_address.ip() {
-                    IpAddr::V4(ipv4) => {
-                        ExternalIpConfig::new_floating_ipv4(ipv4)
-                    }
-                    IpAddr::V6(ipv6) => {
-                        ExternalIpConfig::new_floating_ipv6(ipv6)
-                    }
-                };
+                let eip = external_ip_config_from_floating_ips(
+                    dns_addresses.iter().map(|addr| addr.ip()),
+                );
                 (zone_type.kind(), nic, eip)
             }
             Some(
-                zone_type @ OmicronZoneType::BoundaryNtp {
-                    nic, snat_cfg, ..
-                },
+                zone_type @ OmicronZoneType::BoundaryNtp { nic, snat, .. },
             ) => {
-                let eip = if let Some(snat) = snat_cfg.try_as_ipv4() {
-                    ExternalIpConfig::new_ipv4_source_nat(snat)
-                } else if let Some(snat) = snat_cfg.try_as_ipv6() {
-                    ExternalIpConfig::new_ipv6_source_nat(snat)
-                } else {
-                    unreachable!("Generic SNAT IP must be IPv4 or IPv6");
-                };
+                let eip = external_ip_config_from_snat(snat);
                 (zone_type.kind(), nic, eip)
             }
             _ => unreachable!("unexpected zone type"),
@@ -2008,7 +1991,7 @@ impl ServiceManager {
                 zone_type:
                     OmicronZoneType::ExternalDns {
                         http_address,
-                        dns_address,
+                        dns_addresses,
                         nic,
                         ..
                     },
@@ -2036,6 +2019,20 @@ impl ServiceManager {
                 //
                 // Make sure we take the VPC-private IP address with the same
                 // version as the external address.
+                //
+                // TODO(#11008): external DNS should listen on the private IP
+                // address for *all* of its external addresses. For now we bind
+                // a single address, preferring the IPv4 one (else IPv6) to
+                // match `opte_interface_set_up_install`. Widening this is
+                // blocked on #9309, which puts the private side of each
+                // external address onto the zone's OPTE port in the first
+                // place.
+                let dns_address = dns_addresses
+                    .iter()
+                    .find(|addr| addr.is_ipv4())
+                    .or_else(|| dns_addresses.iter().next())
+                    .copied()
+                    .expect("ExternalDnsAddrs is non-empty by construction");
                 let private_ip = Self::private_ip_for_external_address(
                     dns_address.ip(),
                     &nic.ip_config,
@@ -2354,7 +2351,7 @@ impl ServiceManager {
                         lockstep_port,
                         external_tls,
                         external_dns_servers,
-                        external_ip,
+                        external_ips,
                         nic,
                         ..
                     },
@@ -2393,8 +2390,21 @@ impl ServiceManager {
 
                 // Fetch the private IP of the same IP version as the external
                 // IP address.
+                //
+                // TODO(#11006): Nexus should be reachable on the private IP
+                // address for *all* of its external IPs. For now we bind a
+                // single address, preferring the IPv4 one (else IPv6) to match
+                // `opte_interface_set_up_install`. Widening this is blocked on
+                // #9309, which puts the private side of each external address
+                // onto the zone's OPTE port in the first place.
+                let external_ip = external_ips
+                    .iter()
+                    .find(|ip| ip.is_ipv4())
+                    .or_else(|| external_ips.iter().next())
+                    .copied()
+                    .expect("NexusExternalIps is non-empty by construction");
                 let private_ip = Self::private_ip_for_external_address(
-                    *external_ip,
+                    external_ip,
                     &nic.ip_config,
                     config.zone_type.kind(),
                 )?;
@@ -4050,6 +4060,50 @@ fn extract_nat_data_for_concrete_external_ip_config<T: ConcreteIp>(
 
 fn internal_dns_addrobj_name(gz_address_index: u32) -> String {
     format!("internaldns{gz_address_index}")
+}
+
+/// Build an `ExternalIpConfig` from a zone's set of floating external IPs,
+/// partitioning them by IP family.
+fn external_ip_config_from_floating_ips(
+    ips: impl Iterator<Item = IpAddr>,
+) -> ExternalIpConfig {
+    let mut v4 = BTreeSet::new();
+    let mut v6 = BTreeSet::new();
+    for ip in ips {
+        match ip {
+            IpAddr::V4(ip) => {
+                v4.insert(ip);
+            }
+            IpAddr::V6(ip) => {
+                v6.insert(ip);
+            }
+        }
+    }
+    ExternalIpConfig {
+        v4: (!v4.is_empty())
+            .then(|| ExternalIps { floating_ips: v4, ..Default::default() }),
+        v6: (!v6.is_empty())
+            .then(|| ExternalIps { floating_ips: v6, ..Default::default() }),
+    }
+}
+
+/// Build an `ExternalIpConfig` from a boundary NTP source-NAT configuration.
+fn external_ip_config_from_snat(snat: &ZoneSnatConfig) -> ExternalIpConfig {
+    let (v4, v6) = match snat {
+        ZoneSnatConfig::Ipv4Only(c) => (Some(*c), None),
+        ZoneSnatConfig::Ipv6Only(c) => (None, Some(*c)),
+        ZoneSnatConfig::DualStack { ipv4, ipv6 } => (Some(*ipv4), Some(*ipv6)),
+    };
+    ExternalIpConfig {
+        v4: v4.map(|snat| ExternalIps {
+            source_nat: Some(snat),
+            ..Default::default()
+        }),
+        v6: v6.map(|snat| ExternalIps {
+            source_nat: Some(snat),
+            ..Default::default()
+        }),
+    }
 }
 
 #[cfg(test)]

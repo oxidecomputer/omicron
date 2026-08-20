@@ -164,9 +164,6 @@ pub mod inventory {
 
     pub use crate::v10::inventory::NetworkInterface;
 
-    pub use crate::v11::inventory::OmicronZoneConfig;
-    pub use crate::v11::inventory::OmicronZoneType;
-    pub use crate::v11::inventory::OmicronZonesConfig;
     pub use crate::v11::inventory::SourceNatConfig;
     pub use crate::v11::inventory::SourceNatConfigGeneric;
     pub use crate::v11::inventory::SourceNatConfigV4;
@@ -174,13 +171,10 @@ pub mod inventory {
 
     pub use crate::v12::inventory::HealthMonitorInventory;
 
-    pub use crate::v14::inventory::ConfigReconcilerInventoryStatus;
     pub use crate::v14::inventory::OmicronFileSourceResolverInventory;
     pub use crate::v14::inventory::OmicronSingleMeasurement;
-    pub use crate::v14::inventory::OmicronSledConfig;
     pub use crate::v14::inventory::ReconciledSingleMeasurement;
 
-    pub use crate::v16::inventory::ConfigReconcilerInventory;
     pub use crate::v16::inventory::SingleMeasurementInventory;
 
     pub use crate::v24::inventory::InventoryZpool;
@@ -196,13 +190,23 @@ pub mod inventory {
     pub use crate::v40::inventory::FmdInventoryErrorKind;
     pub use crate::v40::inventory::FmdResource;
 
-    pub use crate::v46::inventory::Inventory;
     pub use crate::v46::inventory::Svc;
     pub use crate::v46::inventory::SvcEnabledNotOnline;
     pub use crate::v46::inventory::SvcEnabledNotOnlineState;
     pub use crate::v46::inventory::SvcState;
     pub use crate::v46::inventory::SvcsEnabledNotOnline;
     pub use crate::v46::inventory::SvcsEnabledNotOnlineResult;
+
+    pub use crate::v48::inventory::ConfigReconcilerInventory;
+    pub use crate::v48::inventory::ConfigReconcilerInventoryStatus;
+    pub use crate::v48::inventory::ExternalDnsAddrs;
+    pub use crate::v48::inventory::Inventory;
+    pub use crate::v48::inventory::NexusExternalIps;
+    pub use crate::v48::inventory::OmicronSledConfig;
+    pub use crate::v48::inventory::OmicronZoneConfig;
+    pub use crate::v48::inventory::OmicronZoneType;
+    pub use crate::v48::inventory::OmicronZonesConfig;
+    pub use crate::v48::inventory::ZoneSnatConfig;
 
     pub use crate::impls::inventory::FmdHostCaseDisplay;
     pub use crate::impls::inventory::FmdInventoryDisplay;
