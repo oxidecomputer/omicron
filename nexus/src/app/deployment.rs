@@ -1882,6 +1882,7 @@ mod tests {
         println!("found error: {error:#}");
         assert!(format!("{error:#}").contains("intended_target_blueprint"));
         assert!(test_dropbox.new_reader().load_new::<()>().is_empty());
+        test_dropbox.cleanup_successful();
 
         // Case: it's an error to provide an initial state referencing a
         // blueprint that isn't in `blueprints`.
