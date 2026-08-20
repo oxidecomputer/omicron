@@ -31,7 +31,7 @@ use nexus_db_errors::OptionalError;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_model::{
     AddressLot, AddressLotBlock, BfdSession, BgpAnnouncement, BgpConfig,
-    DbSwitchInterfaceKind, DbSwitchSlot, INFRA_LOT,
+    DbSwitchInterfaceKind, DbSwitchSlot, DbTypedUuid, INFRA_LOT,
     RouterPeerTypeDbRepresentation, SqlU16, SwitchPortBgpPeerConfigAllowExport,
     SwitchPortBgpPeerConfigAllowImport, SwitchPortBgpPeerConfigCommunity,
     to_db_typed_uuid,
@@ -45,8 +45,11 @@ use omicron_common::api::external::{
 };
 use omicron_uuid_kinds::BgpAnnounceSetUuid;
 use omicron_uuid_kinds::BgpConfigUuid;
+
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::RackUuid;
+use omicron_uuid_kinds::SwitchPortSettingsKind;
+use omicron_uuid_kinds::SwitchPortSettingsUuid;
 use ref_cast::RefCast;
 use serde::{Deserialize, Serialize};
 use sled_agent_types::early_networking::ImportExportPolicy;
@@ -69,7 +72,7 @@ use uuid::Uuid;
 ///   [`networking::BgpPeer`].
 #[derive(Clone, Debug)]
 pub struct BgpPeerFromDb {
-    port_settings_id: Uuid,
+    port_settings_id: SwitchPortSettingsUuid,
     bgp_config_id: BgpConfigUuid,
     interface_name: external::Name,
     inner: networking::BgpPeer,
@@ -82,7 +85,7 @@ impl From<BgpPeerFromDb> for networking::BgpPeer {
 }
 
 impl BgpPeerFromDb {
-    pub fn port_settings_id(&self) -> Uuid {
+    pub fn port_settings_id(&self) -> SwitchPortSettingsUuid {
         self.port_settings_id
     }
 
@@ -127,7 +130,7 @@ impl BgpPeerFromDbBuilder<'_> {
         })?;
 
         Ok(BgpPeerFromDb {
-            port_settings_id: p.port_settings_id,
+            port_settings_id: p.port_settings_id.into(),
             bgp_config_id: p.bgp_config_id(),
             interface_name: p.interface_name.clone().into(),
             inner: networking::BgpPeer {
@@ -235,7 +238,7 @@ impl TryFrom<SwitchPortSettingsCombinedResult>
             };
 
             interfaces.push(networking::SwitchInterfaceConfig {
-                port_settings_id: iface.port_settings_id,
+                port_settings_id: iface.port_settings_id.into_untyped_uuid(),
                 id: iface.id,
                 interface_name: iface.interface_name.into(),
                 v6_enabled: iface.v6_enabled,
@@ -267,7 +270,7 @@ impl TryFrom<SwitchPortSettingsCombinedResult>
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct LinkConfigCombinedResult {
-    pub port_settings_id: Uuid,
+    pub port_settings_id: SwitchPortSettingsUuid,
     pub link_name: Name,
     pub mtu: SqlU16,
     pub fec: Option<SwitchLinkFec>,
@@ -280,7 +283,7 @@ pub struct LinkConfigCombinedResult {
 impl From<LinkConfigCombinedResult> for networking::SwitchPortLinkConfig {
     fn from(value: LinkConfigCombinedResult) -> Self {
         Self {
-            port_settings_id: value.port_settings_id,
+            port_settings_id: value.port_settings_id.into_untyped_uuid(),
             link_name: value.link_name.into(),
             mtu: *value.mtu,
             fec: value.fec.map(Into::into),
@@ -326,7 +329,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         name: Name,
-    ) -> LookupResult<Uuid> {
+    ) -> LookupResult<SwitchPortSettingsUuid> {
         use nexus_db_schema::schema::switch_port_settings::{
             self, dsl as port_settings_dsl,
         };
@@ -338,22 +341,26 @@ impl DataStore {
             .filter(switch_port_settings::name.eq(name))
             .select(switch_port_settings::id)
             .limit(1)
-            .first_async::<Uuid>(&*pool)
+            .first_async::<DbTypedUuid<SwitchPortSettingsKind>>(&*pool)
             .await
+            .map(Into::into)
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     pub async fn switch_ports_using_settings(
         &self,
         opctx: &OpContext,
-        switch_port_settings_id: Uuid,
+        switch_port_settings_id: SwitchPortSettingsUuid,
     ) -> LookupResult<Vec<(Uuid, Name)>> {
         use nexus_db_schema::schema::switch_port::{self, dsl};
 
         let pool = self.pool_connection_authorized(opctx).await?;
 
         dsl::switch_port
-            .filter(switch_port::port_settings_id.eq(switch_port_settings_id))
+            .filter(
+                switch_port::port_settings_id
+                    .eq(to_db_typed_uuid(switch_port_settings_id)),
+            )
             .select((switch_port::id, switch_port::port_name))
             .load_async(&*pool)
             .await
@@ -370,7 +377,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         params: &networking::SwitchPortSettingsCreate,
-        id: Option<Uuid>,
+        id: Option<SwitchPortSettingsUuid>,
         allow_ddm_traffic: bool,
     ) -> CreateResult<SwitchPortSettingsCombinedResult> {
         let err = OptionalError::new();
@@ -459,7 +466,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         params: &networking::SwitchPortSettingsCreate,
-        id: Uuid,
+        id: SwitchPortSettingsUuid,
     ) -> UpdateResult<SwitchPortSettingsCombinedResult> {
         let delete_err = OptionalError::new();
         let create_err = OptionalError::new();
@@ -471,7 +478,7 @@ impl DataStore {
             .transaction(&conn, |conn| {
                 let delete_err = delete_err.clone();
                 let create_err = create_err.clone();
-                let selector = NameOrId::Id(id);
+                let selector = NameOrId::Id(id.into_untyped_uuid());
                 async move {
                     use nexus_db_schema::schema::switch_port_settings_port_config::dsl as port_config_dsl;
 
@@ -491,7 +498,7 @@ impl DataStore {
                     // RSS configured.
                     let allow_ddm_traffic: bool =
                         port_config_dsl::switch_port_settings_port_config
-                            .filter(port_config_dsl::port_settings_id.eq(id))
+                            .filter(port_config_dsl::port_settings_id.eq(to_db_typed_uuid(id)))
                             .select(port_config_dsl::allow_ddm_traffic)
                             .get_result_async(&conn)
                             .await?;
@@ -625,14 +632,14 @@ impl DataStore {
                     // settings on the same connection.
                     let mut applied_ports = Vec::new();
                     for port in ports {
-                        let Some(port_settings_id) = port.port_settings_id
+                        let Some(port_settings_id) = port.port_settings_id()
                         else {
                             continue;
                         };
                         let settings = switch_port_settings_get_on_conn(
                             &conn,
                             err.clone(),
-                            &NameOrId::Id(port_settings_id),
+                            &NameOrId::Id(port_settings_id.into_untyped_uuid()),
                         )
                         .await?;
                         applied_ports.push((port, settings));
@@ -937,8 +944,8 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         switch_port_id: Uuid,
-        port_settings_id: Option<Uuid>,
-        current: UpdatePrecondition<Uuid>,
+        port_settings_id: Option<SwitchPortSettingsUuid>,
+        current: UpdatePrecondition<SwitchPortSettingsUuid>,
     ) -> UpdateResult<()> {
         use nexus_db_schema::schema::bgp_config::dsl as bgp_config_dsl;
         use nexus_db_schema::schema::switch_port;
@@ -989,7 +996,7 @@ impl DataStore {
                             )
                             .filter(
                                 bgp_peer_dsl::port_settings_id
-                                    .eq(psid),
+                                    .eq(to_db_typed_uuid(psid)),
                             )
                             .select(BgpConfig::as_select())
                             .limit(1)
@@ -1045,6 +1052,7 @@ impl DataStore {
                     }
 
                     // perform the requested update
+                    let port_settings_id = port_settings_id.map(to_db_typed_uuid);
                     match current {
                         UpdatePrecondition::DontCare => {
                             diesel::update(switch_port_dsl::switch_port)
@@ -1072,7 +1080,7 @@ impl DataStore {
                                 .filter(switch_port::id.eq(switch_port_id))
                                 .filter(
                                     switch_port::port_settings_id
-                                        .eq(current_id),
+                                        .eq(to_db_typed_uuid(current_id)),
                                 )
                                 .set(
                                     switch_port::port_settings_id
@@ -1130,7 +1138,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         name: Name,
-    ) -> LookupResult<Uuid> {
+    ) -> LookupResult<SwitchPortSettingsUuid> {
         use nexus_db_schema::schema::switch_port_settings;
         use nexus_db_schema::schema::switch_port_settings::dsl as port_settings_dsl;
 
@@ -1142,7 +1150,7 @@ impl DataStore {
             .filter(switch_port_settings::name.eq(db_name))
             .select(switch_port_settings::id)
             .limit(1)
-            .first_async::<Uuid>(&*conn)
+            .first_async::<DbTypedUuid<SwitchPortSettingsKind>>(&*conn)
             .await
             .map_err(|_| {
                 Error::not_found_by_name(
@@ -1151,7 +1159,7 @@ impl DataStore {
                 )
             })?;
 
-        Ok(id)
+        Ok(id.into())
     }
 
     pub async fn switch_ports_with_uplinks(
@@ -1445,7 +1453,7 @@ async fn switch_port_settings_get_on_conn(
             .cloned();
 
             LinkConfigCombinedResult {
-                port_settings_id: config.port_settings_id,
+                port_settings_id: config.port_settings_id.into(),
                 link_name: config.link_name,
                 mtu: config.mtu,
                 fec: config.fec,
@@ -1601,7 +1609,7 @@ async fn switch_port_settings_get_on_conn(
 
 async fn do_switch_port_settings_create(
     conn: &Connection<DTraceConnection<PgConnection>>,
-    id: Option<Uuid>,
+    id: Option<SwitchPortSettingsUuid>,
     params: &networking::SwitchPortSettingsCreate,
     allow_ddm_traffic: bool,
     err: OptionalError<SwitchPortSettingsCreateError>,
@@ -1634,7 +1642,7 @@ async fn do_switch_port_settings_create(
             .get_result_async(conn)
             .await?;
 
-    let psid = db_port_settings.identity.id;
+    let psid = db_port_settings.id();
 
     // add the port config
     let port_config = SwitchPortConfig::new(
@@ -1743,7 +1751,7 @@ async fn do_switch_port_settings_create(
             .cloned();
 
             LinkConfigCombinedResult {
-                port_settings_id: config.port_settings_id,
+                port_settings_id: config.port_settings_id.into(),
                 link_name: config.link_name,
                 mtu: config.mtu,
                 fec: config.fec,
@@ -1852,12 +1860,11 @@ async fn do_switch_port_settings_create(
             };
 
             if let ImportExportPolicy::Allow(list) = &p.allowed_import {
-                let id = port_settings.identity.id;
                 let to_insert: Vec<SwitchPortBgpPeerConfigAllowImport> = list
                     .iter()
                     .map(|&x| {
                         SwitchPortBgpPeerConfigAllowImport::new(
-                            id,
+                            psid,
                             peer_config.link_name.clone().into(),
                             p.addr,
                             x,
@@ -1872,12 +1879,11 @@ async fn do_switch_port_settings_create(
             }
 
             if let ImportExportPolicy::Allow(list) = &p.allowed_export {
-                let id = port_settings.identity.id;
                 let to_insert: Vec<SwitchPortBgpPeerConfigAllowExport> = list
                     .iter()
                     .map(|&x| {
                         SwitchPortBgpPeerConfigAllowExport::new(
-                            id,
+                            psid,
                             peer_config.link_name.clone().into(),
                             p.addr,
                             x,
@@ -1892,13 +1898,12 @@ async fn do_switch_port_settings_create(
             }
 
             if !p.communities.is_empty() {
-                let id = port_settings.identity.id;
                 let to_insert: Vec<SwitchPortBgpPeerConfigCommunity> = p
                     .communities
                     .iter()
                     .map(|&x| {
                         SwitchPortBgpPeerConfigCommunity::new(
-                            id,
+                            psid,
                             peer_config.link_name.clone().into(),
                             p.addr,
                             x,
@@ -2116,7 +2121,7 @@ async fn switch_port_address_view(
             .await?;
 
         result.push(networking::SwitchPortAddressView {
-            port_settings_id: address.port_settings_id,
+            port_settings_id: address.port_settings_id.into_untyped_uuid(),
             address_lot_id: lot.id(),
             address_lot_name: lot.name().clone(),
             address_lot_block_id: address.address_lot_block_id,
@@ -2518,7 +2523,7 @@ mod test {
             .switch_port_set_settings_id(
                 &opctx,
                 port_result.id,
-                Some(settings_result.settings.identity.id),
+                Some(settings_result.settings.id()),
                 UpdatePrecondition::DontCare,
             )
             .await
@@ -2530,11 +2535,14 @@ mod test {
         assert_eq!(uplink_ports.len(), 1);
 
         let db_settings_id = uplink_ports[0]
-            .port_settings_id
+            .port_settings_id()
             .expect("should have a port settings id");
 
         let db_settings = datastore
-            .switch_port_settings_get(&opctx, &NameOrId::Id(db_settings_id))
+            .switch_port_settings_get(
+                &opctx,
+                &NameOrId::Id(db_settings_id.into_untyped_uuid()),
+            )
             .await
             .unwrap();
 
@@ -2894,7 +2902,7 @@ mod test {
             .switch_port_set_settings_id(
                 &opctx,
                 port_result.id,
-                Some(settings_result.settings.identity.id),
+                Some(settings_result.settings.id()),
                 UpdatePrecondition::DontCare,
             )
             .await
