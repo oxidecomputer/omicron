@@ -460,6 +460,7 @@ pub fn build_rack_network_config(
                     management_addrs: c.management_ip.map(|ip| vec![ip]),
                 }),
             tx_eq,
+            allow_ddm_traffic: false,
         };
 
         ports.push(port_config);
