@@ -59,6 +59,7 @@ fn port_config(
         autoneg,
         lldp: None,
         tx_eq: None,
+        allow_ddm_traffic: false,
     }
 }
 
@@ -679,6 +680,7 @@ impl TestInput {
                 autoneg: false,
                 lldp: None,
                 tx_eq: None,
+                allow_ddm_traffic: false,
             }])
         } else {
             rack_config(switch0.chain(switch1).collect())
@@ -839,6 +841,7 @@ fn diffable_to_port_config(
         routes: Vec::new(),
         bgp_peers: Vec::new(),
         lldp: None,
+        allow_ddm_traffic: false,
     }
 }
 
