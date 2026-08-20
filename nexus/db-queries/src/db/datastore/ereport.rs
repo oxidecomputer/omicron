@@ -120,11 +120,11 @@ impl DataStore {
         .filter(dsl::time_deleted.is_null())
         .select(Ereport::as_select());
 
-        if let Some(start) = time_range.and_then(|r| r.start) {
+        if let Some(start) = time_range.and_then(|r| r.start()) {
             query = query.filter(dsl::time_collected.ge(start));
         }
 
-        if let Some(end) = time_range.and_then(|r| r.end) {
+        if let Some(end) = time_range.and_then(|r| r.end()) {
             query = query.filter(dsl::time_collected.le(end));
         }
 
@@ -789,10 +789,9 @@ mod tests {
         explain_fetch_matching_query(
             "explain_ereport_fetch_matching_only_time",
             EreportFilters::new(),
-            Some(BundleTimeRange {
-                start: None,
-                end: Some(chrono::Utc::now()),
-            }),
+            Some(
+                BundleTimeRange::new(None, Some(chrono::Utc::now())).unwrap(),
+            ),
         )
         .await
     }
@@ -802,10 +801,9 @@ mod tests {
         explain_fetch_matching_query(
             "explain_ereport_fetch_matching_time_and_serials",
             EreportFilters::new().with_serials(["BRM6900420", "BRM5555555"]),
-            Some(BundleTimeRange {
-                start: None,
-                end: Some(chrono::Utc::now()),
-            }),
+            Some(
+                BundleTimeRange::new(None, Some(chrono::Utc::now())).unwrap(),
+            ),
         )
         .await
     }
@@ -1199,10 +1197,13 @@ mod tests {
             .ereport_fetch_matching(
                 opctx,
                 &EreportFilters::new(),
-                Some(&BundleTimeRange {
-                    start: Some(time_collected - Duration::from_secs(600)),
-                    end: None,
-                }),
+                Some(
+                    &BundleTimeRange::new(
+                        Some(time_collected - Duration::from_secs(600)),
+                        None,
+                    )
+                    .unwrap(),
+                ),
                 &pagparams,
             )
             .await

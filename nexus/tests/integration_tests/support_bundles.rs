@@ -715,10 +715,8 @@ async fn test_support_bundle_zone_log_time_range(
         &cptestctx,
         client,
         &opctx,
-        BundleTimeRange {
-            start: Some(now - chrono::Duration::hours(24)),
-            end: None,
-        },
+        BundleTimeRange::new(Some(now - chrono::Duration::hours(24)), None)
+            .unwrap(),
     )
     .await;
     assert_eq!(logs.len(), 2, "expected 2 in-window logs, got: {logs:?}");
@@ -731,24 +729,29 @@ async fn test_support_bundle_zone_log_time_range(
         &cptestctx,
         client,
         &opctx,
-        BundleTimeRange {
-            start: Some(now - chrono::Duration::days(60)),
-            end: Some(now - chrono::Duration::days(1)),
-        },
+        BundleTimeRange::new(
+            Some(now - chrono::Duration::days(60)),
+            Some(now - chrono::Duration::days(1)),
+        )
+        .unwrap(),
     )
     .await;
     assert_eq!(logs.len(), 1, "expected 1 in-window log, got: {logs:?}");
     assert!(logs.iter().any(|l| l.ends_with("fake-svc.log.30-days-old")));
 
-    // An unbounded window includes everything.
+    // A window with no bounds does not collect unbounded history: the
+    // collector fills in the default lookback as the start bound, so the
+    // 30-day log stays excluded.
     let logs = collect_zone_logs_with_range(
         &cptestctx,
         client,
         &opctx,
-        BundleTimeRange { start: None, end: None },
+        BundleTimeRange::new(None, None).unwrap(),
     )
     .await;
-    assert_eq!(logs.len(), 3, "expected all 3 logs, got: {logs:?}");
+    assert_eq!(logs.len(), 2, "expected 2 in-lookback logs, got: {logs:?}");
+    assert!(logs.iter().any(|l| l.ends_with("fake-svc.log.30-minutes-old")));
+    assert!(logs.iter().any(|l| l.ends_with("fake-svc.log.6-hours-old")));
 }
 
 // Test range requests on a bundle

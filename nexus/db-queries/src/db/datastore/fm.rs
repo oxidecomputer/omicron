@@ -2833,10 +2833,13 @@ mod tests {
                     .with_ereports(
                         EreportFilters::new().with_serials(["FAKE-SERIAL-01"]),
                     )
-                    .with_time_range(BundleTimeRange {
-                        start: Some(now - chrono::Duration::hours(1)),
-                        end: Some(now),
-                    });
+                    .with_time_range(
+                        BundleTimeRange::new(
+                            Some(now - chrono::Duration::hours(1)),
+                            Some(now),
+                        )
+                        .unwrap(),
+                    );
                 support_bundles_requested
                     .insert_unique(fm::case::SupportBundleRequest {
                         id: SupportBundleUuid::new_v4(),
@@ -3202,10 +3205,13 @@ mod tests {
                         .with_serials(["BRM42"])
                         .with_classes(["ereport.io"]),
                 )
-                .with_time_range(BundleTimeRange {
-                    start: Some(now - chrono::Duration::hours(2)),
-                    end: Some(now),
-                });
+                .with_time_range(
+                    BundleTimeRange::new(
+                        Some(now - chrono::Duration::hours(2)),
+                        Some(now),
+                    )
+                    .unwrap(),
+                );
             support_bundles_requested
                 .insert_unique(fm::case::SupportBundleRequest {
                     id: SupportBundleUuid::new_v4(),

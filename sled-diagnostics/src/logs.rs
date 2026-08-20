@@ -770,7 +770,17 @@ impl LogTimeWindow {
 }
 
 fn chrono_to_jiff(ts: DateTime<Utc>) -> jiff::Timestamp {
-    jiff::Timestamp::from_second(ts.timestamp()).unwrap_or(jiff::Timestamp::MIN)
+    jiff::Timestamp::try_from(std::time::SystemTime::from(ts)).unwrap_or_else(
+        |_| {
+            // Conversion fails only outside jiff's [-9999, 9999] year range;
+            // saturate toward the end we fell off of.
+            if ts.timestamp() < 0 {
+                jiff::Timestamp::MIN
+            } else {
+                jiff::Timestamp::MAX
+            }
+        },
+    )
 }
 
 fn write_log_to_zip<W: Write + Seek>(
@@ -1025,6 +1035,37 @@ mod test {
             .unwrap();
         assert!(file_at(0).in_date_range(&until));
         assert!(!file_at(201).in_date_range(&until));
+
+        // Sub-second precision survives the chrono-to-jiff conversion: an
+        // end bound of 200.5s includes a file modified at 200.4s and
+        // excludes one modified at 200.6s.
+        let subsec_end = DateTime::<Utc>::from_timestamp(200, 500_000_000)
+            .unwrap();
+        let file_at_nanos = |secs, nanos| oxlog::LogFile {
+            path: "/t.log".into(),
+            size: None,
+            modified: Some(jiff::Timestamp::new(secs, nanos).unwrap()),
+        };
+        let subsec = LogTimeWindow { start: None, end: Some(subsec_end) }
+            .to_date_range()
+            .unwrap();
+        assert!(file_at_nanos(200, 400_000_000).in_date_range(&subsec));
+        assert!(!file_at_nanos(200, 600_000_000).in_date_range(&subsec));
+
+        // Bounds outside jiff's representable range saturate toward the end
+        // they fell off of, rather than collapsing the window. chrono
+        // timestamps extend hundreds of thousands of years past jiff's
+        // year-9999 ceiling and year -9999 floor.
+        let far_future = DateTime::<Utc>::from_timestamp(300_000_000_000, 0)
+            .unwrap();
+        let far_past = DateTime::<Utc>::from_timestamp(-300_000_000_000, 0)
+            .unwrap();
+        let saturated =
+            LogTimeWindow { start: Some(far_past), end: Some(far_future) }
+                .to_date_range()
+                .unwrap();
+        assert!(file_at(0).in_date_range(&saturated));
+        assert!(file_at(1_000_000_000).in_date_range(&saturated));
     }
 
     #[test]

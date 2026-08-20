@@ -262,8 +262,8 @@ impl TimeRange {
     ) -> Self {
         TimeRange {
             bundle_id: bundle_id.into(),
-            start_time: range.start,
-            end_time: range.end,
+            start_time: range.start(),
+            end_time: range.end(),
         }
     }
 }
@@ -271,7 +271,8 @@ impl TimeRange {
 impl From<TimeRange> for BundleTimeRange {
     fn from(row: TimeRange) -> Self {
         let TimeRange { bundle_id: _, start_time, end_time } = row;
-        BundleTimeRange { start: start_time, end: end_time }
+        BundleTimeRange::new(start_time, end_time)
+            .expect("database CHECK constraint enforces start <= end")
     }
 }
 

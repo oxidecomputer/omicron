@@ -343,12 +343,12 @@ async fn save_zone_log_zip_or_error(
     time_range: Option<&BundleTimeRange>,
     cancellation_token: &CancellationToken,
 ) -> anyhow::Result<()> {
-    // Destructure with field names so the positional Progenitor call below
-    // can't accidentally swap start and end: query parameters are supplied
-    // in alphabetical order, which is why "end time" comes before
+    // Bind with names so the positional Progenitor call below can't
+    // accidentally swap start and end: query parameters are supplied in
+    // alphabetical order, which is why "end time" comes before
     // "start time".
-    let BundleTimeRange { start, end } =
-        time_range.cloned().unwrap_or_default();
+    let range = time_range.cloned().unwrap_or_default();
+    let (start, end) = (range.start(), range.end());
 
     let download_result = tokio::select! {
         _ = cancellation_token.cancelled() => return Ok(()),

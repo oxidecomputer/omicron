@@ -7,8 +7,11 @@
 //!
 //! Tests inject [`super::sled_agent::SimLogEntry`] entries via
 //! `SledAgent::insert_support_log`. This module renders the entries for a
-//! given zone into an in-memory zip, applying the same
-//! `start_time`/`end_time`/`max_rotated` filters as the real handler.
+//! given zone into an in-memory zip. It approximates the real handler
+//! rather than matching it: the time window tests each entry's mtime
+//! only, `max_rotated` caps all entries globally (newest-first) instead
+//! of capping rotated logs per service, and zip paths are flat rather
+//! than nested by service and log type.
 
 use super::sled_agent::SledAgent;
 use dropshot::HttpError;
@@ -16,9 +19,8 @@ use sled_diagnostics::LogTimeWindow;
 use std::io::Write;
 
 /// Build a zip of synthetic log entries for `zone` and return it as an
-/// `application/zip` HTTP response. Entries with mtime outside the requested
-/// `window` are excluded; if `max_rotated` is `Some(n)`, no more than `n`
-/// entries are returned (after time filtering, sorted newest-first).
+/// `application/zip` HTTP response. See the module docs for how the
+/// filtering approximates the real handler's.
 pub(super) fn serve_zip(
     sa: &SledAgent,
     zone: &str,

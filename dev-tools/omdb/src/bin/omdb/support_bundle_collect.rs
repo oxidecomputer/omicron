@@ -80,7 +80,8 @@ struct CollectArgs {
     include: Vec<BundleDataCategory>,
 
     /// Only collect time-bounded data (zone logs, ereports) newer than
-    /// this age, e.g. "2days" or "12h 30m". Defaults to 7 days.
+    /// this age, e.g. "2days" or "12h 30m". Defaults to a 7-day window
+    /// ending at --until (or now).
     #[clap(long, value_parser = humantime::parse_duration)]
     since: Option<std::time::Duration>,
 
@@ -113,20 +114,31 @@ impl CollectArgs {
 
         // Both flags are ages relative to now: --since is the oldest data
         // to include (the window's start), --until the newest (its end).
+        // Without --since, the collector fills in its default lookback,
+        // anchored to the end bound when one is given.
         let now = omicron_common::now_db_precision();
-        let start = match self.since {
-            Some(age) => now - age,
-            None => now - chrono::Days::new(7),
+        let age_to_timestamp = |flag: &str, age: std::time::Duration| {
+            chrono::Duration::from_std(age)
+                .ok()
+                .and_then(|age| now.checked_sub_signed(age))
+                .with_context(|| format!("--{flag} ({age:?}) is too large"))
         };
-        let end = self.until.map(|age| now - age);
-        if let Some(end) = end {
+        let start = self
+            .since
+            .map(|age| age_to_timestamp("since", age))
+            .transpose()?;
+        let end = self
+            .until
+            .map(|age| age_to_timestamp("until", age))
+            .transpose()?;
+        if let (Some(start), Some(end)) = (start, end) {
             anyhow::ensure!(
                 start <= end,
                 "--since ({start}) must be an older point in time than \
                  --until ({end})",
             );
         }
-        Ok(sel.with_time_range(BundleTimeRange { start: Some(start), end }))
+        Ok(sel.with_time_range(BundleTimeRange::new(start, end)?))
     }
 }
 
