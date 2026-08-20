@@ -176,21 +176,6 @@ impl WicketdApi for WicketdApiImpl {
         Ok(HttpResponseOk(GetBgpAuthKeyInfoResponse { data }))
     }
 
-    async fn delete_rss_config(
-        rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        let ctx = rqctx.context();
-
-        let mut config = ctx.rss_or_multirack_join_config.lock().unwrap();
-        let rss_config = config.rss_config_mut_or_conflict(
-            "cannot delete RSS config when not preparing for RSS",
-        )?;
-
-        *rss_config = Default::default();
-
-        Ok(HttpResponseUpdatedNoContent())
-    }
-
     async fn get_rack_setup_state(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<RackOperationStatus>, HttpError> {
