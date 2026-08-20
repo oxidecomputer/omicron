@@ -84,7 +84,7 @@
 //!   - Unlike linear probing (`h + i`), scattered outputs avoid clustering
 //! - **8-bit salt**: 256 unique underlay addresses per external IP
 //! - **Resolution**: Exhaustion requires 256 other groups to occupy exactly
-//!   those 256 scattered addresses—effectively impossible in 2^64 space
+//!   those 256 scattered addresses, effectively impossible in 2^64 space
 //!
 //! ### Forwarding Architecture (Incoming multicast traffic to guests)
 //!
@@ -105,6 +105,8 @@
 //! - **Group lifecycle**: "Creating" → "Active" → "Deleting" → hard-deleted
 //! - **Member lifecycle**: "Joining" → "Joined" → "Left" → soft-deleted → hard-deleted
 //! - **Dataplane updates**: DPD API calls for P4 table updates
+//! - **Sled propagation**: M2P mappings and forwarding entries pushed to sled-agents
+//! - **OPTE subscriptions**: Per-VMM multicast group subscriptions on target sleds
 //! - **Topology mapping**: Sled-to-switch-port resolution (with caching)
 //!
 //! ## Deletion Semantics: Groups vs Members
@@ -151,6 +153,7 @@ use sled_hardware_types::BaseboardId;
 
 use crate::app::background::BackgroundTask;
 use crate::app::multicast::dataplane::MulticastDataplaneClient;
+use crate::app::multicast::sled::MulticastSledClient;
 use crate::app::saga::StartSaga;
 
 pub(crate) mod groups;
@@ -362,7 +365,7 @@ impl MulticastGroupReconciler {
 /// │  6   │ 0xa ⊕ 6 │  0xc   │
 /// │  7   │ 0xa ⊕ 7 │  0xd   │
 /// └──────┴─────────┴────────┘
-/// Outputs: [a, b, 8, 9, e, f, c, d] — scattered, not sequential
+/// Outputs: [a, b, 8, 9, e, f, c, d] (scattered, not sequential)
 /// ```
 ///
 /// On collision (i.e., underlay IP already in use), we increment salt and retry.
@@ -533,6 +536,13 @@ impl MulticastGroupReconciler {
             }
         };
 
+        // Create sled-agent client for OPTE subscriptions and
+        // M2P/forwarding propagation.
+        let sled_client = MulticastSledClient::new(
+            self.datastore.clone(),
+            self.resolver.clone(),
+        );
+
         // Process creating groups
         match self.reconcile_creating_groups(opctx).await {
             Ok(count) => status.groups_created += count,
@@ -543,7 +553,10 @@ impl MulticastGroupReconciler {
         }
 
         // Process member state changes
-        match self.reconcile_member_states(opctx, &dataplane_client).await {
+        match self
+            .reconcile_member_states(opctx, &dataplane_client, &sled_client)
+            .await
+        {
             Ok(count) => status.members_processed += count,
             Err(e) => {
                 let msg = format!("failed to reconcile member states: {e:#}");
@@ -574,7 +587,10 @@ impl MulticastGroupReconciler {
         }
 
         // Reconcile active groups (verify state, update dataplane as needed)
-        match self.reconcile_active_groups(opctx, &dataplane_client).await {
+        match self
+            .reconcile_active_groups(opctx, &dataplane_client, &sled_client)
+            .await
+        {
             Ok(count) => status.groups_verified += count,
             Err(e) => {
                 let msg = format!("failed to reconcile active groups: {e:#}");
@@ -583,7 +599,10 @@ impl MulticastGroupReconciler {
         }
 
         // Process deleting groups (DPD cleanup + hard-delete from DB)
-        match self.reconcile_deleting_groups(opctx, &dataplane_client).await {
+        match self
+            .reconcile_deleting_groups(opctx, &dataplane_client, &sled_client)
+            .await
+        {
             Ok(count) => status.groups_deleted += count,
             Err(e) => {
                 let msg = format!("failed to reconcile deleting groups: {e:#}");

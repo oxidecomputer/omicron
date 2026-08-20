@@ -99,6 +99,8 @@ pub mod v44;
 pub mod v46;
 #[path = "bgp_peer_src_addr/mod.rs"]
 pub mod v47;
+#[path = "mcast_m2p_forwarding/mod.rs"]
+pub mod v48;
 #[path = "add_probe_put_endpoint/mod.rs"]
 pub mod v6;
 #[path = "multicast_support/mod.rs"]

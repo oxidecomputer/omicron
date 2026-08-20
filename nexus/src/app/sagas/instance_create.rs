@@ -1112,6 +1112,14 @@ async fn sic_join_instance_multicast_group(
         return Ok(None);
     }
 
+    // Per-member source list shape is checked at instance-create parameter
+    // validation. Repeating it here covers saga replay and any caller that
+    // builds params without going through that path.
+    crate::app::multicast::validate_member_source_ips(
+        join_spec.source_ips.as_deref(),
+    )
+    .map_err(saga_action_failed)?;
+
     // Resolve the multicast group identifier to a group ID.
     // a) For IP-based identifiers, this implicitly auto-creates the group if it
     //    doesn't exist.
@@ -1203,10 +1211,15 @@ async fn sic_join_instance_multicast_group_undo(
     // action found rather than established.
     //
     // A row another actor already removed leaves nothing to undo here, and the
-    // group cleanup below still runs.
+    // group cleanup below still runs. The sled-preserving variant keeps any
+    // `sled_id` a concurrent reconciler pass may have assigned, so a pending
+    // OPTE unsubscribe retains its durable handle.
     if output.owned {
         datastore
-            .multicast_group_member_delete_by_id(&opctx, output.member_id)
+            .multicast_group_member_delete_by_id_preserving_sled_id(
+                &opctx,
+                output.member_id,
+            )
             .await?;
     }
 
