@@ -37,6 +37,7 @@ use nexus_lockstep_client::types::SledSelector;
 use nexus_test_utils::background::run_blueprint_planner;
 use nexus_types::deployment::ReconfiguratorConfig;
 use nexus_types::deployment::ReconfiguratorConfigParam;
+use nexus_types::deployment::ReconfiguratorStateInput;
 use nexus_types::deployment::UnstableReconfiguratorState;
 use omicron_nexus::app::DEBUG_DROPBOX_PRODUCER_RECONFIGURATOR;
 use omicron_test_utils::dev::dropbox::DropboxReader;
@@ -1077,6 +1078,7 @@ async fn test_debug_files(cptestctx: &ControlPlaneTestContext) {
         &dropbox_path,
         DEBUG_DROPBOX_PRODUCER_RECONFIGURATOR,
     );
+    let mut cli_inputs = Vec::new();
 
     // Verify initial state of the dropbox.
     let initial = dropbox.load_new::<UnstableReconfiguratorState>();
@@ -1100,6 +1102,7 @@ async fn test_debug_files(cptestctx: &ControlPlaneTestContext) {
     let files = dropbox.load_new::<UnstableReconfiguratorState>();
     assert_eq!(files.len(), 1);
     let file = files.into_iter().next().expect("non-empty Vec");
+    cli_inputs.push(("file1", &file));
     assert!(file.blueprints.contains_key(&bp2_id));
     assert!(file.blueprints.contains_key(&bp1_id));
     assert_eq!(file.target_blueprint.target_id, bp1_id);
@@ -1115,6 +1118,7 @@ async fn test_debug_files(cptestctx: &ControlPlaneTestContext) {
     let files = dropbox.load_new::<UnstableReconfiguratorState>();
     assert_eq!(files.len(), 1);
     let file = files.into_iter().next().expect("non-empty Vec");
+    cli_inputs.push(("file2", &file));
     assert!(file.blueprints.contains_key(&bp3_id));
     assert!(file.blueprints.contains_key(&bp1_id));
     assert_eq!(file.target_blueprint.target_id, bp1_id);
@@ -1133,6 +1137,7 @@ async fn test_debug_files(cptestctx: &ControlPlaneTestContext) {
     let files = dropbox.load_new::<UnstableReconfiguratorState>();
     assert_eq!(files.len(), 1);
     let file = files.into_iter().next().expect("non-empty Vec");
+    cli_inputs.push(("file3", &file));
     assert!(file.blueprints.contains_key(&bp2_id));
     assert_eq!(file.target_blueprint.target_id, bp2_id);
     assert!(file.intended_target_blueprint.is_none());
@@ -1218,6 +1223,7 @@ async fn test_debug_files(cptestctx: &ControlPlaneTestContext) {
     let files = dropbox.load_new::<UnstableReconfiguratorState>();
     assert_eq!(files.len(), 1);
     let file = files.into_iter().next().expect("non-empty Vec");
+    cli_inputs.push(("file4", &file));
     assert!(file.blueprints.contains_key(&bp2_id));
     assert!(file.blueprints.contains_key(&bp4_id));
     assert_eq!(file.target_blueprint.target_id, bp4_id);
@@ -1229,6 +1235,25 @@ async fn test_debug_files(cptestctx: &ControlPlaneTestContext) {
     let files = dropbox.load_new::<UnstableReconfiguratorState>();
     assert!(files.is_empty());
 
-    // XXX-dap load them all into reconfigurator-cli?
+    // Load all the files together and make sure we wind up with the expected
+    // combined state.
+    let inputs = cli_inputs.into_iter().map(|(label, state)| {
+        let bytes = serde_json::to_string(state).expect("serializable");
+        ReconfiguratorStateInput {
+            label: label.to_owned(),
+            reader: std::io::Cursor::new(bytes),
+        }
+    });
+
+    let st = UnstableReconfiguratorState::read_series(inputs)
+        .expect("reading inputs");
+    assert!(st.warnings.is_empty(), "no warnings loading state files");
+    assert!(st.state.intended_target_blueprint.is_none());
+    assert_eq!(st.state.target_blueprint.target_id, bp4_id);
+    assert!(st.state.blueprints.contains_key(&bp1_id));
+    assert!(st.state.blueprints.contains_key(&bp2_id));
+    assert!(st.state.blueprints.contains_key(&bp3_id));
+    assert!(st.state.blueprints.contains_key(&bp4_id));
+
     // XXX-dap test that the import path works?  if we don't already have one
 }

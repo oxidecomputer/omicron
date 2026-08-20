@@ -9274,6 +9274,7 @@ dependencies = [
  "range-requests",
  "raw-cpuid",
  "rcgen",
+ "reconfigurator-cli",
  "ref-cast",
  "regex",
  "reqwest 0.13.2",

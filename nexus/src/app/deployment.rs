@@ -1279,17 +1279,13 @@ mod tests {
     use super::*;
     use chrono::Utc;
     use nexus_reconfigurator_planning::example::example;
-    use nexus_reconfigurator_preparation::reconfigurator_state_load;
-    use nexus_test_utils_macros::nexus_test;
     use nexus_types::deployment::BlueprintHostPhase2DesiredSlots;
     use omicron_test_utils::dev::dropbox::TestDropbox;
     use omicron_test_utils::dev::test_setup_log;
     use omicron_uuid_kinds::MupdateOverrideUuid;
+    use reconfigurator_cli::test_utils::ReconfiguratorCliTestState;
     use tufaceous_artifact::ArtifactHash;
     use tufaceous_artifact::ArtifactVersion;
-
-    type ControlPlaneTestContext =
-        nexus_test_utils::ControlPlaneTestContext<crate::Server>;
 
     fn make_os_artifact(
         version: &semver::Version,
@@ -1863,32 +1859,18 @@ mod tests {
         logctx.cleanup_successful();
     }
 
-    /// Verifies writing Reconfigurator state in the success path
-    #[nexus_test(server = crate::Server)]
-    async fn test_debug_files(cptestctx: &ControlPlaneTestContext) {
-        let log = &cptestctx.logctx.log;
+    /// Verifies the helper for writing Reconfigurator state files
+    #[tokio::test]
+    async fn test_debug_files() {
+        let logctx = test_setup_log("test_debug_files");
+        let log = &logctx.log;
 
-        // This whole block is just to get our hands on a complete, self-
-        // consistent Reconfigurator state and a blueprint consistent with it.
-        let (initial_state, blueprint) = {
-            let datastore = cptestctx.server.server_context().nexus.datastore();
-            let opctx = OpContext::for_tests(log.clone(), datastore.clone());
-            let nblueprints = 5;
-            let initial_state =
-                reconfigurator_state_load(&opctx, &datastore, nblueprints)
-                    .await
-                    .expect("loading test system state");
-            assert!(initial_state.intended_target_blueprint.is_none());
-
-            // Make a new blueprint.
-            let nexus_client = cptestctx.lockstep_client();
-            let blueprint = nexus_client
-                .blueprint_regenerate()
-                .await
-                .expect("creating new blueprint")
-                .into_inner();
-            (initial_state, blueprint)
-        };
+        // Set up a simulated system whose initial state we can work with.
+        let mut sim = ReconfiguratorCliTestState::new("test_debug_files", &log);
+        sim.load_example().expect("loading example system");
+        let initial_state =
+            sim.current_state().to_serializable().expect("initial state");
+        let blueprint = sim.run_planner().expect("expected new blueprint");
 
         // Case: it's an error to provide an initial state that doesn't have the
         // intended blueprint field set.
@@ -1919,12 +1901,14 @@ mod tests {
         intent_state.intended_target_blueprint = Some(blueprint.id);
         intent_state
             .blueprints
-            .insert_unique(blueprint)
+            .insert_unique((*blueprint).clone())
             .expect("new blueprint");
 
         test_debug_files_success(log, &intent_state).await;
         test_debug_files_cancel(log, &intent_state).await;
         test_debug_files_intent_fail(log, &intent_state).await;
+
+        logctx.cleanup_successful();
     }
 
     /// Test case: happy path (writing "intent" file followed by "commit" file)
@@ -2015,29 +1999,6 @@ mod tests {
         assert_eq!(1, reader.count_removed());
 
         test_dropbox.cleanup_successful();
-    }
-
-    /// Test case: exercise failure to write the intent file
-    async fn test_debug_files_intent_fail(
-        log: &Logger,
-        intent_state: &UnstableReconfiguratorState,
-    ) {
-        let test_dropbox = TestDropbox::new(log.clone()).await;
-        let (dir, producer) = test_dropbox.into_parts();
-
-        // Delete the directory so that the write below will fail.
-        dir.cleanup_successful();
-
-        // Attempt to write the intent file and verify the error.
-        let error =
-            SetTargetDebugFile::new(log, &producer, intent_state.clone())
-                .expect("valid input")
-                .write_intent(BlueprintDebugAction::TargetIntent)
-                .await
-                .expect_err("failure to write intent file");
-        let message = InlineErrorChain::new(&error);
-        println!("found error: {message}");
-        assert!(message.contains("I/O error"));
     }
 
     /// Test case: exercise failure to write the intent file
