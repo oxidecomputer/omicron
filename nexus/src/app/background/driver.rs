@@ -411,6 +411,8 @@ mod test {
     use nexus_db_queries::context::OpContext;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::internal_api::views::ActivationReason;
+    use omicron_test_utils::dev::poll::{CondCheckError, wait_for_condition};
+    use std::cell::Cell;
     use std::time::Duration;
     use std::time::Instant;
     use tokio::sync::mpsc;
@@ -788,7 +790,7 @@ mod test {
     //   2. activation (1) finishes
     //   3. one dependency-triggered activation (2) starts
     //   4. activation (2) finishes
-    //   5. no activation (3) should start
+    //   5. no second dependency-triggered activation (3) should start
     #[nexus_test(server = crate::Server)]
     async fn test_distinct_ready_dependencies_are_collapsed(
         cptestctx: &ControlPlaneTestContext,
@@ -847,14 +849,55 @@ mod test {
         wait_tx.send(()).await.unwrap();
 
         // Finally, verify that no second dependency-triggered activation
-        // starts. We do that by waiting for a second and confirming that the
-        // task is idle and the last completed iteration is the same as in the
-        // previous step.
-        tokio::time::sleep(Duration::from_secs(1)).await;
-        let status = driver.task_status(&task_handle);
-        assert!(status.current.is_idle());
-        assert!(status.last.has_completed());
-        assert_eq!(status.last.unwrap_completion().iteration, 2);
-        assert_matches!(ready_rx.try_recv(), Err(TryRecvError::Empty));
+        // starts. Iteration 2 may take some time to finish after being
+        // unpaused, so poll until the task becomes idle. If another activation
+        // starts first, verify that it was caused by something other than a
+        // dependency.
+
+        // We track the latest released iteration so that repeated polls do not
+        // queue release messages for future activations. Iteration 2 has
+        // already been released above, so that's the initial value.
+        let released_iteration = Cell::new(2);
+        wait_for_condition(
+            || async {
+                let status = driver.task_status(&task_handle);
+
+                if status.current.is_idle() {
+                    // Verify that iteration 2 has completed. If a later
+                    // iteration also completed, verify that it was not caused
+                    // by a dependency.
+                    let last = status.last.unwrap_completion();
+                    if last.iteration > 2 {
+                        assert_ne!(last.reason, ActivationReason::Dependency);
+                    }
+
+                    return Ok(());
+                }
+
+                // Iteration 2 is expected to be dependency-triggered and may
+                // still be finishing. Any later running activation must have
+                // been caused by something else, e.g. a timeout.
+                let current = status.current.unwrap_running();
+                let iteration = current.iteration;
+                if iteration > 2 {
+                    assert_ne!(current.reason, ActivationReason::Dependency);
+
+                    // Allow an unrelated activation, such as a timeout, to
+                    // finish so that the task can become idle.
+                    if released_iteration.get() < iteration {
+                        released_iteration.set(iteration);
+                        wait_tx.send(()).await.unwrap();
+                    }
+                }
+
+                Err(CondCheckError::<()>::NotYet {
+                    status: Some("waiting for task to become idle".to_string()),
+                })
+            },
+            &Duration::from_millis(100),
+            &Duration::from_secs(60),
+        )
+        .await
+        .unwrap();
     }
 }
