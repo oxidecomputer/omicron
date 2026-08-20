@@ -17,13 +17,23 @@
 extern crate slog;
 use bootstrap_agent_lockstep_types::{
     CommitState, MultirackJoinRequest, MultirackJoinServiceState,
+    SledAgentInfo, SledAgentStartState, StartSledAgentsStatus,
 };
 use nexus_types::trust_quorum::TrustQuorumConfig;
+use omicron_common::address::BOOTSTRAP_AGENT_RACK_INIT_PORT;
+use omicron_ledger::{self as ledger};
 use omicron_uuid_kinds::RackUuid;
+use sled_agent_bootstrap_common::sprockets::SprocketsClient;
 use sled_agent_bootstrap_common::{RssContext, RunRssError};
+use sled_agent_types::sled::{
+    StartSledAgentRequest, StartSledAgentRequestBody,
+};
 use sled_hardware_types::BaseboardId;
-use slog::{Logger, info};
+use slog::{Logger, error, info};
 use slog_error_chain::{InlineErrorChain, SlogInlineError};
+use std::net::{Ipv6Addr, SocketAddrV6};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::{
     collections::{BTreeMap, BTreeSet},
     time::Duration,
@@ -64,6 +74,14 @@ pub enum MultirackJoinServiceError {
 
     #[error("Failed to join proxy commit task")]
     ProxyCommit(#[from] JoinError),
+
+    #[error(
+        "Sprockets connections not available for all sleds. Missing {0:#?}"
+    )]
+    MissingSledConnections(BTreeSet<BaseboardId>),
+
+    #[error("Failed to access ledger")]
+    Ledger(#[from] ledger::Error),
 }
 
 impl From<RunRssError> for MultirackJoinServiceError {
@@ -94,12 +112,49 @@ enum TqCommitResult {
     },
 }
 
+/// All the information required to start a sled agent remotely over a sprockets
+/// channel.
+struct StartSledAgentInfo {
+    baseboard_id: BaseboardId,
+    bootstrap_ip: Ipv6Addr,
+    req: StartSledAgentRequest,
+}
+
+impl StartSledAgentInfo {
+    fn new(
+        rack_id: RackUuid,
+        bootstrap_ip: Ipv6Addr,
+        info: SledAgentInfo,
+    ) -> Self {
+        StartSledAgentInfo {
+            baseboard_id: info.baseboard_id.clone(),
+            bootstrap_ip,
+            req: StartSledAgentRequest {
+                generation: 0,
+                schema_version: 1,
+                body: StartSledAgentRequestBody {
+                    id: info.sled_id,
+                    subnet: info.sled_subnet,
+                    use_trust_quorum: true,
+                    is_lrtq_learner: false,
+                    rack_id,
+                },
+            },
+        }
+    }
+}
+
 /// The interface to the Multirack Join Service.
 pub struct MultirackJoinServiceHandle {
     pub join_handle:
         tokio::task::JoinHandle<Result<(), MultirackJoinServiceError>>,
     pub input_tx: watch::Sender<MultirackJoinRequest>,
     pub output_rx: watch::Receiver<MultirackJoinServiceState>,
+
+    // Once we've initialized trust quorum, we no longer allow membership
+    // changes. This allows helpful responses to user requests in case a
+    // membership change is attempted too late in the process.
+    pub membership_change_still_possible: Arc<AtomicBool>,
 }
 
 impl MultirackJoinServiceHandle {
@@ -107,16 +162,28 @@ impl MultirackJoinServiceHandle {
         let (input_tx, input_rx) = watch::channel(request);
         let state = MultirackJoinServiceState::Requested;
         let (output_tx, output_rx) = watch::channel(state.clone());
+        let membership_change_still_possible = Arc::new(AtomicBool::new(true));
+        let mcsp = membership_change_still_possible.clone();
         let join_handle = tokio::task::spawn(async move {
             let log =
                 ctx.base_log.new(o!("component" => "MultirackJoinService"));
             info!(log, "Starting Multirack Join Service");
-            let mut task =
-                MultirackJoinServiceTask { log, ctx, input_rx, output_tx };
+            let mut task = MultirackJoinServiceTask {
+                log,
+                ctx,
+                input_rx,
+                output_tx,
+                membership_change_still_possible: mcsp,
+            };
             task.run().await
         });
 
-        Self { join_handle, input_tx, output_rx }
+        Self {
+            join_handle,
+            input_tx,
+            output_rx,
+            membership_change_still_possible,
+        }
     }
 }
 
@@ -126,6 +193,11 @@ struct MultirackJoinServiceTask {
     ctx: RssContext,
     input_rx: watch::Receiver<MultirackJoinRequest>,
     output_tx: watch::Sender<MultirackJoinServiceState>,
+
+    // Once we've initialized trust quorum, we no longer allow membership
+    // changes. This allows helpful responses to user requests in case a
+    // membership change is attempted too late in the process.
+    pub membership_change_still_possible: Arc<AtomicBool>,
 }
 
 impl MultirackJoinServiceTask {
@@ -141,15 +213,176 @@ impl MultirackJoinServiceTask {
         let rack_id = RackUuid::new_v4();
         info!(&self.log, "Created RackId {rack_id}");
 
+        // Record that we have started RSS
+        //
+        // NOTE: This is a "point-of-no-return" -- before sending any requests
+        // to neighboring sleds, we record that RSS has started.
+        // This way, if the RSS power-cycles, it can be detected and we can
+        // clean-slate and try again.
+        self.ctx.write_rss_started_ledger(&self.log).await?;
+
         self.init_trust_quorum(rack_id).await?;
 
+        self.start_sled_agents(rack_id).await?;
+
         // TODO:
-        //   Start sled-agents
         //   Configure networking
         //
         // https://github.com/oxidecomputer/omicron/issues/10637
 
         Ok(())
+    }
+
+    /// Try to start all sled agents on each sled with no other zones
+    async fn start_sled_agents(
+        &mut self,
+        rack_id: RackUuid,
+    ) -> Result<(), MultirackJoinServiceError> {
+        info!(self.log, "Starting Sled agents");
+        let req = self.input_rx.borrow_and_update().clone();
+        let tq_members = req.trust_quorum_peers.clone();
+        let status = StartSledAgentsStatus::assign_ids_and_subnets(req);
+        self.output_tx.send_modify(|state| {
+            *state = MultirackJoinServiceState::StartSledAgents(status.clone())
+        });
+
+        let mut bootstrap_ips: BTreeMap<_, _> = self
+            .ctx
+            .trust_quorum_handle
+            .conn_mgr_status()
+            .await?
+            .connected_peers()
+            .into_iter()
+            .collect();
+
+        // Insert this node into our map. Connected peers don't include ourself.
+        bootstrap_ips.insert(
+            self.ctx.trust_quorum_handle.baseboard_id().clone(),
+            self.ctx.global_zone_bootstrap_ip,
+        );
+
+        let mut missing_sleds = BTreeSet::new();
+        for baseboard_id in tq_members {
+            if !bootstrap_ips.contains_key(&baseboard_id) {
+                missing_sleds.insert(baseboard_id);
+            }
+        }
+        // We have already initialized the trust quorum on all nodes at this
+        // point, and so the number of bootstrap ips should match our expected
+        // configuration.
+        if !missing_sleds.is_empty() {
+            return Err(MultirackJoinServiceError::MissingSledConnections(
+                missing_sleds,
+            ));
+        }
+
+        // Attempt to start all our sled agents in parallel
+        let mut set = JoinSet::new();
+        for info in status.sleds.iter().cloned() {
+            // Unwrap is safe, because we constructed both bootstrap_ips and
+            // status from trust_quorum_peers.
+            let bootstrap_ip = *bootstrap_ips.get(&info.baseboard_id).unwrap();
+            set.spawn(self.spawn_start_sled_agent_task(
+                StartSledAgentInfo::new(rack_id, bootstrap_ip, info),
+            ));
+        }
+
+        // Wait for each sled-agent to start
+        while let Some(res) = set.join_next().await {
+            // We unwrap because we build with `abort=panic`, and don't want to
+            // handle join errors here.
+            let baseboard_id = res.unwrap();
+            info!(
+                self.log,
+                "Started sled agent";
+                "baseboard_id" => %baseboard_id
+            );
+            self.output_tx.send_modify(|state| {
+                let MultirackJoinServiceState::StartSledAgents(status) = state
+                else {
+                    panic!("MultirackJoinService in wrong state: {:#?}", state);
+                };
+                // Safe to unwrap since we only start tasks that return
+                // baseboards that already exist in status.
+                let mut info = status.sleds.get1_mut(&baseboard_id).unwrap();
+                info.start_state = SledAgentStartState::Started;
+            });
+        }
+
+        Ok(())
+    }
+
+    /// Spawn a task that connects to the remote sprockets server and sends a
+    /// `StartSledAgentRequest`.
+    ///
+    /// Runs indefinitely until success.
+    ///
+    /// We assume all errors are transient and will correct themselves, or can
+    /// be corrected by support. In the case this is not true, a clean-slate
+    /// will be required.
+    fn spawn_start_sled_agent_task(
+        &mut self,
+        info: StartSledAgentInfo,
+    ) -> impl Future<Output = BaseboardId> + 'static {
+        let log = self.log.new(o!(
+            "baseboard_id" => info.baseboard_id.to_string(),
+            "bootstrap_ip" => info.bootstrap_ip.to_string()
+        ));
+
+        info!(log, "Attempting to start sled agent";);
+
+        let bootstrap_addr = SocketAddrV6::new(
+            info.bootstrap_ip,
+            BOOTSTRAP_AGENT_RACK_INIT_PORT,
+            0,
+            0,
+        );
+
+        let client = SprocketsClient::new(
+            bootstrap_addr,
+            self.ctx.sprockets_config.clone(),
+            self.ctx.measurements.clone(),
+            log.clone(),
+        );
+
+        let output_tx = self.output_tx.clone();
+        let mut retry_count = 0;
+        async move {
+            // Retry indefinitely to start sled-agent.
+            loop {
+                match client.start_sled_agent(&info.req).await {
+                    Ok(_) => {
+                        return info.baseboard_id;
+                    }
+                    Err(err) => {
+                        // Update state with the latest error seen.
+                        output_tx.send_modify(|state| {
+                            let MultirackJoinServiceState::StartSledAgents(status) =
+                                state
+                            else {
+                                panic!(
+                                    "MultirackJoinService in wrong state: {:#?}",
+                                    state
+                                );
+                            };
+                            let errstr = InlineErrorChain::new(&err).to_string();
+                            // Safe to unwrap since we only start tasks that return
+                            // baseboards that already exist in status.
+                            let mut info =
+                                status.sleds.get1_mut(&info.baseboard_id).unwrap();
+                            info.start_state = SledAgentStartState::InProgress { last_error: Some(errstr) };
+
+                        });
+                        // Only log every minute, given the 6 second sleep below
+                        if retry_count % 10 == 0 {
+                            warn!(log, "Failed to start sled agent"; &err);
+                        }
+                        tokio::time::sleep(Duration::from_secs(6)).await;
+                        retry_count += 1;
+                    }
+                }
+            }
+        }
     }
 
     /// Start initializing trust quorum given the the existing
@@ -550,6 +783,7 @@ impl MultirackJoinServiceTask {
                             "Trust quorum committed at all nodes";
                             "epoch" => %epoch
                         );
+
                         break;
                     }
 
@@ -613,7 +847,34 @@ impl MultirackJoinServiceTask {
             }
         }
 
-        Ok(TqCommitResult::Committed)
+        // At this point all members have acked the commit and trust quorum
+        // is fully commited. However, we still have to check one more time to
+        // see if membership has changed. If we don't do this, we can silently
+        // ignore a submission from an operator.
+        //
+        // We must hold the read lock while checking. If membership has not
+        // changed we update our gate to prevent it from changing in the future.
+        // Otherwise we start a reconfiguration.
+        let guard = self.input_rx.borrow_and_update();
+        if guard.trust_quorum_peers == members {
+            // No membership change
+            //
+            // If an operator tries to change the set of peers for rack
+            // membership after this point they will get an error response.
+            self.membership_change_still_possible
+                .store(false, Ordering::Relaxed);
+
+            Ok(TqCommitResult::Committed)
+        } else {
+            // Membership change
+            let new_members = guard.trust_quorum_peers.clone();
+            let just_committed_epoch = epoch;
+            Ok(TqCommitResult::ReconfigurationNeeded {
+                new_members,
+                new_epoch: epoch.next(),
+                just_committed_epoch,
+            })
+        }
     }
 
     // Check if we have received an updated membership set from an operator.
@@ -632,5 +893,73 @@ impl MultirackJoinServiceTask {
             }
         }
         Ok(None)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::BTreeSet;
+
+    use sled_agent_types::early_networking::{
+        LinkSpeed, PortConfig, RackNetworkConfig, SwitchSlot, UplinkPorts,
+    };
+    use sled_hardware_types::BaseboardId;
+
+    fn rack_network_config() -> RackNetworkConfig {
+        // RackNetworkConfig's ports must be nonempty.
+        let ports = vec![PortConfig {
+            routes: Vec::new(),
+            addresses: Vec::new(),
+            switch: SwitchSlot::Switch1,
+            port: "qsfp0".to_owned(),
+            uplink_port_speed: LinkSpeed::Speed100G,
+            uplink_port_fec: None,
+            bgp_peers: Vec::new(),
+            autoneg: false,
+            lldp: None,
+            tx_eq: None,
+            allow_ddm_traffic: false,
+        }];
+
+        RackNetworkConfig {
+            rack_subnet: "fd00:abcd:ffff::/56".parse().unwrap(),
+            infra_ip_first: "10.0.0.1".parse().unwrap(),
+            infra_ip_last: "10.0.0.100".parse().unwrap(),
+            ports: UplinkPorts::new(ports).unwrap(),
+            bgp: Vec::new(),
+            bfd: Vec::new(),
+        }
+    }
+
+    fn trust_quorum_peers() -> BTreeSet<BaseboardId> {
+        (0..32)
+            .into_iter()
+            .map(|i| BaseboardId {
+                part_number: "FAKE_PART".to_string(),
+                serial_number: format!("2FAKE{:03}", i),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn new_start_sled_agent_status() {
+        let req = MultirackJoinRequest {
+            trust_quorum_peers: trust_quorum_peers(),
+            rack_network_config: rack_network_config(),
+        };
+
+        let status = StartSledAgentsStatus::assign_ids_and_subnets(req.clone());
+        assert_eq!(status.sleds.len(), req.trust_quorum_peers.len());
+
+        let actual_sled_subnets: BTreeSet<_> =
+            status.sleds.iter().map(|s| s.sled_subnet.to_string()).collect();
+        let expected_sled_subnets: BTreeSet<_> =
+            (0..req.trust_quorum_peers.len())
+                .into_iter()
+                .map(|i| format!("fd00:abcd:ffff:{:x}::/64", i + 1))
+                .collect();
+
+        assert_eq!(actual_sled_subnets, expected_sled_subnets);
     }
 }
