@@ -883,15 +883,40 @@ mod tests {
 mod illumos_tests {
     use jiff::Timestamp;
 
+    /// Returns the filesystem name (statvfs `f_basetype`, e.g. "zfs" or
+    /// "tmpfs") for the filesystem holding `path`.
+    fn fs_basetype(path: &camino::Utf8Path) -> String {
+        let cpath = std::ffi::CString::new(path.as_str()).unwrap();
+        let mut vfs: libc::statvfs = unsafe { std::mem::zeroed() };
+        let rc = unsafe { libc::statvfs(cpath.as_ptr(), &mut vfs) };
+        assert_eq!(rc, 0, "statvfs({path}) failed");
+        let basetype =
+            unsafe { std::ffi::CStr::from_ptr(vfs.f_basetype.as_ptr()) };
+        basetype.to_string_lossy().into_owned()
+    }
+
     #[test]
     fn test_crtime_of_new_file() {
         // Create the file next to the source tree rather than in /tmp:
-        // reading crtime requires filesystem support for system
-        // attributes, which the ZFS-backed workspace has.
+        // /tmp is tmpfs, which answers getattrat(3C) with an empty
+        // attribute list, while the workspace checkout is normally on ZFS.
         let dir = camino_tempfile::Builder::new()
             .prefix("oxlog-crtime-test")
             .tempdir_in(env!("CARGO_MANIFEST_DIR"))
             .unwrap();
+
+        // crtime only exists on filesystems that record it. Skip rather
+        // than fail on an unusual checkout location. Note that probing
+        // pathconf(_PC_SATTR_ENABLED) instead would not work here: tmpfs
+        // reports system attribute support yet records no crtime.
+        let basetype = fs_basetype(dir.path());
+        if basetype != "zfs" {
+            eprintln!(
+                "skipping: tempdir is on {basetype}, which records no crtime"
+            );
+            return;
+        }
+
         let path = dir.path().join("file.log");
         std::fs::write(&path, b"hello").unwrap();
 
