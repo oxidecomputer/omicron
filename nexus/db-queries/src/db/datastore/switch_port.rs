@@ -360,6 +360,12 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
+    // Until the rest of multirack is implemented, we don't want to expose
+    // `allow_ddm_traffic` in the external API. That's why it's passed
+    // separately from `params`.
+    //
+    // There is a more detailed comment in `switch_port_settings_update` where
+    // this value gets used.
     pub async fn switch_port_settings_create(
         &self,
         opctx: &OpContext,
