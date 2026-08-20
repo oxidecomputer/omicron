@@ -8054,6 +8054,7 @@ dependencies = [
  "anyhow",
  "async-bb8-diesel",
  "diesel",
+ "iddqd",
  "nexus-db-model",
  "nexus-db-queries",
  "nexus-db-schema",

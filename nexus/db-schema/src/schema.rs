@@ -1262,6 +1262,17 @@ table! {
 }
 
 table! {
+    rendezvous_sled_bp_availability (sled_id) {
+        sled_id -> Uuid,
+        bp_availability -> crate::enums::SledBpAvailabilityEnum,
+        update_disposition_generation -> Nullable<Int8>,
+        blueprint_id -> Uuid,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+    }
+}
+
+table! {
     region (id) {
         id -> Uuid,
         time_created -> Timestamptz,
