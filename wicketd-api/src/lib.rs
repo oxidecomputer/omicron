@@ -31,9 +31,7 @@ use wicket_common::rack_update::AbortUpdateOptions;
 use wicket_common::rack_update::ClearUpdateStateOptions;
 use wicket_common::rack_update::StartUpdateOptions;
 use wicket_common::update_events::EventReport;
-use wicketd_commission_types::rack_setup::BgpAuthKey;
 use wicketd_commission_types::rack_setup::BgpAuthKeyId;
-use wicketd_commission_types::rack_setup::SetBgpAuthKeyStatus;
 use wicketd_commission_types::update::ClearUpdateStateResponse;
 use wicketd_commission_types::update::UpdateTargets;
 
@@ -99,17 +97,6 @@ pub trait WicketdApi {
         // nice way to transmit this information as a batch.
         params: TypedBody<GetBgpAuthKeyParams>,
     ) -> Result<HttpResponseOk<GetBgpAuthKeyInfoResponse>, HttpError>;
-
-    /// Set the BGP authentication key for a particular key ID.
-    #[endpoint {
-        method = PUT,
-        path = "/rack-setup/config/bgp/auth-key/{key_id}"
-    }]
-    async fn put_bgp_auth_key(
-        rqctx: RequestContext<Self::Context>,
-        params: Path<PutBgpAuthKeyParams>,
-        body: TypedBody<PutBgpAuthKeyBody>,
-    ) -> Result<HttpResponseOk<PutBgpAuthKeyResponse>, HttpError>;
 
     /// Update the RSS config recovery silo user password hash.
     #[endpoint {
@@ -326,21 +313,6 @@ pub struct CurrentRssUserConfig {
 pub struct GetBgpAuthKeyParams {
     /// Checks that these keys are valid.
     pub check_valid: BTreeSet<BgpAuthKeyId>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
-pub struct PutBgpAuthKeyParams {
-    pub key_id: BgpAuthKeyId,
-}
-
-#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Eq)]
-pub struct PutBgpAuthKeyBody {
-    pub key: BgpAuthKey,
-}
-
-#[derive(Clone, Debug, Serialize, JsonSchema, PartialEq)]
-pub struct PutBgpAuthKeyResponse {
-    pub status: SetBgpAuthKeyStatus,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
