@@ -1254,6 +1254,4 @@ async fn test_debug_files(cptestctx: &ControlPlaneTestContext) {
     assert!(st.state.blueprints.contains_key(&bp2_id));
     assert!(st.state.blueprints.contains_key(&bp3_id));
     assert!(st.state.blueprints.contains_key(&bp4_id));
-
-    // XXX-dap test that the import path works?  if we don't already have one
 }
