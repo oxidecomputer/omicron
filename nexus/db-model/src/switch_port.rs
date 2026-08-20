@@ -379,10 +379,6 @@ impl SwitchPortSettings {
     ) -> Self {
         Self { identity: SwitchPortSettingsIdentity::new(id, meta.clone()) }
     }
-
-    pub fn id(&self) -> SwitchPortSettingsUuid {
-        self.identity.id.into()
-    }
 }
 
 impl Into<networking_types::SwitchPortSettingsIdentity> for SwitchPortSettings {

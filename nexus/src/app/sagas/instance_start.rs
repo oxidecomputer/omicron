@@ -1179,6 +1179,7 @@ mod test {
     };
     use nexus_types::external_api::instance::InstanceCpuCount;
     use nexus_types::external_api::{instance as instance_types, networking};
+    use nexus_types::identity::Resource;
     use nexus_types_versions::latest;
     use omicron_common::api::external::{
         ByteCount, IdentityMetadataCreateParams, Name,
