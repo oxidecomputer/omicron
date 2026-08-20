@@ -919,6 +919,7 @@ mod tests {
             autoneg: false,
             lldp: None,
             tx_eq: None,
+            allow_ddm_traffic: false,
         }];
 
         RackNetworkConfig {

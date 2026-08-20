@@ -134,7 +134,7 @@ fn early_network_blobs_deserialize() {
 /// future, older blobs can still be deserialized correctly.
 fn current_config_example() -> (&'static str, EarlyNetworkConfigEnvelope) {
     // NOTE: the description must not contain commas or newlines.
-    let description = "2026-07-20 v47";
+    let description = "2026-08-20 v48";
     let config = EarlyNetworkConfigEnvelope::from(&SystemNetworkingConfig {
         rack_network_config: RackNetworkConfig {
             rack_subnet: "fd00:1122:3344:100::/56".parse().unwrap(),
@@ -152,6 +152,7 @@ fn current_config_example() -> (&'static str, EarlyNetworkConfigEnvelope) {
                     autoneg: false,
                     tx_eq: None,
                     lldp: None,
+                    allow_ddm_traffic: false,
                 },
                 PortConfig {
                     routes: vec![],
@@ -172,6 +173,7 @@ fn current_config_example() -> (&'static str, EarlyNetworkConfigEnvelope) {
                         system_description: None,
                         management_addrs: None,
                     }),
+                    allow_ddm_traffic: false,
                 },
                 PortConfig {
                     routes: vec![],
@@ -221,6 +223,7 @@ fn current_config_example() -> (&'static str, EarlyNetworkConfigEnvelope) {
                         system_description: None,
                         management_addrs: None,
                     }),
+                    allow_ddm_traffic: false,
                 },
                 PortConfig {
                     routes: vec![],
@@ -270,6 +273,7 @@ fn current_config_example() -> (&'static str, EarlyNetworkConfigEnvelope) {
                         system_description: None,
                         management_addrs: None,
                     }),
+                    allow_ddm_traffic: false,
                 },
                 PortConfig {
                     routes: vec![],
@@ -282,6 +286,7 @@ fn current_config_example() -> (&'static str, EarlyNetworkConfigEnvelope) {
                     autoneg: false,
                     tx_eq: None,
                     lldp: None,
+                    allow_ddm_traffic: false,
                 },
                 PortConfig {
                     routes: vec![],
@@ -302,6 +307,7 @@ fn current_config_example() -> (&'static str, EarlyNetworkConfigEnvelope) {
                         system_description: None,
                         management_addrs: None,
                     }),
+                    allow_ddm_traffic: false,
                 },
             ])
             .expect("test port list is non-empty"),

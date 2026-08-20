@@ -104,9 +104,15 @@ impl super::Nexus {
         params: networking::SwitchPortSettingsCreate,
         id: Option<Uuid>,
     ) -> CreateResult<SwitchPortSettingsCombinedResult> {
+        // We explicitly do not expose `allow_ddm_traffic` through the external
+        // API. We want to wait until multirack is further along to determine
+        // the shape of exposure. The flag is only set by RSS for testing
+        // purposes. Setting it to false here won't restrict our testing right
+        // now.
+        let allow_ddm_traffic = false;
         let result = self
             .db_datastore
-            .switch_port_settings_create(opctx, &params, id)
+            .switch_port_settings_create(opctx, &params, id, allow_ddm_traffic)
             .await?;
 
         // eagerly propagate changes via rpw
