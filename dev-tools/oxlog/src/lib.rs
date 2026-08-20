@@ -120,7 +120,29 @@ impl LogFile {
                 // An mtime that overflows Timestamp is not accurate, ignore.
                 self.modified = modified.try_into().ok();
             }
+            self.created = Self::created(&self.path, &metadata);
         }
+    }
+
+    // illumos does not expose a file's creation time through stat(2); it is
+    // a system attribute (fsattr(7)) requiring a separate getattrat(3C)
+    // call.
+    #[cfg(target_os = "illumos")]
+    fn created(
+        path: &Utf8Path,
+        _metadata: &std::fs::Metadata,
+    ) -> Option<Timestamp> {
+        crtime::crtime(path)
+    }
+
+    #[cfg(not(target_os = "illumos"))]
+    fn created(
+        _path: &Utf8Path,
+        metadata: &std::fs::Metadata,
+    ) -> Option<Timestamp> {
+        // Not every filesystem records a creation time; a file without one
+        // is filtered by mtime alone.
+        metadata.created().ok().and_then(|created| created.try_into().ok())
     }
 
     pub fn file_name_cmp(&self, other: &Self) -> std::cmp::Ordering {
@@ -179,6 +201,70 @@ impl Ord for LogFile {
 impl LogFile {
     fn new(path: Utf8PathBuf) -> LogFile {
         LogFile { path, size: None, modified: None, created: None }
+    }
+}
+
+/// Reading a file's creation time (crtime) on illumos.
+///
+/// crtime is a system attribute (fsattr(7)) rather than part of stat(2),
+/// retrieved with getattrat(3C) as an nvlist whose "crtime" entry holds a
+/// [seconds, nanoseconds] pair.
+#[cfg(target_os = "illumos")]
+mod crtime {
+    use camino::Utf8Path;
+    use illumos_nvpair::{NvList, NvValue};
+    use illumos_nvpair_sys::{nvlist_free, nvlist_t};
+    use jiff::Timestamp;
+    use std::ffi::{CString, c_char, c_int};
+
+    // See xattr_view_t in sys/attr.h. crtime lives in the read-write view
+    // (it is settable via setattrat(3C) on ZFS); the read-only view holds
+    // only fsid, generation, and similar.
+    const XATTR_VIEW_READWRITE: c_int = 1;
+
+    #[link(name = "c")]
+    unsafe extern "C" {
+        fn getattrat(
+            basefd: c_int,
+            view: c_int,
+            name: *const c_char,
+            nvl: *mut *mut nvlist_t,
+        ) -> c_int;
+    }
+
+    /// Returns the creation time of the file at `path`, or `None` if it
+    /// cannot be determined (missing file, a filesystem without system
+    /// attribute support, or an unexpected attribute shape).
+    pub(crate) fn crtime(path: &Utf8Path) -> Option<Timestamp> {
+        let name = CString::new(path.as_str()).ok()?;
+        let mut raw: *mut nvlist_t = std::ptr::null_mut();
+        let rc = unsafe {
+            getattrat(
+                libc::AT_FDCWD,
+                XATTR_VIEW_READWRITE,
+                name.as_ptr(),
+                &mut raw,
+            )
+        };
+        if rc != 0 || raw.is_null() {
+            return None;
+        }
+        // getattrat allocates the nvlist; deep-copy it into Rust, then
+        // free the C allocation whether or not the copy succeeded.
+        let nvlist = unsafe {
+            let copied = NvList::from_raw(raw);
+            nvlist_free(raw);
+            copied
+        }
+        .ok()?;
+        match nvlist.lookup("crtime") {
+            Some(NvValue::UInt64Array(parts)) if parts.len() == 2 => {
+                let seconds = i64::try_from(parts[0]).ok()?;
+                let nanoseconds = i32::try_from(parts[1]).ok()?;
+                Timestamp::new(seconds, nanoseconds).ok()
+            }
+            _ => None,
+        }
     }
 }
 
@@ -790,5 +876,41 @@ mod tests {
         let touches_start =
             file(Some("2023-01-01T00:00:00Z"), "2024-01-01T01:00:00Z");
         assert!(touches_start.in_date_range(&range));
+    }
+}
+
+#[cfg(all(test, target_os = "illumos"))]
+mod illumos_tests {
+    use jiff::Timestamp;
+
+    #[test]
+    fn test_crtime_of_new_file() {
+        // Create the file next to the source tree rather than in /tmp:
+        // reading crtime requires filesystem support for system
+        // attributes, which the ZFS-backed workspace has.
+        let dir = camino_tempfile::Builder::new()
+            .prefix("oxlog-crtime-test")
+            .tempdir_in(env!("CARGO_MANIFEST_DIR"))
+            .unwrap();
+        let path = dir.path().join("file.log");
+        std::fs::write(&path, b"hello").unwrap();
+
+        let created =
+            super::crtime::crtime(&path).expect("crtime should be readable");
+        let modified: Timestamp = std::fs::metadata(&path)
+            .unwrap()
+            .modified()
+            .unwrap()
+            .try_into()
+            .unwrap();
+
+        // A freshly written file's creation time is at or before its
+        // mtime, and both are recent.
+        assert!(created <= modified, "created {created} > modified {modified}");
+        let age = Timestamp::now().as_second() - created.as_second();
+        assert!(age.abs() < 3600, "crtime is not recent: {created}");
+
+        // A missing file yields None rather than an error.
+        assert!(super::crtime::crtime(&dir.path().join("absent")).is_none());
     }
 }
