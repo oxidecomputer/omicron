@@ -73,9 +73,9 @@ impl<'a> SupportBundleLogs<'a> {
     /// For a given zone and its services create a zip file of all logs
     /// found in that zone and stream it out via an `HttpResponse`.
     ///
-    /// Rotated logs are limited to `window` (by file mtime, inclusive) and,
-    /// when a cap is supplied, to at most `max_rotated` files; the current
-    /// log of each service is always included.
+    /// Logs are limited to `window` (by file mtime, inclusive on both ends)
+    /// and, when a cap is supplied, rotated logs are limited to at most
+    /// `max_rotated` files.
     pub async fn get_logs_for_zone<Z>(
         &self,
         zone: Z,

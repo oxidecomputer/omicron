@@ -558,10 +558,12 @@ impl LogsHandle {
     /// For a given zone find all of its logs for all of its services and write
     /// them to a zip file.
     ///
-    /// The current log file of every service is always included. Archived and
-    /// extra rotated logs are limited to those whose `mtime` falls within
-    /// `window` (inclusive; files with unknown `mtime` are kept), and to at
-    /// most `max_rotated` files when a count cap is supplied.
+    /// Files are filtered by `window` via oxlog's `date_range`: a file is
+    /// included only if its `mtime` (the timestamp of its newest write) falls
+    /// within the window, inclusive on both ends. This applies to current
+    /// logs too, so a service that has written nothing since before the
+    /// window began contributes no files. Rotated logs are additionally
+    /// limited to `max_rotated` files when a count cap is supplied.
     ///
     /// Note that this log retrieval will automatically take and cleanup
     /// necessary zfs snapshots along the way.
@@ -583,12 +585,10 @@ impl LogsHandle {
         // on all of the log paths that oxlog is capable of discovering via the
         // filesystem directly.
         //
-        // NOTE: We deliberately pass `date_range: None` to oxlog and apply
-        // the time-range filter ourselves below. oxlog's filter would exclude
-        // "current" SMF log files whose mtime falls outside the window, and it
-        // excludes files with unknown mtime. The active log file is exactly
-        // where fresh entries land, so it is always included regardless of the
-        // requested window, and unknown-mtime files are kept over-inclusively.
+        // The time window is enforced by oxlog's `date_range` filter, so the
+        // support bundle and the oxlog CLI share one set of semantics. Since
+        // a file's mtime is the timestamp of its newest line, this excludes
+        // files with no in-window content, current logs included.
         let zones = oxlog::Zones::load().map_err(|e| LogError::OxLog(e))?;
         let zone_logs = zones.zone_logs(
             zone,
@@ -599,7 +599,7 @@ impl LogsHandle {
                 // This will cause oxlog to call stat on each file resulting
                 // in a sorted order.
                 show_empty: false,
-                date_range: None,
+                date_range: window.to_date_range(),
             },
         );
 
@@ -613,13 +613,10 @@ impl LogsHandle {
         // we'll leak snapshots.
         let mut log_snapshots = LogSnapshots::new();
 
-        let mtime_range = window.to_mtime_range();
-
         let result = self
             .get_zone_logs_inner(
                 zone_logs,
                 max_rotated,
-                mtime_range,
                 zip,
                 &mut log_snapshots,
             )
@@ -634,17 +631,12 @@ impl LogsHandle {
         &self,
         zone_logs: BTreeMap<String, SvcLogs>,
         max_rotated: Option<usize>,
-        mtime_range: MtimeRange,
         mut zip: zip::ZipWriter<W>,
         mut log_snapshots: &mut LogSnapshots,
     ) -> Result<(), LogError> {
         for (service, service_logs) in zone_logs {
             //  - Grab all of the service's SMF logs -
 
-            // The current log is always included regardless of the mtime
-            // window: the file is where fresh entries land, and a long-quiet
-            // but still-active service shouldn't lose its current log just
-            // because its last write predates the window.
             if let Some(current) = service_logs.current {
                 self.process_logs(
                     &service,
@@ -662,14 +654,10 @@ impl LogsHandle {
             // as "archived", but we are gathering those up as a part of
             // "current" log processing. We only care about logs that have made
             // it explicitly to the debug dataset.
-            // Filtering by mtime happens here, before `process_logs`, so
-            // out-of-window files never trigger dataset lookups or ZFS
-            // snapshot creation.
             let mut archived: Vec<_> = service_logs
                 .archived
                 .into_iter()
                 .filter(|log| log.path.as_str().contains("crypt/debug"))
-                .filter(|log| mtime_range.contains(log.modified))
                 .collect();
 
             // Since these logs can be spread out across multiple U.2 devices
@@ -725,15 +713,10 @@ impl LogsHandle {
                     .await?;
                 }
 
-                // Apply the mtime window and optional count cap to rotated
-                // extras, mirroring the archived-log handling above.
-                let mut rotated: Vec<&LogFile> = logs
-                    .rotated
-                    .iter()
-                    .copied()
-                    .rev()
-                    .filter(|log| mtime_range.contains(log.modified))
-                    .collect();
+                // Apply the optional count cap to rotated extras, mirroring
+                // the archived-log handling above.
+                let mut rotated: Vec<&LogFile> =
+                    logs.rotated.iter().copied().rev().collect();
                 if let Some(n) = max_rotated {
                     rotated.truncate(n);
                 }
@@ -769,41 +752,20 @@ pub struct LogTimeWindow {
 }
 
 impl LogTimeWindow {
-    fn to_mtime_range(self) -> MtimeRange {
-        MtimeRange {
-            start: self.start.map(chrono_to_jiff),
-            end: self.end.map(chrono_to_jiff),
+    /// Converts to oxlog's `DateRange`, substituting timestamp extremes for
+    /// unbounded sides. Returns `None` for a fully unbounded window so oxlog
+    /// skips filtering entirely.
+    ///
+    /// Note the argument order: `DateRange::new` takes the upper bound
+    /// (`before`) first.
+    fn to_date_range(self) -> Option<oxlog::DateRange> {
+        if self.start.is_none() && self.end.is_none() {
+            return None;
         }
-    }
-}
-
-/// Inclusive `mtime` window applied to archived and extra log files.
-#[derive(Clone, Copy, Debug, Default)]
-struct MtimeRange {
-    start: Option<jiff::Timestamp>,
-    end: Option<jiff::Timestamp>,
-}
-
-impl MtimeRange {
-    /// Returns true if a file with the given `modified` time should be
-    /// included. Files with unknown mtime (`None`) are included: when we
-    /// can't tell how old a file is, we keep it rather than risk dropping
-    /// data from a support bundle.
-    fn contains(&self, modified: Option<jiff::Timestamp>) -> bool {
-        let Some(mtime) = modified else {
-            return true;
-        };
-        if let Some(start) = self.start {
-            if mtime < start {
-                return false;
-            }
-        }
-        if let Some(end) = self.end {
-            if mtime > end {
-                return false;
-            }
-        }
-        true
+        let start =
+            self.start.map(chrono_to_jiff).unwrap_or(jiff::Timestamp::MIN);
+        let end = self.end.map(chrono_to_jiff).unwrap_or(jiff::Timestamp::MAX);
+        Some(oxlog::DateRange::new(end, start))
     }
 }
 
@@ -1028,50 +990,41 @@ mod test {
     use super::*;
 
     #[test]
-    fn test_mtime_range_contains() {
-        let ts = |secs| jiff::Timestamp::from_second(secs).unwrap();
+    fn test_log_time_window_to_date_range() {
+        let ts = |secs| DateTime::<Utc>::from_timestamp(secs, 0).unwrap();
+        let file_at = |secs| oxlog::LogFile {
+            path: "/t.log".into(),
+            size: None,
+            modified: Some(jiff::Timestamp::from_second(secs).unwrap()),
+        };
 
-        // An unbounded range includes everything, even unknown mtimes.
-        let unbounded = MtimeRange::default();
-        assert!(unbounded.contains(None));
-        assert!(unbounded.contains(Some(ts(0))));
+        // A fully unbounded window applies no filter at all.
+        assert!(LogTimeWindow::default().to_date_range().is_none());
 
-        let range = MtimeRange { start: Some(ts(100)), end: Some(ts(200)) };
+        // Both bounds set: inclusive on both ends. This also pins the
+        // (before, after) argument order of DateRange::new, which positional
+        // arguments would let us silently swap.
+        let range = LogTimeWindow { start: Some(ts(100)), end: Some(ts(200)) }
+            .to_date_range()
+            .unwrap();
+        assert!(file_at(100).in_date_range(&range));
+        assert!(file_at(150).in_date_range(&range));
+        assert!(file_at(200).in_date_range(&range));
+        assert!(!file_at(99).in_date_range(&range));
+        assert!(!file_at(201).in_date_range(&range));
 
-        // Unknown mtime is kept: when we can't tell how old a file is, we
-        // keep it rather than risk dropping data from a support bundle.
-        assert!(range.contains(None));
+        // One-sided windows leave the other side unbounded.
+        let from = LogTimeWindow { start: Some(ts(100)), end: None }
+            .to_date_range()
+            .unwrap();
+        assert!(file_at(1_000_000_000).in_date_range(&from));
+        assert!(!file_at(99).in_date_range(&from));
 
-        // Bounds are inclusive on both ends.
-        assert!(range.contains(Some(ts(100))));
-        assert!(range.contains(Some(ts(150))));
-        assert!(range.contains(Some(ts(200))));
-        assert!(!range.contains(Some(ts(99))));
-        assert!(!range.contains(Some(ts(201))));
-
-        // Half-open ranges bound only one side.
-        let from = MtimeRange { start: Some(ts(100)), end: None };
-        assert!(from.contains(Some(ts(1_000_000))));
-        assert!(!from.contains(Some(ts(99))));
-
-        let until = MtimeRange { start: None, end: Some(ts(200)) };
-        assert!(until.contains(Some(ts(0))));
-        assert!(!until.contains(Some(ts(201))));
-    }
-
-    #[test]
-    fn test_log_time_window_to_mtime_range() {
-        let chrono_ts = DateTime::<Utc>::from_timestamp(150, 0).unwrap();
-        let window =
-            LogTimeWindow { start: Some(chrono_ts), end: Some(chrono_ts) };
-        let range = window.to_mtime_range();
-        let expected = jiff::Timestamp::from_second(150).unwrap();
-        assert_eq!(range.start, Some(expected));
-        assert_eq!(range.end, Some(expected));
-
-        let unbounded = LogTimeWindow::default().to_mtime_range();
-        assert!(unbounded.start.is_none());
-        assert!(unbounded.end.is_none());
+        let until = LogTimeWindow { start: None, end: Some(ts(200)) }
+            .to_date_range()
+            .unwrap();
+        assert!(file_at(0).in_date_range(&until));
+        assert!(!file_at(201).in_date_range(&until));
     }
 
     #[test]
