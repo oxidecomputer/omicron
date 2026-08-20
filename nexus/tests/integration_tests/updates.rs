@@ -32,7 +32,6 @@ use tufaceous::edit::{Ed25519Key, RepositoryEditor, Root};
 use tufaceous_artifact::{Artifact, ArtifactSet, KnownArtifactTags, SpTags};
 
 use crate::integration_tests::target_release::set_target_release_for_mupdate_recovery_with_expected_status;
-use camino::Utf8Path;
 use nexus_lockstep_client::types::BlueprintTargetSet;
 use nexus_lockstep_client::types::SledSelector;
 use nexus_test_utils::background::run_blueprint_planner;
@@ -40,10 +39,10 @@ use nexus_types::deployment::ReconfiguratorConfig;
 use nexus_types::deployment::ReconfiguratorConfigParam;
 use nexus_types::deployment::UnstableReconfiguratorState;
 use omicron_nexus::app::DEBUG_DROPBOX_PRODUCER_RECONFIGURATOR;
+use omicron_test_utils::dev::dropbox::DropboxReader;
 use omicron_test_utils::dev::poll::CondCheckError;
 use omicron_test_utils::dev::poll::wait_for_condition;
 use omicron_uuid_kinds::GenericUuid;
-use std::collections::BTreeSet;
 
 const TRUST_ROOTS_URL: &str = "/v1/system/update/trust-roots";
 
@@ -1066,48 +1065,6 @@ async fn test_request_without_api_version(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(status.target_release.0, None);
 }
 
-/// Helper for reading files stored into a debug dropbox
-struct DropboxFiles<'a> {
-    path: &'a Utf8Path,
-    seen: BTreeSet<String>,
-}
-
-impl<'a> DropboxFiles<'a> {
-    fn new(path: &'a Utf8Path) -> DropboxFiles<'a> {
-        DropboxFiles { path, seen: BTreeSet::new() }
-    }
-
-    fn load_new(&mut self) -> Vec<UnstableReconfiguratorState> {
-        let mut rv = Vec::new();
-
-        // Since this is a test environment, we have control over the conditions
-        // that might cause transient failures or any unexpected data to appear.
-        // That's why we assert that the world looks precisely like we expect.
-        let dirents =
-            self.path.read_dir_utf8().expect("successfully list directory");
-        for maybe_entry in dirents {
-            let entry = maybe_entry.expect("successfully traverse directory");
-
-            // Ignore anything we've seen before.
-            if self.seen.contains(entry.file_name()) {
-                continue;
-            }
-            self.seen.insert(entry.file_name().to_string());
-
-            // We don't expect to find any non-files here.
-            assert!(entry.file_type().unwrap().is_file());
-            let file_str = std::fs::read_to_string(entry.path())
-                .expect("read dropbox file");
-            let state_file: UnstableReconfiguratorState =
-                serde_json::from_str(&file_str)
-                    .expect("valid Reconfigurator state file");
-            rv.push(state_file);
-        }
-
-        rv
-    }
-}
-
 /// Tests creation of debug files by the autoplanner and blueprint APIs
 // Define an extra sled agent so that we can expunge one.
 #[nexus_test(extra_sled_agents = 1)]
@@ -1116,12 +1073,13 @@ async fn test_debug_files(cptestctx: &ControlPlaneTestContext) {
     let opctx =
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
     let dropbox_path = cptestctx.debug_dropbox_path();
-    let dropbox_reconfigurator_path =
-        dropbox_path.join(DEBUG_DROPBOX_PRODUCER_RECONFIGURATOR);
-    let mut dropbox = DropboxFiles::new(&dropbox_reconfigurator_path);
+    let mut dropbox = DropboxReader::new(
+        &dropbox_path,
+        DEBUG_DROPBOX_PRODUCER_RECONFIGURATOR,
+    );
 
     // Verify initial state of the dropbox.
-    let initial = dropbox.load_new();
+    let initial = dropbox.load_new::<UnstableReconfiguratorState>();
     assert!(initial.is_empty(), "dropbox was not initially empty");
 
     // Fetch the initial blueprint information.
@@ -1139,7 +1097,7 @@ async fn test_debug_files(cptestctx: &ControlPlaneTestContext) {
         .expect("creating new blueprint")
         .into_inner()
         .id;
-    let files = dropbox.load_new();
+    let files = dropbox.load_new::<UnstableReconfiguratorState>();
     assert_eq!(files.len(), 1);
     let file = files.into_iter().next().expect("non-empty Vec");
     assert!(file.blueprints.contains_key(&bp2_id));
@@ -1154,7 +1112,7 @@ async fn test_debug_files(cptestctx: &ControlPlaneTestContext) {
         .expect("creating new blueprint")
         .into_inner()
         .id;
-    let files = dropbox.load_new();
+    let files = dropbox.load_new::<UnstableReconfiguratorState>();
     assert_eq!(files.len(), 1);
     let file = files.into_iter().next().expect("non-empty Vec");
     assert!(file.blueprints.contains_key(&bp3_id));
@@ -1172,7 +1130,7 @@ async fn test_debug_files(cptestctx: &ControlPlaneTestContext) {
         })
         .await
         .expect("setting target bp2");
-    let files = dropbox.load_new();
+    let files = dropbox.load_new::<UnstableReconfiguratorState>();
     assert_eq!(files.len(), 1);
     let file = files.into_iter().next().expect("non-empty Vec");
     assert!(file.blueprints.contains_key(&bp2_id));
@@ -1204,7 +1162,7 @@ async fn test_debug_files(cptestctx: &ControlPlaneTestContext) {
             .contains("parent blueprint is not the current target blueprint")
     );
 
-    let files = dropbox.load_new();
+    let files = dropbox.load_new::<UnstableReconfiguratorState>();
     assert!(files.is_empty());
 
     // Case: autoplanner generates a new blueprint.
@@ -1257,7 +1215,7 @@ async fn test_debug_files(cptestctx: &ControlPlaneTestContext) {
     .await
     .expect("autoplanner should have created new blueprint within 60s");
 
-    let files = dropbox.load_new();
+    let files = dropbox.load_new::<UnstableReconfiguratorState>();
     assert_eq!(files.len(), 1);
     let file = files.into_iter().next().expect("non-empty Vec");
     assert!(file.blueprints.contains_key(&bp2_id));
@@ -1268,10 +1226,9 @@ async fn test_debug_files(cptestctx: &ControlPlaneTestContext) {
     // Case: autoplanner produces no files when it doesn't generate a new
     // blueprint.
     let _ = run_blueprint_planner(&cptestctx.lockstep_client).await;
-    let files = dropbox.load_new();
+    let files = dropbox.load_new::<UnstableReconfiguratorState>();
     assert!(files.is_empty());
 
-    // XXX-dap catch the "intent" state by taking a database lock?
     // XXX-dap load them all into reconfigurator-cli?
     // XXX-dap test that the import path works?  if we don't already have one
 }

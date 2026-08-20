@@ -1134,6 +1134,7 @@ pub fn blueprint_debug_filename(
 // This is currently used in two places, but the main reason to factor it
 // separately is to test the intent file behavior.  This is otherwise difficult
 // to orchestrate in either of the consumers.
+#[derive(Debug)]
 pub struct SetTargetDebugFile<'a> {
     log: &'a Logger,
     producer: &'a Producer,
@@ -1198,6 +1199,7 @@ impl<'a> SetTargetDebugFile<'a> {
     }
 }
 
+#[derive(Debug)]
 pub struct SetTargetDebugFileWroteIntent<'a> {
     log: &'a Logger,
     producer: &'a Producer,
@@ -1275,12 +1277,19 @@ impl<'a> SetTargetDebugFileWroteIntent<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::Utc;
     use nexus_reconfigurator_planning::example::example;
+    use nexus_reconfigurator_preparation::reconfigurator_state_load;
+    use nexus_test_utils_macros::nexus_test;
     use nexus_types::deployment::BlueprintHostPhase2DesiredSlots;
+    use omicron_test_utils::dev::dropbox::TestDropbox;
     use omicron_test_utils::dev::test_setup_log;
     use omicron_uuid_kinds::MupdateOverrideUuid;
     use tufaceous_artifact::ArtifactHash;
     use tufaceous_artifact::ArtifactVersion;
+
+    type ControlPlaneTestContext =
+        nexus_test_utils::ControlPlaneTestContext<crate::Server>;
 
     fn make_os_artifact(
         version: &semver::Version,
@@ -1854,31 +1863,203 @@ mod tests {
         logctx.cleanup_successful();
     }
 
-    // /// Verifies writing Reconfigurator state in the success path
-    // XXX-dap
-    // #[test]
-    // async fn test_debug_files_success() {
-    //     const TEST_NAME: &str = "test_debug_files_success";
-    //     let logctx = test_setup_log(TEST_NAME);
+    /// Verifies writing Reconfigurator state in the success path
+    #[nexus_test(server = crate::Server)]
+    async fn test_debug_files(cptestctx: &ControlPlaneTestContext) {
+        let log = &cptestctx.logctx.log;
 
-    //     // We need an UnstableReconfiguratorState from a realistic system to
-    //     // start with.  Use a simulated system.
-    //     // XXX-dap all of this is private :(
-    //     let mut sim = ReconfiguratorSim::new(
-    //         &logctx.log.clone(),
-    //         Some(TEST_NAME.to_string()),
-    //     );
-    //     let msg = sim
-    //         .load_example(|builder| {
-    //             Ok(builder
-    //                 .nsleds(3)
-    //                 .ndisks_per_sled(3)
-    //                 .external_dns_count(3)
-    //                 .unwrap())
-    //         })
-    //         .expect("loaded example system");
-    //     eprintln!("{msg}");
+        // This whole block is just to get our hands on a complete, self-
+        // consistent Reconfigurator state and a blueprint consistent with it.
+        let (initial_state, blueprint) = {
+            let datastore = cptestctx.server.server_context().nexus.datastore();
+            let opctx = OpContext::for_tests(log.clone(), datastore.clone());
+            let nblueprints = 5;
+            let initial_state =
+                reconfigurator_state_load(&opctx, &datastore, nblueprints)
+                    .await
+                    .expect("loading test system state");
+            assert!(initial_state.intended_target_blueprint.is_none());
 
-    //     let initial_state = sim.current_state().to_serializable().unwrap();
-    // }
+            // Make a new blueprint.
+            let nexus_client = cptestctx.lockstep_client();
+            let blueprint = nexus_client
+                .blueprint_regenerate()
+                .await
+                .expect("creating new blueprint")
+                .into_inner();
+            (initial_state, blueprint)
+        };
+
+        // Case: it's an error to provide an initial state that doesn't have the
+        // intended blueprint field set.
+        let test_dropbox = TestDropbox::new(log.clone()).await;
+        let intent_state = initial_state.clone();
+        let error =
+            SetTargetDebugFile::new(log, test_dropbox.producer(), intent_state)
+                .unwrap_err();
+        println!("found error: {error:#}");
+        assert!(format!("{error:#}").contains("intended_target_blueprint"));
+        assert!(test_dropbox.new_reader().load_new::<()>().is_empty());
+
+        // Case: it's an error to provide an initial state referencing a
+        // blueprint that isn't in `blueprints`.
+        let test_dropbox = TestDropbox::new(log.clone()).await;
+        let mut intent_state = initial_state.clone();
+        intent_state.intended_target_blueprint = Some(blueprint.id);
+        let error =
+            SetTargetDebugFile::new(log, test_dropbox.producer(), intent_state)
+                .unwrap_err();
+        println!("found error: {error:#}");
+        assert!(format!("{error:#}").contains("intended_target_blueprint"));
+        assert!(test_dropbox.new_reader().load_new::<()>().is_empty());
+        test_dropbox.cleanup_successful();
+
+        // The remaining test cases assume a valid intended state.
+        let mut intent_state = initial_state.clone();
+        intent_state.intended_target_blueprint = Some(blueprint.id);
+        intent_state
+            .blueprints
+            .insert_unique(blueprint)
+            .expect("new blueprint");
+
+        test_debug_files_success(log, &intent_state).await;
+        test_debug_files_cancel(log, &intent_state).await;
+        test_debug_files_intent_fail(log, &intent_state).await;
+    }
+
+    /// Test case: happy path (writing "intent" file followed by "commit" file)
+    async fn test_debug_files_success(
+        log: &Logger,
+        intent_state: &UnstableReconfiguratorState,
+    ) {
+        let test_dropbox = TestDropbox::new(log.clone()).await;
+        let producer = test_dropbox.producer();
+        let mut reader = test_dropbox.new_reader();
+
+        // No files ought to have been created yet.
+        let files = reader.load_new::<UnstableReconfiguratorState>();
+        assert!(files.is_empty());
+
+        // Write the intent file and verify it.
+        let helper =
+            SetTargetDebugFile::new(log, producer, intent_state.clone())
+                .expect("valid input")
+                .write_intent(BlueprintDebugAction::TargetIntent)
+                .await
+                .expect("write intent file");
+
+        let files = reader.load_new::<UnstableReconfiguratorState>();
+        assert_eq!(files.len(), 1);
+        let file = files.into_iter().next().expect("non-empty Vec");
+        assert_eq!(file, *intent_state);
+        assert_eq!(0, reader.count_removed());
+
+        // Write the commit file and verify it.
+        let now = Utc::now();
+        let new_target = BlueprintTarget {
+            target_id: intent_state.intended_target_blueprint.unwrap(),
+            enabled: intent_state.target_blueprint.enabled,
+            time_made_target: now,
+        };
+        helper.write_committed(new_target, BlueprintDebugAction::Target).await;
+
+        let files = reader.load_new::<UnstableReconfiguratorState>();
+        assert_eq!(files.len(), 1);
+        let file = files.into_iter().next().expect("non-empty Vec");
+
+        let expected_state = UnstableReconfiguratorState {
+            target_blueprint: new_target,
+            intended_target_blueprint: None,
+            ..intent_state.clone()
+        };
+        assert_eq!(file, expected_state);
+
+        // The intent file ought to have been removed.
+        assert_eq!(1, reader.count_removed());
+        test_dropbox.cleanup_successful();
+    }
+
+    /// Test case: cancel writing new "set target" debug file after writing the
+    /// intent file
+    async fn test_debug_files_cancel(
+        log: &Logger,
+        intent_state: &UnstableReconfiguratorState,
+    ) {
+        let test_dropbox = TestDropbox::new(log.clone()).await;
+        let producer = test_dropbox.producer();
+        let mut reader = test_dropbox.new_reader();
+
+        // No files ought to have been created yet.
+        let files = reader.load_new::<UnstableReconfiguratorState>();
+        assert!(files.is_empty());
+
+        // Write the intent file and verify it.
+        let helper =
+            SetTargetDebugFile::new(log, producer, intent_state.clone())
+                .expect("valid input")
+                .write_intent(BlueprintDebugAction::TargetIntent)
+                .await
+                .expect("write intent file");
+
+        let files = reader.load_new::<UnstableReconfiguratorState>();
+        assert_eq!(files.len(), 1);
+        let file = files.into_iter().next().expect("non-empty Vec");
+        assert_eq!(file, *intent_state);
+
+        // Case: cancel.  This is what we'd do if we failed to make the new
+        // blueprint the target.  There should be nothing new in the dropbox and
+        // the previous file ought to have been removed.
+        helper.cancel().await;
+        let files = reader.load_new::<UnstableReconfiguratorState>();
+        assert!(files.is_empty());
+        assert_eq!(1, reader.count_removed());
+
+        test_dropbox.cleanup_successful();
+    }
+
+    /// Test case: exercise failure to write the intent file
+    async fn test_debug_files_intent_fail(
+        log: &Logger,
+        intent_state: &UnstableReconfiguratorState,
+    ) {
+        let test_dropbox = TestDropbox::new(log.clone()).await;
+        let (dir, producer) = test_dropbox.into_parts();
+
+        // Delete the directory so that the write below will fail.
+        dir.cleanup_successful();
+
+        // Attempt to write the intent file and verify the error.
+        let error =
+            SetTargetDebugFile::new(log, &producer, intent_state.clone())
+                .expect("valid input")
+                .write_intent(BlueprintDebugAction::TargetIntent)
+                .await
+                .expect_err("failure to write intent file");
+        let message = InlineErrorChain::new(&error);
+        println!("found error: {message}");
+        assert!(message.contains("I/O error"));
+    }
+
+    /// Test case: exercise failure to write the intent file
+    async fn test_debug_files_intent_fail(
+        log: &Logger,
+        intent_state: &UnstableReconfiguratorState,
+    ) {
+        let test_dropbox = TestDropbox::new(log.clone()).await;
+        let (dir, producer) = test_dropbox.into_parts();
+
+        // Delete the directory so that the write below will fail.
+        dir.cleanup_successful();
+
+        // Attempt to write the intent file and verify the error.
+        let error =
+            SetTargetDebugFile::new(log, &producer, intent_state.clone())
+                .expect("valid input")
+                .write_intent(BlueprintDebugAction::TargetIntent)
+                .await
+                .expect_err("failure to write intent file");
+        let message = InlineErrorChain::new(&error).to_string();
+        println!("found error: {message}");
+        assert!(message.contains("I/O error"));
+    }
 }
