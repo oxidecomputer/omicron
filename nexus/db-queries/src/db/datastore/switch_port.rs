@@ -365,6 +365,7 @@ impl DataStore {
         opctx: &OpContext,
         params: &networking::SwitchPortSettingsCreate,
         id: Option<Uuid>,
+        allow_ddm_traffic: bool,
     ) -> CreateResult<SwitchPortSettingsCombinedResult> {
         let err = OptionalError::new();
         let conn = self.pool_connection_authorized(opctx).await?;
@@ -375,7 +376,14 @@ impl DataStore {
             .transaction(&conn, |conn| {
                 let err = err.clone();
                 async move {
-                    do_switch_port_settings_create(&conn, id, params, err).await
+                    do_switch_port_settings_create(
+                        &conn,
+                        id,
+                        params,
+                        allow_ddm_traffic,
+                        err,
+                    )
+                    .await
                 }
             })
             .await
@@ -459,9 +467,32 @@ impl DataStore {
                 let create_err = create_err.clone();
                 let selector = NameOrId::Id(id);
                 async move {
+                    use nexus_db_schema::schema::switch_port_settings_port_config::dsl as port_config_dsl;
+
+                    // Until the rest of multirack is implemented, we don't
+                    // want to expose `allow_ddm_traffic` in the external API.
+                    // It's very possible that the actual external configuration
+                    // will look different. For now, we must just ensure that
+                    // a customer doesn't set this flag to true at RSS time
+                    // as we'll maintain whatever actual value was set during
+                    // RSS below. This allows us to test multirack during
+                    // implementation without making it customer visible.
+                    //
+                    // Since `allow_ddm_traffic` isn't part of the external API
+                    // it's absent from `params`. Read it back before the delete
+                    // and carry it into the recreate. Otherwise an operator
+                    // editing unrelated port settings would silently clear what
+                    // RSS configured.
+                    let allow_ddm_traffic: bool =
+                        port_config_dsl::switch_port_settings_port_config
+                            .filter(port_config_dsl::port_settings_id.eq(id))
+                            .select(port_config_dsl::allow_ddm_traffic)
+                            .get_result_async(&conn)
+                            .await?;
+
                     do_switch_port_settings_delete(&conn, &selector, delete_err).await?;
                     do_switch_port_settings_create(
-                        &conn, Some(id), params, create_err,
+                        &conn, Some(id), params, allow_ddm_traffic, create_err,
                     ).await
                 }
             })
@@ -1566,6 +1597,7 @@ async fn do_switch_port_settings_create(
     conn: &Connection<DTraceConnection<PgConnection>>,
     id: Option<Uuid>,
     params: &networking::SwitchPortSettingsCreate,
+    allow_ddm_traffic: bool,
     err: OptionalError<SwitchPortSettingsCreateError>,
 ) -> Result<SwitchPortSettingsCombinedResult, diesel::result::Error> {
     use nexus_db_schema::schema::{
@@ -1599,8 +1631,11 @@ async fn do_switch_port_settings_create(
     let psid = db_port_settings.identity.id;
 
     // add the port config
-    let port_config =
-        SwitchPortConfig::new(psid, params.port_config.geometry.into());
+    let port_config = SwitchPortConfig::new(
+        psid,
+        params.port_config.geometry.into(),
+        allow_ddm_traffic,
+    );
 
     let db_port_config: SwitchPortConfig =
         diesel::insert_into(port_config_dsl::switch_port_settings_port_config)
@@ -2462,8 +2497,14 @@ mod test {
             addresses: vec![],
         };
 
+        let allow_ddm_traffic = false;
         let settings_result = datastore
-            .switch_port_settings_create(&opctx, &settings, None)
+            .switch_port_settings_create(
+                &opctx,
+                &settings,
+                None,
+                allow_ddm_traffic,
+            )
             .await
             .unwrap();
 
@@ -2833,8 +2874,14 @@ mod test {
             }],
             addresses: vec![],
         };
+        let allow_ddm_traffic = false;
         let settings_result = datastore
-            .switch_port_settings_create(&opctx, &settings, None)
+            .switch_port_settings_create(
+                &opctx,
+                &settings,
+                None,
+                allow_ddm_traffic,
+            )
             .await
             .unwrap();
         datastore
@@ -3045,8 +3092,14 @@ mod test {
             addresses: vec![],
         };
 
+        let allow_ddm_traffic = false;
         let result = datastore
-            .switch_port_settings_create(&opctx, &settings, None)
+            .switch_port_settings_create(
+                &opctx,
+                &settings,
+                None,
+                allow_ddm_traffic,
+            )
             .await
             .expect("created settings");
 

@@ -3752,7 +3752,8 @@ CREATE TYPE IF NOT EXISTS omicron.public.switch_port_geometry AS ENUM (
 
 CREATE TABLE IF NOT EXISTS omicron.public.switch_port_settings_port_config (
     port_settings_id UUID PRIMARY KEY,
-    geometry omicron.public.switch_port_geometry
+    geometry omicron.public.switch_port_geometry,
+    allow_ddm_traffic BOOL NOT NULL DEFAULT false
 );
 
 CREATE TYPE IF NOT EXISTS omicron.public.switch_link_fec AS ENUM (
@@ -9261,7 +9262,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '291.0.0', NULL)
+    (TRUE, NOW(), NOW(), '292.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
