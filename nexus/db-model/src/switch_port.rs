@@ -435,11 +435,17 @@ impl Into<networking_types::SwitchPortSettingsGroup>
 pub struct SwitchPortConfig {
     pub port_settings_id: Uuid,
     pub geometry: SwitchPortGeometry,
+    /// Whether DDM traffic is permitted on this port.
+    pub allow_ddm_traffic: bool,
 }
 
 impl SwitchPortConfig {
-    pub fn new(port_settings_id: Uuid, geometry: SwitchPortGeometry) -> Self {
-        Self { port_settings_id, geometry }
+    pub fn new(
+        port_settings_id: Uuid,
+        geometry: SwitchPortGeometry,
+        allow_ddm_traffic: bool,
+    ) -> Self {
+        Self { port_settings_id, geometry, allow_ddm_traffic }
     }
 }
 
