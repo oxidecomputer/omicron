@@ -446,33 +446,6 @@
         }
       }
     },
-    "/rack-setup/config/recovery-user-password-hash": {
-      "put": {
-        "summary": "Update the RSS config recovery silo user password hash.",
-        "operationId": "put_rss_config_recovery_user_password_hash",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/PutRssRecoveryUserPasswordHash"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "204": {
-            "description": "resource updated"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
     "/reload-config": {
       "post": {
         "summary": "Instruct wicketd to reload its SMF config properties.",
@@ -2351,11 +2324,6 @@
         "minLength": 1,
         "maxLength": 63
       },
-      "NewPasswordHash": {
-        "title": "A password hash in PHC string format",
-        "description": "Password hashes must be in PHC (Password Hashing Competition) string format.  Passwords must be hashed with Argon2id.  Password hashes may be rejected if the parameters appear not to be secure enough.",
-        "type": "string"
-      },
       "Oui": {
         "description": "An Organization Unique Identifier.",
         "type": "array",
@@ -3184,17 +3152,6 @@
           "version": "0.1.2"
         },
         "type": "string"
-      },
-      "PutRssRecoveryUserPasswordHash": {
-        "type": "object",
-        "properties": {
-          "hash": {
-            "$ref": "#/components/schemas/NewPasswordHash"
-          }
-        },
-        "required": [
-          "hash"
-        ]
       },
       "RackInitUuid": {
         "x-rust-type": {

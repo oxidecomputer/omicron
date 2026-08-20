@@ -17787,7 +17787,6 @@ dependencies = [
  "dropshot",
  "gateway-client",
  "omicron-common",
- "omicron-passwords",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "schemars 0.8.22",
