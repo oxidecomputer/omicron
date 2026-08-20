@@ -131,6 +131,7 @@ async fn test_omdb_usage_errors() {
         &["nexus", "sleds"],
         &["sled-agent"],
         &["sled-agent", "zones"],
+        &["sled-agent", "network-config"],
         &["oximeter", "--help"],
         &["oxql", "--help"],
         // Mispelled argument

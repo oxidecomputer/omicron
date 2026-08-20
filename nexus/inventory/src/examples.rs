@@ -25,13 +25,8 @@ use nexus_types::inventory::ZpoolName;
 use omicron_cockroach_metrics::MetricValue;
 use omicron_cockroach_metrics::PrometheusMetrics;
 use omicron_common::api::external::ByteCount;
-use omicron_common::disk::DatasetConfig;
 use omicron_common::disk::DatasetKind;
 use omicron_common::disk::DatasetName;
-use omicron_common::disk::DiskVariant;
-use omicron_common::disk::M2Slot;
-use omicron_common::disk::OmicronPhysicalDiskConfig;
-use omicron_common::disk::SharedDatasetConfig;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
@@ -45,6 +40,12 @@ use sled_agent_resolvable_files_examples::NON_BOOT_PATHS;
 use sled_agent_resolvable_files_examples::NON_BOOT_UUID;
 use sled_agent_resolvable_files_examples::WriteInstallDatasetContext;
 use sled_agent_resolvable_files_examples::dataset_missing_error;
+use sled_agent_types::disk::DatasetConfig;
+use sled_agent_types::disk::DiskIdentity;
+use sled_agent_types::disk::DiskVariant;
+use sled_agent_types::disk::M2Slot;
+use sled_agent_types::disk::OmicronPhysicalDiskConfig;
+use sled_agent_types::disk::SharedDatasetConfig;
 use sled_agent_types::inventory::BootImageHeader;
 use sled_agent_types::inventory::BootPartitionDetails;
 use sled_agent_types::inventory::ConfigReconcilerInventory;
@@ -466,7 +467,7 @@ pub fn representative() -> Representative {
     let disks = vec![
         // Let's say we have one manufacturer for our M.2...
         InventoryDisk {
-            identity: omicron_common::disk::DiskIdentity {
+            identity: DiskIdentity {
                 vendor: "macrohard".to_string(),
                 model: "box".to_string(),
                 serial: "XXIV".to_string(),
@@ -481,7 +482,7 @@ pub fn representative() -> Representative {
         },
         // ... and a couple different vendors for our U.2s
         InventoryDisk {
-            identity: omicron_common::disk::DiskIdentity {
+            identity: DiskIdentity {
                 vendor: "memetendo".to_string(),
                 model: "swatch".to_string(),
                 serial: "0001".to_string(),
@@ -495,7 +496,7 @@ pub fn representative() -> Representative {
             slot_firmware_versions: vec![Some("EXAMP1".to_string())],
         },
         InventoryDisk {
-            identity: omicron_common::disk::DiskIdentity {
+            identity: DiskIdentity {
                 vendor: "memetendo".to_string(),
                 model: "swatch".to_string(),
                 serial: "0002".to_string(),
@@ -509,7 +510,7 @@ pub fn representative() -> Representative {
             slot_firmware_versions: vec![Some("EXAMP1".to_string())],
         },
         InventoryDisk {
-            identity: omicron_common::disk::DiskIdentity {
+            identity: DiskIdentity {
                 vendor: "tony".to_string(),
                 model: "craystation".to_string(),
                 serial: "5".to_string(),

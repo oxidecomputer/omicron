@@ -9,9 +9,8 @@ use std::collections::BTreeSet;
 use bootstrap_agent_lockstep_types::MultirackJoinRequest;
 use sled_agent_types::early_networking::{
     BgpConfig, BgpPeerConfig, ImportExportPolicy, LinkFec, LinkSpeed,
-    LldpAdminStatus, LldpPortConfig, MaxPathConfig, PortConfig,
-    RackNetworkConfig, RouterPeerType, SwitchSlot, UplinkAddressConfig,
-    UplinkPorts,
+    LldpAdminStatus, LldpPortConfig, MaxPathConfig, NumberedRouter, PortConfig,
+    RackNetworkConfig, SwitchSlot, UplinkAddressConfig, UplinkPorts,
 };
 use sled_hardware_types::BaseboardId;
 
@@ -49,9 +48,12 @@ fn main() {
             bgp_peers: vec![BgpPeerConfig {
                 asn: 65002,
                 port: "qsfp0".to_owned(),
-                addr: RouterPeerType::Numbered {
-                    ip: "172.20.16.43".parse().unwrap(),
-                },
+                addr: NumberedRouter::new(
+                    "172.20.16.43".parse().unwrap(),
+                    None,
+                )
+                .expect("bgp peer addressing is valid")
+                .into(),
                 hold_time: Some(6),
                 idle_hold_time: Some(0),
                 delay_open: Some(3),

@@ -444,7 +444,7 @@ assert_cmd = "2.0.17"
 async-bb8-diesel = "0.2"
 async-recursion = "1.1.1"
 async-trait = "0.1.89"
-attest-mock = { git = "https://github.com/oxidecomputer/dice-util", rev = "10952e8d9599b735b85d480af3560a11700e5b64" }
+attest-mock = { git = "https://github.com/oxidecomputer/dice-util", rev = "4a39ef08d81e5177edee0bddb1146032aa21074d" }
 atomicwrites = "0.4.4"
 authz-macros = { path = "nexus/authz-macros" }
 backoff = { version = "0.4.0", features = [ "tokio" ] }
@@ -752,11 +752,11 @@ progenitor-extras = "0.2.0"
 # NOTE: if you change the pinned revision of the `bhyve_api` and propolis
 # dependencies, you must also update the references in package-manifest.toml to
 # match the new revision.
-bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "6885fe0476bdd3767449065698fe0aa763f98a4d" }
-propolis-api-types-versions = { git = "https://github.com/oxidecomputer/propolis", rev = "6885fe0476bdd3767449065698fe0aa763f98a4d" }
-propolis_api_types = { git = "https://github.com/oxidecomputer/propolis", rev = "6885fe0476bdd3767449065698fe0aa763f98a4d" }
-propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "6885fe0476bdd3767449065698fe0aa763f98a4d" }
-propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "6885fe0476bdd3767449065698fe0aa763f98a4d" }
+bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "3c07d60a77d528018fded2f0a434cafe724f3423" }
+propolis-api-types-versions = { git = "https://github.com/oxidecomputer/propolis", rev = "3c07d60a77d528018fded2f0a434cafe724f3423" }
+propolis_api_types = { git = "https://github.com/oxidecomputer/propolis", rev = "3c07d60a77d528018fded2f0a434cafe724f3423" }
+propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "3c07d60a77d528018fded2f0a434cafe724f3423" }
+propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "3c07d60a77d528018fded2f0a434cafe724f3423" }
 # NOTE: see above!
 proptest = "1.11.0"
 qorb = "0.4.1"
@@ -844,8 +844,8 @@ slog-term = "2.9.1"
 smf = "0.2"
 socket2 = { version = "0.5", features = ["all"] }
 sp-sim = { path = "sp-sim" }
-sprockets-tls = { git = "https://github.com/oxidecomputer/sprockets.git", rev = "68a4b3bf819722f9f57a3f0c99e1393ed01ba392" }
-sprockets-tls-test-utils = { git = "https://github.com/oxidecomputer/sprockets.git", rev = "68a4b3bf819722f9f57a3f0c99e1393ed01ba392" }
+sprockets-tls = { git = "https://github.com/oxidecomputer/sprockets.git", rev = "a233079e04d9688454486c452b694587a28c5257" }
+sprockets-tls-test-utils = { git = "https://github.com/oxidecomputer/sprockets.git", rev = "a233079e04d9688454486c452b694587a28c5257" }
 sqlformat = "0.3.5"
 sqlparser = { version = "0.61.0", features = [ "visitor" ] }
 static_assertions = "1.1.0"
@@ -909,7 +909,7 @@ wicketd-commission-types-versions = { path = "wicketd-commission-types/versions"
 x509-cert = { version = "0.2.5", default-features = false }
 xshell = "0.2.7"
 zerocopy = "0.8.26"
-zeroize = { version = "1.8.1", features = ["zeroize_derive", "std"] }
+zeroize = { version = "1.8.1", features = ["zeroize_derive", "serde", "std"] }
 zfs-test-harness = { path = "sled-storage/zfs-test-harness" }
 zip = { version = "4.2.0", default-features = false, features = ["deflate","bzip2"] }
 zone = { version = "0.3.1", default-features = false, features = ["async"] }

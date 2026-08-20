@@ -121,6 +121,7 @@ use quiesce::cmd_nexus_quiesce;
 use reconfigurator_config::ReconfiguratorConfigArgs;
 use reconfigurator_config::cmd_nexus_reconfigurator_config;
 use serde::Deserialize;
+use sled_agent_types::disk::DiskIdentity;
 use sled_hardware_types::BaseboardId;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
@@ -5398,7 +5399,7 @@ async fn cmd_nexus_sled_expunge_disk_with_datastore(
         .context("loading latest collection")?
     {
         Some(collection) => {
-            let disk_identity = omicron_common::disk::DiskIdentity {
+            let disk_identity = DiskIdentity {
                 vendor: physical_disk.vendor.clone(),
                 serial: physical_disk.serial.clone(),
                 model: physical_disk.model.clone(),

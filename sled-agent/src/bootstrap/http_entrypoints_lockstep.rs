@@ -4,9 +4,10 @@
 
 //! HTTP entrypoint functions for the bootstrap agent's lockstep API.
 //!
-//! This API handles rack initialization and reset operations. It is a lockstep
-//! API, meaning the client and server are always deployed together and only
-//! need to support a single version.
+//! This API primarily handles rack initialization; it also provides some
+//! read-only detailed debugging information intended for consumption only by
+//! `omdb`. It is a lockstep API, meaning the client and server are always
+//! deployed together and only need to support a single version.
 
 use std::net::Ipv6Addr;
 
@@ -24,6 +25,7 @@ use bootstrap_agent_lockstep_types::RackInitializeRequest;
 use bootstrap_agent_lockstep_types::RackOperationStatus;
 use bootstrap_agent_lockstep_types::ReplicatedNetworkConfig;
 use bootstrap_agent_lockstep_types::ReplicatedNetworkConfigContents;
+use bootstrap_agent_lockstep_types::scrimlet_reconcilers::ScrimletReconcilersStatus;
 use dropshot::ClientErrorStatusCode;
 use dropshot::{
     ApiDescription, HttpError, HttpResponseOk, RequestContext, TypedBody,
@@ -34,6 +36,7 @@ use sled_agent_bootstrap_common::RssContext;
 use sled_agent_config_reconciler::InternalDisksReceiver;
 use sled_agent_measurements::MeasurementsHandle;
 use sled_agent_rack_setup::RackInitializeRequestParams;
+use sled_agent_scrimlet_reconcilers::ScrimletReconcilers;
 use slog::Logger;
 use sprockets_tls::keys::SprocketsConfig;
 use std::sync::Arc;
@@ -51,6 +54,7 @@ pub(crate) struct BootstrapServerContext {
     pub(crate) sprockets_config: SprocketsConfig,
     pub(crate) trust_quorum_handle: trust_quorum::NodeTaskHandle,
     pub(crate) measurements: Arc<MeasurementsHandle>,
+    pub(crate) scrimlet_reconcilers: Arc<ScrimletReconcilers>,
 }
 
 impl From<&BootstrapServerContext> for RssContext {
@@ -135,6 +139,13 @@ impl BootstrapAgentLockstepApi for BootstrapAgentLockstepImpl {
             },
         );
         Ok(HttpResponseOk(ReplicatedNetworkConfig { contents }))
+    }
+
+    async fn scrimlet_reconcilers_status_for_debug(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<ScrimletReconcilersStatus>, HttpError> {
+        let ctx = rqctx.context();
+        Ok(HttpResponseOk(ctx.scrimlet_reconcilers.status()))
     }
 
     async fn baseboard_ids(
