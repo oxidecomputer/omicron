@@ -180,7 +180,10 @@ impl DataStore {
             .do_update()
             .set((
                 dsl::bp_availability.eq(excluded(dsl::bp_availability)),
-                // Set the generation to NULL.
+                // Set the generation to NULL. This is akin to setting a
+                // generation of infinity -- decommissioned is a terminal state,
+                // and both this upsert and the active one above filter out
+                // already-decommissioned rows.
                 dsl::update_disposition_generation
                     .eq(excluded(dsl::update_disposition_generation)),
                 dsl::blueprint_id.eq(excluded(dsl::blueprint_id)),

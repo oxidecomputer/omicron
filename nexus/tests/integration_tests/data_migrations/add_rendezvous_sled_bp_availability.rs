@@ -120,8 +120,8 @@ async fn after_impl(ctx: &MigrationContext<'_>) {
         })
         .collect::<Vec<_>>();
 
-    // Only sleds from the newest target blueprint are backfilled (
-    // SLED_OTHER_BP is excluded).
+    // Only sleds from the newest target blueprint are backfilled
+    // (SLED_OTHER_BP is excluded).
     assert_eq!(
         got,
         vec![

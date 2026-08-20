@@ -278,24 +278,35 @@ pub(crate) async fn reconcile_sled_blueprint_availability(
         }
     }
 
-    // Rows still here are for sleds the blueprint doesn't mention -- this is
-    // only possible on a stale blueprint predating a sled another Nexus already
-    // recorded. We leave them untouched.
-    let num_not_in_blueprint = existing_db_sleds.len();
-    if num_not_in_blueprint > 0 {
-        let sled_ids = existing_db_sleds
-            .iter()
-            .map(|row| row.sled_id())
-            .collect::<Vec<_>>();
+    // Rows still here are for sleds the blueprint doesn't mention. We leave
+    // them untouched either way, but account for them separately:
+    //
+    // * An active row can only be left over on a stale blueprint predating a
+    //   sled another Nexus already recorded, so it's worth calling out.
+    // * A decommissioned row is a terminal tombstone. The blueprint doesn't
+    //   prune decommissioned sleds today, but once it does this will be the
+    //   steady state for every pruned sled, so it isn't noteworthy.
+    let mut active_not_in_blueprint = Vec::new();
+    for row in &existing_db_sleds {
+        match row.state()? {
+            SledBpAvailabilityState::Active { .. } => {
+                active_not_in_blueprint.push(row.sled_id());
+            }
+            SledBpAvailabilityState::Decommissioned => {
+                stats.num_decommissioned_not_in_blueprint += 1;
+            }
+        }
+    }
+    stats.num_not_in_blueprint = active_not_in_blueprint.len();
+    if !active_not_in_blueprint.is_empty() {
         info!(
             opctx.log,
-            "left rows for sleds absent from the target blueprint untouched; \
-             this Nexus may be acting on a stale blueprint";
-            "num_not_in_blueprint" => num_not_in_blueprint,
-            "sled_ids" => ?sled_ids,
+            "left active rows for sleds absent from the target blueprint \
+             untouched; this Nexus may be acting on a stale blueprint";
+            "num_not_in_blueprint" => stats.num_not_in_blueprint,
+            "sled_ids" => ?active_not_in_blueprint,
         );
     }
-    stats.num_not_in_blueprint = num_not_in_blueprint;
 
     Ok(stats)
 }
@@ -460,8 +471,11 @@ mod tests {
             match (self.in_database, self.in_blueprint) {
                 // Not mentioned by the blueprint.
                 (None, None) => {}
-                (Some(_), None) => {
+                (Some(DbPrep::Active(_)), None) => {
                     stats.num_not_in_blueprint += 1;
+                }
+                (Some(DbPrep::Decommissioned), None) => {
+                    stats.num_decommissioned_not_in_blueprint += 1;
                 }
                 // Fresh insert driven by an active blueprint sled.
                 (None, Some(BlueprintPrep::Active(bp))) => {

@@ -672,9 +672,20 @@ pub struct SledBlueprintAvailabilityRendezvousStats {
     /// tombstone (possibly written by a concurrent Nexus during this pass).
     pub num_already_decommissioned: usize,
 
-    /// Number of rows for sleds the target blueprint doesn't mention. These are
-    /// left untouched.
+    /// Number of active rows for sleds the target blueprint doesn't mention.
+    /// These are left untouched.
+    ///
+    /// This can only happen if this Nexus is acting on a stale blueprint that
+    /// predates a sled another Nexus already recorded.
     pub num_not_in_blueprint: usize,
+
+    /// Number of decommissioned rows for sleds the target blueprint doesn't
+    /// mention. These are terminal tombstones and are left untouched.
+    ///
+    /// Today the blueprint never prunes decommissioned sleds, so this is
+    /// expected to be zero; once it does, this becomes the steady state for
+    /// every pruned sled.
+    pub num_decommissioned_not_in_blueprint: usize,
 }
 
 impl slog::KV for SledBlueprintAvailabilityRendezvousStats {
@@ -691,6 +702,7 @@ impl slog::KV for SledBlueprintAvailabilityRendezvousStats {
             num_decommissioned,
             num_already_decommissioned,
             num_not_in_blueprint,
+            num_decommissioned_not_in_blueprint,
         } = *self;
         serializer
             .emit_usize("num_marked_available".into(), num_marked_available)?;
@@ -711,6 +723,10 @@ impl slog::KV for SledBlueprintAvailabilityRendezvousStats {
         )?;
         serializer
             .emit_usize("num_not_in_blueprint".into(), num_not_in_blueprint)?;
+        serializer.emit_usize(
+            "num_decommissioned_not_in_blueprint".into(),
+            num_decommissioned_not_in_blueprint,
+        )?;
         Ok(())
     }
 }

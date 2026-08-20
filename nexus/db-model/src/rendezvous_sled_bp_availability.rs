@@ -95,16 +95,7 @@ pub enum SledBpAvailabilityState {
 ///
 /// A row is created for each sled observed in a target blueprint by a
 /// rendezvous pass (or by the migration backfill).
-#[derive(
-    Queryable,
-    Insertable,
-    Debug,
-    Clone,
-    Selectable,
-    Deserialize,
-    Serialize,
-    PartialEq,
-)]
+#[derive(Queryable, Insertable, Debug, Clone, Selectable, PartialEq)]
 #[diesel(table_name = rendezvous_sled_bp_availability)]
 pub struct RendezvousSledBpAvailability {
     sled_id: DbTypedUuid<SledKind>,

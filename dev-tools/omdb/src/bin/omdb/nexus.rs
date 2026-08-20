@@ -1739,32 +1739,36 @@ fn print_task_blueprint_rendezvous(details: &serde_json::Value) {
 
             println!("    sled_blueprint_availability rendezvous counts:");
             println!(
-                "        num_marked_available:       {}",
+                "        num_marked_available:                {}",
                 sled_blueprint_availability.num_marked_available
             );
             println!(
-                "        num_marked_unavailable:     {}",
+                "        num_marked_unavailable:              {}",
                 sled_blueprint_availability.num_marked_unavailable
             );
             println!(
-                "        num_unchanged:              {}",
+                "        num_unchanged:                       {}",
                 sled_blueprint_availability.num_unchanged
             );
             println!(
-                "        num_invariant_violations:   {}",
+                "        num_invariant_violations:            {}",
                 sled_blueprint_availability.num_invariant_violations
             );
             println!(
-                "        num_decommissioned:         {}",
+                "        num_decommissioned:                  {}",
                 sled_blueprint_availability.num_decommissioned
             );
             println!(
-                "        num_already_decommissioned: {}",
+                "        num_already_decommissioned:          {}",
                 sled_blueprint_availability.num_already_decommissioned
             );
             println!(
-                "        num_not_in_blueprint:       {}",
+                "        num_not_in_blueprint:                {}",
                 sled_blueprint_availability.num_not_in_blueprint
+            );
+            println!(
+                "        num_decommissioned_not_in_blueprint: {}",
+                sled_blueprint_availability.num_decommissioned_not_in_blueprint
             );
         }
     }

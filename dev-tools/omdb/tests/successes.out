@@ -662,13 +662,14 @@ task: "blueprint_rendezvous"
         num_tombstoned:         0
         num_already_tombstoned: 0
     sled_blueprint_availability rendezvous counts:
-        num_marked_available:       0
-        num_marked_unavailable:     0
-        num_unchanged:              2
-        num_invariant_violations:   0
-        num_decommissioned:         0
-        num_already_decommissioned: 0
-        num_not_in_blueprint:       0
+        num_marked_available:                0
+        num_marked_unavailable:              0
+        num_unchanged:                       2
+        num_invariant_violations:            0
+        num_decommissioned:                  0
+        num_already_decommissioned:          0
+        num_not_in_blueprint:                0
+        num_decommissioned_not_in_blueprint: 0
 
 task: "crdb_node_id_collector"
   configured period: every <REDACTED_DURATION>m
@@ -1383,13 +1384,14 @@ task: "blueprint_rendezvous"
         num_tombstoned:         0
         num_already_tombstoned: 0
     sled_blueprint_availability rendezvous counts:
-        num_marked_available:       0
-        num_marked_unavailable:     0
-        num_unchanged:              2
-        num_invariant_violations:   0
-        num_decommissioned:         0
-        num_already_decommissioned: 0
-        num_not_in_blueprint:       0
+        num_marked_available:                0
+        num_marked_unavailable:              0
+        num_unchanged:                       2
+        num_invariant_violations:            0
+        num_decommissioned:                  0
+        num_already_decommissioned:          0
+        num_not_in_blueprint:                0
+        num_decommissioned_not_in_blueprint: 0
 
 task: "crdb_node_id_collector"
   configured period: every <REDACTED_DURATION>m
