@@ -673,6 +673,7 @@ fn build_port_config(
         autoneg: config.autoneg,
         lldp: config.lldp.clone(),
         tx_eq: config.tx_eq,
+        allow_ddm_traffic: false,
     })
 }
 

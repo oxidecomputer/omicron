@@ -42,7 +42,7 @@ pub mod diagnostics {
     pub use crate::v1::diagnostics::SledDiagnosticsLogsDownloadPathParam;
     pub use crate::v1::diagnostics::SledDiagnosticsLogsDownloadPathParm;
 
-    pub use crate::v48::diagnostics::SledDiagnosticsLogsDownloadQueryParam;
+    pub use crate::v49::diagnostics::SledDiagnosticsLogsDownloadQueryParam;
 }
 
 pub mod disk {
@@ -92,11 +92,12 @@ pub mod early_networking {
     pub use crate::v47::early_networking::BgpPeerConfig;
     pub use crate::v47::early_networking::EmptyUplinkPortsError;
     pub use crate::v47::early_networking::NumberedRouter;
-    pub use crate::v47::early_networking::PortConfig;
-    pub use crate::v47::early_networking::RackNetworkConfig;
     pub use crate::v47::early_networking::RouterPeerType;
     pub use crate::v47::early_networking::UnnumberedRouter;
-    pub use crate::v47::early_networking::UplinkPorts;
+
+    pub use crate::v48::early_networking::PortConfig;
+    pub use crate::v48::early_networking::RackNetworkConfig;
+    pub use crate::v48::early_networking::UplinkPorts;
 }
 
 pub mod firewall_rules {
@@ -265,8 +266,8 @@ pub mod system_networking {
 
     pub use crate::v39::system_networking::BlueprintExternalNetworkingConfig;
 
-    pub use crate::v47::system_networking::SystemNetworkingConfig;
-    pub use crate::v47::system_networking::WriteNetworkConfigRequest;
+    pub use crate::v48::system_networking::SystemNetworkingConfig;
+    pub use crate::v48::system_networking::WriteNetworkConfigRequest;
 }
 
 pub mod trust_quorum {

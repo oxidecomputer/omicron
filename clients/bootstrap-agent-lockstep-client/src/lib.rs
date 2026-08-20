@@ -42,6 +42,8 @@ progenitor::generate_api!(
         RssStep = bootstrap_agent_lockstep_types::RssStep,
         ScrimletReconcilersStatus = bootstrap_agent_lockstep_types::scrimlet_reconcilers::ScrimletReconcilersStatus,
         ServiceIpPoolConfig = bootstrap_agent_lockstep_types::ServiceIpPoolConfig,
+        SledAgentInfo = bootstrap_agent_lockstep_types::SledAgentInfo,
+        StartSledAgentStatus = bootstrap_agent_lockstep_types::StartSledAgentStatus,
         SwitchSlot = sled_agent_types::early_networking::SwitchSlot,
         TxEqConfig = sled_agent_types::early_networking::TxEqConfig,
         UplinkAddressConfig = sled_agent_types::early_networking::UplinkAddressConfig,

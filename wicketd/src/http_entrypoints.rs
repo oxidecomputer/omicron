@@ -176,22 +176,6 @@ impl WicketdApi for WicketdApiImpl {
         Ok(HttpResponseOk(GetBgpAuthKeyInfoResponse { data }))
     }
 
-    async fn put_bgp_auth_key(
-        rqctx: RequestContext<Self::Context>,
-        params: Path<PutBgpAuthKeyParams>,
-        body: TypedBody<PutBgpAuthKeyBody>,
-    ) -> Result<HttpResponseOk<PutBgpAuthKeyResponse>, HttpError> {
-        let ctx = rqctx.context();
-        let params = params.into_inner();
-
-        let mut config = ctx.rss_or_multirack_join_config.lock().unwrap();
-        let status = config
-            .set_bgp_auth_key(params.key_id, body.into_inner().key)
-            .map_err(|err| HttpError::for_bad_request(None, err.to_string()))?;
-
-        Ok(HttpResponseOk(PutBgpAuthKeyResponse { status }))
-    }
-
     async fn put_rss_config_recovery_user_password_hash(
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<PutRssRecoveryUserPasswordHash>,

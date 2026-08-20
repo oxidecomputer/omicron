@@ -396,50 +396,6 @@
         }
       }
     },
-    "/rack-setup/config/bgp/auth-key/{key_id}": {
-      "put": {
-        "summary": "Set the BGP authentication key for a particular key ID.",
-        "operationId": "put_bgp_auth_key",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "key_id",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/BgpAuthKeyId"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/PutBgpAuthKeyBody"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PutBgpAuthKeyResponse"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
     "/rack-setup/config/multirack": {
       "get": {
         "summary": "Get the current status of the multirack join configuration.",
@@ -919,31 +875,6 @@
         "required": [
           "part_number",
           "serial_number"
-        ]
-      },
-      "BgpAuthKey": {
-        "description": "Describes the actual authentication key to use with a BGP peer.\n\nCurrently, only TCP-MD5 authentication is supported.",
-        "oneOf": [
-          {
-            "description": "TCP-MD5 authentication.",
-            "type": "object",
-            "properties": {
-              "key": {
-                "description": "The pre-shared key.",
-                "type": "string"
-              },
-              "kind": {
-                "type": "string",
-                "enum": [
-                  "tcp_md5"
-                ]
-              }
-            },
-            "required": [
-              "key",
-              "kind"
-            ]
-          }
         ]
       },
       "BgpAuthKeyId": {
@@ -3254,28 +3185,6 @@
         },
         "type": "string"
       },
-      "PutBgpAuthKeyBody": {
-        "type": "object",
-        "properties": {
-          "key": {
-            "$ref": "#/components/schemas/BgpAuthKey"
-          }
-        },
-        "required": [
-          "key"
-        ]
-      },
-      "PutBgpAuthKeyResponse": {
-        "type": "object",
-        "properties": {
-          "status": {
-            "$ref": "#/components/schemas/SetBgpAuthKeyStatus"
-          }
-        },
-        "required": [
-          "status"
-        ]
-      },
       "PutRssRecoveryUserPasswordHash": {
         "type": "object",
         "properties": {
@@ -4085,31 +3994,6 @@
           "description",
           "name",
           "ranges"
-        ]
-      },
-      "SetBgpAuthKeyStatus": {
-        "oneOf": [
-          {
-            "description": "The key was accepted and replaced an old key.",
-            "type": "string",
-            "enum": [
-              "replaced"
-            ]
-          },
-          {
-            "description": "The key was accepted, and is the same as the existing key.",
-            "type": "string",
-            "enum": [
-              "unchanged"
-            ]
-          },
-          {
-            "description": "The key was accepted and is new.",
-            "type": "string",
-            "enum": [
-              "added"
-            ]
-          }
         ]
       },
       "Sff8636Datapath": {
