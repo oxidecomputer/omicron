@@ -32,3 +32,5 @@ pub mod latest;
 pub mod v1;
 #[path = "full_service_ip_pool_details/mod.rs"]
 pub mod v2;
+#[path = "bgp_peer_src_addr/mod.rs"]
+pub mod v3;

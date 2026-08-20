@@ -178,6 +178,7 @@ impl_enum_type!(
 
     Omdb => b"omdb"
     Unrecoverable => b"unrecoverable"
+    Orphaned => b"orphaned"
 );
 
 impl_enum_type!(
@@ -208,6 +209,14 @@ impl SagaState {
     /// Sagas that are Done don't need to be run anymore. Sagas that are
     /// Abandoned have been explicitly opted out of being recovered.
     pub const RECOVERY_CANDIDATE_STATES: &'static [Self] =
+        &[Self::Running, Self::Unwinding];
+
+    /// A saga must be in this set of states to be a candidate for orphan
+    /// saga abandonment.
+    ///
+    /// Sagas that are Done finished successfully and are not orphans. Sagas
+    /// that are Abandoned do not need to be abandoned again.
+    pub const ORPHAN_ABANDONMENT_CANDIDATE_STATES: &'static [Self] =
         &[Self::Running, Self::Unwinding];
 }
 
@@ -728,6 +737,93 @@ where
 
     fn build(row: Self::Row) -> deserialize::Result<Self> {
         Ok(LoadedSaga(SagaRow::from_columns(row)))
+    }
+}
+
+/// The subset of a `saga` row needed to identify and classify a saga,
+/// omitting the DAG (by far the widest column in the table).
+///
+/// Used by queries that inspect saga state in bulk, like fault-management
+/// analysis, where fetching the DAG for every row would be wasteful.
+///
+/// As with [`Saga`], the flat `saga_state` column and the three nullable
+/// abandon columns are bundled into a [`SagaExecState`], validated during
+/// deserialization. Loading is all-or-nothing: a row that fails validation
+/// fails the entire query.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SagaSummary {
+    pub id: SagaId,
+    pub name: String,
+    pub time_created: chrono::DateTime<chrono::Utc>,
+    pub saga_state: SagaExecState,
+    pub current_sec: Option<SecId>,
+}
+
+// The columns backing a `SagaSummary`, in `Selectable` (expression) and
+// `Queryable::Row` (deserialized value) form.
+type SagaSummarySelection = (
+    saga::id,
+    saga::name,
+    saga::time_created,
+    saga::saga_state,
+    saga::current_sec,
+    saga::abandon_time,
+    saga::abandon_reason,
+    saga::abandon_comment,
+);
+type SagaSummaryColumns = (
+    SagaId,
+    String,
+    DateTime<Utc>,
+    SagaState,
+    Option<SecId>,
+    Option<DateTime<Utc>>,
+    Option<SagaReasonAbandoned>,
+    Option<String>,
+);
+
+impl diesel::Selectable<Pg> for SagaSummary {
+    type SelectExpression = SagaSummarySelection;
+
+    fn construct_selection() -> Self::SelectExpression {
+        (
+            saga::id,
+            saga::name,
+            saga::time_created,
+            saga::saga_state,
+            saga::current_sec,
+            saga::abandon_time,
+            saga::abandon_reason,
+            saga::abandon_comment,
+        )
+    }
+}
+
+impl<ST> diesel::deserialize::Queryable<ST, Pg> for SagaSummary
+where
+    SagaSummaryColumns: diesel::deserialize::FromStaticSqlRow<ST, Pg>,
+{
+    type Row = SagaSummaryColumns;
+
+    fn build(row: Self::Row) -> deserialize::Result<Self> {
+        let (
+            id,
+            name,
+            time_created,
+            saga_state,
+            current_sec,
+            abandon_time,
+            abandon_reason,
+            abandon_comment,
+        ) = row;
+        let saga_state = SagaExecState::try_from_columns(
+            id,
+            saga_state,
+            abandon_time,
+            abandon_reason,
+            abandon_comment,
+        )?;
+        Ok(SagaSummary { id, name, time_created, saga_state, current_sec })
     }
 }
 

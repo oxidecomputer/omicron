@@ -9,9 +9,10 @@ use camino::{Utf8Path, Utf8PathBuf};
 use derive_more::From;
 use iddqd::{IdOrdItem, id_upcast};
 use key_manager::StorageKeyRequester;
-use omicron_common::disk::{DiskIdentity, DiskVariant};
 use omicron_common::zpool_name::ZpoolName;
 use omicron_uuid_kinds::ZpoolUuid;
+use sled_agent_types::disk::DiskIdentity;
+use sled_agent_types::disk::DiskVariant;
 use sled_hardware::{
     DiskFirmware, Partition, PooledDisk, PooledDiskError, UnparsedDisk,
 };

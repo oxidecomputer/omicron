@@ -59,7 +59,7 @@ progenitor::generate_api!(
         Ipv6Range = omicron_common::address::Ipv6Range,
         LinkFec = sled_agent_types::early_networking::LinkFec,
         LinkSpeed = sled_agent_types::early_networking::LinkSpeed,
-        M2Slot = installinator_common::M2Slot,
+        M2Slot = sled_agent_types::disk::M2Slot,
         PortConfigV2 = omicron_common::api::internal::shared::PortConfigV2,
         ProgressEventForInstallinatorSpec = installinator_common::ProgressEvent,
         ProgressEventForUplinkPreflightSpec = wicket_common::preflight_check::ProgressEvent,

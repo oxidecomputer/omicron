@@ -15,6 +15,7 @@ use nexus_db_queries::db;
 use nexus_db_queries::db::datastore::sled::SledReservationReason;
 use nexus_types::deployment::DiskFilter;
 use nexus_types::deployment::SledFilter;
+use nexus_types::external_api;
 use nexus_types::external_api::path_params;
 use nexus_types::external_api::physical_disk::PhysicalDiskPolicy;
 use nexus_types::external_api::sled::{SledPolicy, SledProvisionPolicy};
@@ -170,10 +171,16 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
-    ) -> ListResultVec<db::model::Sled> {
-        self.db_datastore
+    ) -> ListResultVec<external_api::sled::Sled> {
+        let inv = self.inventory_load_rx().borrow().clone();
+        let sleds = self
+            .db_datastore
             .sled_list(&opctx, &pagparams, SledFilter::InService)
-            .await
+            .await?
+            .into_iter()
+            .map(|sled| sled.to_external_api(&inv))
+            .collect::<Vec<_>>();
+        Ok(sleds)
     }
 
     pub async fn sled_client(
