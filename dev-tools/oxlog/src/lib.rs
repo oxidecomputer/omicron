@@ -77,16 +77,20 @@ pub struct Filter {
     /// Show a log file even if is has zero size.
     pub show_empty: bool,
 
-    /// Show a log file if its `mtime` falls within this date range.
+    /// Show a log file if its content may overlap this date range, judged
+    /// by its creation time and `mtime` (see [`LogFile::in_date_range`]).
     pub date_range: Option<DateRange>,
 }
 
-/// The range of time a file's `mtime` must be in within to be included.
+/// The range of time a file's content must overlap to be included.
+/// Both bounds are inclusive.
 #[derive(Copy, Clone, Debug)]
 pub struct DateRange {
-    /// Files with `mtime`s equal to or later than this will be excluded.
+    /// The end of the range: files whose content begins after this are
+    /// excluded.
     before: Timestamp,
-    /// Files with `mtime`s equal to or earlier than this will be excluded.
+    /// The start of the range: files with `mtime`s earlier than this are
+    /// excluded.
     after: Timestamp,
 }
 
@@ -103,6 +107,9 @@ pub struct LogFile {
     pub path: Utf8PathBuf,
     pub size: Option<u64>,
     pub modified: Option<Timestamp>,
+    /// The file's creation time (crtime), where available. Together with
+    /// `modified` this bounds the time span of the file's content.
+    pub created: Option<Timestamp>,
 }
 
 impl LogFile {
@@ -120,6 +127,21 @@ impl LogFile {
         self.path.file_name().cmp(&other.path.file_name())
     }
 
+    /// Returns true if the file's content may overlap `date_range`
+    /// (inclusive on both ends).
+    ///
+    /// A file's content spans from its creation time to its `mtime` (the
+    /// time of its newest write), so it overlaps the range when
+    /// `created <= before && modified >= after`. This keeps a file whose
+    /// newest write postdates the range but which still holds lines from
+    /// within it, such as the current log of a service that has kept
+    /// writing past the end of the range.
+    ///
+    /// The creation time is trusted only when it is no later than the
+    /// `mtime`. A copied file's crtime is the time of the copy, after the
+    /// preserved `mtime` of its content; falling back to the `mtime` in
+    /// that case (and when crtime is unavailable) restores the historical
+    /// behavior of testing the `mtime` against both bounds.
     pub fn in_date_range(&self, date_range: &DateRange) -> bool {
         let Some(modified) = self.modified else {
             // We failed to stat the file, it probably doesn't exist anymore.
@@ -127,11 +149,12 @@ impl LogFile {
             return false;
         };
 
-        if modified < date_range.after || modified > date_range.before {
-            return false;
-        }
+        let content_start = match self.created {
+            Some(created) if created <= modified => created,
+            _ => modified,
+        };
 
-        true
+        content_start <= date_range.before && modified >= date_range.after
     }
 }
 
@@ -155,7 +178,7 @@ impl Ord for LogFile {
 
 impl LogFile {
     fn new(path: Utf8PathBuf) -> LogFile {
-        LogFile { path, size: None, modified: None }
+        LogFile { path, size: None, modified: None, created: None }
     }
 }
 
@@ -608,11 +631,13 @@ mod tests {
                         path: "/bar/blah:default.log.1700000000".into(),
                         size: None,
                         modified: None,
+                        created: None,
                     },
                     LogFile {
                         path: "/foo/blah:default.log.1600000000".into(),
                         size: None,
                         modified: None,
+                        created: None,
                     },
                 ],
                 extra: vec![
@@ -622,11 +647,13 @@ mod tests {
                         path: "/foo/blah/sub.default.log1".into(),
                         size: None,
                         modified: None,
+                        created: None,
                     },
                     LogFile {
                         path: "/bar/blah/sub.default.log2".into(),
                         size: None,
                         modified: None,
+                        created: None,
                     },
                 ],
             },
@@ -657,16 +684,19 @@ mod tests {
             path: Utf8PathBuf::from("old"),
             size: None,
             modified: Some("1950-01-01T00:00:00Z".parse().unwrap()),
+            created: None,
         };
         let new_log = LogFile {
             path: Utf8PathBuf::from("new"),
             size: None,
             modified: Some("2050-01-01T00:00:00Z".parse().unwrap()),
+            created: None,
         };
         let matched_log = LogFile {
             path: Utf8PathBuf::from("just_right"),
             size: None,
             modified: Some("2024-01-01T00:00:00Z".parse().unwrap()),
+            created: None,
         };
 
         let full_date_range = DateRange {
@@ -697,5 +727,68 @@ mod tests {
         assert!(!old_log.in_date_range(&max_before_date_range));
         assert!(new_log.in_date_range(&max_before_date_range));
         assert!(matched_log.in_date_range(&max_before_date_range));
+    }
+
+    #[test]
+    fn test_daterange_filter_content_span() {
+        use super::{DateRange, LogFile};
+        use camino::Utf8PathBuf;
+
+        let file = |created: Option<&str>, modified: &str| LogFile {
+            path: Utf8PathBuf::from("spanning"),
+            size: None,
+            modified: Some(modified.parse().unwrap()),
+            created: created.map(|c| c.parse().unwrap()),
+        };
+        let range = DateRange {
+            before: "2024-01-01T01:59:00Z".parse().unwrap(),
+            after: "2024-01-01T01:00:00Z".parse().unwrap(),
+        };
+
+        // A file created before the end of the range whose mtime postdates
+        // it holds in-window content and is included, even though its mtime
+        // alone would exclude it. This is the shape of a current log that
+        // kept being written past the end of the range.
+        let spans_end =
+            file(Some("2024-01-01T01:00:00Z"), "2024-01-01T02:00:00Z");
+        assert!(spans_end.in_date_range(&range));
+
+        // Without a creation time the same mtime is excluded, preserving
+        // the mtime-only behavior.
+        let mtime_only = file(None, "2024-01-01T02:00:00Z");
+        assert!(!mtime_only.in_date_range(&range));
+
+        // A creation time later than the mtime is a copy timestamp, not a
+        // content bound: it must not pull an out-of-range file into the
+        // range. This is the shape of an old log recently copied into an
+        // archive with its mtime preserved.
+        let archived_copy =
+            file(Some("2024-06-01T00:00:00Z"), "2023-12-31T00:00:00Z");
+        assert!(!archived_copy.in_date_range(&range));
+
+        // But a copy's preserved mtime inside the range still matches.
+        let archived_copy_in_range =
+            file(Some("2024-06-01T00:00:00Z"), "2024-01-01T01:30:00Z");
+        assert!(archived_copy_in_range.in_date_range(&range));
+
+        // A file whose entire span predates the range stays excluded; a
+        // trusted creation time never weakens the start bound.
+        let too_old =
+            file(Some("2023-01-01T00:00:00Z"), "2023-06-01T00:00:00Z");
+        assert!(!too_old.in_date_range(&range));
+
+        // A file created after the range ends stays excluded.
+        let too_new =
+            file(Some("2024-01-01T02:00:00Z"), "2024-01-01T03:00:00Z");
+        assert!(!too_new.in_date_range(&range));
+
+        // Bounds are inclusive: a span touching the range only at its
+        // endpoints still matches.
+        let touches_end =
+            file(Some("2024-01-01T01:59:00Z"), "2024-01-01T03:00:00Z");
+        assert!(touches_end.in_date_range(&range));
+        let touches_start =
+            file(Some("2023-01-01T00:00:00Z"), "2024-01-01T01:00:00Z");
+        assert!(touches_start.in_date_range(&range));
     }
 }
