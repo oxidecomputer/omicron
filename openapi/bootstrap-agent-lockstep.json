@@ -3817,6 +3817,10 @@
           {
             "type": "object",
             "properties": {
+              "last_error": {
+                "nullable": true,
+                "type": "string"
+              },
               "type": {
                 "type": "string",
                 "enum": [
