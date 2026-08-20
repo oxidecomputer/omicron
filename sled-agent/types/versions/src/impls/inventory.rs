@@ -33,7 +33,8 @@ use crate::latest::inventory::{
     RemoveMupdateOverrideBootSuccessInventory, RemoveMupdateOverrideInventory,
     SingleMeasurementInventory, SourceNatConfig, SourceNatConfigGeneric,
     SourceNatConfigV4, SourceNatConfigV6, SvcEnabledNotOnlineState, SvcState,
-    SvcsEnabledNotOnline, ZoneArtifactInventory, ZoneKind, ZpoolHealth,
+    SvcsEnabledNotOnline, ZoneArtifactInventory, ZoneKind, ZoneSnatConfig,
+    ZpoolHealth,
 };
 
 impl ZoneKind {
@@ -279,18 +280,6 @@ impl OmicronZoneType {
     /// Identifies whether this is a Crucible (not Crucible pantry) zone.
     pub fn is_crucible(&self) -> bool {
         matches!(self, OmicronZoneType::Crucible { .. })
-    }
-
-    /// This zone's external IP.
-    pub fn external_ip(&self) -> Option<IpAddr> {
-        match self {
-            OmicronZoneType::Nexus { external_ip, .. } => Some(*external_ip),
-            OmicronZoneType::ExternalDns { dns_address, .. } => {
-                Some(dns_address.ip())
-            }
-            OmicronZoneType::BoundaryNtp { snat_cfg, .. } => Some(snat_cfg.ip),
-            _ => None,
-        }
     }
 
     /// The service vNIC providing external connectivity to this zone.
@@ -1179,12 +1168,33 @@ pub enum SourceNatConfigError {
     UnalignedPortPair { first_port: u16, last_port: u16 },
 }
 
+impl ZoneSnatConfig {
+    /// Return the IPv4 SNAT config, if any.
+    pub fn as_ipv4(&self) -> Option<&SourceNatConfigV4> {
+        match self {
+            ZoneSnatConfig::Ipv4Only(ipv4)
+            | ZoneSnatConfig::DualStack { ipv4, .. } => Some(ipv4),
+            ZoneSnatConfig::Ipv6Only(_) => None,
+        }
+    }
+
+    /// Return the IPv6 SNAT config, if any.
+    pub fn as_ipv6(&self) -> Option<&SourceNatConfigV6> {
+        match self {
+            ZoneSnatConfig::Ipv6Only(ipv6)
+            | ZoneSnatConfig::DualStack { ipv6, .. } => Some(ipv6),
+            ZoneSnatConfig::Ipv4Only(_) => None,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::latest::inventory::{FmdInventoryError, FmdInventoryErrorKind};
     use iddqd::IdOrdMap;
     use omicron_uuid_kinds::{FmdHostCaseUuid, FmdResourceUuid, GenericUuid};
+    use std::net::Ipv4Addr;
     use uuid::Uuid;
 
     #[test]
@@ -1264,5 +1274,33 @@ mod tests {
             "tests/output/fmd_inventory_display.txt",
             &out,
         );
+    }
+
+    #[test]
+    fn test_zone_snat_config_as_ip_types() {
+        let ipv4 = SourceNatConfig::new(
+            "10.0.0.1".parse::<Ipv4Addr>().unwrap(),
+            0,
+            NUM_SOURCE_NAT_PORTS - 1,
+        )
+        .unwrap();
+        let ipv6 = SourceNatConfig::new(
+            "fd00::1".parse::<Ipv6Addr>().unwrap(),
+            0,
+            NUM_SOURCE_NAT_PORTS - 1,
+        )
+        .unwrap();
+        let ipv4_only = ZoneSnatConfig::Ipv4Only(ipv4);
+        let ipv6_only = ZoneSnatConfig::Ipv6Only(ipv6);
+        let dual_stack = ZoneSnatConfig::DualStack { ipv4, ipv6 };
+
+        assert_eq!(ipv4_only.as_ipv4().unwrap(), &ipv4);
+        assert!(ipv4_only.as_ipv6().is_none());
+
+        assert!(ipv6_only.as_ipv4().is_none());
+        assert_eq!(ipv6_only.as_ipv6().unwrap(), &ipv6);
+
+        assert_eq!(dual_stack.as_ipv4().unwrap(), &ipv4);
+        assert_eq!(dual_stack.as_ipv6().unwrap(), &ipv6);
     }
 }
