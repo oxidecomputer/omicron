@@ -11,6 +11,7 @@ use nexus_types::fm::analysis_reports::ClosedCaseReport;
 use nexus_types::fm::{self, Sitrep, SitrepVersion};
 use nexus_types::in_service_disk::InServiceDisk;
 use nexus_types::inventory;
+use nexus_types::observed_saga::ObservedSaga;
 use omicron_uuid_kinds::AlertUuid;
 use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::SupportBundleUuid;
@@ -60,6 +61,9 @@ pub struct Input {
     /// new sitrep's `support_bundle_generation`.
     support_bundles_changed: bool,
     in_service_disks: Arc<IdOrdMap<InServiceDisk>>,
+    /// All non-terminal (running, unwinding, or abandoned) sagas, annotated
+    /// with their latest node-event time and owning-Nexus state.
+    observed_sagas: Arc<IdOrdMap<ObservedSaga>>,
 }
 
 impl Input {
@@ -69,6 +73,16 @@ impl Input {
 
     pub fn inventory(&self) -> &inventory::Collection {
         &self.inv
+    }
+
+    /// The reference "now" for time-based analysis: the completion time of
+    /// the inventory collection this sitrep is generated against.
+    ///
+    /// Diagnosis engines compare timestamps against this rather than reading
+    /// the wall clock, so a given input always produces the same sitrep and
+    /// tests can pin time exactly.
+    pub fn reference_time(&self) -> DateTime<Utc> {
+        self.inv.time_done
     }
 
     pub fn new_ereports(&self) -> &IdOrdMap<Arc<fm::Ereport>> {
@@ -104,12 +118,22 @@ impl Input {
         &self.in_service_disks
     }
 
+    /// All non-terminal sagas observed in the database, indexed by `saga_id`.
+    /// See the saga diagnosis engine for how absence (a saga that has reached
+    /// a terminal state) drives case closure.
+    pub fn observed_sagas(&self) -> &IdOrdMap<ObservedSaga> {
+        &self.observed_sagas
+    }
+
     /// Returns a [`Builder`] for constructing a new `Input` from the provided
-    /// `parent_sitrep`, inventory collection, and in-service disks.
+    /// `parent_sitrep` and inventory collection.
+    ///
+    /// The queried input collections (in-service disks, observed sagas) are
+    /// provided via the builder's setters; [`Builder::build`] fails if any
+    /// was never provided.
     pub fn builder(
         parent_sitrep: Option<Arc<(SitrepVersion, Sitrep)>>,
         inv: Arc<inventory::Collection>,
-        in_service_disks: Arc<IdOrdMap<InServiceDisk>>,
     ) -> Result<Builder, InvalidInputs> {
         // Before preparing analysis inputs, check that the proposed input
         // inventory collection is at least as new as the parent sitrep's
@@ -134,7 +158,8 @@ impl Input {
         Ok(Builder {
             parent_sitrep,
             inv,
-            in_service_disks,
+            in_service_disks: None,
+            observed_sagas: None,
             new_ereports: IdOrdMap::default(),
             ereporter_restarts: IdOrdMap::default(),
             unmarked_seen_ereports: BTreeSet::default(),
@@ -155,13 +180,20 @@ pub enum InvalidInputs {
         next_inv_min_time_started: DateTime<Utc>,
         input_inv_time_started: DateTime<Utc>,
     },
+    #[error("required analysis input `{name}` was never provided")]
+    MissingInput { name: &'static str },
 }
 
 #[must_use]
 pub struct Builder {
     parent_sitrep: Option<Arc<(SitrepVersion, Sitrep)>>,
     inv: Arc<inventory::Collection>,
-    in_service_disks: Arc<IdOrdMap<InServiceDisk>>,
+    // The queried input collections. Each is required: `build()` fails on
+    // any still-`None` input, so a caller cannot forget one and silently
+    // run analysis against an empty collection (which has active semantics,
+    // e.g. an empty `observed_sagas` reads as "every saga case may close").
+    in_service_disks: Option<Arc<IdOrdMap<InServiceDisk>>>,
+    observed_sagas: Option<Arc<IdOrdMap<ObservedSaga>>>,
     /// Ereports which are new and should be input to analysis in the next
     /// sitrep.
     new_ereports: IdOrdMap<Arc<fm::Ereport>>,
@@ -271,7 +303,45 @@ impl Builder {
     /// Finish constructing the [`Input`] and return it, along with a [`Report`]
     /// that provides a human-readable summary of how the inputs were
     /// constructed.
-    pub fn build(self) -> (Input, Report) {
+    /// Provides the in-service physical disks queried from the database.
+    /// Required; [`Builder::build`] fails without it.
+    pub fn in_service_disks(
+        mut self,
+        disks: Arc<IdOrdMap<InServiceDisk>>,
+    ) -> Self {
+        self.in_service_disks = Some(disks);
+        self
+    }
+
+    /// Provides the non-terminal sagas queried from the database.
+    /// Required; [`Builder::build`] fails without it.
+    pub fn observed_sagas(
+        mut self,
+        sagas: Arc<IdOrdMap<ObservedSaga>>,
+    ) -> Self {
+        self.observed_sagas = Some(sagas);
+        self
+    }
+
+    /// Fills every required input not yet provided with an empty collection.
+    ///
+    /// Test-only: lets a test populate just the inputs it exercises while
+    /// still declaring, explicitly, that the rest are empty. Production
+    /// callers must provide every input.
+    #[cfg(any(test, feature = "testing"))]
+    pub fn with_empty_defaults(mut self) -> Self {
+        self.in_service_disks.get_or_insert_with(Default::default);
+        self.observed_sagas.get_or_insert_with(Default::default);
+        self
+    }
+
+    pub fn build(self) -> Result<(Input, Report), InvalidInputs> {
+        let in_service_disks = self
+            .in_service_disks
+            .ok_or(InvalidInputs::MissingInput { name: "in_service_disks" })?;
+        let observed_sagas = self
+            .observed_sagas
+            .ok_or(InvalidInputs::MissingInput { name: "observed_sagas" })?;
         let parent_sitrep = self.parent_sitrep.as_ref().map(|s| &s.1);
         let (parent_sitrep_id, parent_inv_id) = match parent_sitrep {
             Some(sitrep) => {
@@ -290,10 +360,23 @@ impl Builder {
             num_ereporter_restarts: self.ereporter_restarts.len(),
             open_cases: BTreeMap::new(),
             closed_cases_copied_forward: BTreeMap::new(),
-            in_service_disks: self
-                .in_service_disks
+            in_service_disks: in_service_disks
                 .iter()
                 .map(|d| d.physical_disk_id)
+                .collect(),
+            observed_sagas: observed_sagas
+                .iter()
+                .map(|s| {
+                    (
+                        s.saga_id,
+                        fm::analysis_reports::ObservedSagaReport {
+                            saga_name: s.saga_name.clone(),
+                            saga_state: s.saga_state.clone(),
+                            last_event_time: s.last_event_time,
+                            owner_state: s.owner_state,
+                        },
+                    )
+                })
                 .collect(),
         };
 
@@ -391,10 +474,11 @@ impl Builder {
             ereporter_restarts: self.ereporter_restarts,
             alerts_changed,
             support_bundles_changed,
-            in_service_disks: self.in_service_disks,
+            in_service_disks,
+            observed_sagas,
         };
 
-        (input, report)
+        Ok((input, report))
     }
 }
 
@@ -633,12 +717,9 @@ mod tests {
 
         // Build analysis input
         let (input, report) = {
-            let mut builder = Input::builder(
-                Some(parent_sitrep),
-                inv,
-                Arc::new(IdOrdMap::new()),
-            )
-            .expect("collection start time check should always pass");
+            let mut builder = Input::builder(Some(parent_sitrep), inv)
+                .expect("collection start time check should always pass")
+                .with_empty_defaults();
             // Pass in four ereports:
             //  - two that are in the open cases of the parent sitrep
             //  - one that is in the (to-be-copied-forward) closed case
@@ -652,7 +733,7 @@ mod tests {
                 (*ereport_in_closed_unmarked).clone(),
                 (*ereport_new).clone(),
             ]);
-            builder.build()
+            builder.build().expect("all inputs provided")
         };
         eprintln!("{}", report.display_multiline(0));
 
@@ -892,12 +973,9 @@ mod tests {
             version: 1,
             time_made_current: chrono::Utc::now(),
         };
-        Input::builder(
-            Some(Arc::new((parent_version, parent))),
-            inv,
-            Arc::new(IdOrdMap::new()),
-        )
-        .expect("collection start time check should always pass")
+        Input::builder(Some(Arc::new((parent_version, parent))), inv)
+            .expect("collection start time check should always pass")
+            .with_empty_defaults()
     }
 
     /// All alert requests on a closed case are satisfied and the case has no
@@ -935,7 +1013,7 @@ mod tests {
 
         let mut builder = builder_with_closed_case(closed_case);
         builder.add_marked_alert_requests([alert_id]);
-        let (input, _) = builder.build();
+        let (input, _) = builder.build().expect("all inputs provided");
 
         assert_eq!(input.closed_cases_copied_forward().len(), 0);
         assert!(
@@ -987,7 +1065,7 @@ mod tests {
 
         let mut builder = builder_with_closed_case(closed_case);
         builder.add_marked_alert_requests([satisfied_alert_id]);
-        let (input, _) = builder.build();
+        let (input, _) = builder.build().expect("all inputs provided");
 
         let carried = input.closed_cases_copied_forward().get(&case_id).expect(
             "one alert request unsatisfied, so case must be carried forward",
@@ -1039,7 +1117,7 @@ mod tests {
 
         let mut builder = builder_with_closed_case(closed_case);
         builder.add_marked_support_bundle_requests([bundle_id]);
-        let (input, _) = builder.build();
+        let (input, _) = builder.build().expect("all inputs provided");
 
         assert_eq!(input.closed_cases_copied_forward().len(), 0);
         assert!(
@@ -1087,7 +1165,7 @@ mod tests {
 
         let mut builder = builder_with_closed_case(closed_case);
         builder.add_marked_support_bundle_requests([satisfied_bundle_id]);
-        let (input, _) = builder.build();
+        let (input, _) = builder.build().expect("all inputs provided");
 
         let carried = input.closed_cases_copied_forward().get(&case_id).expect(
             "one bundle request unsatisfied, so case must be carried \

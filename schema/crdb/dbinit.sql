@@ -2560,16 +2560,19 @@ CREATE TABLE IF NOT EXISTS omicron.public.external_ip (
 
     is_probe BOOL NOT NULL DEFAULT false,
 
-    /* The name must be non-NULL iff this is a floating IP. */
-    CONSTRAINT null_fip_name CHECK (
-        (kind != 'floating' AND name IS NULL) OR
-        (kind = 'floating' AND name IS NOT NULL)
+    /*
+     * Names and descriptions are required for instance floating IPs,
+     * and service IPs of any kind.
+     */
+    CONSTRAINT fips_and_services_need_names CHECK (
+        (is_service = TRUE AND name IS NOT NULL) OR
+        (is_service = FALSE AND kind != 'floating' AND name IS NULL) OR
+        (is_service = FALSE AND kind = 'floating' AND name IS NOT NULL)
     ),
-
-    /* The description must be non-NULL iff this is a floating IP. */
-    CONSTRAINT null_fip_description CHECK (
-        (kind != 'floating' AND description IS NULL) OR
-        (kind = 'floating' AND description IS NOT NULL)
+    CONSTRAINT fips_and_services_need_descriptions CHECK (
+        (is_service = TRUE AND description IS NOT NULL) OR
+        (is_service = FALSE AND kind != 'floating' AND description IS NULL) OR
+        (is_service = FALSE AND kind = 'floating' AND description IS NOT NULL)
     ),
 
     /* Only floating IPs can be attached to a project, and
@@ -2926,7 +2929,9 @@ CREATE TYPE IF NOT EXISTS omicron.public.saga_abandon_reason AS ENUM (
     /* the saga was explicitly abandoned via omdb */
     'omdb',
     /* during saga recovery, the persistent state was unable to processed */
-    'unrecoverable'
+    'unrecoverable',
+    /* the saga was discovered assigned to an SEC that's been long-expunged */
+    'orphaned'
 );
 
 
@@ -3871,11 +3876,23 @@ CREATE TABLE IF NOT EXISTS omicron.public.switch_port_settings_bgp_peer_config (
     id UUID NOT NULL,
     -- Maximum valid router lifetime is 9000 seconds (2.5 hours) per RFC 4861
     router_lifetime INT4 NOT NULL CHECK (router_lifetime >= 0 AND router_lifetime <= 9000),
+    -- Similarly to `addr`, we perform additional validations here and in the Rust logic.
+    src_addr INET CHECK (host(src_addr) != '0.0.0.0' AND host(src_addr) != '::' ),
 
     -- router_lifetime is only meaningful to set for unnumbered peers; ensure
     -- it's left at 0 for numbered peers
     CONSTRAINT router_lifetime_only_for_unnumbered_peers CHECK (
         router_lifetime = 0 OR addr IS NULL
+    ),
+
+    -- Only allow configuration of src_addr for "numbered" peers
+    CONSTRAINT src_addr_only_for_numbered_peers CHECK (
+        src_addr IS NULL OR addr IS NOT NULL
+    ),
+
+    -- src_addr's address family must match the peer's addr
+    CONSTRAINT src_addr_family_must_match_peer CHECK (
+        family(src_addr) = family(addr)
     ),
 
     PRIMARY KEY (id)
@@ -5318,7 +5335,8 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_internal_dns (
 CREATE TYPE IF NOT EXISTS omicron.public.inv_svc_enabled_not_online_state AS ENUM (
     'offline',
     'degraded',
-    'maintenance'
+    'maintenance',
+    'unrecognized'
 );
 
 CREATE TABLE IF NOT EXISTS omicron.public.inv_svc_enabled_not_online (
@@ -5604,6 +5622,14 @@ CREATE TYPE IF NOT EXISTS omicron.public.bp_sled_measurements AS ENUM (
     'artifacts'
 );
 
+-- The availability half of a sled's update disposition in a blueprint.
+CREATE TYPE IF NOT EXISTS omicron.public.sled_update_availability AS ENUM (
+    -- Available for use for all provisions.
+    'available',
+    -- Disallowed for all use + migratable instances are being evacuated.
+    'evacuating'
+);
+
 -- metadata associated with a single sled in a blueprint
 CREATE TABLE IF NOT EXISTS omicron.public.bp_sled_metadata (
     -- foreign key into `blueprint` table
@@ -5611,6 +5637,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_sled_metadata (
 
     sled_id UUID NOT NULL,
     sled_state omicron.public.sled_state NOT NULL,
+
     sled_agent_generation INT8 NOT NULL,
     -- NULL means do not remove any overrides
     remove_mupdate_override UUID,
@@ -5631,6 +5658,17 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_sled_metadata (
 
     -- the measurements for this sled
     measurements omicron.public.bp_sled_measurements NOT NULL,
+
+    -- the sled's update disposition
+    update_disposition_generation INT8 NOT NULL,
+    update_availability omicron.public.sled_update_availability NOT NULL,
+    update_disruption_policy omicron.public.reconfigurator_disruption_policy,
+
+    -- a disruption policy is recorded iff the sled is evacuating
+    CONSTRAINT update_disruption_policy_set_iff_evacuating CHECK (
+        (update_availability = 'evacuating')
+            = (update_disruption_policy IS NOT NULL)
+    ),
 
     PRIMARY KEY (blueprint_id, sled_id)
 );
@@ -6610,30 +6648,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.bootstore_config (
 
 CREATE INDEX IF NOT EXISTS address_lot_names ON omicron.public.address_lot(name);
 
-CREATE VIEW IF NOT EXISTS omicron.public.bgp_peer_view
-AS
-SELECT
- sp.switch_slot,
- sp.port_name,
- bpc.addr,
- bpc.hold_time,
- bpc.idle_hold_time,
- bpc.delay_open,
- bpc.connect_retry,
- bpc.keepalive,
- bpc.remote_asn,
- bpc.min_ttl,
- bpc.md5_auth_key,
- bpc.multi_exit_discriminator,
- bpc.local_pref,
- bpc.enforce_first_as,
- bpc.vlan_id,
- bpc.router_lifetime,
- bc.asn
-FROM omicron.public.switch_port sp
-JOIN omicron.public.switch_port_settings_bgp_peer_config bpc
-ON sp.port_settings_id = bpc.port_settings_id
-JOIN omicron.public.bgp_config bc ON bc.id = bpc.bgp_config_id;
 
 CREATE INDEX IF NOT EXISTS switch_port_id_and_name
 ON omicron.public.switch_port (port_settings_id, port_name) STORING (switch_slot);
@@ -8008,7 +8022,8 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_sitrep_analysis_report (
 
 CREATE TYPE IF NOT EXISTS omicron.public.diagnosis_engine AS ENUM (
     'power_shelf',
-    'physical_disk'
+    'physical_disk',
+    'saga'
 );
 
 CREATE TABLE IF NOT EXISTS omicron.public.fm_case (
@@ -8075,15 +8090,80 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_fact_physical_disk (
 
     PRIMARY KEY (sitrep_id, id),
 
-    -- Each variant validates that the columns it expects are present.
-    -- Future variants should add their own constraint like this one,
-    -- leaving existing constraints untouched.
+    -- Each kind's constraint checks only that its own columns are present,
+    -- not that others are NULL, so future kinds may share columns.
     CONSTRAINT zpool_unhealthy_columns_present CHECK (
         kind != 'zpool_unhealthy' OR (
             zpool_id IS NOT NULL
             AND last_seen_health IS NOT NULL
             AND observed_in_inv IS NOT NULL
             AND time_observed IS NOT NULL
+        )
+    )
+);
+
+-- The saga diagnosis engine's facts. See the comment on the physical-disk
+-- engine above: one table per engine, fact content as typed columns.
+CREATE TYPE IF NOT EXISTS omicron.public.fm_fact_saga_kind AS ENUM (
+    'not_progressing',
+    'owner_not_current_generation',
+    'abandoned'
+);
+
+CREATE TYPE IF NOT EXISTS omicron.public.fm_fact_saga_orphan_reason AS ENUM (
+    'quiesced',
+    'expunged'
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.fm_fact_saga (
+    -- Stable UUID for this fact across sitreps.
+    id UUID NOT NULL,
+    -- Sitrep this row belongs to.
+    sitrep_id UUID NOT NULL,
+    -- UUID of the case this fact attaches to.
+    case_id UUID NOT NULL,
+    -- UUID of the sitrep in which this fact was first added. Preserved
+    -- unchanged when the fact is carried forward into a child sitrep.
+    -- Debug-only.
+    created_sitrep_id UUID NOT NULL,
+    -- Free-form, debug-only comment.
+    comment TEXT NOT NULL,
+
+    -- The saga this fact is about. Common to every kind of saga fact (the
+    -- case is keyed by it), so it is always present regardless of `kind`.
+    --
+    -- Fact payloads carry only the fields that define the condition; data
+    -- that merely describes the saga (e.g., its name) is looked up from the
+    -- saga table when a case is acted on.
+    saga_id UUID NOT NULL,
+
+    -- Which saga fact this row represents. The columns below are populated
+    -- according to this discriminant (see the CHECK constraint).
+    kind omicron.public.fm_fact_saga_kind NOT NULL,
+
+    -- Columns for a 'not_progressing' fact. NULL for any other kind.
+    saga_state omicron.public.saga_state,
+    last_event_time TIMESTAMPTZ,
+
+    -- Columns for an 'owner_not_current_generation' fact. NULL for any other
+    -- kind.
+    current_sec UUID,
+    orphan_reason omicron.public.fm_fact_saga_orphan_reason,
+
+    PRIMARY KEY (sitrep_id, id),
+
+    -- Each kind's constraint checks only that its own columns are present,
+    -- not that others are NULL, so future kinds may share columns.
+    CONSTRAINT not_progressing_columns_present CHECK (
+        kind != 'not_progressing' OR (
+            saga_state IN ('running', 'unwinding')
+            AND last_event_time IS NOT NULL
+        )
+    ),
+    CONSTRAINT owner_not_current_generation_columns_present CHECK (
+        kind != 'owner_not_current_generation' OR (
+            current_sec IS NOT NULL
+            AND orphan_reason IS NOT NULL
         )
     )
 );
@@ -9181,7 +9261,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '285.0.0', NULL)
+    (TRUE, NOW(), NOW(), '291.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

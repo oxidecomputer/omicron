@@ -36,13 +36,7 @@ use omicron_common::address::get_sled_address;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Generation;
 use omicron_common::api::internal::shared::DatasetKind;
-use omicron_common::disk::CompressionAlgorithm;
-use omicron_common::disk::DatasetConfig;
 use omicron_common::disk::DatasetName;
-use omicron_common::disk::DiskIdentity;
-use omicron_common::disk::M2Slot;
-use omicron_common::disk::OmicronPhysicalDiskConfig;
-use omicron_common::disk::SharedDatasetConfig;
 use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::MupdateOverrideUuid;
@@ -53,6 +47,12 @@ use omicron_uuid_kinds::ZpoolUuid;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
+use sled_agent_types::disk::CompressionAlgorithm;
+use sled_agent_types::disk::DatasetConfig;
+use sled_agent_types::disk::DiskIdentity;
+use sled_agent_types::disk::M2Slot;
+use sled_agent_types::disk::OmicronPhysicalDiskConfig;
+use sled_agent_types::disk::SharedDatasetConfig;
 use sled_agent_types::system_networking::ServiceZoneNatEntries;
 use sled_agent_types::system_networking::ServiceZoneNatEntriesError;
 use sled_agent_types::system_networking::ServiceZoneNatEntry;
@@ -865,6 +865,14 @@ pub enum BlueprintExpungedZoneAccessReason {
     /// remaining with the set of configuration.
     NexusExternalConfig,
 
+    /// Sagas assigned to any expunged Nexus whose generation is older than the
+    /// current running Nexus zone are considered orphaned and marked as
+    /// abandoned.
+    ///
+    /// The planner must not prune a Nexus zone if it still has any sagas
+    /// assigned to it.
+    NexusOrphanSagaAbandonment,
+
     /// Nexus needs to whether it itself should be quiescing. If the
     /// actively-running Nexus has been expunged (but not yet shut down), it
     /// should still be able to determine this!
@@ -872,8 +880,8 @@ pub enum BlueprintExpungedZoneAccessReason {
     /// The planner does not need to account for this when pruning Nexus zones.
     NexusSelfIsQuiescing,
 
-    /// Sagas assigneed to any expunged Nexus must be reassigned to an
-    /// in-service Nexus.
+    /// Sagas assigned to any expunged Nexus must be reassigned to an in-service
+    /// Nexus.
     ///
     /// The planner must not prune a Nexus zone if it still has any sagas
     /// assigned to it.
@@ -1478,12 +1486,14 @@ impl fmt::Display for BlueprintDisplay<'_> {
                 remove_mupdate_override,
                 host_phase_2,
                 measurements,
+                update_disposition,
             } = config;
 
             // Report toplevel sled info
             writeln!(f, "\n  sled: {sled_id}")?;
             let mut rows = vec![
                 (STATE, state.to_string()),
+                (UPDATE_DISPOSITION, update_disposition.to_string()),
                 (CONFIG_GENERATION, sled_agent_generation.to_string()),
                 (SUBNET, subnet.to_string()),
                 (LAST_ALLOCATED_IP, last_allocated_ip.to_string()),
@@ -1629,6 +1639,92 @@ pub struct BlueprintSledConfig {
     pub remove_mupdate_override: Option<MupdateOverrideUuid>,
     pub host_phase_2: BlueprintHostPhase2DesiredSlots,
     pub measurements: BlueprintMeasurements,
+    pub update_disposition: BlueprintSledUpdateDisposition,
+}
+
+/// Controls a sled's availability for provisioning and whether its migratable
+/// instances are evacuated during an update, along with a generation number
+/// bumped whenever that disposition changes.
+///
+/// Stored in [`BlueprintSledConfig::update_disposition`]. See RFD 666.
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Diffable,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+)]
+pub struct BlueprintSledUpdateDisposition {
+    /// A generation number bumped whenever `kind` changes.
+    pub generation: Generation,
+
+    /// The disposition itself.
+    pub kind: BlueprintSledUpdateDispositionKind,
+}
+
+impl BlueprintSledUpdateDisposition {
+    /// The initial disposition for a newly added sled: available, at the
+    /// initial generation.
+    ///
+    /// This is also the disposition that existing `bp_sled_metadata` rows are
+    /// backfilled to by the schema migration that adds this field.
+    pub const fn initial() -> Self {
+        Self {
+            generation: Generation::new(),
+            kind: BlueprintSledUpdateDispositionKind::Available,
+        }
+    }
+}
+
+impl fmt::Display for BlueprintSledUpdateDisposition {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{} (generation {})", self.kind, self.generation)
+    }
+}
+
+/// The content of a sled's update disposition: whether the sled is available
+/// for provisioning, and if being evacuated, which disruption policy applies.
+///
+/// The "kind" half of [`BlueprintSledUpdateDisposition`].
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Diffable,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+)]
+#[serde(tag = "availability", rename_all = "snake_case")]
+pub enum BlueprintSledUpdateDispositionKind {
+    /// The sled is available for use for all provisions.
+    Available,
+
+    /// The sled is disallowed for all use, and its migratable instances are
+    /// evacuated according to `policy`.
+    Evacuating { policy: ReconfiguratorDisruptionPolicy },
+    // In the future, this will gain `ReservedForMigrationTarget`, for a sled
+    // that is disallowed for general provisioning but usable as a target for
+    // update-related migrations.
+}
+
+impl fmt::Display for BlueprintSledUpdateDispositionKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            BlueprintSledUpdateDispositionKind::Available => {
+                write!(f, "available")
+            }
+            BlueprintSledUpdateDispositionKind::Evacuating { policy } => {
+                write!(f, "evacuating ({policy})")
+            }
+        }
+    }
 }
 
 impl BlueprintSledConfig {

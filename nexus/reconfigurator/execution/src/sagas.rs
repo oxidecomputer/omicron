@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Re-assign sagas from expunged Nexus zones
+//! Handle sagas from expunged Nexus zones
 
 use nexus_db_model::SecId;
 use nexus_db_queries::context::OpContext;
@@ -10,7 +10,7 @@ use nexus_db_queries::db::DataStore;
 use nexus_types::deployment::{Blueprint, BlueprintExpungedZoneAccessReason};
 use omicron_common::api::external::Error;
 use omicron_uuid_kinds::{GenericUuid, OmicronZoneUuid};
-use slog::{debug, info, warn};
+use slog::{debug, error, info, warn};
 
 /// For each expunged Nexus zone in the same generation as the current Nexus,
 /// re-assign sagas owned by that Nexus to the specified nexus (`nexus_id`).
@@ -47,7 +47,12 @@ pub(crate) async fn reassign_sagas_from_expunged(
 ) -> Result<bool, Error> {
     let log = &opctx.log;
 
-    let nexus_zone_ids = find_expunged_same_generation(blueprint, nexus_id)?;
+    let nexus_zone_ids = find_expunged_nexus_ids(
+        blueprint,
+        nexus_id,
+        BlueprintExpungedZoneAccessReason::NexusSagaReassignment,
+        FindExpungedNexusFilter::SameGeneration,
+    )?;
     debug!(
         log,
         "re-assign sagas: found expunged Nexus instances with matching generation";
@@ -77,22 +82,118 @@ pub(crate) async fn reassign_sagas_from_expunged(
     }
 }
 
-/// Returns the list of Nexus ids for expunged (and ready-to-cleanup) Nexus
-/// zones in the same generation as the given Nexus id
-fn find_expunged_same_generation(
+/// Abandon sagas that can never be reassigned.
+///
+/// Sagas are only ever reassigned to an in-service Nexus of the *same*
+/// generation (see [`reassign_sagas_from_expunged`]). So once a Nexus has been
+/// expunged and the active Nexuses are of a higher generation, any saga still
+/// assigned to it can never be adopted and would otherwise stay stuck forever.
+/// These sagas also never go through saga recovery, as each Nexus only attempts
+/// to recover sagas assigned to itself.
+///
+/// We abandon all sagas from an earlier generation than the current running
+/// Nexus, as there is no way to salvage them. Note that abandoning a saga does
+/// not unwind it: any partial work it has already done is left in place.
+///
+/// Any Nexus that isn't in the target blueprint is left untouched, since we
+/// can't confirm its state.
+///
+/// This is all safe even if we're currently executing an old blueprint because:
+/// - A zone can never become un-expunged.
+/// - The generation never goes backwards.
+///
+/// The combination means that no other Nexus can ever assign this saga.
+pub(crate) async fn abandon_orphan_sagas(
+    opctx: &OpContext,
+    datastore: &DataStore,
     blueprint: &Blueprint,
     nexus_id: SecId,
+) -> Result<(), anyhow::Error> {
+    let log = &opctx.log;
+
+    // Find ids of stale expunged Nexus zones
+    let stale_sec_ids = find_expunged_nexus_ids(
+        blueprint,
+        nexus_id,
+        BlueprintExpungedZoneAccessReason::NexusOrphanSagaAbandonment,
+        FindExpungedNexusFilter::OlderGeneration,
+    )?;
+
+    info!(
+        log,
+        "abandon orphan sagas: abandoning running or unwinding sagas from \
+        expunged (and ready-for-cleanup) Nexus zones of an older generation \
+        than the current running Nexus zone";
+        "stale_expunged_sec_ids" => ?stale_sec_ids,
+    );
+    let result = datastore
+        .sagas_abandon_orphans(
+            opctx,
+            &stale_sec_ids,
+            "orphan: current_sec is expunged and too old for this saga to be \
+            re-assigned"
+                .to_string(),
+        )
+        .await;
+
+    match result {
+        Ok(count) => {
+            if count == 0 {
+                info!(log, "no orphaned sagas to abandon");
+            } else {
+                error!(log, "abandoned orphan sagas";
+                    "nexus_zone_ids" => ?stale_sec_ids,
+                    "count" => count,
+                );
+            };
+
+            Ok(())
+        }
+        Err(error) => {
+            warn!(log, "failed to abandon orphan sagas";
+                "nexus_zone_ids" => ?stale_sec_ids,
+                &error,
+            );
+
+            Err(error.into())
+        }
+    }
+}
+
+enum FindExpungedNexusFilter {
+    // Include only Nexus zones of the same generation.
+    SameGeneration,
+    // Include only Nexus zones of an older generation.
+    OlderGeneration,
+}
+
+/// Returns the SEC ids of expunged (and ready-for-cleanup) Nexus zones whose
+/// generation relates to the given Nexus's generation as specified by `filter`
+fn find_expunged_nexus_ids(
+    blueprint: &Blueprint,
+    nexus_id: SecId,
+    reason: BlueprintExpungedZoneAccessReason,
+    filter: FindExpungedNexusFilter,
 ) -> Result<Vec<SecId>, Error> {
     let nexus_zone_id = OmicronZoneUuid::from_untyped_uuid(nexus_id.0);
     let active_nexus_generation =
         blueprint.find_generation_for_self(nexus_zone_id)?;
+
+    // We source SEC ids strictly from the target blueprint as these are the
+    // only Nexuses we can confidently confirm the state of. Any Nexus not in
+    // the target blueprint is effectively ignored.
     Ok(blueprint
-        .expunged_nexus_zones_ready_for_cleanup(
-            BlueprintExpungedZoneAccessReason::NexusSagaReassignment,
-        )
+        .expunged_nexus_zones_ready_for_cleanup(reason)
         .filter_map(|(_sled_id, zone_config, nexus_config)| {
-            (nexus_config.nexus_generation == active_nexus_generation)
-                .then_some(zone_config.id)
+            let include = match filter {
+                FindExpungedNexusFilter::SameGeneration => {
+                    nexus_config.nexus_generation == active_nexus_generation
+                }
+                FindExpungedNexusFilter::OlderGeneration => {
+                    nexus_config.nexus_generation < active_nexus_generation
+                }
+            };
+            include.then_some(zone_config.id)
         })
         .map(|id| SecId(id.into_untyped_uuid()))
         .collect())
@@ -101,15 +202,166 @@ fn find_expunged_same_generation(
 #[cfg(test)]
 mod test {
     use super::*;
+    use async_bb8_diesel::AsyncRunQueryDsl;
+    use chrono::Utc;
+    use diesel::prelude::*;
+    use iddqd::IdOrdMap;
+    use nexus_db_model::{
+        AbandonMetadata, Saga, SagaExecState, SagaId, SagaReasonAbandoned,
+        SagaState,
+    };
+    use nexus_db_queries::db::pub_test_utils::TestDatabase;
+    use nexus_inventory::now_db_precision;
     use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
     use nexus_reconfigurator_planning::blueprint_editor::ExternalNetworkingAllocator;
     use nexus_reconfigurator_planning::example::ExampleSystemBuilder;
     use nexus_reconfigurator_planning::planner::PlannerRng;
-    use nexus_types::deployment::BlueprintSource;
+    use nexus_types::deployment::{
+        BlueprintHostPhase2DesiredSlots, BlueprintMeasurements,
+        BlueprintSledConfig, BlueprintSledUpdateDisposition, BlueprintSource,
+        BlueprintZoneConfig, BlueprintZoneDisposition,
+        BlueprintZoneImageSource, BlueprintZoneType,
+        CockroachDbPreserveDowngrade, LastAllocatedSubnetIpOffset,
+        OmicronZoneExternalFloatingIp, OximeterReadMode, PendingMgsUpdates,
+        blueprint_zone_type,
+    };
+    use nexus_types::external_api::sled::SledState;
+    use omicron_common::address::Ipv6Subnet;
     use omicron_common::api::external::Generation;
+    use omicron_common::api::external::MacAddr;
+    use omicron_common::api::external::Vni;
+    use omicron_common::api::internal::shared::PrivateIpConfig;
+    use omicron_common::zpool_name::ZpoolName;
     use omicron_test_utils::dev::test_setup_log;
+    use omicron_uuid_kinds::BlueprintUuid;
+    use omicron_uuid_kinds::ExternalIpUuid;
+    use omicron_uuid_kinds::SledUuid;
+    use omicron_uuid_kinds::ZpoolUuid;
+    use sled_agent_types::inventory::NetworkInterface;
+    use sled_agent_types::inventory::NetworkInterfaceKind;
+    use std::collections::BTreeMap;
     use std::collections::BTreeSet;
+    use std::net::IpAddr;
+    use std::net::Ipv6Addr;
     use uuid::Uuid;
+
+    // Build an in-memory blueprint containing exactly the given top level
+    // Nexus generation, and Nexus zones, each with the specified disposition
+    // and generation.
+    fn create_test_blueprint_with_custom_nexus(
+        nexus_generation: Generation,
+        nexus_zones: Vec<(
+            OmicronZoneUuid,
+            BlueprintZoneDisposition,
+            Generation,
+        )>,
+    ) -> Blueprint {
+        let blueprint_id = BlueprintUuid::new_v4();
+        let sled_id = SledUuid::new_v4();
+
+        let ip_config = PrivateIpConfig::new_ipv4(
+            "192.168.1.1".parse().unwrap(),
+            "192.168.1.0/24".parse().unwrap(),
+        )
+        .unwrap();
+        let zones: IdOrdMap<BlueprintZoneConfig> = nexus_zones
+            .into_iter()
+            .map(|(zone_id, disposition, nexus_generation)| {
+                BlueprintZoneConfig {
+                    disposition,
+                    id: zone_id,
+                    filesystem_pool: ZpoolName::new_external(
+                        ZpoolUuid::new_v4(),
+                    ),
+                    zone_type: BlueprintZoneType::Nexus(
+                        blueprint_zone_type::Nexus {
+                            internal_address: "[::1]:0".parse().unwrap(),
+                            lockstep_port: 0,
+                            external_dns_servers: Vec::new(),
+                            external_ip: OmicronZoneExternalFloatingIp {
+                                id: ExternalIpUuid::new_v4(),
+                                ip: IpAddr::V6(Ipv6Addr::LOCALHOST),
+                            },
+                            external_tls: true,
+                            nic: NetworkInterface {
+                                id: uuid::Uuid::new_v4(),
+                                kind: NetworkInterfaceKind::Service {
+                                    id: zone_id.into_untyped_uuid(),
+                                },
+                                name: "test-nic".parse().unwrap(),
+                                ip_config: ip_config.clone(),
+                                mac: MacAddr::random_system(),
+                                vni: Vni::try_from(100).unwrap(),
+                                primary: true,
+                                slot: 0,
+                            },
+                            nexus_generation,
+                        },
+                    ),
+                    image_source: BlueprintZoneImageSource::InstallDataset,
+                }
+            })
+            .collect();
+
+        let mut sleds = BTreeMap::new();
+        sleds.insert(
+            sled_id,
+            BlueprintSledConfig {
+                state: SledState::Active,
+                subnet: Ipv6Subnet::new(Ipv6Addr::LOCALHOST),
+                last_allocated_ip_subnet_offset:
+                    LastAllocatedSubnetIpOffset::initial(),
+                sled_agent_generation: Generation::new(),
+                zones,
+                disks: IdOrdMap::new(),
+                datasets: IdOrdMap::new(),
+                remove_mupdate_override: None,
+                host_phase_2: BlueprintHostPhase2DesiredSlots::current_contents(
+                ),
+                measurements: BlueprintMeasurements::InstallDataset,
+                update_disposition: BlueprintSledUpdateDisposition::initial(),
+            },
+        );
+
+        Blueprint {
+            id: blueprint_id,
+            sleds,
+            pending_mgs_updates: PendingMgsUpdates::new(),
+            parent_blueprint_id: None,
+            internal_dns_version: Generation::new(),
+            external_dns_version: Generation::new(),
+            target_release_minimum_generation: Generation::new(),
+            nexus_generation,
+            external_networking_generation: Generation::new(),
+            cockroachdb_fingerprint: String::new(),
+            cockroachdb_setting_preserve_downgrade:
+                CockroachDbPreserveDowngrade::DoNotModify,
+            clickhouse_cluster_config: None,
+            oximeter_read_mode: OximeterReadMode::SingleNode,
+            oximeter_read_version: Generation::new(),
+            time_created: now_db_precision(),
+            creator: "test suite".to_string(),
+            comment: "test blueprint".to_string(),
+            source: BlueprintSource::Test,
+        }
+    }
+
+    // Summarize a saga's state ignoring the abandonment timestamp, so we can
+    // compare states across a database round-trip without timestamp precision
+    // flakiness.
+    fn state_summary(
+        state: &SagaExecState,
+    ) -> (SagaState, Option<(SagaReasonAbandoned, String)>) {
+        match state {
+            SagaExecState::Running => (SagaState::Running, None),
+            SagaExecState::Unwinding => (SagaState::Unwinding, None),
+            SagaExecState::Done => (SagaState::Done, None),
+            SagaExecState::Abandoned(metadata) => (
+                SagaState::Abandoned,
+                Some((metadata.reason, metadata.comment.clone())),
+            ),
+        }
+    }
 
     #[test]
     fn test_find_expunged_same_generation() {
@@ -118,9 +370,9 @@ mod test {
         let logctx = test_setup_log(TEST_NAME);
         let log = &logctx.log;
 
-        // To do an exhaustive test of `find_expunged_same_generation()`, we
-        // want some expunged zones and some non-expunged zones in each of two
-        // different generations.
+        // To do an exhaustive test of `find_expunged_nexus_ids()` with the
+        // `SameGeneration` filter, we want some expunged zones and some
+        // non-expunged zones in each of two different generations.
 
         // First, create a basic blueprint with several Nexus zones in
         // generation 1.
@@ -244,9 +496,11 @@ mod test {
             })
             .collect();
         for (_sled_id, zone_id, _image_source) in g1_keep_ids {
-            let matched = find_expunged_same_generation(
+            let matched = find_expunged_nexus_ids(
                 &blueprint3,
                 SecId(zone_id.into_untyped_uuid()),
+                BlueprintExpungedZoneAccessReason::NexusSagaReassignment,
+                FindExpungedNexusFilter::SameGeneration,
             )
             .unwrap();
             assert_eq!(
@@ -264,9 +518,11 @@ mod test {
         // expunged-and-ready-for-cleanup zone in generation 2.
         let g2_matched = SecId(g2_expunged_cleaned_up.into_untyped_uuid());
         for (_sled_id, zone_id) in g2_keep_ids {
-            let matched = find_expunged_same_generation(
+            let matched = find_expunged_nexus_ids(
                 &blueprint3,
                 SecId(zone_id.into_untyped_uuid()),
+                BlueprintExpungedZoneAccessReason::NexusSagaReassignment,
+                FindExpungedNexusFilter::SameGeneration,
             )
             .unwrap();
             assert_eq!(matched.len(), 1);
@@ -276,9 +532,11 @@ mod test {
         // It is possible for the expunged and not-yet-ready-for-cleanup zone in
         // generation 2 to wind up calling this function.  It should not find
         // itself!
-        let matched = find_expunged_same_generation(
+        let matched = find_expunged_nexus_ids(
             &blueprint3,
             SecId(g2_expunged_not_cleaned_up.into_untyped_uuid()),
+            BlueprintExpungedZoneAccessReason::NexusSagaReassignment,
+            FindExpungedNexusFilter::SameGeneration,
         )
         .unwrap();
         assert_eq!(matched.len(), 1);
@@ -286,12 +544,349 @@ mod test {
 
         // Test the sole error case: if we cannot figure out which generation we
         // were given.
-        let error =
-            find_expunged_same_generation(&blueprint3, SecId(Uuid::new_v4()))
-                .expect_err("made-up Nexus should not exist");
+        let error = find_expunged_nexus_ids(
+            &blueprint3,
+            SecId(Uuid::new_v4()),
+            BlueprintExpungedZoneAccessReason::NexusSagaReassignment,
+            FindExpungedNexusFilter::SameGeneration,
+        )
+        .expect_err("made-up Nexus should not exist");
         assert!(matches!(error, Error::InternalError { internal_message }
             if internal_message.contains("did not find Nexus")));
 
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn test_find_expunged_older_generation() {
+        const TEST_NAME: &str = "test_find_expunged_older_generation";
+
+        let logctx = test_setup_log(TEST_NAME);
+
+        // g1 is older than the current generation g2.
+        let g1 = Generation::new();
+        let g2 = g1.next();
+
+        // Build a blueprint with different Nexus states across two generations:
+        //
+        // - two in-service Nexus zones in each generation
+        // - two expunged and ready-for-cleanup Nexus zones in generation 1
+        // - one expunged and ready-for-cleanup Nexus zone in generation 2
+        // - one expunged but NOT ready-for-cleanup Nexus zone in
+        //   generation 2
+        let g1_in_service_a = OmicronZoneUuid::new_v4();
+        let g1_in_service_b = OmicronZoneUuid::new_v4();
+        let g1_expunged_a = OmicronZoneUuid::new_v4();
+        let g1_expunged_b = OmicronZoneUuid::new_v4();
+        let g2_in_service_a = OmicronZoneUuid::new_v4();
+        let g2_in_service_b = OmicronZoneUuid::new_v4();
+        let g2_expunged_ready = OmicronZoneUuid::new_v4();
+        let g2_expunged_not_ready = OmicronZoneUuid::new_v4();
+
+        let blueprint = create_test_blueprint_with_custom_nexus(
+            g2,
+            vec![
+                (g1_in_service_a, BlueprintZoneDisposition::InService, g1),
+                (g1_in_service_b, BlueprintZoneDisposition::InService, g1),
+                (
+                    g1_expunged_a,
+                    BlueprintZoneDisposition::Expunged {
+                        as_of_generation: g1,
+                        ready_for_cleanup: true,
+                    },
+                    g1,
+                ),
+                (
+                    g1_expunged_b,
+                    BlueprintZoneDisposition::Expunged {
+                        as_of_generation: g1,
+                        ready_for_cleanup: true,
+                    },
+                    g1,
+                ),
+                (g2_in_service_a, BlueprintZoneDisposition::InService, g2),
+                (g2_in_service_b, BlueprintZoneDisposition::InService, g2),
+                (
+                    g2_expunged_ready,
+                    BlueprintZoneDisposition::Expunged {
+                        as_of_generation: g2,
+                        ready_for_cleanup: true,
+                    },
+                    g2,
+                ),
+                (
+                    g2_expunged_not_ready,
+                    BlueprintZoneDisposition::Expunged {
+                        as_of_generation: g2,
+                        ready_for_cleanup: false,
+                    },
+                    g2,
+                ),
+            ],
+        );
+
+        // The only zones older than g2 that are expunged + ready for cleanup
+        // are the two generation-1 ones.
+        let g1_matched: BTreeSet<SecId> = [g1_expunged_a, g1_expunged_b]
+            .into_iter()
+            .map(|zone_id| SecId(zone_id.into_untyped_uuid()))
+            .collect();
+
+        // For the in-service zones in generation 1, there are no expunged zones
+        // of an older generation (generation 1 is the oldest), so we find
+        // nothing.
+        for zone_id in [g1_in_service_a, g1_in_service_b] {
+            let matched = find_expunged_nexus_ids(
+                &blueprint,
+                SecId(zone_id.into_untyped_uuid()),
+                BlueprintExpungedZoneAccessReason::NexusOrphanSagaAbandonment,
+                FindExpungedNexusFilter::OlderGeneration,
+            )
+            .unwrap();
+            assert!(matched.is_empty());
+        }
+
+        // For the in-service zones in generation 2, we should find the
+        // expunged and ready-for-cleanup zones in generation 1. We should NOT
+        // find the generation-2 expunged zone, since that's the same
+        // generation, not older.
+        for zone_id in [g2_in_service_a, g2_in_service_b] {
+            let matched = find_expunged_nexus_ids(
+                &blueprint,
+                SecId(zone_id.into_untyped_uuid()),
+                BlueprintExpungedZoneAccessReason::NexusOrphanSagaAbandonment,
+                FindExpungedNexusFilter::OlderGeneration,
+            )
+            .unwrap();
+            assert_eq!(matched.len(), 2);
+            assert_eq!(
+                matched.into_iter().collect::<BTreeSet<_>>(),
+                g1_matched
+            );
+        }
+
+        // It is possible for the expunged and NOT ready-for-cleanup zone in
+        // generation 2 to wind up calling this function. From its (generation
+        // 2) perspective, the only older expunged and ready-for-cleanup zones
+        // are the generation-1 ones; it finds neither the same-generation
+        // expunged zone nor itself.
+        let matched = find_expunged_nexus_ids(
+            &blueprint,
+            SecId(g2_expunged_not_ready.into_untyped_uuid()),
+            BlueprintExpungedZoneAccessReason::NexusOrphanSagaAbandonment,
+            FindExpungedNexusFilter::OlderGeneration,
+        )
+        .unwrap();
+        assert_eq!(matched.len(), 2);
+        assert_eq!(matched.into_iter().collect::<BTreeSet<_>>(), g1_matched);
+
+        // There should be an error if the id of the current nexus is not in the
+        // blueprint
+        let error = find_expunged_nexus_ids(
+            &blueprint,
+            SecId(Uuid::new_v4()),
+            BlueprintExpungedZoneAccessReason::NexusOrphanSagaAbandonment,
+            FindExpungedNexusFilter::OlderGeneration,
+        )
+        .expect_err("made-up Nexus should not exist");
+        assert!(matches!(error, Error::InternalError { internal_message }
+            if internal_message.contains("did not find Nexus")));
+
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_abandon_orphan_sagas() {
+        let logctx = test_setup_log("test_abandon_orphan_sagas");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // Generations: g1 is older than the live generation g2.
+        let g1 = Generation::new();
+        let g2 = g1.next();
+
+        // Build a blueprint with:
+        // - an in-service Nexus at the live generation (g2)
+        // - an expunged + ready_for_cleanup Nexus at the live generation (g2)
+        // - an expunged + ready_for_cleanup Nexus at an older generation (g1)
+        //
+        // Only the orphan_zone, with a generation older than the current Nexus,
+        // has sagas that can never be reassigned.
+        let in_service_zone = OmicronZoneUuid::new_v4();
+        let expunged_same_gen_zone = OmicronZoneUuid::new_v4();
+        let orphan_zone = OmicronZoneUuid::new_v4();
+
+        let blueprint = create_test_blueprint_with_custom_nexus(
+            g2,
+            vec![
+                (in_service_zone, BlueprintZoneDisposition::InService, g2),
+                (
+                    expunged_same_gen_zone,
+                    BlueprintZoneDisposition::Expunged {
+                        as_of_generation: g2,
+                        ready_for_cleanup: true,
+                    },
+                    g2,
+                ),
+                (
+                    orphan_zone,
+                    BlueprintZoneDisposition::Expunged {
+                        as_of_generation: g1,
+                        ready_for_cleanup: true,
+                    },
+                    g1,
+                ),
+            ],
+        );
+
+        // We create sagas for four different SECs:
+        //
+        // - `in_service_sec`:        a live, in-service Nexus
+        // - `expunged_same_gen_sec`: expunged, but same generation as the live
+        //                            Nexus (so still reassignable)
+        // - `absent_sec`:            a Nexus that isn't in the blueprint at all
+        // - `orphan_sec`:            expunged and older than the live Nexus
+        //
+        // Only `orphan_sec`'s running/unwinding sagas should be abandoned. All
+        // other sagas, for every SEC and in every state, must be left untouched
+        let in_service_sec = SecId(in_service_zone.into_untyped_uuid());
+        let expunged_same_gen_sec =
+            SecId(expunged_same_gen_zone.into_untyped_uuid());
+        let absent_sec = SecId(Uuid::new_v4());
+        let orphan_sec = SecId(orphan_zone.into_untyped_uuid());
+
+        // For each SEC, create one saga in each state (running, unwinding,
+        // done, and abandoned).
+        let mut sagas_to_insert = Vec::new();
+        for sec in
+            [in_service_sec, expunged_same_gen_sec, absent_sec, orphan_sec]
+        {
+            for state in [
+                steno::SagaCachedState::Running,
+                steno::SagaCachedState::Unwinding,
+                steno::SagaCachedState::Done,
+            ] {
+                sagas_to_insert.push(Saga::new(
+                    sec,
+                    steno::SagaCreateParams {
+                        id: steno::SagaId(Uuid::new_v4()),
+                        name: steno::SagaName::new("test saga"),
+                        dag: serde_json::Value::Null,
+                        state,
+                    },
+                ));
+            }
+            sagas_to_insert.push(Saga::new_abandoned(
+                sec,
+                SagaId(steno::SagaId(Uuid::new_v4())),
+                "test saga".to_string(),
+                serde_json::Value::Null,
+                AbandonMetadata {
+                    time: Utc::now(),
+                    reason: SagaReasonAbandoned::Unrecoverable,
+                    comment: "preexisting abandonment".to_string(),
+                },
+            ));
+        }
+
+        // Record the initial state of every saga so we can confirm which ones
+        // changed.
+        let initial_state: BTreeMap<SagaId, SagaExecState> = sagas_to_insert
+            .iter()
+            .map(|saga| (saga.id, saga.saga_state.clone()))
+            .collect();
+
+        // The only sagas that should end up newly abandoned are those from `orphan_sec`
+        // that started out running or unwinding.
+        let expected_newly_abandoned: BTreeSet<SagaId> = sagas_to_insert
+            .iter()
+            .filter_map(|saga| {
+                (saga.creator == orphan_sec
+                    && matches!(
+                        saga.saga_state,
+                        SagaExecState::Running | SagaExecState::Unwinding
+                    ))
+                .then_some(saga.id)
+            })
+            .collect();
+        assert_eq!(expected_newly_abandoned.len(), 2);
+
+        // Insert the sagas.
+        {
+            use nexus_db_schema::schema::saga::dsl;
+            let conn = datastore.pool_connection_for_tests().await.unwrap();
+            diesel::insert_into(dsl::saga)
+                .values(sagas_to_insert.iter().collect::<Vec<_>>())
+                .execute_async(&*conn)
+                .await
+                .expect("successful insertion");
+        }
+
+        // Run the orphan saga abandoner.
+        abandon_orphan_sagas(opctx, datastore, &blueprint, in_service_sec)
+            .await
+            .expect("abandon_orphan_sagas failed");
+
+        // Read every saga we inserted back. Query by primary key to avoid a
+        // full table scan.
+        let all_ids: Vec<SagaId> = initial_state.keys().copied().collect();
+        let loaded: Vec<Saga> = {
+            use nexus_db_schema::schema::saga::dsl;
+            let conn = datastore.pool_connection_for_tests().await.unwrap();
+            dsl::saga
+                .filter(dsl::id.eq_any(all_ids))
+                .select(Saga::as_select())
+                .load_async(&*conn)
+                .await
+                .expect("failed to load sagas")
+        };
+        assert_eq!(loaded.len(), sagas_to_insert.len());
+
+        // Split what we loaded into the sagas we expect to have been abandoned
+        // and the ones we expect to be untouched.
+        let expected_unchanged_count =
+            sagas_to_insert.len() - expected_newly_abandoned.len();
+
+        let (abandoned, unchanged): (Vec<Saga>, Vec<Saga>) = loaded
+            .into_iter()
+            .partition(|saga| expected_newly_abandoned.contains(&saga.id));
+
+        assert_eq!(abandoned.len(), expected_newly_abandoned.len());
+        assert_eq!(unchanged.len(), expected_unchanged_count);
+
+        // `orphan_sec`'s running/unwinding sagas should now be abandoned as
+        // orphaned.
+        for saga in abandoned {
+            assert_eq!(
+                state_summary(&saga.saga_state),
+                (
+                    SagaState::Abandoned,
+                    Some((
+                        SagaReasonAbandoned::Orphaned,
+                        "orphan: current_sec is expunged and too old for this \
+                        saga to be re-assigned"
+                            .to_string(),
+                    )),
+                ),
+                "saga {} should have been abandoned as orphaned, but is {:?}",
+                saga.id,
+                saga.saga_state,
+            );
+        }
+
+        // Every other saga must be exactly as we inserted it.
+        for saga in unchanged {
+            let initial = &initial_state[&saga.id];
+            assert_eq!(
+                state_summary(&saga.saga_state),
+                state_summary(initial),
+                "saga {} (creator {:?}) should have been left untouched",
+                saga.id,
+                saga.creator,
+            );
+        }
+
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 }

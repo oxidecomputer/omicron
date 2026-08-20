@@ -5,9 +5,6 @@
 //! Sled agent implementation
 
 use crate::artifact_store::{ArtifactStore, SledAgentArtifactStoreWrapper};
-use crate::bootstrap::sprockets_client::{
-    SprocketsClient, SprocketsClientError,
-};
 use crate::config::Config;
 use crate::hardware_monitor::HardwareMonitorHandle;
 use crate::instance_manager::InstanceManager;
@@ -64,6 +61,9 @@ use omicron_uuid_kinds::{
 };
 use oximeter_instruments::http::LatencyTracker;
 use oxnet::IpNet;
+use sled_agent_bootstrap_common::sprockets::{
+    SprocketsClient, SprocketsClientError,
+};
 use sled_agent_config_reconciler::{
     ConfigReconcilerHandle, ConfigReconcilerSpawnToken, InternalDisks,
     InternalDisksReceiver, LedgerNewConfigError, LedgerTaskError,
@@ -78,6 +78,7 @@ use sled_agent_types::attached_subnet::AttachedSubnet;
 use sled_agent_types::attached_subnet::AttachedSubnets;
 use sled_agent_types::dataset::LocalStorageDatasetDeleteRequest;
 use sled_agent_types::dataset::LocalStorageDatasetEnsureRequest;
+use sled_agent_types::disk::CompressionAlgorithm;
 use sled_agent_types::disk::DiskStateRequested;
 use sled_agent_types::early_networking::EarlyNetworkConfigEnvelope;
 use sled_agent_types::instance::ResolvedVpcFirewallRule;
@@ -1440,7 +1441,7 @@ impl SledAgent {
             size_details: Some(SizeDetails {
                 quota: Some(dataset_size),
                 reservation: Some(dataset_size),
-                compression: omicron_common::disk::CompressionAlgorithm::Off,
+                compression: CompressionAlgorithm::Off,
             }),
             id: None,
             additional_options: None,
