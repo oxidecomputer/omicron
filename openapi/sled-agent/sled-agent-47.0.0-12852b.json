@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "45.0.0"
+    "version": "47.0.0"
   },
   "paths": {
     "/artifacts": {
@@ -3306,10 +3306,11 @@
         ]
       },
       "BgpPeerConfig": {
+        "description": "A BGP peer configuration for a port.",
         "type": "object",
         "properties": {
           "addr": {
-            "description": "Address of the peer.",
+            "description": "Address of the peer (numbered or unnumbered).",
             "allOf": [
               {
                 "$ref": "#/components/schemas/RouterPeerType"
@@ -9105,8 +9106,15 @@
           {
             "type": "object",
             "properties": {
-              "ip": {
-                "description": "IP address for numbered BGP peers.",
+              "src_addr": {
+                "nullable": true,
+                "description": "Optional local IP address to bind when establishing outbound TCP connections to this peer. If `None`, the OS selects the source address.",
+                "default": null,
+                "type": "string",
+                "format": "ip"
+              },
+              "target_addr": {
+                "description": "Target IP address for numbered BGP peers.",
                 "type": "string",
                 "format": "ip"
               },
@@ -9118,7 +9126,7 @@
               }
             },
             "required": [
-              "ip",
+              "target_addr",
               "type"
             ]
           }
@@ -9906,6 +9914,13 @@
             "type": "string",
             "enum": [
               "maintenance"
+            ]
+          },
+          {
+            "description": "An instance whose state is absent or unrecognized. Note: as per `man svcs`, \"Absent or unrecognized states are denoted by a question mark (?) character\". So there is not an \"unrecognized\" state per se in svcs.",
+            "type": "string",
+            "enum": [
+              "unrecognized"
             ]
           }
         ]

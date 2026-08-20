@@ -14,11 +14,12 @@ use indent_write::fmt::IndentWriter;
 use omicron_common::address::Ip;
 use omicron_common::address::NUM_SOURCE_NAT_PORTS;
 use omicron_common::api::external::Generation;
-use omicron_common::disk::{DatasetKind, DatasetName, M2Slot};
+use omicron_common::disk::{DatasetKind, DatasetName};
 use omicron_common::update::OmicronInstallManifestSource;
 use omicron_uuid_kinds::MupdateUuid;
 use tufaceous_artifact::ArtifactHash;
 
+use crate::latest::disk::M2Slot;
 use crate::latest::inventory::{
     BootImageHeader, BootPartitionContents, BootPartitionDetails,
     ConfigReconcilerInventory, ConfigReconcilerInventoryResult, FmdHostCase,
@@ -577,6 +578,12 @@ impl SvcsEnabledNotOnline {
         let SvcsEnabledNotOnline { services, errors, time_of_status: _ } = self;
         services.is_empty() && errors.is_empty()
     }
+
+    /// Removes all services that are not in the `Maintenance` state.
+    pub fn retain_in_maintenance(&mut self) {
+        self.services
+            .retain(|svc| svc.state == SvcEnabledNotOnlineState::Maintenance);
+    }
 }
 
 /// Display helper for [`OmicronFileSourceResolverInventory`].
@@ -1055,6 +1062,7 @@ impl From<SvcEnabledNotOnlineState> for SvcState {
             SvcEnabledNotOnlineState::Degraded => Self::Degraded,
             SvcEnabledNotOnlineState::Maintenance => Self::Maintenance,
             SvcEnabledNotOnlineState::Offline => Self::Offline,
+            SvcEnabledNotOnlineState::Unrecognized => Self::Unrecognized,
         }
     }
 }
@@ -1069,6 +1077,7 @@ impl fmt::Display for SvcState {
             SvcState::Maintenance => "maintenance",
             SvcState::Disabled => "disabled",
             SvcState::LegacyRun => "legacy_run",
+            SvcState::Unrecognized => "unrecognized",
         };
 
         write!(f, "{state}")
@@ -1081,6 +1090,7 @@ impl fmt::Display for SvcEnabledNotOnlineState {
             SvcEnabledNotOnlineState::Offline => "offline",
             SvcEnabledNotOnlineState::Degraded => "degraded",
             SvcEnabledNotOnlineState::Maintenance => "maintenance",
+            SvcEnabledNotOnlineState::Unrecognized => "unrecognized",
         };
 
         write!(f, "{state}")

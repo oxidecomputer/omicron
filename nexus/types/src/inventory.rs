@@ -22,7 +22,6 @@ use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
 use iddqd::id_upcast;
 use omicron_common::api::external::ByteCount;
-use omicron_common::disk::M2Slot;
 pub use omicron_common::zpool_name::ZpoolName;
 use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::DatasetUuid;
@@ -32,6 +31,8 @@ use omicron_uuid_kinds::ZpoolUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
+use sled_agent_types::disk::M2Slot;
+use sled_agent_types_versions::latest::disk::DiskIdentity;
 use sled_agent_types_versions::latest::inventory::ConfigReconcilerInventory;
 use sled_agent_types_versions::latest::inventory::ConfigReconcilerInventoryResult;
 use sled_agent_types_versions::latest::inventory::ConfigReconcilerInventoryStatus;
@@ -324,11 +325,7 @@ impl Collection {
             .filter_map(|sled_agent| {
                 match &sled_agent.smf_services_enabled_not_online {
                     SvcsEnabledNotOnlineResult::SvcsEnabledNotOnline(svcs)
-                        // This should check if svcs.is_empty() which includes
-                        // parsing errors. We have a bug with this at the moment
-                        // https://github.com/oxidecomputer/omicron/issues/10997
-                        // This check should change once that issue is resolved
-                        if svcs.services.is_empty() =>
+                        if svcs.is_empty() =>
                     {
                         None
                     }
@@ -608,7 +605,7 @@ pub struct PhysicalDisk {
     // InventoryDisk and PhysicalDisk? The types are structurally the same, but
     // maybe the separation is useful to indicate that a `PhysicalDisk` doesn't
     // always show up in the inventory.
-    pub identity: omicron_common::disk::DiskIdentity,
+    pub identity: DiskIdentity,
     pub variant: PhysicalDiskKind,
     pub slot: i64,
     pub firmware: PhysicalDiskFirmware,

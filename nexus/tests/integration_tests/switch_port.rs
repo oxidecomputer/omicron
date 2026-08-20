@@ -26,8 +26,9 @@ use sled_agent_types::early_networking::ImportExportPolicy;
 use sled_agent_types::early_networking::LinkFec;
 use sled_agent_types::early_networking::LinkSpeed;
 use sled_agent_types::early_networking::MaxPathConfig;
+use sled_agent_types::early_networking::NumberedRouter;
 use sled_agent_types::early_networking::RouterLifetimeConfig;
-use sled_agent_types::early_networking::RouterPeerType;
+use sled_agent_types::early_networking::UnnumberedRouter;
 use std::str::FromStr;
 
 type ControlPlaneTestContext =
@@ -318,9 +319,12 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
             // Numbered peer - identified by address
             BgpPeer {
                 bgp_config: NameOrId::Name("as47".parse().unwrap()),
-                addr: RouterPeerType::Numbered {
-                    ip: "1.2.3.4".parse().unwrap(),
-                },
+                addr: NumberedRouter::new(
+                    "1.2.3.4".parse().unwrap(),
+                    Some("9.9.9.9".parse().unwrap()),
+                )
+                .unwrap()
+                .into(),
                 hold_time: 6,
                 idle_hold_time: 6,
                 delay_open: 0,
@@ -340,9 +344,10 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
             // Unnumbered peer - identified by link from parent `BgpPeerConfig`
             BgpPeer {
                 bgp_config: NameOrId::Name("as47".parse().unwrap()),
-                addr: RouterPeerType::Unnumbered {
+                addr: UnnumberedRouter {
                     router_lifetime: RouterLifetimeConfig::new(123).unwrap(),
-                },
+                }
+                .into(),
                 hold_time: 6,
                 idle_hold_time: 6,
                 delay_open: 0,
@@ -388,8 +393,13 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
         .expect("Should have a numbered peer");
     assert_eq!(
         numbered_peer.addr,
-        RouterPeerType::Numbered { ip: "1.2.3.4".parse().unwrap() },
-        "Numbered peer should have addr 1.2.3.4"
+        NumberedRouter::new(
+            "1.2.3.4".parse().unwrap(),
+            Some("9.9.9.9".parse().unwrap()),
+        )
+        .unwrap()
+        .into(),
+        "Numbered peer should have addr 1.2.3.4 and src_addr 9.9.9.9"
     );
 
     // Find the unnumbered peer (no address)
@@ -400,9 +410,10 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
         .expect("Should have an unnumbered peer");
     assert_eq!(
         unnumbered_peer.addr,
-        RouterPeerType::Unnumbered {
+        UnnumberedRouter {
             router_lifetime: RouterLifetimeConfig::new(123).unwrap(),
         }
+        .into()
     );
     assert_eq!(
         unnumbered_peer.remote_asn,
@@ -460,9 +471,10 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
         .expect("Roundtrip should have an unnumbered peer");
     assert_eq!(
         roundtrip_unnumbered.addr,
-        RouterPeerType::Unnumbered {
+        UnnumberedRouter {
             router_lifetime: RouterLifetimeConfig::new(123).unwrap(),
         }
+        .into()
     );
     assert_eq!(roundtrip_unnumbered.remote_asn, Some(65000));
     assert_eq!(roundtrip_unnumbered.communities, vec![65000]);
