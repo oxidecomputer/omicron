@@ -1151,10 +1151,10 @@ async fn test_debug_files(cptestctx: &ControlPlaneTestContext) {
     assert!(file.intended_target_blueprint.is_none());
 
     // Case: failing to make a blueprint the target does not create any debug
-    // files (or rather, does not leave any around).  To test this, we'll create
-    // a second blueprint based on the first, try to set it as the target (which
-    // will fail), and verify that on net, no new files have been created.
-    // Ignore the file created just for having created the blueprint.
+    // files (or rather, does not leave any around).  To test this, we'll use
+    // the second blueprint that we created earlier and try to set it as the
+    // target.  This will fail, since its parent is no longer the current
+    // target.  Then we'll verify that on net, no new files have been created.
     let error = nexus_client
         .blueprint_target_set(&BlueprintTargetSet {
             enabled: target_initial.enabled,
