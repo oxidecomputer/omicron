@@ -76,6 +76,12 @@ pub struct Vmm {
     /// If this VMM is in the `Failed` state, this field describes why it
     /// failed. This is `None` for VMMs that are not in the `Failed` state.
     pub failure_reason: Option<VmmFailureReason>,
+
+    /// The sled's `update_disposition` generation which triggered this VMM to
+    /// stop.
+    ///
+    /// NULL when its state has not been modified by an update.
+    pub stopped_for_update_disposition_generation: Option<Generation>,
 }
 
 impl Vmm {
@@ -106,6 +112,7 @@ impl Vmm {
             state: VmmState::Creating,
             cpu_platform,
             failure_reason: None,
+            stopped_for_update_disposition_generation: None,
         }
     }
 
