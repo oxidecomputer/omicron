@@ -26,6 +26,7 @@ use omicron_common::api::external::UserId;
 use omicron_common::api::internal::nexus::Certificate;
 use omicron_sled_agent::sim;
 use omicron_test_utils::dev;
+use omicron_test_utils::dev::TestTempDir;
 use omicron_test_utils::dev::poll;
 use omicron_test_utils::dev::poll::wait_for_condition;
 use omicron_test_utils::dev::poll::wait_for_watch_channel_condition;
@@ -132,6 +133,8 @@ pub struct ControlPlaneTestContext<N> {
     pub silo_name: Name,
     pub user_name: UserId,
     pub password: String,
+
+    pub(crate) debug_dropbox_dir: TestTempDir,
 }
 
 impl<N: NexusServer> ControlPlaneTestContext<N> {
@@ -171,6 +174,10 @@ impl<N: NexusServer> ControlPlaneTestContext<N> {
 
     pub fn wildcard_silo_dns_name(&self) -> String {
         format!("*.sys.{}", self.external_dns_zone_name)
+    }
+
+    pub fn debug_dropbox_path(&self) -> &Utf8Path {
+        self.debug_dropbox_dir.path()
     }
 
     /// Wait until at least one inventory collection has been inserted into the
@@ -339,6 +346,7 @@ impl<N: NexusServer> ControlPlaneTestContext<N> {
         for (_, mut ddm) in self.ddm {
             ddm.cleanup().await.unwrap();
         }
+        self.debug_dropbox_dir.cleanup_successful();
         self.logctx.cleanup_successful();
     }
 }

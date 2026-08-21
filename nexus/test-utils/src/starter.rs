@@ -80,8 +80,10 @@ use omicron_common::api::internal::nexus::ProducerKind;
 use omicron_common::api::internal::shared::DatasetKind;
 use omicron_common::api::internal::shared::PrivateIpConfig;
 use omicron_common::zpool_name::ZpoolName;
+use omicron_debug_dropbox::DebugDropbox;
 use omicron_sled_agent::sim;
 use omicron_test_utils::dev;
+use omicron_test_utils::dev::TestTempDir;
 use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::ExternalIpUuid;
@@ -108,7 +110,7 @@ use sled_agent_types::inventory::SledCpuFamily;
 use sled_agent_types::inventory::SourceNatConfigGeneric;
 use sled_agent_types::system_networking::SystemNetworkingConfig;
 use sled_agent_types::system_networking::WriteNetworkConfigRequest;
-use slog::{Logger, debug, error, o};
+use slog::{Logger, debug, error, info, o};
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::collections::HashMap;
@@ -176,6 +178,8 @@ pub struct ControlPlaneStarter<'a, N: NexusServer> {
     pub password: Option<String>,
 
     pub simulated_upstairs: Arc<sim::SimulatedUpstairs>,
+
+    debug_dropbox_dir: TestTempDir,
 }
 
 type StepInitFn<'a, N> = Box<
@@ -190,6 +194,8 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
         let simulated_upstairs_log = logctx.log.new(o!(
             "component" => "omicron_sled_agent::sim::SimulatedUpstairs",
         ));
+
+        let debug_dropbox_dir = TestTempDir::new(&logctx.log);
 
         Self {
             config,
@@ -227,6 +233,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
             simulated_upstairs: Arc::new(sim::SimulatedUpstairs::new(
                 simulated_upstairs_log,
             )),
+            debug_dropbox_dir,
         }
     }
 
@@ -595,7 +602,12 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
                 .clone(),
         };
 
-        let nexus_internal = N::start_internal(&self.config, &log).await?;
+        let debug_dropbox =
+            DebugDropbox::for_tests(log, &self.debug_dropbox_dir.path())
+                .await
+                .expect("creating debug dropbox directory");
+        let nexus_internal =
+            N::start_internal(&self.config, &log, debug_dropbox).await?;
         let nexus_internal_addr =
             nexus_internal.get_http_server_internal_address();
         let internal_address = match nexus_internal_addr {
@@ -777,7 +789,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
             .clone()
             .build_full_config_for_initial_generation();
 
-        slog::info!(log, "DNS population: {:#?}", dns_config);
+        info!(log, "DNS population: {:#?}", dns_config);
         dns_config_client.dns_config_put(&dns_config).await.expect(
             "Failed to send initial DNS records to internal DNS server",
         );
@@ -1305,6 +1317,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
             silo_name: self.silo_name.unwrap(),
             user_name: self.user_name.unwrap(),
             password: self.password.unwrap(),
+            debug_dropbox_dir: self.debug_dropbox_dir,
         }
     }
 
@@ -1342,6 +1355,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
         for (_, mut ddm) in self.ddm {
             ddm.cleanup().await.unwrap();
         }
+        self.debug_dropbox_dir.cleanup_successful();
         self.logctx.cleanup_successful();
     }
 

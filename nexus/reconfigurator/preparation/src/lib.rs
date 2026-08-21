@@ -19,6 +19,7 @@ use nexus_db_queries::db::datastore::SQL_BATCH_SIZE;
 use nexus_db_queries::db::pagination::Paginator;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintMetadata;
+use nexus_types::deployment::BlueprintTarget;
 use nexus_types::deployment::ClickhousePolicy;
 use nexus_types::deployment::CockroachDbClusterVersion;
 use nexus_types::deployment::CockroachDbSettings;
@@ -53,6 +54,7 @@ use omicron_common::policy::CRUCIBLE_PANTRY_REDUNDANCY;
 use omicron_common::policy::INTERNAL_DNS_REDUNDANCY;
 use omicron_common::policy::NEXUS_REDUNDANCY;
 use omicron_common::policy::OXIMETER_REDUNDANCY;
+use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use sled_agent_types::disk::DiskIdentity;
@@ -503,7 +505,8 @@ async fn fetch_all_service_ip_pool_ranges(
     Ok(ranges)
 }
 
-/// Loads state for debugging or import into `reconfigurator-cli`
+/// Loads Reconfigurator-related state from a live system for debugging or
+/// import into `reconfigurator-cli`
 ///
 /// This is used in omdb, tests, and in Nexus to collect support bundles
 pub async fn reconfigurator_state_load(
@@ -598,6 +601,37 @@ pub async fn reconfigurator_state_load(
         .collect::<IdOrdMap<Blueprint>>()
         .await;
 
+    // Delegate the rest.
+    reconfigurator_state_assemble(
+        opctx,
+        datastore,
+        planning_input,
+        collections,
+        blueprints,
+        target_blueprint,
+        None,
+    )
+    .await
+}
+
+/// Assembles a reconfigurator state file with caller-provided planning input,
+/// inventory collections, blueprints, and target blueprint
+///
+/// These parts of the returned state file will be exactly as the caller
+/// provided them.  The other state that goes into the file will be loaded from
+/// the live system.
+///
+/// This is used to package up all the information that went into a specific
+/// planner run for future debugging.
+pub async fn reconfigurator_state_assemble(
+    opctx: &OpContext,
+    datastore: &DataStore,
+    planning_input: PlanningInput,
+    collections: IdOrdMap<Collection>,
+    blueprints: IdOrdMap<Blueprint>,
+    target_blueprint: BlueprintTarget,
+    intended_target_blueprint: Option<BlueprintUuid>,
+) -> Result<UnstableReconfiguratorState, anyhow::Error> {
     // It's also useful to include information about any DNS generations
     // mentioned in any blueprints.
     let blueprints_list = &blueprints;
@@ -650,6 +684,7 @@ pub async fn reconfigurator_state_load(
         planning_input,
         collections,
         target_blueprint,
+        intended_target_blueprint,
         blueprints,
         internal_dns,
         external_dns,

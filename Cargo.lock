@@ -8176,6 +8176,7 @@ dependencies = [
  "nexus-db-queries",
  "nexus-types",
  "omicron-common",
+ "omicron-debug-dropbox",
  "omicron-rpaths",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
@@ -8222,6 +8223,7 @@ dependencies = [
  "nexus-types-versions",
  "omicron-cockroach-admin",
  "omicron-common",
+ "omicron-debug-dropbox",
  "omicron-passwords",
  "omicron-rpaths",
  "omicron-sled-agent",
@@ -8932,6 +8934,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "omicron-debug-dropbox"
+version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/omicron-debug-dropbox?rev=eb13fc7a0031261dd51a14a30a133155460f5c0a#eb13fc7a0031261dd51a14a30a133155460f5c0a"
+dependencies = [
+ "camino",
+ "derive_more 2.1.1",
+ "slog",
+ "slog-error-chain 0.1.0 (git+https://github.com/oxidecomputer/slog-error-chain?branch=main)",
+ "thiserror 2.0.18",
+ "tokio",
+]
+
+[[package]]
 name = "omicron-deployment-graph"
 version = "0.1.0"
 dependencies = [
@@ -9258,6 +9273,7 @@ dependencies = [
  "num-integer",
  "omicron-cockroach-metrics",
  "omicron-common",
+ "omicron-debug-dropbox",
  "omicron-passwords",
  "omicron-rpaths",
  "omicron-sled-agent",
@@ -9294,6 +9310,7 @@ dependencies = [
  "range-requests",
  "raw-cpuid",
  "rcgen",
+ "reconfigurator-cli",
  "ref-cast",
  "regex",
  "reqwest 0.13.2",
@@ -9830,6 +9847,7 @@ dependencies = [
  "libc",
  "nexus-config",
  "omicron-common",
+ "omicron-debug-dropbox",
  "omicron-workspace-hack",
  "oxide-tokio-rt",
  "pem",
@@ -9839,6 +9857,7 @@ dependencies = [
  "reqwest 0.13.2",
  "rustls",
  "serde",
+ "serde_json",
  "sha2 0.10.9",
  "slog",
  "slog-error-chain 0.1.0 (git+https://github.com/oxidecomputer/slog-error-chain?branch=main)",
@@ -9901,6 +9920,8 @@ dependencies = [
  "daft",
  "data-encoding",
  "der 0.7.10",
+ "derive_more 2.1.1",
+ "derive_more-impl",
  "digest 0.10.7",
  "digest 0.11.3",
  "dof 0.3.0",

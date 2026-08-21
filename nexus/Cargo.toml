@@ -80,6 +80,7 @@ nexus-test-interface.workspace = true
 ntp-admin-client.workspace = true
 num-integer.workspace = true
 omicron-cockroach-metrics.workspace = true
+omicron-debug-dropbox.workspace = true
 openssl.workspace = true
 oximeter-client.workspace = true
 oximeter-db = { workspace = true, default-features = false, features = [
@@ -203,6 +204,7 @@ pem.workspace = true
 petgraph.workspace = true
 pretty_assertions.workspace = true
 rcgen.workspace = true
+reconfigurator-cli.workspace = true
 regex.workspace = true
 rustls.workspace = true
 scim2-test-client.workspace = true
