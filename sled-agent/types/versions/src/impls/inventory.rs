@@ -281,18 +281,6 @@ impl OmicronZoneType {
         matches!(self, OmicronZoneType::Crucible { .. })
     }
 
-    /// This zone's external IP.
-    pub fn external_ip(&self) -> Option<IpAddr> {
-        match self {
-            OmicronZoneType::Nexus { external_ip, .. } => Some(*external_ip),
-            OmicronZoneType::ExternalDns { dns_address, .. } => {
-                Some(dns_address.ip())
-            }
-            OmicronZoneType::BoundaryNtp { snat_cfg, .. } => Some(snat_cfg.ip),
-            _ => None,
-        }
-    }
-
     /// The service vNIC providing external connectivity to this zone.
     pub fn service_vnic(&self) -> Option<&NetworkInterface> {
         match self {
