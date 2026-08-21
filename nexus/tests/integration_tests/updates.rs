@@ -1091,6 +1091,13 @@ async fn test_debug_files(cptestctx: &ControlPlaneTestContext) {
         .expect("initial target blueprint");
     let bp1_id = target_initial.target_id;
 
+    // We need an inventory collection for the next step.
+    cptestctx
+        .wait_for_at_least_one_inventory_collection(
+            std::time::Duration::from_secs(60),
+        )
+        .await;
+
     // Case: creating a new blueprint via the lockstep API creates a debug file.
     let nexus_client = cptestctx.lockstep_client();
     let bp2_id = nexus_client
