@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "48.0.0"
+    "version": "49.0.0"
   },
   "paths": {
     "/artifacts": {
@@ -8570,6 +8570,11 @@
             "items": {
               "$ref": "#/components/schemas/UplinkAddressConfig"
             }
+          },
+          "allow_ddm_traffic": {
+            "description": "Whether or not to allow DDM traffic on this port",
+            "default": false,
+            "type": "boolean"
           },
           "autoneg": {
             "description": "Whether or not to set autonegotiation",

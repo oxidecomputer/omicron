@@ -11,6 +11,7 @@ workspace = true
 bootstore.workspace = true
 bootstrap-agent-lockstep-types.workspace = true
 camino.workspace = true
+iddqd.workspace = true
 itertools.workspace = true
 nexus-types.workspace = true
 omicron-common.workspace = true

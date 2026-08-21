@@ -8346,6 +8346,11 @@
               "$ref": "#/components/schemas/UplinkAddressConfig"
             }
           },
+          "allow_ddm_traffic": {
+            "description": "Whether or not to allow DDM traffic on this port",
+            "default": false,
+            "type": "boolean"
+          },
           "autoneg": {
             "description": "Whether or not to set autonegotiation",
             "default": false,
