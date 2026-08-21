@@ -229,9 +229,11 @@ impl MultirackJoinServiceTask {
 
         self.init_trust_quorum(rack_id).await?;
 
-        self.start_sled_agents(rack_id).await?;
-
+        // We must initialize the bootstore before starting sled-agents or
+        // sled-agents will block waiting indefinitely.
         self.configure_networking().await?;
+
+        self.start_sled_agents(rack_id).await?;
 
         // We're done
         self.ctx.write_rss_completed_ledger(&self.log).await?;
@@ -240,9 +242,6 @@ impl MultirackJoinServiceTask {
     }
 
     /// Publish this rack's network configuration to the bootstore.
-    ///
-    /// The scrimlet reconcilers read it from there and program the switch, so
-    /// this is what gets a joining rack's front ports configured.
     async fn configure_networking(
         &mut self,
     ) -> Result<(), MultirackJoinServiceError> {
