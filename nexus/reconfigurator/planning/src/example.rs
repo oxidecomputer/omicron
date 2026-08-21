@@ -1768,6 +1768,7 @@ mod tests {
                 | ServiceName::RepoDepot
                 | ServiceName::ManagementGatewayService
                 | ServiceName::Dendrite
+                | ServiceName::Lldpd
                 | ServiceName::Mgd
                 | ServiceName::Ddm => {
                     out.insert(service, Ok(()));

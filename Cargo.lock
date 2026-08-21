@@ -6754,6 +6754,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0ceec5bc11778974d1bcb055b18002eba7f4b3518b6a0081b3af5f21666da9ad"
 
 [[package]]
+name = "loopback-ip-mgr"
+version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/falcon?rev=aa44de0ab2edd702322ef60dd9fec1d1e70348ad#aa44de0ab2edd702322ef60dd9fec1d1e70348ad"
+dependencies = [
+ "libc",
+ "libnet",
+ "network-interface",
+ "oxnet",
+ "slog",
+]
+
+[[package]]
 name = "lpc55_areas"
 version = "0.2.5"
 source = "git+https://github.com/oxidecomputer/lpc55_support#fc64732faf5511850b35f1734d572b9953d73374"
@@ -7173,6 +7185,17 @@ name = "nested"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ca2b420f638f07fe83056b55ea190bb815f609ec5a35e7017884a10f78839c9e"
+
+[[package]]
+name = "network-interface"
+version = "0.1.7"
+source = "git+https://github.com/oxidecomputer/network-interface?branch=illumos#5a696e910333bdc50ef56cebe9cdd78e40127d87"
+dependencies = [
+ "cc",
+ "libc",
+ "thiserror 1.0.69",
+ "winapi",
+]
 
 [[package]]
 name = "new_debug_unreachable"
@@ -8214,6 +8237,7 @@ dependencies = [
  "illumos-utils",
  "internal-dns-resolver",
  "internal-dns-types",
+ "loopback-ip-mgr",
  "nexus-client",
  "nexus-config",
  "nexus-db-queries",
@@ -8955,6 +8979,9 @@ dependencies = [
  "gateway-client",
  "gateway-test-utils",
  "libc",
+ "loopback-ip-mgr",
+ "mg-admin-client",
+ "mg-api-types",
  "nexus-config",
  "nexus-test-interface",
  "nexus-test-utils",
@@ -8967,6 +8994,10 @@ dependencies = [
  "oxide-tokio-rt",
  "pq-sys",
  "signal-hook-tokio",
+ "sled-agent-types",
+ "slog",
+ "slog-async",
+ "slog-term",
  "subprocess",
  "tokio",
  "tokio-postgres",
@@ -9829,6 +9860,7 @@ dependencies = [
  "hex",
  "http",
  "libc",
+ "loopback-ip-mgr",
  "nexus-config",
  "omicron-common",
  "omicron-workspace-hack",

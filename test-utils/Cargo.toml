@@ -19,6 +19,7 @@ headers.workspace = true
 hex.workspace = true
 http.workspace = true
 libc.workspace = true
+loopback-ip-mgr.workspace = true
 nexus-config.workspace = true
 omicron-common.workspace = true
 oxide-tokio-rt.workspace = true
