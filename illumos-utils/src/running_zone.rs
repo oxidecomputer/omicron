@@ -21,7 +21,6 @@ use camino_tempfile::Utf8TempDir;
 use debug_ignore::DebugIgnore;
 use ipnetwork::IpNetwork;
 use omicron_common::address::{AZ_PREFIX_LENGTH, Ipv6Subnet};
-use omicron_common::backoff;
 use omicron_common::resolvable_files::ResolvableFileSource;
 use omicron_uuid_kinds::OmicronZoneUuid;
 pub use oxlog::is_oxide_smf_log_file;
@@ -86,17 +85,7 @@ pub enum EnsureAddressError {
     EnsureAddressError(#[from] crate::zone::EnsureAddressError),
 
     #[error(transparent)]
-    GetAddressesError(#[from] crate::zone::GetAddressesError),
-
-    #[error("Failed ensuring link-local address in {zone}")]
-    LinkLocal {
-        zone: String,
-        #[source]
-        err: crate::ExecutionError,
-    },
-
-    #[error("Failed to find non-link-local address in {zone}")]
-    NoDhcpV6Addr { zone: String },
+    OptePortSetup(#[from] crate::zone::OptePortSetupError),
 
     #[error(
         "Cannot allocate bootstrap {address} in {zone}: missing bootstrap vnic"
@@ -107,10 +96,6 @@ pub enum EnsureAddressError {
         "Failed ensuring address in {zone}: missing opte port ({port_idx})"
     )]
     MissingOptePort { zone: String, port_idx: usize },
-
-    // TODO-remove(#2931): See comment in `ensure_address_for_port`
-    #[error(transparent)]
-    OpteGatewayConfig(#[from] RunCommandError),
 }
 
 #[cfg(target_os = "illumos")]
@@ -374,7 +359,12 @@ impl RunningZone {
             }
         })?;
         let zone = Some(self.inner.name.as_ref());
-        if let Some(gateway) = port.gateway().ipv4_addr() {
+        // Both the v4 gateway and the v4 private address are present exactly
+        // when the port has an IPv4 configuration, so this matches both or
+        // neither.
+        if let (Some(gateway), Some(private_ip)) =
+            (port.gateway().ipv4_addr(), port.ipv4_addr())
+        {
             let v4_name = format!("{}4", name);
             let addrobj =
                 AddrObject::new(port.name(), &v4_name).map_err(|err| {
@@ -384,26 +374,13 @@ impl RunningZone {
                         err,
                     }
                 })?;
-            let addr =
-                Zones::ensure_address(zone, &addrobj, AddressRequest::Dhcp)
-                    .await?;
-            // TODO-remove(#2931): OPTE's DHCP "server" returns the list of routes
-            // to add via option 121 (Classless Static Route). The illumos DHCP
-            // client currently does not support this option, so we add the routes
-            // manually here.
-            let gateway_ip = gateway.to_string();
-            let private_ip = addr.ip();
-            self.run_cmd(&[
-                ROUTE,
-                "add",
-                "-host",
-                &gateway_ip,
-                &private_ip.to_string(),
-                "-interface",
-                "-ifp",
-                port.name(),
-            ])?;
-            self.run_cmd(&[ROUTE, "add", "-inet", "default", &gateway_ip])?;
+            Zones::configure_opte_ipv4_port(
+                zone,
+                &addrobj,
+                *gateway,
+                *private_ip,
+            )
+            .await?;
         }
         if port.gateway().ipv6_addr().is_some() {
             let v6_name = format!("{}6", name);
@@ -415,58 +392,8 @@ impl RunningZone {
                         err,
                     }
                 })?;
-            // If the port is using IPv6 addressing we still want it to use
-            // DHCP(v6) which requires first creating a link-local address.
-            Zones::ensure_has_link_local_v6_address(zone, &addrobj)
-                .await
-                .map_err(|err| EnsureAddressError::LinkLocal {
-                    zone: self.inner.name.clone(),
-                    err,
-                })?;
-
-            // Unlike DHCPv4, there's no blocking `ipadm` call we can
-            // make as it just happens in the background. So we just poll
-            // until we find a non link-local address.
-            backoff::retry_notify(
-                backoff::retry_policy_local(),
-                || async {
-                    // Grab all the address on the addrobj. There should
-                    // always be at least one (the link-local we added)
-                    let addrs = Zones::get_all_addresses(zone, &addrobj)
-                        .await
-                        .map_err(|e| {
-                            backoff::BackoffError::permanent(
-                                EnsureAddressError::from(e),
-                            )
-                        })?;
-
-                    // Look for a non link-local addr
-                    addrs
-                        .into_iter()
-                        .find(|addr| match addr {
-                            IpNetwork::V6(ip) => {
-                                !ip.ip().is_unicast_link_local()
-                            }
-                            _ => false,
-                        })
-                        .ok_or_else(|| {
-                            backoff::BackoffError::transient(
-                                EnsureAddressError::NoDhcpV6Addr {
-                                    zone: self.inner.name.clone(),
-                                },
-                            )
-                        })
-                },
-                |error, delay| {
-                    slog::debug!(
-                        self.inner.log,
-                        "No non link-local address yet (retrying in {:?})",
-                        delay;
-                        error
-                    );
-                },
-            )
-            .await?;
+            Zones::configure_opte_ipv6_port(zone, &addrobj, &self.inner.log)
+                .await?;
         }
         Ok(())
     }
