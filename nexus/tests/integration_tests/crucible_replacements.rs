@@ -4,6 +4,7 @@
 
 //! Tests related to region and region snapshot replacement
 
+use crate::integration_tests::common::assert_all_crucible_resources_deleted;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::ExpressionMethods;
 use diesel::QueryDsl;
@@ -121,6 +122,13 @@ pub(crate) async fn wait_for_all_replacements(
                 // that all work is done.
 
                 run_all_crucible_replacement_tasks(lockstep_client).await;
+
+                // Also, run the volume delete background task. This is
+                // important because some of the checks for moving replacement
+                // requests along will check if volumes are soft or hard
+                // deleted.
+
+                run_volume_delete(lockstep_client).await;
 
                 let ro_left_to_do = datastore
                     .find_read_only_regions_on_expunged_physical_disks(&opctx)
@@ -299,6 +307,7 @@ mod region_replacement {
         client: ClientTestContext,
         lockstep_client: ClientTestContext,
         replacement_request_id: Uuid,
+        cptestctx: &'a ControlPlaneTestContext,
     }
 
     impl<'a> DeletedVolumeTest<'a> {
@@ -372,6 +381,7 @@ mod region_replacement {
                 client: client.clone(),
                 lockstep_client: lockstep_client.clone(),
                 replacement_request_id,
+                cptestctx,
             }
         }
 
@@ -416,8 +426,12 @@ mod region_replacement {
                 RegionReplacementState::Complete,
             );
 
-            // Assert there are no more Crucible resources
-            assert!(self.disk_test.crucible_resources_deleted().await);
+            // Assert there are no undeleted Crucible resources
+            assert_all_crucible_resources_deleted(
+                &self.cptestctx,
+                &self.disk_test,
+            )
+            .await;
         }
 
         async fn wait_for_request_state(
@@ -1050,6 +1064,8 @@ async fn test_racing_replacements_for_soft_deleted_disk_volume(
             let snapshot_id = snapshot.identity.id;
 
             async move {
+                run_volume_delete(&lockstep_client).await;
+
                 let region_snapshot = datastore
                     .region_snapshot_get(dataset_id, region_id, snapshot_id)
                     .await
@@ -1304,7 +1320,7 @@ async fn test_racing_replacements_for_soft_deleted_disk_volume(
 
     // Now, assert that all crucible resources are cleaned up
 
-    assert!(disk_test.crucible_resources_deleted().await);
+    assert_all_crucible_resources_deleted(cptestctx, &disk_test).await;
 }
 
 mod region_snapshot_replacement {
@@ -1328,6 +1344,7 @@ mod region_snapshot_replacement {
         lockstep_client: ClientTestContext,
         replacement_request_id: Uuid,
         snapshot_socket_addr: SocketAddr,
+        cptestctx: &'a ControlPlaneTestContext,
     }
 
     impl<'a> DeletedVolumeTest<'a> {
@@ -1468,6 +1485,7 @@ mod region_snapshot_replacement {
                 lockstep_client: lockstep_client.clone(),
                 replacement_request_id,
                 snapshot_socket_addr,
+                cptestctx,
             }
         }
 
@@ -1508,8 +1526,8 @@ mod region_snapshot_replacement {
         ///   completion
         /// - this harness' region snapshot replacement request has transitioned
         ///   to Complete
-        /// - there are no more volumes that reference the request's region
-        ///   snapshot
+        /// - there are no non-deleted volumes that reference the request's
+        ///   region snapshot
         pub async fn finish_test(&self) {
             // Make sure that all the background tasks can run to completion.
 
@@ -1532,40 +1550,34 @@ mod region_snapshot_replacement {
                 RegionSnapshotReplacementState::Complete,
             );
 
-            // Assert no volumes are referencing the snapshot address
+            // Wait for all volume deletes, then assert no non-deleted volumes
+            // are referencing the snapshot address
 
-            let mut counter = 1;
-            loop {
-                let volumes = self
-                    .datastore
-                    .find_volumes_referencing_socket_addr(
-                        &self.opctx(),
-                        self.snapshot_socket_addr,
-                    )
-                    .await
-                    .unwrap();
+            wait_for_all_volume_deletes(&self.datastore, &self.lockstep_client)
+                .await;
 
-                if !volumes.is_empty() {
-                    eprintln!(
-                        "Volume should be gone, try {counter} {:?}",
-                        volumes
-                    );
-                    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-                    counter += 1;
-                    if counter > 200 {
-                        panic!(
-                            "Tried 200 times, and still this did not finish"
-                        );
-                    }
-                } else {
-                    break;
-                }
-            }
+            let volumes: Vec<_> = self
+                .datastore
+                .find_volumes_referencing_socket_addr(
+                    &self.opctx(),
+                    self.snapshot_socket_addr,
+                )
+                .await
+                .unwrap()
+                .into_iter()
+                .filter(|volume| volume.time_deleted.is_none())
+                .collect();
+
+            assert!(volumes.is_empty());
         }
 
         /// Assert no Crucible resources are leaked
         pub async fn assert_no_crucible_resources_leaked(&self) {
-            assert!(self.disk_test.crucible_resources_deleted().await);
+            assert_all_crucible_resources_deleted(
+                &self.cptestctx,
+                &self.disk_test,
+            )
+            .await;
         }
 
         async fn wait_for_request_state(
@@ -1738,6 +1750,8 @@ mod region_snapshot_replacement {
             );
             let mut i = 1;
             loop {
+                run_volume_delete(&self.lockstep_client).await;
+
                 let region_snapshot_replace_request = self
                     .datastore
                     .get_region_snapshot_replacement_request_by_id(
@@ -2763,6 +2777,8 @@ async fn test_replacement_sanity_twice_after_snapshot_delete(
     // Delete the snapshot
     delete_snapshot(&client, PROJECT_NAME, "snap").await;
 
+    wait_for_all_volume_deletes(&datastore, &lockstep_client).await;
+
     // Assert snapshot volume is gone
     let db_snapshot = datastore
         .snapshot_get(&opctx, snapshot.identity.id)
@@ -2834,4 +2850,6 @@ async fn test_replacement_sanity_twice_after_snapshot_delete(
 
         wait_for_all_replacements(&datastore, &lockstep_client).await;
     }
+
+    wait_for_all_volume_deletes(&datastore, &lockstep_client).await;
 }

@@ -23,8 +23,7 @@
 //! It will set itself as the "operating saga" for a region replacement request,
 //! change the state to "Completing", and:
 //!
-//! 1. Call the Volume delete saga for the fake Volume that points to the old
-//!    region.
+//! 1. Soft-delete the fake Volume that points to the old region.
 //!
 //! 2. Clear the operating saga id from the request record, and change the state
 //!    to Completed.
@@ -35,9 +34,9 @@ use super::{
     SagaInitError,
 };
 use crate::app::sagas::declare_saga_actions;
-use crate::app::sagas::volume_delete;
 use crate::app::{authn, db};
 use nexus_types::saga::saga_action_failed;
+use omicron_common::api::external::Error;
 use omicron_uuid_kinds::VolumeUuid;
 use serde::Deserialize;
 use serde::Serialize;
@@ -65,6 +64,9 @@ declare_saga_actions! {
         + srrf_set_saga_id
         - srrf_set_saga_id_undo
     }
+    SOFT_DELETE_VOLUME -> "soft_delete_volume" {
+        + srrf_soft_delete_volume
+    }
     UPDATE_REQUEST_RECORD -> "unused_2" {
         + srrf_update_request_record
     }
@@ -83,7 +85,7 @@ impl NexusSaga for SagaRegionReplacementFinish {
     }
 
     fn make_saga_dag(
-        params: &Self::Params,
+        _params: &Self::Params,
         mut builder: steno::DagBuilder,
     ) -> Result<steno::Dag, SagaInitError> {
         builder.append(Node::action(
@@ -93,38 +95,7 @@ impl NexusSaga for SagaRegionReplacementFinish {
         ));
 
         builder.append(set_saga_id_action());
-
-        let subsaga_params = volume_delete::Params {
-            serialized_authn: params.serialized_authn.clone(),
-            volume_id: params.region_volume_id,
-        };
-
-        let subsaga_dag = {
-            let subsaga_builder = steno::DagBuilder::new(steno::SagaName::new(
-                volume_delete::SagaVolumeDelete::NAME,
-            ));
-            volume_delete::SagaVolumeDelete::make_saga_dag(
-                &subsaga_params,
-                subsaga_builder,
-            )?
-        };
-
-        builder.append(Node::constant(
-            "params_for_volume_delete_subsaga",
-            serde_json::to_value(&subsaga_params).map_err(|e| {
-                SagaInitError::SerializeError(
-                    "params_for_volume_delete_subsaga".to_string(),
-                    e,
-                )
-            })?,
-        ));
-
-        builder.append(Node::subsaga(
-            "volume_delete_subsaga_no_result",
-            subsaga_dag,
-            "params_for_volume_delete_subsaga",
-        ));
-
+        builder.append(soft_delete_volume_action());
         builder.append(update_request_record_action());
 
         Ok(builder.build()?)
@@ -181,6 +152,26 @@ async fn srrf_set_saga_id_undo(
     Ok(())
 }
 
+async fn srrf_soft_delete_volume(
+    sagactx: NexusActionContext,
+) -> Result<(), ActionError> {
+    let params = sagactx.saga_params::<Params>()?;
+    let osagactx = sagactx.user_data();
+
+    osagactx
+        .datastore()
+        .soft_delete_volume(params.region_volume_id)
+        .await
+        .map_err(|e| {
+            saga_action_failed(Error::internal_error(&format!(
+                "failed to soft_delete_volume: {:?}",
+                e,
+            )))
+        })?;
+
+    Ok(())
+}
+
 async fn srrf_update_request_record(
     sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
@@ -218,6 +209,7 @@ pub(crate) mod test {
     use nexus_db_model::RegionReplacementState;
     use nexus_db_queries::authn::saga::Serialized;
     use nexus_db_queries::context::OpContext;
+    use nexus_test_utils::background::wait_for_all_volume_deletes;
     use nexus_test_utils_macros::nexus_test;
     use omicron_uuid_kinds::DatasetUuid;
     use omicron_uuid_kinds::GenericUuid;
@@ -349,7 +341,11 @@ pub(crate) mod test {
         assert_eq!(result.replacement_state, RegionReplacementState::Complete);
         assert!(result.operating_saga_id.is_none());
 
-        // Validate the Volume was deleted
+        // Run the volume delete background task and validate the Volume was
+        // deleted.
+        wait_for_all_volume_deletes(datastore, &cptestctx.lockstep_client)
+            .await;
+
         assert!(
             datastore.volume_get(old_region_volume_id).await.unwrap().is_none()
         );

@@ -204,6 +204,8 @@ impl super::Nexus {
             )
             .await?;
 
+        self.background_tasks.task_volume_delete.activate();
+
         Ok(())
     }
 }

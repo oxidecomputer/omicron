@@ -69,6 +69,7 @@ use nexus_types::internal_api::background::IncompleteBootstoreConfigReport;
 use nexus_types::internal_api::background::InstanceReincarnationStatus;
 use nexus_types::internal_api::background::InstanceUpdaterStatus;
 use nexus_types::internal_api::background::InventoryLoadStatus;
+use nexus_types::internal_api::background::LocalStorageDeleteStatus;
 use nexus_types::internal_api::background::LookupRegionPortStatus;
 use nexus_types::internal_api::background::PhysicalDiskAdoptionStatus;
 use nexus_types::internal_api::background::ProbeDistributorStatus;
@@ -94,6 +95,7 @@ use nexus_types::internal_api::background::TufArtifactReplicationCounters;
 use nexus_types::internal_api::background::TufArtifactReplicationRequest;
 use nexus_types::internal_api::background::TufArtifactReplicationStatus;
 use nexus_types::internal_api::background::TufRepoPrunerStatus;
+use nexus_types::internal_api::background::VolumeDeleteStatus;
 use nexus_types::internal_api::background::fm_rendezvous;
 use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::CollectionUuid;
@@ -1425,6 +1427,12 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
         }
         "switch_port_config_manager" => {
             print_task_switch_port_settings_manager(details);
+        }
+        "volume_delete" => {
+            print_task_volume_delete(details);
+        }
+        "local_storage_delete" => {
+            print_task_local_storage_delete(details);
         }
         _ => {
             println!(
@@ -4317,6 +4325,81 @@ fn print_task_physical_disk_adoption(details: &serde_json::Value) {
     }
 }
 
+fn print_task_volume_delete(details: &serde_json::Value) {
+    match serde_json::from_value::<VolumeDeleteStatus>(details.clone()) {
+        Err(error) => eprintln!(
+            "warning: failed to interpret task details: {:?}: {:?}",
+            error, details
+        ),
+
+        Ok(status) => {
+            let VolumeDeleteStatus {
+                region_results,
+                running_snapshot_results,
+                snapshot_results,
+                volumes_deleted,
+                errors,
+            } = &status;
+
+            println!("    result of deleting regions:");
+            for result in region_results {
+                println!("    > {result}");
+            }
+
+            println!("    result of deleting running snapshots:");
+            for result in running_snapshot_results {
+                println!("    > {result}");
+            }
+
+            println!("    result of deleting snapshots:");
+            for result in snapshot_results {
+                println!("    > {result}");
+            }
+
+            println!("    volumes deleted:");
+            for id in volumes_deleted {
+                println!("    > {id}");
+            }
+
+            println!("    errors: {}", errors.len());
+            for error in errors {
+                println!("    > {error}");
+            }
+        }
+    }
+}
+
+fn print_task_local_storage_delete(details: &serde_json::Value) {
+    match serde_json::from_value::<LocalStorageDeleteStatus>(details.clone()) {
+        Err(error) => eprintln!(
+            "warning: failed to interpret task details: {:?}: {:?}",
+            error, details
+        ),
+
+        Ok(status) => {
+            let LocalStorageDeleteStatus {
+                delete_results,
+                deallocate_results,
+                errors,
+            } = &status;
+
+            println!("    result of deleting local storage:");
+            for result in delete_results {
+                println!("    > {result}");
+            }
+
+            println!("    result of deallocating local storage:");
+            for result in deallocate_results {
+                println!("    > {result}");
+            }
+
+            println!("    errors: {}", errors.len());
+            for error in errors {
+                println!("    > {error}");
+            }
+        }
+    }
+}
 const ERRICON: &str = "/!\\";
 
 fn warn_if_nonzero(n: usize) -> &'static str {

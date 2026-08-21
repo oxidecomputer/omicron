@@ -517,7 +517,9 @@ impl DataStore {
         let (.., disk) =
             LookupPath::new(opctx, self).disk_id(disk_id).fetch().await?;
 
-        self.disk_get_with_model(opctx, disk).await
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        self.disk_get_with_model(&conn, disk).await
     }
 
     /// Return a `datastore::Disk` given a `model::Disk`
@@ -525,14 +527,14 @@ impl DataStore {
     /// Note: basically all of Nexus should _not_ be using this, and should be
     /// using `disk_get` instead: this version of the function bypasses the
     /// LookupPath induced permissions check and should only called from omdb.
+    /// Code that is looking up deleted disks should also use this method, as
+    /// `LookupPath` will not return deleted resources.
     pub async fn disk_get_with_model(
         &self,
-        opctx: &OpContext,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
         disk: model::Disk,
     ) -> LookupResult<Disk> {
         let disk_id = disk.id();
-
-        let conn = self.pool_connection_authorized(opctx).await?;
 
         let disk = match disk.disk_type {
             db::model::DiskType::Crucible => {
@@ -541,7 +543,7 @@ impl DataStore {
                 let disk_type_crucible = dsl::disk_type_crucible
                     .filter(dsl::disk_id.eq(disk_id))
                     .select(DiskTypeCrucible::as_select())
-                    .first_async(&*conn)
+                    .first_async(conn)
                     .await
                     .map_err(|e| {
                         public_error_from_diesel(e, ErrorHandler::Server)
@@ -559,7 +561,7 @@ impl DataStore {
                 let disk_type_local_storage = dsl::disk_type_local_storage
                     .filter(dsl::disk_id.eq(disk_id))
                     .select(DiskTypeLocalStorage::as_select())
-                    .first_async(&*conn)
+                    .first_async(conn)
                     .await
                     .map_err(|e| {
                         public_error_from_diesel(e, ErrorHandler::Server)

@@ -118,6 +118,7 @@ use super::tasks::instance_updater;
 use super::tasks::instance_watcher;
 use super::tasks::inventory_collection;
 use super::tasks::inventory_load;
+use super::tasks::local_storage_delete::*;
 use super::tasks::lookup_region_port;
 use super::tasks::metrics_producer_gc;
 use super::tasks::multicast::MulticastGroupReconciler;
@@ -142,6 +143,7 @@ use super::tasks::trust_quorum;
 use super::tasks::tuf_artifact_replication;
 use super::tasks::tuf_repo_pruner;
 use super::tasks::v2p_mappings::V2PManager;
+use super::tasks::volume_delete::*;
 use super::tasks::vpc_routes;
 use super::tasks::webhook_deliverator;
 use crate::Nexus;
@@ -280,6 +282,8 @@ impl BackgroundTasksInitializer {
             task_attached_subnet_manager: Activator::new(),
             task_session_cleanup: Activator::new(),
             task_populate_switch_ports: Activator::new(),
+            task_volume_delete: Activator::new(),
+            task_local_storage_delete: Activator::new(),
 
             // Handles to activate background tasks that do not get used by Nexus
             // at-large.  These background tasks are implementation details as far as
@@ -376,6 +380,8 @@ impl BackgroundTasksInitializer {
             task_audit_log_timeout_incomplete,
             task_audit_log_cleanup,
             task_populate_switch_ports,
+            task_volume_delete,
+            task_local_storage_delete,
             // Add new background tasks here.  Be sure to use this binding in a
             // call to `Driver::register()` below.  That's what actually wires
             // up the Activator to the corresponding background task.
@@ -1312,6 +1318,26 @@ impl BackgroundTasksInitializer {
             opctx: opctx.child(BTreeMap::new()),
             watchers: vec![],
             activator: task_populate_switch_ports,
+        });
+
+        driver.register(TaskDefinition {
+            name: "volume_delete",
+            description: "delete resources from soft-deleted volumes",
+            period: config.volume_delete.period_secs,
+            task_impl: Box::new(VolumeDeleter::new(datastore.clone())),
+            opctx: opctx.child(BTreeMap::new()),
+            watchers: vec![],
+            activator: task_volume_delete,
+        });
+
+        driver.register(TaskDefinition {
+            name: "local_storage_delete",
+            description: "delete resources for disks backed by local storage",
+            period: config.local_storage_delete.period_secs,
+            task_impl: Box::new(LocalStorageDeleter::new(datastore.clone())),
+            opctx: opctx.child(BTreeMap::new()),
+            watchers: vec![],
+            activator: task_local_storage_delete,
         });
 
         driver
