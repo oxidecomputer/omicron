@@ -2378,6 +2378,40 @@ CREATE INDEX IF NOT EXISTS lookup_ip_pool_by_type ON omicron.public.ip_pool (
 ) WHERE
     time_deleted IS NULL;
 
+/*
+ * The external services whose external addresses are drawn from IP pools.
+ */
+CREATE TYPE IF NOT EXISTS omicron.public.external_service_kind AS ENUM (
+    'nexus',
+    'boundary_ntp',
+    'external_dns'
+);
+
+/*
+ * Join table assigning IP pools to external services.
+ *
+ * This represents the operator's intent about which pools should be used for
+ * those services, but we're intentionally not specifying the semantics yet
+ * (e.g., an assignment means we MUST use an IP from the pool, vs MAY do so).
+ * We'll flesh that out per-service as needed during implementation.
+ */
+CREATE TABLE IF NOT EXISTS omicron.public.external_service_ip_pool (
+    service omicron.public.external_service_kind NOT NULL,
+    ip_pool_id UUID NOT NULL,
+    -- Most commonly want to look up per-service first, e.g., during blueprint
+    -- planning
+    PRIMARY KEY (service, ip_pool_id)
+);
+
+/*
+ * Index supporting fast lookup of a pool, e.g. to list services assigned to it.
+ * Also used when deleting the actual `ip_pool` row, failing the query if it's
+ * still assigned to anything.
+ */
+CREATE INDEX IF NOT EXISTS external_service_ip_pool_by_ip_pool_id ON omicron.public.external_service_ip_pool (
+    ip_pool_id
+);
+
 -- The order here is most-specific first, and it matters because we use this
 -- fact to select the most specific default in the case where there is both a
 -- silo default and a fleet default. If we were to add a project type, it should
@@ -3762,7 +3796,8 @@ CREATE TYPE IF NOT EXISTS omicron.public.switch_port_geometry AS ENUM (
 
 CREATE TABLE IF NOT EXISTS omicron.public.switch_port_settings_port_config (
     port_settings_id UUID PRIMARY KEY,
-    geometry omicron.public.switch_port_geometry
+    geometry omicron.public.switch_port_geometry,
+    allow_ddm_traffic BOOL NOT NULL
 );
 
 CREATE TYPE IF NOT EXISTS omicron.public.switch_link_fec AS ENUM (
@@ -6187,6 +6222,97 @@ CREATE TABLE IF NOT EXISTS omicron.public.rendezvous_debug_dataset (
 CREATE INDEX IF NOT EXISTS lookup_usable_rendezvous_debug_dataset
     ON omicron.public.rendezvous_debug_dataset (id)
     WHERE time_tombstoned IS NULL;
+
+/*******************************************************************/
+
+/*
+ * The availability state of a sled in the `rendezvous_sled_bp_availability` table.
+ *
+ *   available     - the sled may be used to provision new instances
+ *   unavailable   - the sled is an active sled but is not currently a
+ *                   provisioning target (e.g. it is being evacuated for an
+ *                   update)
+ *   decommissioned - the sled is marked decommissioned in the blueprint; this
+ *                    is a terminal state (see the table comment below)
+ */
+CREATE TYPE IF NOT EXISTS omicron.public.sled_bp_availability AS ENUM (
+    'available',
+    'unavailable',
+    'decommissioned'
+);
+
+/*
+ * Per-sled provisioning availability as of the target blueprint.
+ *
+ * This is a Reconfigurator rendezvous table reflecting which sleds the
+ * target blueprint considers available for provisioning. Once wired up, the
+ * instance-start allocation path will consult this table alongside `sled`.
+ *
+ * Unlike the other rendezvous tables, sled availability is not monotonic: a sled
+ * becomes unavailable while evacuated for an update, then available again
+ * afterwards. This means that we can't use one-way tombstones. We keep one row
+ * per sled and move its `bp_availability` between `available` and
+ * `unavailable`.
+ *
+ * To prevent duelling Nexuses from trampling over each other's state, we use
+ * the following mechanisms:
+ *
+ * - The available/unavailable flip is guarded by
+ *   `update_disposition_generation`, so that a write takes effect only if its
+ *   generation is greater than the stored one.
+ *
+ * - A decommissioned sled's row moves to the terminal `decommissioned` state
+ *   rather than being deleted. Like the other rendezvous tables' tombstones,
+ *   this stops a stale Nexus from resurrecting the sled by re-inserting it.
+ *
+ * A sled is moved to the terminal `decommissioned` state only when the
+ * blueprint marks it as decommissioned. In particular, the absence
+ * of a sled from the target blueprint does not cause it to be moved to the
+ * decommissioned state, because that sled might have just been added by a
+ * different instance of Nexus and not be in this Nexus's target blueprint.
+ *
+ * When blueprint sled pruning for decommission is implemented, as a
+ * precondition to pruning, we must ensure that the sled has been marked as
+ * decommissioned in this table.
+ */
+CREATE TABLE IF NOT EXISTS omicron.public.rendezvous_sled_bp_availability (
+    /* ID of the sled */
+    sled_id UUID PRIMARY KEY,
+
+    /* The sled's availability state (see the enum and comment above) */
+    bp_availability omicron.public.sled_bp_availability NOT NULL,
+
+    /*
+     * The sled's `update_disposition` generation from the blueprint this row was
+     * last written from.
+     *
+     * NULL if and only if the sled is decommissioned (see the CHECK constraint
+     * below).
+     */
+    update_disposition_generation INT8,
+
+    /*
+     * ID of the target blueprint the Reconfigurator reconciliation RPW was
+     * acting on when this row was last written.
+     */
+    blueprint_id UUID NOT NULL,
+
+    /* Time this row was created */
+    time_created TIMESTAMPTZ NOT NULL,
+
+    /* Time this row was last modified */
+    time_modified TIMESTAMPTZ NOT NULL,
+
+    CONSTRAINT decommissioned_has_no_generation CHECK (
+        (bp_availability = 'decommissioned')
+        = (update_disposition_generation IS NULL)
+    )
+);
+
+/* Add an index which lets instance allocation find available sleds */
+CREATE INDEX IF NOT EXISTS lookup_available_sled
+    ON omicron.public.rendezvous_sled_bp_availability (sled_id)
+    WHERE bp_availability = 'available';
 
 /*******************************************************************/
 
@@ -9282,7 +9408,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '292.0.0', NULL)
+    (TRUE, NOW(), NOW(), '295.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

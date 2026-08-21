@@ -1039,8 +1039,8 @@ mod test {
         // Sub-second precision survives the chrono-to-jiff conversion: an
         // end bound of 200.5s includes a file modified at 200.4s and
         // excludes one modified at 200.6s.
-        let subsec_end = DateTime::<Utc>::from_timestamp(200, 500_000_000)
-            .unwrap();
+        let subsec_end =
+            DateTime::<Utc>::from_timestamp(200, 500_000_000).unwrap();
         let file_at_nanos = |secs, nanos| oxlog::LogFile {
             path: "/t.log".into(),
             size: None,
@@ -1056,10 +1056,10 @@ mod test {
         // they fell off of, rather than collapsing the window. chrono
         // timestamps extend hundreds of thousands of years past jiff's
         // year-9999 ceiling and year -9999 floor.
-        let far_future = DateTime::<Utc>::from_timestamp(300_000_000_000, 0)
-            .unwrap();
-        let far_past = DateTime::<Utc>::from_timestamp(-300_000_000_000, 0)
-            .unwrap();
+        let far_future =
+            DateTime::<Utc>::from_timestamp(300_000_000_000, 0).unwrap();
+        let far_past =
+            DateTime::<Utc>::from_timestamp(-300_000_000_000, 0).unwrap();
         let saturated =
             LogTimeWindow { start: Some(far_past), end: Some(far_future) }
                 .to_date_range()

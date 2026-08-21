@@ -464,9 +464,7 @@ pub(crate) mod test_utils {
             (prop::option::of(arb_datetime()), prop::option::of(arb_datetime()))
                 .prop_map(|(a, b)| {
                     let (start, end) = match (a, b) {
-                        (Some(a), Some(b)) => {
-                            (Some(a.min(b)), Some(a.max(b)))
-                        }
+                        (Some(a), Some(b)) => (Some(a.min(b)), Some(a.max(b))),
                         (start, end) => (start, end),
                     };
                     BundleTimeRange::new(start, end)
@@ -535,9 +533,8 @@ mod tests {
         assert_eq!(range.end(), Some(ts(5 * WEEK_SECS)));
 
         // An existing start bound is left alone.
-        let mut selection = BundleDataSelection::new().with_time_range(
-            BundleTimeRange::new(Some(ts(50)), None).unwrap(),
-        );
+        let mut selection = BundleDataSelection::new()
+            .with_time_range(BundleTimeRange::new(Some(ts(50)), None).unwrap());
         selection.ensure_start_bound(now, lookback);
         let range = selection.time_range().unwrap();
         assert_eq!(range.start(), Some(ts(50)));
@@ -546,8 +543,7 @@ mod tests {
         // An end bound at the minimum representable time saturates rather
         // than underflowing.
         let mut selection = BundleDataSelection::new().with_time_range(
-            BundleTimeRange::new(None, Some(DateTime::<Utc>::MIN_UTC))
-                .unwrap(),
+            BundleTimeRange::new(None, Some(DateTime::<Utc>::MIN_UTC)).unwrap(),
         );
         selection.ensure_start_bound(now, lookback);
         let range = selection.time_range().unwrap();

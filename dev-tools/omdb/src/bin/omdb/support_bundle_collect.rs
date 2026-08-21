@@ -123,14 +123,10 @@ impl CollectArgs {
                 .and_then(|age| now.checked_sub_signed(age))
                 .with_context(|| format!("--{flag} ({age:?}) is too large"))
         };
-        let start = self
-            .since
-            .map(|age| age_to_timestamp("since", age))
-            .transpose()?;
-        let end = self
-            .until
-            .map(|age| age_to_timestamp("until", age))
-            .transpose()?;
+        let start =
+            self.since.map(|age| age_to_timestamp("since", age)).transpose()?;
+        let end =
+            self.until.map(|age| age_to_timestamp("until", age)).transpose()?;
         if let (Some(start), Some(end)) = (start, end) {
             anyhow::ensure!(
                 start <= end,

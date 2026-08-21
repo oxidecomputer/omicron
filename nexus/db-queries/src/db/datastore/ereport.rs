@@ -789,9 +789,7 @@ mod tests {
         explain_fetch_matching_query(
             "explain_ereport_fetch_matching_only_time",
             EreportFilters::new(),
-            Some(
-                BundleTimeRange::new(None, Some(chrono::Utc::now())).unwrap(),
-            ),
+            Some(BundleTimeRange::new(None, Some(chrono::Utc::now())).unwrap()),
         )
         .await
     }
@@ -801,9 +799,7 @@ mod tests {
         explain_fetch_matching_query(
             "explain_ereport_fetch_matching_time_and_serials",
             EreportFilters::new().with_serials(["BRM6900420", "BRM5555555"]),
-            Some(
-                BundleTimeRange::new(None, Some(chrono::Utc::now())).unwrap(),
-            ),
+            Some(BundleTimeRange::new(None, Some(chrono::Utc::now())).unwrap()),
         )
         .await
     }

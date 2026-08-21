@@ -31,13 +31,13 @@ use wicket_common::rack_setup::BgpAuthKeyInfo;
 use wicket_common::rack_setup::BgpAuthKeyStatus;
 use wicket_common::rack_setup::DisplaySlice;
 use wicketd_client::types::GetBgpAuthKeyParams;
-use wicketd_client::types::NewPasswordHash;
-use wicketd_client::types::PutRssRecoveryUserPasswordHash;
 use wicketd_commission_types::rack_setup::BgpAuthKey;
 use wicketd_commission_types::rack_setup::BgpAuthKeyId;
 use wicketd_commission_types::rack_setup::CertificatePem;
 use wicketd_commission_types::rack_setup::CertificateUploadResponse;
+use wicketd_commission_types::rack_setup::NewPasswordHash;
 use wicketd_commission_types::rack_setup::PrivateKeyPem;
+use wicketd_commission_types::rack_setup::PutRecoveryUserPasswordHash;
 use wicketd_commission_types::rack_setup::PutRssUserConfigInsensitive;
 use wicketd_commission_types::rack_setup::SetBgpAuthKeyStatus;
 use zeroize::Zeroizing;
@@ -133,7 +133,7 @@ impl SetupArgs {
             }
             SetupArgs::ResetConfig => {
                 slog::info!(log, "instructing wicketd to reset config...");
-                client
+                commission_client
                     .delete_rss_config()
                     .await
                     .context("failed to clear config")?;
@@ -144,9 +144,9 @@ impl SetupArgs {
                 let hash = NewPasswordHash(hash.to_string());
 
                 slog::info!(log, "uploading password hash to wicketd...");
-                client
+                commission_client
                     .put_rss_config_recovery_user_password_hash(
-                        &PutRssRecoveryUserPasswordHash { hash },
+                        &PutRecoveryUserPasswordHash { hash },
                     )
                     .await
                     .context("failed to upload password hash to wicketd")?;
