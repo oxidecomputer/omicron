@@ -8123,9 +8123,7 @@ fn prettyprint_vmm(
     const STATE: &'static str = "state";
     const FAILURE_REASON: &'static str = "  failure reason";
     const FAILURE_NOTE: &'static str = "  note";
-    // TODO-K: Is this too long?
-    const STOPPED_FOR_UPDATE: &'static str =
-        "  stopped for update disposition generation";
+    const STOPPED_FOR_UPDATE: &'static str = "  update disposition";
     const WIDTH: usize = const_max_len(&[
         ID,
         CREATED,
@@ -8139,6 +8137,7 @@ fn prettyprint_vmm(
         ADDRESS,
         FAILURE_REASON,
         FAILURE_NOTE,
+        STOPPED_FOR_UPDATE,
     ]);
 
     let width = std::cmp::max(width, Some(WIDTH)).unwrap_or(WIDTH);
@@ -8193,7 +8192,7 @@ fn prettyprint_vmm(
     }
     if let Some(ud_generation) = stopped_for_update_disposition_generation {
         let u_g = u64::from(ud_generation.0);
-        println!("{indent}{STOPPED_FOR_UPDATE:>width$}: {u_g}");
+        println!("{indent}{STOPPED_FOR_UPDATE:>width$}: generation {u_g}");
     }
 
     let g = u64::from(generation.0);
