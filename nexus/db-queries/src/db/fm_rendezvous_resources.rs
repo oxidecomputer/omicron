@@ -88,10 +88,7 @@ where
     type GenerationColumn: Column<Table = schema::fm_sitrep::table>;
 
     /// The generation kind counted by [`Self::GenerationColumn`] (e.g.
-    /// `omicron_generation_kinds::AlertKind` for `Alert`). Ties the generation
-    /// values threaded through these queries to the resource they belong to,
-    /// so an alert generation can't be passed where a support bundle
-    /// generation is expected.
+    /// `omicron_generation_kinds::AlertKind` for `Alert`).
     type GenerationKind: TypedGenerationKind;
 
     /// The id column in the creation marker table
