@@ -39,7 +39,6 @@ progenitor::generate_api!(
         ArtifactId = wicket_common::artifact::ArtifactId,
         Baseboard = sled_hardware_types::Baseboard,
         BaseboardId = sled_hardware_types::BaseboardId,
-        BgpAuthKey = wicketd_commission_types_versions::latest::rack_setup::BgpAuthKey,
         BgpAuthKeyId = wicketd_commission_types_versions::latest::rack_setup::BgpAuthKeyId,
         BgpAuthKeyInfo = wicket_common::rack_setup::BgpAuthKeyInfo,
         BgpAuthKeyStatus = wicket_common::rack_setup::BgpAuthKeyStatus,
