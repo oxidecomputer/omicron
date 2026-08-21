@@ -67,6 +67,7 @@ impl_typed_uuid_kinds! {
         FmdResource = {},
         Instance = {},
         InternalZpool = {},
+        IpPool = {},
         LoopbackAddress = {},
         MulticastGroup = {},
         Measurement = {},
