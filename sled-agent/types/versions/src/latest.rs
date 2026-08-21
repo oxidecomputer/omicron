@@ -175,13 +175,10 @@ pub mod inventory {
 
     pub use crate::v12::inventory::HealthMonitorInventory;
 
-    pub use crate::v14::inventory::ConfigReconcilerInventoryStatus;
     pub use crate::v14::inventory::OmicronFileSourceResolverInventory;
     pub use crate::v14::inventory::OmicronSingleMeasurement;
-    pub use crate::v14::inventory::OmicronSledConfig;
     pub use crate::v14::inventory::ReconciledSingleMeasurement;
 
-    pub use crate::v16::inventory::ConfigReconcilerInventory;
     pub use crate::v16::inventory::SingleMeasurementInventory;
 
     pub use crate::v24::inventory::InventoryZpool;
@@ -197,13 +194,18 @@ pub mod inventory {
     pub use crate::v40::inventory::FmdInventoryErrorKind;
     pub use crate::v40::inventory::FmdResource;
 
-    pub use crate::v46::inventory::Inventory;
     pub use crate::v46::inventory::Svc;
     pub use crate::v46::inventory::SvcEnabledNotOnline;
     pub use crate::v46::inventory::SvcEnabledNotOnlineState;
     pub use crate::v46::inventory::SvcState;
     pub use crate::v46::inventory::SvcsEnabledNotOnline;
     pub use crate::v46::inventory::SvcsEnabledNotOnlineResult;
+
+    pub use crate::v49::inventory::ConfigReconcilerInventory;
+    pub use crate::v49::inventory::ConfigReconcilerInventoryStatus;
+    pub use crate::v49::inventory::Inventory;
+    pub use crate::v49::inventory::OmicronSledConfig;
+    pub use crate::v49::inventory::OmicronSledUpdateDisposition;
 
     pub use crate::impls::inventory::FmdHostCaseDisplay;
     pub use crate::impls::inventory::FmdInventoryDisplay;

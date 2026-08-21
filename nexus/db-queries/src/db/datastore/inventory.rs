@@ -3737,6 +3737,8 @@ impl DataStore {
                                 zones: IdOrdMap::default(),
                                 host_phase_2: sled_config.host_phase_2.into(),
                                 measurements: sled_config.measurements.into(),
+                                // TODO-john FIX THIS
+                                update_disposition: sled_agent_types::inventory::OmicronSledUpdateDisposition::Available,
                             },
                         })
                         .map_err(|e| {

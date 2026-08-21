@@ -53,6 +53,7 @@ use sled_agent_types::disk::DiskIdentity;
 use sled_agent_types::disk::M2Slot;
 use sled_agent_types::disk::OmicronPhysicalDiskConfig;
 use sled_agent_types::disk::SharedDatasetConfig;
+use sled_agent_types::inventory::OmicronSledUpdateDisposition;
 use sled_agent_types::system_networking::ServiceZoneNatEntries;
 use sled_agent_types::system_networking::ServiceZoneNatEntriesError;
 use sled_agent_types::system_networking::ServiceZoneNatEntry;
@@ -1686,6 +1687,22 @@ impl fmt::Display for BlueprintSledUpdateDisposition {
     }
 }
 
+impl From<BlueprintSledUpdateDisposition> for OmicronSledUpdateDisposition {
+    fn from(value: BlueprintSledUpdateDisposition) -> Self {
+        // sled-agent only cares about the disposition itself, not the
+        // generation
+        let BlueprintSledUpdateDisposition { generation: _, kind } = value;
+        match kind {
+            BlueprintSledUpdateDispositionKind::Available => Self::Available,
+            BlueprintSledUpdateDispositionKind::Evacuating {
+                // similarly, sled-agent doesn't care about the policy, only
+                // that it should be evacuating
+                policy: _,
+            } => Self::Evacuating,
+        }
+    }
+}
+
 /// The content of a sled's update disposition: whether the sled is available
 /// for provisioning, and if being evacuated, which disruption policy applies.
 ///
@@ -1787,6 +1804,7 @@ impl BlueprintSledConfig {
             remove_mupdate_override: self.remove_mupdate_override,
             host_phase_2: self.host_phase_2.into(),
             measurements: self.measurements.into(),
+            update_disposition: self.update_disposition.into(),
         }
     }
 

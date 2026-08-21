@@ -59,6 +59,7 @@ use sled_agent_types::inventory::InventoryDisk;
 use sled_agent_types::inventory::InventoryZpool;
 use sled_agent_types::inventory::OmicronFileSourceResolverInventory;
 use sled_agent_types::inventory::OmicronSledConfig;
+use sled_agent_types::inventory::OmicronSledUpdateDisposition;
 use sled_agent_types::inventory::OmicronZonesConfig;
 use sled_agent_types::inventory::OrphanedDataset;
 use sled_agent_types::inventory::SingleMeasurementInventory;
@@ -413,6 +414,7 @@ pub fn representative() -> Representative {
         remove_mupdate_override: None,
         host_phase_2: HostPhase2DesiredSlots::current_contents(),
         measurements: Default::default(),
+        update_disposition: OmicronSledUpdateDisposition::Available,
     };
     let sled16 = OmicronSledConfig {
         generation: sled16.generation,
@@ -422,6 +424,7 @@ pub fn representative() -> Representative {
         remove_mupdate_override: None,
         host_phase_2: HostPhase2DesiredSlots::current_contents(),
         measurements: Default::default(),
+        update_disposition: OmicronSledUpdateDisposition::Available,
     };
     let sled17 = OmicronSledConfig {
         generation: sled17.generation,
@@ -431,6 +434,7 @@ pub fn representative() -> Representative {
         remove_mupdate_override: None,
         host_phase_2: HostPhase2DesiredSlots::current_contents(),
         measurements: Default::default(),
+        update_disposition: OmicronSledUpdateDisposition::Available,
     };
 
     // Create iterator producing fixed IDs.
