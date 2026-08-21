@@ -148,6 +148,7 @@ mod tests {
             autoneg: false,
             lldp: Some(lldp("uplink-0")),
             tx_eq: None,
+            allow_ddm_traffic: false,
         };
         RackInitializeRequest {
             trust_quorum_peers: Some(trust_quorum_peers()),
@@ -219,6 +220,7 @@ mod tests {
             autoneg: false,
             lldp: Some(lldp("uplink-0")),
             tx_eq: None,
+            allow_ddm_traffic: false,
         };
         let mut request = static_bfd_request();
         request.rack_network_config = RackNetworkConfig {

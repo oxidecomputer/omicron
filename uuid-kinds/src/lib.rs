@@ -99,6 +99,7 @@ impl_typed_uuid_kinds! {
         SvcEnabledNotOnline = {},
         SvcEnabledNotOnlineParseError = {},
         SvcEnabledNotOnlineService = {},
+        SwitchPortSettings = {},
         TufArtifact = {},
         TufRepo = {},
         TufTrustRoot = {},

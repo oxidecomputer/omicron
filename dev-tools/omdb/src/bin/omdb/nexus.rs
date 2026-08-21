@@ -1711,6 +1711,7 @@ fn print_task_blueprint_rendezvous(details: &serde_json::Value) {
                 crucible_dataset,
                 local_storage_dataset,
                 local_storage_unencrypted_dataset,
+                sled_blueprint_availability,
             } = status.stats;
 
             print_datasets_rendezvous_stats(&debug_dataset, "debug_dataset");
@@ -1738,6 +1739,40 @@ fn print_task_blueprint_rendezvous(details: &serde_json::Value) {
             print_datasets_rendezvous_stats(
                 &local_storage_unencrypted_dataset,
                 "local_storage_unencrypted_dataset",
+            );
+
+            println!("    sled_blueprint_availability rendezvous counts:");
+            println!(
+                "        num_marked_available:                {}",
+                sled_blueprint_availability.num_marked_available
+            );
+            println!(
+                "        num_marked_unavailable:              {}",
+                sled_blueprint_availability.num_marked_unavailable
+            );
+            println!(
+                "        num_unchanged:                       {}",
+                sled_blueprint_availability.num_unchanged
+            );
+            println!(
+                "        num_invariant_violations:            {}",
+                sled_blueprint_availability.num_invariant_violations
+            );
+            println!(
+                "        num_decommissioned:                  {}",
+                sled_blueprint_availability.num_decommissioned
+            );
+            println!(
+                "        num_already_decommissioned:          {}",
+                sled_blueprint_availability.num_already_decommissioned
+            );
+            println!(
+                "        num_not_in_blueprint:                {}",
+                sled_blueprint_availability.num_not_in_blueprint
+            );
+            println!(
+                "        num_decommissioned_not_in_blueprint: {}",
+                sled_blueprint_availability.num_decommissioned_not_in_blueprint
             );
         }
     }
