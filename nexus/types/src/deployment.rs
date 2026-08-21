@@ -1714,6 +1714,17 @@ pub enum BlueprintSledUpdateDispositionKind {
     // update-related migrations.
 }
 
+impl BlueprintSledUpdateDispositionKind {
+    /// Whether a sled with this disposition may be used to provision new
+    /// instances.
+    pub fn is_available_for_provisioning(self) -> bool {
+        match self {
+            BlueprintSledUpdateDispositionKind::Available => true,
+            BlueprintSledUpdateDispositionKind::Evacuating { .. } => false,
+        }
+    }
+}
+
 impl fmt::Display for BlueprintSledUpdateDispositionKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {

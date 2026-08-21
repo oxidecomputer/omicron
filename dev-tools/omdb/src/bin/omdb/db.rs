@@ -66,6 +66,7 @@ use nexus_db_errors::OptionalError;
 use nexus_db_lookup::DataStoreConnection;
 use nexus_db_lookup::LookupPath;
 use nexus_db_model::CrucibleDataset;
+use nexus_db_model::DbSledBpAvailability;
 use nexus_db_model::DnsGroup;
 use nexus_db_model::DnsName;
 use nexus_db_model::DnsVersion;
@@ -4690,11 +4691,13 @@ struct SledRow {
     role: &'static str,
     policy: SledPolicy,
     state: SledState,
+    #[tabled(rename = "BP AVAIL")]
+    bp_availability: &'static str,
     id: SledUuid,
 }
 
-impl From<Sled> for SledRow {
-    fn from(s: Sled) -> Self {
+impl SledRow {
+    fn new(s: Sled, bp_availability: Option<DbSledBpAvailability>) -> Self {
         SledRow {
             id: s.id(),
             serial: s.serial_number().to_string(),
@@ -4702,6 +4705,10 @@ impl From<Sled> for SledRow {
             role: if s.is_scrimlet() { "scrimlet" } else { "-" },
             policy: s.policy(),
             state: s.state().into(),
+            bp_availability: match bp_availability {
+                Some(state) => state.label(),
+                None => "(missing)",
+            },
         }
     }
 }
@@ -4731,7 +4738,19 @@ async fn cmd_db_sleds(
         .context("listing sleds")?;
     check_limit(&sleds, limit, || String::from("listing sleds"));
 
-    let rows = sleds.into_iter().map(|s| SledRow::from(s));
+    // Look up each sled's reconfigurator provisioning availability from the
+    // `rendezvous_sled_bp_availability` rendezvous table. A sled might not be
+    // present in the table (e.g. it was just added and the reconciliation task
+    // has not run yet), in which case it is rendered as `(missing)`.
+    let bp_availability = datastore
+        .rendezvous_sled_bp_availability_list_all_batched(opctx)
+        .await
+        .context("listing sled bp-availability rendezvous rows")?;
+
+    let rows = sleds.into_iter().map(|s| {
+        let state = bp_availability.get(&s.id()).map(|r| r.bp_availability());
+        SledRow::new(s, state)
+    });
     let table = tabled::Table::new(rows)
         .with(tabled::settings::Style::empty())
         .with(tabled::settings::Padding::new(1, 1, 0, 0))

@@ -11,14 +11,20 @@ workspace = true
 [dependencies]
 bootstore.workspace = true
 camino.workspace = true
+omicron-common.workspace = true
 omicron-ledger.workspace = true
+omicron-uuid-kinds.workspace = true
 serde.workspace = true
+serde_json = { workspace = true, features = ["raw_value"] }
 sled-agent-config-reconciler.workspace = true
 sled-agent-measurements.workspace = true
+sled-agent-types.workspace = true
 slog-error-chain.workspace = true
 slog.workspace = true
 sprockets-tls.workspace = true
 thiserror.workspace = true
+tokio.workspace = true
 trust-quorum.workspace = true
+uuid.workspace = true
 
 omicron-workspace-hack.workspace = true

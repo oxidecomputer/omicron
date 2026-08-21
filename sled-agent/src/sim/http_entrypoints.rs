@@ -95,6 +95,7 @@ use sled_agent_types_versions::v33;
 use sled_agent_types_versions::v39;
 use sled_agent_types_versions::v42;
 use sled_agent_types_versions::v47;
+use sled_agent_types_versions::v48;
 use sled_diagnostics::SledDiagnosticsQueryOutput;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
@@ -442,6 +443,7 @@ impl SledAgentApi for SledAgentSimImpl {
         use v33::system_networking::SystemNetworkingConfig as BodyV33;
         use v39::system_networking::SystemNetworkingConfig as BodyV39;
         use v42::system_networking::SystemNetworkingConfig as BodyV42;
+        use v47::system_networking::SystemNetworkingConfig as BodyV47;
 
         let config =
             rqctx.context().bootstore_network_config.lock().unwrap().clone();
@@ -464,8 +466,8 @@ impl SledAgentApi for SledAgentSimImpl {
 
         // Downconvert from the current version to the v20 version we have to
         // return from this endpoint.
-        let body_v42 =
-            BodyV42::try_from(latest_version_body).map_err(|err| {
+        let body_v42 = BodyV42::try_from(BodyV47::from(latest_version_body))
+            .map_err(|err| {
                 HttpError::for_internal_error(format!(
                     "failed to downconvert early network config: {err:#}"
                 ))
@@ -479,6 +481,19 @@ impl SledAgentApi for SledAgentSimImpl {
             schema_version: BodyV20::SCHEMA_VERSION,
             body,
         }))
+    }
+
+    async fn write_network_bootstore_config_v48(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<v48::system_networking::WriteNetworkConfigRequest>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let mut config =
+            rqctx.context().bootstore_network_config.lock().unwrap();
+        let body = body.into_inner();
+
+        *config = EarlyNetworkConfigEnvelope::from(&body.body)
+            .serialize_to_bootstore_with_generation(body.generation);
+        Ok(HttpResponseUpdatedNoContent())
     }
 
     async fn write_network_bootstore_config_v47(
