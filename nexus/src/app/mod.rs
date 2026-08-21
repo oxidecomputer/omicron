@@ -714,7 +714,7 @@ impl Nexus {
                     mgs_updates_tx,
                     blueprint_load_tx,
                     sitrep_load_tx,
-                    debug_dropbox: debug_dropbox_reconfigurator,
+                    debug_dropbox_reconfigurator,
                     console_session_absolute_timeout,
                 },
             );
