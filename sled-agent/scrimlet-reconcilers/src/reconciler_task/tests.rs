@@ -42,6 +42,7 @@ impl Reconciler for MockReconciler {
     fn new(
         _mode: ScrimletReconcilersMode,
         _switch_slot: ThisSledSwitchSlot,
+        _base_ddm_interfaces: BTreeSet<String>,
         _parent_log: &Logger,
     ) -> Self {
         unimplemented!("not called by tests")
@@ -143,6 +144,7 @@ impl Harness {
                     mgs_addr: dummy_addr,
                     dpd_addr: dummy_addr,
                     mgd_addr: dummy_addr,
+                    ddmd_addr: dummy_addr,
                 },
                 ThisSledSwitchSlot::TEST_FAKE,
                 log,

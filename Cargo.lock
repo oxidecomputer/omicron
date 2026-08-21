@@ -14445,6 +14445,7 @@ dependencies = [
  "bootstrap-agent-lockstep-types",
  "chrono",
  "daft",
+ "ddm-admin-client",
  "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=67635f6971b4ce67fe18eab71a9d9214b8585cd9)",
  "dropshot",
  "either",

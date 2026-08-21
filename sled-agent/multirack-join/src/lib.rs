@@ -233,20 +233,25 @@ impl MultirackJoinServiceTask {
 
         self.configure_networking().await?;
 
+        // We're done
+        self.ctx.write_rss_completed_ledger(&self.log).await?;
+
         Ok(())
     }
 
     /// Publish this rack's network configuration to the bootstore.
     ///
     /// The scrimlet reconcilers read it from there and program the switch, so
-    /// this is what gets a joining rack's front ports configured. RSS does the
-    /// equivalent for rack 0 before initializing sleds; we do it after starting
-    /// them, because a joining rack's underlay already exists.
+    /// this is what gets a joining rack's front ports configured.
     async fn configure_networking(
         &mut self,
     ) -> Result<(), MultirackJoinServiceError> {
         let rack_network_config =
             self.input_rx.borrow_and_update().rack_network_config.clone();
+
+        self.output_tx.send_modify(|state| {
+            *state = MultirackJoinServiceState::ConfigureNetworking
+        });
 
         // Only RSS places services, so a joining rack has no service zone NAT
         // entries to publish and stays at the initial generation.

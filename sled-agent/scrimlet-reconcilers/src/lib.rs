@@ -26,6 +26,7 @@
 //! * Configuration of BFD within `mgd`
 //! * Configuration of static routes within `mgd`
 //! * Configuration of SMF properties for `uplinkd` and `lldpd`
+//! * Configuration of the interfaces `ddmd` runs DDM on
 //!
 //! The specific configuration that should be applied comes from Nexus (or RSS,
 //! at rack setup time) and is sent to `sled-agent` via the bootstore.
@@ -42,6 +43,7 @@
 //! [`ThisSledSwitchZoneUnderlayIpAddr`]:
 //! sled_agent_types::sled::ThisSledSwitchZoneUnderlayIpAddr
 
+mod ddmd_reconciler;
 mod dpd_reconciler;
 mod handle;
 mod lldpd_reconciler;

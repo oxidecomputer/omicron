@@ -106,6 +106,7 @@ use sled_hardware::underlay;
 use sled_hardware_types::Baseboard;
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
+use std::collections::BTreeSet;
 use std::net::{IpAddr, Ipv6Addr, SocketAddr};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
@@ -495,6 +496,33 @@ impl illumos_utils::smf_helper::Service for SwitchService {
     }
     fn smf_name(&self) -> String {
         format!("svc:/oxide/{}", self.service_name())
+    }
+}
+
+/// The interfaces the switch zone's `mg-ddm` should always run DDM on,
+/// independent of the rack network config.
+///
+/// Returned as bare interface names. Callers that need addrobjs (i.e. the SMF
+/// `interfaces` property) must wrap these in [`AddrObject`] themselves;
+/// `DdmdReconciler` passes them to ddmd's apply endpoint, which appends the
+/// link-local addrobj suffix server-side. Keeping this function the single
+/// producer of the names is what keeps those two callers in agreement — if they
+/// disagree, an apply would tear down the FSMs SMF started.
+pub(crate) fn switch_zone_ddm_base_interfaces(
+    sidecar_revision: &SidecarRevision,
+    switch_zone_maghemite_links: &[PhysicalLink],
+) -> BTreeSet<String> {
+    if sidecar_revision.is_physical() {
+        // See the `tfport_name` function for how tfportd names the addrconf it
+        // creates. Right now, that's `tfportrear[0-31]_0` for all rear ports,
+        // which is what we're directing ddmd to listen for advertisements on.
+        //
+        // Front ports are not listed here: they only carry DDM when the rack
+        // network config marks them `allow_ddm_traffic`, which is handled
+        // dynamically by `DdmdReconciler`.
+        (0..32).map(|i| format!("tfportrear{i}_0")).collect()
+    } else {
+        switch_zone_maghemite_links.iter().map(|l| l.to_string()).collect()
     }
 }
 
@@ -3088,41 +3116,17 @@ impl ServiceManager {
                         }
                     }
 
-                    let maghemite_interfaces: Vec<_> = if real_sidecar {
-                        (0..32)
-                            .map(|i| {
-                                // See the `tfport_name` function
-                                // for how tfportd names the
-                                // addrconf it creates.  Right now,
-                                // that's `tfportrear[0-31]_0` for
-                                // all rear ports, which is what
-                                // we're directing ddmd to listen
-                                // for advertisements on.
-                                //
-                                // This may grow in a multi-rack
-                                // future to include a subset of
-                                // "front" ports too, when racks are
-                                // cabled together.
-                                AddrObject::new(
-                                    &format!("tfportrear{}_0", i),
-                                    IPV6_LINK_LOCAL_ADDROBJ_NAME,
-                                )
+                    let maghemite_interfaces: Vec<_> =
+                        switch_zone_ddm_base_interfaces(
+                            &self.inner.sidecar_revision,
+                            &self.inner.switch_zone_maghemite_links,
+                        )
+                        .iter()
+                        .map(|name| {
+                            AddrObject::new(name, IPV6_LINK_LOCAL_ADDROBJ_NAME)
                                 .unwrap()
-                            })
-                            .collect()
-                    } else {
-                        self.inner
-                            .switch_zone_maghemite_links
-                            .iter()
-                            .map(|i| {
-                                AddrObject::new(
-                                    &i.to_string(),
-                                    IPV6_LINK_LOCAL_ADDROBJ_NAME,
-                                )
-                                .unwrap()
-                            })
-                            .collect()
-                    };
+                        })
+                        .collect();
 
                     for i in maghemite_interfaces {
                         mg_ddm_config = mg_ddm_config.add_property(

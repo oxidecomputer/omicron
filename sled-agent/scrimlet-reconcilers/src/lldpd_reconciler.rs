@@ -69,6 +69,7 @@ impl Reconciler for LldpdReconciler {
     fn new(
         mode: ScrimletReconcilersMode,
         switch_slot: ThisSledSwitchSlot,
+        _base_ddm_interfaces: BTreeSet<String>,
         _parent_log: &slog::Logger,
     ) -> Self {
         let is_running_in_test_mode = match mode {
