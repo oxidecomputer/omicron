@@ -339,7 +339,7 @@ impl super::Nexus {
         };
 
         if let Err(error) = &archive_deposit {
-            error!(
+            warn!(
                 &opctx.log,
                 "failed to archive debug file for new blueprint";
                 "blueprint_id" => %blueprint.id,
@@ -1073,6 +1073,9 @@ impl SledUpdateStatus {
     }
 }
 
+/// Describes why a Reconfigurator state file is being created by Nexus
+///
+/// This is used to name the resulting file.
 #[derive(Debug, Clone, Copy)]
 pub enum BlueprintDebugAction {
     /// the autoplanner generated this blueprint and will try to make it the
@@ -1092,7 +1095,7 @@ pub enum BlueprintDebugAction {
     Target,
 }
 
-/// Returns the filename for a debug drop file related to blueprint planning
+/// Returns the filename for a debug dropbox file related to blueprint planning
 pub fn blueprint_debug_filename(
     blueprint: &Blueprint,
     action: BlueprintDebugAction,
@@ -1234,7 +1237,7 @@ impl<'a> SetTargetDebugWriter<'a> {
                         }
                     }
                     Err(error) => {
-                        error!(
+                        warn!(
                             log,
                             "failed to save SetTarget intent file";
                             InlineErrorChain::new(&error),

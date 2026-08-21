@@ -292,18 +292,13 @@ impl BlueprintPlanner {
             |error| PlanError::SaveBlueprint { blueprint_id, source: error },
         )?;
 
-        // Next we're going to try to make this the new target blueprint.
+        // Before we try to make this the new target blueprint, assemble some
+        // Reconfigurator state files that can be used to document and
+        // potentially debug the planning choices we made.  The details of
+        // writing out the files are handled by `SetTargetDebugWriter`.
         //
-        // Before we do that, assemble some Reconfigurator state files that can
-        // be used to debug the planning choices we made.  First, we'll write an
-        // "intent" file that reflects the current state of the system (which
-        // means the old target blueprint) and mentions that we're about to try
-        // to make this new blueprint the target.  If we succeed in making it
-        // the target, we'll write a second "commit" file that reflects the
-        // change in target blueprint.  We'll also try to remove the "intent"
-        // file, since it'll be redundant with the "commit" file.  All of this
-        // is handled by the SetTargetDebugWriter helper.  The whole process is
-        // best-effort.  If any of it fails, we'll proceed normally.
+        // The part of the process is best-effort.  If any of it fails, we'll
+        // proceed anyway.
         let maybe_debug_intent = reconfigurator_state_assemble(
             opctx,
             &self.datastore,
@@ -363,7 +358,6 @@ impl BlueprintPlanner {
                         );
                     }
                 }
-
                 return Ok(BlueprintPlannerStatus::Planned {
                     parent_blueprint_id,
                     error: format!("{error}"),
