@@ -1602,13 +1602,22 @@
             }
           },
           "event_reports": {
-            "type": "object",
-            "additionalProperties": {
-              "type": "object",
-              "additionalProperties": {
-                "$ref": "#/components/schemas/EventReportForWicketdEngineSpec"
-              }
-            }
+            "title": "IdOrdMap",
+            "x-rust-type": {
+              "crate": "iddqd",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/SpEventReport"
+                }
+              ],
+              "path": "iddqd::IdOrdMap",
+              "version": "*"
+            },
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SpEventReport"
+            },
+            "uniqueItems": true
           },
           "system_version": {
             "nullable": true,
@@ -4155,6 +4164,22 @@
               "error"
             ]
           }
+        ]
+      },
+      "SpEventReport": {
+        "description": "An event report for a single SP.",
+        "type": "object",
+        "properties": {
+          "event_report": {
+            "$ref": "#/components/schemas/EventReportForWicketdEngineSpec"
+          },
+          "sp": {
+            "$ref": "#/components/schemas/SpIdentifier"
+          }
+        },
+        "required": [
+          "event_report",
+          "sp"
         ]
       },
       "SpIdentifier": {
