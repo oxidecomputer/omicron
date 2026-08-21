@@ -12,6 +12,7 @@ use expectorate::assert_contents;
 use gateway_client::ClientInfo as _;
 use http::StatusCode;
 use nexus_test_utils::background::activate_background_task;
+use nexus_test_utils::background::run_blueprint_rendezvous;
 use nexus_test_utils::wait_for_producer;
 use nexus_test_utils::{OXIMETER_UUID, PRODUCER_UUID};
 use nexus_test_utils_macros::nexus_test;
@@ -247,6 +248,14 @@ async fn test_omdb_success_cases() {
     activate_background_task(lockstep_client, "fm_analysis").await;
     activate_background_task(lockstep_client, "fm_rendezvous").await;
     activate_background_task(lockstep_client, "fm_sitrep_history_pruner").await;
+
+    // Populate the `rendezvous_sled_bp_availability` table deterministically so
+    // the BP AVAIL column in `omdb db sleds` has data present in it. Run
+    // this twice: the first pass populates the table (unless a watch-triggered
+    // activation already did), and the second reaches the steady state
+    // asserted by the expectorate output.
+    run_blueprint_rendezvous(&cptestctx.lockstep_client).await;
+    run_blueprint_rendezvous(&cptestctx.lockstep_client).await;
 
     let mut output = String::new();
 
@@ -710,6 +719,15 @@ async fn test_omdb_env_settings(cptestctx: &ControlPlaneTestContext) {
     let ch_url = format!("http://{}/", cptestctx.clickhouse.http_address());
     let dns_sockaddr = cptestctx.internal_dns.dns_server.local_address();
     let mut output = String::new();
+
+    // The blueprint_rendezvous task needs an inventory collection to run.
+    cptestctx
+        .wait_for_at_least_one_inventory_collection(Duration::from_secs(60))
+        .await;
+
+    // Populate the `rendezvous_sled_bp_availability` table deterministically so
+    // the BP AVAIL column in `omdb db sleds` has data present in it.
+    run_blueprint_rendezvous(&cptestctx.lockstep_client).await;
 
     // Database URL
     // Case 1: specified on the command line

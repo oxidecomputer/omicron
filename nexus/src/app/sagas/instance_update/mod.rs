@@ -2929,13 +2929,24 @@ mod test {
             }],
         }];
 
+        let allow_ddm_traffic = false;
         let uplink0_settings = datastore
-            .switch_port_settings_create(&opctx, &uplink0_params, None)
+            .switch_port_settings_create(
+                &opctx,
+                &uplink0_params,
+                None,
+                allow_ddm_traffic,
+            )
             .await
             .expect("should be able to create configuration for uplink0");
 
         let uplink1_settings = datastore
-            .switch_port_settings_create(&opctx, &uplink1_params, None)
+            .switch_port_settings_create(
+                &opctx,
+                &uplink1_params,
+                None,
+                allow_ddm_traffic,
+            )
             .await
             .expect("should be able to create configuration for uplink1");
 

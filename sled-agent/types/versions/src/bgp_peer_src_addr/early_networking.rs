@@ -421,7 +421,7 @@ impl TryFrom<RackNetworkConfig> for v42::RackNetworkConfig {
             infra_ip_last: new.infra_ip_last,
             ports: v42::UplinkPorts::new(
                 new.ports
-                    .into_vec()
+                    .0
                     .into_iter()
                     .map(TryFrom::try_from)
                     .collect::<Result<_, _>>()?,

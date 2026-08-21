@@ -91,11 +91,12 @@ pub mod early_networking {
     pub use crate::v47::early_networking::BgpPeerConfig;
     pub use crate::v47::early_networking::EmptyUplinkPortsError;
     pub use crate::v47::early_networking::NumberedRouter;
-    pub use crate::v47::early_networking::PortConfig;
-    pub use crate::v47::early_networking::RackNetworkConfig;
     pub use crate::v47::early_networking::RouterPeerType;
     pub use crate::v47::early_networking::UnnumberedRouter;
-    pub use crate::v47::early_networking::UplinkPorts;
+
+    pub use crate::v48::early_networking::PortConfig;
+    pub use crate::v48::early_networking::RackNetworkConfig;
+    pub use crate::v48::early_networking::UplinkPorts;
 }
 
 pub mod firewall_rules {
@@ -103,15 +104,15 @@ pub mod firewall_rules {
 }
 
 pub mod multicast {
-    pub use crate::v48::multicast::ClearMcast2Phys;
-    pub use crate::v48::multicast::ClearMcastForwarding;
-    pub use crate::v48::multicast::Mcast2PhysMapping;
-    pub use crate::v48::multicast::McastFilterMode;
-    pub use crate::v48::multicast::McastForwardingEntry;
-    pub use crate::v48::multicast::McastForwardingNextHop;
-    pub use crate::v48::multicast::McastReplication;
-    pub use crate::v48::multicast::McastSourceFilter;
-    pub use crate::v48::multicast::MulticastGroupCfg;
+    pub use crate::v49::multicast::ClearMcast2Phys;
+    pub use crate::v49::multicast::ClearMcastForwarding;
+    pub use crate::v49::multicast::Mcast2PhysMapping;
+    pub use crate::v49::multicast::McastFilterMode;
+    pub use crate::v49::multicast::McastForwardingEntry;
+    pub use crate::v49::multicast::McastForwardingNextHop;
+    pub use crate::v49::multicast::McastReplication;
+    pub use crate::v49::multicast::McastSourceFilter;
+    pub use crate::v49::multicast::MulticastGroupCfg;
 }
 
 pub mod instance {
@@ -276,8 +277,8 @@ pub mod system_networking {
 
     pub use crate::v39::system_networking::BlueprintExternalNetworkingConfig;
 
-    pub use crate::v47::system_networking::SystemNetworkingConfig;
-    pub use crate::v47::system_networking::WriteNetworkConfigRequest;
+    pub use crate::v48::system_networking::SystemNetworkingConfig;
+    pub use crate::v48::system_networking::WriteNetworkConfigRequest;
 }
 
 pub mod trust_quorum {

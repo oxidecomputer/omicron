@@ -1246,6 +1246,18 @@
           "last"
         ]
       },
+      "Ipv6Subnet": {
+        "description": "Wraps an [`Ipv6Net`] with a compile-time prefix length.",
+        "type": "object",
+        "properties": {
+          "net": {
+            "$ref": "#/components/schemas/Ipv6Net"
+          }
+        },
+        "required": [
+          "net"
+        ]
+      },
       "LinkFec": {
         "description": "The forward error correction mode of a link.",
         "oneOf": [
@@ -2277,6 +2289,39 @@
           {
             "type": "object",
             "properties": {
+              "sleds": {
+                "title": "BiHashMap",
+                "x-rust-type": {
+                  "crate": "iddqd",
+                  "parameters": [
+                    {
+                      "$ref": "#/components/schemas/SledAgentInfo"
+                    }
+                  ],
+                  "path": "iddqd::BiHashMap",
+                  "version": "*"
+                },
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/SledAgentInfo"
+                },
+                "uniqueItems": true
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "start_sled_agents"
+                ]
+              }
+            },
+            "required": [
+              "sleds",
+              "state"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
               "state": {
                 "type": "string",
                 "enum": [
@@ -2380,6 +2425,11 @@
             "items": {
               "$ref": "#/components/schemas/UplinkAddressConfig"
             }
+          },
+          "allow_ddm_traffic": {
+            "description": "Whether or not to allow DDM traffic on this port",
+            "default": false,
+            "type": "boolean"
           },
           "autoneg": {
             "description": "Whether or not to set autonegotiation",
@@ -3750,6 +3800,93 @@
           "name",
           "ranges"
         ]
+      },
+      "SledAgentInfo": {
+        "description": "Status information for a given sled agent",
+        "type": "object",
+        "properties": {
+          "baseboard_id": {
+            "$ref": "#/components/schemas/BaseboardId"
+          },
+          "sled_id": {
+            "$ref": "#/components/schemas/SledUuid"
+          },
+          "sled_subnet": {
+            "$ref": "#/components/schemas/Ipv6Subnet"
+          },
+          "start_state": {
+            "$ref": "#/components/schemas/SledAgentStartState"
+          }
+        },
+        "required": [
+          "baseboard_id",
+          "sled_id",
+          "sled_subnet",
+          "start_state"
+        ]
+      },
+      "SledAgentStartState": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "last_error": {
+                "nullable": true,
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "in_progress"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "started"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "reason": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "failed"
+                ]
+              }
+            },
+            "required": [
+              "reason",
+              "type"
+            ]
+          }
+        ]
+      },
+      "SledUuid": {
+        "x-rust-type": {
+          "crate": "omicron-uuid-kinds",
+          "path": "omicron_uuid_kinds::SledUuid",
+          "version": "*"
+        },
+        "type": "string",
+        "format": "uuid"
       },
       "SwitchSlot": {
         "description": "Identifies switch physical location",
