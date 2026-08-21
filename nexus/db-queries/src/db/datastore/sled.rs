@@ -672,24 +672,40 @@ mod local_storage_pairing_test {
     /// and then validate that "an overwhelming majority" pass.
     #[test]
     fn descending_workload_across_seeds() {
-        // 774 GiB of headroom, in MiB.
-        const POOL_HEADROOM: i64 = 774 * 1024;
+        // 774 GiB of headroom per pool, in bytes.
+        let pool_headroom: i64 =
+            external::ByteCount::from_gibibytes_u32(774).to_bytes() as i64;
 
-        // Disk sizes in GiB. Local storage charges 70 MiB of dataset
-        // overhead per GiB, so each request costs 1094 MiB per GiB.
-        const DISK_GB: [i64; 7] = [388, 195, 98, 50, 26, 14, 8];
+        // Disk sizes in GiB, chosen so that seven rounds of these disks
+        // nearly fill ten pools.
+        const DISK_GIB: [u32; 7] = [388, 195, 98, 50, 26, 14, 8];
+
+        // Compute each request's size (disk size plus dataset overhead)
+        // through the same path production uses, so this workload stays in
+        // sync with the overhead charged by DiskTypeLocalStorage::new.
+        let request_sizes: Vec<i64> = DISK_GIB
+            .iter()
+            .enumerate()
+            .map(|(i, gib)| {
+                local_storage_disk(
+                    Uuid::from_u128(i as u128 + 1),
+                    external::ByteCount::from_gibibytes_u32(*gib),
+                )
+                .required_dataset_size()
+            })
+            .collect();
 
         let mut succeeded = 0;
 
         for seed in 0..100u64 {
             let mut rng = StdRng::seed_from_u64(seed);
-            let mut headrooms = [POOL_HEADROOM; 10];
+            let mut headrooms = [pool_headroom; 10];
 
             let all_rounds_placed = (0..7).all(|_| {
-                let requests: Vec<LocalStorageRequest> = DISK_GB
+                let requests: Vec<LocalStorageRequest> = request_sizes
                     .iter()
                     .enumerate()
-                    .map(|(i, gb)| request(i as u128 + 1, gb * 1094))
+                    .map(|(i, size)| request(i as u128 + 1, *size))
                     .collect();
 
                 let pools: Vec<LocalStorageCandidatePool> = headrooms
@@ -792,9 +808,10 @@ mod local_storage_pairing_test {
         ));
     }
 
-    fn local_storage_disk(disk_id: Uuid) -> LocalStorageDisk {
-        let size = external::ByteCount::from_gibibytes_u32(1);
-
+    fn local_storage_disk(
+        disk_id: Uuid,
+        size: external::ByteCount,
+    ) -> LocalStorageDisk {
         let params = disk::DiskCreate {
             identity: external::IdentityMetadataCreateParams {
                 name: format!("disk-{disk_id}").parse().unwrap(),
@@ -846,7 +863,10 @@ mod local_storage_pairing_test {
         }
 
         let allocated_disk = {
-            let mut disk = local_storage_disk(Uuid::new_v4());
+            let mut disk = local_storage_disk(
+                Uuid::new_v4(),
+                external::ByteCount::from_gibibytes_u32(1),
+            );
             disk.local_storage_dataset_allocation =
                 Some(datastore::LocalStorageAllocation::Unencrypted(
                     db::model::LocalStorageUnencryptedDatasetAllocation::new_for_tests_only(
@@ -863,7 +883,10 @@ mod local_storage_pairing_test {
             disk
         };
 
-        let unallocated_disk = local_storage_disk(Uuid::new_v4());
+        let unallocated_disk = local_storage_disk(
+            Uuid::new_v4(),
+            external::ByteCount::from_gibibytes_u32(1),
+        );
         let unallocated_disk_id = unallocated_disk.id();
 
         let allocations = choose_local_storage_allocations(
