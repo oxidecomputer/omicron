@@ -344,21 +344,6 @@
             "$ref": "#/components/responses/Error"
           }
         }
-      },
-      "delete": {
-        "summary": "Reset all RSS configuration to their default values.",
-        "operationId": "delete_rss_config",
-        "responses": {
-          "204": {
-            "description": "resource updated"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
       }
     },
     "/rack-setup/config/bgp/auth-key": {
@@ -383,50 +368,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/GetBgpAuthKeyInfoResponse"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/rack-setup/config/bgp/auth-key/{key_id}": {
-      "put": {
-        "summary": "Set the BGP authentication key for a particular key ID.",
-        "operationId": "put_bgp_auth_key",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "key_id",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/BgpAuthKeyId"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/PutBgpAuthKeyBody"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PutBgpAuthKeyResponse"
                 }
               }
             }
@@ -472,33 +413,6 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/MultirackJoinConfigBaseUserInput"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "204": {
-            "description": "resource updated"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/rack-setup/config/recovery-user-password-hash": {
-      "put": {
-        "summary": "Update the RSS config recovery silo user password hash.",
-        "operationId": "put_rss_config_recovery_user_password_hash",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/PutRssRecoveryUserPasswordHash"
               }
             }
           },
@@ -919,31 +833,6 @@
         "required": [
           "part_number",
           "serial_number"
-        ]
-      },
-      "BgpAuthKey": {
-        "description": "Describes the actual authentication key to use with a BGP peer.\n\nCurrently, only TCP-MD5 authentication is supported.",
-        "oneOf": [
-          {
-            "description": "TCP-MD5 authentication.",
-            "type": "object",
-            "properties": {
-              "key": {
-                "description": "The pre-shared key.",
-                "type": "string"
-              },
-              "kind": {
-                "type": "string",
-                "enum": [
-                  "tcp_md5"
-                ]
-              }
-            },
-            "required": [
-              "key",
-              "kind"
-            ]
-          }
         ]
       },
       "BgpAuthKeyId": {
@@ -2420,11 +2309,6 @@
         "minLength": 1,
         "maxLength": 63
       },
-      "NewPasswordHash": {
-        "title": "A password hash in PHC string format",
-        "description": "Password hashes must be in PHC (Password Hashing Competition) string format.  Passwords must be hashed with Argon2id.  Password hashes may be rejected if the parameters appear not to be secure enough.",
-        "type": "string"
-      },
       "Oui": {
         "description": "An Organization Unique Identifier.",
         "type": "array",
@@ -3254,39 +3138,6 @@
         },
         "type": "string"
       },
-      "PutBgpAuthKeyBody": {
-        "type": "object",
-        "properties": {
-          "key": {
-            "$ref": "#/components/schemas/BgpAuthKey"
-          }
-        },
-        "required": [
-          "key"
-        ]
-      },
-      "PutBgpAuthKeyResponse": {
-        "type": "object",
-        "properties": {
-          "status": {
-            "$ref": "#/components/schemas/SetBgpAuthKeyStatus"
-          }
-        },
-        "required": [
-          "status"
-        ]
-      },
-      "PutRssRecoveryUserPasswordHash": {
-        "type": "object",
-        "properties": {
-          "hash": {
-            "$ref": "#/components/schemas/NewPasswordHash"
-          }
-        },
-        "required": [
-          "hash"
-        ]
-      },
       "RackInitUuid": {
         "x-rust-type": {
           "crate": "omicron-uuid-kinds",
@@ -4085,31 +3936,6 @@
           "description",
           "name",
           "ranges"
-        ]
-      },
-      "SetBgpAuthKeyStatus": {
-        "oneOf": [
-          {
-            "description": "The key was accepted and replaced an old key.",
-            "type": "string",
-            "enum": [
-              "replaced"
-            ]
-          },
-          {
-            "description": "The key was accepted, and is the same as the existing key.",
-            "type": "string",
-            "enum": [
-              "unchanged"
-            ]
-          },
-          {
-            "description": "The key was accepted and is new.",
-            "type": "string",
-            "enum": [
-              "added"
-            ]
-          }
         ]
       },
       "Sff8636Datapath": {

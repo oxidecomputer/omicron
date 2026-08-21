@@ -5,9 +5,6 @@
 //! Sled agent implementation
 
 use crate::artifact_store::{ArtifactStore, SledAgentArtifactStoreWrapper};
-use crate::bootstrap::sprockets_client::{
-    SprocketsClient, SprocketsClientError,
-};
 use crate::config::Config;
 use crate::hardware_monitor::HardwareMonitorHandle;
 use crate::instance_manager::InstanceManager;
@@ -64,6 +61,9 @@ use omicron_uuid_kinds::{
 };
 use oximeter_instruments::http::LatencyTracker;
 use oxnet::IpNet;
+use sled_agent_bootstrap_common::sprockets::{
+    SprocketsClient, SprocketsClientError,
+};
 use sled_agent_config_reconciler::{
     ConfigReconcilerHandle, ConfigReconcilerSpawnToken, InternalDisks,
     InternalDisksReceiver, LedgerNewConfigError, LedgerTaskError,

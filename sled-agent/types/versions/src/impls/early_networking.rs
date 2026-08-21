@@ -352,6 +352,7 @@ impl PortConfig {
             autoneg: false,
             lldp: None,
             tx_eq: None,
+            allow_ddm_traffic: false,
         }
     }
 }
