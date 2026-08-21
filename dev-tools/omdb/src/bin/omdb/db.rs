@@ -826,9 +826,6 @@ enum RegionCommands {
     /// Find what is using a region
     UsedBy(RegionUsedByArgs),
 
-    /// Find deleted volume regions
-    FindDeletedVolumeRegions,
-
     /// Perform an dry-run allocation and return what was selected
     DryRunRegionAllocation(DryRunRegionAllocationArgs),
 }
@@ -1125,6 +1122,8 @@ enum VolumeCommands {
     CannotActivate,
     /// What volumes reference a thing?
     Reference(VolumeReferenceArgs),
+    /// What resources are marked for deletion?
+    SoftDeletedResources,
 }
 
 #[derive(Debug, Args, Clone)]
@@ -1403,9 +1402,6 @@ impl DbArgs {
                         .await
                     }
                     DbCommands::Region(RegionArgs {
-                        command: RegionCommands::FindDeletedVolumeRegions,
-                    }) => cmd_db_region_find_deleted(&datastore).await,
-                    DbCommands::Region(RegionArgs {
                         command: RegionCommands::DryRunRegionAllocation(args),
                     }) => cmd_db_dry_run_region_allocation(&opctx, &datastore, args).await,
                     DbCommands::RegionReplacement(RegionReplacementArgs {
@@ -1608,6 +1604,9 @@ impl DbArgs {
                     DbCommands::Volumes(VolumeArgs {
                         command: VolumeCommands::Reference(args),
                     }) => cmd_db_volume_reference(&opctx, &datastore, &fetch_opts, &args).await,
+                    DbCommands::Volumes(VolumeArgs {
+                        command: VolumeCommands::SoftDeletedResources,
+                    }) => cmd_db_volume_soft_deleted_resources(&opctx, &datastore).await,
 
                     DbCommands::Vmm(VmmArgs { command: VmmCommands::Info(args) }) => {
                         cmd_db_vmm_info(&opctx, &datastore, &fetch_opts, &args)
@@ -4109,31 +4108,37 @@ async fn cmd_db_region_used_by(
     Ok(())
 }
 
-/// Find deleted volume regions
-async fn cmd_db_region_find_deleted(
+/// Show soft-deleted crucible resources
+async fn cmd_db_volume_soft_deleted_resources(
+    opctx: &OpContext,
     datastore: &DataStore,
 ) -> Result<(), anyhow::Error> {
-    let freed_crucible_resources =
-        datastore.find_deleted_volume_regions().await?;
+    let soft_deleted_crucible_resources =
+        datastore.crucible_resources_marked_for_deletion(opctx).await?;
+
+    let ready_soft_deleted_crucible_resources = {
+        let mut cloned_resources = soft_deleted_crucible_resources.clone();
+        cloned_resources.remove_regions_with_snapshots(&datastore).await?;
+        cloned_resources
+    };
 
     #[derive(Tabled)]
     struct RegionRow {
-        dataset_id: DatasetUuid,
         region_id: Uuid,
+        ready: bool,
     }
 
-    #[derive(Tabled)]
-    struct VolumeRow {
-        volume_id: VolumeUuid,
-    }
-
-    let region_rows: Vec<RegionRow> = freed_crucible_resources
-        .datasets_and_regions
+    let region_rows: Vec<RegionRow> = soft_deleted_crucible_resources
+        .regions
         .iter()
-        .map(|row| {
-            let (dataset, region) = row;
-
-            RegionRow { dataset_id: dataset.id(), region_id: region.id() }
+        .map(|region| RegionRow {
+            region_id: region.id(),
+            ready: {
+                ready_soft_deleted_crucible_resources
+                    .regions
+                    .iter()
+                    .any(|r| r.id() == region.id())
+            },
         })
         .collect();
 
@@ -4143,17 +4148,40 @@ async fn cmd_db_region_find_deleted(
 
     println!("{}", table);
 
-    let volume_rows: Vec<VolumeRow> = freed_crucible_resources
-        .volumes
-        .iter()
-        .map(|volume_id| VolumeRow { volume_id: *volume_id })
-        .collect();
+    #[derive(Tabled)]
+    struct RegionSnapshotRow {
+        dataset_id: DatasetUuid,
+        region_id: Uuid,
+        snapshot_id: Uuid,
+        ready: bool,
+    }
 
-    let volume_table = tabled::Table::new(volume_rows)
+    let region_snapshot_rows: Vec<RegionSnapshotRow> =
+        soft_deleted_crucible_resources
+            .region_snapshots
+            .iter()
+            .map(|region_snapshot| RegionSnapshotRow {
+                dataset_id: region_snapshot.dataset_id(),
+                region_id: region_snapshot.region_id,
+                snapshot_id: region_snapshot.snapshot_id,
+                ready: {
+                    ready_soft_deleted_crucible_resources
+                        .region_snapshots
+                        .iter()
+                        .any(|rs| {
+                            rs.dataset_id == region_snapshot.dataset_id().into()
+                                && rs.region_id == region_snapshot.region_id
+                                && rs.snapshot_id == region_snapshot.snapshot_id
+                        })
+                },
+            })
+            .collect();
+
+    let region_snapshot_table = tabled::Table::new(region_snapshot_rows)
         .with(tabled::settings::Style::psql())
         .to_string();
 
-    println!("{}", volume_table);
+    println!("{}", region_snapshot_table);
 
     Ok(())
 }

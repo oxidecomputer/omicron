@@ -20,7 +20,9 @@ use nexus_db_queries::db::datastore::RegionAllocationFor;
 use nexus_db_queries::db::datastore::RegionAllocationParameters;
 use nexus_db_queries::db::fixed_data::FLEET_ID;
 use nexus_test_utils::SLED_AGENT_UUID;
+use nexus_test_utils::background::run_volume_delete;
 use nexus_test_utils::background::run_volume_delete_return_status;
+use nexus_test_utils::background::wait_for_all_local_storage_deletes_errors_ok;
 use nexus_test_utils::background::wait_for_all_volume_deletes;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
@@ -1405,7 +1407,6 @@ async fn test_async_region_delete(cptestctx: &ControlPlaneTestContext) {
         run_volume_delete_return_status(&cptestctx.lockstep_client).await;
 
     assert!(!status.errors.is_empty());
-    assert_eq!(status.region_results.len(), 2);
 
     // Delete the project's default VPC subnet and VPC
     let subnet_url =
@@ -2325,13 +2326,13 @@ async fn test_no_halt_disk_delete_one_region_on_expunged_agent(
         .await
         .expect("failed to delete disk");
 
-    // Run the volume delete task, and assert two regions are deleted.
+    // Assert running the volume delete task deletes the two other regions but
+    // errors when trying to delete the third.
 
     let status =
         run_volume_delete_return_status(&cptestctx.lockstep_client).await;
 
     assert!(!status.errors.is_empty());
-    assert_eq!(status.region_results.len(), 2);
 
     // Expunge the physical disk
 
@@ -2350,16 +2351,9 @@ async fn test_no_halt_disk_delete_one_region_on_expunged_agent(
         .await
         .unwrap();
 
-    // Rerun the volume delete task and assert the last region was deleted. This
-    // test asserts against 3 regions being deleted because the volume record
-    // won't be hard-deleted, and the background task will re-attempt each
-    // delete.
+    // Rerun the volume delete task and assert the last region was deleted.
 
-    let status =
-        run_volume_delete_return_status(&cptestctx.lockstep_client).await;
-
-    assert!(status.errors.is_empty());
-    assert_eq!(status.region_results.len(), 3);
+    run_volume_delete(&cptestctx.lockstep_client).await;
 
     // Assert that all the regions are gone - Nexus should hard delete the
     // region records in this case.
@@ -3167,12 +3161,12 @@ async fn test_read_only_disk_different_vcr(
 /// Test that deleting a local storage disk retries through transient sled
 /// agent errors.
 ///
-/// This exercises the retry loop in `sdd_delete_local_storage` by:
+/// This exercises the `local_storage_delete` background task by:
 ///
 /// 1. Creating a local storage disk and starting an instance with it.
 /// 2. Stopping the instance and detaching the disk.
 /// 3. Injecting transient 503 errors into the simulated sled agent.
-/// 4. Deleting the disk and verifying the saga retries and succeeds.
+/// 4. Deleting the disk and verifying the task retries and succeeds.
 ///
 /// Time is paused so that exponential backoff sleeps resolve quickly.
 #[nexus_test]
@@ -3243,34 +3237,20 @@ async fn test_delete_local_storage_disk_retries_on_transient_error(
     disk_post(client, &url_instance_detach_disk, local_disk_name.clone()).await;
 
     // Inject transient failures into local storage operations on the sled
-    // agent. The disk delete saga's `sdd_delete_local_storage` action will
+    // agent. The background task responsible for deleting local storage will
     // retry through these. 8 errors comfortably exceeds backon's default
     // max_times of 3 (catching the regression fixed by #9993), while keeping
     // virtual time low enough that background task timers don't cause excessive
     // real I/O during auto-advance.
     cptestctx.first_sled_agent().set_local_storage_error_count(8);
 
-    // Pausing the timer turns on Tokio's auto-advance behavior, making backoff
-    // sleeps resolve instantly.
-    tokio::time::pause();
-
-    // Delete the disk. This triggers the disk delete saga, which must retry
-    // in the face of injected errors.
+    // Delete the disk.
     let disk_url = get_disk_url("local-disk");
     NexusRequest::object_delete(client, &disk_url)
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
         .await
-        .expect("disk delete should succeed after retrying transient errors");
-
-    tokio::time::resume();
-
-    assert_eq!(
-        cptestctx.first_sled_agent().local_storage_error_remaining(),
-        0,
-        "not all injected errors were consumed; \
-         the retry loop may not have been exercised"
-    );
+        .expect("disk delete should succeed");
 
     NexusRequest::new(
         RequestBuilder::new(client, Method::GET, &disk_url)
@@ -3280,6 +3260,25 @@ async fn test_delete_local_storage_disk_retries_on_transient_error(
     .execute()
     .await
     .expect("disk should no longer exist");
+
+    // Ensure the background task eventually deletes the local storage.
+
+    tokio::time::pause();
+
+    wait_for_all_local_storage_deletes_errors_ok(
+        &nexus.datastore(),
+        &cptestctx.lockstep_client,
+    )
+    .await;
+
+    tokio::time::resume();
+
+    assert_eq!(
+        cptestctx.first_sled_agent().local_storage_error_remaining(),
+        0,
+        "not all injected errors were consumed; \
+         the retry loop may not have been exercised"
+    );
 }
 
 async fn disk_get(client: &ClientTestContext, disk_url: &str) -> Disk {

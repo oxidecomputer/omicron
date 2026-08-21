@@ -1156,160 +1156,38 @@ impl DataStore {
         self.volume_create(dest_volume_id.0, randomized_vcr).await
     }
 
-    /// Find read/write regions for deleted volumes that do not have associated
-    /// region snapshots and are not being used by any other non-deleted
-    /// volumes, and return them for garbage collection
-    pub async fn find_deleted_volume_regions(
+    /// Return regions and region snapshots marked for deletion.
+    pub async fn crucible_resources_marked_for_deletion(
         &self,
-    ) -> LookupResult<FreedCrucibleResources> {
-        let conn = self.pool_connection_unauthorized().await?;
-        self.transaction_retry_wrapper("find_deleted_volume_regions")
-            .transaction(&conn, |conn| async move {
-                Self::find_deleted_volume_regions_in_txn(&conn).await
-            })
-            .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
-    }
+        opctx: &OpContext,
+    ) -> LookupResult<SoftDeletedCrucibleResources> {
+        let conn = self.pool_connection_authorized(opctx).await?;
 
-    async fn find_deleted_volume_regions_in_txn(
-        conn: &async_bb8_diesel::Connection<DbConnection>,
-    ) -> Result<FreedCrucibleResources, diesel::result::Error> {
-        use nexus_db_schema::schema::crucible_dataset::dsl as dataset_dsl;
-        use nexus_db_schema::schema::region::dsl as region_dsl;
-        use nexus_db_schema::schema::region_snapshot::dsl;
-        use nexus_db_schema::schema::volume::dsl as volume_dsl;
+        let regions = {
+            use nexus_db_schema::schema::region::dsl;
+            dsl::region
+                .filter(dsl::deleting.eq(true))
+                .select(Region::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?
+        };
 
-        // Find all read-write regions (read-only region cleanup is taken care
-        // of in soft_delete_volume_in_txn!) and their associated datasets
-        let unfiltered_deleted_regions = region_dsl::region
-            .filter(region_dsl::read_only.eq(false))
-            // the volume may be hard deleted, so use a left join here
-            .left_join(
-                volume_dsl::volume.on(region_dsl::volume_id.eq(volume_dsl::id)),
-            )
-            .inner_join(
-                dataset_dsl::crucible_dataset
-                    .on(region_dsl::dataset_id.eq(dataset_dsl::id)),
-            )
-            // where there either are no region snapshots, or the region
-            // snapshot volume has deleted = true
-            .left_join(
-                dsl::region_snapshot.on(dsl::region_id
-                    .eq(region_dsl::id)
-                    .and(dsl::dataset_id.eq(dataset_dsl::id))),
-            )
-            .filter(dsl::deleting.eq(true).or(dsl::deleting.is_null()))
-            // and return them (along with the volume so it can be hard deleted)
-            .select((
-                CrucibleDataset::as_select(),
-                Region::as_select(),
-                Option::<RegionSnapshot>::as_select(),
-                // Diesel can't express a difference between
-                //
-                // a) the volume record existing and the nullable
-                //    volume.time_deleted column being set to null
-                // b) the volume record does not exist (null due to left join)
-                //
-                // so return an Option and check below
-                Option::<Volume>::as_select(),
-            ))
-            .load_async(conn)
-            .await?;
+        let region_snapshots = {
+            use nexus_db_schema::schema::region_snapshot::dsl;
+            dsl::region_snapshot
+                .filter(dsl::deleting.eq(true))
+                .select(RegionSnapshot::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?
+        };
 
-        let mut deleted_regions =
-            Vec::with_capacity(unfiltered_deleted_regions.len());
-
-        let mut volume_set: HashSet<VolumeUuid> =
-            HashSet::with_capacity(unfiltered_deleted_regions.len());
-
-        for (dataset, region, region_snapshot, volume) in
-            unfiltered_deleted_regions
-        {
-            // only operate on soft deleted volumes
-            let soft_deleted = match &volume {
-                Some(volume) => volume.time_deleted.is_some(),
-                None => false,
-            };
-
-            if !soft_deleted {
-                continue;
-            }
-
-            if region_snapshot.is_some() {
-                // We cannot delete this region: the presence of the region
-                // snapshot record means that the Crucible agent's snapshot has
-                // not been deleted yet (as the lifetime of the region snapshot
-                // record is equal to or longer than the lifetime of the
-                // Crucible agent's snapshot).
-                //
-                // This condition can occur when multiple volume delete sagas
-                // run concurrently: one will decrement the crucible resources
-                // (but hasn't made the appropriate DELETE calls to the
-                // appropriate Agents to tombstone the running snapshots and
-                // snapshots yet), and the other will be in the "delete freed
-                // regions" saga node trying to delete the region. Without this
-                // check, This race results in the Crucible Agent returning
-                // "must delete snapshots first" and causing saga unwinds.
-                //
-                // Another volume delete will pick up this region and remove it.
-                continue;
-            }
-
-            if let Some(volume) = &volume {
-                volume_set.insert(volume.id());
-            }
-
-            deleted_regions.push((dataset, region, volume));
-        }
-
-        let regions_for_deletion: HashSet<Uuid> =
-            deleted_regions.iter().map(|(_, region, _)| region.id()).collect();
-
-        let mut volumes = Vec::with_capacity(deleted_regions.len());
-
-        for volume_id in volume_set {
-            // Do not return a volume hard-deletion if there are still lingering
-            // read/write regions, unless all those lingering read/write regions
-            // will be deleted from the result of returning from this function.
-            let allocated_rw_regions: HashSet<Uuid> =
-                Self::get_allocated_regions_query(volume_id)
-                    .get_results_async::<(CrucibleDataset, Region)>(conn)
-                    .await?
-                    .into_iter()
-                    .filter_map(|(_, region)| {
-                        if !region.read_only() {
-                            Some(region.id())
-                        } else {
-                            None
-                        }
-                    })
-                    .collect();
-
-            if allocated_rw_regions.is_subset(&regions_for_deletion) {
-                // If all the allocated rw regions for this volume are in the
-                // set of regions being returned for deletion, then we can
-                // hard-delete this volume. Read-only region accounting should
-                // have already been updated by soft-deleting this volume.
-                //
-                // Note: we'll be in this branch if allocated_rw_regions is
-                // empty. I believe the only time we'll hit this empty case is
-                // when the volume is fully populated with read-only resources
-                // (read-only regions and region snapshots).
-                volumes.push(volume_id);
-            } else {
-                // Not all r/w regions allocated to this volume are being
-                // deleted here, so we can't hard-delete the volume yet.
-            }
-        }
-
-        Ok(FreedCrucibleResources {
-            datasets_and_regions: deleted_regions
-                .into_iter()
-                .map(|(d, r, _)| (d, r))
-                .collect(),
-
-            volumes,
-        })
+        Ok(SoftDeletedCrucibleResources { regions, region_snapshots })
     }
 
     pub async fn read_only_resources_associated_with_volume(
@@ -1428,8 +1306,7 @@ impl DataStore {
         };
 
         // Decrease the number of references for each resource that a volume
-        // references, collecting the regions and region snapshots that were
-        // freed up for deletion.
+        // references.
 
         let num_read_write_subvolumes =
             match count_read_write_sub_volumes(&vcr) {
@@ -1441,15 +1318,8 @@ impl DataStore {
                 }
             };
 
-        let mut regions: Vec<Uuid> = Vec::with_capacity(
-            REGION_REDUNDANCY_THRESHOLD * num_read_write_subvolumes,
-        );
-
-        let mut region_snapshots: Vec<RegionSnapshotV3> =
-            Vec::with_capacity(crucible_targets.read_only_targets.len());
-
-        // First, grab read-write regions - they're not shared, but they are
-        // not candidates for deletion if there are region snapshots
+        // First, mark read-write regions for deletion - they're not shared so
+        // no reference accounting is required.
         let mut read_write_targets = Vec::with_capacity(
             REGION_REDUNDANCY_THRESHOLD * num_read_write_subvolumes,
         );
@@ -1474,18 +1344,24 @@ impl DataStore {
                 )));
             };
 
-            // Filter out regions that have any region-snapshots
-            let region_snapshot_count: i64 = {
-                use nexus_db_schema::schema::region_snapshot::dsl;
-                dsl::region_snapshot
-                    .filter(dsl::region_id.eq(region.id()))
-                    .count()
-                    .get_result_async::<i64>(conn)
-                    .await?
-            };
+            let region_id = region.id();
 
-            if region_snapshot_count == 0 {
-                regions.push(region.id());
+            use nexus_db_schema::schema::region::dsl;
+            let updated_rows = diesel::update(dsl::region)
+                .filter(dsl::id.eq(region_id))
+                .filter(dsl::read_only.eq(false))
+                .filter(dsl::deleting.eq(false))
+                .set(dsl::deleting.eq(true))
+                .execute_async(conn)
+                .await?;
+
+            if updated_rows != 1 {
+                return Err(err.bail(
+                    SoftDeleteError::UnexpectedDatabaseUpdate(
+                        updated_rows,
+                        "setting deleting (region)".into(),
+                    ),
+                ));
             }
         }
 
@@ -1593,8 +1469,6 @@ impl DataStore {
                                 ),
                             ));
                         }
-
-                        regions.push(region_id);
                     }
                 }
 
@@ -1690,23 +1564,22 @@ impl DataStore {
                                 ),
                             ));
                         }
-
-                        region_snapshots.push(RegionSnapshotV3 {
-                            dataset: dataset_id,
-                            region: region_id,
-                            snapshot: snapshot_id,
-                        });
                     }
                 }
             }
         }
 
-        let resources_to_delete = CrucibleResources::V3(CrucibleResourcesV3 {
-            regions,
-            region_snapshots,
-        });
+        // When the volume delete saga existed, all resources to delete were
+        // serialized into a column in the volume record and acted on in a later
+        // saga node. Now that there's a background task, this transaction
+        // simply marks resources for deletion and serializes a blank set of
+        // CrucibleResources. This column can be removed the release after the
+        // release that contains the new volume delete background task.
+        let resources_to_delete =
+            CrucibleResources::V3(CrucibleResourcesV3::default());
 
-        // Soft-delete the volume, and serialize the resources to delete.
+        // Soft-delete the volume, and serialize a blank set of resources to
+        // delete.
         let serialized_resources = serde_json::to_string(&resources_to_delete)
             .map_err(|e| err.bail(e.into()))?;
 
@@ -2454,7 +2327,7 @@ pub struct RegionSnapshotV3 {
     snapshot: Uuid,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Default, Serialize, Deserialize)]
 pub struct CrucibleResourcesV3 {
     #[serde(deserialize_with = "null_to_empty_list")]
     pub regions: Vec<Uuid>,
@@ -2474,148 +2347,130 @@ where
 }
 
 impl DataStore {
-    /// For a CrucibleResources object, return the Regions to delete, as well as
-    /// the CrucibleDataset they belong to.
-    pub async fn regions_to_delete(
+    pub async fn mark_crucible_resources_resources_for_deletion(
         &self,
-        crucible_resources: &CrucibleResources,
-    ) -> LookupResult<Vec<(CrucibleDataset, Region)>> {
-        let conn = self.pool_connection_unauthorized().await?;
+        opctx: &OpContext,
+        crucible_resources: CrucibleResources,
+    ) -> Result<(), Error> {
+        let conn = self.pool_connection_authorized(opctx).await?;
 
-        match crucible_resources {
-            CrucibleResources::V1(crucible_resources) => {
-                Ok(crucible_resources.datasets_and_regions.clone())
-            }
+        // Mark all regions for deletion
 
-            CrucibleResources::V2(crucible_resources) => {
-                Ok(crucible_resources.datasets_and_regions.clone())
-            }
+        let regions_to_mark: Vec<Uuid> = match &crucible_resources {
+            CrucibleResources::V1(crucible_resources) => crucible_resources
+                .datasets_and_regions
+                .iter()
+                .map(|(_, region)| region.id())
+                .collect(),
+
+            CrucibleResources::V2(crucible_resources) => crucible_resources
+                .datasets_and_regions
+                .iter()
+                .map(|(_, region)| region.id())
+                .collect(),
 
             CrucibleResources::V3(crucible_resources) => {
-                use nexus_db_schema::schema::crucible_dataset::dsl as dataset_dsl;
-                use nexus_db_schema::schema::region::dsl as region_dsl;
-
-                region_dsl::region
-                    .filter(
-                        region_dsl::id
-                            .eq_any(crucible_resources.regions.clone()),
-                    )
-                    .inner_join(
-                        dataset_dsl::crucible_dataset
-                            .on(region_dsl::dataset_id.eq(dataset_dsl::id)),
-                    )
-                    .select((CrucibleDataset::as_select(), Region::as_select()))
-                    .get_results_async::<(CrucibleDataset, Region)>(&*conn)
-                    .await
-                    .map_err(|e| {
-                        public_error_from_diesel(e, ErrorHandler::Server)
-                    })
+                crucible_resources.regions.clone()
             }
+        };
+
+        {
+            use nexus_db_schema::schema::region::dsl;
+
+            diesel::update(dsl::region)
+                .filter(dsl::id.eq_any(regions_to_mark))
+                .filter(dsl::deleting.eq(false))
+                .set(dsl::deleting.eq(true))
+                .execute_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
         }
+
+        // Mark all region snapshots for deletion
+        let region_snapshots: Vec<RegionSnapshotV3> = match crucible_resources {
+            CrucibleResources::V1(crucible_resources) => crucible_resources
+                .datasets_and_snapshots
+                .into_iter()
+                .map(|(_, region_snapshot)| RegionSnapshotV3 {
+                    dataset: region_snapshot.dataset_id(),
+                    region: region_snapshot.region_id,
+                    snapshot: region_snapshot.snapshot_id,
+                })
+                .collect(),
+
+            CrucibleResources::V2(crucible_resources) => crucible_resources
+                .snapshots_to_delete
+                .into_iter()
+                .map(|region_snapshot| RegionSnapshotV3 {
+                    dataset: region_snapshot.dataset_id(),
+                    region: region_snapshot.region_id,
+                    snapshot: region_snapshot.snapshot_id,
+                })
+                .collect(),
+
+            CrucibleResources::V3(crucible_resources) => {
+                crucible_resources.region_snapshots
+            }
+        };
+
+        for region_snapshot in region_snapshots {
+            use nexus_db_schema::schema::region_snapshot::dsl;
+
+            diesel::update(dsl::region_snapshot)
+                .filter(
+                    dsl::dataset_id
+                        .eq(to_db_typed_uuid(region_snapshot.dataset)),
+                )
+                .filter(dsl::region_id.eq(region_snapshot.region))
+                .filter(dsl::snapshot_id.eq(region_snapshot.snapshot))
+                .filter(dsl::deleting.eq(false))
+                .set(dsl::deleting.eq(true))
+                .execute_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+        }
+
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct SoftDeletedCrucibleResources {
+    pub regions: Vec<Region>,
+    pub region_snapshots: Vec<RegionSnapshot>,
+}
+
+impl SoftDeletedCrucibleResources {
+    /// Filter out regions that have region snapshots, they can't be deleted
+    /// yet. The Crucible agent will reject any DELETE calls that Nexus sends in
+    /// this cause but Nexus can avoid sending calls it knows will fail.
+    pub async fn remove_regions_with_snapshots(
+        &mut self,
+        datastore: &DataStore,
+    ) -> Result<(), Error> {
+        let region_ids: Vec<Uuid> =
+            self.regions.iter().map(|region| region.id()).collect();
+
+        let region_snapshots_for_regions =
+            datastore.region_snapshots_for_regions(region_ids).await?;
+
+        let regions_with_snapshots: HashSet<_> = region_snapshots_for_regions
+            .into_iter()
+            .map(|region_snapshot| region_snapshot.region_id)
+            .collect();
+
+        self.regions
+            .retain(|region| !regions_with_snapshots.contains(&region.id()));
+
+        Ok(())
     }
 
-    /// For a CrucibleResources object, return the RegionSnapshots to delete, as
-    /// well as the CrucibleDataset they belong to.
-    pub async fn snapshots_to_delete(
-        &self,
-        crucible_resources: &CrucibleResources,
-    ) -> LookupResult<Vec<(CrucibleDataset, RegionSnapshot)>> {
-        let conn = self.pool_connection_unauthorized().await?;
-
-        match crucible_resources {
-            CrucibleResources::V1(crucible_resources) => {
-                Ok(crucible_resources.datasets_and_snapshots.clone())
-            }
-
-            CrucibleResources::V2(crucible_resources) => {
-                use nexus_db_schema::schema::crucible_dataset::dsl;
-
-                let mut result: Vec<_> = Vec::with_capacity(
-                    crucible_resources.snapshots_to_delete.len(),
-                );
-
-                for snapshots_to_delete in
-                    &crucible_resources.snapshots_to_delete
-                {
-                    let maybe_dataset = dsl::crucible_dataset
-                        .filter(dsl::id.eq(snapshots_to_delete.dataset_id))
-                        .select(CrucibleDataset::as_select())
-                        .first_async(&*conn)
-                        .await
-                        .optional()
-                        .map_err(|e| {
-                            public_error_from_diesel(e, ErrorHandler::Server)
-                        })?;
-
-                    match maybe_dataset {
-                        Some(dataset) => {
-                            result.push((dataset, snapshots_to_delete.clone()));
-                        }
-
-                        None => {
-                            return Err(Error::internal_error(&format!(
-                                "could not find dataset {}!",
-                                snapshots_to_delete.dataset_id,
-                            )));
-                        }
-                    }
-                }
-
-                Ok(result)
-            }
-
-            CrucibleResources::V3(crucible_resources) => {
-                use nexus_db_schema::schema::crucible_dataset::dsl as dataset_dsl;
-                use nexus_db_schema::schema::region_snapshot::dsl;
-
-                let mut datasets_and_snapshots = Vec::with_capacity(
-                    crucible_resources.region_snapshots.len(),
-                );
-
-                for region_snapshots in &crucible_resources.region_snapshots {
-                    let maybe_tuple = dsl::region_snapshot
-                        .filter(
-                            dsl::dataset_id
-                                .eq(to_db_typed_uuid(region_snapshots.dataset)),
-                        )
-                        .filter(dsl::region_id.eq(region_snapshots.region))
-                        .filter(dsl::snapshot_id.eq(region_snapshots.snapshot))
-                        .inner_join(
-                            dataset_dsl::crucible_dataset
-                                .on(dsl::dataset_id.eq(dataset_dsl::id)),
-                        )
-                        .select((
-                            CrucibleDataset::as_select(),
-                            RegionSnapshot::as_select(),
-                        ))
-                        .first_async::<(CrucibleDataset, RegionSnapshot)>(
-                            &*conn,
-                        )
-                        .await
-                        .optional()
-                        .map_err(|e| {
-                            public_error_from_diesel(e, ErrorHandler::Server)
-                        })?;
-
-                    match maybe_tuple {
-                        Some(tuple) => {
-                            datasets_and_snapshots.push(tuple);
-                        }
-
-                        None => {
-                            // If something else is deleting the exact same
-                            // CrucibleResources (for example from a duplicate
-                            // resource-delete saga) then these region_snapshot
-                            // entries could be gone (because they are hard
-                            // deleted). Skip missing entries, return only what
-                            // we can find.
-                        }
-                    }
-                }
-
-                Ok(datasets_and_snapshots)
-            }
-        }
+    pub fn is_empty(&self) -> bool {
+        self.regions.is_empty() && self.region_snapshots.is_empty()
     }
 }
 
@@ -4618,38 +4473,11 @@ mod tests {
     // CrucibleResources that was serialized before schema update 6.0.0.
     #[tokio::test]
     async fn test_deserialize_old_crucible_resources() {
-        let logctx =
-            dev::test_setup_log("test_deserialize_old_crucible_resources");
-        let log = logctx.log.new(o!());
-        let db = TestDatabase::new_with_datastore(&log).await;
-        let datastore = db.datastore();
+        // Deserialize an old CrucibleResources json - this was before the
+        // `deleting` column / field was added to ResourceSnapshot.
 
-        // Start with a fake volume, doesn't matter if it's empty
-
-        let volume_id = VolumeUuid::new_v4();
-        let _volume = datastore
-            .volume_create(
-                volume_id,
-                VolumeConstructionRequest::Volume {
-                    id: *volume_id.as_untyped_uuid(),
-                    block_size: 512,
-                    sub_volumes: vec![],
-                    read_only_parent: None,
-                },
-            )
-            .await
-            .unwrap();
-
-        // Add old CrucibleResources json in the `resources_to_clean_up` column
-        // - this was before the `deleting` column / field was added to
-        // ResourceSnapshot.
-
-        {
-            use nexus_db_schema::schema::volume::dsl;
-
-            let conn = datastore.pool_connection_unauthorized().await.unwrap();
-
-            let resources_to_clean_up = r#"{
+        let crucible_resources: CrucibleResources = serde_json::from_str(
+            r#"{
   "V1": {
     "datasets_and_regions": [],
     "datasets_and_snapshots": [
@@ -4679,29 +4507,19 @@ mod tests {
     ]
   }
 }
-"#;
+"#,
+        )
+        .unwrap();
 
-            diesel::update(dsl::volume)
-                .filter(dsl::id.eq(to_db_typed_uuid(volume_id)))
-                .set((
-                    dsl::resources_to_clean_up.eq(resources_to_clean_up),
-                    dsl::time_deleted.eq(Utc::now()),
-                ))
-                .execute_async(&*conn)
-                .await
-                .unwrap();
-        }
+        // Assert the contents of the deserialized CrucibleResources
 
-        // Soft delete the volume
-
-        let cr = datastore.soft_delete_volume(volume_id).await.unwrap();
-
-        // Assert the contents of the returned CrucibleResources
-
-        let datasets_and_regions =
-            datastore.regions_to_delete(&cr).await.unwrap();
-        let datasets_and_snapshots =
-            datastore.snapshots_to_delete(&cr).await.unwrap();
+        let CrucibleResources::V1(CrucibleResourcesV1 {
+            datasets_and_regions,
+            datasets_and_snapshots,
+        }) = crucible_resources
+        else {
+            panic!("wrong variant");
+        };
 
         assert!(datasets_and_regions.is_empty());
         assert_eq!(datasets_and_snapshots.len(), 1);
@@ -4713,9 +4531,6 @@ mod tests {
             "f548332c-6026-4eff-8c1c-ba202cd5c834".parse::<Uuid>().unwrap()
         );
         assert_eq!(region_snapshot.deleting, false);
-
-        db.terminate().await;
-        logctx.cleanup_successful();
     }
 
     #[tokio::test]
@@ -6110,53 +5925,5 @@ mod tests {
                 read_only_parent: Some(Box::new(rop)),
             }
         );
-    }
-
-    /// Assert that there are no "deleted" r/w regions found when the associated
-    /// volume hasn't been created yet.
-    #[tokio::test]
-    async fn test_no_find_deleted_region_for_no_volume() {
-        let logctx =
-            dev::test_setup_log("test_no_find_deleted_region_for_no_volume");
-        let log = logctx.log.new(o!());
-        let db = TestDatabase::new_with_datastore(&log).await;
-        let (opctx, datastore) = (db.opctx(), db.datastore());
-
-        let _test_datasets = TestDatasets::create(
-            &opctx,
-            datastore.clone(),
-            REGION_REDUNDANCY_THRESHOLD,
-        )
-        .await;
-
-        let volume_id = VolumeUuid::new_v4();
-
-        // Assert that allocating regions without creating the volume does not
-        // cause them to be returned as "deleted" regions, as this can cause
-        // sagas that allocate regions to race with the volume delete saga and
-        // cause premature region deletion.
-
-        let _datasets_and_regions = datastore
-            .disk_region_allocate(
-                &opctx,
-                volume_id,
-                &DiskSource::Blank { block_size: 512.try_into().unwrap() },
-                ByteCount::from_gibibytes_u32(1),
-                &&RegionAllocationStrategy::RandomWithDistinctSleds {
-                    seed: None,
-                },
-            )
-            .await
-            .unwrap();
-
-        let deleted_regions = datastore
-            .find_deleted_volume_regions()
-            .await
-            .expect("find_deleted_volume_regions");
-
-        assert!(deleted_regions.is_empty());
-
-        db.terminate().await;
-        logctx.cleanup_successful();
     }
 }

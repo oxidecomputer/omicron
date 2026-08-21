@@ -421,18 +421,20 @@ async fn sdc_alloc_regions(
 async fn sdc_alloc_regions_undo(
     sagactx: NexusActionContext,
 ) -> Result<(), anyhow::Error> {
+    let log = sagactx.user_data().log();
     let osagactx = sagactx.user_data();
-    let log = osagactx.log();
 
-    let region_ids = sagactx
-        .lookup::<Vec<(db::model::CrucibleDataset, db::model::Region)>>(
-            "datasets_and_regions",
-        )?
-        .into_iter()
-        .map(|(_, region)| region.id())
-        .collect::<Vec<Uuid>>();
+    warn!(log, "sdc_alloc_regions_undo: marking crucible regions for deletion");
 
-    osagactx.datastore().regions_hard_delete(log, region_ids).await?;
+    let datasets_and_regions: Vec<(
+        db::model::CrucibleDataset,
+        db::model::Region,
+    )> = sagactx.lookup("datasets_and_regions")?;
+
+    for (_, region) in datasets_and_regions {
+        osagactx.datastore().mark_region_for_deletion(region.id()).await?;
+    }
+
     Ok(())
 }
 
@@ -699,66 +701,8 @@ async fn sdc_regions_ensure(
 }
 
 async fn sdc_regions_ensure_undo(
-    sagactx: NexusActionContext,
+    _sagactx: NexusActionContext,
 ) -> Result<(), anyhow::Error> {
-    let log = sagactx.user_data().log();
-    let params = sagactx.saga_params::<Params>()?;
-    let osagactx = sagactx.user_data();
-    let datastore = osagactx.datastore();
-    let opctx = crate::context::op_context_for_saga_action(
-        &sagactx,
-        &params.serialized_authn,
-    );
-
-    warn!(log, "sdc_regions_ensure_undo: Deleting crucible regions");
-
-    let result = osagactx
-        .nexus()
-        .delete_crucible_regions(
-            log,
-            sagactx
-                .lookup::<Vec<(db::model::CrucibleDataset, db::model::Region)>>(
-                    "datasets_and_regions",
-                )?,
-        )
-        .await;
-
-    match result {
-        Err(e) => {
-            // If we cannot delete the regions, then returning an error will
-            // cause the saga to stop unwinding and be stuck. This will leave
-            // the disk that the saga created: change that disk's state to
-            // Faulted here.
-
-            error!(
-                log,
-                "sdc_regions_ensure_undo: Deleting crucible regions failed with {}",
-                e
-            );
-
-            let disk_id = sagactx.lookup::<Uuid>("disk_id")?;
-            let (.., authz_disk, db_disk) = LookupPath::new(&opctx, datastore)
-                .disk_id(disk_id)
-                .fetch_for(authz::Action::Modify)
-                .await
-                .map_err(saga_action_failed)?;
-
-            datastore
-                .disk_update_runtime(
-                    &opctx,
-                    &authz_disk,
-                    &db_disk.runtime().faulted(),
-                )
-                .await?;
-
-            return Err(e.into());
-        }
-
-        Ok(()) => {
-            info!(log, "sdc_regions_ensure_undo: Deleted crucible regions");
-        }
-    }
-
     Ok(())
 }
 
@@ -1443,6 +1387,11 @@ pub(crate) mod test {
             || Box::pin(async { new_test_params(&opctx, project_id) }),
             || {
                 Box::pin(async {
+                    wait_for_all_volume_deletes(
+                        nexus.datastore(),
+                        &cptestctx.lockstep_client,
+                    )
+                    .await;
                     verify_clean_slate(&cptestctx, &test).await;
                 })
             },
@@ -1471,7 +1420,14 @@ pub(crate) mod test {
         >(
             nexus,
             || Box::pin(async { new_test_params(&opctx, project_id) }),
-            || Box::pin(async { verify_clean_slate(&cptestctx, &test).await; }),
+            || Box::pin(async {
+                wait_for_all_volume_deletes(
+                    nexus.datastore(),
+                    &cptestctx.lockstep_client,
+                )
+                .await;
+                verify_clean_slate(&cptestctx, &test).await;
+            }),
             log
         ).await;
     }

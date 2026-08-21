@@ -285,7 +285,9 @@ async fn test_region_replacement_does_not_create_freed_region(
         activate_background_task(&lockstep_client, "region_replacement").await;
 
     // Assert there are no freed crucible regions that result from that
-    assert!(datastore.find_deleted_volume_regions().await.unwrap().is_empty());
+    let soft_deleted_resources =
+        datastore.crucible_resources_marked_for_deletion(&opctx).await.unwrap();
+    assert!(soft_deleted_resources.regions.is_empty());
 }
 
 mod region_replacement {
@@ -1027,7 +1029,11 @@ async fn test_racing_replacements_for_soft_deleted_disk_volume(
         RegionSnapshotReplacementState::ReplacementDone,
     );
 
-    assert!(datastore.find_deleted_volume_regions().await.unwrap().is_empty());
+    // Regions are not yet eligible for deletion.
+
+    let soft_deleted_resources =
+        datastore.crucible_resources_marked_for_deletion(&opctx).await.unwrap();
+    assert!(soft_deleted_resources.regions.is_empty());
 
     // 3) Delete the disk
     let disk_url = get_disk_url("disk");
@@ -1036,15 +1042,6 @@ async fn test_racing_replacements_for_soft_deleted_disk_volume(
         .execute()
         .await
         .expect("failed to delete disk");
-
-    // The volume should be soft-deleted now. The region snapshot replacement
-    // swapped out the region snapshot from the snapshot volume to the temporary
-    // volume for later deletion, but has not actually deleted that temporary
-    // volume yet, so the count will not have gone to 0.
-
-    let volume = datastore.volume_get(db_disk.volume_id()).await.unwrap();
-    assert!(volume.is_some());
-    assert!(volume.unwrap().time_deleted.is_some());
 
     // 4) region snapshot replacement garbage collect will delete the temporary
     //    volume with the stashed reference to the region snapshot, bringing the
@@ -1089,11 +1086,6 @@ async fn test_racing_replacements_for_soft_deleted_disk_volume(
     )
     .await
     .expect("region snapshot garbage collected");
-
-    // Assert that the disk's volume is still only soft-deleted, because the two
-    // other associated region snapshots still exist.
-    let volume = datastore.volume_get(db_disk.volume_id()).await.unwrap();
-    assert!(volume.is_some());
 
     // Check on the old region id - it should not be deleted
     let maybe_region =
@@ -1287,29 +1279,6 @@ async fn test_racing_replacements_for_soft_deleted_disk_volume(
     // Make sure that all the background tasks can run to completion.
 
     wait_for_all_replacements(datastore, &lockstep_client).await;
-
-    // The disk volume should be deleted by the snapshot delete: wait until this
-    // happens
-
-    wait_for_condition(
-        || {
-            let datastore = datastore.clone();
-            let volume_id = db_disk.volume_id();
-
-            async move {
-                let volume = datastore.volume_get(volume_id).await.unwrap();
-                if volume.is_none() {
-                    Ok(())
-                } else {
-                    Err(CondCheckError::<()>::NotYet { status: None })
-                }
-            }
-        },
-        &std::time::Duration::from_millis(50),
-        &std::time::Duration::from_secs(30),
-    )
-    .await
-    .expect("disk volume deleted");
 
     // There should be no more crucible resources left. Don't just check for
     // `crucible_resources_deleted` here! We have set one of the physical disk

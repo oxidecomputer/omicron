@@ -289,7 +289,7 @@ impl DataStore {
         Ok(dataset_and_regions)
     }
 
-    /// Deletes a set of regions.
+    /// Hard-deletes a set of regions marked for deletion.
     ///
     /// Also updates the storage usage on their corresponding datasets.
     pub async fn regions_hard_delete(
@@ -312,6 +312,7 @@ impl DataStore {
 
                     let dataset_ids: Vec<Uuid> = diesel::delete(dsl::region)
                         .filter(dsl::id.eq_any(region_ids))
+                        .filter(dsl::deleting.eq(true))
                         .returning(dsl::dataset_id)
                         .get_results_async(&conn)
                         .await?;
@@ -544,6 +545,24 @@ impl DataStore {
             .select(Region::as_select())
             .load_async(&*conn)
             .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    pub async fn mark_region_for_deletion(
+        &self,
+        region_id: Uuid,
+    ) -> DeleteResult {
+        use nexus_db_schema::schema::region::dsl;
+
+        let conn = self.pool_connection_unauthorized().await?;
+
+        diesel::update(dsl::region)
+            .filter(dsl::id.eq(region_id))
+            .filter(dsl::deleting.eq(false))
+            .set(dsl::deleting.eq(true))
+            .execute_async(&*conn)
+            .await
+            .map(|_| ())
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 }

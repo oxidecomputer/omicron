@@ -11,7 +11,6 @@ use nexus_db_queries::db::DataStore;
 use nexus_lockstep_client::types::BackgroundTask;
 use nexus_lockstep_client::types::CurrentStatus;
 use nexus_lockstep_client::types::LastResult;
-use nexus_types::identity::Asset;
 use nexus_types::internal_api::background::*;
 use omicron_test_utils::dev::poll::{CondCheckError, wait_for_condition};
 use slog::info;
@@ -591,6 +590,7 @@ pub async fn run_blueprint_rendezvous(lockstep_client: &ClientTestContext) {
 /// errors.
 pub async fn run_volume_delete(internal_client: &ClientTestContext) {
     let status = run_volume_delete_return_status(internal_client).await;
+    eprintln!("jwm run_volume_delete status: {status:?}");
     assert!(status.errors.is_empty());
 }
 
@@ -628,7 +628,8 @@ pub async fn wait_for_all_volume_deletes(
 
             async move {
                 // Trigger the volume delete background task. Bail out of this
-                // loop only when there's no more soft-deleted volumes.
+                // loop only when there's no more resources eligible for
+                // deletion.
                 //
                 // Be careful not to check if the background tasks performed any
                 // actions: the fixed point that we're waiting for is for all
@@ -636,34 +637,21 @@ pub async fn wait_for_all_volume_deletes(
 
                 run_volume_delete(lockstep_client).await;
 
-                let mut soft_deleted_volumes_left =
-                    datastore.get_soft_deleted_volumes(&opctx).await.unwrap();
+                let mut soft_deleted_resources = datastore
+                    .crucible_resources_marked_for_deletion(&opctx)
+                    .await
+                    .unwrap();
 
-                // Filter out volumes that have allocated regions left, these
-                // will not be deleted.
-                let soft_deleted_volumes_left = {
-                    let mut result =
-                        Vec::with_capacity(soft_deleted_volumes_left.len());
+                soft_deleted_resources
+                    .remove_regions_with_snapshots(&datastore)
+                    .await
+                    .unwrap();
 
-                    while let Some(volume) = soft_deleted_volumes_left.pop() {
-                        let allocated_regions = datastore
-                            .get_allocated_regions(volume.id())
-                            .await
-                            .unwrap();
-
-                        if allocated_regions.is_empty() {
-                            result.push(volume);
-                        }
-                    }
-
-                    result.len()
-                };
-
-                if soft_deleted_volumes_left > 0 {
+                if !soft_deleted_resources.is_empty() {
                     info!(
                         &lockstep_client.client_log,
-                        "wait_for_all_volume_deletes: \
-                        {soft_deleted_volumes_left} soft-deleted volumes left",
+                        "wait_for_all_volume_deletes: still resources to \
+                        delete",
                     );
 
                     return Err(CondCheckError::<()>::NotYet { status: None });
@@ -679,8 +667,17 @@ pub async fn wait_for_all_volume_deletes(
     .expect("all deletes finished");
 }
 
-/// Run the local_storage_delete background task and return the status.
+/// Run the local_storage_delete background task, and assert that there are no
+/// reported errors.
 pub async fn run_local_storage_delete(internal_client: &ClientTestContext) {
+    let status = run_local_storage_delete_return_status(internal_client).await;
+    assert!(status.errors.is_empty());
+}
+
+/// Run the local_storage_delete background task and return the status.
+pub async fn run_local_storage_delete_return_status(
+    internal_client: &ClientTestContext,
+) -> LocalStorageDeleteStatus {
     let last_background_task =
         activate_background_task(&internal_client, "local_storage_delete")
             .await;
@@ -694,17 +691,32 @@ pub async fn run_local_storage_delete(internal_client: &ClientTestContext) {
         );
     };
 
-    let status = serde_json::from_value::<LocalStorageDeleteStatus>(
+    serde_json::from_value::<LocalStorageDeleteStatus>(
         last_result_completed.details,
     )
-    .unwrap();
-
-    assert!(status.errors.is_empty());
+    .unwrap()
 }
 
 pub async fn wait_for_all_local_storage_deletes(
     datastore: &Arc<DataStore>,
     lockstep_client: &ClientTestContext,
+) {
+    wait_for_all_local_storage_deletes_impl(datastore, lockstep_client, false)
+        .await
+}
+
+pub async fn wait_for_all_local_storage_deletes_errors_ok(
+    datastore: &Arc<DataStore>,
+    lockstep_client: &ClientTestContext,
+) {
+    wait_for_all_local_storage_deletes_impl(datastore, lockstep_client, true)
+        .await
+}
+
+async fn wait_for_all_local_storage_deletes_impl(
+    datastore: &Arc<DataStore>,
+    lockstep_client: &ClientTestContext,
+    errors_ok: bool,
 ) {
     wait_for_condition(
         || {
@@ -722,7 +734,13 @@ pub async fn wait_for_all_local_storage_deletes(
                 // actions: the fixed point that we're waiting for is for all
                 // resources to be cleaned up.
 
-                run_local_storage_delete(lockstep_client).await;
+                if errors_ok {
+                    let _ =
+                        run_local_storage_delete_return_status(lockstep_client)
+                            .await;
+                } else {
+                    run_local_storage_delete(lockstep_client).await;
+                }
 
                 let disks_requiring_work = datastore
                     .deleted_disks_with_undeleted_local_storage(&opctx)

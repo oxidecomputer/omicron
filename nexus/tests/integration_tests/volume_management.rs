@@ -2158,6 +2158,8 @@ async fn test_volume_checkout_randomize_ids_only_read_only(
 async fn test_keep_your_targets_straight(cptestctx: &ControlPlaneTestContext) {
     let nexus = &cptestctx.server.server_context().nexus;
     let datastore = nexus.datastore();
+    let opctx =
+        OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
 
     // Four zpools, one dataset each
     let disk_test = DiskTestBuilder::new(&cptestctx)
@@ -2309,7 +2311,7 @@ async fn test_keep_your_targets_straight(cptestctx: &ControlPlaneTestContext) {
     // Soft delete the volume, and validate that the volume's region_snapshots
     // had their volume resource usage records deleted
 
-    let cr = datastore.soft_delete_volume(volume_id).await.unwrap();
+    datastore.soft_delete_volume(volume_id).await.unwrap();
 
     for i in 0..3 {
         let (dataset_id, region_id, snapshot_id, _) = region_snapshots[i];
@@ -2328,17 +2330,16 @@ async fn test_keep_your_targets_straight(cptestctx: &ControlPlaneTestContext) {
         assert!(usage.is_empty());
     }
 
-    let datasets_and_regions = datastore.regions_to_delete(&cr).await.unwrap();
-    let datasets_and_snapshots =
-        datastore.snapshots_to_delete(&cr).await.unwrap();
+    let marked_resources =
+        datastore.crucible_resources_marked_for_deletion(&opctx).await.unwrap();
 
-    assert!(datasets_and_regions.is_empty());
-    assert_eq!(datasets_and_snapshots.len(), 3);
+    assert!(marked_resources.regions.is_empty());
+    assert_eq!(marked_resources.region_snapshots.len(), 3);
 
     // Now, let's say we're at a spot where the running snapshots have been
-    // deleted, but before volume_hard_delete or region_snapshot_remove are
-    // called. Pretend another snapshot-create and snapshot-delete snuck in
-    // here, and the second snapshot hits a agent that reuses the first target.
+    // deleted, but before the region snapshot records are deleted. Pretend
+    // another snapshot-create and snapshot-delete snuck in here, and the second
+    // snapshot hits a agent that reuses the first target.
 
     for i in 3..6 {
         let (dataset_id, region_id, snapshot_id, snapshot_addr) =
@@ -2443,10 +2444,10 @@ async fn test_keep_your_targets_straight(cptestctx: &ControlPlaneTestContext) {
         assert_eq!(usage[0].volume_id(), volume_id);
     }
 
-    // Soft delete the volume, and validate that only three region_snapshot
+    // Soft delete the volume, and validate that only all 6 region_snapshot
     // records are returned.
 
-    let cr = datastore.soft_delete_volume(volume_id).await.unwrap();
+    datastore.soft_delete_volume(volume_id).await.unwrap();
 
     // Make sure every region_snapshot has no usage records now
 
@@ -2467,12 +2468,11 @@ async fn test_keep_your_targets_straight(cptestctx: &ControlPlaneTestContext) {
         assert!(usage.is_empty());
     }
 
-    let datasets_and_regions = datastore.regions_to_delete(&cr).await.unwrap();
-    let datasets_and_snapshots =
-        datastore.snapshots_to_delete(&cr).await.unwrap();
+    let marked_resources =
+        datastore.crucible_resources_marked_for_deletion(&opctx).await.unwrap();
 
-    assert!(datasets_and_regions.is_empty());
-    assert_eq!(datasets_and_snapshots.len(), 3);
+    assert!(marked_resources.regions.is_empty());
+    assert_eq!(marked_resources.region_snapshots.len(), 6);
 }
 
 #[nexus_test]
@@ -3338,82 +3338,9 @@ async fn test_upstairs_notify_downstairs_client_stops(
         .unwrap();
 }
 
-/// Assert `soft_delete_volume` returns the regions associated with the volume.
-#[nexus_test]
-async fn test_cte_returns_regions(cptestctx: &ControlPlaneTestContext) {
-    let client = &cptestctx.external_client;
-    let _disk_test = DiskTest::new(&cptestctx).await;
-    create_project_and_pool(client).await;
-    let disks_url = get_disks_url();
-
-    let disk = disk::DiskCreate {
-        identity: IdentityMetadataCreateParams {
-            name: "disk".parse().unwrap(),
-            description: String::from("disk"),
-        },
-        disk_backend: disk::DiskBackend::Distributed {
-            disk_source: disk::DiskSource::Blank {
-                block_size: disk::BlockSize::try_from(512).unwrap(),
-            },
-        },
-        size: ByteCount::from_gibibytes_u32(2),
-    };
-
-    let disk: external::Disk = NexusRequest::new(
-        RequestBuilder::new(client, Method::POST, &disks_url)
-            .body(Some(&disk))
-            .expect_status(Some(StatusCode::CREATED)),
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .unwrap()
-    .parsed_body()
-    .unwrap();
-
-    let apictx = &cptestctx.server.server_context();
-    let nexus = &apictx.nexus;
-    let datastore = nexus.datastore();
-    let opctx =
-        OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
-
-    let disk_id = disk.identity.id;
-
-    let Disk::Crucible(db_disk) = datastore
-        .disk_get(&opctx, disk_id)
-        .await
-        .unwrap_or_else(|_| panic!("test disk {:?} should exist", disk_id))
-    else {
-        unreachable!()
-    };
-
-    let allocated_regions =
-        datastore.get_allocated_regions(db_disk.volume_id()).await.unwrap();
-
-    assert_eq!(allocated_regions.len(), 3);
-
-    let resources_to_clean_up =
-        datastore.soft_delete_volume(db_disk.volume_id()).await.unwrap();
-
-    let datasets_and_regions_to_clean =
-        datastore.regions_to_delete(&resources_to_clean_up).await.unwrap();
-
-    assert_eq!(datasets_and_regions_to_clean.len(), 3);
-
-    assert_eq!(
-        datasets_and_regions_to_clean
-            .into_iter()
-            .map(|(_, region)| region.id())
-            .collect::<Vec<Uuid>>(),
-        allocated_regions
-            .into_iter()
-            .map(|(_, region)| region.id())
-            .collect::<Vec<Uuid>>(),
-    );
-}
-
 struct TestReadOnlyRegionReferenceUsage {
     datastore: Arc<DataStore>,
+    opctx: OpContext,
 
     region: db::model::Region,
     region_address: SocketAddrV6,
@@ -3484,6 +3411,7 @@ impl TestReadOnlyRegionReferenceUsage {
 
         TestReadOnlyRegionReferenceUsage {
             datastore: datastore.clone(),
+            opctx,
 
             region,
             region_address,
@@ -3592,42 +3520,32 @@ impl TestReadOnlyRegionReferenceUsage {
     }
 
     pub async fn validate_region_returned_for_cleanup(&self) {
+        let soft_deleted_resources = self
+            .datastore
+            .crucible_resources_marked_for_deletion(&self.opctx)
+            .await
+            .unwrap();
+
         assert!(
-            self.datastore
-                .regions_to_delete(
-                    &self.last_resources_to_delete.as_ref().unwrap()
-                )
-                .await
-                .unwrap()
+            soft_deleted_resources
+                .regions
                 .into_iter()
-                .any(|(_, r)| r.id() == self.region.id())
+                .any(|r| r.id() == self.region.id())
         );
     }
 
     pub async fn validate_region_not_returned_for_cleanup(&self) {
-        assert!(
-            !self
-                .datastore
-                .regions_to_delete(
-                    &self.last_resources_to_delete.as_ref().unwrap()
-                )
-                .await
-                .unwrap()
-                .into_iter()
-                .any(|(_, r)| r.id() == self.region.id())
-        );
-    }
-
-    // read-only regions should never be returned by find_deleted_volume_regions
-    pub async fn region_not_returned_by_find_deleted_volume_regions(&self) {
-        let freed_crucible_resources =
-            self.datastore.find_deleted_volume_regions().await.unwrap();
+        let soft_deleted_resources = self
+            .datastore
+            .crucible_resources_marked_for_deletion(&self.opctx)
+            .await
+            .unwrap();
 
         assert!(
-            !freed_crucible_resources
-                .datasets_and_regions
+            !soft_deleted_resources
+                .regions
                 .into_iter()
-                .any(|(_, r)| r.id() == self.region.id())
+                .any(|r| r.id() == self.region.id())
         );
     }
 
@@ -3775,10 +3693,6 @@ async fn test_read_only_region_reference_usage_sanity(
     // it should be returned for cleanup.
 
     harness.validate_region_returned_for_cleanup().await;
-
-    // It should not be returned by find_deleted_volume_regions.
-
-    harness.region_not_returned_by_find_deleted_volume_regions().await;
 }
 
 /// Assert that creating a volume with a read-only region in the ROP creates an
@@ -3797,10 +3711,6 @@ async fn test_read_only_region_reference_sanity_rop(
 
     harness.validate_only_first_volume_referenced().await;
 
-    // It should be _not_ returned by find_deleted_volume_regions.
-
-    harness.region_not_returned_by_find_deleted_volume_regions().await;
-
     // Now, soft-delete the volume, and make sure that read-only volume
     // reference is gone too.
 
@@ -3812,10 +3722,6 @@ async fn test_read_only_region_reference_sanity_rop(
     // it should be returned for cleanup.
 
     harness.validate_region_returned_for_cleanup().await;
-
-    // It should not be returned by find_deleted_volume_regions.
-
-    harness.region_not_returned_by_find_deleted_volume_regions().await;
 }
 
 /// Assert that creating multiple volumes with a read-only region creates the
@@ -3849,8 +3755,6 @@ async fn test_read_only_region_reference_sanity_multi(
 
     harness.validate_region_not_returned_for_cleanup().await;
 
-    harness.region_not_returned_by_find_deleted_volume_regions().await;
-
     // Deleting the second volume should free up the read-only region for
     // deletion
 
@@ -3859,10 +3763,6 @@ async fn test_read_only_region_reference_sanity_multi(
     harness.validate_no_usage_records().await;
 
     harness.validate_region_returned_for_cleanup().await;
-
-    // It should not be returned by find_deleted_volume_regions.
-
-    harness.region_not_returned_by_find_deleted_volume_regions().await;
 }
 
 /// Assert that creating multiple volumes with a read-only region in the ROP
@@ -3896,8 +3796,6 @@ async fn test_read_only_region_reference_sanity_rop_multi(
 
     harness.validate_region_not_returned_for_cleanup().await;
 
-    harness.region_not_returned_by_find_deleted_volume_regions().await;
-
     // Deleting the second volume should free up the read-only region for
     // deletion
 
@@ -3906,10 +3804,6 @@ async fn test_read_only_region_reference_sanity_rop_multi(
     harness.validate_no_usage_records().await;
 
     harness.validate_region_returned_for_cleanup().await;
-
-    // It should not be returned by find_deleted_volume_regions.
-
-    harness.region_not_returned_by_find_deleted_volume_regions().await;
 }
 
 /// Assert that a read-only region is properly reference counted and not
@@ -5415,22 +5309,36 @@ async fn test_no_zombie_region_snapshots(cptestctx: &ControlPlaneTestContext) {
 
     // Soft-delete the snapshot volume
 
-    let cr =
-        datastore.soft_delete_volume(db_snapshot.volume_id()).await.unwrap();
+    datastore.soft_delete_volume(db_snapshot.volume_id()).await.unwrap();
 
-    // Assert that no resources are returned for clean-up
+    // Assert that no resources are eligible for clean-up.
 
-    assert!(datastore.regions_to_delete(&cr).await.unwrap().is_empty());
-    assert!(datastore.snapshots_to_delete(&cr).await.unwrap().is_empty());
+    let mut soft_deleted_resources =
+        datastore.crucible_resources_marked_for_deletion(&opctx).await.unwrap();
+
+    soft_deleted_resources
+        .remove_regions_with_snapshots(&datastore)
+        .await
+        .unwrap();
+
+    assert!(soft_deleted_resources.is_empty());
 
     // Soft-delete the volume created as part of step 3
 
-    let cr = datastore.soft_delete_volume(step_3_volume_id).await.unwrap();
+    datastore.soft_delete_volume(step_3_volume_id).await.unwrap();
 
-    // Assert that region snapshots _are_ returned for clean-up
+    // Assert that region snapshots _are_ eligible for clean-up
 
-    assert!(datastore.regions_to_delete(&cr).await.unwrap().is_empty());
-    assert!(!datastore.snapshots_to_delete(&cr).await.unwrap().is_empty());
+    let mut soft_deleted_resources =
+        datastore.crucible_resources_marked_for_deletion(&opctx).await.unwrap();
+
+    soft_deleted_resources
+        .remove_regions_with_snapshots(&datastore)
+        .await
+        .unwrap();
+
+    assert!(soft_deleted_resources.regions.is_empty());
+    assert!(!soft_deleted_resources.region_snapshots.is_empty());
 
     // Pretend that there's a racing call to volume_create that has a volume
     // that uses the snapshot volume as a read-only parent. This call should
@@ -5599,21 +5507,26 @@ async fn test_no_zombie_read_only_regions(cptestctx: &ControlPlaneTestContext) {
 
     // Soft-delete the step 1 volume
 
-    let cr = datastore.soft_delete_volume(step_1_volume_id).await.unwrap();
+    datastore.soft_delete_volume(step_1_volume_id).await.unwrap();
 
     // Assert that no resources are returned for clean-up
 
-    assert!(datastore.regions_to_delete(&cr).await.unwrap().is_empty());
-    assert!(datastore.snapshots_to_delete(&cr).await.unwrap().is_empty());
+    let soft_deleted_resources =
+        datastore.crucible_resources_marked_for_deletion(&opctx).await.unwrap();
+
+    assert!(soft_deleted_resources.is_empty());
 
     // Soft-delete the step 2 volume
 
-    let cr = datastore.soft_delete_volume(step_2_volume_id).await.unwrap();
+    datastore.soft_delete_volume(step_2_volume_id).await.unwrap();
 
     // Assert that the read-only regions _are_ returned for clean-up
 
-    assert!(!datastore.regions_to_delete(&cr).await.unwrap().is_empty());
-    assert!(datastore.snapshots_to_delete(&cr).await.unwrap().is_empty());
+    let soft_deleted_resources =
+        datastore.crucible_resources_marked_for_deletion(&opctx).await.unwrap();
+
+    assert!(!soft_deleted_resources.regions.is_empty());
+    assert!(soft_deleted_resources.region_snapshots.is_empty());
 
     // Pretend that there's a racing call to volume_create that has a volume
     // that uses the step 1 volume as a read-only parent. This call should
@@ -5784,21 +5697,26 @@ async fn test_no_zombie_read_write_regions(
 
     // Soft-delete the step 1 volume
 
-    let cr = datastore.soft_delete_volume(step_1_volume_id).await.unwrap();
+    datastore.soft_delete_volume(step_1_volume_id).await.unwrap();
 
     // Assert that no resources are returned for clean-up
 
-    assert!(datastore.regions_to_delete(&cr).await.unwrap().is_empty());
-    assert!(datastore.snapshots_to_delete(&cr).await.unwrap().is_empty());
+    let soft_deleted_resources =
+        datastore.crucible_resources_marked_for_deletion(&opctx).await.unwrap();
+
+    assert!(soft_deleted_resources.is_empty());
 
     // Soft-delete the step 2 volume
 
-    let cr = datastore.soft_delete_volume(step_2_volume_id).await.unwrap();
+    datastore.soft_delete_volume(step_2_volume_id).await.unwrap();
 
     // Assert that the read-only regions _are_ returned for clean-up
 
-    assert!(!datastore.regions_to_delete(&cr).await.unwrap().is_empty());
-    assert!(datastore.snapshots_to_delete(&cr).await.unwrap().is_empty());
+    let soft_deleted_resources =
+        datastore.crucible_resources_marked_for_deletion(&opctx).await.unwrap();
+
+    assert!(!soft_deleted_resources.regions.is_empty());
+    assert!(soft_deleted_resources.region_snapshots.is_empty());
 
     // Pretend that there's a racing call to volume_create that has a volume
     // that uses the step 1 volume as a read-only parent. This call should

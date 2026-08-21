@@ -725,8 +725,7 @@ mod test {
         // Before the task starts, soft-delete the volume, and delete the
         // region snapshot (like the volume delete saga would do).
 
-        let crucible_resources =
-            datastore.soft_delete_volume(volume_id).await.unwrap();
+        datastore.soft_delete_volume(volume_id).await.unwrap();
 
         // Assert no more usage
 
@@ -743,14 +742,17 @@ mod test {
 
         assert!(records.is_empty());
 
-        // The region snapshot should have been returned for deletion
+        // The region snapshot should have been marked for deletion
 
-        let datasets_and_snapshots =
-            datastore.snapshots_to_delete(&crucible_resources).await.unwrap();
+        let soft_deleted_resources = datastore
+            .crucible_resources_marked_for_deletion(&opctx)
+            .await
+            .unwrap();
 
-        assert!(!datasets_and_snapshots.is_empty());
+        assert!(!soft_deleted_resources.is_empty());
 
-        let region_snapshot_to_delete = &datasets_and_snapshots[0].1;
+        let region_snapshot_to_delete =
+            &soft_deleted_resources.region_snapshots[0];
 
         assert_eq!(
             region_snapshot_to_delete.dataset_id,

@@ -826,6 +826,9 @@ CREATE INDEX IF NOT EXISTS lookup_regions_missing_ports
 CREATE INDEX IF NOT EXISTS lookup_regions_by_read_only
     on omicron.public.region (read_only);
 
+CREATE INDEX IF NOT EXISTS lookup_regions_by_deleting
+    on omicron.public.region (deleting);
+
 /*
  * A snapshot of a region, within a dataset.
  */
@@ -9096,7 +9099,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '282.0.0', NULL)
+    (TRUE, NOW(), NOW(), '283.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

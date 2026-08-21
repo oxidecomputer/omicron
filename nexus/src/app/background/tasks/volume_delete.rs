@@ -35,13 +35,12 @@ use futures::future::BoxFuture;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::datastore::CrucibleResources;
-use nexus_db_queries::db::datastore::FreedCrucibleResources;
+use nexus_db_queries::db::model;
 use nexus_db_queries::db::model::CrucibleDataset;
 use nexus_types::identity::Asset;
 use nexus_types::internal_api::background::VolumeDeleteStatus;
 use omicron_common::api::external::Error;
 use omicron_uuid_kinds::DatasetUuid;
-use omicron_uuid_kinds::VolumeUuid;
 use serde_json::json;
 use slog::Logger;
 use std::sync::Arc;
@@ -279,41 +278,46 @@ impl VolumeDeleter {
     async fn delete_crucible_regions(
         &self,
         log: &Logger,
-        crucible_resources_to_delete: &CrucibleResources,
+        regions: &[model::Region],
         status: &mut VolumeDeleteStatus,
-    ) -> DeleteResult {
-        let datasets_and_regions = match self
-            .datastore
-            .regions_to_delete(&crucible_resources_to_delete)
-            .await
-        {
-            Ok(datasets_and_regions) => datasets_and_regions,
-
-            Err(e) => {
-                let s = format!("error calling regions_to_delete: {e}");
-                error!(log, "{s}");
-                status.errors.push(s);
-
-                // Try again next time!
-                return DeleteResult::WaitForNextActivation;
-            }
-        };
-
-        let request_count = datasets_and_regions.len();
-        if request_count == 0 {
-            return DeleteResult::Deleted;
+    ) {
+        if regions.is_empty() {
+            return;
         }
 
-        // Send DELETE calls to the corresponding Crucible agents
-        let mut all_deleted = true;
+        let mut region_ids_to_hard_delete: Vec<Uuid> =
+            Vec::with_capacity(regions.len());
 
-        for (dataset, region) in &datasets_and_regions {
+        // Send DELETE calls to the corresponding Crucible agents
+
+        for region in regions {
+            let dataset = match self
+                .datastore
+                .crucible_dataset_get(region.dataset_id())
+                .await
+            {
+                Ok(dataset) => dataset,
+
+                Err(e) => {
+                    let s = format!(
+                        "failed calling crucible_dataset_get for {}: {e}",
+                        region.dataset_id(),
+                    );
+                    error!(log, "{s}");
+                    status.errors.push(s);
+
+                    continue;
+                }
+            };
+
             match self.delete_crucible_region(log, &dataset, region.id()).await
             {
                 Ok(DeleteResult::Deleted) => {
                     status
                         .region_results
                         .push(format!("{}: deleted", region.id()));
+
+                    region_ids_to_hard_delete.push(region.id());
                 }
 
                 Ok(DeleteResult::WaitForNextActivation) => {
@@ -321,48 +325,26 @@ impl VolumeDeleter {
                         "{}: requested deletion, waiting",
                         region.id()
                     ));
-
-                    all_deleted = false;
                 }
 
                 Err(e) => {
                     status.errors.push(format!("{e}"));
-
-                    all_deleted = false;
                 }
             }
         }
 
-        // If any of the operations require waiting for the next activation,
-        // then return that, otherwise return that all were deleted.
+        // When all crucible resources are cleaned up, hard delete the region
+        // records. This also re-computes the crucible_dataset size_used column
+        // for those region's datasets.
 
-        if all_deleted {
-            // When all crucible resources are cleaned up, hard delete the
-            // region records. This also re-computes the crucible_dataset
-            // size_used column for those region's datasets.
-
-            let region_ids_to_delete =
-                datasets_and_regions.iter().map(|(_, r)| r.id()).collect();
-
-            match self
-                .datastore
-                .regions_hard_delete(log, region_ids_to_delete)
-                .await
-            {
-                Ok(()) => DeleteResult::Deleted,
-
-                Err(e) => {
-                    let s = format!("error calling regions_hard_delete: {e}");
-                    error!(log, "{s}");
-                    status.errors.push(s);
-
-                    // More work is required next task activation
-                    DeleteResult::WaitForNextActivation
-                }
-            }
-        } else {
-            // More work is required next task activation
-            DeleteResult::WaitForNextActivation
+        if let Err(e) = self
+            .datastore
+            .regions_hard_delete(log, region_ids_to_hard_delete)
+            .await
+        {
+            let s = format!("error calling regions_hard_delete: {e}");
+            error!(log, "{s}");
+            status.errors.push(s);
         }
     }
 
@@ -535,84 +517,6 @@ impl VolumeDeleter {
         }
     }
 
-    async fn delete_crucible_running_snapshots(
-        &self,
-        log: &Logger,
-        crucible_resources_to_delete: &CrucibleResources,
-        status: &mut VolumeDeleteStatus,
-    ) -> DeleteResult {
-        let datasets_and_snapshots = match self
-            .datastore
-            .snapshots_to_delete(&crucible_resources_to_delete)
-            .await
-        {
-            Ok(datasets_and_snapshots) => datasets_and_snapshots,
-
-            Err(e) => {
-                let s = format!("error calling snapshots_to_delete: {e}");
-                error!(log, "{s}");
-                status.errors.push(s);
-
-                // Try again next time!
-                return DeleteResult::WaitForNextActivation;
-            }
-        };
-
-        let request_count = datasets_and_snapshots.len();
-        if request_count == 0 {
-            return DeleteResult::Deleted;
-        }
-
-        // Send DELETE calls to the corresponding Crucible agents
-        let mut all_deleted = true;
-
-        for (dataset, region_snapshot) in datasets_and_snapshots {
-            let region_id = region_snapshot.region_id;
-            let snapshot_id = region_snapshot.snapshot_id;
-
-            match self
-                .delete_crucible_running_snapshot(
-                    log,
-                    &dataset,
-                    region_id,
-                    snapshot_id,
-                )
-                .await
-            {
-                Ok(DeleteResult::Deleted) => {
-                    status.running_snapshot_results.push(format!(
-                        "{} / {}: deleted",
-                        region_id, snapshot_id
-                    ));
-                }
-
-                Ok(DeleteResult::WaitForNextActivation) => {
-                    status.running_snapshot_results.push(format!(
-                        "{} / {}: requested deletion, waiting",
-                        region_id, snapshot_id,
-                    ));
-
-                    all_deleted = false;
-                }
-
-                Err(e) => {
-                    status.errors.push(format!("{e}"));
-
-                    all_deleted = false;
-                }
-            }
-        }
-
-        // If any of the operations require waiting for the next activation,
-        // then return that, otherwise return that all were deleted.
-
-        if all_deleted {
-            DeleteResult::Deleted
-        } else {
-            DeleteResult::WaitForNextActivation
-        }
-    }
-
     async fn request_crucible_snapshot_delete(
         &self,
         log: &Logger,
@@ -727,37 +631,78 @@ impl VolumeDeleter {
     async fn delete_crucible_snapshots(
         &self,
         log: &Logger,
-        crucible_resources_to_delete: &CrucibleResources,
+        region_snapshots: &[model::RegionSnapshot],
         status: &mut VolumeDeleteStatus,
-    ) -> DeleteResult {
-        let datasets_and_snapshots = match self
-            .datastore
-            .snapshots_to_delete(&crucible_resources_to_delete)
-            .await
-        {
-            Ok(datasets_and_snapshots) => datasets_and_snapshots,
-
-            Err(e) => {
-                let s = format!("error calling snapshots_to_delete: {e}");
-                error!(log, "{s}");
-                status.errors.push(s);
-
-                // Try again next time!
-                return DeleteResult::WaitForNextActivation;
-            }
-        };
-
-        let request_count = datasets_and_snapshots.len();
-        if request_count == 0 {
-            return DeleteResult::Deleted;
+    ) {
+        if region_snapshots.is_empty() {
+            return;
         }
 
         // Send DELETE calls to the corresponding Crucible agents
-        let mut all_deleted = true;
 
-        for (dataset, region_snapshot) in &datasets_and_snapshots {
+        let mut region_snapshots_to_delete: Vec<&model::RegionSnapshot> =
+            Vec::with_capacity(region_snapshots.len());
+
+        for region_snapshot in region_snapshots {
+            let dataset = match self
+                .datastore
+                .crucible_dataset_get(region_snapshot.dataset_id())
+                .await
+            {
+                Ok(dataset) => dataset,
+
+                Err(e) => {
+                    let s = format!(
+                        "failed calling crucible_dataset_get for {}: {e}",
+                        region_snapshot.dataset_id(),
+                    );
+                    error!(log, "{s}");
+                    status.errors.push(s);
+
+                    continue;
+                }
+            };
+
             let region_id = region_snapshot.region_id;
             let snapshot_id = region_snapshot.snapshot_id;
+
+            // First, delete the running snapshot
+
+            match self
+                .delete_crucible_running_snapshot(
+                    log,
+                    &dataset,
+                    region_id,
+                    snapshot_id,
+                )
+                .await
+            {
+                Ok(DeleteResult::Deleted) => {
+                    status.running_snapshot_results.push(format!(
+                        "{} / {}: deleted",
+                        region_id, snapshot_id
+                    ));
+
+                    // continue on to deleting the snapshot
+                }
+
+                Ok(DeleteResult::WaitForNextActivation) => {
+                    status.running_snapshot_results.push(format!(
+                        "{} / {}: requested deletion, waiting",
+                        region_id, snapshot_id,
+                    ));
+
+                    continue;
+                }
+
+                Err(e) => {
+                    status.errors.push(format!("{e}"));
+
+                    continue;
+                }
+            }
+
+            // Then delete the snapshot
 
             match self
                 .delete_crucible_snapshot(log, &dataset, region_id, snapshot_id)
@@ -768,6 +713,8 @@ impl VolumeDeleter {
                         "{} / {}: deleted",
                         region_id, snapshot_id
                     ));
+
+                    region_snapshots_to_delete.push(region_snapshot);
                 }
 
                 Ok(DeleteResult::WaitForNextActivation) => {
@@ -775,339 +722,99 @@ impl VolumeDeleter {
                         "{} / {}: requested deletion, waiting",
                         region_id, snapshot_id,
                     ));
-
-                    all_deleted = false;
                 }
 
                 Err(e) => {
                     status.errors.push(format!("{e}"));
-
-                    all_deleted = false;
                 }
             }
         }
 
-        // If any of the operations require waiting for the next activation,
-        // then return that, otherwise return that all were deleted.
+        // When all crucible resources are cleaned up, hard delete the region
+        // snapshot records.
 
-        if all_deleted {
-            // When all crucible resources are cleaned up, hard delete the
-            // region snapshot records.
-
-            let mut result = DeleteResult::Deleted;
-
-            for (_, region_snapshot) in datasets_and_snapshots {
-                if let Err(e) = self
-                    .datastore
-                    .region_snapshot_remove(
-                        region_snapshot.dataset_id.into(),
-                        region_snapshot.region_id,
-                        region_snapshot.snapshot_id,
-                    )
-                    .await
-                {
-                    let s =
-                        format!("error calling region_snapshot_remove: {e}");
-                    error!(log, "{s}");
-                    status.errors.push(s);
-
-                    // More work is required next task activation
-                    result = DeleteResult::WaitForNextActivation
-                }
+        for region_snapshot in region_snapshots_to_delete {
+            if let Err(e) = self
+                .datastore
+                .region_snapshot_remove(
+                    region_snapshot.dataset_id.into(),
+                    region_snapshot.region_id,
+                    region_snapshot.snapshot_id,
+                )
+                .await
+            {
+                let s = format!("error calling region_snapshot_remove: {e}");
+                error!(log, "{s}");
+                status.errors.push(s);
             }
-
-            result
-        } else {
-            DeleteResult::WaitForNextActivation
         }
     }
 
-    async fn clean_up_volume_resources(
+    async fn delete_all_marked_resources(
         &self,
         log: &Logger,
-        crucible_resources_to_delete: &CrucibleResources,
+        opctx: &OpContext,
         status: &mut VolumeDeleteStatus,
-    ) -> DeleteResult {
-        // For any resource that is no longer referenced due to the soft-delete
-        // of a volume, do the following in order:
+    ) {
+        // Grab all regions and region snapshots that are marked for deletion
+
+        let mut soft_deleted_crucible_resources = match self
+            .datastore
+            .crucible_resources_marked_for_deletion(opctx)
+            .await
+        {
+            Ok(soft_deleted_crucible_resources) => {
+                soft_deleted_crucible_resources
+            }
+
+            Err(e) => {
+                let s = format!(
+                    "error calling crucible_resources_marked_for_deletion: {e}"
+                );
+                error!(log, "{s}");
+                status.errors.push(s);
+                return;
+            }
+        };
+
+        // Do the following in order:
         //
-        // - delete top level regions
         // - delete running snapshots (read: read-only regions backed by
         //   snapshots)
         // - delete region snapshots
+        // - delete top level regions
         //
-        // Running snapshots have to be deleted before snapshots are, but
-        // attempt deleting both regions and running snapshots each task
-        // activation as they are independent.
+        // Running snapshots have to be deleted before region snapshots are, and
+        // region snapshots have to be deleted before regions are. Before
+        // deleting regions, remove those that aren't ready for deletion.
 
-        let delete_regions_result = self
-            .delete_crucible_regions(log, crucible_resources_to_delete, status)
-            .await;
-
-        let delete_region_snapshots_result = self
-            .delete_crucible_running_snapshots(
-                log,
-                crucible_resources_to_delete,
-                status,
-            )
-            .await;
-
-        if delete_regions_result == DeleteResult::Deleted
-            && delete_region_snapshots_result == DeleteResult::Deleted
-        {
-            // We're able to continue on with deleting snapshots
-        } else {
-            // Otherwise, more work is required from the next task activation.
-            return DeleteResult::WaitForNextActivation;
-        }
-
-        // Past this point, running snapshots ar deleted, so delete any
-        // snapshots. If this is successful, then all crucible resources to
-        // delete have been cleaned up
+        eprintln!("first: {soft_deleted_crucible_resources:?}");
 
         self.delete_crucible_snapshots(
             log,
-            crucible_resources_to_delete,
+            &soft_deleted_crucible_resources.region_snapshots,
             status,
         )
-        .await
-    }
+        .await;
 
-    async fn conditionally_hard_delete_volume_record(
-        &self,
-        log: &Logger,
-        volume_id: VolumeUuid,
-        status: &mut VolumeDeleteStatus,
-    ) {
-        // Do not hard delete the volume record if there are lingering regions
-        // associated with them. This occurs when a region snapshot hasn't been
-        // deleted, which means we can't delete the region. Later on, deleting
-        // the region snapshot when its reference count goes to zero will free
-        // up the region(s) to be deleted (by delete_freed_crucible_regions).
-
-        let allocated_regions =
-            match self.datastore.get_allocated_regions(volume_id).await {
-                Ok(allocated_regions) => allocated_regions,
-
-                Err(e) => {
-                    let s = format!(
-                        "failed to get_allocated_regions for {volume_id}: {e}"
-                    );
-                    error!(log, "{s}");
-                    status.errors.push(s);
-                    return;
-                }
-            };
-
-        if !allocated_regions.is_empty() {
-            info!(
-                &log,
-                "allocated regions for {volume_id} is not-empty, skipping \
-                hard delete",
-            );
-
-            return;
-        }
-
-        if let Err(e) = self.datastore.volume_hard_delete(volume_id).await {
-            let s =
-                format!("failed to volume_hard_delete for {volume_id}: {e}");
+        if let Err(e) = soft_deleted_crucible_resources
+            .remove_regions_with_snapshots(&self.datastore)
+            .await
+        {
+            let s = format!("error calling remove_regions_with_snapshots: {e}");
             error!(log, "{s}");
             status.errors.push(s);
             return;
         }
 
-        status.volumes_deleted.push(volume_id.to_string());
-    }
+        eprintln!("second: {soft_deleted_crucible_resources:?}");
 
-    /// Deleting region snapshots may have freed up regions that were deleted in
-    /// the DB but couldn't previously be deleted by the Crucible Agent because
-    /// a snapshot existed. Look for those here.
-    ///
-    /// It's insufficient to rely on the struct of CrucibleResources to clean
-    /// up: imagine a disk that is composed of three regions (a subset of the
-    /// VolumeConstructionRequest is shown here):
-    ///
-    /// ```json
-    /// {
-    ///   "type": "volume",
-    ///   "id": "6b353c87-afac-4ee2-b71a-6fe35fcf9e46",
-    ///   "sub_volumes": [
-    ///     {
-    ///       "type": "region",
-    ///       "opts": {
-    ///         "targets": [
-    ///           "[fd00:1122:3344:101::5]:1000",
-    ///           "[fd00:1122:3344:102::9]:1000",
-    ///           "[fd00:1122:3344:103::2]:1000"
-    ///         ],
-    ///         "read_only": false
-    ///       }
-    ///     }
-    ///   ],
-    ///   "read_only_parent": null,
-    /// }
-    /// ```
-    ///
-    /// Taking a snapshot of this will produce the following volume:
-    ///
-    /// ```json
-    /// {
-    ///   "type": "volume",
-    ///   "id": "1ef7282e-a3fb-4222-85a8-b16d3fbfd738",   <-- new UUID
-    ///   "sub_volumes": [
-    ///     {
-    ///       "type": "region",
-    ///       "opts": {
-    ///         "targets": [
-    ///           "[fd00:1122:3344:101::5]:1001",         <-- port changed
-    ///           "[fd00:1122:3344:102::9]:1001",         <-- port changed
-    ///           "[fd00:1122:3344:103::2]:1001"          <-- port changed
-    ///         ],
-    ///         "read_only": true                         <-- read_only now true
-    ///       }
-    ///     }
-    ///   ],
-    ///   "read_only_parent": null,
-    /// }
-    /// ```
-    ///
-    /// The snapshot targets will use the same IP but different port: snapshots
-    /// are initially located on the same filesystem as their region.
-    ///
-    /// The disk's volume has no read only resources, while the snapshot's
-    /// volume does. The disk volume's targets are all regions (backed by
-    /// downstairs that are read/write) while the snapshot volume's targets are
-    /// all snapshots (backed by downstairs that are read-only). The two volumes
-    /// are linked in the sense that the snapshots from the second are contained
-    /// *within* the regions of the first, reflecting the resource nesting from
-    /// ZFS. This is also reflected in the REST endpoint that the Crucible agent
-    /// uses:
-    ///
-    ///   /crucible/0/regions/{id}/snapshots/{name}
-    ///
-    /// If the disk is then deleted, the CrucibleResources struct returned as
-    /// from the soft-delete function will contain *nothing* to clean up: the
-    /// regions contain snapshots that are part of other volumes and cannot be
-    /// deleted, and the disk's volume doesn't reference any read-only
-    /// resources.
-    ///
-    /// This is expected and normal: regions are "leaked" all the time due to
-    /// snapshots preventing their deletion. This function detects when those
-    /// regions can be cleaned up.
-    ///
-    /// Note: each delete of a snapshot could trigger another delete of a
-    /// region, if that region's use has gone to zero. A snapshot delete will
-    /// never trigger another snapshot delete.
-    async fn delete_freed_crucible_regions(
-        &self,
-        log: &Logger,
-        status: &mut VolumeDeleteStatus,
-    ) {
-        // Find regions freed up for deletion by a previous delete of region
-        // snapshots.
-        let freed_datasets_regions_and_volumes =
-            match self.datastore.find_deleted_volume_regions().await {
-                Ok(freed_datasets_regions_and_volumes) => {
-                    freed_datasets_regions_and_volumes
-                }
-
-                Err(e) => {
-                    let s =
-                        format!("failed to find_deleted_volume_regions: {e}");
-                    error!(log, "{s}");
-                    status.errors.push(s);
-
-                    // Try again next time!
-                    return;
-                }
-            };
-
-        if freed_datasets_regions_and_volumes.is_empty() {
-            return;
-        }
-
-        let FreedCrucibleResources { datasets_and_regions, volumes } =
-            freed_datasets_regions_and_volumes;
-
-        let mut all_deleted = true;
-
-        for (dataset, region) in &datasets_and_regions {
-            match self.delete_crucible_region(log, &dataset, region.id()).await
-            {
-                Ok(DeleteResult::Deleted) => {
-                    status
-                        .region_results
-                        .push(format!("{}: deleted", region.id()));
-                }
-
-                Ok(DeleteResult::WaitForNextActivation) => {
-                    status.region_results.push(format!(
-                        "{}: requested deletion, waiting",
-                        region.id()
-                    ));
-
-                    all_deleted = false;
-                }
-
-                Err(e) => {
-                    all_deleted = false;
-
-                    let s = format!(
-                        "failed delete_crucible_region for {}: {e}",
-                        region.id(),
-                    );
-                    error!(log, "{s}");
-                    status.errors.push(s);
-                }
-            }
-        }
-
-        if all_deleted {
-            // When all crucible resources are cleaned up, hard delete the
-            // region records. This also re-computes the crucible_dataset
-            // size_used column for those region's datasets.
-
-            let region_ids_to_delete =
-                datasets_and_regions.iter().map(|(_, r)| r.id()).collect();
-
-            match self
-                .datastore
-                .regions_hard_delete(log, region_ids_to_delete)
-                .await
-            {
-                Ok(()) => {
-                    // ok
-                }
-
-                Err(e) => {
-                    let s = format!("error calling regions_hard_delete: {e}");
-                    error!(log, "{s}");
-                    status.errors.push(s);
-
-                    // More work is required next task activation
-                    return;
-                }
-            }
-
-            for volume_id in volumes {
-                // A Volume returned by `find_deleted_volume_regions` will not
-                // have read/write regions, so it is safe to delete without
-                // checking.
-
-                if let Err(e) =
-                    self.datastore.volume_hard_delete(volume_id).await
-                {
-                    let s = format!(
-                        "error calling volume_hard_delete for {volume_id}: {e}"
-                    );
-                    error!(log, "{s}");
-                    status.errors.push(s);
-                }
-            }
-        } else {
-            // More work is required next task activation
-        }
+        self.delete_crucible_regions(
+            log,
+            &soft_deleted_crucible_resources.regions,
+            status,
+        )
+        .await;
     }
 }
 
@@ -1120,9 +827,15 @@ impl BackgroundTask for VolumeDeleter {
             let log = &opctx.log;
             let mut status = VolumeDeleteStatus::default();
 
+            // The volume soft delete transaction now simply marks regions and
+            // region snapshots for deletion, but previous versions of Nexus
+            // would serialize a set of resources to delete. Take that, mark all
+            // those resources for deletion, then hard-delete the volume.
+
             let soft_deleted_volumes =
                 match self.datastore.get_soft_deleted_volumes(opctx).await {
                     Ok(v) => v,
+
                     Err(e) => {
                         let s = format!(
                             "error calling get_soft_deleted_volumes: {e}"
@@ -1134,11 +847,12 @@ impl BackgroundTask for VolumeDeleter {
                 };
 
             for volume in soft_deleted_volumes {
+                let volume_id = volume.id();
+
                 let Some(resources_to_clean_up) = &volume.resources_to_clean_up
                 else {
                     let s = format!(
-                        "volume {} has no resources to clean up",
-                        volume.id(),
+                        "volume {volume_id} has no resources to clean up",
                     );
                     error!(log, "{s}");
                     status.errors.push(s);
@@ -1148,11 +862,11 @@ impl BackgroundTask for VolumeDeleter {
                 let resources_to_clean_up: CrucibleResources =
                     match serde_json::from_str(&resources_to_clean_up) {
                         Ok(v) => v,
+
                         Err(e) => {
                             let s = format!(
-                                "volume {} resources to clean up did not \
-                                deserialize: {e}",
-                                volume.id(),
+                                "volume {volume_id} resources to clean up did \
+                                not deserialize: {e}",
                             );
                             error!(log, "{s}");
                             status.errors.push(s);
@@ -1160,30 +874,45 @@ impl BackgroundTask for VolumeDeleter {
                         }
                     };
 
-                match self
-                    .clean_up_volume_resources(
-                        log,
-                        &resources_to_clean_up,
-                        &mut status,
+                if let Err(e) = self
+                    .datastore
+                    .mark_crucible_resources_resources_for_deletion(
+                        opctx,
+                        resources_to_clean_up,
                     )
                     .await
                 {
-                    DeleteResult::Deleted => {
-                        self.conditionally_hard_delete_volume_record(
-                            log,
-                            volume.id(),
-                            &mut status,
-                        )
-                        .await;
+                    let s = format!(
+                        "failed to mark_resources_for_delete for {volume_id}: \
+                        {e}",
+                    );
+
+                    error!(log, "{s}");
+                    status.errors.push(s);
+
+                    continue;
+                }
+
+                match self.datastore.volume_hard_delete(volume_id).await {
+                    Ok(()) => {
+                        status.volumes_deleted.push(volume_id.to_string());
                     }
 
-                    DeleteResult::WaitForNextActivation => {
-                        continue;
+                    Err(e) => {
+                        let s = format!(
+                            "failed to volume_hard_delete for \
+                            {volume_id}: {e}",
+                        );
+
+                        error!(log, "{s}");
+                        status.errors.push(s);
                     }
                 }
             }
 
-            self.delete_freed_crucible_regions(log, &mut status).await;
+            // Now delete all marked resources
+
+            self.delete_all_marked_resources(log, opctx, &mut status).await;
 
             json!(status)
         }

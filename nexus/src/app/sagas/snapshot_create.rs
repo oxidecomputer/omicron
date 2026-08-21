@@ -484,6 +484,12 @@ async fn ssc_alloc_regions_undo(
     let osagactx = sagactx.user_data();
     let log = osagactx.log();
 
+    warn!(log, "ssc_alloc_regions_undo: marking regions for deletion");
+
+    // If `ssc_alloc_regions` succeeded, mark each region it created for the
+    // destination volume for deletion. This will also clean up any ensured
+    // regions.
+
     let region_ids = sagactx
         .lookup::<Vec<(db::model::CrucibleDataset, db::model::Region)>>(
             "datasets_and_regions",
@@ -492,7 +498,10 @@ async fn ssc_alloc_regions_undo(
         .map(|(_, region)| region.id())
         .collect::<Vec<Uuid>>();
 
-    osagactx.datastore().regions_hard_delete(log, region_ids).await?;
+    for region_id in region_ids {
+        osagactx.datastore().mark_region_for_deletion(region_id).await?;
+    }
+
     Ok(())
 }
 
@@ -579,22 +588,8 @@ async fn ssc_regions_ensure(
 }
 
 async fn ssc_regions_ensure_undo(
-    sagactx: NexusActionContext,
+    _sagactx: NexusActionContext,
 ) -> Result<(), anyhow::Error> {
-    let osagactx = sagactx.user_data();
-    let log = osagactx.log();
-    warn!(log, "ssc_regions_ensure_undo: Deleting crucible regions");
-    osagactx
-        .nexus()
-        .delete_crucible_regions(
-            log,
-            sagactx
-                .lookup::<Vec<(db::model::CrucibleDataset, db::model::Region)>>(
-                    "datasets_and_regions",
-                )?,
-        )
-        .await?;
-    info!(log, "ssc_regions_ensure_undo: Deleted crucible regions");
     Ok(())
 }
 
@@ -627,11 +622,8 @@ async fn ssc_create_destination_volume_record_undo(
     let destination_volume_id =
         sagactx.lookup::<VolumeUuid>("destination_volume_id")?;
 
-    // This saga contains what is necessary to clean up the destination volume
-    // resources. It's safe here to perform a volume hard delete without
-    // decreasing the crucible resource count because the destination volume is
-    // guaranteed to never have read only resources that require that
-    // accounting.
+    // This saga will mark any created regions for the destination volume as
+    // deleted, so hard delete the volume record here to avoid leaking it.
 
     info!(log, "hard deleting volume {}", destination_volume_id);
 
@@ -903,13 +895,17 @@ async fn ssc_send_snapshot_request_to_sled_agent_undo(
     let snapshot_id = sagactx.lookup::<Uuid>("snapshot_id")?;
     info!(log, "Undoing snapshot request for {snapshot_id}");
 
-    // Lookup the regions used by the source disk...
+    // Lookup the regions used by the source disk and instruct each of those
+    // related Crucible Agents to delete the snapshot.
+    //
+    // Importantly, the region_snapshot records will not have been created yet,
+    // so no record exists to be marked for cleanup by the `volume_delete`
+    // background task.
     let datasets_and_regions = osagactx
         .datastore()
         .get_allocated_regions(params.disk.volume_id())
         .await?;
 
-    // ... and instruct each of those regions to delete the snapshot.
     for (dataset, region) in datasets_and_regions {
         osagactx
             .nexus()
@@ -1504,13 +1500,18 @@ async fn ssc_start_running_snapshot_undo(
     let snapshot_id = sagactx.lookup::<Uuid>("snapshot_id")?;
     info!(log, "Undoing snapshot start running request for {snapshot_id}");
 
-    // Lookup the regions used by the source disk...
+    // Lookup the regions used by the source disk and instruct each of those
+    // related Crucible Agents to delete the running snapshot.
+    //
+    // It's also important to mark the created region_snapshot records as
+    // 'deleting' so that the volume_delete background task will not refuse to
+    // delete the associated regions later (because it incorrectly determines
+    // that they still have in-use region snapshots).
     let datasets_and_regions = osagactx
         .datastore()
         .get_allocated_regions(params.disk.volume_id())
         .await?;
 
-    // ... and instruct each of those regions to delete the running snapshot.
     for (dataset, region) in datasets_and_regions {
         osagactx
             .nexus()
@@ -1524,9 +1525,14 @@ async fn ssc_start_running_snapshot_undo(
 
         osagactx
             .datastore()
-            .region_snapshot_remove(dataset.id(), region.id(), snapshot_id)
+            .mark_region_snapshot_for_deletion(
+                dataset.id(),
+                region.id(),
+                snapshot_id,
+            )
             .await?;
     }
+
     Ok(())
 }
 
