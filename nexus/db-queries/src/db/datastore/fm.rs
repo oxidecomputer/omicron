@@ -407,10 +407,11 @@ impl DataStore {
                         })
                         .map_err(|_| {
                             let internal_message = format!(
-                                "encountered multiple case ereports for case \
-                                 {case_id} with the same UUID {id}. this \
-                                 should really not be possible, as the \
-                                 assignment UUID is a primary key!",
+                                "ereport {ereport_id} is assigned to case \
+                                 {case_id} more than once (assignment {id} \
+                                 collides with a previously loaded one). an \
+                                 ereport may be assigned to a case at most \
+                                 once",
                             );
                             Error::InternalError { internal_message }
                         })?;
@@ -3130,6 +3131,10 @@ mod tests {
             .await
             .expect("failed to read sitrep");
 
+        // Before comparing against what we inserted, the loaded sitrep must
+        // be well-formed on its own.
+        nexus_fm_slippy::assert_sitrep_has_no_fatal_notes(&read_sitrep);
+
         assert_sitreps_eq(&sitrep, &read_sitrep);
 
         // Clean up
@@ -3232,6 +3237,9 @@ mod tests {
             .fm_sitrep_read(&opctx, sitrep_id)
             .await
             .expect("failed to read sitrep");
+
+        // The loaded sitrep must be well-formed
+        nexus_fm_slippy::assert_sitrep_has_no_fatal_notes(&read_sitrep);
 
         assert_sitreps_eq(&sitrep, &read_sitrep);
 

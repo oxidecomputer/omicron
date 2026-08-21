@@ -251,10 +251,17 @@ mod tests {
     }
 
     /// Finalize the builder with throwaway values for `creator_id` and
-    /// `time_created` (which these tests don't exercise).
+    /// `time_created` (which these tests don't exercise), asserting that
+    /// building preserved slippy-cleanliness.
+    #[track_caller]
     fn build_sitrep(builder: SitrepBuilder<'_>) -> fm::Sitrep {
+        let parent = builder.input().parent_sitrep().cloned();
         let (sitrep, _) =
             builder.build(OmicronZoneUuid::new_v4(), chrono::Utc::now());
+        crate::test_util::assert_analysis_preserves_slippy_clean(
+            &sitrep,
+            parent.as_ref(),
+        );
         sitrep
     }
 
