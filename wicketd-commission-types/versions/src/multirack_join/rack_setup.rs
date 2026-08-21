@@ -2,11 +2,14 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Rack setup (RSS) types for the `DDM_AND_L1_CONFIG` version.
+//! Rack setup (RSS) types for the `MULTIRACK_JOIN` version.
 //!
-//! [`UserSpecifiedPortConfig`] is restructured in this version: its variants
-//! are now [`UplinkPortConfig`] (the former `ManualPortConfig`) and a DDM
-//! variant carrying the new [`L1PortConfig`].
+//! This version adds the multirack join types, [`MultirackJoinRequest`] and
+//! [`RunMultirackJoinResponse`].
+//!
+//! [`UserSpecifiedPortConfig`] is also restructured here: its variants are now
+//! [`UplinkPortConfig`] (the former `ManualPortConfig`) and a DDM variant
+//! carrying the new [`L1PortConfig`].
 //! [`UserSpecifiedRackNetworkConfig`] and [`PutRssUserConfigInsensitive`] are
 //! redefined because they transitively contain it; every other rack-setup type
 //! is re-exported unchanged from [`crate::v1::rack_setup`],
@@ -16,6 +19,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::net::{IpAddr, Ipv6Addr};
 
 use iddqd::IdOrdMap;
+use omicron_uuid_kinds::MultirackJoinUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize, Serializer};
 
@@ -411,4 +415,50 @@ impl JsonSchema for UserSpecifiedPortConfig {
         }
         .into()
     }
+}
+
+// Multirack join.
+//
+// The root struct is [`MultirackJoinRequest`]. Unlike the RSS configuration,
+// which is staged field by field as `UserSpecified*` types and resolved by
+// wicketd, a join request is posted whole and forwarded to the bootstrap agent
+// as-is, so it carries the same fully-resolved [`RackNetworkConfig`] the
+// bootstrap agent's own multirack-join endpoint takes.
+
+// Re-exports of pinned types from sled-agent-types-versions.
+pub use sled_agent_types_versions::v1::early_networking::{
+    BfdMode, BfdPeerConfig, ImportExportPolicy,
+};
+pub use sled_agent_types_versions::v30::early_networking::UplinkAddressConfig;
+pub use sled_agent_types_versions::v47::early_networking::{
+    BgpPeerConfig, NumberedRouter, RouterPeerType, UnnumberedRouter,
+};
+pub use sled_agent_types_versions::v48::early_networking::{
+    PortConfig, RackNetworkConfig, UplinkPorts,
+};
+
+// Re-export of a type from sled-hardware-types that should never change.
+pub use sled_hardware_types::BaseboardId;
+
+/// A request to join this rack into an existing multirack cluster.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct MultirackJoinRequest {
+    /// The peers required to initialize this rack's trust quorum.
+    ///
+    /// Unlike RSS, this is not optional: the bootstrap agent discovers
+    /// bootstrap addresses and maps them to these `BaseboardId`s.
+    pub trust_quorum_peers: BTreeSet<BaseboardId>,
+
+    /// The network configuration for this joining rack.
+    pub rack_network_config: RackNetworkConfig,
+}
+
+/// The response to a request to join a multirack cluster.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+pub struct RunMultirackJoinResponse {
+    /// The ID of the multirack join that was started.
+    ///
+    /// A query for the state of rack setup reports this same ID, in untyped
+    /// form, as `RackOperation::id` with `kind` set to `multirack-join`.
+    pub id: MultirackJoinUuid,
 }

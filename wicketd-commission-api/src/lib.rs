@@ -29,7 +29,7 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
-    (4, DDM_AND_L1_CONFIG),
+    (4, MULTIRACK_JOIN),
     (3, BGP_PEER_SRC_ADDR),
     (2, FULL_SERVICE_IP_POOL_DETAILS),
     (1, INITIAL),
@@ -200,7 +200,7 @@ pub trait WicketdCommissionApi {
     #[endpoint {
         method = PUT,
         path = "/rack-setup/config",
-        versions = VERSION_DDM_AND_L1_CONFIG..,
+        versions = VERSION_MULTIRACK_JOIN..,
     }]
     async fn put_rss_config(
         rqctx: RequestContext<Self::Context>,
@@ -211,7 +211,7 @@ pub trait WicketdCommissionApi {
         operation_id = "put_rss_config",
         method = PUT,
         path = "/rack-setup/config",
-        versions = VERSION_BGP_PEER_SRC_ADDR..VERSION_DDM_AND_L1_CONFIG,
+        versions = VERSION_BGP_PEER_SRC_ADDR..VERSION_MULTIRACK_JOIN,
     }]
     async fn put_rss_config_v3(
         rqctx: RequestContext<Self::Context>,
@@ -341,6 +341,31 @@ pub trait WicketdCommissionApi {
         rqctx: RequestContext<Self::Context>,
     ) -> Result<
         HttpResponseOk<latest::rack_setup::RunRackSetupResponse>,
+        HttpError,
+    >;
+
+    /// Join this rack into an existing multirack cluster
+    ///
+    /// This is the multirack counterpart to running rack setup, and applies to
+    /// every rack but the first: it initializes this rack's trust quorum,
+    /// starts its sled-agents, and publishes its network configuration, but
+    /// places no control plane services. Reconfigurator adopts the rack
+    /// afterwards.
+    ///
+    /// Unlike rack setup, the configuration is not staged through this API
+    /// beforehand; it is posted here in full and forwarded to the bootstrap
+    /// agent. Progress is reported by `GET /rack-setup`, as a `RackOperation`
+    /// whose `kind` is `multirack-join`.
+    #[endpoint {
+        method = POST,
+        path = "/multirack-join",
+        versions = VERSION_MULTIRACK_JOIN..,
+    }]
+    async fn post_run_multirack_join(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<latest::rack_setup::MultirackJoinRequest>,
+    ) -> Result<
+        HttpResponseOk<latest::rack_setup::RunMultirackJoinResponse>,
         HttpError,
     >;
 }

@@ -677,47 +677,62 @@ output.type = "zone"
 service_name = "mg-ddm"
 # Note: unlike every other package, `maghemite` is not restricted to either the
 # "standard" or "trampoline" image; it is included in both.
-source.type = "prebuilt"
-source.repo = "maghemite"
+# LOCAL TESTING: built from the /claude/maghemite checkout, not buildomat.
+#   cd /claude/maghemite && cargo run -p mg-package
+#   cp out/mg-ddm-gz.tar /claude/omicron/out/
+# Restore the commented `source.*` keys below to go back to the buildomat pin.
+source.type = "manual"
+#source.type = "prebuilt"
+#source.repo = "maghemite"
 # Updating the commit hash here currently requires also updating
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "ce015cde17a1ebc839ae482026d522cf0e369a3b"
+#source.commit = "ce015cde17a1ebc839ae482026d522cf0e369a3b"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mg-ddm-gz.sha256.txt
-source.sha256 = "279cb103525d4a554082fbea11f7b841fc1515f337cf895849b5e7c0950b925d"
+#source.sha256 = "279cb103525d4a554082fbea11f7b841fc1515f337cf895849b5e7c0950b925d"
 output.type = "tarball"
 
 [package.mg-ddm]
 service_name = "mg-ddm"
 # Note: unlike every other package, `maghemite` is not restricted to either the
 # "standard" or "trampoline" image; it is included in both.
-source.type = "prebuilt"
-source.repo = "maghemite"
+# LOCAL TESTING: built from the /claude/maghemite checkout, not buildomat.
+#   cd /claude/maghemite && cargo run -p mg-package
+#   cp out/mg-ddm.tar.gz /claude/omicron/out/
+# Restore the commented `source.*` keys below to go back to the buildomat pin.
+source.type = "manual"
+#source.type = "prebuilt"
+#source.repo = "maghemite"
 # Updating the commit hash here currently requires also updating
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "ce015cde17a1ebc839ae482026d522cf0e369a3b"
+#source.commit = "ce015cde17a1ebc839ae482026d522cf0e369a3b"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mg-ddm.sha256.txt
-source.sha256 = "742d0bec146634695f40133b41f9da8a2de2bc36a905de0927c7515a6672e1ce"
+#source.sha256 = "742d0bec146634695f40133b41f9da8a2de2bc36a905de0927c7515a6672e1ce"
 output.type = "zone"
 output.intermediate_only = true
 
 [package.mgd]
 service_name = "mgd"
-source.type = "prebuilt"
-source.repo = "maghemite"
+# LOCAL TESTING: built from the /claude/maghemite checkout, not buildomat.
+#   cd /claude/maghemite && cargo run -p mg-package
+#   cp out/mgd.tar.gz /claude/omicron/out/
+# Restore the commented `source.*` keys below to go back to the buildomat pin.
+source.type = "manual"
+#source.type = "prebuilt"
+#source.repo = "maghemite"
 # Updating the commit hash here currently requires also updating
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "ce015cde17a1ebc839ae482026d522cf0e369a3b"
+#source.commit = "ce015cde17a1ebc839ae482026d522cf0e369a3b"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mgd.sha256.txt
-source.sha256 = "a8ef9f24f794c9ac3c4e66b60e738d50aa1b22f86c7aa7baf7b07d300411ecde"
+#source.sha256 = "a8ef9f24f794c9ac3c4e66b60e738d50aa1b22f86c7aa7baf7b07d300411ecde"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -810,10 +825,17 @@ only_for_targets.image = "standard"
 # 2. Copy dendrite.tar.gz from dendrite/out to omicron/out/dendrite-softnpu.tar.gz
 # 3. Change the below `source.type` key to `"manual"` and comment out or remove
 # the other `source.*` keys.
-source.type = "prebuilt"
-source.repo = "dendrite"
-source.commit = "04a52a3240a26c58f03e1cf40353d67ff69d76b6"
-source.sha256 = "eb2ee25b5a9c8bb28f17a8d8aaaa0a7bffaf00ee0cadd876baf5c8c85572ca68"
+#
+# LOCAL TESTING: doing exactly that, from /claude/dendrite on branch
+# `ajs/ddm-link-settings` (67635f69) - the rev `dpd-client` is pinned to, and the
+# first one carrying `allow_ddm_traffic`. The buildomat pin below (04a52a32)
+# predates that field, which makes it inert at runtime. Restore the commented
+# `source.*` keys to go back to the prebuilt zone.
+source.type = "manual"
+#source.type = "prebuilt"
+#source.repo = "dendrite"
+#source.commit = "04a52a3240a26c58f03e1cf40353d67ff69d76b6"
+#source.sha256 = "eb2ee25b5a9c8bb28f17a8d8aaaa0a7bffaf00ee0cadd876baf5c8c85572ca68"
 output.type = "zone"
 output.intermediate_only = true
 
