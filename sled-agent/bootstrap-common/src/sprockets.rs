@@ -2,17 +2,12 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Interface for making API requests to a Sled Agent's Bootstrap API.
+//! Interface for making requests to a Sled Agent's Bootstrap API.
 
-use super::params::Request;
-use super::params::RequestEnvelope;
-use super::params::version;
-use super::views::SledAgentResponse;
-use crate::bootstrap::views::Response;
-use crate::bootstrap::views::ResponseEnvelope;
+use serde::{Deserialize, Serialize};
 use sled_agent_measurements::{MeasurementError, MeasurementsHandle};
 use sled_agent_types::sled::StartSledAgentRequest;
-use slog::Logger;
+use slog::{Logger, o};
 use slog_error_chain::SlogInlineError;
 use sprockets_tls;
 use sprockets_tls::keys::SprocketsConfig;
@@ -24,6 +19,7 @@ use thiserror::Error;
 use tokio::io::AsyncReadExt;
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;
+use uuid::Uuid;
 
 #[derive(Debug, Error, SlogInlineError)]
 pub enum SprocketsClientError {
@@ -72,9 +68,44 @@ pub enum SprocketsClientError {
     MeasurementError(#[source] MeasurementError),
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum Request<'a> {
+    /// Send configuration information for launching a Sled Agent.
+    StartSledAgentRequest(Cow<'a, StartSledAgentRequest>),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RequestEnvelope<'a> {
+    pub version: u32,
+    pub request: Request<'a>,
+}
+
+pub mod version {
+    pub const V1: u32 = 1;
+}
+
+/// Describes the Sled Agent running on the device.
+#[derive(Serialize, Deserialize, PartialEq)]
+pub struct SledAgentResponse {
+    pub id: Uuid,
+}
+
+#[derive(Serialize, Deserialize, PartialEq)]
+// Note: We intentionally do not derive `Debug` on this type, to avoid
+// accidentally debug-logging the secret share.
+pub enum Response {
+    SledAgentResponse(SledAgentResponse),
+}
+
+#[derive(Serialize, Deserialize, PartialEq)]
+pub struct ResponseEnvelope {
+    pub version: u32,
+    pub response: Result<Response, String>,
+}
+
 /// A sprockets client wrapper used to connect to bootstrap agents for rack
 /// initialization
-pub(crate) struct SprocketsClient {
+pub struct SprocketsClient {
     addr: SocketAddrV6,
     log: Logger,
     sprockets_conf: SprocketsConfig,
@@ -82,7 +113,7 @@ pub(crate) struct SprocketsClient {
 }
 
 impl SprocketsClient {
-    pub(crate) fn new(
+    pub fn new(
         addr: SocketAddrV6,
         sprockets_conf: SprocketsConfig,
         measurements: Arc<MeasurementsHandle>,
@@ -92,9 +123,10 @@ impl SprocketsClient {
     }
 
     /// Start sled agent by sending an initialization request determined from
-    /// RSS input. This client is on the same scrimlet as RSS, and is talking
-    /// over TCP to all other bootstrap agents.
-    pub(crate) async fn start_sled_agent(
+    /// RSS or multirack join service input. This client is on the same scrimlet
+    /// as RSS or the multirack join service, and is talking over sprockets to
+    /// all other bootstrap agents.
+    pub async fn start_sled_agent(
         &self,
         request: &StartSledAgentRequest,
     ) -> Result<SledAgentResponse, SprocketsClientError> {
@@ -102,7 +134,7 @@ impl SprocketsClient {
         Self::start_sled_agent_with_stream(stream, request).await
     }
 
-    pub(crate) async fn start_sled_agent_with_stream(
+    pub async fn start_sled_agent_with_stream(
         stream: sprockets_tls::Stream<TcpStream>,
         request: &StartSledAgentRequest,
     ) -> Result<SledAgentResponse, SprocketsClientError> {
@@ -112,7 +144,7 @@ impl SprocketsClient {
         }
     }
 
-    pub(crate) async fn connect(
+    pub async fn connect(
         &self,
     ) -> Result<sprockets_tls::Stream<TcpStream>, SprocketsClientError> {
         let log =
@@ -195,5 +227,43 @@ impl SprocketsClient {
         }
 
         envelope.response.map_err(SprocketsClientError::ServerFailure)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::net::Ipv6Addr;
+
+    use omicron_common::address::Ipv6Subnet;
+    use omicron_uuid_kinds::RackUuid;
+    use omicron_uuid_kinds::SledUuid;
+    use sled_agent_types::sled::StartSledAgentRequestBody;
+
+    use super::*;
+
+    #[test]
+    fn json_serialization_round_trips() {
+        let envelope = RequestEnvelope {
+            version: 1,
+            request: Request::StartSledAgentRequest(Cow::Owned(
+                StartSledAgentRequest {
+                    generation: 0,
+                    schema_version: 1,
+                    body: StartSledAgentRequestBody {
+                        id: SledUuid::new_v4(),
+                        rack_id: RackUuid::new_v4(),
+                        use_trust_quorum: false,
+                        is_lrtq_learner: false,
+                        subnet: Ipv6Subnet::new(Ipv6Addr::LOCALHOST),
+                    },
+                },
+            )),
+        };
+
+        let serialized = serde_json::to_vec(&envelope).unwrap();
+        let deserialized: RequestEnvelope =
+            serde_json::from_slice(serialized.as_slice()).unwrap();
+
+        assert!(envelope == deserialized, "serialization round trip failed");
     }
 }

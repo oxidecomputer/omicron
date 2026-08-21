@@ -62,16 +62,6 @@ probe_view                               GET      /experimental/v1/probes/{probe
 rack_membership_abort                    POST     /v1/system/hardware/racks/{rack_id}/membership/abort
 rack_membership_add_sleds                POST     /v1/system/hardware/racks/{rack_id}/membership/add
 rack_membership_status                   GET      /v1/system/hardware/racks/{rack_id}/membership
-support_bundle_create                    POST     /experimental/v1/system/support-bundles
-support_bundle_delete                    DELETE   /experimental/v1/system/support-bundles/{bundle_id}
-support_bundle_download                  GET      /experimental/v1/system/support-bundles/{bundle_id}/download
-support_bundle_download_file             GET      /experimental/v1/system/support-bundles/{bundle_id}/download/{file}
-support_bundle_head                      HEAD     /experimental/v1/system/support-bundles/{bundle_id}/download
-support_bundle_head_file                 HEAD     /experimental/v1/system/support-bundles/{bundle_id}/download/{file}
-support_bundle_index                     GET      /experimental/v1/system/support-bundles/{bundle_id}/index
-support_bundle_list                      GET      /experimental/v1/system/support-bundles
-support_bundle_update                    PUT      /experimental/v1/system/support-bundles/{bundle_id}
-support_bundle_view                      GET      /experimental/v1/system/support-bundles/{bundle_id}
 timeseries_query                         POST     /v1/timeseries/query
 
 API operations found with tag "external-subnets"
@@ -195,12 +185,14 @@ OPERATION ID                             METHOD   URL PATH
 alert_class_list                         GET      /v1/alert-classes
 alert_delivery_list                      GET      /v1/alert-receivers/{receiver}/deliveries
 alert_delivery_resend                    POST     /v1/alerts/{alert_id}/resend
+alert_list                               GET      /v1/alerts
 alert_receiver_delete                    DELETE   /v1/alert-receivers/{receiver}
 alert_receiver_list                      GET      /v1/alert-receivers
 alert_receiver_probe                     POST     /v1/alert-receivers/{receiver}/probe
 alert_receiver_subscription_add          POST     /v1/alert-receivers/{receiver}/subscriptions
 alert_receiver_subscription_remove       DELETE   /v1/alert-receivers/{receiver}/subscriptions/{subscription}
 alert_receiver_view                      GET      /v1/alert-receivers/{receiver}
+alert_view                               GET      /v1/alerts/{alert_id}
 webhook_receiver_create                  POST     /v1/webhook-receivers
 webhook_receiver_update                  PUT      /v1/webhook-receivers/{receiver}
 webhook_secrets_add                      POST     /v1/webhook-secrets
@@ -345,6 +337,19 @@ system_subnet_pool_silo_update           PUT      /v1/system/subnet-pools/{pool}
 system_subnet_pool_update                PUT      /v1/system/subnet-pools/{pool}
 system_subnet_pool_utilization_view      GET      /v1/system/subnet-pools/{pool}/utilization
 system_subnet_pool_view                  GET      /v1/system/subnet-pools/{pool}
+
+API operations found with tag "system/support-bundles"
+OPERATION ID                             METHOD   URL PATH
+support_bundle_create                    POST     /v1/system/support-bundles
+support_bundle_delete                    DELETE   /v1/system/support-bundles/{bundle_id}
+support_bundle_download                  GET      /v1/system/support-bundles/{bundle_id}/download
+support_bundle_download_file             GET      /v1/system/support-bundles/{bundle_id}/download/{file}
+support_bundle_head                      HEAD     /v1/system/support-bundles/{bundle_id}/download
+support_bundle_head_file                 HEAD     /v1/system/support-bundles/{bundle_id}/download/{file}
+support_bundle_index                     GET      /v1/system/support-bundles/{bundle_id}/index
+support_bundle_list                      GET      /v1/system/support-bundles
+support_bundle_update                    PUT      /v1/system/support-bundles/{bundle_id}
+support_bundle_view                      GET      /v1/system/support-bundles/{bundle_id}
 
 API operations found with tag "system/update"
 OPERATION ID                             METHOD   URL PATH

@@ -44,6 +44,7 @@ use omicron_test_utils::dev::dropbox::DropboxReader;
 use omicron_test_utils::dev::poll::CondCheckError;
 use omicron_test_utils::dev::poll::wait_for_condition;
 use omicron_uuid_kinds::GenericUuid;
+use slog_error_chain::InlineErrorChain;
 
 const TRUST_ROOTS_URL: &str = "/v1/system/update/trust-roots";
 
@@ -1261,4 +1262,19 @@ async fn test_debug_files(cptestctx: &ControlPlaneTestContext) {
     assert!(st.state.blueprints.contains_key(&bp2_id));
     assert!(st.state.blueprints.contains_key(&bp3_id));
     assert!(st.state.blueprints.contains_key(&bp4_id));
+}
+
+/// Test that in a stock test environment, one can run the planner and get a new
+/// blueprint.
+#[nexus_test(configure_second_nexus = true)]
+async fn test_stock_planner(cptestctx: &ControlPlaneTestContext) {
+    let nexus_client = cptestctx.lockstep_client();
+    let _blueprint =
+        nexus_client.blueprint_regenerate().await.unwrap_or_else(|error| {
+            panic!(
+                "unexpectedly failed to generate new blueprint in stock test \
+                 environment: {}",
+                InlineErrorChain::new(&error)
+            );
+        });
 }

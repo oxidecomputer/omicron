@@ -183,6 +183,7 @@ table! {
     switch_port_settings_port_config (port_settings_id) {
         port_settings_id -> Uuid,
         geometry -> crate::enums::SwitchPortGeometryEnum,
+        allow_ddm_traffic -> Bool,
     }
 }
 
@@ -276,6 +277,7 @@ table! {
         vlan_id -> Nullable<Int4>,
         id -> Uuid,
         router_lifetime -> Int4,
+        src_addr -> Nullable<Inet>,
     }
 }
 
@@ -323,28 +325,6 @@ table! {
         shaper -> Nullable<Text>,
         checker -> Nullable<Text>,
         max_paths -> Int2,
-    }
-}
-
-table! {
-    bgp_peer_view (switch_slot, port_name) {
-        switch_slot -> crate::enums::SwitchSlotEnum,
-        port_name -> Text,
-        addr -> Nullable<Inet>,
-        hold_time -> Int8,
-        idle_hold_time -> Int8,
-        delay_open -> Int8,
-        connect_retry -> Int8,
-        keepalive -> Int8,
-        remote_asn -> Nullable<Int8>,
-        min_ttl -> Nullable<Int2>,
-        md5_auth_key -> Nullable<Text>,
-        multi_exit_discriminator -> Nullable<Int8>,
-        local_pref -> Nullable<Int8>,
-        enforce_first_as -> Bool,
-        vlan_id -> Nullable<Int4>,
-        router_lifetime -> Int4,
-        asn -> Int8,
     }
 }
 
@@ -1279,6 +1259,17 @@ table! {
         pool_id -> Uuid,
         blueprint_id_when_created -> Uuid,
         blueprint_id_when_tombstoned -> Nullable<Uuid>,
+    }
+}
+
+table! {
+    rendezvous_sled_bp_availability (sled_id) {
+        sled_id -> Uuid,
+        bp_availability -> crate::enums::SledBpAvailabilityEnum,
+        update_disposition_generation -> Nullable<Int8>,
+        blueprint_id -> Uuid,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
     }
 }
 
@@ -3382,6 +3373,22 @@ table! {
 }
 
 table! {
+    fm_fact_saga (sitrep_id, id) {
+        id -> Uuid,
+        sitrep_id -> Uuid,
+        case_id -> Uuid,
+        created_sitrep_id -> Uuid,
+        comment -> Text,
+        saga_id -> Uuid,
+        kind -> crate::enums::FmFactSagaKindEnum,
+        saga_state -> Nullable<crate::enums::SagaStateEnum>,
+        last_event_time -> Nullable<Timestamptz>,
+        current_sec -> Nullable<Uuid>,
+        orphan_reason -> Nullable<crate::enums::FmFactSagaOrphanReasonEnum>,
+    }
+}
+
+table! {
     fm_ereport_in_case (sitrep_id, id) {
         id -> Uuid,
         restart_id -> Uuid,
@@ -3398,6 +3405,8 @@ allow_tables_to_appear_in_same_query!(fm_ereport_in_case, ereport);
 allow_tables_to_appear_in_same_query!(fm_sitrep, fm_case);
 allow_tables_to_appear_in_same_query!(fm_sitrep, fm_fact_physical_disk);
 allow_tables_to_appear_in_same_query!(fm_case, fm_fact_physical_disk);
+allow_tables_to_appear_in_same_query!(fm_sitrep, fm_fact_saga);
+allow_tables_to_appear_in_same_query!(fm_case, fm_fact_saga);
 
 table! {
     fm_alert_request (sitrep_id, id) {
@@ -3513,3 +3522,8 @@ table! {
 
 allow_tables_to_appear_in_same_query!(trust_quorum_member, hw_baseboard_id);
 joinable!(trust_quorum_member -> hw_baseboard_id(hw_baseboard_id));
+
+// Declared as separate pairs rather than one three-table invocation, which
+// would re-emit the `trust_quorum_member`/`hw_baseboard_id` impls above.
+allow_tables_to_appear_in_same_query!(sled, hw_baseboard_id);
+allow_tables_to_appear_in_same_query!(sled, trust_quorum_member);

@@ -89,9 +89,9 @@ EXECUTING COMMAND: omdb ["db", "sleds"]
 termination: Exited(0)
 ---------------------------------------------
 stdout:
- SERIAL       IP           ROLE      POLICY      STATE   ID                                   
- SimGimlet01  [::1]:REDACTED_PORT  scrimlet  in service  active  ..........<REDACTED_UUID>........... 
- SimGimlet00  [::1]:REDACTED_PORT  scrimlet  in service  active  ..........<REDACTED_UUID>........... 
+ SERIAL       IP           ROLE      POLICY      STATE   BP AVAIL   ID                                   
+ SimGimlet01  [::1]:REDACTED_PORT  scrimlet  in service  active  available  ..........<REDACTED_UUID>........... 
+ SimGimlet00  [::1]:REDACTED_PORT  scrimlet  in service  active  available  ..........<REDACTED_UUID>........... 
 ---------------------------------------------
 stderr:
 note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
@@ -102,9 +102,9 @@ EXECUTING COMMAND: omdb ["db", "sleds", "-F", "discretionary"]
 termination: Exited(0)
 ---------------------------------------------
 stdout:
- SERIAL       IP           ROLE      POLICY      STATE   ID                                   
- SimGimlet01  [::1]:REDACTED_PORT  scrimlet  in service  active  ..........<REDACTED_UUID>........... 
- SimGimlet00  [::1]:REDACTED_PORT  scrimlet  in service  active  ..........<REDACTED_UUID>........... 
+ SERIAL       IP           ROLE      POLICY      STATE   BP AVAIL   ID                                   
+ SimGimlet01  [::1]:REDACTED_PORT  scrimlet  in service  active  available  ..........<REDACTED_UUID>........... 
+ SimGimlet00  [::1]:REDACTED_PORT  scrimlet  in service  active  available  ..........<REDACTED_UUID>........... 
 ---------------------------------------------
 stderr:
 note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
@@ -661,6 +661,15 @@ task: "blueprint_rendezvous"
         num_not_in_inventory:   0
         num_tombstoned:         0
         num_already_tombstoned: 0
+    sled_blueprint_availability rendezvous counts:
+        num_marked_available:                0
+        num_marked_unavailable:              0
+        num_unchanged:                       2
+        num_invariant_violations:            0
+        num_decommissioned:                  0
+        num_already_decommissioned:          0
+        num_not_in_blueprint:                0
+        num_decommissioned_not_in_blueprint: 0
 
 task: "crdb_node_id_collector"
   configured period: every <REDACTED_DURATION>m
@@ -770,6 +779,8 @@ task: "fm_sitrep_gc"
     orphaned fm_ereport_in_case rows deleted:                                    0
       batches:                                                                   1
     orphaned fm_fact_physical_disk rows deleted:                                 0
+      batches:                                                                   1
+    orphaned fm_fact_saga rows deleted:                                          0
       batches:                                                                   1
     orphaned fm_sitrep_analysis_report rows deleted:                             <ORPHANED_FMSITREPANALYSISREPORT_ROWS_DELETED_REDACTED>
       batches:                                                                   1
@@ -1372,6 +1383,15 @@ task: "blueprint_rendezvous"
         num_not_in_inventory:   0
         num_tombstoned:         0
         num_already_tombstoned: 0
+    sled_blueprint_availability rendezvous counts:
+        num_marked_available:                0
+        num_marked_unavailable:              0
+        num_unchanged:                       2
+        num_invariant_violations:            0
+        num_decommissioned:                  0
+        num_already_decommissioned:          0
+        num_not_in_blueprint:                0
+        num_decommissioned_not_in_blueprint: 0
 
 task: "crdb_node_id_collector"
   configured period: every <REDACTED_DURATION>m
@@ -1481,6 +1501,8 @@ task: "fm_sitrep_gc"
     orphaned fm_ereport_in_case rows deleted:                                    0
       batches:                                                                   1
     orphaned fm_fact_physical_disk rows deleted:                                 0
+      batches:                                                                   1
+    orphaned fm_fact_saga rows deleted:                                          0
       batches:                                                                   1
     orphaned fm_sitrep_analysis_report rows deleted:                             <ORPHANED_FMSITREPANALYSISREPORT_ROWS_DELETED_REDACTED>
       batches:                                                                   1

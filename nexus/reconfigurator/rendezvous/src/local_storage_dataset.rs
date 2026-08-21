@@ -169,7 +169,6 @@ mod tests {
     use nexus_db_queries::db::queries::ALLOW_FULL_TABLE_SCAN_SQL;
     use nexus_types::inventory::ZpoolName;
     use omicron_common::api::external::ByteCount;
-    use omicron_common::disk::CompressionAlgorithm;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::PhysicalDiskUuid;
     use omicron_uuid_kinds::RackUuid;
@@ -177,6 +176,7 @@ mod tests {
     use omicron_uuid_kinds::ZpoolUuid;
     use proptest::prelude::*;
     use proptest::proptest;
+    use sled_agent_types::disk::CompressionAlgorithm;
 
     async fn proptest_do_prep(
         opctx: &OpContext,

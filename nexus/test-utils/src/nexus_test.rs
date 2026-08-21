@@ -49,6 +49,7 @@ pub struct ControlPlaneBuilder<'a> {
     nextra_sled_agents: u16,
     tls_cert: Option<Certificate>,
     nexus_config: NexusConfig,
+    configure_second_nexus: bool,
 }
 
 impl<'a> ControlPlaneBuilder<'a> {
@@ -58,6 +59,7 @@ impl<'a> ControlPlaneBuilder<'a> {
             nextra_sled_agents: 0,
             tls_cert: None,
             nexus_config: load_test_config(),
+            configure_second_nexus: false,
         }
     }
 
@@ -68,6 +70,11 @@ impl<'a> ControlPlaneBuilder<'a> {
 
     pub fn with_tls_cert(mut self, tls_cert: Option<Certificate>) -> Self {
         self.tls_cert = tls_cert;
+        self
+    }
+
+    pub fn with_second_nexus_configured(mut self, do_configure: bool) -> Self {
+        self.configure_second_nexus = do_configure;
         self
     }
 
@@ -90,7 +97,7 @@ impl<'a> ControlPlaneBuilder<'a> {
             self.tls_cert,
             self.nextra_sled_agents,
             DEFAULT_SP_SIM_CONFIG.into(),
-            false,
+            self.configure_second_nexus,
         )
         .await
     }
