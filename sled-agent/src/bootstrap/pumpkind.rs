@@ -4,6 +4,7 @@
 
 //! Starting the pumpkind service.
 
+use sled_hardware::{DendriteAsic, SledMode};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -15,8 +16,20 @@ pub enum Error {
     Adm(#[from] smf::AdmError),
 }
 
-#[cfg(feature = "switch-asic")]
-pub(super) fn enable_pumpkind_service(log: &slog::Logger) -> Result<(), Error> {
+pub(super) fn enable_pumpkind_service(
+    log: &slog::Logger,
+    sled_mode: &SledMode,
+) -> Result<(), Error> {
+    // Pumpkind manages sidecar PSU/thermal hardware; it only has work on a
+    // sled that may drive a physical Tofino.
+    if !matches!(
+        sled_mode,
+        SledMode::Auto
+            | SledMode::Scrimlet { asic: DendriteAsic::TofinoAsic }
+    ) {
+        return Ok(());
+    }
+
     const SERVICE_FMRI: &str = "svc:/oxide/pumpkind";
     const MANIFEST_PATH: &str =
         "/opt/oxide/pumpkind/lib/svc/manifest/system/pumpkind.xml";
@@ -30,12 +43,5 @@ pub(super) fn enable_pumpkind_service(log: &slog::Logger) -> Result<(), Error> {
         .temporary()
         .run(smf::AdmSelection::ByPattern(&[SERVICE_FMRI]))?;
 
-    Ok(())
-}
-
-#[cfg(not(feature = "switch-asic"))]
-pub(super) fn enable_pumpkind_service(
-    _log: &slog::Logger,
-) -> Result<(), Error> {
     Ok(())
 }

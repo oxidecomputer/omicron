@@ -77,7 +77,10 @@ impl BootstrapAgentStartup {
         let (config, log, startup_networking) =
             tokio::task::spawn_blocking(|| async move {
                 enable_mg_ddm(&config, &log).await?;
-                pumpkind::enable_pumpkind_service(&log)?;
+                pumpkind::enable_pumpkind_service(
+                    &log,
+                    &sled_mode_from_config(&config)?,
+                )?;
                 ensure_zfs_key_directory_exists(&log)?;
 
                 let startup_networking =
@@ -305,28 +308,18 @@ fn sled_mode_from_config(config: &Config) -> Result<SledMode, StartError> {
         }
         SledModeConfig::Sled => SledMode::Sled,
         SledModeConfig::Scrimlet => {
-            let asic = if cfg!(feature = "switch-asic") {
-                DendriteAsic::TofinoAsic
-            } else if cfg!(feature = "switch-stub") {
+            // The ASIC is whatever sidecar the operator declared; the stub
+            // has no config expression, so its feature keeps selecting it.
+            let asic = if cfg!(feature = "switch-stub") {
                 DendriteAsic::TofinoStub
-            } else if cfg!(feature = "switch-softnpu") {
+            } else {
                 match config.sidecar_revision {
+                    SidecarRevision::Physical(_) => DendriteAsic::TofinoAsic,
                     SidecarRevision::SoftZone(_) => DendriteAsic::SoftNpuZone,
                     SidecarRevision::SoftPropolis(_) => {
                         DendriteAsic::SoftNpuPropolisDevice
                     }
-                    _ => {
-                        return Err(StartError::IncorrectBuildPackaging(
-                            "sled-agent configured to run on softnpu zone but dosen't \
-                         have a softnpu sidecar revision",
-                        ));
-                    }
                 }
-            } else {
-                return Err(StartError::IncorrectBuildPackaging(
-                    "sled-agent configured to run on scrimlet but wasn't \
-                        packaged with switch zone",
-                ));
             };
             SledMode::Scrimlet { asic }
         }
