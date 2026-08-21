@@ -8,7 +8,7 @@ use super::reconfigurator_config::ReconfiguratorConfigLoaderState;
 use crate::app::BlueprintDebugAction;
 use crate::app::background::BackgroundTask;
 use crate::app::background::tasks::blueprint_load::LoadedTargetBlueprint;
-use crate::app::deployment::SetTargetDebugFile;
+use crate::app::deployment::SetTargetDebugWriter;
 use chrono::Utc;
 use futures::future::BoxFuture;
 use iddqd::IdOrdMap;
@@ -57,10 +57,6 @@ enum PlanError {
         #[source]
         source: Error,
     },
-    #[error("failed to assemble debug state")]
-    AssembleDebugState(#[source] anyhow::Error),
-    #[error("failed to save debug state to dropbox")]
-    SaveDebugState(#[from] omicron_debug_dropbox::DepositError),
 }
 
 /// Background task that runs the update planner.
@@ -153,9 +149,7 @@ impl BlueprintPlanner {
                     PlanError::AssemblePlanningInput(_)
                     | PlanError::MakePlanner { .. }
                     | PlanError::Plan(_)
-                    | PlanError::AssembleDebugState(_)
-                    | PlanError::SaveBlueprint { .. }
-                    | PlanError::SaveDebugState(_) => {
+                    | PlanError::SaveBlueprint { .. } => {
                         error!(
                             &opctx.log,
                             "blueprint planning failed";
@@ -285,8 +279,7 @@ impl BlueprintPlanner {
             }
         }
 
-        // We have a fresh blueprint.  We're going to proceed with trying to
-        // make it the target.
+        // We have a fresh blueprint.  Insert it into the database.
         let blueprint_id = blueprint.id;
         info!(
             &opctx.log,
@@ -295,16 +288,23 @@ impl BlueprintPlanner {
             "blueprint_id" => %blueprint_id,
         );
 
-        // Assemble a Reconfigurator state file that we can archive for future
-        // debugging.  You could argue that this should be best-effort.  But
-        // this really shouldn't fail under normal operation.  It should only
-        // fail if the database is partially offline or something like that.  In
-        // that case, it's fairly likely this whole operation is going to fail
-        // anyway.  On the other hand, if we allowed this to be non-fatal, it
-        // would be easy to not notice if some *bug* caused this to stop working
-        // altogether, and then we'd silently lose valuable debugging
-        // information from deployed systems.  So we just treat this as fatal.
-        let debug_intent = reconfigurator_state_assemble(
+        self.datastore.blueprint_insert(opctx, &blueprint).await.map_err(
+            |error| PlanError::SaveBlueprint { blueprint_id, source: error },
+        )?;
+
+        // Next we're going to try to make this the new target blueprint.
+        //
+        // Before we do that, assemble some Reconfigurator state files that can
+        // be used to debug the planning choices we made.  First, we'll write an
+        // "intent" file that reflects the current state of the system (which
+        // means the old target blueprint) and mentions that we're about to try
+        // to make this new blueprint the target.  If we succeed in making it
+        // the target, we'll write a second "commit" file that reflects the
+        // change in target blueprint.  We'll also try to remove the "intent"
+        // file, since it'll be redundant with the "commit" file.  All of this
+        // is handled by the SetTargetDebugWriter helper.  The whole process is
+        // best-effort.  If any of it fails, we'll proceed normally.
+        let maybe_debug_intent = reconfigurator_state_assemble(
             opctx,
             &self.datastore,
             input,
@@ -313,33 +313,14 @@ impl BlueprintPlanner {
             target,
             Some(blueprint_id),
         )
-        .await
-        .map_err(PlanError::AssembleDebugState)?;
-        let dropbox_files = SetTargetDebugFile::new(
+        .await;
+        let debug_dropbox_writer = SetTargetDebugWriter::new(
             &opctx.log,
             &self.debug_dropbox,
-            debug_intent,
+            maybe_debug_intent,
         )
-        .map_err(PlanError::AssembleDebugState)?;
-
-        // Archive the Reconfigurator state file.  As above, we require that
-        // this succeed.
-        let dropbox_files = dropbox_files
-            .write_intent(BlueprintDebugAction::AutoplanIntent)
-            .await?;
-
-        // Insert the new blueprint into the database.
-        if let Err(error) =
-            self.datastore.blueprint_insert(opctx, &blueprint).await.map_err(
-                |error| PlanError::SaveBlueprint {
-                    blueprint_id,
-                    source: error,
-                },
-            )
-        {
-            dropbox_files.cancel().await;
-            return Err(error);
-        }
+        .write_intent(BlueprintDebugAction::AutoplanIntent)
+        .await;
 
         // Try to make it the current target.
         let target = BlueprintTarget {
@@ -356,6 +337,11 @@ impl BlueprintPlanner {
                     "error" => %error,
                     "blueprint_id" => %blueprint_id
                 );
+
+                // Try to cancel the dropbox deposit since the information is
+                // useless now.
+                debug_dropbox_writer.cancel().await;
+
                 let blueprint_id = blueprint_id.into_untyped_uuid();
                 let authz_blueprint = authz::Blueprint::new(
                     authz::FLEET,
@@ -378,10 +364,6 @@ impl BlueprintPlanner {
                     }
                 }
 
-                // Try to cancel the dropbox deposit.  This information is
-                // useless now.  It's not a problem if this doesn't work.
-                dropbox_files.cancel().await;
-
                 return Ok(BlueprintPlannerStatus::Planned {
                     parent_blueprint_id,
                     error: format!("{error}"),
@@ -397,7 +379,7 @@ impl BlueprintPlanner {
         // There's no point in failing after this, whatever happens.
 
         // Write a new state file for the dropbox that reflects the new target.
-        dropbox_files
+        debug_dropbox_writer
             .write_committed(target, BlueprintDebugAction::Autoplan)
             .await;
 
