@@ -62,9 +62,18 @@ impl BundleCollection {
         resolver: Resolver,
         log: slog::Logger,
         opctx: OpContext,
-        data_selection: BundleDataSelection,
+        mut data_selection: BundleDataSelection,
         bundle: BundleInfo,
     ) -> Self {
+        // Every time-bounded category (zone logs, ereports) reads the
+        // bundle-wide time range from this selection. A selection without
+        // a start bound would collect unbounded history, so bound this
+        // collection run to the default lookback. The stored selection is
+        // not modified.
+        data_selection.ensure_start_bound(
+            omicron_common::now_db_precision(),
+            BundleDataSelection::DEFAULT_LOOKBACK,
+        );
         Self {
             datastore,
             resolver,

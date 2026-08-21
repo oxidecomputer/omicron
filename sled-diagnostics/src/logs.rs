@@ -11,6 +11,8 @@ use std::{
 };
 
 use camino::{Utf8Path, Utf8PathBuf};
+use chrono::DateTime;
+use chrono::Utc;
 use fs_err::File;
 use illumos_utils::zfs::{
     CreateSnapshotError, DestroySnapshotError, GetValueError,
@@ -554,8 +556,14 @@ impl LogsHandle {
     }
 
     /// For a given zone find all of its logs for all of its services and write
-    /// them to a zip file. Additionally include up to `max_rotated` logs in
-    /// the zip file.
+    /// them to a zip file.
+    ///
+    /// Files are filtered by `window` via oxlog's `date_range`: a file is
+    /// included only if its `mtime` (the timestamp of its newest write) falls
+    /// within the window, inclusive on both ends. This applies to current
+    /// logs too, so a service that has written nothing since before the
+    /// window began contributes no files. Rotated logs are additionally
+    /// limited to `max_rotated` files when a count cap is supplied.
     ///
     /// Note that this log retrieval will automatically take and cleanup
     /// necessary zfs snapshots along the way.
@@ -566,7 +574,8 @@ impl LogsHandle {
     pub async fn get_zone_logs<W: Write + Seek>(
         &self,
         zone: &str,
-        max_rotated: usize,
+        max_rotated: Option<usize>,
+        window: LogTimeWindow,
         writer: &mut W,
     ) -> Result<(), LogError> {
         // We are opting to use oxlog to find logs rather than using a similar
@@ -575,6 +584,11 @@ impl LogsHandle {
         // internal structures like a list of running zones. Instead we operate
         // on all of the log paths that oxlog is capable of discovering via the
         // filesystem directly.
+        //
+        // The time window is enforced by oxlog's `date_range` filter, so the
+        // support bundle and the oxlog CLI share one set of semantics. Since
+        // a file's mtime is the timestamp of its newest line, this excludes
+        // files with no in-window content, current logs included.
         let zones = oxlog::Zones::load().map_err(|e| LogError::OxLog(e))?;
         let zone_logs = zones.zone_logs(
             zone,
@@ -585,7 +599,7 @@ impl LogsHandle {
                 // This will cause oxlog to call stat on each file resulting
                 // in a sorted order.
                 show_empty: false,
-                date_range: None,
+                date_range: window.to_date_range(),
             },
         );
 
@@ -616,12 +630,13 @@ impl LogsHandle {
     async fn get_zone_logs_inner<W: Write + Seek>(
         &self,
         zone_logs: BTreeMap<String, SvcLogs>,
-        max_rotated: usize,
+        max_rotated: Option<usize>,
         mut zip: zip::ZipWriter<W>,
         mut log_snapshots: &mut LogSnapshots,
     ) -> Result<(), LogError> {
         for (service, service_logs) in zone_logs {
             //  - Grab all of the service's SMF logs -
+
             if let Some(current) = service_logs.current {
                 self.process_logs(
                     &service,
@@ -655,12 +670,18 @@ impl LogsHandle {
                     .unwrap_or(0)
             });
 
-            for file in archived.iter().rev().take(max_rotated) {
+            // Apply the count cap only when the caller specified one. With a
+            // time window and no count cap, take everything in the window.
+            let mut to_process: Vec<&LogFile> = archived.iter().rev().collect();
+            if let Some(n) = max_rotated {
+                to_process.truncate(n);
+            }
+            for file in to_process {
                 self.process_logs(
                     &service,
                     &mut zip,
                     &mut log_snapshots,
-                    &file,
+                    file,
                     LogType::Archive,
                 )
                 .await?;
@@ -692,8 +713,14 @@ impl LogsHandle {
                     .await?;
                 }
 
-                // We clamp the number of rotated logs we grab to 5.
-                for log in logs.rotated.iter().rev().take(max_rotated) {
+                // Apply the optional count cap to rotated extras, mirroring
+                // the archived-log handling above.
+                let mut rotated: Vec<&LogFile> =
+                    logs.rotated.iter().copied().rev().collect();
+                if let Some(n) = max_rotated {
+                    rotated.truncate(n);
+                }
+                for log in rotated {
                     self.process_logs(
                         &service,
                         &mut zip,
@@ -710,6 +737,50 @@ impl LogsHandle {
 
         Ok(())
     }
+}
+
+/// Inclusive log-collection time window.
+///
+/// Bundles `start`/`end` into one type so callers can't accidentally swap
+/// them at the call site: the two bounds have the same type and the same
+/// `Option`-ness, and would otherwise be adjacent positional arguments.
+/// `None` on either side means unbounded on that side.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct LogTimeWindow {
+    pub start: Option<DateTime<Utc>>,
+    pub end: Option<DateTime<Utc>>,
+}
+
+impl LogTimeWindow {
+    /// Converts to oxlog's `DateRange`, substituting timestamp extremes for
+    /// unbounded sides. Returns `None` for a fully unbounded window so oxlog
+    /// skips filtering entirely.
+    ///
+    /// Note the argument order: `DateRange::new` takes the upper bound
+    /// (`before`) first.
+    fn to_date_range(self) -> Option<oxlog::DateRange> {
+        if self.start.is_none() && self.end.is_none() {
+            return None;
+        }
+        let start =
+            self.start.map(chrono_to_jiff).unwrap_or(jiff::Timestamp::MIN);
+        let end = self.end.map(chrono_to_jiff).unwrap_or(jiff::Timestamp::MAX);
+        Some(oxlog::DateRange::new(end, start))
+    }
+}
+
+fn chrono_to_jiff(ts: DateTime<Utc>) -> jiff::Timestamp {
+    jiff::Timestamp::try_from(std::time::SystemTime::from(ts)).unwrap_or_else(
+        |_| {
+            // Conversion fails only outside jiff's [-9999, 9999] year range;
+            // saturate toward the end we fell off of.
+            if ts.timestamp() < 0 {
+                jiff::Timestamp::MIN
+            } else {
+                jiff::Timestamp::MAX
+            }
+        },
+    )
 }
 
 fn write_log_to_zip<W: Write + Seek>(
@@ -927,6 +998,75 @@ mod test {
     use camino::Utf8PathBuf;
 
     use super::*;
+
+    #[test]
+    fn test_log_time_window_to_date_range() {
+        let ts = |secs| DateTime::<Utc>::from_timestamp(secs, 0).unwrap();
+        let file_at = |secs| oxlog::LogFile {
+            path: "/t.log".into(),
+            size: None,
+            modified: Some(jiff::Timestamp::from_second(secs).unwrap()),
+        };
+
+        // A fully unbounded window applies no filter at all.
+        assert!(LogTimeWindow::default().to_date_range().is_none());
+
+        // Both bounds set: inclusive on both ends. This also pins the
+        // (before, after) argument order of DateRange::new, which positional
+        // arguments would let us silently swap.
+        let range = LogTimeWindow { start: Some(ts(100)), end: Some(ts(200)) }
+            .to_date_range()
+            .unwrap();
+        assert!(file_at(100).in_date_range(&range));
+        assert!(file_at(150).in_date_range(&range));
+        assert!(file_at(200).in_date_range(&range));
+        assert!(!file_at(99).in_date_range(&range));
+        assert!(!file_at(201).in_date_range(&range));
+
+        // One-sided windows leave the other side unbounded.
+        let from = LogTimeWindow { start: Some(ts(100)), end: None }
+            .to_date_range()
+            .unwrap();
+        assert!(file_at(1_000_000_000).in_date_range(&from));
+        assert!(!file_at(99).in_date_range(&from));
+
+        let until = LogTimeWindow { start: None, end: Some(ts(200)) }
+            .to_date_range()
+            .unwrap();
+        assert!(file_at(0).in_date_range(&until));
+        assert!(!file_at(201).in_date_range(&until));
+
+        // Sub-second precision survives the chrono-to-jiff conversion: an
+        // end bound of 200.5s includes a file modified at 200.4s and
+        // excludes one modified at 200.6s.
+        let subsec_end =
+            DateTime::<Utc>::from_timestamp(200, 500_000_000).unwrap();
+        let file_at_nanos = |secs, nanos| oxlog::LogFile {
+            path: "/t.log".into(),
+            size: None,
+            modified: Some(jiff::Timestamp::new(secs, nanos).unwrap()),
+        };
+        let subsec = LogTimeWindow { start: None, end: Some(subsec_end) }
+            .to_date_range()
+            .unwrap();
+        assert!(file_at_nanos(200, 400_000_000).in_date_range(&subsec));
+        assert!(!file_at_nanos(200, 600_000_000).in_date_range(&subsec));
+
+        // Bounds outside jiff's representable range saturate toward the end
+        // they fell off of, rather than collapsing the window. chrono
+        // timestamps extend hundreds of thousands of years past jiff's
+        // year-9999 ceiling and year -9999 floor.
+        let far_future =
+            DateTime::<Utc>::from_timestamp(300_000_000_000, 0).unwrap();
+        let far_past =
+            DateTime::<Utc>::from_timestamp(-300_000_000_000, 0).unwrap();
+        let saturated =
+            LogTimeWindow { start: Some(far_past), end: Some(far_future) }
+                .to_date_range()
+                .unwrap();
+        assert!(file_at(0).in_date_range(&saturated));
+        assert!(file_at(1_000_000_000).in_date_range(&saturated));
+    }
 
     #[test]
     fn test_sort_cockroach_extra_logs() {

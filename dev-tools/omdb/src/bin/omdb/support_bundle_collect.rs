@@ -29,6 +29,7 @@ use nexus_db_queries::db::DataStore;
 use nexus_types::fm::ereport::EreportFilters;
 use nexus_types::support_bundle::BundleDataCategory;
 use nexus_types::support_bundle::BundleDataSelection;
+use nexus_types::support_bundle::BundleTimeRange;
 use omicron_uuid_kinds::SupportBundleUuid;
 use std::io::Write;
 use std::sync::Arc;
@@ -77,10 +78,21 @@ struct CollectArgs {
     /// Defaults to all categories.
     #[clap(long, value_enum)]
     include: Vec<BundleDataCategory>,
+
+    /// Only collect time-bounded data (zone logs, ereports) newer than
+    /// this age, e.g. "2days" or "12h 30m". Defaults to a 7-day window
+    /// ending at --until (or now).
+    #[clap(long, value_parser = humantime::parse_duration)]
+    since: Option<std::time::Duration>,
+
+    /// Only collect time-bounded data (zone logs, ereports) older than
+    /// this age, e.g. "1h". Must be a smaller age than --since.
+    #[clap(long, value_parser = humantime::parse_duration)]
+    until: Option<std::time::Duration>,
 }
 
 impl CollectArgs {
-    fn data_selection(&self) -> BundleDataSelection {
+    fn data_selection(&self) -> anyhow::Result<BundleDataSelection> {
         let categories: &[BundleDataCategory] = if self.include.is_empty() {
             BundleDataCategory::value_variants()
         } else {
@@ -94,17 +106,35 @@ impl CollectArgs {
                 BundleDataCategory::HostInfo => sel.with_all_sleds(),
                 BundleDataCategory::SledCubbyInfo => sel.with_sled_cubby_info(),
                 BundleDataCategory::SpDumps => sel.with_sp_dumps(),
-                BundleDataCategory::Ereports => sel.with_ereports(
-                    EreportFilters::new()
-                        .with_start_time(
-                            omicron_common::now_db_precision()
-                                - chrono::Days::new(7),
-                        )
-                        .expect("no end time set, cannot fail"),
-                ),
+                BundleDataCategory::Ereports => {
+                    sel.with_ereports(EreportFilters::new())
+                }
             };
         }
-        sel
+
+        // Both flags are ages relative to now: --since is the oldest data
+        // to include (the window's start), --until the newest (its end).
+        // Without --since, the collector fills in its default lookback,
+        // anchored to the end bound when one is given.
+        let now = omicron_common::now_db_precision();
+        let age_to_timestamp = |flag: &str, age: std::time::Duration| {
+            chrono::Duration::from_std(age)
+                .ok()
+                .and_then(|age| now.checked_sub_signed(age))
+                .with_context(|| format!("--{flag} ({age:?}) is too large"))
+        };
+        let start =
+            self.since.map(|age| age_to_timestamp("since", age)).transpose()?;
+        let end =
+            self.until.map(|age| age_to_timestamp("until", age)).transpose()?;
+        if let (Some(start), Some(end)) = (start, end) {
+            anyhow::ensure!(
+                start <= end,
+                "--since ({start}) must be an older point in time than \
+                 --until ({end})",
+            );
+        }
+        Ok(sel.with_time_range(BundleTimeRange::new(start, end)?))
     }
 }
 
@@ -156,7 +186,7 @@ impl CollectArgs {
             resolver,
             bundle_log,
             opctx,
-            self.data_selection(),
+            self.data_selection()?,
             bundle,
         ));
 

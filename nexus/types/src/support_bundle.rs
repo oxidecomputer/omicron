@@ -8,10 +8,12 @@
 //! They are shared between the support bundle collector and FM case types.
 
 use crate::fm::ereport::EreportFilters;
+use chrono::DateTime;
+use chrono::Utc;
 use itertools::Itertools;
 use omicron_uuid_kinds::SledUuid;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::collections::HashSet;
 use std::fmt;
 
@@ -23,6 +25,8 @@ use std::fmt;
     Hash,
     Eq,
     PartialEq,
+    Ord,
+    PartialOrd,
     Serialize,
     Deserialize,
     clap::ValueEnum,
@@ -99,38 +103,126 @@ impl fmt::Display for DisplayBundleData<'_> {
     }
 }
 
+/// Inclusive time bound applied bundle-wide to time-bounded categories
+/// (currently host-info logs and ereports).
+///
+/// `None` on either side means unbounded on that side. When both bounds are
+/// set, `start <= end` holds: construction and deserialization both reject
+/// inverted ranges, and persistence backstops the invariant with a database
+/// CHECK constraint.
+#[derive(Debug, Clone, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(try_from = "UncheckedBundleTimeRange")]
+pub struct BundleTimeRange {
+    start: Option<DateTime<Utc>>,
+    end: Option<DateTime<Utc>>,
+}
+
+impl BundleTimeRange {
+    /// Creates a range, rejecting `start > end` when both bounds are set.
+    pub fn new(
+        start: Option<DateTime<Utc>>,
+        end: Option<DateTime<Utc>>,
+    ) -> anyhow::Result<Self> {
+        if let (Some(start), Some(end)) = (start, end) {
+            anyhow::ensure!(
+                start <= end,
+                "time range start ({start}) must not be later than \
+                 its end ({end})"
+            );
+        }
+        Ok(Self { start, end })
+    }
+
+    pub fn start(&self) -> Option<DateTime<Utc>> {
+        self.start
+    }
+
+    pub fn end(&self) -> Option<DateTime<Utc>> {
+        self.end
+    }
+}
+
+/// Mirror of [`BundleTimeRange`] that deserialization goes through so
+/// inverted ranges are rejected there as well.
+#[derive(Deserialize)]
+struct UncheckedBundleTimeRange {
+    start: Option<DateTime<Utc>>,
+    end: Option<DateTime<Utc>>,
+}
+
+impl TryFrom<UncheckedBundleTimeRange> for BundleTimeRange {
+    type Error = String;
+
+    fn try_from(value: UncheckedBundleTimeRange) -> Result<Self, String> {
+        Self::new(value.start, value.end).map_err(|e| e.to_string())
+    }
+}
+
 /// A collection of bundle data specifications.
 ///
 /// This wrapper ensures that categories and data always match - you can't
 /// insert (BundleDataCategory::Reconfigurator, BundleData::SpDumps)
 /// because each BundleData determines its own category.
-#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
+///
+/// `time_range`, when set, bounds every time-bounded category's collection
+/// (host-info logs and ereports). Stored as one field here rather than
+/// copied into per-category filters.
+#[derive(Debug, Clone, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct BundleDataSelection {
-    data: HashMap<BundleDataCategory, BundleData>,
+    // Ordered so iteration (and therefore display output) is deterministic.
+    data: BTreeMap<BundleDataCategory, BundleData>,
+    time_range: Option<BundleTimeRange>,
 }
 
 impl BundleDataSelection {
+    /// The default collection lookback, applied when a selection does not
+    /// specify a start bound for its time range.
+    pub const DEFAULT_LOOKBACK: chrono::Days = chrono::Days::new(7);
+
     /// Creates an empty selection with no data categories.
     pub fn new() -> Self {
-        Self { data: HashMap::new() }
+        Self::default()
     }
 
     /// Returns a selection containing all default data categories
-    /// (i.e. "collect everything").
+    /// (i.e. "collect everything") with a bundle-wide time window covering
+    /// the default lookback.
     pub fn all() -> Self {
-        Self::new()
+        let mut selection = Self::new()
             .with_reconfigurator()
             .with_all_sleds()
             .with_sled_cubby_info()
             .with_sp_dumps()
-            .with_ereports(
-                EreportFilters::new()
-                    .with_start_time(
-                        omicron_common::now_db_precision()
-                            - chrono::Days::new(7),
-                    )
-                    .expect("no end time set, cannot fail"),
-            )
+            .with_ereports(EreportFilters::new());
+        selection.ensure_start_bound(
+            omicron_common::now_db_precision(),
+            Self::DEFAULT_LOOKBACK,
+        );
+        selection
+    }
+
+    /// Ensures the bundle-wide time range has a start bound.
+    ///
+    /// When the selection has no range, or a range without a start bound,
+    /// the start is filled in `lookback` before the range's end bound, or
+    /// before `now` when the range has no end bound either. Existing bounds
+    /// are preserved.
+    pub fn ensure_start_bound(
+        &mut self,
+        now: DateTime<Utc>,
+        lookback: chrono::Days,
+    ) {
+        let range = self.time_range.get_or_insert_with(Default::default);
+        if range.start.is_none() {
+            let anchor = range.end.unwrap_or(now);
+            // Checked subtraction: an end bound near the minimum
+            // representable time would otherwise underflow.
+            range.start = Some(
+                anchor
+                    .checked_sub_days(lookback)
+                    .unwrap_or(DateTime::<Utc>::MIN_UTC),
+            );
+        }
     }
 
     /// Adds reconfigurator state collection.
@@ -174,10 +266,23 @@ impl BundleDataSelection {
         self
     }
 
+    /// Sets the bundle-wide time range. Affects every time-bounded category
+    /// (host-info logs and ereports) at collection time.
+    pub fn with_time_range(mut self, range: BundleTimeRange) -> Self {
+        self.time_range = Some(range);
+        self
+    }
+
     /// Inserts a [`BundleData`] value. If a value with the same category
     /// already exists, the last write wins.
     pub fn insert(&mut self, bundle_data: BundleData) {
         self.data.insert(bundle_data.category(), bundle_data);
+    }
+
+    /// Sets the bundle-wide time range in place (used by code paths that
+    /// build the selection incrementally, e.g. database read paths).
+    pub fn set_time_range(&mut self, range: Option<BundleTimeRange>) {
+        self.time_range = range;
     }
 
     /// Returns `true` if reconfigurator state should be collected.
@@ -212,12 +317,18 @@ impl BundleDataSelection {
             _ => None,
         }
     }
+
+    /// Returns the bundle-wide time range, if any was set. Applies to every
+    /// time-bounded category at collection time.
+    pub fn time_range(&self) -> Option<&BundleTimeRange> {
+        self.time_range.as_ref()
+    }
 }
 
 impl IntoIterator for BundleDataSelection {
     type Item = BundleData;
     type IntoIter =
-        std::collections::hash_map::IntoValues<BundleDataCategory, BundleData>;
+        std::collections::btree_map::IntoValues<BundleDataCategory, BundleData>;
 
     fn into_iter(self) -> Self::IntoIter {
         self.data.into_values()
@@ -227,7 +338,7 @@ impl IntoIterator for BundleDataSelection {
 impl<'a> IntoIterator for &'a BundleDataSelection {
     type Item = &'a BundleData;
     type IntoIter =
-        std::collections::hash_map::Values<'a, BundleDataCategory, BundleData>;
+        std::collections::btree_map::Values<'a, BundleDataCategory, BundleData>;
 
     fn into_iter(self) -> Self::IntoIter {
         self.data.values()
@@ -266,13 +377,25 @@ impl fmt::Display for DisplayBundleDataSelection<'_> {
             }
             write!(f, "{:>indent$}- {}", "", item.display())?;
         }
+        if let Some(range) = self.selection.time_range() {
+            if !self.selection.data.is_empty() {
+                writeln!(f)?;
+            }
+            let bound = |b: &Option<DateTime<Utc>>| match b {
+                Some(ts) => {
+                    ts.to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+                }
+                None => "unbounded".to_string(),
+            };
+            write!(
+                f,
+                "{:>indent$}- time_range(start: {}, end: {})",
+                "",
+                bound(&range.start),
+                bound(&range.end),
+            )?;
+        }
         Ok(())
-    }
-}
-
-impl Default for BundleDataSelection {
-    fn default() -> Self {
-        Self::new()
     }
 }
 
@@ -321,13 +444,51 @@ pub(crate) mod test_utils {
     use super::*;
     use proptest::prelude::*;
 
+    fn arb_datetime() -> impl Strategy<Value = DateTime<Utc>> {
+        // Span the full representable range of `DateTime<Utc>` so
+        // round-trip tests exercise far-past and far-future times,
+        // not just a hand-picked window that drifts out of date.
+        let min = DateTime::<Utc>::MIN_UTC.timestamp();
+        let max = DateTime::<Utc>::MAX_UTC.timestamp();
+        (min..=max).prop_map(|secs| DateTime::from_timestamp(secs, 0).unwrap())
+    }
+
+    impl Arbitrary for BundleTimeRange {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
+            // Generated bounds are ordered (start <= end when both are
+            // set) so arbitrary selections satisfy the database CHECK
+            // constraint when round-tripped through persistence tests.
+            (prop::option::of(arb_datetime()), prop::option::of(arb_datetime()))
+                .prop_map(|(a, b)| {
+                    let (start, end) = match (a, b) {
+                        (Some(a), Some(b)) => (Some(a.min(b)), Some(a.max(b))),
+                        (start, end) => (start, end),
+                    };
+                    BundleTimeRange::new(start, end)
+                        .expect("bounds are ordered")
+                })
+                .boxed()
+        }
+    }
+
     impl Arbitrary for BundleDataSelection {
         type Parameters = ();
         type Strategy = BoxedStrategy<Self>;
 
         fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
-            prop::collection::vec(any::<BundleData>(), 0..=5)
-                .prop_map(|data| data.into_iter().collect())
+            (
+                prop::collection::vec(any::<BundleData>(), 0..=5),
+                prop::option::of(any::<BundleTimeRange>()),
+            )
+                .prop_map(|(data, time_range)| {
+                    let mut sel: BundleDataSelection =
+                        data.into_iter().collect();
+                    sel.set_time_range(time_range);
+                    sel
+                })
                 .boxed()
         }
     }
@@ -345,5 +506,66 @@ mod tests {
         let deserialized: BundleDataSelection =
             serde_json::from_str(&json).unwrap();
         prop_assert_eq!(selection, deserialized);
+    }
+
+    #[test]
+    fn ensure_start_bound_fills_only_missing_start() {
+        let ts = |secs| DateTime::<Utc>::from_timestamp(secs, 0).unwrap();
+        const WEEK_SECS: i64 = 7 * 24 * 60 * 60;
+        let now = ts(10 * WEEK_SECS);
+        let lookback = chrono::Days::new(7);
+
+        // No range at all: the lookback anchors to `now`.
+        let mut selection = BundleDataSelection::new();
+        selection.ensure_start_bound(now, lookback);
+        let range = selection.time_range().unwrap();
+        assert_eq!(range.start(), Some(ts(9 * WEEK_SECS)));
+        assert_eq!(range.end(), None);
+
+        // With only an end bound, the lookback anchors to it instead, and
+        // it is preserved.
+        let mut selection = BundleDataSelection::new().with_time_range(
+            BundleTimeRange::new(None, Some(ts(5 * WEEK_SECS))).unwrap(),
+        );
+        selection.ensure_start_bound(now, lookback);
+        let range = selection.time_range().unwrap();
+        assert_eq!(range.start(), Some(ts(4 * WEEK_SECS)));
+        assert_eq!(range.end(), Some(ts(5 * WEEK_SECS)));
+
+        // An existing start bound is left alone.
+        let mut selection = BundleDataSelection::new()
+            .with_time_range(BundleTimeRange::new(Some(ts(50)), None).unwrap());
+        selection.ensure_start_bound(now, lookback);
+        let range = selection.time_range().unwrap();
+        assert_eq!(range.start(), Some(ts(50)));
+        assert_eq!(range.end(), None);
+
+        // An end bound at the minimum representable time saturates rather
+        // than underflowing.
+        let mut selection = BundleDataSelection::new().with_time_range(
+            BundleTimeRange::new(None, Some(DateTime::<Utc>::MIN_UTC)).unwrap(),
+        );
+        selection.ensure_start_bound(now, lookback);
+        let range = selection.time_range().unwrap();
+        assert_eq!(range.start(), Some(DateTime::<Utc>::MIN_UTC));
+        assert_eq!(range.end(), Some(DateTime::<Utc>::MIN_UTC));
+    }
+
+    #[test]
+    fn bundle_time_range_rejects_inverted_bounds() {
+        let ts = |secs| DateTime::<Utc>::from_timestamp(secs, 0).unwrap();
+
+        assert!(BundleTimeRange::new(Some(ts(200)), Some(ts(100))).is_err());
+        assert!(BundleTimeRange::new(Some(ts(100)), Some(ts(100))).is_ok());
+        assert!(BundleTimeRange::new(Some(ts(100)), Some(ts(200))).is_ok());
+        assert!(BundleTimeRange::new(None, None).is_ok());
+
+        // Deserialization rejects inverted ranges too.
+        let inverted =
+            r#"{"start":"2024-01-02T00:00:00Z","end":"2024-01-01T00:00:00Z"}"#;
+        assert!(serde_json::from_str::<BundleTimeRange>(inverted).is_err());
+        let ordered =
+            r#"{"start":"2024-01-01T00:00:00Z","end":"2024-01-02T00:00:00Z"}"#;
+        assert!(serde_json::from_str::<BundleTimeRange>(ordered).is_ok());
     }
 }

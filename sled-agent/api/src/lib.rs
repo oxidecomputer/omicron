@@ -39,6 +39,7 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
+    (49, ADD_LOG_TIME_RANGE),
     (48, ALLOW_DDM_TRAFFIC),
     (47, BGP_PEER_SRC_ADDR),
     (46, MODIFY_SVC_STATE_ENUM),
@@ -1514,6 +1515,7 @@ pub trait SledAgentApi {
     #[endpoint {
         method = GET,
         path = "/support/logs/download/{zone}",
+        versions = VERSION_ADD_LOG_TIME_RANGE..,
     }]
     async fn support_logs_download(
         request_context: RequestContext<Self::Context>,
@@ -1524,6 +1526,30 @@ pub trait SledAgentApi {
             latest::diagnostics::SledDiagnosticsLogsDownloadQueryParam,
         >,
     ) -> Result<http::Response<Body>, HttpError>;
+
+    /// This endpoint returns a zip file of a zone's logs organized by service.
+    #[endpoint {
+        operation_id = "support_logs_download",
+        method = GET,
+        path = "/support/logs/download/{zone}",
+        versions = ..VERSION_ADD_LOG_TIME_RANGE,
+    }]
+    async fn support_logs_download_v1(
+        request_context: RequestContext<Self::Context>,
+        path_params: Path<
+            v1::diagnostics::SledDiagnosticsLogsDownloadPathParam,
+        >,
+        query_params: Query<
+            v1::diagnostics::SledDiagnosticsLogsDownloadQueryParam,
+        >,
+    ) -> Result<http::Response<Body>, HttpError> {
+        Self::support_logs_download(
+            request_context,
+            path_params,
+            query_params.map(Into::into),
+        )
+        .await
+    }
 
     /// This endpoint reports the status of the `destroy_orphaned_datasets`
     /// chicken switch. It will be removed with omicron#6177.

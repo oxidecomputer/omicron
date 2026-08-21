@@ -9,13 +9,15 @@ use nexus_db_schema::schema::{
     support_bundle_data_selection_ereports,
     support_bundle_data_selection_flags,
     support_bundle_data_selection_host_info,
+    support_bundle_data_selection_time_range,
 };
 
 use chrono::{DateTime, Utc};
 use nexus_types::external_api::support_bundle as support_bundle_types;
-use nexus_types::fm::ereport::{EreportFilters, EreportFiltersParams};
+use nexus_types::fm::ereport::EreportFilters;
 use nexus_types::internal_api::views as internal_views;
 use nexus_types::support_bundle::BundleData;
+use nexus_types::support_bundle::BundleTimeRange;
 use nexus_types::support_bundle::SledSelection;
 use omicron_uuid_kinds::CaseKind;
 use omicron_uuid_kinds::CaseUuid;
@@ -216,8 +218,6 @@ impl From<HostInfo> for BundleData {
 #[diesel(table_name = support_bundle_data_selection_ereports)]
 pub struct Ereports {
     pub bundle_id: DbTypedUuid<SupportBundleKind>,
-    pub start_time: Option<DateTime<Utc>>,
-    pub end_time: Option<DateTime<Utc>>,
     pub only_serials: Vec<String>,
     pub only_classes: Vec<String>,
 }
@@ -229,38 +229,56 @@ impl Ereports {
     ) -> Self {
         Ereports {
             bundle_id: bundle_id.into(),
-            start_time: filters.start_time(),
-            end_time: filters.end_time(),
             only_serials: filters.only_serials().to_vec(),
             only_classes: filters.only_classes().to_vec(),
         }
     }
 }
 
-impl TryFrom<Ereports> for BundleData {
-    type Error = omicron_common::api::external::Error;
-
-    fn try_from(row: Ereports) -> Result<Self, Self::Error> {
-        let Ereports {
-            bundle_id: _,
-            start_time,
-            end_time,
-            only_serials,
-            only_classes,
-        } = row;
-        EreportFiltersParams {
-            start_time,
-            end_time,
-            only_serials,
-            only_classes,
-        }
-        .try_into()
-        .map(BundleData::Ereports)
+impl From<Ereports> for BundleData {
+    fn from(row: Ereports) -> Self {
+        let Ereports { bundle_id: _, only_serials, only_classes } = row;
+        BundleData::Ereports(
+            EreportFilters::new()
+                .with_serials(only_serials)
+                .with_classes(only_classes),
+        )
     }
 }
 
-/// Joined query result: flags + optional host_info + optional ereports.
-/// All fields use `#[diesel(embed)]` so no `table_name` is needed.
+/// Bundle-wide time range row. Row existence indicates a range was set.
+#[derive(Queryable, Insertable, Clone, Debug, Selectable)]
+#[diesel(table_name = support_bundle_data_selection_time_range)]
+pub struct TimeRange {
+    pub bundle_id: DbTypedUuid<SupportBundleKind>,
+    pub start_time: Option<DateTime<Utc>>,
+    pub end_time: Option<DateTime<Utc>>,
+}
+
+impl TimeRange {
+    pub fn new(
+        bundle_id: impl Into<DbTypedUuid<SupportBundleKind>>,
+        range: &BundleTimeRange,
+    ) -> Self {
+        TimeRange {
+            bundle_id: bundle_id.into(),
+            start_time: range.start(),
+            end_time: range.end(),
+        }
+    }
+}
+
+impl From<TimeRange> for BundleTimeRange {
+    fn from(row: TimeRange) -> Self {
+        let TimeRange { bundle_id: _, start_time, end_time } = row;
+        BundleTimeRange::new(start_time, end_time)
+            .expect("database CHECK constraint enforces start <= end")
+    }
+}
+
+/// Joined query result: flags + optional host_info + optional ereports +
+/// optional time_range. All fields use `#[diesel(embed)]` so no `table_name`
+/// is needed.
 #[derive(Queryable, Selectable)]
 pub struct BundleDataSelection {
     #[diesel(embed)]
@@ -269,6 +287,8 @@ pub struct BundleDataSelection {
     pub host_info: Option<HostInfo>,
     #[diesel(embed)]
     pub ereports: Option<Ereports>,
+    #[diesel(embed)]
+    pub time_range: Option<TimeRange>,
 }
 
 impl TryFrom<BundleDataSelection>
@@ -292,8 +312,9 @@ impl TryFrom<BundleDataSelection>
             selection.insert(host_info.into());
         }
         if let Some(ereports) = row.ereports {
-            selection.insert(ereports.try_into()?);
+            selection.insert(ereports.into());
         }
+        selection.set_time_range(row.time_range.map(Into::into));
         Ok(selection)
     }
 }
