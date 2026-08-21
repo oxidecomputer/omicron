@@ -123,6 +123,7 @@ mod region_replacement;
 mod region_snapshot;
 pub mod region_snapshot_replacement;
 mod rendezvous_debug_dataset;
+mod rendezvous_sled_bp_availability;
 mod role;
 mod saga;
 mod scim;

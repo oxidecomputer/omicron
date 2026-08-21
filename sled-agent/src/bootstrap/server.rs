@@ -7,7 +7,6 @@
 use super::RssAccessError;
 use super::http_entrypoints_lockstep;
 use super::http_entrypoints_lockstep::BootstrapServerContext;
-use super::views::SledAgentResponse;
 use crate::bootstrap::maghemite;
 use crate::bootstrap::pre_server::BootstrapAgentStartup;
 use crate::bootstrap::pumpkind;
@@ -36,6 +35,7 @@ use omicron_ledger as ledger;
 use omicron_ledger::Ledger;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::RackInitUuid;
+use sled_agent_bootstrap_common::sprockets::SledAgentResponse;
 use sled_agent_config_reconciler::ConfigReconcilerSpawnToken;
 use sled_agent_config_reconciler::InternalDisksReceiver;
 use sled_agent_rack_setup::RackInitializeRequestParams;

@@ -109,6 +109,7 @@ define_enums! {
     SagaAbandonReasonEnum => "saga_abandon_reason",
     SagaStateEnum => "saga_state",
     ServiceKindEnum => "service_kind",
+    SledBpAvailabilityEnum => "sled_bp_availability",
     SledCpuFamilyEnum => "sled_cpu_family",
     SledPolicyEnum => "sled_policy",
     SledResourceVmmStateEnum => "sled_resource_vmm_state",
