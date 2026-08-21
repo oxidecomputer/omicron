@@ -99,7 +99,7 @@ num-iter = { version = "0.1.45", default-features = false, features = ["i128"] }
 num-traits = { version = "0.2.19", features = ["i128", "libm"] }
 once_cell = { version = "1.21.3", features = ["critical-section"] }
 openapiv3 = { version = "2.2.0", default-features = false, features = ["skip_serializing_defaults"] }
-oxide-generation = { version = "0.1.0", default-features = false, features = ["daft01", "proptest1", "schemars08", "serde", "slog2"] }
+oxide-generation = { version = "0.1.2", default-features = false, features = ["daft01", "proptest1", "schemars08", "serde", "slog2"] }
 peg-runtime = { version = "0.8.5", default-features = false, features = ["std"] }
 pem-rfc7468 = { version = "0.7.0", default-features = false, features = ["std"] }
 percent-encoding = { version = "2.3.2" }
@@ -253,7 +253,7 @@ num-iter = { version = "0.1.45", default-features = false, features = ["i128"] }
 num-traits = { version = "0.2.19", features = ["i128", "libm"] }
 once_cell = { version = "1.21.3", features = ["critical-section"] }
 openapiv3 = { version = "2.2.0", default-features = false, features = ["skip_serializing_defaults"] }
-oxide-generation = { version = "0.1.0", default-features = false, features = ["daft01", "proptest1", "schemars08", "serde", "slog2"] }
+oxide-generation = { version = "0.1.2", default-features = false, features = ["daft01", "proptest1", "schemars08", "serde", "slog2"] }
 peg-runtime = { version = "0.8.5", default-features = false, features = ["std"] }
 pem-rfc7468 = { version = "0.7.0", default-features = false, features = ["std"] }
 percent-encoding = { version = "2.3.2" }
@@ -332,7 +332,6 @@ zip-3b31131e45eafb45 = { package = "zip", version = "0.6.6", default-features = 
 cookie = { version = "0.18.1", default-features = false, features = ["percent-encode"] }
 dof-468e82937335b1c9 = { package = "dof", version = "0.3.0", default-features = false, features = ["des"] }
 dof-9fbad63c4bcf4a8f = { package = "dof", version = "0.4.0", default-features = false, features = ["des"] }
-getrandom-468e82937335b1c9 = { package = "getrandom", version = "0.3.4", default-features = false, features = ["std"] }
 hyper-rustls = { version = "0.27.7", features = ["http2"] }
 hyper-util = { version = "0.1.20", features = ["full"] }
 linux-raw-sys = { version = "0.4.15", default-features = false, features = ["elf", "errno", "general", "ioctl", "no_std", "system"] }
@@ -348,7 +347,6 @@ tokio-rustls = { version = "0.26.4", default-features = false, features = ["aws-
 cookie = { version = "0.18.1", default-features = false, features = ["percent-encode"] }
 dof-468e82937335b1c9 = { package = "dof", version = "0.3.0", default-features = false, features = ["des"] }
 dof-9fbad63c4bcf4a8f = { package = "dof", version = "0.4.0", default-features = false, features = ["des"] }
-getrandom-468e82937335b1c9 = { package = "getrandom", version = "0.3.4", default-features = false, features = ["std"] }
 hyper-rustls = { version = "0.27.7", features = ["http2"] }
 hyper-util = { version = "0.1.20", features = ["full"] }
 linux-raw-sys = { version = "0.4.15", default-features = false, features = ["elf", "errno", "general", "ioctl", "no_std", "system"] }
@@ -363,7 +361,6 @@ tokio-rustls = { version = "0.26.4", default-features = false, features = ["aws-
 [target.x86_64-apple-darwin.dependencies]
 cookie = { version = "0.18.1", default-features = false, features = ["percent-encode"] }
 errno = { version = "0.3.14" }
-getrandom-468e82937335b1c9 = { package = "getrandom", version = "0.3.4", default-features = false, features = ["std"] }
 hyper-rustls = { version = "0.27.7", features = ["http2"] }
 hyper-util = { version = "0.1.20", features = ["full"] }
 miniz_oxide = { version = "0.8.9", default-features = false, features = ["simd", "with-alloc"] }
@@ -377,7 +374,6 @@ tokio-rustls = { version = "0.26.4", default-features = false, features = ["aws-
 [target.x86_64-apple-darwin.build-dependencies]
 cookie = { version = "0.18.1", default-features = false, features = ["percent-encode"] }
 errno = { version = "0.3.14" }
-getrandom-468e82937335b1c9 = { package = "getrandom", version = "0.3.4", default-features = false, features = ["std"] }
 hyper-rustls = { version = "0.27.7", features = ["http2"] }
 hyper-util = { version = "0.1.20", features = ["full"] }
 miniz_oxide = { version = "0.8.9", default-features = false, features = ["simd", "with-alloc"] }
@@ -391,7 +387,6 @@ tokio-rustls = { version = "0.26.4", default-features = false, features = ["aws-
 [target.aarch64-apple-darwin.dependencies]
 cookie = { version = "0.18.1", default-features = false, features = ["percent-encode"] }
 errno = { version = "0.3.14" }
-getrandom-468e82937335b1c9 = { package = "getrandom", version = "0.3.4", default-features = false, features = ["std"] }
 hyper-rustls = { version = "0.27.7", features = ["http2"] }
 hyper-util = { version = "0.1.20", features = ["full"] }
 miniz_oxide = { version = "0.8.9", default-features = false, features = ["simd", "with-alloc"] }
@@ -405,7 +400,6 @@ tokio-rustls = { version = "0.26.4", default-features = false, features = ["aws-
 [target.aarch64-apple-darwin.build-dependencies]
 cookie = { version = "0.18.1", default-features = false, features = ["percent-encode"] }
 errno = { version = "0.3.14" }
-getrandom-468e82937335b1c9 = { package = "getrandom", version = "0.3.4", default-features = false, features = ["std"] }
 hyper-rustls = { version = "0.27.7", features = ["http2"] }
 hyper-util = { version = "0.1.20", features = ["full"] }
 miniz_oxide = { version = "0.8.9", default-features = false, features = ["simd", "with-alloc"] }
@@ -423,7 +417,6 @@ cookie = { version = "0.18.1", default-features = false, features = ["percent-en
 dof-468e82937335b1c9 = { package = "dof", version = "0.3.0", default-features = false, features = ["des"] }
 dof-9fbad63c4bcf4a8f = { package = "dof", version = "0.4.0", default-features = false, features = ["des"] }
 errno = { version = "0.3.14" }
-getrandom-468e82937335b1c9 = { package = "getrandom", version = "0.3.4", default-features = false, features = ["std"] }
 hyper-rustls = { version = "0.27.7", features = ["http2"] }
 hyper-util = { version = "0.1.20", features = ["full"] }
 inout = { version = "0.2.2", default-features = false, features = ["block-padding"] }
@@ -444,7 +437,6 @@ cookie = { version = "0.18.1", default-features = false, features = ["percent-en
 dof-468e82937335b1c9 = { package = "dof", version = "0.3.0", default-features = false, features = ["des"] }
 dof-9fbad63c4bcf4a8f = { package = "dof", version = "0.4.0", default-features = false, features = ["des"] }
 errno = { version = "0.3.14" }
-getrandom-468e82937335b1c9 = { package = "getrandom", version = "0.3.4", default-features = false, features = ["std"] }
 hyper-rustls = { version = "0.27.7", features = ["http2"] }
 hyper-util = { version = "0.1.20", features = ["full"] }
 inout = { version = "0.2.2", default-features = false, features = ["block-padding"] }
