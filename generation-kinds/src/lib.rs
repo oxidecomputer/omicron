@@ -17,7 +17,6 @@ pub use oxide_generation::{
     TypedGenerationKind, TypedGenerationTag,
 };
 
-use daft::Diffable;
 use oxide_generation_macros::impl_typed_generation_kinds;
 
 // NOTE:
@@ -30,7 +29,6 @@ use oxide_generation_macros::impl_typed_generation_kinds;
 // Please keep this list in alphabetical order.
 impl_typed_generation_kinds! {
     settings = {
-        attrs = [#[derive(Diffable)]],
         schemars08 = {
             attrs = [#[cfg(feature = "schemars08")]],
             rust_type = {
@@ -42,6 +40,7 @@ impl_typed_generation_kinds! {
     },
     kinds = {
         Alert = {},
+        SagaAdopt = {},
         SagaReassignment = {},
         SupportBundle = {},
     },

@@ -31,6 +31,28 @@ use omicron_generation_kinds::TypedGenerationKind;
 pub type MarkerTable<R> =
     <<R as FmRendezvousResource>::IdColumn as Column>::Table;
 
+/// The generation kind stored in some [`FmRendezvousResource`] `R`'s
+/// [`FmRendezvousResource::GenerationColumn`].
+pub type GenerationKind<R> =
+    <<R as FmRendezvousResource>::GenerationColumn as SitrepGenerationColumn>::Kind;
+
+/// A per-resource-type generation column on the `fm_sitrep` table, paired
+/// with the generation kind of the values it stores.
+pub trait SitrepGenerationColumn:
+    Column<Table = schema::fm_sitrep::table>
+{
+    /// The generation kind of the values stored in this column.
+    type Kind: TypedGenerationKind;
+}
+
+impl SitrepGenerationColumn for schema::fm_sitrep::alert_generation {
+    type Kind = omicron_generation_kinds::AlertGenerationKind;
+}
+
+impl SitrepGenerationColumn for schema::fm_sitrep::support_bundle_generation {
+    type Kind = omicron_generation_kinds::SupportBundleGenerationKind;
+}
+
 /// A resource created by FM rendezvous, comprising the Diesel schema types
 /// required to generically construct useful queries / CTEs that operate on that
 /// resource.
@@ -85,11 +107,7 @@ where
     /// [`SitrepGuardedInsert`] to guard against stale execution.
     ///
     /// [`SitrepGuardedInsert`]: crate::db::sitrep_guard::SitrepGuardedInsert
-    type GenerationColumn: Column<Table = schema::fm_sitrep::table>;
-
-    /// The generation kind counted by [`Self::GenerationColumn`] (e.g.
-    /// `omicron_generation_kinds::AlertKind` for `Alert`).
-    type GenerationKind: TypedGenerationKind;
+    type GenerationColumn: SitrepGenerationColumn;
 
     /// The id column in the creation marker table
     /// (e.g. `rendezvous_alert_created::alert_id` for `Alert`).
@@ -102,15 +120,13 @@ where
 }
 
 impl FmRendezvousResource for nexus_db_model::Alert {
-    type GenerationColumn = schema::fm_sitrep::dsl::alert_generation;
-    type GenerationKind = omicron_generation_kinds::AlertKind;
+    type GenerationColumn = schema::fm_sitrep::alert_generation;
     type IdColumn = schema::rendezvous_alert_created::dsl::alert_id;
     type RequestTable = schema::fm_alert_request::table;
 }
 
 impl FmRendezvousResource for nexus_db_model::SupportBundle {
-    type GenerationColumn = schema::fm_sitrep::dsl::support_bundle_generation;
-    type GenerationKind = omicron_generation_kinds::SupportBundleKind;
+    type GenerationColumn = schema::fm_sitrep::support_bundle_generation;
     type IdColumn =
         schema::rendezvous_support_bundle_created::dsl::support_bundle_id;
     type RequestTable = schema::fm_support_bundle_request::table;
@@ -126,6 +142,7 @@ impl FmRendezvousResource for nexus_db_model::SupportBundle {
 #[cfg(test)]
 pub(crate) mod test_utils {
     use super::FmRendezvousResource;
+    use super::SitrepGenerationColumn;
     use crate::context::OpContext;
     use crate::db::DataStore;
     use async_bb8_diesel::AsyncRunQueryDsl;
@@ -197,9 +214,12 @@ pub(crate) mod test_utils {
         const TAG: TypedGenerationTag = TypedGenerationTag::new("dummy");
     }
 
+    impl SitrepGenerationColumn for dummy_generation {
+        type Kind = DummyGenerationKind;
+    }
+
     impl FmRendezvousResource for DummyResource {
         type GenerationColumn = dummy_generation;
-        type GenerationKind = DummyGenerationKind;
         type IdColumn = dummy_marker::dsl::dummy_id;
         type RequestTable = dummy_request::table;
     }

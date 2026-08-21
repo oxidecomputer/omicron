@@ -27,6 +27,7 @@
 //! [`SupportBundleRequest`]: nexus_types::fm::case::SupportBundleRequest
 
 use crate::db::fm_rendezvous_resources::FmRendezvousResource;
+use crate::db::fm_rendezvous_resources::GenerationKind;
 use crate::db::fm_rendezvous_resources::MarkerTable;
 use crate::db::true_or_cast_error::matches_sentinel;
 use async_bb8_diesel::AsyncRunQueryDsl;
@@ -68,7 +69,7 @@ where
     /// Resource generation in the sitrep currently being executed by
     /// fm_rendezvous. The `stale_guard` CTE requires this to equal the latest
     /// sitrep's value of [`FmRendezvousResource::GenerationColumn`].
-    expected_generation: DbTypedGeneration<R::GenerationKind>,
+    expected_generation: DbTypedGeneration<GenerationKind<R>>,
 
     /// Caller-built INSERT for the resource row itself, nested into the
     /// `new_resource` CTE via [`QueryFragment::walk_ast`].
@@ -105,7 +106,7 @@ where
     ///
     pub fn new(
         resource_id: Uuid,
-        expected_generation: TypedGeneration<R::GenerationKind>,
+        expected_generation: TypedGeneration<GenerationKind<R>>,
         resource_insert: ISR,
     ) -> Self {
         let marker_from_clause =

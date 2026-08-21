@@ -9371,6 +9371,7 @@
         ]
       },
       "SagaReassignmentGeneration": {
+        "description": "Generation numbers stored in the database, used for optimistic concurrency control",
         "x-rust-type": {
           "crate": "omicron-generation-kinds",
           "path": "omicron_generation_kinds::SagaReassignmentGeneration",

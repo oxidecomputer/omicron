@@ -9,10 +9,10 @@ workspace = true
 
 # The dependencies and features are written so as to make it easy for no-std
 # code to import omicron-generation-kinds. All the features below are turned on
-# within omicron.
+# within omicron, except for `testing`, which is only turned on by crates that
+# need `proptest::Arbitrary` impls for generation numbers.
 
 [dependencies]
-daft.workspace = true
 oxide-generation = { workspace = true, features = ["daft01"] }
 oxide-generation-macros.workspace = true
 
@@ -20,6 +20,6 @@ oxide-generation-macros.workspace = true
 default = ["std"]
 serde = ["oxide-generation/serde"]
 schemars08 = ["oxide-generation/schemars08", "std"]
-slog2 = ["oxide-generation/slog2", "std"]
+slog2 = ["oxide-generation/slog2"]
 std = ["oxide-generation/std"]
 testing = ["oxide-generation/proptest1"]

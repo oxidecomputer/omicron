@@ -13,17 +13,9 @@ use diesel::sql_types;
 use omicron_generation_kinds::{
     Generation, GenericGeneration, TypedGeneration, TypedGenerationKind,
 };
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
 use std::fmt;
-use std::str::FromStr;
 
 /// Returns the corresponding `DbTypedGeneration` for this `TypedGeneration`.
-///
-/// Code external to the `db-model` crate sometimes needs a way to convert a
-/// `TypedGeneration` to a `DbTypedGeneration`. We don't want
-/// `DbTypedGeneration` to be used anywhere, so we don't make it public.
-/// Instead, we expose this function.
 #[inline]
 pub fn to_db_typed_generation<T: TypedGenerationKind>(
     generation: TypedGeneration<T>,
@@ -33,13 +25,15 @@ pub fn to_db_typed_generation<T: TypedGenerationKind>(
 
 /// A generation number with information about the kind of counter it is.
 ///
-/// Despite the fact that this is marked `pub`, this is *private* to the
-/// `db-model` crate (this type is not exported at the top level). External
-/// users must use omicron-generation-kinds' `TypedGeneration`.
+/// This is the Diesel representation of omicron-generation-kinds'
+/// `TypedGeneration`.
+///
+/// This is `pub` because query builders in nexus-db-queries need it as a bind
+/// type. Most code should use the upstream `TypedGeneration` as much as
+/// possible, since that has much more infrastructure built around it.
 #[derive_where(Clone, Copy, Eq, Ord, PartialEq, PartialOrd, Hash)]
-#[derive(AsExpression, FromSqlRow, Serialize, Deserialize, JsonSchema)]
+#[derive(AsExpression, FromSqlRow)]
 #[diesel(sql_type = sql_types::BigInt)]
-#[serde(transparent, bound = "")]
 pub struct DbTypedGeneration<T: TypedGenerationKind>(
     pub(crate) TypedGeneration<T>,
 );
@@ -75,22 +69,6 @@ impl<T: TypedGenerationKind> fmt::Debug for DbTypedGeneration<T> {
     #[inline]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.0.fmt(f)
-    }
-}
-
-impl<T: TypedGenerationKind> fmt::Display for DbTypedGeneration<T> {
-    #[inline]
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.0.fmt(f)
-    }
-}
-
-impl<T: TypedGenerationKind> FromStr for DbTypedGeneration<T> {
-    type Err = omicron_generation_kinds::ParseError;
-
-    #[inline]
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(TypedGeneration::from_str(s)?.into())
     }
 }
 

@@ -38,9 +38,12 @@ impl_typed_generation_kinds! {
 
 This will:
 
-- Create a new `TypedGenerationKind` called `WidgetKind`. This kind will become
-  the type parameter to `TypedGeneration` and other related generic types.
-- Create a type alias `type WidgetGeneration = TypedGeneration<WidgetKind>`.
+- Create a new `TypedGenerationKind` called `WidgetGenerationKind`. This kind
+  will become the type parameter to `TypedGeneration` and other related generic
+  types. (The `Generation` infix keeps these distinct from the `WidgetKind` UUID
+  kinds in `omicron-uuid-kinds`.)
+- Create a type alias
+  `type WidgetGeneration = TypedGeneration<WidgetGenerationKind>`.
 
 Then, start changing your generation types over. It's generally easiest to
 change the type of a generation number in a struct or enum field, and start
@@ -58,7 +61,7 @@ pulling that thread.
 .Using type aliases
 ====
 For `TypedGeneration<T>`, prefer to use the type aliases. For example,
-`AlertGeneration` rather than `TypedGeneration<AlertKind>`.
+`AlertGeneration` rather than `TypedGeneration<AlertGenerationKind>`.
 
 Other types that use the same kinds, like
 `nexus_db_model::DbTypedGeneration<T>`, don't have aliases defined for them.
@@ -75,11 +78,11 @@ field in a versioned API type changes the OpenAPI document, and so requires
 going through the usual API versioning process.
 
 . For Nexus database storage, `nexus-db-model` has a `DbTypedGeneration` generic
-type which can be used. `DbTypedGeneration` should not be exposed outside of
-`nexus-db-model`; instead, prefer to use the regular `TypedGeneration` and only
-convert to `DbTypedGeneration` within the lowest layers (i.e. using
-getters/setters and not making it a public field). This is because the regular
-`TypedGeneration` has much more infrastructure built around it.
+type which can be used. `DbTypedGeneration` should not appear in public fields
+or in signatures above the datastore layer; instead, prefer to use the regular
+`TypedGeneration` and only convert to `DbTypedGeneration` within the lowest
+layers (i.e. using getters/setters). This is because the regular `TypedGeneration`
+has much more infrastructure built around it.
 
 ## Relationship to `omicron_common::api::external::Generation`
 

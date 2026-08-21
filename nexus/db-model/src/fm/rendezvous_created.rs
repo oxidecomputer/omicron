@@ -12,8 +12,8 @@ use crate::typed_uuid::DbTypedUuid;
 use nexus_db_schema::schema::rendezvous_alert_created;
 use nexus_db_schema::schema::rendezvous_support_bundle_created;
 use omicron_generation_kinds::{
-    AlertGeneration, AlertKind as AlertGenerationKind, SupportBundleGeneration,
-    SupportBundleKind as SupportBundleGenerationKind,
+    AlertGeneration, AlertGenerationKind, SupportBundleGeneration,
+    SupportBundleGenerationKind,
 };
 use omicron_uuid_kinds::{AlertKind, AlertUuid};
 use omicron_uuid_kinds::{SupportBundleKind, SupportBundleUuid};

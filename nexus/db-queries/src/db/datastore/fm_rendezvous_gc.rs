@@ -69,6 +69,7 @@ use crate::authz;
 use crate::context::OpContext;
 use crate::db::DataStore;
 use crate::db::fm_rendezvous_resources::FmRendezvousResource;
+use crate::db::fm_rendezvous_resources::GenerationKind;
 use crate::db::fm_rendezvous_resources::MarkerTable;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::Column;
@@ -147,7 +148,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         sitrep_id: SitrepUuid,
-        sitrep_generation: TypedGeneration<R::GenerationKind>,
+        sitrep_generation: TypedGeneration<GenerationKind<R>>,
     ) -> Result<MarkerGcResult, Error> {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
         let conn = self.pool_connection_authorized(opctx).await?;
@@ -196,7 +197,7 @@ struct RendezvousMarkerGcPage<R: FmRendezvousResource> {
     sitrep_id: Uuid,
     /// Generation of the sitrep being executed. A marker row is deletable only
     /// if its `created_at_generation` is strictly less than this.
-    sitrep_generation: DbTypedGeneration<R::GenerationKind>,
+    sitrep_generation: DbTypedGeneration<GenerationKind<R>>,
     /// `FROM` clause for the marker table, built once in [`Self::new`]. Stored
     /// as a field here, rather than reconstructed inside
     /// [`QueryFragment::walk_ast`], so it correctly shares `self`'s lifetime
@@ -214,7 +215,7 @@ impl<R: FmRendezvousResource> RendezvousMarkerGcPage<R> {
         cursor: Uuid,
         page_size: i64,
         sitrep_id: SitrepUuid,
-        sitrep_generation: TypedGeneration<R::GenerationKind>,
+        sitrep_generation: TypedGeneration<GenerationKind<R>>,
     ) -> Self {
         Self {
             cursor,
