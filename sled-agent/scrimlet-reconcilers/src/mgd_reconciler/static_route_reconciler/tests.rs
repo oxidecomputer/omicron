@@ -83,6 +83,7 @@ fn port_config(switch: SwitchSlot, routes: Vec<RouteConfig>) -> PortConfig {
         autoneg: false,
         lldp: None,
         tx_eq: None,
+        allow_ddm_traffic: false,
     }
 }
 
@@ -943,12 +944,12 @@ impl TestInput {
             }
         }
 
-        MgdStaticRouteReconcilerStatus::Success {
+        MgdStaticRouteReconcilerStatus::Complete {
             unchanged,
-            deleted_v4,
-            deleted_v6,
-            added_v4,
-            added_v6,
+            delete_v4_result: Ok(deleted_v4),
+            delete_v6_result: Ok(deleted_v6),
+            add_v4_result: Ok(added_v4),
+            add_v6_result: Ok(added_v6),
         }
     }
 }
@@ -1128,13 +1129,14 @@ async fn proptest_full_reconciliation() {
         SpPort::One,
     )
     .await;
-    let mut mgdctx = dev::maghemite::MgdInstance::start(
-        0,
-        SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0).into(),
-        Some(mgsctx.address().into()),
-    )
-    .await
-    .expect("started mgd");
+    let mut mgdctx =
+        dev::maghemite::MgdInstance::start(
+            0,
+            SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0).into(),
+            Some(mgsctx.address().into())
+        )
+        .await
+        .expect("started mgd");
     let client = Client::new(
         &format!("http://{}", mgdctx.address()),
         logctx.log.clone(),

@@ -33,7 +33,7 @@ use oxide_update_engine_types::buffer::{
 use oxide_update_engine_types::spec::{EngineSpec, SerializableError};
 use slog::Logger;
 use tokio::{sync::watch, task::JoinHandle};
-use tufaceous_artifact_v2::DisplayTags;
+use tufaceous_artifact::DisplayTags;
 use wicket_common::{
     WICKETD_TIMEOUT,
     rack_update::{

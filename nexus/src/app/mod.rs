@@ -10,7 +10,6 @@ use crate::DropshotServer;
 use crate::app::background::BackgroundTasksData;
 use crate::app::background::CurrentSitrep;
 use crate::app::background::SagaRecoveryHelpers;
-use crate::app::background::resolve_mgd_clients;
 use crate::app::update::UpdateStatusHandle;
 use crate::populate::PopulateArgs;
 use crate::populate::PopulateStatus;
@@ -33,7 +32,6 @@ use nexus_mgs_updates::ArtifactCache;
 use nexus_mgs_updates::MgsUpdateDriver;
 use nexus_types::deployment::PendingMgsUpdates;
 use nexus_types::deployment::ReconfiguratorConfigParam;
-
 use omicron_common::address::MGS_PORT;
 use omicron_common::address::UnderlaySubnets;
 use omicron_common::api::external::ByteCount;
@@ -54,7 +52,7 @@ use std::sync::Arc;
 use std::sync::OnceLock;
 use tokio::sync::mpsc;
 use tokio::sync::watch;
-use update_common::artifacts::ArtifactsWithPlan;
+use tufaceous::Repository;
 use uuid::Uuid;
 
 // The implementation of Nexus is large, and split into a number of submodules
@@ -99,7 +97,7 @@ pub(crate) mod saga;
 mod scim;
 mod session;
 mod silo;
-mod sled;
+pub(crate) mod sled;
 mod sled_instance;
 mod snapshot;
 mod ssh_key;
@@ -292,7 +290,7 @@ pub struct Nexus {
 
     /// Sender for TUF repository artifacts temporarily stored in this zone to
     /// be replicated out to sleds in the background
-    tuf_artifact_replication_tx: mpsc::Sender<ArtifactsWithPlan>,
+    tuf_artifact_replication_tx: mpsc::Sender<Repository>,
 
     /// reports status of pending MGS-managed updates
     mgs_update_status_rx: watch::Receiver<MgsUpdateDriverStatus>,
@@ -1191,7 +1189,47 @@ impl Nexus {
         &self,
     ) -> Result<HashMap<SwitchSlot, mg_admin_client::Client>, ResolveError>
     {
-        resolve_mgd_clients(self.resolver(), &self.log).await
+        let mgd_addrs =
+            self.resolver().lookup_all_socket_v6(ServiceName::Mgd).await?;
+        let mut clients = HashMap::new();
+        for addr in mgd_addrs {
+            let client = mg_admin_client::Client::new(
+                &format!("http://{addr}"),
+                self.log.clone(),
+            );
+            let switch_slot = match client.switch_identifiers().await {
+                Ok(response) => match response.slot {
+                    Some(0) => SwitchSlot::Switch0,
+                    Some(1) => SwitchSlot::Switch1,
+                    Some(n) => {
+                        warn!(
+                            self.log, "failed to determine switch slot for mgd";
+                            "addr" => %addr,
+                            "error" => format!("mgd returned unknown slot {n}"),
+                        );
+                        continue;
+                    }
+                    None => {
+                        warn!(
+                            self.log, "failed to determine switch slot for mgd";
+                            "addr" => %addr,
+                            "error" => "mgd does not yet know its switch slot",
+                        );
+                        continue;
+                    }
+                },
+                Err(err) => {
+                    warn!(
+                        self.log, "failed to determine switch slot for mgd";
+                        "addr" => %addr,
+                        InlineErrorChain::new(&err),
+                    );
+                    continue;
+                }
+            };
+            clients.insert(switch_slot, client);
+        }
+        Ok(clients)
     }
 
     pub(crate) fn demo_sagas(
@@ -1318,6 +1356,11 @@ pub(crate) async fn dpd_clients(
     Ok(mappings)
 }
 
+// We currently ignore the rack_id argument here, as the shared
+// switch_zone_address_mappings function doesn't allow filtering on the rack ID.
+// Since we only have a single rack, this is OK for now.
+// TODO: https://github.com/oxidecomputer/omicron/issues/1276
+//
 /// Returns a mapping of clients for the LLDP daemons of reachable switch zones.
 /// If we are unable to communicate with the switch zone and determine the mapping
 /// of SwitchSlot -> Zone Underlay Address, we omit an entry for that client.
@@ -1326,65 +1369,20 @@ pub(crate) async fn lldpd_clients(
     _rack_id: RackUuid,
     log: &slog::Logger,
 ) -> Result<HashMap<SwitchSlot, lldpd_client::Client>, String> {
-    let lldpd_socketaddrs = match resolver
-        .lookup_all_socket_v6(ServiceName::Lldpd)
-        .await
-    {
-        Ok(addrs) => addrs,
-        Err(e) => {
-            error!(log, "failed to resolve addresses for LLDP services"; "error" => %e);
-            return Err(e.to_string());
-        }
-    };
-
-    let clients: Vec<(SocketAddrV6, lldpd_client::Client)> = lldpd_socketaddrs
+    let mappings = switch_zone_address_mappings(resolver, log).await?;
+    let log = log.new(o!( "component" => "LldpdClient"));
+    let port = lldpd_client::default_port();
+    let clients: HashMap<SwitchSlot, lldpd_client::Client> = mappings
         .iter()
-        .map(|socket_addr| {
-            let client = lldpd_client::Client::new(
-                &format!("http://{socket_addr}"),
-                log.new(o!(
-                    "component" => "LldpClient"
-                )),
+        .map(|(location, addr)| {
+            let lldpd_client = lldpd_client::Client::new(
+                &format!("http://[{addr}]:{port}"),
+                log.clone(),
             );
-
-            (*socket_addr, client)
+            (*location, lldpd_client)
         })
         .collect();
-
-    let mut mappings: HashMap<SwitchSlot, lldpd_client::Client> =
-        HashMap::new();
-
-    for (addr, client) in clients {
-        let switch_slot = match client.switch_identifiers().await {
-            Ok(response) => response.slot,
-            Err(e) => {
-                error!(
-                    log,
-                    "failed to determine switch slot for lldpd";
-                    "error" => %e,
-                    "addr" => %addr,
-                );
-                continue;
-            }
-        };
-
-        let location = match switch_slot {
-            Some(0) => SwitchSlot::Switch0,
-            Some(1) => SwitchSlot::Switch1,
-            Some(v) => {
-                warn!(log, "unexpected value for switch slot: {v}");
-                continue;
-            }
-            None => {
-                warn!(log, "Lldpd has not learned switch slot from MGS");
-                continue;
-            }
-        };
-
-        mappings.insert(location, client);
-    }
-
-    Ok(mappings)
+    Ok(clients)
 }
 
 /// Look up Dendrite addresses in DNS then determine the switch location of

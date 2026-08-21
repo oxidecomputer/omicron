@@ -36,6 +36,7 @@ oxide-tokio-rt.workspace = true
 reqwest.workspace = true
 sha2.workspace = true
 serde_json.workspace = true
+sled-agent-types.workspace = true
 sled-hardware.workspace = true
 sled-hardware-types.workspace = true
 sled-storage.workspace = true
@@ -48,7 +49,7 @@ smf.workspace = true
 tar.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["full"] }
-tufaceous-artifact-v2.workspace = true
+tufaceous-artifact.workspace = true
 oxide-update-engine.workspace = true
 oxide-update-engine-types.workspace = true
 omicron-workspace-hack.workspace = true

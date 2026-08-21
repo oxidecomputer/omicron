@@ -21,11 +21,12 @@ use nexus_types::deployment::{
     Blueprint, BlueprintDatasetConfig, BlueprintDatasetDisposition,
     BlueprintHostPhase2DesiredSlots, BlueprintMeasurements,
     BlueprintPhysicalDiskConfig, BlueprintPhysicalDiskDisposition,
-    BlueprintSledConfig, BlueprintSource, BlueprintZoneConfig,
-    BlueprintZoneDisposition, BlueprintZoneImageSource, BlueprintZoneType,
-    CockroachDbPreserveDowngrade, OmicronZoneExternalFloatingAddr,
-    OmicronZoneExternalFloatingIp, OmicronZoneExternalSnatIp, OximeterReadMode,
-    PendingMgsUpdates, blueprint_zone_type,
+    BlueprintSledConfig, BlueprintSledUpdateDisposition, BlueprintSource,
+    BlueprintZoneConfig, BlueprintZoneDisposition, BlueprintZoneImageSource,
+    BlueprintZoneType, CockroachDbPreserveDowngrade,
+    OmicronZoneExternalFloatingAddr, OmicronZoneExternalFloatingIp,
+    OmicronZoneExternalSnatIp, OximeterReadMode, PendingMgsUpdates,
+    blueprint_zone_type,
 };
 use nexus_types::external_api::sled::SledState;
 use omicron_common::address::LLDP_PORT;
@@ -43,10 +44,7 @@ use omicron_common::api::internal::shared::{
 use omicron_common::backoff::{
     BackoffError, retry_notify_ext, retry_policy_internal_service_aggressive,
 };
-use omicron_common::disk::{
-    CompressionAlgorithm, DatasetConfig, DatasetKind, DatasetName, DiskVariant,
-    SharedDatasetConfig,
-};
+use omicron_common::disk::{DatasetKind, DatasetName};
 use omicron_common::policy::{
     BOUNDARY_NTP_REDUNDANCY, COCKROACHDB_REDUNDANCY,
     CRUCIBLE_PANTRY_REDUNDANCY, INTERNAL_DNS_REDUNDANCY, NEXUS_REDUNDANCY,
@@ -63,6 +61,10 @@ use serde::{Deserialize, Serialize};
 use sled_agent_client::{
     Client as SledAgentClient, Error as SledAgentError, types as SledAgentTypes,
 };
+use sled_agent_types::disk::CompressionAlgorithm;
+use sled_agent_types::disk::DatasetConfig;
+use sled_agent_types::disk::DiskVariant;
+use sled_agent_types::disk::SharedDatasetConfig;
 use sled_agent_types::inventory::NetworkInterface;
 use sled_agent_types::inventory::NetworkInterfaceKind;
 use sled_agent_types::inventory::SourceNatConfigError;
@@ -947,6 +949,8 @@ impl ServicePlan {
                 sled_description.sled_id,
                 BlueprintSledConfig {
                     state: SledState::Active,
+                    update_disposition: BlueprintSledUpdateDisposition::initial(
+                    ),
                     subnet: sled_description.subnet,
                     last_allocated_ip_subnet_offset: sled_description
                         .last_allocated_ip_subnet_offset,
@@ -1370,6 +1374,7 @@ mod tests {
     use omicron_common::api::internal::shared::AllowedSourceIps;
     use omicron_test_utils::dev::test_setup_log;
     use oxnet::Ipv6Net;
+    use sled_agent_types::disk::DiskIdentity;
     use sled_agent_types::early_networking::PortConfig;
     use sled_agent_types::early_networking::RackNetworkConfig;
     use sled_agent_types::early_networking::UplinkPorts;
@@ -1549,7 +1554,7 @@ mod tests {
 
         let disks: Vec<_> = (0..DISK_COUNT)
             .map(|i| sled_agent_types::inventory::InventoryDisk {
-                identity: omicron_common::disk::DiskIdentity {
+                identity: DiskIdentity {
                     vendor: "vendor".to_string(),
                     model: "model".to_string(),
                     serial: format!("test-{i}"),

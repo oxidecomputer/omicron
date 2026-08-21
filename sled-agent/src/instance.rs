@@ -2771,7 +2771,6 @@ mod tests {
     use omicron_common::api::external::{Generation, Hostname};
     use omicron_common::api::internal::shared::{DhcpConfig, SledIdentifiers};
 
-    use omicron_common::disk::DiskIdentity;
     use omicron_uuid_kinds::InternalZpoolUuid;
     use propolis_client::ClientInfo;
     use propolis_client::types::{
@@ -2781,6 +2780,7 @@ mod tests {
         CurrentlyManagedZpoolsReceiver, InternalDiskDetails,
         InternalDisksReceiver,
     };
+    use sled_agent_types::disk::DiskIdentity;
     use sled_agent_types::instance::ExternalIpv4Config;
     use sled_agent_types::instance::ExternalIpv6Config;
     use sled_agent_types::instance::InstanceEnsureBody;

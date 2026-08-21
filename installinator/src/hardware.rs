@@ -6,7 +6,7 @@ use anyhow::Context;
 use anyhow::Result;
 use anyhow::anyhow;
 use anyhow::ensure;
-use omicron_common::disk::DiskVariant;
+use sled_agent_types::disk::DiskVariant;
 use sled_hardware::ExternalDisks;
 use sled_hardware::HardwareManager;
 use sled_hardware::SledMode;

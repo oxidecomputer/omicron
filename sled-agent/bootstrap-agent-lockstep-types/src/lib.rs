@@ -13,29 +13,39 @@ use anyhow::Context as _;
 use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
 use iddqd::id_upcast;
+use iddqd::{BiHashItem, BiHashMap, bi_upcast};
 use omicron_common::address::AZ_PREFIX_LENGTH;
-use omicron_common::address::IpRange;
-use omicron_common::address::IpVersion;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::RACK_PREFIX_LENGTH;
 use omicron_common::address::SLED_PREFIX_LENGTH;
 use omicron_common::address::get_64_subnet;
 use omicron_common::api::external::AllowedSourceIps;
-use omicron_common::api::external::Error;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::UserId;
 use omicron_common::api::internal::nexus::Certificate;
+use omicron_uuid_kinds::MultirackJoinUuid;
 use omicron_uuid_kinds::RackInitUuid;
+use omicron_uuid_kinds::RackUuid;
+use omicron_uuid_kinds::SledUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sled_agent_types::early_networking::RackNetworkConfig;
 use sled_hardware_types::BaseboardId;
+use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::net::IpAddr;
 use std::net::Ipv6Addr;
 use strum::EnumCount;
 use strum::EnumIter;
 use strum::IntoEnumIterator;
+use trust_quorum_types::messages::ReconfigureMsg as TqReconfigureMsg;
+use trust_quorum_types::status::CoordinatorStatus;
+use trust_quorum_types::types::Epoch;
+use trust_quorum_types::types::Threshold;
+pub use wicketd_commission_types::rack_setup::ServiceIpPoolConfig;
+pub use wicketd_commission_types::rack_setup::ServiceIpPoolError;
+
+pub mod scrimlet_reconcilers;
 
 /// Configuration for the "rack setup service".
 ///
@@ -238,6 +248,19 @@ fn validate_external_dns(
     Ok(())
 }
 
+#[derive(Clone, Deserialize, Serialize, PartialEq, JsonSchema)]
+pub struct MultirackJoinRequest {
+    /// The set of peers required to initialize trust quorum
+    ///
+    /// Unlike RSS, this is not optional for multirack setups. Bootstrap
+    /// addresses are discovered by the bootstrap agent and mapped to the
+    /// `BaseboardId`s.
+    pub trust_quorum_peers: BTreeSet<BaseboardId>,
+
+    /// The rack network configuration for this joining rack
+    pub rack_network_config: RackNetworkConfig,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "snake_case", tag = "type")]
 pub enum BootstrapAddressDiscovery {
@@ -262,6 +285,7 @@ pub struct RecoverySiloConfig {
 )]
 #[serde(tag = "status", rename_all = "snake_case")]
 pub enum RackOperationStatus {
+    Uninitialized,
     Initializing {
         id: RackInitUuid,
         step: RssStep,
@@ -277,7 +301,20 @@ pub enum RackOperationStatus {
     InitializationPanicked {
         id: RackInitUuid,
     },
-    Uninitialized,
+    MultirackJoinInProgress {
+        // Status is queried via a different API
+        id: MultirackJoinUuid,
+    },
+    MultirackJoinCompleted {
+        id: Option<MultirackJoinUuid>,
+    },
+    MultirackJoinFailed {
+        id: MultirackJoinUuid,
+        message: String,
+    },
+    MultirackJoinPanicked {
+        id: MultirackJoinUuid,
+    },
 }
 
 /// Steps we go through during initial rack setup.
@@ -374,104 +411,6 @@ pub struct ReplicatedNetworkConfigContents {
     pub base64_blob: String,
 }
 
-/// Full details of a system-service IP pool, provided at rack setup (RSS).
-#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
-#[serde(try_from = "UnvalidatedServiceIpPoolConfig")]
-pub struct ServiceIpPoolConfig {
-    /// Name of the IP Pool
-    pub name: Name,
-    /// Description of the IP Pool
-    pub description: String,
-    /// List of IP address ranges in the pool.
-    ///
-    /// There is guaranteed to be at least one range, and all ranges are of the
-    /// same IP version.
-    // NOTE: Private to ensure the above invariants. `new()` checks them, and we
-    // deserialize through `UnvalidatedServiceIpPoolConfig` to check them.
-    ranges: Vec<IpRange>,
-}
-
-impl ServiceIpPoolConfig {
-    /// Construct a new service IP pool configuration.
-    ///
-    /// Errors if `ranges` is empty, or if the ranges are a mix of IPv4 and
-    /// IPv6 addresses.
-    pub fn new(
-        name: Name,
-        description: String,
-        ranges: Vec<IpRange>,
-    ) -> Result<Self, ServiceIpPoolError> {
-        let mut versions = ranges.iter().map(|r| r.version());
-        let Some(first) = versions.next() else {
-            return Err(ServiceIpPoolError::EmptyRanges);
-        };
-        if versions.any(|v| v != first) {
-            return Err(ServiceIpPoolError::MixedIpVersions);
-        }
-        Ok(Self { name, description, ranges })
-    }
-
-    /// The ranges belonging to this pool.
-    ///
-    /// Guaranteed to be non-empty and all of the same IP version.
-    pub fn ranges(&self) -> &[IpRange] {
-        &self.ranges
-    }
-
-    /// The IP version of this pool, derived from its ranges.
-    pub fn ip_version(&self) -> IpVersion {
-        // Safety: the constructor guarantees at least one range, and that all
-        // ranges share an IP version.
-        self.ranges[0].version()
-    }
-}
-
-/// Errors constructing a `ServiceIpPoolConfig`.
-#[derive(Clone, Copy, Debug, thiserror::Error)]
-pub enum ServiceIpPoolError {
-    #[error("must provide at least one IP range")]
-    EmptyRanges,
-    #[error("ranges have mixed IP versions")]
-    MixedIpVersions,
-}
-
-impl From<ServiceIpPoolError> for Error {
-    fn from(value: ServiceIpPoolError) -> Self {
-        Error::internal_error(format!(
-            "error constructing service IP pool config: {value}"
-        ))
-    }
-}
-
-impl iddqd::IdOrdItem for ServiceIpPoolConfig {
-    type Key<'a> = &'a Name;
-
-    fn key(&self) -> Self::Key<'_> {
-        &self.name
-    }
-
-    id_upcast!();
-}
-
-#[derive(Deserialize)]
-struct UnvalidatedServiceIpPoolConfig {
-    name: Name,
-    description: String,
-    ranges: Vec<IpRange>,
-}
-
-impl TryFrom<UnvalidatedServiceIpPoolConfig> for ServiceIpPoolConfig {
-    type Error = ServiceIpPoolError;
-
-    fn try_from(
-        value: UnvalidatedServiceIpPoolConfig,
-    ) -> Result<Self, Self::Error> {
-        let UnvalidatedServiceIpPoolConfig { name, description, ranges } =
-            value;
-        ServiceIpPoolConfig::new(name, description, ranges)
-    }
-}
-
 #[derive(
     Debug,
     Clone,
@@ -503,4 +442,104 @@ impl IdOrdItem for BootstrapIpOfBaseboardId {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct BaseboardIds {
     pub data: IdOrdMap<BootstrapIpOfBaseboardId>,
+}
+
+/// The state of the commit phase of the trust quorum protocol
+#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+pub struct CommitState {
+    pub rack_id: RackUuid,
+    pub members: BTreeSet<BaseboardId>,
+    pub epoch: Epoch,
+    pub last_committed_epoch: Option<Epoch>,
+    pub threshold: Threshold,
+    pub commit_crash_tolerance: u8,
+    pub acked: BTreeSet<BaseboardId>,
+    pub fatal_errors: BTreeMap<BaseboardId, String>,
+    pub transient_errors: BTreeMap<BaseboardId, String>,
+}
+
+// Information about the state of a sled agent start request
+#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case", tag = "type")]
+pub enum SledAgentStartState {
+    InProgress { last_error: Option<String> },
+    Started,
+    Failed { reason: String },
+}
+
+/// Status information for a given sled agent
+#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+pub struct SledAgentInfo {
+    pub baseboard_id: BaseboardId,
+    pub sled_id: SledUuid,
+    pub sled_subnet: Ipv6Subnet<SLED_PREFIX_LENGTH>,
+    pub start_state: SledAgentStartState,
+}
+
+impl BiHashItem for SledAgentInfo {
+    type K1<'a> = &'a BaseboardId;
+    type K2<'a> = &'a SledUuid;
+
+    fn key1(&self) -> Self::K1<'_> {
+        &self.baseboard_id
+    }
+
+    fn key2(&self) -> Self::K2<'_> {
+        &self.sled_id
+    }
+
+    bi_upcast!();
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+pub struct StartSledAgentsStatus {
+    pub sleds: BiHashMap<SledAgentInfo>,
+}
+
+impl StartSledAgentsStatus {
+    // Create the allocations necessary to start a sled-agent and return a
+    // preliminary state.
+    //
+    // This should only be called once.
+    pub fn assign_ids_and_subnets(req: MultirackJoinRequest) -> Self {
+        let rack_subnet = Ipv6Subnet::<RACK_PREFIX_LENGTH>::new(
+            req.rack_network_config.rack_subnet.addr(),
+        );
+        let sleds = req
+            .trust_quorum_peers
+            .into_iter()
+            .enumerate()
+            .map(|(idx, baseboard_id)| SledAgentInfo {
+                baseboard_id,
+                sled_id: SledUuid::new_v4(),
+                sled_subnet: get_64_subnet(
+                    rack_subnet,
+                    u8::try_from(idx + 1).expect("too many sleds"),
+                ),
+                start_state: SledAgentStartState::InProgress {
+                    last_error: None,
+                },
+            })
+            .collect();
+
+        StartSledAgentsStatus { sleds }
+    }
+}
+
+/// The current state of the `MultirackJoinService` as retrieved from the
+/// `output_rx` watch channel.
+#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case", tag = "state")]
+pub enum MultirackJoinServiceState {
+    Uninitialized,
+    Requested,
+    Starting,
+    TrustQuorumReconfigure(TqReconfigureMsg),
+    TrustQuorumPreparing(CoordinatorStatus),
+    TrustQuorumCommitting(CommitState),
+    StartSledAgents(StartSledAgentsStatus),
+    Completed,
+    Failed { message: String },
+    InvalidMembershipSize { message: String },
+    TaskPanicked,
 }

@@ -16,6 +16,7 @@ nexus-types.workspace = true
 omicron-common.workspace = true
 omicron-uuid-kinds.workspace = true
 serde.workspace = true
+sled-agent-types.workspace = true
 slog.workspace = true
 
 # See omicron-rpaths for more about the "pq-sys" dependency.  This is needed

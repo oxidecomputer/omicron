@@ -308,6 +308,49 @@ fn draw_rack_status_details_popup(
                 style::plain_text(),
             )]));
         }
+        Ok(RackOperationStatus::MultirackJoinInProgress { id }) => {
+            body.lines.push(Line::from(vec![
+                status,
+                Span::styled("Multirack Join In Progress", style::plain_text()),
+            ]));
+            body.lines.push(Line::from(vec![Span::styled(
+                format!("Current operation ID: {}", id),
+                style::plain_text(),
+            )]));
+        }
+        Ok(RackOperationStatus::MultirackJoinCompleted { id }) => {
+            body.lines.push(Line::from(vec![
+                status,
+                Span::styled("Multirack Join Completed", style::plain_text()),
+            ]));
+            if let Some(id) = id {
+                body.lines.push(Line::from(vec![Span::styled(
+                    format!("Last multirack join operation ID: {}", id),
+                    style::plain_text(),
+                )]));
+            }
+        }
+        Ok(RackOperationStatus::MultirackJoinFailed { id, message }) => {
+            body.lines.push(Line::from(vec![
+                status,
+                Span::styled("Multirack Join Failed", style::plain_text()),
+            ]));
+            body.lines.push(Line::from(vec![Span::styled(
+                format!("Last multirack join operation ID: {}", id),
+                style::plain_text(),
+            )]));
+            push_text_lines(message, prefix, &mut body.lines);
+        }
+        Ok(RackOperationStatus::MultirackJoinPanicked { id }) => {
+            body.lines.push(Line::from(vec![
+                status,
+                Span::styled("Multirack Join Panicked", style::plain_text()),
+            ]));
+            body.lines.push(Line::from(vec![Span::styled(
+                format!("Last multirack join operation ID: {}", id),
+                style::plain_text(),
+            )]));
+        }
         Err(message) => {
             body.lines.push(Line::from(vec![
                 status,
@@ -425,7 +468,11 @@ impl Control for RackSetupPane {
                 RackOperationStatus::Initialized { .. }
                 | RackOperationStatus::Initializing { .. }
                 | RackOperationStatus::InitializationFailed { .. }
-                | RackOperationStatus::InitializationPanicked { .. },
+                | RackOperationStatus::InitializationPanicked { .. }
+                | RackOperationStatus::MultirackJoinCompleted { .. }
+                | RackOperationStatus::MultirackJoinInProgress { .. }
+                | RackOperationStatus::MultirackJoinFailed { .. }
+                | RackOperationStatus::MultirackJoinPanicked { .. },
             )
             | Err(_) => &self.help,
         };
@@ -492,6 +539,16 @@ fn rss_config_text<'a>(
             RackOperationStatus::InitializationFailed { .. }
             | RackOperationStatus::InitializationPanicked { .. },
         ) => Span::styled("Initialization Failed", bad_style),
+        Ok(RackOperationStatus::MultirackJoinInProgress { .. }) => {
+            Span::styled("Multirack Join In Progress", warn_style)
+        }
+        Ok(RackOperationStatus::MultirackJoinCompleted { .. }) => {
+            Span::styled("Multirack Join Completed", ok_style)
+        }
+        Ok(
+            RackOperationStatus::MultirackJoinFailed { .. }
+            | RackOperationStatus::MultirackJoinPanicked { .. },
+        ) => Span::styled("Multirack Join Failed", bad_style),
         Err(_) => Span::styled("Unknown", bad_style),
     };
 
@@ -516,7 +573,7 @@ fn rss_config_text<'a>(
         bootstrap_sleds,
         ntp_servers,
         dns_servers,
-        internal_services_ip_pool_ranges,
+        service_ip_pools,
         external_dns_ips,
         external_dns_zone_name,
         rack_network_config,
@@ -1139,15 +1196,34 @@ fn rss_config_text<'a>(
     );
     append_list(
         &mut spans,
-        "Internal services IP pool ranges: ".into(),
-        internal_services_ip_pool_ranges
+        "Service IP pools: ".into(),
+        service_ip_pools
             .iter()
-            .map(|r| {
-                let s = match r {
-                    IpRange::V4(r) => format!("{} - {}", r.first, r.last),
-                    IpRange::V6(r) => format!("{} - {}", r.first, r.last),
-                };
-                plain_list_item(s)
+            .flat_map(|pool| {
+                // Pools are displayed as a header line with the name and
+                // description, and then an indented list with one bullet for
+                // each IP range in the pool. This is vertically-expansive, but
+                // the ranges can easily be cut off on small terminals,
+                // especially for IPv6 addresses.
+                let header = vec![
+                    Span::styled("  • ", label_style),
+                    Span::styled(pool.name.to_string(), ok_style),
+                    Span::styled(
+                        format!(" ({})", pool.description),
+                        label_style,
+                    ),
+                ];
+                let ranges = pool.ranges().iter().map(|r| {
+                    let s = match r {
+                        IpRange::V4(r) => format!("{} - {}", r.first, r.last),
+                        IpRange::V6(r) => format!("{} - {}", r.first, r.last),
+                    };
+                    vec![
+                        Span::styled("    • ", label_style),
+                        Span::styled(s, ok_style),
+                    ]
+                });
+                std::iter::once(header).chain(ranges)
             })
             .collect(),
     );
@@ -1214,4 +1290,104 @@ fn rss_config_text<'a>(
     spans.push(Line::default());
 
     Text::from(spans)
+}
+
+#[cfg(test)]
+mod preview {
+    use super::*;
+    use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
+    use ratatui::widgets::Paragraph;
+    use std::collections::BTreeMap;
+    use wicket_common::example::ExampleRackSetupData;
+    use wicket_common::rack_setup::GetBgpAuthKeyInfoResponse;
+
+    // This "test" isn't really a test. It's a quick-and-dirty way to visual
+    // inspect the RSS-configuration pane at various terminal widths. This can
+    // be useful to get a sense of the layout, and also to ensure that data
+    // isn't clipped or badly-formatted. The pane uses a `Paragraph`, which does
+    // not wrap lines by default, so long lines (like several IPv6 addresses,
+    // for example) can bet cut off.
+    //
+    // Run this explicitly with:
+    //
+    //   cargo test -p wicket -- --ignored --nocapture preview_rss_config_pane
+    #[test]
+    #[ignore = "manual TUI-rendering preview, not an assertion"]
+    fn preview_rss_config_pane() {
+        let example = ExampleRackSetupData::non_empty();
+        // Add a second, IPv6 pool with two ranges so the preview exercises the
+        // long-address / multi-range case.
+        let mut insensitive = example.current_insensitive;
+        insensitive
+            .service_ip_pools
+            .insert_unique(
+                wicketd_commission_types::rack_setup::ServiceIpPoolConfig::new(
+                    "oxide-service-pool-v6".parse().unwrap(),
+                    "IPv6 IP Pool for Oxide Services".to_string(),
+                    vec![
+                        IpRange::try_from((
+                            "fd00:1122:3344:0100::1"
+                                .parse::<std::net::Ipv6Addr>()
+                                .unwrap(),
+                            "fd00:1122:3344:0100::a"
+                                .parse::<std::net::Ipv6Addr>()
+                                .unwrap(),
+                        ))
+                        .unwrap(),
+                        IpRange::try_from((
+                            "fd00:1122:3344:0200::1"
+                                .parse::<std::net::Ipv6Addr>()
+                                .unwrap(),
+                            "fd00:1122:3344:0200::14"
+                                .parse::<std::net::Ipv6Addr>()
+                                .unwrap(),
+                        ))
+                        .unwrap(),
+                    ],
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        let config = CurrentRssUserConfig {
+            insensitive,
+            sensitive: CurrentRssUserConfigSensitive {
+                num_external_certificates: 1,
+                recovery_silo_password_set: true,
+                bgp_auth_keys: GetBgpAuthKeyInfoResponse {
+                    data: BTreeMap::new(),
+                },
+            },
+        };
+        let text = rss_config_text(
+            Ok(&RackOperationStatus::Uninitialized),
+            Some(&config),
+        );
+
+        // Render the pane text the same way `draw()` does (a non-wrapping
+        // `Paragraph`) into fixed-width buffers, and dump them. The `|` markers
+        // show the exact right edge at each width.
+        for width in [60u16, 72, 78, 100] {
+            let height = text.height() as u16;
+            let backend = TestBackend::new(width, height);
+            let mut terminal = Terminal::new(backend).unwrap();
+            terminal
+                .draw(|frame| {
+                    frame.render_widget(
+                        Paragraph::new(text.clone()),
+                        frame.area(),
+                    );
+                })
+                .unwrap();
+            let buf = terminal.backend().buffer();
+            println!("\n================= width = {width} =================");
+            for y in 0..buf.area.height {
+                let mut line = String::new();
+                for x in 0..buf.area.width {
+                    line.push_str(buf[(x, y)].symbol());
+                }
+                println!("|{}|", line.trim_end());
+            }
+        }
+    }
 }

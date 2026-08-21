@@ -44,6 +44,7 @@ use nexus_types::deployment::BlueprintMeasurements;
 use nexus_types::deployment::BlueprintPhysicalDiskConfig;
 use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
 use nexus_types::deployment::BlueprintSledConfig;
+use nexus_types::deployment::BlueprintSledUpdateDisposition;
 use nexus_types::deployment::BlueprintSource;
 use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneDisposition;
@@ -78,7 +79,6 @@ use omicron_common::api::internal::nexus::ProducerEndpoint;
 use omicron_common::api::internal::nexus::ProducerKind;
 use omicron_common::api::internal::shared::DatasetKind;
 use omicron_common::api::internal::shared::PrivateIpConfig;
-use omicron_common::disk::CompressionAlgorithm;
 use omicron_common::zpool_name::ZpoolName;
 use omicron_sled_agent::sim;
 use omicron_test_utils::dev;
@@ -93,6 +93,8 @@ use omicron_uuid_kinds::ZpoolUuid;
 use oximeter_collector::Oximeter;
 use oximeter_producer::LogConfig;
 use oximeter_producer::Server as ProducerServer;
+use sled_agent_types::disk::CompressionAlgorithm;
+use sled_agent_types::disk::DiskIdentity;
 use sled_agent_types::early_networking::PortConfig;
 use sled_agent_types::early_networking::RackNetworkConfig;
 use sled_agent_types::early_networking::SwitchSlot;
@@ -1427,7 +1429,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
                         .insert_unique(BlueprintPhysicalDiskConfig {
                             disposition:
                                 BlueprintPhysicalDiskDisposition::InService,
-                            identity: omicron_common::disk::DiskIdentity {
+                            identity: DiskIdentity {
                                 vendor: "nexus-tests".to_string(),
                                 model: "nexus-test-model".to_string(),
                                 serial: format!("nexus-test-disk-{disk_index}"),
@@ -1468,7 +1470,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
                         .insert_unique(BlueprintPhysicalDiskConfig {
                             disposition:
                                 BlueprintPhysicalDiskDisposition::InService,
-                            identity: omicron_common::disk::DiskIdentity {
+                            identity: DiskIdentity {
                                 vendor: "nexus-tests".to_string(),
                                 model: "nexus-test-model".to_string(),
                                 serial: format!("nexus-test-disk-{disk_index}"),
@@ -1484,6 +1486,8 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
                 sled_id,
                 BlueprintSledConfig {
                     state: SledState::Active,
+                    update_disposition: BlueprintSledUpdateDisposition::initial(
+                    ),
                     subnet: Ipv6Subnet::new(Ipv6Addr::LOCALHOST),
                     last_allocated_ip_subnet_offset:
                         LastAllocatedSubnetIpOffset::initial(),
@@ -1530,6 +1534,7 @@ impl ControlPlaneTestContextSledAgent {
 
     pub async fn teardown(self) {
         self.server.http_server.close().await.unwrap();
+        self.server.sled_agent.repo_depot.app_private().stop_writers().await;
     }
 }
 
@@ -1633,7 +1638,6 @@ pub(crate) async fn setup_with_config_impl<N: NexusServer>(
     extra_sled_agents: u16,
     gateway_config_file: Utf8PathBuf,
     second_nexus: bool,
-    // peer_routers: bool,
 ) -> ControlPlaneTestContext<N> {
     const STEP_TIMEOUT: Duration = Duration::from_secs(600);
 

@@ -9,8 +9,8 @@ use anyhow::Context as _;
 use dropshot::ConfigDropshot;
 use dropshot::HttpServer;
 use dropshot::ServerBuilder;
-use omicron_common::disk::M2Slot;
 use omicron_uuid_kinds::SledUuid;
+use sled_agent_types::disk::M2Slot;
 use sled_agent_types::inventory::SledRole;
 use sled_hardware_types::BaseboardId;
 use slog::Logger;
@@ -262,7 +262,6 @@ mod api_impl {
     use sled_agent_types::support_bundle::SupportBundleMetadata;
     use sled_agent_types::support_bundle::SupportBundlePathParam;
     use sled_agent_types::support_bundle::SupportBundleTransferQueryParams;
-    use sled_agent_types::uplink::SwitchPorts;
     use sled_agent_types::zone_bundle::BundleUtilization;
     use sled_agent_types::zone_bundle::CleanupContext;
     use sled_agent_types::zone_bundle::CleanupContextUpdate;
@@ -279,7 +278,8 @@ mod api_impl {
     use sled_agent_types_versions::v33;
     use sled_agent_types_versions::v39;
     use sled_agent_types_versions::v42;
-    use sled_agent_types_versions::v45;
+    use sled_agent_types_versions::v47;
+    use sled_agent_types_versions::v48;
     use sled_diagnostics::SledDiagnosticsQueryOutput;
     use std::collections::BTreeMap;
     use std::collections::BTreeSet;
@@ -765,13 +765,6 @@ mod api_impl {
             unimplemented!()
         }
 
-        async fn uplink_ensure(
-            _rqctx: RequestContext<Self::Context>,
-            _body: TypedBody<SwitchPorts>,
-        ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-            unimplemented!()
-        }
-
         async fn read_network_bootstore_config_cache(
             _rqctx: RequestContext<Self::Context>,
         ) -> Result<
@@ -781,9 +774,16 @@ mod api_impl {
             unimplemented!()
         }
 
-        async fn write_network_bootstore_config_v45(
+        async fn write_network_bootstore_config_v48(
             _rqctx: RequestContext<Self::Context>,
-            _body: TypedBody<v45::system_networking::WriteNetworkConfigRequest>,
+            _body: TypedBody<v48::system_networking::WriteNetworkConfigRequest>,
+        ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+            unimplemented!()
+        }
+
+        async fn write_network_bootstore_config_v47(
+            _rqctx: RequestContext<Self::Context>,
+            _body: TypedBody<v47::system_networking::WriteNetworkConfigRequest>,
         ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
             unimplemented!()
         }

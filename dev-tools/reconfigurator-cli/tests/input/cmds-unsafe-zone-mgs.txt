@@ -6,7 +6,7 @@ load-example --nsleds 3 --ndisks-per-sled 3
 # is running out of as its working directory.)
 #
 # This is used to simulate the initial version of the system.
-tuf-assemble ../../update-common/manifests/fake-0.0.1.toml
+generate-fake-repo 0.0.1
 
 # Load the target release from the assembled TUF repository.
 set target-release repo-0.0.1.zip
@@ -50,7 +50,7 @@ inventory-show latest
 
 # Setup is now done -- create another TUF repository which will act as the
 # target release being updated to.
-tuf-assemble ../../update-common/manifests/fake.toml
+generate-fake-repo 1.0.0
 
 # Load the target release from the assembled TUF repository.
 set target-release repo-1.0.0.zip
@@ -60,6 +60,16 @@ sled-list
 
 # Retrieve blueprint information to know the ID of the zone to expunge
 blueprint-show latest
+
+# Measurements will block further planning progress, run a planning step
+blueprint-plan latest latest
+blueprint-diff latest
+
+# Make sure the measurements are up to date for inventory
+sled-set serial0 omicron-config latest
+sled-set serial1 omicron-config latest
+sled-set serial2 omicron-config latest
+inventory-generate
 
 # We expunge a single internal_dns zone
 #
@@ -115,8 +125,8 @@ blueprint-diff latest
 sled-update-sp serial0 --active 1.0.0
 sled-update-sp serial1 --active 1.0.0
 sled-update-sp serial2 --active 1.0.0
-sled-update-host-phase2 serial1 --boot-disk B --slot-b d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47
-sled-update-host-phase1 serial1 --active B --slot-b b99d5273ba1418bebb19d74b701d716896409566d41de76ada71bded4c9b166b
+sled-update-host-phase2 serial1 --boot-disk B --slot-b c2a8af75d6907ef138d033dc3be1fcbf7d7a78a87aee04796caf283a6bb0952d
+sled-update-host-phase1 serial1 --active B --slot-b 2902cb5932fa703ed62fc6a0a330898fe6fd4bde68c74f6398a6aa916cb7e79c
 inventory-generate
 blueprint-plan latest latest
 blueprint-diff latest

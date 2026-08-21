@@ -5,9 +5,6 @@
 //! Sled agent implementation
 
 use crate::artifact_store::{ArtifactStore, SledAgentArtifactStoreWrapper};
-use crate::bootstrap::sprockets_client::{
-    SprocketsClient, SprocketsClientError,
-};
 use crate::config::Config;
 use crate::hardware_monitor::HardwareMonitorHandle;
 use crate::instance_manager::InstanceManager;
@@ -64,18 +61,24 @@ use omicron_uuid_kinds::{
 };
 use oximeter_instruments::http::LatencyTracker;
 use oxnet::IpNet;
+use sled_agent_bootstrap_common::sprockets::{
+    SprocketsClient, SprocketsClientError,
+};
 use sled_agent_config_reconciler::{
     ConfigReconcilerHandle, ConfigReconcilerSpawnToken, InternalDisks,
     InternalDisksReceiver, LedgerNewConfigError, LedgerTaskError,
     ReconcilerInventory, SledAgentFacilities,
 };
-use sled_agent_early_networking::EarlyNetworkSetupError;
 use sled_agent_health_monitor::handle::HealthMonitorHandle;
 use sled_agent_measurements::MeasurementsHandle;
+use sled_agent_scrimlet_reconcilers::{
+    ScrimletReconcilersMode, SledAgentNetworkingInfo,
+};
 use sled_agent_types::attached_subnet::AttachedSubnet;
 use sled_agent_types::attached_subnet::AttachedSubnets;
 use sled_agent_types::dataset::LocalStorageDatasetDeleteRequest;
 use sled_agent_types::dataset::LocalStorageDatasetEnsureRequest;
+use sled_agent_types::disk::CompressionAlgorithm;
 use sled_agent_types::disk::DiskStateRequested;
 use sled_agent_types::early_networking::EarlyNetworkConfigEnvelope;
 use sled_agent_types::instance::ResolvedVpcFirewallRule;
@@ -94,7 +97,6 @@ use sled_agent_types::sled::{
     StartSledAgentRequest, ThisSledSwitchZoneUnderlayIpAddr,
 };
 use sled_agent_types::system_networking::SystemNetworkingConfig;
-use sled_agent_types::uplink::HostPortConfig;
 use sled_agent_types::zone_bundle::{
     BundleUtilization, CleanupContext, CleanupCount, CleanupPeriod,
     PriorityOrder, StorageLimit, ZoneBundleMetadata,
@@ -173,9 +175,6 @@ pub enum Error {
 
     #[error(transparent)]
     ZpoolList(#[from] illumos_utils::zpool::ListError),
-
-    #[error(transparent)]
-    EarlyNetworkError(#[from] EarlyNetworkSetupError),
 
     #[error("Bootstore Error")]
     Bootstore(#[from] bootstore::NodeRequestError),
@@ -693,6 +692,19 @@ impl SledAgent {
                 .new(o!("component" => "NetworkConfigDeserializationTask")),
         ));
 
+        // Hand our scrimlet reconcilers the information they need, now that we
+        // have it available.
+        let this_sled_switch_zone_ip =
+            ThisSledSwitchZoneUnderlayIpAddr::from_sled_agent_request(&request);
+        long_running_task_handles
+            .scrimlet_reconcilers
+            .set_sled_agent_networking_info_once(SledAgentNetworkingInfo {
+                system_networking_config_rx: network_config_rx.clone(),
+                mode: ScrimletReconcilersMode::SwitchZone(
+                    this_sled_switch_zone_ip,
+                ),
+            });
+
         // Start reconciling against our ledgered sled config.
         config_reconciler.spawn_reconciliation_task(
             ReconcilerFacilities {
@@ -716,10 +728,7 @@ impl SledAgent {
                     *sled_address.ip(),
                 )?,
                 underlay_address: *sled_address.ip(),
-                local_switch_zone_ip:
-                    ThisSledSwitchZoneUnderlayIpAddr::from_sled_agent_request(
-                        &request,
-                    ),
+                local_switch_zone_ip: this_sled_switch_zone_ip,
                 rack_id: request.body.rack_id,
                 network_config_rx,
                 metrics_queue: metrics_manager.request_queue(),
@@ -1145,17 +1154,6 @@ impl SledAgent {
             .map_err(Error::from)
     }
 
-    pub async fn ensure_scrimlet_host_ports(
-        &self,
-        uplinks: Vec<HostPortConfig>,
-    ) -> Result<(), Error> {
-        self.inner
-            .services
-            .ensure_scrimlet_host_ports(uplinks)
-            .await
-            .map_err(Error::from)
-    }
-
     /// Validate if the given [`SocketAddr`] represents a peer on the same
     /// underlay subnet as the current sled.
     pub fn ensure_sled_local_request(
@@ -1443,7 +1441,7 @@ impl SledAgent {
             size_details: Some(SizeDetails {
                 quota: Some(dataset_size),
                 reservation: Some(dataset_size),
-                compression: omicron_common::disk::CompressionAlgorithm::Off,
+                compression: CompressionAlgorithm::Off,
             }),
             id: None,
             additional_options: None,

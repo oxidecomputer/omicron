@@ -5,13 +5,13 @@
 //! Implementations for early networking types.
 
 use crate::latest::early_networking::BgpPeerConfig;
-use crate::latest::early_networking::EmptyUplinkPortsError;
 use crate::latest::early_networking::InvalidIpAddrError;
 use crate::latest::early_networking::LinkFec;
 use crate::latest::early_networking::LinkSpeed;
 use crate::latest::early_networking::LldpAdminStatus;
 use crate::latest::early_networking::MaxPathConfig;
 use crate::latest::early_networking::MaxPathConfigError;
+use crate::latest::early_networking::NumberedRouter;
 use crate::latest::early_networking::PortConfig;
 use crate::latest::early_networking::RouterLifetimeConfig;
 use crate::latest::early_networking::RouterLifetimeConfigError;
@@ -28,13 +28,21 @@ use ipnetwork::IpNetwork;
 use oxnet::IpNet;
 use oxnet::IpNetParseError;
 use oxnet::Ipv6Net;
-use schemars::JsonSchema;
-use serde::Deserialize;
 use std::fmt;
 use std::net::AddrParseError;
 use std::net::IpAddr;
 use std::net::Ipv6Addr;
 use std::str::FromStr;
+
+impl NumberedRouter {
+    pub fn target_addr(&self) -> RouterPeerIpAddr {
+        self.target_addr
+    }
+
+    pub fn src_addr(&self) -> Option<RouterPeerIpAddr> {
+        self.src_addr
+    }
+}
 
 impl BgpPeerConfig {
     /// The default hold time for a BGP peer in seconds.
@@ -164,12 +172,12 @@ impl FromStr for RouterPeerIpAddr {
 }
 
 impl RouterPeerIpAddr {
-    // Returns true if `Self` contains an IPv4 address; false otherwise.
+    /// Returns true if `Self` contains an IPv4 address; false otherwise.
     pub fn is_ipv4(&self) -> bool {
         self.0.is_ipv4()
     }
 
-    // Returns true if `Self` contains an IPv6 address; false otherwise.
+    /// Returns true if `Self` contains an IPv6 address; false otherwise.
     pub fn is_ipv6(&self) -> bool {
         self.0.is_ipv6()
     }
@@ -193,8 +201,8 @@ impl RouterPeerType {
     /// Value is `None` for unnumbered peers.
     pub fn src_addr(&self) -> Option<RouterPeerIpAddr> {
         match self {
-            RouterPeerType::Unnumbered { .. } => None,
-            RouterPeerType::Numbered { ip: _, src_addr } => *src_addr,
+            RouterPeerType::Unnumbered(_) => None,
+            RouterPeerType::Numbered(peer) => peer.src_addr(),
         }
     }
 }
@@ -344,6 +352,7 @@ impl PortConfig {
             autoneg: false,
             lldp: None,
             tx_eq: None,
+            allow_ddm_traffic: false,
         }
     }
 }
@@ -357,6 +366,8 @@ mod complicated_arbitrary_impls {
     use crate::latest::early_networking::BfdPeerConfig;
     use crate::latest::early_networking::BgpConfig;
     use crate::latest::early_networking::ImportExportPolicy;
+    use crate::v47::early_networking::NumberedRouter;
+    use crate::v47::early_networking::UnnumberedRouter;
     use oxnet::Ipv4Net;
     use proptest::prelude::*;
     use std::net::Ipv4Addr;
@@ -422,6 +433,57 @@ mod complicated_arbitrary_impls {
                     Self::try_from(ip).expect(
                         "unspecial IPs should produce valid RouterPeerIpAddrs",
                     )
+                })
+                .boxed()
+        }
+    }
+
+    impl Arbitrary for RouterPeerType {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            // Start with either numbered or unnumbered.
+            #[derive(Debug, Clone, test_strategy::Arbitrary)]
+            enum Kind {
+                Numbered(RouterPeerIpAddr),
+                Unnumbered(RouterLifetimeConfig),
+            }
+
+            // Converts an IP into a `RotuerPeerType::Numbered` value by gluing
+            // on an (optional) src_addr that, if Some(_), matches the IP
+            // family of `ip`.
+            fn glue_src_addr_matching_family(
+                ip: RouterPeerIpAddr,
+            ) -> impl Strategy<Value = RouterPeerType> {
+                let src_addr = match IpAddr::from(ip) {
+                    IpAddr::V4(_) => {
+                        arb_unspecial_ipv4().prop_map(IpAddr::V4).boxed()
+                    }
+                    IpAddr::V6(_) => {
+                        arb_unspecial_ipv6().prop_map(IpAddr::V6).boxed()
+                    }
+                };
+                let src_addr = src_addr.prop_flat_map(|src_addr| {
+                    let src_addr = RouterPeerIpAddr::try_from(src_addr).expect(
+                        "unspecial IPs should produce valid RouterPeerIpAddrs",
+                    );
+                    prop_oneof![Just(None), Just(Some(src_addr))]
+                });
+                src_addr.prop_map(move |src_addr| {
+                    NumberedRouter::new(ip, src_addr).unwrap().into()
+                })
+            }
+
+            any::<Kind>()
+                .prop_flat_map(|kind| match kind {
+                    Kind::Numbered(ip) => {
+                        glue_src_addr_matching_family(ip).boxed()
+                    }
+                    Kind::Unnumbered(router_lifetime) => {
+                        Just(UnnumberedRouter { router_lifetime }.into())
+                            .boxed()
+                    }
                 })
                 .boxed()
         }
@@ -732,38 +794,6 @@ impl<'a> IntoIterator for &'a UplinkPorts {
 
     fn into_iter(self) -> Self::IntoIter {
         self.0.iter()
-    }
-}
-
-impl<'de> Deserialize<'de> for UplinkPorts {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let ports = Vec::<PortConfig>::deserialize(deserializer)?;
-        UplinkPorts::new(ports).map_err(|EmptyUplinkPortsError| {
-            serde::de::Error::invalid_length(0, &"at least one uplink port")
-        })
-    }
-}
-
-impl JsonSchema for UplinkPorts {
-    fn schema_name() -> String {
-        "UplinkPorts".to_string()
-    }
-
-    fn json_schema(
-        generator: &mut schemars::r#gen::SchemaGenerator,
-    ) -> schemars::schema::Schema {
-        schemars::schema::Schema::Object(schemars::schema::SchemaObject {
-            instance_type: Some(schemars::schema::InstanceType::Array.into()),
-            array: Some(Box::new(schemars::schema::ArrayValidation {
-                items: Some(generator.subschema_for::<PortConfig>().into()),
-                min_items: Some(1),
-                ..Default::default()
-            })),
-            ..Default::default()
-        })
     }
 }
 

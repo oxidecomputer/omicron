@@ -11,8 +11,9 @@ use omicron_test_utils::dev::test_setup_log;
 use sled_agent_types::early_networking::{
     BgpConfig, BgpPeerConfig, EarlyNetworkConfigEnvelope, ImportExportPolicy,
     LinkFec, LinkSpeed, LldpAdminStatus, LldpPortConfig, MaxPathConfig,
-    PortConfig, RackNetworkConfig, RouterLifetimeConfig, RouterPeerType,
-    SwitchSlot, UplinkAddress, UplinkAddressConfig, UplinkPorts,
+    NumberedRouter, PortConfig, RackNetworkConfig, RouterLifetimeConfig,
+    SwitchSlot, UnnumberedRouter, UplinkAddress, UplinkAddressConfig,
+    UplinkPorts,
 };
 use sled_agent_types::inventory::SourceNatConfigGeneric;
 use sled_agent_types::system_networking::{
@@ -133,7 +134,7 @@ fn early_network_blobs_deserialize() {
 /// future, older blobs can still be deserialized correctly.
 fn current_config_example() -> (&'static str, EarlyNetworkConfigEnvelope) {
     // NOTE: the description must not contain commas or newlines.
-    let description = "2026-07-20 v43";
+    let description = "2026-08-20 v48";
     let config = EarlyNetworkConfigEnvelope::from(&SystemNetworkingConfig {
         rack_network_config: RackNetworkConfig {
             rack_subnet: "fd00:1122:3344:100::/56".parse().unwrap(),
@@ -151,6 +152,7 @@ fn current_config_example() -> (&'static str, EarlyNetworkConfigEnvelope) {
                     autoneg: false,
                     tx_eq: None,
                     lldp: None,
+                    allow_ddm_traffic: false,
                 },
                 PortConfig {
                     routes: vec![],
@@ -171,6 +173,7 @@ fn current_config_example() -> (&'static str, EarlyNetworkConfigEnvelope) {
                         system_description: None,
                         management_addrs: None,
                     }),
+                    allow_ddm_traffic: false,
                 },
                 PortConfig {
                     routes: vec![],
@@ -185,10 +188,11 @@ fn current_config_example() -> (&'static str, EarlyNetworkConfigEnvelope) {
                     bgp_peers: vec![BgpPeerConfig {
                         asn: 65002,
                         port: "qsfp18".to_owned(),
-                        addr: RouterPeerType::Unnumbered {
+                        addr: UnnumberedRouter {
                             router_lifetime: RouterLifetimeConfig::new(1234)
                                 .unwrap(),
-                        },
+                        }
+                        .into(),
                         hold_time: Some(6),
                         idle_hold_time: Some(3),
                         delay_open: Some(3),
@@ -219,6 +223,7 @@ fn current_config_example() -> (&'static str, EarlyNetworkConfigEnvelope) {
                         system_description: None,
                         management_addrs: None,
                     }),
+                    allow_ddm_traffic: false,
                 },
                 PortConfig {
                     routes: vec![],
@@ -232,10 +237,12 @@ fn current_config_example() -> (&'static str, EarlyNetworkConfigEnvelope) {
                     bgp_peers: vec![BgpPeerConfig {
                         asn: 65002,
                         port: "qsfp18".to_owned(),
-                        addr: RouterPeerType::Numbered {
-                            ip: "172.20.15.43".parse().unwrap(),
-                            src_addr: Some("172.20.15.44".parse().unwrap()),
-                        },
+                        addr: NumberedRouter::new(
+                            "172.20.15.43".parse().unwrap(),
+                            Some("172.20.15.44".parse().unwrap()),
+                        )
+                        .unwrap()
+                        .into(),
                         hold_time: Some(6),
                         idle_hold_time: Some(0),
                         delay_open: Some(3),
@@ -266,6 +273,7 @@ fn current_config_example() -> (&'static str, EarlyNetworkConfigEnvelope) {
                         system_description: None,
                         management_addrs: None,
                     }),
+                    allow_ddm_traffic: false,
                 },
                 PortConfig {
                     routes: vec![],
@@ -278,6 +286,7 @@ fn current_config_example() -> (&'static str, EarlyNetworkConfigEnvelope) {
                     autoneg: false,
                     tx_eq: None,
                     lldp: None,
+                    allow_ddm_traffic: false,
                 },
                 PortConfig {
                     routes: vec![],
@@ -298,6 +307,7 @@ fn current_config_example() -> (&'static str, EarlyNetworkConfigEnvelope) {
                         system_description: None,
                         management_addrs: None,
                     }),
+                    allow_ddm_traffic: false,
                 },
             ])
             .expect("test port list is non-empty"),

@@ -201,7 +201,7 @@ impl super::Nexus {
         let mut result = Vec::new();
         for (switch_slot, client) in self.mg_clients().await.map_err(|e| {
             external::Error::internal_error(&format!(
-                "failed to get mgd clients: {e}"
+                "failed to get mg clients: {e}"
             ))
         })? {
             let router_info = match client.read_routers().await {
@@ -257,7 +257,7 @@ impl super::Nexus {
         let mut result = vec![];
         for (switch_slot, client) in self.mg_clients().await.map_err(|e| {
             external::Error::internal_error(&format!(
-                "failed to get mgd clients: {e}"
+                "failed to get mg clients: {e}"
             ))
         })? {
             let router_info = match client.read_routers().await {
@@ -318,7 +318,7 @@ impl super::Nexus {
         let mut result = Vec::new();
         for (switch_slot, client) in self.mg_clients().await.map_err(|e| {
             external::Error::internal_error(&format!(
-                "failed to get mgd clients: {e}"
+                "failed to get mg clients: {e}"
             ))
         })? {
             let history = match client
@@ -361,7 +361,7 @@ impl super::Nexus {
         let mut result = Vec::new();
         for (switch_slot, client) in self.mg_clients().await.map_err(|e| {
             external::Error::internal_error(&format!(
-                "failed to get mgd clients: {e}"
+                "failed to get mg clients: {e}"
             ))
         })? {
             let mut imported: Vec<networking::BgpImported> = Vec::new();

@@ -27,6 +27,7 @@ use diesel::result::OptionalExtension;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_schema::schema::alert::dsl as alert_dsl;
+use nexus_types::external_api::alert as external_api;
 use nexus_types::fm::case::AlertRequest;
 use nexus_types::identity::Asset;
 use omicron_common::api::external::CreateResult;
@@ -88,6 +89,8 @@ pub struct AlertFilters {
     cases: Vec<DbTypedUuid<CaseKind>>,
 
     /// Include only alerts with the specified alert classes.
+    ///
+    /// If this is empty, all alert classes will be included.
     classes: Vec<model::AlertClass>,
 
     /// If `true`, include only alerts that have been fully dispatched.
@@ -236,6 +239,45 @@ impl AlertFilters {
         }
         self.dispatched = Some(dispatched);
         Ok(self)
+    }
+}
+
+impl TryFrom<external_api::AlertListParams> for AlertFilters {
+    type Error = Error;
+    fn try_from(
+        params: external_api::AlertListParams,
+    ) -> Result<Self, Self::Error> {
+        let external_api::AlertListParams { alert_class, start_time, end_time } =
+            params;
+
+        let mut filters = Self::default();
+        if let Some(start_time) = start_time {
+            filters = filters.after(start_time)?;
+        }
+        if let Some(end_time) = end_time {
+            filters = filters.before(end_time)?;
+        }
+
+        if let Some(alert_class) = alert_class {
+            let subscription =
+                model::AlertSubscriptionKind::try_from(alert_class)?;
+            let classes = subscription.matching_classes()?.collect::<Vec<_>>();
+
+            // If the provided glob doesn't match any classes, give up.
+            if classes.is_empty() {
+                return Err(Error::non_resourcetype_not_found(format!(
+                    "alert class glob '{subscription}' does not match any \
+                     existing alert classes"
+                )));
+            }
+
+            // The `AlertFilters::with_classes` method will `into_iter()` the
+            // argument and `extend()` the existing list of classes with it.
+            // This is not necessary here, since we just created the alert
+            // filters and are not going to add any other classes to it.
+            filters.classes = classes;
+        }
+        Ok(filters)
     }
 }
 
@@ -464,6 +506,7 @@ impl DataStore {
         pagparams: &DataPageParams<'_, (DateTime<Utc>, Uuid)>,
     ) -> ListResultVec<(Alert, Option<fm::RendezvousAlertCreated>)> {
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
+
         Self::alert_list_matching_query(filters, pagparams)
             .load_async(&*self.pool_connection_authorized(opctx).await?)
             .await
@@ -482,6 +525,8 @@ impl DataStore {
             (alert_dsl::time_created, alert_dsl::id),
             &pagparams,
         )
+        // The singleton probe alert should not appear in the alert list.
+        .filter(alert_dsl::alert_class.ne(model::AlertClass::Probe))
         .left_join(marker_dsl::rendezvous_alert_created)
         .select((
             Alert::as_select(),

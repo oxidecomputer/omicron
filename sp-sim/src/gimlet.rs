@@ -48,7 +48,7 @@ use gateway_messages::{ComponentDetails, Message, MgsError, StartupOptions};
 use gateway_messages::{DiscoverResponse, IgnitionState, PowerState};
 use gateway_messages::{MessageKind, version};
 use gateway_types::component::SpState;
-use omicron_common::disk::M2Slot;
+use sled_agent_types::disk::M2Slot;
 use slog::{Logger, debug, error, info, warn};
 use slog_error_chain::InlineErrorChain;
 use std::cell::Cell;

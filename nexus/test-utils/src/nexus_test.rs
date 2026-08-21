@@ -36,9 +36,7 @@ use oximeter_producer::Server as ProducerServer;
 use sled_agent_types::early_networking::SwitchSlot;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
-#[cfg(feature = "omicron-dev")]
 use std::net::Ipv4Addr;
-#[cfg(feature = "omicron-dev")]
 use std::sync::Mutex;
 use std::sync::{Arc, RwLock};
 use std::time::Duration;

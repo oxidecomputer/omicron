@@ -82,18 +82,8 @@ pub struct OmicronInstallMetadata {
     pub file_size: u64,
 
     /// The hash of the file.
+    #[schemars(schema_with = "ArtifactHash::v1_json_schema")]
     pub hash: ArtifactHash,
-}
-
-impl OmicronInstallMetadata {
-    // TODO(iliana): remove when cleaning up Tufaceous v1
-    pub fn new_v2(
-        file_name: String,
-        file_size: u64,
-        hash: tufaceous_artifact_v2::ArtifactHash,
-    ) -> Self {
-        Self { file_name, file_size, hash: ArtifactHash(hash.0) }
-    }
 }
 
 impl IdOrdItem for OmicronInstallMetadata {

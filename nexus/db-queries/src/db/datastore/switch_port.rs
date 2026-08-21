@@ -2012,12 +2012,12 @@ impl<'a> BgpPeerProperties<'a> {
         peer: &'a networking::BgpPeer,
     ) -> Result<(), SwitchPortSettingsCreateError> {
         let prev = match peer.addr {
-            RouterPeerType::Unnumbered { .. } => {
+            RouterPeerType::Unnumbered(_) => {
                 self.unnumbered_peers.insert(link_name, peer)
             }
-            RouterPeerType::Numbered { ip, .. } => {
-                self.numbered_peers.insert(ip.into(), peer)
-            }
+            RouterPeerType::Numbered(numbered_router) => self
+                .numbered_peers
+                .insert(numbered_router.target_addr().into(), peer),
         };
 
         // We should never have duplicates: that either means we have multiple
@@ -2027,10 +2027,11 @@ impl<'a> BgpPeerProperties<'a> {
             Ok(())
         } else {
             let (kind, duplication) = match peer.addr {
-                RouterPeerType::Unnumbered { .. } => {
+                RouterPeerType::Unnumbered(_) => {
                     ("unnumbered", format!("link {link_name}"))
                 }
-                RouterPeerType::Numbered { ip, .. } => {
+                RouterPeerType::Numbered(numbered_router) => {
+                    let ip = numbered_router.target_addr();
                     ("numbered", format!("address {ip}"))
                 }
             };
@@ -2321,9 +2322,10 @@ mod test {
     use omicron_uuid_kinds::GenericUuid;
     use sled_agent_types::early_networking::BfdMode;
     use sled_agent_types::early_networking::ImportExportPolicy;
+    use sled_agent_types::early_networking::NumberedRouter;
     use sled_agent_types::early_networking::RouterLifetimeConfig;
-    use sled_agent_types::early_networking::RouterPeerType;
     use sled_agent_types::early_networking::SwitchSlot;
+    use sled_agent_types::early_networking::UnnumberedRouter;
     use std::net::IpAddr;
     use std::{collections::HashMap, str::FromStr};
 
@@ -2404,10 +2406,12 @@ mod test {
                 peers: vec![
                     BgpPeer {
                         bgp_config: bgp_config.identity.name.clone().into(),
-                        addr: RouterPeerType::Numbered {
-                            ip: "192.168.1.1".parse().unwrap(),
-                            src_addr: None,
-                        },
+                        addr: NumberedRouter::new(
+                            "192.168.1.1".parse().unwrap(),
+                            None,
+                        )
+                        .unwrap()
+                        .into(),
                         hold_time: 0,
                         idle_hold_time: 0,
                         delay_open: 0,
@@ -2429,10 +2433,11 @@ mod test {
                     },
                     BgpPeer {
                         bgp_config: bgp_config.identity.name.clone().into(),
-                        addr: RouterPeerType::Unnumbered {
+                        addr: UnnumberedRouter {
                             router_lifetime: RouterLifetimeConfig::new(123)
                                 .unwrap(),
-                        },
+                        }
+                        .into(),
                         hold_time: 0,
                         idle_hold_time: 0,
                         delay_open: 0,
@@ -2803,10 +2808,12 @@ mod test {
                 link_name: Name::from_str("phy0").unwrap(),
                 peers: vec![BgpPeer {
                     bgp_config: bgp_config.identity.name.clone().into(),
-                    addr: RouterPeerType::Numbered {
-                        ip: "192.168.1.1".parse().unwrap(),
-                        src_addr: None,
-                    },
+                    addr: NumberedRouter::new(
+                        "192.168.1.1".parse().unwrap(),
+                        None,
+                    )
+                    .unwrap()
+                    .into(),
                     hold_time: 0,
                     idle_hold_time: 0,
                     delay_open: 0,
@@ -2977,9 +2984,10 @@ mod test {
         // communities and import/export policies.
         let peer_phy0 = BgpPeer {
             bgp_config: NameOrId::Name("bgp-cfg".parse().unwrap()),
-            addr: RouterPeerType::Unnumbered {
+            addr: UnnumberedRouter {
                 router_lifetime: RouterLifetimeConfig::new(100).unwrap(),
-            },
+            }
+            .into(),
             hold_time: 0,
             idle_hold_time: 0,
             delay_open: 0,
@@ -3000,9 +3008,10 @@ mod test {
         };
 
         let peer_phy1 = BgpPeer {
-            addr: RouterPeerType::Unnumbered {
+            addr: UnnumberedRouter {
                 router_lifetime: RouterLifetimeConfig::new(200).unwrap(),
-            },
+            }
+            .into(),
             communities: vec![30, 40],
             allowed_export: ImportExportPolicy::NoFiltering,
             allowed_import: ImportExportPolicy::Allow(vec![

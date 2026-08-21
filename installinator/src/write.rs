@@ -20,18 +20,16 @@ use installinator_common::{
     StepProgress, StepResult, StepSuccess, UpdateEngine, WriteComponent,
     WriteError, WriteOutput, WriteSpec, WriteStepId,
 };
-use omicron_common::{
-    disk::M2Slot,
-    update::{
-        MupdateOverrideInfo, OmicronInstallManifest,
-        OmicronInstallManifestSource, OmicronInstallMetadata,
-    },
+use omicron_common::update::{
+    MupdateOverrideInfo, OmicronInstallManifest, OmicronInstallManifestSource,
+    OmicronInstallMetadata,
 };
 use omicron_uuid_kinds::{MupdateOverrideUuid, MupdateUuid};
 use oxide_update_engine_types::errors::NestedEngineError;
 use oxide_update_engine_types::events::ProgressUnits;
 use oxide_update_engine_types::spec::EngineSpec;
 use sha2::{Digest, Sha256};
+use sled_agent_types::disk::M2Slot;
 use slog::{Logger, info, warn};
 use slog_error_chain::InlineErrorChain;
 use tokio::{
@@ -39,7 +37,7 @@ use tokio::{
     fs::File,
     io::{AsyncWrite, AsyncWriteExt},
 };
-use tufaceous_artifact_v2::ArtifactHash;
+use tufaceous_artifact::ArtifactHash;
 
 use crate::{async_temp_file::AsyncNamedTempFile, hardware::Hardware};
 
@@ -652,11 +650,11 @@ pub(crate) struct ArtifactToWrite {
 impl ArtifactToWrite {
     fn to_install_metadata(&self) -> OmicronInstallMetadata {
         let file_size: usize = self.data.num_bytes();
-        OmicronInstallMetadata::new_v2(
-            self.file_name.clone(),
-            u64::try_from(file_size).expect("usize fits in u64"),
-            self.hash,
-        )
+        OmicronInstallMetadata {
+            file_name: self.file_name.clone(),
+            file_size: u64::try_from(file_size).expect("usize fits in u64"),
+            hash: self.hash,
+        }
     }
 }
 

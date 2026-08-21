@@ -4,6 +4,7 @@
 
 //! omdb commands that query or update specific Nexus instances
 
+mod fm_config;
 mod quiesce;
 mod reconfigurator_config;
 mod update_status;
@@ -26,6 +27,8 @@ use clap::Args;
 use clap::ColorChoice;
 use clap::Subcommand;
 use clap::ValueEnum;
+use fm_config::FmConfigArgs;
+use fm_config::cmd_nexus_fm_config;
 use futures::StreamExt;
 use futures::TryStreamExt;
 use http::StatusCode;
@@ -60,6 +63,7 @@ use nexus_types::internal_api::background::BlueprintRendezvousStatus;
 use nexus_types::internal_api::background::DatasetsRendezvousStats;
 use nexus_types::internal_api::background::EreporterStatus;
 use nexus_types::internal_api::background::FmAnalysisStatus;
+use nexus_types::internal_api::background::FmConfigLoadStatus;
 use nexus_types::internal_api::background::FmRendezvousStatus;
 use nexus_types::internal_api::background::IncompleteBootstoreConfigReport;
 use nexus_types::internal_api::background::InstanceReincarnationStatus;
@@ -116,6 +120,7 @@ use quiesce::cmd_nexus_quiesce;
 use reconfigurator_config::ReconfiguratorConfigArgs;
 use reconfigurator_config::cmd_nexus_reconfigurator_config;
 use serde::Deserialize;
+use sled_agent_types::disk::DiskIdentity;
 use sled_hardware_types::BaseboardId;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
@@ -184,6 +189,8 @@ enum NexusCommands {
     TrustQuorum(TrustQuorumArgs),
     /// show running artifact versions
     UpdateStatus(UpdateStatusArgs),
+    /// view or modify fault management config
+    FmConfig(FmConfigArgs),
 }
 
 #[derive(Debug, Args)]
@@ -604,10 +611,38 @@ struct TrustQuorumConfigArgs {
 #[derive(Debug, Args)]
 struct TrustQuorumRemoveSledArgs {
     // remove is _extremely_ dangerous, so we also require a database
-    // connection to perform some safety checks
+    // connection to perform some safety checks. These are only possible when
+    // removing by sled ID; a sled identified by baseboard may have no database
+    // record at all.
     #[clap(flatten)]
     db_url_opts: DbUrlOptions,
-    sled_id: SledUuid,
+
+    /// ID of the rack to remove the sled from
+    rack_id: RackUuid,
+
+    /// ID of the sled to remove
+    #[clap(
+        long,
+        conflicts_with_all = ["part_number", "serial_number"],
+        required_unless_present_any = ["part_number", "serial_number"],
+    )]
+    sled_id: Option<SledUuid>,
+
+    /// part number of the sled to remove, for a sled with no database record
+    #[clap(long, requires = "serial_number")]
+    part_number: Option<String>,
+
+    /// serial number of the sled to remove, for a sled with no database record
+    #[clap(long, requires = "part_number")]
+    serial_number: Option<String>,
+}
+
+impl TrustQuorumRemoveSledArgs {
+    fn baseboard_id(&self) -> Option<BaseboardId> {
+        let part_number = self.part_number.clone()?;
+        let serial_number = self.serial_number.clone()?;
+        Some(BaseboardId { part_number, serial_number })
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -722,14 +757,7 @@ impl NexusArgs {
             }) => cmd_nexus_background_tasks_list(&client).await,
             NexusCommands::BackgroundTasks(BackgroundTasksArgs {
                 command: BackgroundTasksCommands::Show(args),
-            }) => {
-                cmd_nexus_background_tasks_show(
-                    &client,
-                    args,
-                    omdb.output.color,
-                )
-                .await
-            }
+            }) => cmd_nexus_background_tasks_show(&client, args).await,
             NexusCommands::BackgroundTasks(BackgroundTasksArgs {
                 command: BackgroundTasksCommands::PrintReport(args),
             }) => {
@@ -945,6 +973,9 @@ impl NexusArgs {
             NexusCommands::UpdateStatus(args) => {
                 cmd_nexus_update_status(&client, args).await
             }
+            NexusCommands::FmConfig(args) => {
+                cmd_nexus_fm_config(omdb, &client, args).await
+            }
         }
     }
 }
@@ -997,7 +1028,6 @@ async fn cmd_nexus_background_tasks_list(
 async fn cmd_nexus_background_tasks_show(
     client: &nexus_lockstep_client::Client,
     args: &BackgroundTasksShowArgs,
-    color: ColorChoice,
 ) -> Result<(), anyhow::Error> {
     let response =
         client.bgtask_list().await.context("listing background tasks")?;
@@ -1047,7 +1077,6 @@ async fn cmd_nexus_background_tasks_show(
 
     let opts = BackgroundTasksPrintOpts {
         show_executing_info: !args.no_executing_info,
-        colored: should_colorize(color, supports_color::Stream::Stdout),
     };
 
     // Some tasks should be grouped and printed together in a certain order,
@@ -1146,8 +1175,6 @@ async fn cmd_nexus_background_tasks_activate(
 #[derive(Clone, Debug)]
 struct BackgroundTasksPrintOpts {
     show_executing_info: bool,
-    /// Whether to style output with ANSI terminal colors.
-    colored: bool,
 }
 
 fn print_task(bgtask: &BackgroundTask, opts: &BackgroundTasksPrintOpts) {
@@ -1196,7 +1223,7 @@ fn print_task(bgtask: &BackgroundTask, opts: &BackgroundTasksPrintOpts) {
     // unstable -- it gets exposed by background tasks as unstructured
     // (schemaless) data.  We make a best effort to interpret it.
     if let LastResult::Completed(completed) = &bgtask.last {
-        print_task_details(&bgtask, &completed.details, opts.colored);
+        print_task_details(&bgtask, &completed.details);
     }
 }
 
@@ -1240,11 +1267,7 @@ fn print_start_end_time(
 /// undocumented and unstable (subject to change).  That does make this code
 /// both ugly and brittle.  It's not a fatal error to fail to parse these, but
 /// we do warn the user if that happens.
-fn print_task_details(
-    bgtask: &BackgroundTask,
-    details: &serde_json::Value,
-    colored: bool,
-) {
+fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
     // All tasks might produce an "error" property.  If we find one, print that
     // out and stop.
     #[derive(Deserialize)]
@@ -1377,7 +1400,10 @@ fn print_task_details(
             print_task_webhook_deliverator(details);
         }
         "fm_analysis" => {
-            print_task_fm_analysis(details, colored);
+            print_task_fm_analysis(details);
+        }
+        "fm_config_loader" => {
+            print_task_fm_config_loader(details);
         }
         "fm_sitrep_loader" => {
             print_task_fm_sitrep_loader(details);
@@ -3508,7 +3534,7 @@ mod ereporter_status_fields {
     pub const NUM_WIDTH: usize = 4;
 }
 
-fn print_task_fm_analysis(details: &serde_json::Value, colored: bool) {
+fn print_task_fm_analysis(details: &serde_json::Value) {
     use nexus_types::internal_api::background::fm_analysis::{
         AnalysisOutcome, AnalysisStatus, Outcome, PreparationStatus,
     };
@@ -3547,10 +3573,18 @@ fn print_task_fm_analysis(details: &serde_json::Value, colored: bool) {
     println!("    FAULT MANAGEMENT ANALYSIS SUMMARY");
     println!("    =================================");
     let (prep_status, analysis_status) = match outcome {
-        Outcome::Disabled => {
+        Outcome::Disabled(config_source) => {
             println!(
-                "    fault management analysis explicitly disabled \
-                 by config!"
+                "    fault management analysis explicitly disabled by config!"
+            );
+            println!("{}", config_source.display_multiline(6));
+            return;
+        }
+        Outcome::WaitingForConfig => {
+            println!(
+                "    analysis was not performed, as the fault management\n    \
+                     configuration has not yet been loaded.\n\
+                 (i) note: this should only happen if Nexus has just started.",
             );
             return;
         }
@@ -3597,22 +3631,19 @@ fn print_task_fm_analysis(details: &serde_json::Value, colored: bool) {
         }
     };
 
-    let AnalysisStatus {
-        start_time,
-        end_time,
-        report: analysis_report,
-        outcome,
-        capacity,
-    } = analysis_status;
-    match outcome {
+    let AnalysisStatus { start_time, end_time, outcome, capacity } =
+        analysis_status;
+    let sitrep_id = match outcome {
         AnalysisOutcome::Error(error) => {
             println!("{ERRICON} analysis failed: {error}");
+            None
         }
         AnalysisOutcome::Unchanged => {
             println!(
                 "    no changes from the current situation report ({:?})",
                 parent_sitrep_id
             );
+            None
         }
         AnalysisOutcome::LimitReached { limit } => {
             println!(
@@ -3620,6 +3651,7 @@ fn print_task_fm_analysis(details: &serde_json::Value, colored: bool) {
                  limit ({limit} sitreps) has been reached!"
             );
             println!("    no new sitrep was written.");
+            None
         }
         AnalysisOutcome::NotCommitted { sitrep_id } => {
             println!(
@@ -3630,6 +3662,7 @@ fn print_task_fm_analysis(details: &serde_json::Value, colored: bool) {
                 of date"
             );
             println!("    sitrep ID: {sitrep_id:?}");
+            Some(sitrep_id)
         }
         AnalysisOutcome::CommitFailed { sitrep_id, error } => {
             println!(
@@ -3638,11 +3671,20 @@ fn print_task_fm_analysis(details: &serde_json::Value, colored: bool) {
             );
             println!("    sitrep ID: {sitrep_id:?}");
             println!("    error:     {error}");
+            Some(sitrep_id)
         }
         AnalysisOutcome::Committed { sitrep_id } => {
             println!("    analyzed the situation, and committed a new sitrep!");
             println!("    sitrep ID: {sitrep_id:?}");
+            Some(sitrep_id)
         }
+    };
+    if let Some(sitrep_id) = sitrep_id {
+        println!(
+            "    note: you can view the sitrep and its reports with:\n      \
+                   $ omdb db sitrep show {sitrep_id}\n      \
+                   $ omdb db sitrep analysis-report {sitrep_id} "
+        )
     }
     println!();
 
@@ -3660,20 +3702,53 @@ fn print_task_fm_analysis(details: &serde_json::Value, colored: bool) {
         println!("      count: {:>6}", capacity.count);
     }
 
-    let PreparationStatus { warnings, report: prep_report } = prep_status;
-    println!("    preparation report:");
-    print!("{}", prep_report.display_multiline(6).colored(colored));
+    let PreparationStatus { warnings } = prep_status;
     if !warnings.is_empty() {
         println!("{ERRICON}   non-fatal errors preparing analysis inputs:");
         for error in warnings {
             println!("      > {error}")
         }
     }
-
-    println!();
-    println!("    analysis report:");
-    print!("{}", analysis_report.display_multiline(6).colored(colored));
     print_start_end_time(start_time, end_time, 4);
+}
+
+fn print_task_fm_config_loader(details: &serde_json::Value) {
+    use nexus_types::internal_api::background::CurrentFmConfig;
+    let current_config =
+        match serde_json::from_value::<FmConfigLoadStatus>(details.clone()) {
+            Err(error) => {
+                eprintln!(
+                    "warning: failed to interpret task details: {:?}: {:?}",
+                    error, details
+                );
+                return;
+            }
+            Ok(FmConfigLoadStatus::Error(error)) => {
+                println!("    task did not complete successfully: {error}");
+                return;
+            }
+            Ok(FmConfigLoadStatus::LatestConfigInvalid { error, fallback }) => {
+                println!(
+                    "/!\\ the latest FM config override in the database is \
+                 invalid: {error}"
+                );
+                fallback
+            }
+            Ok(FmConfigLoadStatus::Loaded(config)) => config,
+        };
+
+    let CurrentFmConfig { time_loaded, updated, config } = current_config;
+
+    const TIME_LOADED: &str = "config last loaded at:";
+    const UPDATED: &str = "  loaded by this activation:";
+    const WIDTH: usize = const_max_len(&[TIME_LOADED, UPDATED]) + 1;
+    println!(
+        "    {TIME_LOADED:<WIDTH$}{}",
+        humantime::format_rfc3339_millis(time_loaded.into()),
+    );
+    println!("    {UPDATED:<WIDTH$}{updated}");
+    println!("    current config:");
+    print!("{}", config.display_multiline(6));
 }
 
 fn print_task_fm_sitrep_loader(details: &serde_json::Value) {
@@ -3709,25 +3784,34 @@ fn print_task_fm_sitrep_history_pruner(details: &serde_json::Value) {
         Outcome, SitrepsPruned,
     };
 
-    let SitrepHistoryPrunerStatus {
-        history_limit,
-        batch_size,
-        pruned: SitrepsPruned { batches, total, versions },
-        outcome,
-    } = match serde_json::from_value::<SitrepHistoryPrunerStatus>(
-        details.clone(),
-    ) {
-        Err(error) => {
-            eprintln!(
-                "warning: failed to interpret task details: {:?}: {:?}",
-                error, details
-            );
-            return;
-        }
-        Ok(status) => status,
-    };
+    let (cfg, batch_size, SitrepsPruned { batches, total, versions }, outcome) =
+        match serde_json::from_value::<SitrepHistoryPrunerStatus>(
+            details.clone(),
+        ) {
+            Err(error) => {
+                eprintln!(
+                    "warning: failed to interpret task details: {:?}: {:?}",
+                    error, details
+                );
+                return;
+            }
+            Ok(SitrepHistoryPrunerStatus::WaitingForConfig) => {
+                println!(
+                    "    nothing was pruned, as the fault management\n    \
+                         configuration has not yet been loaded.\n\
+                     (i) note: this should only happen if Nexus has just \
+                     started.",
+                );
+                return;
+            }
+            Ok(SitrepHistoryPrunerStatus::Activated {
+                cfg,
+                batch_size,
+                pruned,
+                outcome,
+            }) => (cfg, batch_size, pruned, outcome),
+        };
 
-    const HISTORY_LIMIT: &str = "max sitreps to keep:";
     const STATUS: &str = "status:";
     const SITREP_COUNT: &str = "  current count:";
     const PRUNED_COUNT: &str = "  sitreps pruned:";
@@ -3735,7 +3819,6 @@ fn print_task_fm_sitrep_history_pruner(details: &serde_json::Value) {
     const BATCHES: &str = "  batches:";
     const BATCH_SIZE: &str = "deletion batch size:";
     const P_WIDTH: usize = const_max_len(&[
-        HISTORY_LIMIT,
         SITREP_COUNT,
         PRUNED_COUNT,
         PRUNED_VERSIONS,
@@ -3743,7 +3826,8 @@ fn print_task_fm_sitrep_history_pruner(details: &serde_json::Value) {
         BATCH_SIZE,
     ]) + 1;
     const NUM_WIDTH: usize = 4;
-    println!("    {HISTORY_LIMIT:<P_WIDTH$}{history_limit:>NUM_WIDTH$}");
+    println!("    configuration:");
+    print!("{}", cfg.display_multiline(6));
     println!("    {BATCH_SIZE:<P_WIDTH$}{batch_size:>NUM_WIDTH$}");
     match outcome {
         Outcome::Error(error) => {
@@ -5241,7 +5325,7 @@ async fn cmd_nexus_sled_expunge_disk_with_datastore(
         .context("loading latest collection")?
     {
         Some(collection) => {
-            let disk_identity = omicron_common::disk::DiskIdentity {
+            let disk_identity = DiskIdentity {
                 vendor: physical_disk.vendor.clone(),
                 serial: physical_disk.serial.clone(),
                 model: physical_disk.model.clone(),
@@ -5416,39 +5500,38 @@ async fn cmd_nexus_trust_quorum_remove_sled(
     args: &TrustQuorumRemoveSledArgs,
     omdb: &Omdb,
     log: &slog::Logger,
-    destruction_token: DestructiveOperationToken,
-) -> Result<(), anyhow::Error> {
-    let datastore = args.db_url_opts.connect(omdb, log).await?;
-    let result = cmd_nexus_trust_quorum_remove_sled_with_datastore(
-        &datastore,
-        client,
-        args,
-        log,
-        destruction_token,
-    )
-    .await;
-    datastore.terminate().await;
-    result
-}
-
-// `omdb nexus trust-quorum remove-sled`, but borrowing a datastore
-async fn cmd_nexus_trust_quorum_remove_sled_with_datastore(
-    datastore: &Arc<DataStore>,
-    client: &nexus_lockstep_client::Client,
-    args: &TrustQuorumRemoveSledArgs,
-    log: &slog::Logger,
     _destruction_token: DestructiveOperationToken,
 ) -> Result<(), anyhow::Error> {
-    use nexus_db_queries::context::OpContext;
-    let opctx = OpContext::for_omdb(log.clone(), datastore.clone());
-    let opctx = &opctx;
-
-    // First, we need to look up the sled so we know its serial number.
-    let (_authz_sled, sled) = LookupPath::new(opctx, datastore)
-        .sled_id(args.sled_id)
-        .fetch()
-        .await
-        .with_context(|| format!("failed to find sled {}", args.sled_id))?;
+    // Trust quorum membership is tracked by baseboard, so a sled ID has to be
+    // resolved into one. A sled given by baseboard may have no database record
+    // to resolve, which is the reason for accepting one.
+    let (baseboard_id, description) = match args.baseboard_id() {
+        Some(baseboard_id) => {
+            let description = format!(
+                "sled {baseboard_id} from the trust-quorum for rack {}",
+                args.rack_id,
+            );
+            (baseboard_id, description)
+        }
+        None => {
+            let sled_id =
+                args.sled_id.expect("clap requires a sled ID or a baseboard");
+            let datastore = args.db_url_opts.connect(omdb, log).await?;
+            let sled = lookup_sled_by_id(&datastore, sled_id, log).await;
+            datastore.terminate().await;
+            let sled = sled?;
+            let description = format!(
+                "sled {sled_id} ({}) from the trust-quorum for rack {}",
+                sled.serial_number(),
+                args.rack_id,
+            );
+            let baseboard_id = BaseboardId {
+                part_number: sled.part_number().to_string(),
+                serial_number: sled.serial_number().to_string(),
+            };
+            (baseboard_id, description)
+        }
+    };
 
     // Helper to get confirmation messages from the user.
     let mut prompt = ConfirmationPrompt::new();
@@ -5473,14 +5556,11 @@ async fn cmd_nexus_trust_quorum_remove_sled_with_datastore(
     );
 
     println!(
-        "WARNING: This operation will PERMANENTLY and IRRECOVABLY remove sled \
-        {} ({}) from the trust-quorum for rack {}. To proceed, type the \
-        sled's serial number.",
-        args.sled_id,
-        sled.serial_number(),
-        sled.rack_id
+        "WARNING: This operation will PERMANENTLY and IRRECOVABLY remove \
+        {description}. To proceed, type the sled's serial number."
     );
-    prompt.read_and_validate("sled serial number", sled.serial_number())?;
+    prompt
+        .read_and_validate("sled serial number", &baseboard_id.serial_number)?;
 
     println!(
         "About to start the trust quorum reconfiguration to remove the sled."
@@ -5503,7 +5583,7 @@ async fn cmd_nexus_trust_quorum_remove_sled_with_datastore(
     );
 
     let epoch = client
-        .trust_quorum_remove_sled(&args.sled_id.into_untyped_uuid())
+        .trust_quorum_remove_sled(args.rack_id.as_untyped_uuid(), &baseboard_id)
         .await
         .context("trust quorum remove sled")?
         .into_inner();
@@ -5511,6 +5591,24 @@ async fn cmd_nexus_trust_quorum_remove_sled_with_datastore(
     println!("Started trust quorum reconfiguration at epoch {epoch}\n");
 
     Ok(())
+}
+
+// Look up a sled by ID, for the safety checks in `omdb nexus trust-quorum
+// remove-sled`.
+async fn lookup_sled_by_id(
+    datastore: &Arc<DataStore>,
+    sled_id: SledUuid,
+    log: &slog::Logger,
+) -> Result<nexus_db_model::Sled, anyhow::Error> {
+    let opctx = OpContext::for_omdb(log.clone(), datastore.clone());
+
+    let (_authz_sled, sled) = LookupPath::new(&opctx, datastore)
+        .sled_id(sled_id)
+        .fetch()
+        .await
+        .with_context(|| format!("failed to find sled {sled_id}"))?;
+
+    Ok(sled)
 }
 
 /// Runs `omdb nexus support-bundles create`

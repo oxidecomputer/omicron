@@ -6,6 +6,7 @@
 
 use anyhow::Context;
 use futures::StreamExt;
+use iddqd::IdOrdMap;
 use nexus_db_model::DbMetadataNexusState;
 use nexus_db_model::DnsGroup;
 use nexus_db_model::Generation;
@@ -46,7 +47,6 @@ use omicron_common::address::SLED_PREFIX_LENGTH;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::LookupType;
-use omicron_common::disk::DiskIdentity;
 use omicron_common::policy::BOUNDARY_NTP_REDUNDANCY;
 use omicron_common::policy::COCKROACHDB_REDUNDANCY;
 use omicron_common::policy::CRUCIBLE_PANTRY_REDUNDANCY;
@@ -55,6 +55,7 @@ use omicron_common::policy::NEXUS_REDUNDANCY;
 use omicron_common::policy::OXIMETER_REDUNDANCY;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
+use sled_agent_types::disk::DiskIdentity;
 use sled_hardware_types::BaseboardId;
 use slog::Logger;
 use slog::error;
@@ -206,7 +207,7 @@ impl PlanningInputFromDb<'_> {
                     .tuf_repo_get_by_id(opctx, repo_id.into())
                     .await
                     .internal_context("fetching target release repo")?
-                    .into_external(),
+                    .into(),
             ),
         };
         let tuf_repo = TufRepoPolicy {
@@ -234,7 +235,7 @@ impl PlanningInputFromDb<'_> {
                             .internal_context(
                                 "fetching previous target release repo",
                             )?
-                            .into_external(),
+                            .into(),
                     )
                 } else {
                     TargetReleaseDescription::Initial
@@ -543,7 +544,7 @@ pub async fn reconfigurator_state_load(
             // They can be removed since we fetched the list.
             read.ok()
         })
-        .collect::<Vec<Collection>>()
+        .collect::<IdOrdMap<Collection>>()
         .await;
 
     // Grab the latest target blueprint.
@@ -594,7 +595,7 @@ pub async fn reconfigurator_state_load(
             // They can be removed since we fetched the list.
             read.ok()
         })
-        .collect::<Vec<Blueprint>>()
+        .collect::<IdOrdMap<Blueprint>>()
         .await;
 
     // It's also useful to include information about any DNS generations

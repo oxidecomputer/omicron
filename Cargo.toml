@@ -50,6 +50,7 @@ members = [
     "dev-tools/oximeter-load-test",
     "dev-tools/oxlog",
     "dev-tools/pins",
+    "dev-tools/rack-init-config",
     "dev-tools/reconfigurator-cli",
     "dev-tools/reconfigurator-exec-unsafe",
     "dev-tools/reconfigurator-sp-updater",
@@ -150,10 +151,12 @@ members = [
     "sled-agent/api",
     "sled-agent/bootstrap-agent-lockstep-api",
     "sled-agent/bootstrap-agent-lockstep-types",
+    "sled-agent/bootstrap-common",
     "sled-agent/config-reconciler",
     "sled-agent/early-networking",
     "sled-agent/health-monitor",
     "sled-agent/measurements",
+    "sled-agent/multirack-join",
     "sled-agent/rack-setup",
     "sled-agent/repo-depot-api",
     "sled-agent/scrimlet-reconcilers",
@@ -177,7 +180,6 @@ members = [
     "trust-quorum/types",
     "trust-quorum/types/versions",
     "typed-rng",
-    "update-common",
     "uuid-kinds",
     "wicket-common",
     "wicket-dbg",
@@ -243,6 +245,7 @@ default-members = [
     "dev-tools/oximeter-load-test",
     "dev-tools/oxlog",
     "dev-tools/pins",
+    "dev-tools/rack-init-config",
     "dev-tools/reconfigurator-cli",
     "dev-tools/reconfigurator-exec-unsafe",
     "dev-tools/reconfigurator-sp-updater",
@@ -345,10 +348,12 @@ default-members = [
     "sled-agent/api",
     "sled-agent/bootstrap-agent-lockstep-api",
     "sled-agent/bootstrap-agent-lockstep-types",
+    "sled-agent/bootstrap-common",
     "sled-agent/config-reconciler",
     "sled-agent/early-networking",
     "sled-agent/health-monitor",
     "sled-agent/measurements",
+    "sled-agent/multirack-join",
     "sled-agent/rack-setup",
     "sled-agent/repo-depot-api",
     "sled-agent/scrimlet-reconcilers",
@@ -372,7 +377,6 @@ default-members = [
     "trust-quorum/types/versions",
     "test-utils",
     "typed-rng",
-    "update-common",
     "uuid-kinds",
     "wicket-common",
     "wicket-dbg",
@@ -440,7 +444,7 @@ assert_cmd = "2.0.17"
 async-bb8-diesel = "0.2"
 async-recursion = "1.1.1"
 async-trait = "0.1.89"
-attest-mock = { git = "https://github.com/oxidecomputer/dice-util", rev = "10952e8d9599b735b85d480af3560a11700e5b64" }
+attest-mock = { git = "https://github.com/oxidecomputer/dice-util", rev = "4a39ef08d81e5177edee0bddb1146032aa21074d" }
 atomicwrites = "0.4.4"
 authz-macros = { path = "nexus/authz-macros" }
 backoff = { version = "0.4.0", features = [ "tokio" ] }
@@ -516,8 +520,8 @@ dns-server-api = { path = "dns-server-api" }
 dns-service-client = { path = "clients/dns-service-client" }
 dpd-client = { git = "https://github.com/oxidecomputer/dendrite", rev = "04a52a3240a26c58f03e1cf40353d67ff69d76b6" }
 dropshot = { version = "0.17.1", features = [ "usdt-probes" ] }
-dropshot-api-manager = "0.7.2"
-dropshot-api-manager-types = "0.7.2"
+dropshot-api-manager = "0.8.0"
+dropshot-api-manager-types = "0.8.0"
 dyn-clone = "1.0.20"
 either = "1.15.0"
 erebor = { git = "https://github.com/oxidecomputer/erebor", rev = "48512bf970474ff0fd0868c833fd504c8d169064" }
@@ -607,7 +611,7 @@ ispf = { git = "https://github.com/oxidecomputer/ispf" }
 jiff = "0.2.15"
 key-manager = { path = "key-manager" }
 key-manager-types = { path = "key-manager/types" }
-kstat-rs = "0.2.4"
+kstat-rs = "0.2.5"
 libc = "0.2.174"
 linkme = "0.3"
 libipcc = { git = "https://github.com/oxidecomputer/ipcc-rs", rev = "524eb8f125003dff50b9703900c6b323f00f9e1b" }
@@ -695,7 +699,7 @@ oxide-tokio-rt = "0.1.4"
 oxide-update-engine = "0.1.2"
 oxide-update-engine-types = { version = "0.1.2", features = ["schemars08"] }
 oxide-update-engine-display = "0.1.2"
-oxide-vpc = { git = "https://github.com/oxidecomputer/opte", rev = "7f20f04c289961b92d18906846c28ff2b28ba681", features = [ "api", "std" ] }
+oxide-vpc = { git = "https://github.com/oxidecomputer/opte", rev = "0525f2f95588760133b7d5ebc8548e1ccdfbb353", features = [ "api", "std" ] }
 oxlog = { path = "dev-tools/oxlog" }
 oxnet = "0.1.5"
 once_cell = "1.21.3"
@@ -704,7 +708,7 @@ openapiv3 = "2.2.0"
 # must match samael's crate!
 openssl = "0.10"
 openssl-sys = "0.9"
-opte-ioctl = { git = "https://github.com/oxidecomputer/opte", rev = "7f20f04c289961b92d18906846c28ff2b28ba681" }
+opte-ioctl = { git = "https://github.com/oxidecomputer/opte", rev = "0525f2f95588760133b7d5ebc8548e1ccdfbb353" }
 oso = "0.27"
 owo-colors = "4.2.2"
 oximeter = { path = "oximeter/oximeter" }
@@ -814,11 +818,13 @@ similar-asserts = "1.7.0"
 # server zones.
 sled = "=0.34.7"
 sled-agent-api = { path = "sled-agent/api" }
+sled-agent-bootstrap-common = { path = "sled-agent/bootstrap-common" }
 sled-agent-client = { path = "clients/sled-agent-client" }
 sled-agent-config-reconciler = { path = "sled-agent/config-reconciler" }
 sled-agent-early-networking = { path = "sled-agent/early-networking" }
 sled-agent-health-monitor = { path = "sled-agent/health-monitor" }
 sled-agent-measurements = { path = "sled-agent/measurements" }
+sled-agent-multirack-join = { path = "sled-agent/multirack-join" }
 sled-agent-rack-setup = { path = "sled-agent/rack-setup" }
 sled-agent-scrimlet-reconcilers = { path = "sled-agent/scrimlet-reconcilers" }
 sled-agent-types = { path = "sled-agent/types" }
@@ -839,8 +845,8 @@ slog-term = "2.9.1"
 smf = "0.2"
 socket2 = { version = "0.5", features = ["all"] }
 sp-sim = { path = "sp-sim" }
-sprockets-tls = { git = "https://github.com/oxidecomputer/sprockets.git", rev = "68a4b3bf819722f9f57a3f0c99e1393ed01ba392" }
-sprockets-tls-test-utils = { git = "https://github.com/oxidecomputer/sprockets.git", rev = "68a4b3bf819722f9f57a3f0c99e1393ed01ba392" }
+sprockets-tls = { git = "https://github.com/oxidecomputer/sprockets.git", rev = "a233079e04d9688454486c452b694587a28c5257" }
+sprockets-tls-test-utils = { git = "https://github.com/oxidecomputer/sprockets.git", rev = "a233079e04d9688454486c452b694587a28c5257" }
 sqlformat = "0.3.5"
 sqlparser = { version = "0.61.0", features = [ "visitor" ] }
 static_assertions = "1.1.0"
@@ -879,17 +885,13 @@ tough = { version = "0.22.0" }
 transceiver-controller = { git = "https://github.com/oxidecomputer/transceiver-control", features = [ "api-traits" ] }
 transient-dns-server = { path = "dns-server/transient" }
 trybuild = "1.0.106"
-tufaceous = { git = "https://github.com/oxidecomputer/tufaceous", branch = "v1" }
-tufaceous-artifact = { git = "https://github.com/oxidecomputer/tufaceous", branch = "v1", features = ["proptest", "schemars"] }
-tufaceous-brand-metadata = { git = "https://github.com/oxidecomputer/tufaceous", branch = "v1" }
-tufaceous-lib = { git = "https://github.com/oxidecomputer/tufaceous", branch = "v1" }
-tufaceous-v2 = { git = "https://github.com/oxidecomputer/tufaceous", branch = "main", package = "tufaceous" }
-tufaceous-artifact-v2 = { git = "https://github.com/oxidecomputer/tufaceous", branch = "main", package = "tufaceous-artifact", features = ["proptest", "schemars"] }
+tufaceous = { git = "https://github.com/oxidecomputer/tufaceous", branch = "main" }
+tufaceous-artifact = { git = "https://github.com/oxidecomputer/tufaceous", branch = "main", features = ["proptest", "schemars"] }
+tufaceous-brand-metadata = { git = "https://github.com/oxidecomputer/tufaceous", branch = "main" }
 tui-tree-widget = "0.23.1"
 typed-rng = { path = "typed-rng" }
 typify = "0.3.0"
 unicode-width = "0.1.13"
-update-common = { path = "update-common" }
 url = "2.5.4"
 usdt = "0.5.0"
 uuid = { version = "1.17.0", features = ["serde", "v4"] }
@@ -908,7 +910,7 @@ wicketd-commission-types-versions = { path = "wicketd-commission-types/versions"
 x509-cert = { version = "0.2.5", default-features = false }
 xshell = "0.2.7"
 zerocopy = "0.8.26"
-zeroize = { version = "1.8.1", features = ["zeroize_derive", "std"] }
+zeroize = { version = "1.8.1", features = ["zeroize_derive", "serde", "std"] }
 zfs-test-harness = { path = "sled-storage/zfs-test-harness" }
 zip = { version = "4.2.0", default-features = false, features = ["deflate","bzip2"] }
 zone = { version = "0.3.1", default-features = false, features = ["async"] }

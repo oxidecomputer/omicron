@@ -46,7 +46,6 @@ use omicron_common::api::internal::shared::PrivateIpConfig;
 use omicron_common::backoff::{
     BackoffError, retry_notify, retry_policy_internal_service_aggressive,
 };
-use omicron_common::disk::DiskIdentity;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
@@ -59,6 +58,7 @@ use sled_agent_rack_setup::{
     from_ipaddr_to_external_floating_ip,
     from_sockaddr_to_external_floating_addr,
 };
+use sled_agent_types::disk::DiskIdentity;
 use sled_agent_types::early_networking::PortConfig;
 use sled_agent_types::early_networking::UplinkPorts;
 use sled_agent_types::inventory::NetworkInterface;
@@ -74,7 +74,8 @@ use std::sync::Arc;
 use transient_dns_server::TransientDnsServer;
 use uuid::Uuid;
 
-// TODO(#8950) Remove or move these names somewhere common.
+// Well-known service IP pool names the simulated sled-agent creates, mirroring
+// what real rack setup produces.
 const SERVICE_POOL_IPV4_NAME: &str = "oxide-service-pool-v4";
 const SERVICE_POOL_IPV6_NAME: &str = "oxide-service-pool-v6";
 

@@ -45,8 +45,8 @@ slog-dtrace.workspace = true
 slog.workspace = true
 rand.workspace = true
 thiserror.workspace = true
-tufaceous-artifact-v2.workspace = true
-tufaceous-v2.workspace = true
+tufaceous.workspace = true
+tufaceous-artifact.workspace = true
 tokio = { workspace = true, features = [ "full" ] }
 tokio-stream.workspace = true
 tokio-util.workspace = true
@@ -111,3 +111,4 @@ subprocess.workspace = true
 tar.workspace = true
 tokio = { workspace = true, features = ["test-util"] }
 wicket.workspace = true
+zeroize.workspace = true
