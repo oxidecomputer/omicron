@@ -1129,14 +1129,13 @@ async fn proptest_full_reconciliation() {
         SpPort::One,
     )
     .await;
-    let mut mgdctx =
-        dev::maghemite::MgdInstance::start(
-            0,
-            SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0).into(),
-            Some(mgsctx.address().into())
-        )
-        .await
-        .expect("started mgd");
+    let mut mgdctx = dev::maghemite::MgdInstance::start(
+        0,
+        SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0).into(),
+        Some(mgsctx.address().into()),
+    )
+    .await
+    .expect("started mgd");
     let client = Client::new(
         &format!("http://{}", mgdctx.address()),
         logctx.log.clone(),
