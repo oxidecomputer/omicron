@@ -85,8 +85,12 @@ use diesel::sql_types;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_lookup::DbConnection;
+use nexus_db_model::DbTypedGeneration;
+use nexus_db_model::to_db_typed_generation;
 use omicron_common::api::external::Error;
-use omicron_common::api::external::Generation;
+use omicron_generation_kinds::AlertGeneration;
+use omicron_generation_kinds::SupportBundleGeneration;
+use omicron_generation_kinds::TypedGeneration;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SitrepUuid;
 use uuid::Uuid;
@@ -109,7 +113,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         sitrep_id: SitrepUuid,
-        sitrep_alert_generation: Generation,
+        sitrep_alert_generation: AlertGeneration,
     ) -> Result<MarkerGcResult, Error> {
         self.fm_rendezvous_marker_gc::<nexus_db_model::Alert>(
             opctx,
@@ -126,7 +130,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         sitrep_id: SitrepUuid,
-        sitrep_support_bundle_generation: Generation,
+        sitrep_support_bundle_generation: SupportBundleGeneration,
     ) -> Result<MarkerGcResult, Error> {
         self.fm_rendezvous_marker_gc::<nexus_db_model::SupportBundle>(
             opctx,
@@ -143,7 +147,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         sitrep_id: SitrepUuid,
-        sitrep_generation: Generation,
+        sitrep_generation: TypedGeneration<R::GenerationKind>,
     ) -> Result<MarkerGcResult, Error> {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
         let conn = self.pool_connection_authorized(opctx).await?;
@@ -192,7 +196,7 @@ struct RendezvousMarkerGcPage<R: FmRendezvousResource> {
     sitrep_id: Uuid,
     /// Generation of the sitrep being executed. A marker row is deletable only
     /// if its `created_at_generation` is strictly less than this.
-    sitrep_generation: nexus_db_model::Generation,
+    sitrep_generation: DbTypedGeneration<R::GenerationKind>,
     /// `FROM` clause for the marker table, built once in [`Self::new`]. Stored
     /// as a field here, rather than reconstructed inside
     /// [`QueryFragment::walk_ast`], so it correctly shares `self`'s lifetime
@@ -210,15 +214,13 @@ impl<R: FmRendezvousResource> RendezvousMarkerGcPage<R> {
         cursor: Uuid,
         page_size: i64,
         sitrep_id: SitrepUuid,
-        sitrep_generation: Generation,
+        sitrep_generation: TypedGeneration<R::GenerationKind>,
     ) -> Self {
         Self {
             cursor,
             page_size,
             sitrep_id: sitrep_id.into_untyped_uuid(),
-            sitrep_generation: nexus_db_model::Generation::from(
-                sitrep_generation,
-            ),
+            sitrep_generation: to_db_typed_generation(sitrep_generation),
             marker_from_clause: <MarkerTable<R> as HasTable>::table()
                 .from_clause(),
             sitrep_from_clause: nexus_db_schema::schema::fm_sitrep::table
@@ -344,6 +346,7 @@ impl<R: FmRendezvousResource> QueryFragment<Pg> for RendezvousMarkerGcPage<R> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::db::fm_rendezvous_resources::test_utils::DummyGenerationKind;
     use crate::db::fm_rendezvous_resources::test_utils::DummyResource;
     use crate::db::fm_rendezvous_resources::test_utils::dummy_request;
     use crate::db::fm_rendezvous_resources::test_utils::insert_current_sitrep;
@@ -422,7 +425,7 @@ mod tests {
             .fm_rendezvous_marker_gc::<DummyResource>(
                 db.opctx(),
                 sitrep_id,
-                Generation::from_u32(5),
+                TypedGeneration::<DummyGenerationKind>::from_u32(5),
             )
             .await
             .unwrap();
@@ -487,7 +490,7 @@ mod tests {
                 cursor,
                 2,
                 sitrep_id,
-                Generation::from_u32(5),
+                TypedGeneration::<DummyGenerationKind>::from_u32(5),
             )
             .get_result_async::<(i64, Option<Uuid>)>(&*conn)
         };
@@ -536,7 +539,7 @@ mod tests {
             .fm_rendezvous_marker_gc::<DummyResource>(
                 db.opctx(),
                 SitrepUuid::new_v4(),
-                Generation::from_u32(5),
+                TypedGeneration::<DummyGenerationKind>::from_u32(5),
             )
             .await
             .unwrap();
@@ -558,7 +561,7 @@ mod tests {
             Uuid::nil(),
             1000,
             SitrepUuid::nil(),
-            Generation::from_u32(5),
+            TypedGeneration::<DummyGenerationKind>::from_u32(5),
         );
         expectorate_query_contents(
             query,

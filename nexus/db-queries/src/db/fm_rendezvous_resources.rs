@@ -23,6 +23,7 @@ use diesel::pg::Pg;
 use diesel::query_builder::QueryFragment;
 use diesel::query_source::QuerySource;
 use nexus_db_schema::schema;
+use omicron_generation_kinds::TypedGenerationKind;
 
 /// The creation marker table corresponding to some [`FmRendezvousResource`]
 /// `R`. This is the table that defines the column referenced by the
@@ -86,6 +87,13 @@ where
     /// [`SitrepGuardedInsert`]: crate::db::sitrep_guard::SitrepGuardedInsert
     type GenerationColumn: Column<Table = schema::fm_sitrep::table>;
 
+    /// The generation kind counted by [`Self::GenerationColumn`] (e.g.
+    /// `omicron_generation_kinds::AlertKind` for `Alert`). Ties the generation
+    /// values threaded through these queries to the resource they belong to,
+    /// so an alert generation can't be passed where a support bundle
+    /// generation is expected.
+    type GenerationKind: TypedGenerationKind;
+
     /// The id column in the creation marker table
     /// (e.g. `rendezvous_alert_created::alert_id` for `Alert`).
     type IdColumn: Column;
@@ -98,12 +106,14 @@ where
 
 impl FmRendezvousResource for nexus_db_model::Alert {
     type GenerationColumn = schema::fm_sitrep::dsl::alert_generation;
+    type GenerationKind = omicron_generation_kinds::AlertKind;
     type IdColumn = schema::rendezvous_alert_created::dsl::alert_id;
     type RequestTable = schema::fm_alert_request::table;
 }
 
 impl FmRendezvousResource for nexus_db_model::SupportBundle {
     type GenerationColumn = schema::fm_sitrep::dsl::support_bundle_generation;
+    type GenerationKind = omicron_generation_kinds::SupportBundleKind;
     type IdColumn =
         schema::rendezvous_support_bundle_created::dsl::support_bundle_id;
     type RequestTable = schema::fm_support_bundle_request::table;
@@ -129,7 +139,10 @@ pub(crate) mod test_utils {
     use nexus_db_lookup::DbConnection;
     use nexus_types::fm::Sitrep;
     use nexus_types::fm::SitrepMetadata;
-    use omicron_common::api::external;
+    use omicron_generation_kinds::AlertGeneration;
+    use omicron_generation_kinds::SupportBundleGeneration;
+    use omicron_generation_kinds::TypedGenerationKind;
+    use omicron_generation_kinds::TypedGenerationTag;
     use omicron_uuid_kinds::CollectionUuid;
     use omicron_uuid_kinds::OmicronZoneUuid;
     use omicron_uuid_kinds::SitrepUuid;
@@ -180,8 +193,16 @@ pub(crate) mod test_utils {
         pub name: String,
     }
 
+    /// Generation kind for the synthetic resource.
+    pub(crate) enum DummyGenerationKind {}
+
+    impl TypedGenerationKind for DummyGenerationKind {
+        const TAG: TypedGenerationTag = TypedGenerationTag::new("dummy");
+    }
+
     impl FmRendezvousResource for DummyResource {
         type GenerationColumn = dummy_generation;
+        type GenerationKind = DummyGenerationKind;
         type IdColumn = dummy_marker::dsl::dummy_id;
         type RequestTable = dummy_request::table;
     }
@@ -238,8 +259,8 @@ pub(crate) mod test_utils {
                 creator_id: OmicronZoneUuid::new_v4(),
                 comment: "rendezvous resource test sitrep".to_string(),
                 time_created: Utc::now(),
-                alert_generation: external::Generation::new(),
-                support_bundle_generation: external::Generation::new(),
+                alert_generation: AlertGeneration::new(),
+                support_bundle_generation: SupportBundleGeneration::new(),
             },
             cases: IdOrdMap::new(),
             ereports_by_id: IdOrdMap::new(),

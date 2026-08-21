@@ -33,11 +33,11 @@ use nexus_types::identity::Asset;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
-use omicron_common::api::external::Generation;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
+use omicron_generation_kinds::AlertGeneration;
 use omicron_uuid_kinds::CaseKind;
 use omicron_uuid_kinds::{AlertUuid, CaseUuid, GenericUuid};
 use std::collections::HashSet;
@@ -336,14 +336,14 @@ impl DataStore {
         opctx: &OpContext,
         request: &AlertRequest,
         case_id: CaseUuid,
-        expected_alert_generation: Generation,
+        expected_alert_generation: AlertGeneration,
     ) -> Result<Alert, FmRendezvousAlertCreateError> {
         let conn = self.pool_connection_authorized(opctx).await?;
         let alert = Alert::for_fm_alert_request(request, case_id);
 
         let guarded = SitrepGuardedInsert::<Alert, _>::new(
             alert.id().into_untyped_uuid(),
-            expected_alert_generation.into(),
+            expected_alert_generation,
             Self::alert_insert_query(alert),
         );
 
@@ -593,6 +593,7 @@ mod tests {
     use nexus_types::alert::test_alerts;
     use nexus_types::fm::Sitrep;
     use nexus_types::fm::SitrepMetadata;
+    use omicron_generation_kinds::SupportBundleGeneration;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::CaseUuid;
     use omicron_uuid_kinds::CollectionUuid;
@@ -601,7 +602,7 @@ mod tests {
     use serde_json::json;
     use std::num::NonZeroU32;
 
-    fn make_sitrep(alert_generation: Generation) -> Sitrep {
+    fn make_sitrep(alert_generation: AlertGeneration) -> Sitrep {
         Sitrep {
             metadata: SitrepMetadata {
                 id: SitrepUuid::new_v4(),
@@ -612,7 +613,7 @@ mod tests {
                 parent_sitrep_id: None,
                 next_inv_min_time_started: Utc::now(),
                 alert_generation,
-                support_bundle_generation: Generation::new(),
+                support_bundle_generation: SupportBundleGeneration::new(),
             },
             cases: Default::default(),
             ereports_by_id: Default::default(),
@@ -849,7 +850,11 @@ mod tests {
         let conn = datastore.pool_connection_for_tests().await.unwrap();
 
         datastore
-            .fm_sitrep_insert(opctx, make_sitrep(Generation::from_u32(1)), None)
+            .fm_sitrep_insert(
+                opctx,
+                make_sitrep(AlertGeneration::from_u32(1)),
+                None,
+            )
             .await
             .unwrap();
 
@@ -860,7 +865,7 @@ mod tests {
                 opctx,
                 &make_alert_request(alert_id),
                 case_id,
-                Generation::from_u32(1),
+                AlertGeneration::from_u32(1),
             )
             .await
             .unwrap();
@@ -873,10 +878,7 @@ mod tests {
             .first_async::<RendezvousAlertCreated>(&*conn)
             .await
             .unwrap();
-        assert_eq!(
-            marker.created_at_generation,
-            nexus_db_model::Generation::new()
-        );
+        assert_eq!(marker.created_at_generation(), AlertGeneration::new());
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -892,7 +894,11 @@ mod tests {
         let conn = datastore.pool_connection_for_tests().await.unwrap();
 
         datastore
-            .fm_sitrep_insert(opctx, make_sitrep(Generation::from_u32(1)), None)
+            .fm_sitrep_insert(
+                opctx,
+                make_sitrep(AlertGeneration::from_u32(1)),
+                None,
+            )
             .await
             .unwrap();
 
@@ -911,7 +917,7 @@ mod tests {
                 opctx,
                 &make_alert_request(alert_id),
                 case_id,
-                Generation::from_u32(1),
+                AlertGeneration::from_u32(1),
             )
             .await
             .unwrap_err();
@@ -940,7 +946,11 @@ mod tests {
 
         // Latest sitrep is at generation 5; the rendezvous task expects 1.
         datastore
-            .fm_sitrep_insert(opctx, make_sitrep(Generation::from_u32(5)), None)
+            .fm_sitrep_insert(
+                opctx,
+                make_sitrep(AlertGeneration::from_u32(5)),
+                None,
+            )
             .await
             .unwrap();
 
@@ -949,7 +959,7 @@ mod tests {
                 opctx,
                 &make_alert_request(AlertUuid::new_v4()),
                 CaseUuid::new_v4(),
-                Generation::new(),
+                AlertGeneration::new(),
             )
             .await
             .unwrap_err();
@@ -978,11 +988,11 @@ mod tests {
                 .values(vec![
                     RendezvousAlertCreated::new(
                         present_a,
-                        nexus_db_model::Generation::new(),
+                        AlertGeneration::new(),
                     ),
                     RendezvousAlertCreated::new(
                         present_b,
-                        nexus_db_model::Generation::new(),
+                        AlertGeneration::new(),
                     ),
                 ])
                 .execute_async(&*conn)

@@ -78,6 +78,7 @@ trust-quorum-types.workspace = true
 omicron-cockroach-metrics.workspace = true
 omicron-common.workspace = true
 omicron-passwords.workspace = true
+omicron-generation-kinds.workspace = true
 omicron-uuid-kinds.workspace = true
 oximeter.workspace = true
 omicron-workspace-hack.workspace = true

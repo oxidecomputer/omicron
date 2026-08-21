@@ -42,7 +42,9 @@ use diesel::query_source::QuerySource;
 use diesel::result::Error as DieselError;
 use diesel::sql_types;
 use nexus_db_lookup::DbConnection;
-use nexus_db_model::Generation;
+use nexus_db_model::DbTypedGeneration;
+use nexus_db_model::to_db_typed_generation;
+use omicron_generation_kinds::TypedGeneration;
 use uuid::Uuid;
 
 /// CTE-wrapped stale-execution-guarded INSERT.
@@ -66,7 +68,7 @@ where
     /// Resource generation in the sitrep currently being executed by
     /// fm_rendezvous. The `stale_guard` CTE requires this to equal the latest
     /// sitrep's value of [`FmRendezvousResource::GenerationColumn`].
-    expected_generation: Generation,
+    expected_generation: DbTypedGeneration<R::GenerationKind>,
 
     /// Caller-built INSERT for the resource row itself, nested into the
     /// `new_resource` CTE via [`QueryFragment::walk_ast`].
@@ -103,14 +105,14 @@ where
     ///
     pub fn new(
         resource_id: Uuid,
-        expected_generation: Generation,
+        expected_generation: TypedGeneration<R::GenerationKind>,
         resource_insert: ISR,
     ) -> Self {
         let marker_from_clause =
             <MarkerTable<R> as HasTable>::table().from_clause();
         Self {
             resource_id,
-            expected_generation,
+            expected_generation: to_db_typed_generation(expected_generation),
             resource_insert,
             marker_from_clause,
         }
@@ -357,6 +359,7 @@ mod tests {
 
     // The synthetic resource and dummy schema are shared with the GC test suite;
     // see `crate::db::fm_rendezvous_resources::test_utils`.
+    use crate::db::fm_rendezvous_resources::test_utils::DummyGenerationKind;
     use crate::db::fm_rendezvous_resources::test_utils::DummyResource;
     use crate::db::fm_rendezvous_resources::test_utils::dummy_resource;
     use crate::db::fm_rendezvous_resources::test_utils::insert_current_sitrep;
@@ -379,7 +382,7 @@ mod tests {
             .returning(DummyResource::as_returning());
         let query = SitrepGuardedInsert::<DummyResource, _>::new(
             resource_id,
-            Generation::try_from(3).unwrap(),
+            TypedGeneration::<DummyGenerationKind>::from_u32(3),
             insert,
         );
         expectorate_query_contents(
@@ -406,7 +409,10 @@ mod tests {
             .returning(DummyResource::as_returning());
         SitrepGuardedInsert::<DummyResource, _>::new(
             resource_id,
-            Generation::try_from(expected_generation).unwrap(),
+            TypedGeneration::<DummyGenerationKind>::try_from(
+                expected_generation,
+            )
+            .unwrap(),
             insert,
         )
         .execute_async(conn)
