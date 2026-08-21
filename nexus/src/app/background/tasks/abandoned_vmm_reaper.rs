@@ -253,6 +253,7 @@ mod tests {
                         time_state_updated: Utc::now(),
                         generation: Generation::new(),
                         failure_reason: None,
+                        stopped_for_update_disposition_generation: None,
                     }),
                 )
                 .await

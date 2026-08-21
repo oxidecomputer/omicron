@@ -6420,6 +6420,13 @@ CREATE TABLE IF NOT EXISTS omicron.public.vmm (
     state omicron.public.vmm_state NOT NULL,
     cpu_platform omicron.public.vmm_cpu_platform NOT NULL,
     failure_reason omicron.public.vmm_failure_reason,
+    /*
+     * The sled's `update_disposition` generation which triggered this VMM to
+     * stop.
+     *
+     * NULL when its state has not been modified by an update.
+     */
+    stopped_for_update_disposition_generation INT8,
 
     -- If a VMM is in the 'failed' state, it must have a failure reason; if it
     -- is not in the failed state, it must not have a failure reason.
@@ -9353,7 +9360,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '293.0.0', NULL)
+    (TRUE, NOW(), NOW(), '294.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
