@@ -108,7 +108,9 @@ pub struct LogFile {
     pub size: Option<u64>,
     pub modified: Option<Timestamp>,
     /// The file's creation time (crtime), where available. Together with
-    /// `modified` this bounds the time span of the file's content.
+    /// `modified` this bounds the time span of the file's content. Only
+    /// populated where it can affect date-range filtering (see
+    /// [`LogFile::read_created`]).
     pub created: Option<Timestamp>,
 }
 
@@ -120,7 +122,30 @@ impl LogFile {
                 // An mtime that overflows Timestamp is not accurate, ignore.
                 self.modified = modified.try_into().ok();
             }
-            self.created = Self::created(&self.path, &metadata);
+        }
+    }
+
+    /// Looks up the file's creation time, when it could change the result
+    /// of [`LogFile::in_date_range`] for `date_range`.
+    ///
+    /// The lookup is a separate getattrat(3C) call per file on illumos,
+    /// worth skipping where the `mtime` alone decides the span test.
+    pub fn read_created(&mut self, date_range: &DateRange) {
+        if self.created_affects_range(date_range) {
+            self.created = Self::created(&self.path);
+        }
+    }
+
+    /// Returns true when the creation time could change the result of
+    /// [`LogFile::in_date_range`]: only for a file whose `mtime` postdates
+    /// the end of the range. An `mtime` within the range proves overlap by
+    /// itself, and an `mtime` before the range excludes the file through
+    /// the start bound, which the creation time never weakens.
+    fn created_affects_range(&self, date_range: &DateRange) -> bool {
+        match self.modified {
+            Some(modified) => modified > date_range.before,
+            // Without an mtime the file is excluded outright.
+            None => false,
         }
     }
 
@@ -128,21 +153,18 @@ impl LogFile {
     // a system attribute (fsattr(7)) requiring a separate getattrat(3C)
     // call.
     #[cfg(target_os = "illumos")]
-    fn created(
-        path: &Utf8Path,
-        _metadata: &std::fs::Metadata,
-    ) -> Option<Timestamp> {
+    fn created(path: &Utf8Path) -> Option<Timestamp> {
         crtime::crtime(path)
     }
 
     #[cfg(not(target_os = "illumos"))]
-    fn created(
-        _path: &Utf8Path,
-        metadata: &std::fs::Metadata,
-    ) -> Option<Timestamp> {
+    fn created(path: &Utf8Path) -> Option<Timestamp> {
         // Not every filesystem records a creation time; a file without one
         // is filtered by mtime alone.
-        metadata.created().ok().and_then(|created| created.try_into().ok())
+        std::fs::metadata(path)
+            .and_then(|metadata| metadata.created())
+            .ok()
+            .and_then(|created| created.try_into().ok())
     }
 
     pub fn file_name_cmp(&self, other: &Self) -> std::cmp::Ordering {
@@ -570,6 +592,7 @@ fn load_svc_logs(
             }
 
             if let Some(date_range) = date_range {
+                logfile.read_created(&date_range);
                 if !logfile.in_date_range(&date_range) {
                     continue;
                 }
@@ -625,6 +648,7 @@ fn load_extra_logs(
         }
 
         if let Some(date_range) = date_range {
+            logfile.read_created(&date_range);
             if !logfile.in_date_range(&date_range) {
                 continue;
             }
@@ -876,6 +900,54 @@ mod tests {
         let touches_start =
             file(Some("2023-01-01T00:00:00Z"), "2024-01-01T01:00:00Z");
         assert!(touches_start.in_date_range(&range));
+    }
+
+    #[test]
+    fn test_created_lookup_gating() {
+        use super::{DateRange, LogFile};
+        use camino::Utf8PathBuf;
+
+        let range = DateRange {
+            before: "2024-01-01T01:59:00Z".parse().unwrap(),
+            after: "2024-01-01T01:00:00Z".parse().unwrap(),
+        };
+        let file = |modified: Option<&str>| LogFile {
+            path: Utf8PathBuf::from("gated"),
+            size: None,
+            modified: modified.map(|m| m.parse().unwrap()),
+            created: None,
+        };
+
+        // Only a file whose mtime postdates the end of the range needs its
+        // creation time looked up; everywhere else the mtime alone decides
+        // the span test.
+        let needs_lookup = file(Some("2024-01-01T02:00:00Z"));
+        assert!(needs_lookup.created_affects_range(&range));
+
+        let at_range_end = file(Some("2024-01-01T01:59:00Z"));
+        assert!(!at_range_end.created_affects_range(&range));
+        let in_range = file(Some("2024-01-01T01:30:00Z"));
+        assert!(!in_range.created_affects_range(&range));
+        let before_range = file(Some("2023-12-31T00:00:00Z"));
+        assert!(!before_range.created_affects_range(&range));
+        let no_mtime = file(None);
+        assert!(!no_mtime.created_affects_range(&range));
+
+        // Skipping the lookup never changes the outcome: where the gate
+        // says no, in_date_range answers the same with and without a
+        // creation time.
+        let early_creation: super::Timestamp =
+            "2023-01-01T00:00:00Z".parse().unwrap();
+
+        let mut in_range = in_range;
+        assert!(in_range.in_date_range(&range));
+        in_range.created = Some(early_creation);
+        assert!(in_range.in_date_range(&range));
+
+        let mut before_range = before_range;
+        assert!(!before_range.in_date_range(&range));
+        before_range.created = Some(early_creation);
+        assert!(!before_range.in_date_range(&range));
     }
 }
 
