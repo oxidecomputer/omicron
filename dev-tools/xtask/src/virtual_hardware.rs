@@ -38,6 +38,12 @@ enum Commands {
         #[clap(long, env, default_value = "zone")]
         softnpu_mode: String,
 
+        #[clap(long, env)]
+        softnpu_commit: Option<String>,
+
+        #[clap(long, env)]
+        sidecar_lite_commit: Option<String>,
+
         /// The MAC address of your gateway IP
         ///
         /// Will be inferred via `arp` if unsupplied.
@@ -161,6 +167,8 @@ pub fn run_cmd(args: Args) -> Result<()> {
             physical_link,
             promiscuous_filter_off,
             softnpu_mode,
+            softnpu_commit,
+            sidecar_lite_commit,
             gateway_ip,
             gateway_mac,
             pxa,
@@ -181,7 +189,11 @@ pub fn run_cmd(args: Args) -> Result<()> {
                 && softnpu_mode == "zone"
             {
                 ensure_simulated_links(&physical_link, promiscuous_filter_off)?;
-                ensure_softnpu_zone(&npu_zone)?;
+                ensure_softnpu_zone(
+                    &npu_zone,
+                    softnpu_commit,
+                    sidecar_lite_commit,
+                )?;
                 initialize_softnpu_zone(gateway_ip, gateway_mac, pxa, pxa_mac)?;
             }
             println!("created virtual hardware");
@@ -364,7 +376,11 @@ fn branch_head(repo: &str, branch: &str) -> Result<String> {
         .ok_or_else(|| anyhow!("{repo} branch {branch} not found"))
 }
 
-fn ensure_softnpu_zone(npu_zone: &Utf8Path) -> Result<()> {
+fn ensure_softnpu_zone(
+    npu_zone: &Utf8Path,
+    softnpu_commit: Option<String>,
+    sidecar_lite_commit: Option<String>,
+) -> Result<()> {
     let zones = zoneadm_list()?;
     if !zones.iter().any(|z| z == "sidecar_softnpu") {
         if !npu_zone.exists() {
@@ -373,9 +389,14 @@ fn ensure_softnpu_zone(npu_zone: &Utf8Path) -> Result<()> {
             );
         }
 
-        let softnpu_commit = branch_head("softnpu", SOFTNPU_BRANCH)?;
-        let sidecar_lite_commit =
-            branch_head("sidecar-lite", SIDECAR_LITE_BRANCH)?;
+        let softnpu_commit = match softnpu_commit {
+            Some(sha) => sha,
+            None => branch_head("softnpu", SOFTNPU_BRANCH)?,
+        };
+        let sidecar_lite_commit = match sidecar_lite_commit {
+            Some(sha) => sha,
+            None => branch_head("sidecar-lite", SIDECAR_LITE_BRANCH)?,
+        };
         let mut cmd = Command::new(PFEXEC);
         cmd.arg(npu_zone);
         cmd.args([

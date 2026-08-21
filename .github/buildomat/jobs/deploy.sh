@@ -268,6 +268,14 @@ PXA_END="$EXTRA_IP_END"
 DISKS=( $(pfexec nvmeadm list -p -o disk) )
 pfexec zpool create -f scratch "${DISKS[@]}"
 
+gh_sha() {
+    curl -fsS -H "Accept: application/vnd.github.sha" \
+        "https://api.github.com/repos/oxidecomputer/$1/commits/$2"
+}
+SOFTNPU_COMMIT=$(gh_sha softnpu zl/multicast)
+SIDECAR_LITE_COMMIT=$(gh_sha sidecar-lite zl/multicast)
+export SOFTNPU_COMMIT SIDECAR_LITE_COMMIT
+
 ptime -m \
     pfexec ./target/release/xtask virtual-hardware \
     --vdev-dir /scratch \
