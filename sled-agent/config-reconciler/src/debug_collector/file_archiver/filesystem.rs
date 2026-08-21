@@ -16,13 +16,15 @@ use thiserror::Error;
 pub(crate) struct Filename(String);
 
 #[derive(Debug, Error)]
-#[error("string is not a valid filename (has slashes or is '.' or '..'): {0}")]
+#[error(
+    "string is not a valid filename (has slashes or is '', '.', or '..'): {0}"
+)]
 pub(crate) struct BadFilename(String);
 
 impl TryFrom<String> for Filename {
     type Error = BadFilename;
     fn try_from(value: String) -> Result<Self, Self::Error> {
-        if value == "." || value == ".." || value.contains('/') {
+        if value == "" || value == "." || value == ".." || value.contains('/') {
             Err(BadFilename(value))
         } else {
             Ok(Filename(value))
@@ -33,11 +35,12 @@ impl TryFrom<String> for Filename {
 impl Filename {
     /// Returns this filename with its last `.`-delimited extension removed
     ///
-    /// Returns a copy of this filename if it has no extension.  This cannot
-    /// fail because a prefix of a valid filename is itself a valid filename.
+    /// Returns a copy of this filename if it has no extension or if removing it
+    /// would make it invalid (e.g., `...txt`, which would become `..`)
     pub(crate) fn strip_extension(&self) -> Filename {
         match self.0.rsplit_once('.') {
-            Some((base, _extension)) => Filename(base.to_owned()),
+            Some((base, _extension)) => Filename::try_from(base.to_string())
+                .unwrap_or_else(|_| self.clone()),
             None => self.clone(),
         }
     }
@@ -201,6 +204,23 @@ mod test {
         assert!(Filename::try_from(String::from("foo/bar")).is_err());
         assert!(Filename::try_from(String::from("foo/")).is_err());
         assert!(Filename::try_from(String::from("/bar")).is_err());
+        assert!(Filename::try_from(String::from("")).is_err());
+
+        let a = Filename::try_from(String::from("foo.txt.gz")).unwrap();
+        let b = a.strip_extension();
+        assert_eq!(b.0, "foo.txt");
+        let c = b.strip_extension();
+        assert_eq!(c.0, "foo");
+        let d = c.strip_extension();
+        assert_eq!(d.0, "foo");
+
+        let a = Filename::try_from(String::from(".foo")).unwrap();
+        let b = a.strip_extension();
+        assert_eq!(b.0, ".foo");
+
+        let a = Filename::try_from(String::from("...txt")).unwrap();
+        let b = a.strip_extension();
+        assert_eq!(b.0, "...txt");
     }
 
     // Returns a temp dir containing a regular file ("regular.txt"), a

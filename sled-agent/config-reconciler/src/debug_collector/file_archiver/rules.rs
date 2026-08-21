@@ -130,6 +130,10 @@ pub(crate) static ALL_RULES: LazyLock<IdOrdMap<Rule>> = LazyLock::new(|| {
             .unwrap()
             .to_owned();
     assert!(debug_dropbox.is_relative());
+    // unwrap() (x2): the debug dropbox path is always a valid name
+    let debug_dropbox_basename =
+        Filename::try_from(debug_dropbox.file_name().unwrap().to_string())
+            .unwrap();
     // unwrap(): the dropbox's reserved producer name is the name of a directory
     // that the dropbox itself creates, so it cannot contain a slash.
     let debug_dropbox_reserved = Filename::try_from(String::from(
@@ -192,10 +196,7 @@ pub(crate) static ALL_RULES: LazyLock<IdOrdMap<Rule>> = LazyLock::new(|| {
             rule_scope: RuleScope::ZoneAlways,
             directory: debug_dropbox,
             scanning: RuleScanning::Nested {
-                output_subdir: Filename::try_from(String::from(
-                    "debug_dropbox",
-                ))
-                .unwrap(),
+                output_subdir: debug_dropbox_basename,
                 exclude_subdirs: BTreeSet::from([debug_dropbox_reserved]),
             },
             delete_original: true,

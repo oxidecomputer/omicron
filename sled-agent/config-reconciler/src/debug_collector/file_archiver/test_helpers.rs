@@ -282,16 +282,16 @@ impl TestFileKind {
         }
     }
 
-    /// Returns whether the archiver is allowed to leave this file unarchived
+    /// Returns whether the archiver should have archived this file
     ///
     /// Most kinds of files are expected to be archived on a "final" pass.  The
     /// exceptions are files that we don't care about either way and files that
     /// must never be archived.
-    pub fn is_not_archived(&self) -> bool {
+    pub fn is_archived(&self) -> bool {
         match self {
             TestFileKind::Ignored
             | TestFileKind::DebugDropboxStaged { .. }
-            | TestFileKind::DebugDropboxTooDeep { .. } => true,
+            | TestFileKind::DebugDropboxTooDeep { .. } => false,
             TestFileKind::ProcessCoreDump { .. }
             | TestFileKind::LogSmfRotated { .. }
             | TestFileKind::LogSmfLive { .. }
@@ -301,7 +301,7 @@ impl TestFileKind {
             | TestFileKind::GlobalLogSmfRotated
             | TestFileKind::GlobalLogSmfLive
             | TestFileKind::GlobalLogSyslogRotated
-            | TestFileKind::GlobalLogSyslogLive => false,
+            | TestFileKind::GlobalLogSyslogLive => true,
         }
     }
 }
@@ -356,14 +356,18 @@ impl TryFrom<&Utf8Path> for TestFileKind {
                 // inside a producer's directory, so a deposit is exactly two
                 // components below the dropbox root.
                 let ncomponents =
-                    dropbox_relative.trim_start_matches('/').split('/').count();
+                    Utf8Path::new(dropbox_relative.trim_start_matches('/'))
+                        .components()
+                        .count();
                 if ncomponents > 2 {
                     Ok(TestFileKind::DebugDropboxTooDeep {
                         zone_name,
                         zone_root,
                     })
-                } else {
+                } else if ncomponents == 2 {
                     Ok(TestFileKind::DebugDropbox { zone_name, zone_root })
+                } else {
+                    Err(anyhow!("unknown test file kind (dropbox producer?)"))
                 }
             } else {
                 Err(anyhow!("unknown non-global zone test file kind"))

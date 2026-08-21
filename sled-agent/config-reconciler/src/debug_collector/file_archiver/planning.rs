@@ -669,7 +669,7 @@ mod test {
         println!("files that were not archived: {}", unarchived_files.len());
         for test_file in unarchived_files {
             println!("    {}", test_file.path);
-            if !test_file.kind.is_not_archived() {
+            if test_file.kind.is_archived() {
                 panic!(
                     "test file of kind {:?} was not archived: {:?}",
                     test_file.kind, test_file.path,
@@ -848,7 +848,7 @@ mod test {
         let fail_dir = files
             .iter()
             .find_map(|test_file| {
-                if test_file.kind.is_not_archived() {
+                if !test_file.kind.is_archived() {
                     None
                 } else {
                     let parent = test_file.path.parent().unwrap();
@@ -888,7 +888,7 @@ mod test {
         {
             let mut dirs_with_files: BTreeSet<_> = BTreeSet::new();
             for test_file in &files {
-                if test_file.kind.is_not_archived() {
+                if !test_file.kind.is_archived() {
                     continue;
                 }
                 let file = &test_file.path;
@@ -1047,13 +1047,13 @@ mod test {
         // exactly those at or under the path where we injected the error.
         let missed: Vec<_> = unarchived_files
             .iter()
-            .filter(|test_file| !test_file.kind.is_not_archived())
+            .filter(|test_file| test_file.kind.is_archived())
             .map(|test_file| test_file.path.as_path())
             .collect();
         let expected: Vec<_> = files
             .iter()
             .filter(|test_file| {
-                !test_file.kind.is_not_archived()
+                test_file.kind.is_archived()
                     && test_file.path.starts_with(fail_path)
             })
             .map(|test_file| test_file.path.as_path())
