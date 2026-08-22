@@ -80,6 +80,7 @@ declare_saga_actions! {
 /// to identify that parameters do not need to be supplied as input.
 pub fn create_dag(
     mut builder: steno::DagBuilder,
+    create_default_subnet: bool,
 ) -> Result<steno::Dag, super::SagaInitError> {
     builder.append(Node::action(
         "vpc_id",
@@ -101,16 +102,18 @@ pub fn create_dag(
         "GenerateDefaultV6RouteId",
         ACTION_GENERATE_ID.as_ref(),
     ));
-    builder.append(Node::action(
-        "subnet_route_id",
-        "GenerateSubnetRouteId",
-        ACTION_GENERATE_ID.as_ref(),
-    ));
-    builder.append(Node::action(
-        "default_subnet_id",
-        "GenerateDefaultSubnetId",
-        ACTION_GENERATE_ID.as_ref(),
-    ));
+    if create_default_subnet {
+        builder.append(Node::action(
+            "subnet_route_id",
+            "GenerateSubnetRouteId",
+            ACTION_GENERATE_ID.as_ref(),
+        ));
+        builder.append(Node::action(
+            "default_subnet_id",
+            "GenerateDefaultSubnetId",
+            ACTION_GENERATE_ID.as_ref(),
+        ));
+    }
     builder.append(Node::action(
         "default_internet_gateway_id",
         "GenerateDefaultInternetGatewayId",
@@ -120,8 +123,10 @@ pub fn create_dag(
     builder.append(vpc_create_router_action());
     builder.append(vpc_create_v4_route_action());
     builder.append(vpc_create_v6_route_action());
-    builder.append(vpc_create_subnet_action());
-    builder.append(vpc_create_subnet_route_action());
+    if create_default_subnet {
+        builder.append(vpc_create_subnet_action());
+        builder.append(vpc_create_subnet_route_action());
+    }
     builder.append(vpc_update_firewall_action());
     builder.append(vpc_create_gateway_action());
     builder.append(vpc_notify_sleds_action());
@@ -140,11 +145,20 @@ impl NexusSaga for SagaVpcCreate {
     }
 
     fn make_saga_dag(
-        _params: &Self::Params,
+        params: &Self::Params,
         builder: steno::DagBuilder,
     ) -> Result<steno::Dag, super::SagaInitError> {
-        create_dag(builder)
+        create_dag(
+            builder,
+            should_create_default_subnet(params.vpc_create.defaults.as_ref()),
+        )
     }
+}
+
+pub(crate) fn should_create_default_subnet(
+    defaults: Option<&vpc::VpcCreateDefaults>,
+) -> bool {
+    defaults.is_none_or(|defaults| defaults.subnet.is_some())
 }
 
 // vpc create saga: action implementations
@@ -700,6 +714,19 @@ pub(crate) mod test {
 
     const PROJECT_NAME: &str = "springfield-squidport";
 
+    #[test]
+    fn test_should_create_default_subnet() {
+        assert!(super::should_create_default_subnet(None));
+        assert!(!super::should_create_default_subnet(Some(
+            &vpc_types::VpcCreateDefaults { subnet: None }
+        )));
+        assert!(super::should_create_default_subnet(Some(
+            &vpc_types::VpcCreateDefaults {
+                subnet: Some(vpc_types::SubnetCreateDefaults {}),
+            }
+        )));
+    }
+
     async fn create_org_and_project(client: &ClientTestContext) -> Uuid {
         create_default_ip_pools(&client).await;
         let project = create_project(client, PROJECT_NAME).await;
@@ -720,6 +747,7 @@ pub(crate) mod test {
                 },
                 ipv6_prefix: None,
                 dns_name: "abc".parse().unwrap(),
+                defaults: None,
             },
             authz_project,
         }

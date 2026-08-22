@@ -102,6 +102,7 @@ async fn test_vpcs(cptestctx: &ControlPlaneTestContext) {
                 },
                 ipv6_prefix: Some(bad_prefix),
                 dns_name: "abc".parse().unwrap(),
+                defaults: None,
             })),
     )
     .authn_as(AuthnMode::PrivilegedUser)
@@ -327,6 +328,7 @@ async fn test_vpc_limited_collaborator_role(
             },
             ipv6_prefix: None,
             dns_name: "test".parse().unwrap(),
+            defaults: None,
         },
     )
     .authn_as(AuthnMode::PrivilegedUser)
@@ -348,6 +350,7 @@ async fn test_vpc_limited_collaborator_role(
             },
             ipv6_prefix: None,
             dns_name: "test2".parse().unwrap(),
+            defaults: None,
         },
     )
     .authn_as(AuthnMode::UnprivilegedUser)
@@ -386,6 +389,7 @@ async fn test_vpc_limited_collaborator_role(
                 },
                 ipv6_prefix: None,
                 dns_name: "forbidden".parse().unwrap(),
+                defaults: None,
             }))
             .expect_status(Some(StatusCode::FORBIDDEN)),
     )
@@ -544,6 +548,7 @@ async fn test_limited_collaborator_blocked_from_networking_resources(
                 },
                 ipv6_prefix: None,
                 dns_name: "forbidden".parse().unwrap(),
+                defaults: None,
             }))
             .expect_status(Some(StatusCode::FORBIDDEN)),
     )

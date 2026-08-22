@@ -2945,6 +2945,7 @@ mod test {
                     name: "my-project".parse().unwrap(),
                     description: "".to_string(),
                 },
+                defaults: None,
             },
         );
         let (.., project) =
@@ -3058,6 +3059,7 @@ mod test {
                     name: "my-project".parse().unwrap(),
                     description: "".to_string(),
                 },
+                defaults: None,
             },
         );
         let (.., project) =

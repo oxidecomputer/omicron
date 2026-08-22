@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "2026081901.0.0"
+    "version": "2026081902.0.0"
   },
   "paths": {
     "/device/auth": {
@@ -26549,9 +26549,18 @@
         ]
       },
       "ProjectCreate": {
-        "description": "Create-time parameters for a `Project`",
+        "description": "Create-time parameters for a `Project`.",
         "type": "object",
         "properties": {
+          "defaults": {
+            "nullable": true,
+            "description": "Default resources to create.\n\nIf omitted, all default resources are created. If provided, only the selected default resources are created.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ProjectCreateDefaults"
+              }
+            ]
+          },
           "description": {
             "type": "string"
           },
@@ -26563,6 +26572,22 @@
           "description",
           "name"
         ]
+      },
+      "ProjectCreateDefaults": {
+        "description": "Default resources to create with a project.",
+        "type": "object",
+        "properties": {
+          "vpc": {
+            "nullable": true,
+            "description": "Create a default VPC with all or explicitly selected VPC defaults.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/VpcCreateDefaultsSelection"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false
       },
       "ProjectResultsPage": {
         "description": "A single page of results",
@@ -28693,6 +28718,11 @@
         "required": [
           "items"
         ]
+      },
+      "SubnetCreateDefaults": {
+        "description": "Configuration for a default subnet.",
+        "type": "object",
+        "additionalProperties": false
       },
       "SubnetPool": {
         "description": "A pool of subnets for external subnet allocation",
@@ -30952,9 +30982,18 @@
         ]
       },
       "VpcCreate": {
-        "description": "Create-time parameters for a `Vpc`",
+        "description": "Create-time parameters for a `Vpc`.",
         "type": "object",
         "properties": {
+          "defaults": {
+            "nullable": true,
+            "description": "Default resources to create.\n\nIf omitted, all default resources are created. If provided, only the selected default resources are created.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/VpcCreateDefaults"
+              }
+            ]
+          },
           "description": {
             "type": "string"
           },
@@ -30978,6 +31017,61 @@
           "description",
           "dns_name",
           "name"
+        ]
+      },
+      "VpcCreateDefaults": {
+        "description": "Default resources to create with a VPC.",
+        "type": "object",
+        "properties": {
+          "subnet": {
+            "nullable": true,
+            "description": "Create a default subnet.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SubnetCreateDefaults"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "VpcCreateDefaultsSelection": {
+        "description": "Select default resources to create with a VPC.",
+        "oneOf": [
+          {
+            "description": "Create all current and future default resources.",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "all"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "Create only the explicitly selected default resources.",
+            "type": "object",
+            "properties": {
+              "defaults": {
+                "$ref": "#/components/schemas/VpcCreateDefaults"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "explicit"
+                ]
+              }
+            },
+            "required": [
+              "defaults",
+              "type"
+            ]
+          }
         ]
       },
       "VpcFirewallIcmpFilter": {

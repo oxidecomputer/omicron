@@ -87,6 +87,7 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyy_mm_dd_nn, IDENT),
+    (2026_08_19_02, PROJECT_AND_VPC_CREATE_DEFAULTS),
     (2026_08_19_01, BGP_PEER_SRC_ADDR),
     (2026_08_17_00, SUPPORT_BUNDLES_STABLE),
     (2026_08_14_00, ALERT_LIST),
@@ -1158,11 +1159,28 @@ pub trait NexusExternalApi {
         method = POST,
         path = "/v1/projects",
         tags = ["projects"],
+        versions = VERSION_PROJECT_AND_VPC_CREATE_DEFAULTS..,
     }]
     async fn project_create(
         rqctx: RequestContext<Self::Context>,
         new_project: TypedBody<latest::project::ProjectCreate>,
     ) -> Result<HttpResponseCreated<latest::project::Project>, HttpError>;
+
+    /// Create project
+    #[endpoint {
+        operation_id = "project_create",
+        method = POST,
+        path = "/v1/projects",
+        tags = ["projects"],
+        versions = ..VERSION_PROJECT_AND_VPC_CREATE_DEFAULTS,
+    }]
+    async fn project_create_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        new_project: TypedBody<v2025_11_20_00::project::ProjectCreate>,
+    ) -> Result<HttpResponseCreated<v2025_11_20_00::project::Project>, HttpError>
+    {
+        Self::project_create(rqctx, new_project.map(Into::into)).await
+    }
 
     /// Fetch project
     #[endpoint {
@@ -6992,12 +7010,29 @@ pub trait NexusExternalApi {
         method = POST,
         path = "/v1/vpcs",
         tags = ["vpcs"],
+        versions = VERSION_PROJECT_AND_VPC_CREATE_DEFAULTS..,
     }]
     async fn vpc_create(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<latest::project::ProjectSelector>,
         body: TypedBody<latest::vpc::VpcCreate>,
     ) -> Result<HttpResponseCreated<latest::vpc::Vpc>, HttpError>;
+
+    /// Create VPC
+    #[endpoint {
+        operation_id = "vpc_create",
+        method = POST,
+        path = "/v1/vpcs",
+        tags = ["vpcs"],
+        versions = ..VERSION_PROJECT_AND_VPC_CREATE_DEFAULTS,
+    }]
+    async fn vpc_create_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<v2025_11_20_00::project::ProjectSelector>,
+        body: TypedBody<v2025_11_20_00::vpc::VpcCreate>,
+    ) -> Result<HttpResponseCreated<v2025_11_20_00::vpc::Vpc>, HttpError> {
+        Self::vpc_create(rqctx, query_params, body.map(Into::into)).await
+    }
 
     /// Fetch VPC
     #[endpoint {

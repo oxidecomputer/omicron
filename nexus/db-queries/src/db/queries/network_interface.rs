@@ -2147,6 +2147,7 @@ mod tests {
                         name: "project".parse().unwrap(),
                         description: "desc".to_string(),
                     },
+                    defaults: None,
                 },
             );
             let (.., project) =

@@ -768,6 +768,7 @@ mod test {
                     name: "project".parse().unwrap(),
                     description: "desc".to_string(),
                 },
+                defaults: None,
             },
         );
         datastore.project_create(&opctx, project).await.unwrap();
