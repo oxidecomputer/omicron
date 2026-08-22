@@ -28,6 +28,7 @@ use crate::db::queries::ip_pool::FilterOverlappingIpRanges;
 use crate::db::raw_query_builder::QueryBuilder;
 use crate::db::raw_query_builder::SelectableSql;
 use crate::db::raw_query_builder::TypedSqlQuery;
+use crate::db::true_or_cast_error::matches_sentinel;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::AggregateExpressionMethods;
@@ -120,6 +121,13 @@ const REASSIGN_LAST_POOL_ERROR: &str = "Cannot reassign the last IP Pool \
 const DELETE_LAST_POOL_ERROR: &str = "Cannot delete the last IP Pool \
     assigned for system services use. Create and assign at least one more \
     IP Pool before deleting this one.";
+
+// Error message emitted when a user attempts to assign a pool from system
+// serivces to silos, and that pool is currently assigned to a specific external
+// service, e.g., Nexus.
+const ASSIGNED_TO_EXTERNAL_SERVICE_ERROR: &str = "Cannot reassign an IP \
+    Pool for silos, while it is assigned to a specific external service. \
+    Unassign it first, and try again.";
 
 /// Check if pool selection has an IP version conflict.
 ///
@@ -834,6 +842,7 @@ impl DataStore {
         authz_pool: &authz::IpPool,
         db_pool: &IpPool,
     ) -> DeleteResult {
+        use nexus_db_schema::schema::external_service_ip_pool;
         use nexus_db_schema::schema::ip_pool::dsl;
         use nexus_db_schema::schema::ip_pool_range;
         use nexus_db_schema::schema::ip_pool_resource;
@@ -854,6 +863,29 @@ impl DataStore {
         if range.is_some() {
             return Err(Error::invalid_request(
                 "IP Pool cannot be deleted while it contains IP ranges",
+            ));
+        }
+
+        // Verify the pool is not assigned to any external service. A concurrent
+        // assignment is caught separately by the `rcgen` check on the delete
+        // below, since assigning a pool to a service bumps its `rcgen`.
+        let assignment =
+            external_service_ip_pool::dsl::external_service_ip_pool
+                .filter(
+                    external_service_ip_pool::dsl::ip_pool_id
+                        .eq(authz_pool.id()),
+                )
+                .select(external_service_ip_pool::dsl::ip_pool_id)
+                .limit(1)
+                .first_async::<Uuid>(&*conn)
+                .await
+                .optional()
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+        if assignment.is_some() {
+            return Err(Error::invalid_request(
+                "IP Pool cannot be deleted while it is assigned to a service",
             ));
         }
 
@@ -964,8 +996,18 @@ impl DataStore {
                     ref info,
                 ) => {
                     let message = info.message();
-                    if message.ends_with("invalid bool value") {
+                    if matches_sentinel(&e, &[BAD_SILO_LINK_SENTINEL]).is_some()
+                    {
                         Error::invalid_request(BAD_SILO_LINK_ERROR)
+                    } else if matches_sentinel(
+                        &e,
+                        &[ASSIGNED_TO_EXTERNAL_SERVICE_SENTINEL],
+                    )
+                    .is_some()
+                    {
+                        Error::invalid_request(
+                            ASSIGNED_TO_EXTERNAL_SERVICE_ERROR,
+                        )
                     } else if message.contains("division by zero") {
                         Error::invalid_request(POOL_HAS_IPS_ERROR)
                     } else if message.starts_with("could not parse")
@@ -2198,6 +2240,11 @@ const SILO_DELETED_SENTINEL: &str = "silo-deleted";
 // system-services pool of a given type.
 const LAST_POOL_SENTINEL: &str = "last-pool";
 
+// Sentinel we try to cast as a bool when a user attempts to assign a pool from
+// system serivces to silos, and that pool is currently assigned to a specific
+// external service, e.g., Nexus.
+const ASSIGNED_TO_EXTERNAL_SERVICE_SENTINEL: &str = "assigned-to-services";
+
 /// Extract the sentinel string from a UUID cast error message.
 ///
 /// When our SQL queries intentionally fail a UUID cast to signal an error
@@ -2574,6 +2621,19 @@ fn reassign_system_services_ip_pool_query(
             LIMIT 1\
         ), 1/0, 1) AS BOOL))",
         )
+        // Generate bool-cast error if the pool is currently assigned to a
+        // specific external service like Nexus.
+        .sql(
+            " AND CAST(IF(EXISTS(\
+            SELECT 1 \
+            FROM external_service_ip_pool \
+            WHERE ip_pool_id = ",
+        )
+        .param()
+        .bind::<sql_types::Uuid, _>(ip_pool.id())
+        .sql("), '")
+        .sql(ASSIGNED_TO_EXTERNAL_SERVICE_SENTINEL)
+        .sql("', 'TRUE') AS BOOL)")
         // Generate int-cast error if this is the last pool of this assignment.
         .sql(
             " AND CAST(IF(\
@@ -2609,9 +2669,9 @@ mod test {
     use crate::authz;
     use crate::db::datastore::external_ip::FloatingIpAllocation;
     use crate::db::datastore::ip_pool::{
-        BAD_SILO_LINK_ERROR, DELETE_LAST_POOL_ERROR, POOL_HAS_IPS_ERROR,
-        REASSIGN_LAST_POOL_ERROR, assign_ip_pool_query,
-        link_ip_pool_to_external_silo_query,
+        ASSIGNED_TO_EXTERNAL_SERVICE_ERROR, BAD_SILO_LINK_ERROR,
+        DELETE_LAST_POOL_ERROR, POOL_HAS_IPS_ERROR, REASSIGN_LAST_POOL_ERROR,
+        assign_ip_pool_query, link_ip_pool_to_external_silo_query,
         unlink_ip_pool_from_external_silo_query,
     };
     use crate::db::explain::ExplainableAsync as _;
@@ -2630,8 +2690,8 @@ mod test {
     };
     use nexus_db_lookup::LookupPath;
     use nexus_db_model::{
-        InternetGatewayIpPool, IpPoolAssignment, IpPoolIdentity, IpPoolType,
-        IpVersion,
+        ExternalServiceKind, InternetGatewayIpPool, IpPoolAssignment,
+        IpPoolIdentity, IpPoolType, IpVersion,
     };
     use nexus_types::deployment::{
         OmicronZoneExternalFloatingIp, OmicronZoneExternalIp,
@@ -6299,6 +6359,109 @@ mod test {
                 range.last_address(),
             ),
         );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn cannot_assign_ip_pool_to_silos_while_assigned_to_services() {
+        let logctx = dev::test_setup_log(
+            "cannot_assign_ip_pool_to_silos_while_assigned_to_services",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // Create the v4 system-service pool, add a range, and assign it to an
+        // external service. Also create a v6 pool so that reassigning the v4
+        // pool for silo use is allowed at the end (more than one
+        // system-service pool remains).
+        let ipv4 = create_service_ip_pool(
+            opctx,
+            datastore,
+            "oxide-service-pool-v4",
+            IpVersion::V4.into(),
+        )
+        .await;
+        let ipv6 = create_service_ip_pool(
+            opctx,
+            datastore,
+            "oxide-service-pool-v6",
+            IpVersion::V6.into(),
+        )
+        .await;
+        let ip_range = IpRange::V4(Ipv4Range {
+            first: Ipv4Addr::new(1, 1, 1, 1),
+            last: Ipv4Addr::new(1, 1, 1, 10),
+        });
+        datastore
+            .ip_pool_add_range(
+                opctx,
+                &ipv4.authz_pool,
+                &ipv4.db_pool,
+                &ip_range,
+            )
+            .await
+            .unwrap();
+
+        // Assign both to Nexus.
+        datastore
+            .external_service_ip_pool_assign(
+                opctx,
+                ExternalServiceKind::Nexus,
+                &ipv4.authz_pool,
+            )
+            .await
+            .expect("Should be able to assign pool to Nexus");
+        datastore
+            .external_service_ip_pool_assign(
+                opctx,
+                ExternalServiceKind::Nexus,
+                &ipv6.authz_pool,
+            )
+            .await
+            .expect("Should be able to assign pool to Nexus");
+
+        // Should not be able to assign the IPv4 pool to silos now, since
+        // it's assigned for use by Nexus.
+        let res = datastore
+            .ip_pool_assign(
+                opctx,
+                &ipv4.authz_pool,
+                &ipv4.db_pool,
+                IpPoolAssignment::Silos,
+            )
+            .await;
+        let Err(Error::InvalidRequest { message }) = &res else {
+            panic!(
+                "Should not be able to assign to silos internal \
+                IP Pool when assigned to Nexus, found {res:#?}"
+            );
+        };
+        assert_eq!(
+            message.external_message(),
+            ASSIGNED_TO_EXTERNAL_SERVICE_ERROR
+        );
+
+        // Unassign it, and now we can assign the pool for silo use.
+        let _ = datastore
+            .external_service_ip_pool_unassign(
+                opctx,
+                ExternalServiceKind::Nexus,
+                &ipv4.authz_pool,
+            )
+            .await
+            .expect("Should be able to unassign IP Pool");
+        let _ = datastore.ip_pool_assign(
+            opctx,
+            &ipv4.authz_pool,
+            &ipv4.db_pool,
+            IpPoolAssignment::Silos,
+        ).await
+            .expect(
+                "Should be able to delete internal IP Pool when more than one remains, \
+                after unassigning it from Nexus"
+            );
 
         db.terminate().await;
         logctx.cleanup_successful();

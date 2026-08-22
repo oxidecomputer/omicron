@@ -57,6 +57,7 @@ define_enums! {
     DownstairsClientStopRequestReasonEnum => "downstairs_client_stop_request_reason_type",
     DownstairsClientStoppedReasonEnum => "downstairs_client_stopped_reason_type",
     EreporterTypeEnum => "ereporter_type",
+    ExternalServiceKindEnum => "external_service_kind",
     FailureDomainEnum => "failure_domain",
     FmFactPhysicalDiskKindEnum => "fm_fact_physical_disk_kind",
     FmFactSagaKindEnum => "fm_fact_saga_kind",
