@@ -7505,6 +7505,7 @@ dependencies = [
  "pq-sys",
  "predicates",
  "pretty_assertions",
+ "proptest",
  "qorb",
  "rand 0.9.2",
  "rcgen",

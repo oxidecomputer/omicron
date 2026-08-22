@@ -79,7 +79,7 @@ going through the usual API versioning process.
 
 . For Nexus database storage, `nexus-db-model` has a `DbTypedGeneration` generic
 type which can be used. `DbTypedGeneration` should not appear in public fields
-or in signatures above the datastore layer; instead, prefer to use the regular
+or signatures above the datastore layer; instead, prefer to use the regular
 `TypedGeneration` and only convert to `DbTypedGeneration` within the lowest
 layers (i.e. using getters/setters). This is because the regular `TypedGeneration`
 has much more infrastructure built around it.
