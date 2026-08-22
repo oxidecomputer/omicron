@@ -8768,6 +8768,18 @@ CREATE TYPE IF NOT EXISTS omicron.public.multicast_group_member_state AS ENUM (
     'left'
 );
 
+-- Origin of a multicast group membership.
+--
+-- 'static' is administratively-configured membership created through the
+-- control plane API (instance attach); it does not expire. 'igmp_snooped' is
+-- dynamic soft-state learned from snooped IGMP/MLD reports (RFD 488). Origin
+-- distinguishes which rows a future soft-state reaper may expire: snooped rows
+-- expire on their query-interval-derived hold-down, static rows never do.
+CREATE TYPE IF NOT EXISTS omicron.public.multicast_group_member_origin AS ENUM (
+    'static',
+    'igmp_snooped'
+);
+
 /*
  * External multicast groups (customer-facing, allocated from IP pools)
  * Following the bifurcated design from RFD 488
@@ -8896,7 +8908,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.multicast_group_member (
     /* Empty array means any source is allowed (ASM) */
     /* Non-empty array enables source filtering (IGMPv3/MLDv2) */
     /* The group's source_ips in API views is the union of all active members */
-    source_ips INET[] NOT NULL DEFAULT ARRAY[]::INET[]
+    source_ips INET[] NOT NULL DEFAULT ARRAY[]::INET[],
+
+    /* Origin of this membership (static API vs snooped IGMP/MLD soft-state) */
+    membership_origin omicron.public.multicast_group_member_origin NOT NULL DEFAULT 'static'
 );
 
 /* External Multicast Group Indexes */
@@ -9387,7 +9402,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '295.0.0', NULL)
+    (TRUE, NOW(), NOW(), '296.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

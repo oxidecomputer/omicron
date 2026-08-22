@@ -631,6 +631,7 @@ ntp-admin-types = { path = "ntp-admin/types" }
 ntp-admin-types-versions = { path = "ntp-admin/types/versions" }
 mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "f74e74694b2df8c88c862b6e32409898ad85ded5" }
 ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "f74e74694b2df8c88c862b6e32409898ad85ded5" }
+ddm-api-types-versions = { git = "https://github.com/oxidecomputer/maghemite", rev = "f74e74694b2df8c88c862b6e32409898ad85ded5" }
 multimap = "0.10.1"
 nexus-auth = { path = "nexus/auth" }
 nexus-background-task-interface = { path = "nexus/background-task-interface" }

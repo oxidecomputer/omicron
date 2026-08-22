@@ -29,6 +29,7 @@ use std::fmt;
 use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::num::NonZeroU32;
+use std::num::NonZeroUsize;
 use std::time::Duration;
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
@@ -951,38 +952,67 @@ pub struct MulticastGroupReconcilerConfig {
     #[serde_as(as = "DurationSeconds<u64>")]
     pub period_secs: Duration,
 
-    /// TTL (in seconds) for the sled-to-switch-port mapping cache.
+    /// Maximum number of groups to process concurrently per reconciler pass.
     ///
-    /// This cache maps sled IDs to their physical switch ports. It changes when
-    /// sleds are added/removed or inventory is updated.
+    /// Each slot may hold an in-flight `dpd_ensure` saga that the reconciler
+    /// awaits in the same pass. A wedged dependency holds a slot until the
+    /// saga unwinds, so this cap bounds the worst-case in-flight saga count.
     ///
-    /// Default: 3600 seconds (1 hour)
+    /// The limit feeds `buffer_unordered`, which never polls its input when
+    /// given zero, so a zero value would stall the reconciler rather than
+    /// serialize it. The type rejects zero at deserialization time.
     #[serde(
-        default = "MulticastGroupReconcilerConfig::default_sled_cache_ttl_secs"
+        default = "MulticastGroupReconcilerConfig::default_group_concurrency_limit"
     )]
-    #[serde_as(as = "DurationSeconds<u64>")]
-    pub sled_cache_ttl_secs: Duration,
+    pub group_concurrency_limit: NonZeroUsize,
 
-    /// TTL (in seconds) for the backplane hardware topology cache.
+    /// Maximum number of members to process concurrently per group.
     ///
-    /// This cache stores the hardware platform's port mapping. It effectively
-    /// never changes during normal operation.
+    /// Members do not start sagas. Per-member work involves HTTP calls to
+    /// DPD and sled-agent. The default accounts for the outer
+    /// `group_concurrency_limit` multiplier, since peak in-flight
+    /// per-member futures is the product of the two limits.
     ///
-    /// Default: 86400 seconds (24 hours) with smart invalidation
+    /// Zero is rejected for the same reason as `group_concurrency_limit`.
     #[serde(
-        default = "MulticastGroupReconcilerConfig::default_backplane_cache_ttl_secs"
+        default = "MulticastGroupReconcilerConfig::default_member_concurrency_limit"
     )]
+    pub member_concurrency_limit: NonZeroUsize,
+
+    /// Grace period before an orphaned "Creating" group with no members is
+    /// reaped by the emptiness sweep.
+    ///
+    /// Implicit group creation and first-member attach are not atomic, and even
+    /// static membership must propagate through the ddm/MRIB exchange before a
+    /// group is live. This grace gates reaping on the group's creation time so a
+    /// group whose first attach is still in flight is not collected prematurely.
+    ///
+    /// The value should bound that worst-case attach-and-propagate latency with
+    /// margin. A future IGMP/MLD hold-down for emptied "Active" groups (RFD
+    /// 0488) is a sibling timer, not a reuse of this knob: snooped membership
+    /// expiry must derive from the protocol's Group Membership Interval
+    /// (robustness variable x query interval + max response time, ~260s with
+    /// RFC 3376 defaults), which is far longer than this grace.
     #[serde_as(as = "DurationSeconds<u64>")]
-    pub backplane_cache_ttl_secs: Duration,
+    #[serde(
+        default = "MulticastGroupReconcilerConfig::default_orphan_grace_secs"
+    )]
+    pub orphan_grace_secs: Duration,
 }
 
 impl MulticastGroupReconcilerConfig {
-    const fn default_sled_cache_ttl_secs() -> Duration {
-        Duration::from_secs(3600) // 1 hour
+    const fn default_group_concurrency_limit() -> NonZeroUsize {
+        // Safe to unwrap: the literal is nonzero.
+        NonZeroUsize::new(16).unwrap()
     }
 
-    const fn default_backplane_cache_ttl_secs() -> Duration {
-        Duration::from_secs(86400) // 24 hours
+    const fn default_member_concurrency_limit() -> NonZeroUsize {
+        // Safe to unwrap: the literal is nonzero.
+        NonZeroUsize::new(32).unwrap()
+    }
+
+    const fn default_orphan_grace_secs() -> Duration {
+        Duration::from_secs(60)
     }
 }
 
@@ -990,8 +1020,9 @@ impl Default for MulticastGroupReconcilerConfig {
     fn default() -> Self {
         Self {
             period_secs: Duration::from_secs(60),
-            sled_cache_ttl_secs: Self::default_sled_cache_ttl_secs(),
-            backplane_cache_ttl_secs: Self::default_backplane_cache_ttl_secs(),
+            group_concurrency_limit: Self::default_group_concurrency_limit(),
+            member_concurrency_limit: Self::default_member_concurrency_limit(),
+            orphan_grace_secs: Self::default_orphan_grace_secs(),
         }
     }
 }
@@ -1629,8 +1660,9 @@ mod test {
                         },
                         multicast_reconciler: MulticastGroupReconcilerConfig {
                             period_secs: Duration::from_secs(60),
-                            sled_cache_ttl_secs: MulticastGroupReconcilerConfig::default_sled_cache_ttl_secs(),
-                            backplane_cache_ttl_secs: MulticastGroupReconcilerConfig::default_backplane_cache_ttl_secs(),
+                            group_concurrency_limit: MulticastGroupReconcilerConfig::default_group_concurrency_limit(),
+                            member_concurrency_limit: MulticastGroupReconcilerConfig::default_member_concurrency_limit(),
+                            orphan_grace_secs: MulticastGroupReconcilerConfig::default_orphan_grace_secs(),
                         },
                         trust_quorum: TrustQuorumConfig {
                             period_secs: Duration::from_secs(60),
@@ -1906,6 +1938,29 @@ mod test {
         )
         .expect_err("retention_days = 0 should be rejected");
         assert!(error.message().contains("nonzero"), "error = {}", error);
+    }
+
+    #[test]
+    fn test_invalid_multicast_reconciler_concurrency_limits() {
+        // A zero limit would leave `buffer_unordered` never polling its
+        // input, wedging the reconciler instead of serializing it.
+        for field in ["group_concurrency_limit", "member_concurrency_limit"] {
+            let error = toml::from_str::<MulticastGroupReconcilerConfig>(
+                &format!("period_secs = 60\n{field} = 0\n"),
+            )
+            .unwrap_err();
+            assert!(
+                error.message().contains("nonzero"),
+                "{field} = 0 should be rejected, error = {error}"
+            );
+        }
+
+        // Defaults apply when the limits are omitted.
+        let config = toml::from_str::<MulticastGroupReconcilerConfig>(
+            "period_secs = 60\n",
+        )
+        .expect("config without concurrency limits should parse");
+        assert_eq!(config, MulticastGroupReconcilerConfig::default());
     }
 
     #[test]

@@ -449,7 +449,7 @@ impl DataStore {
         use nexus_db_schema::schema::multicast_group_member;
         let now = Utc::now();
 
-        // Atomic: only mark `Deleting` if no active members exist.
+        // Atomically mark "Deleting" only if no active members exist.
         let rows = diesel::update(multicast_group::table)
             .filter(multicast_group::id.eq(group_id.into_untyped_uuid()))
             .filter(
@@ -822,9 +822,9 @@ impl DataStore {
     /// Deallocate an external multicast group address for IP pool cleanup.
     ///
     /// This marks the group's IP address as deallocated by setting `time_deleted`,
-    /// releasing it back to the pool. This is not the user-initiated deletion path.
+    /// releasing it back to the pool. This is not the normal deletion path.
     ///
-    /// User-initiated deletion uses `mark_multicast_group_for_removal` which
+    /// Normal deletion uses `multicast_group_mark_removal_if_empty` which
     /// transitions to "Deleting" state for RPW cleanup before row removal.
     ///
     /// Returns `Ok(true)` if the group was deallocated, `Ok(false)` if it was

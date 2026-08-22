@@ -552,6 +552,8 @@ async fn proptest_full_reconciliation() {
     let mut mgdctx = omicron_test_utils::dev::maghemite::MgdInstance::start(
         0,
         mgsctx.address().into(),
+        None,
+        None,
     )
     .await
     .expect("started mgd");
