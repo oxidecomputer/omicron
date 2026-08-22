@@ -902,14 +902,22 @@ impl InstanceManagerRunner {
         }
 
         tokio::spawn(async move {
+            // Await every instance before reporting, keeping the first
+            // error, so one failed refresh does not leave the remaining
+            // ports on stale IGW keying. The per-instance result is
+            // propagated, not just the channel error, so a failed OPTE
+            // refresh is visible to the caller and retried on the next
+            // mapping push.
+            let mut result = Ok(());
             for channel in channels {
-                if let Err(e) = channel.await {
-                    let _ = tx.send(Err(e.into()));
-                    return;
-                }
+                let refresh = match channel.await {
+                    Ok(inner) => inner,
+                    Err(e) => Err(e.into()),
+                };
+                result = result.and(refresh);
             }
 
-            let _ = tx.send(Ok(()));
+            let _ = tx.send(result);
         });
 
         Ok(())

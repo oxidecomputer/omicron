@@ -22,6 +22,7 @@
 use std::collections::BTreeSet;
 use std::net::IpAddr;
 
+use dpd_client::types as dpd_types;
 use http::{Method, StatusCode};
 
 use nexus_db_model::{MemberParentRef, MulticastGroupMemberState};
@@ -42,6 +43,10 @@ use nexus_types::external_api::multicast::{
 };
 use nexus_types::internal_api::params::InstanceMigrateRequest;
 
+use super::*;
+use crate::integration_tests::instances::{
+    instance_simulate, instance_wait_for_state, vmm_simulate_on_sled,
+};
 use nexus_types_versions::latest::instance::Instance;
 use omicron_common::address::{
     MAX_SOURCE_IPS_PER_GROUP, MAX_SOURCE_IPS_PER_MEMBER,
@@ -51,11 +56,6 @@ use omicron_common::api::external::{
 };
 use omicron_nexus::TestInterfaces;
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid, MulticastGroupUuid};
-
-use super::*;
-use crate::integration_tests::instances::{
-    instance_simulate, instance_wait_for_state, vmm_simulate_on_sled,
-};
 
 const PROJECT_NAME: &str = "test-project";
 
@@ -210,6 +210,25 @@ async fn test_multicast_lifecycle(cptestctx: &ControlPlaneTestContext) {
             MulticastGroupMemberState::Left, // Stopped instance
         )
         .await;
+
+        let members = nexus_test_utils::http_testing::NexusRequest::iter_collection_authn::<
+            MulticastGroupMember,
+        >(
+            client,
+            &mcast_group_members_url(group_name),
+            &format!("project={PROJECT_NAME}"),
+            None,
+        )
+        .await
+        .expect("Should list multicast group members")
+        .all_items;
+
+        assert_eq!(
+            members.len(),
+            1,
+            "Instance should be the sole member of {group_name}"
+        );
+        assert_eq!(members[0].parent_id, instances[3].identity.id);
     }
 
     // Detach operations and idempotency
@@ -283,185 +302,6 @@ async fn test_multicast_lifecycle(cptestctx: &ControlPlaneTestContext) {
         wait_for_group_deleted(cptestctx, group_names[1]),
         wait_for_group_deleted(cptestctx, group_names[2]),
         wait_for_group_deleted(cptestctx, group_names[3]),
-    )
-    .await;
-}
-
-#[nexus_test]
-async fn test_multicast_group_attach_conflicts(
-    cptestctx: &ControlPlaneTestContext,
-) {
-    let client = &cptestctx.external_client;
-
-    // Create project and pools in parallel
-    ops::join3(
-        create_default_ip_pools(&client),
-        create_project(client, PROJECT_NAME),
-        create_multicast_ip_pool_with_range(
-            &client,
-            "mcast-pool-conflicts",
-            (224, 23, 0, 1),   // Unique range: 224.23.0.1
-            (224, 23, 0, 255), // to 224.23.0.255
-        ),
-    )
-    .await;
-
-    // Create first instance (implicit model: first instance creates the group)
-    instance_for_multicast_groups(
-        cptestctx,
-        PROJECT_NAME,
-        "mcast-instance-1",
-        false,
-        &[],
-    )
-    .await;
-
-    // Add instance1 to group (group implicitly creates if it doesn't exist)
-    multicast_group_attach(
-        cptestctx,
-        PROJECT_NAME,
-        "mcast-instance-1",
-        "mcast-group-1",
-    )
-    .await;
-
-    // Wait for group to become Active before proceeding
-    wait_for_group_active(client, "mcast-group-1").await;
-
-    // Create second instance and add to same multicast group
-    // This should succeed (multicast groups can have multiple members, unlike floating IPs)
-    instance_for_multicast_groups(
-        cptestctx,
-        PROJECT_NAME,
-        "mcast-instance-2",
-        false,
-        &[],
-    )
-    .await;
-    multicast_group_attach(
-        cptestctx,
-        PROJECT_NAME,
-        "mcast-instance-2",
-        "mcast-group-1",
-    )
-    .await;
-
-    // Wait for reconciler
-    wait_for_multicast_reconciler(&cptestctx.lockstep_client).await;
-
-    // Verify both instances are members of the group
-    let members =
-        nexus_test_utils::http_testing::NexusRequest::iter_collection_authn::<
-            MulticastGroupMember,
-        >(
-            client,
-            &mcast_group_members_url("mcast-group-1"),
-            &format!("project={PROJECT_NAME}"),
-            None,
-        )
-        .await
-        .expect("Should list multicast group members")
-        .all_items;
-
-    assert_eq!(
-        members.len(),
-        2,
-        "Multicast group should support multiple members (unlike floating IPs)"
-    );
-
-    cleanup_instances(
-        cptestctx,
-        client,
-        PROJECT_NAME,
-        &["mcast-instance-1", "mcast-instance-2"],
-    )
-    .await;
-    wait_for_group_deleted(cptestctx, "mcast-group-1").await;
-}
-
-#[nexus_test]
-async fn test_multicast_group_attach_multiple(
-    cptestctx: &ControlPlaneTestContext,
-) {
-    let client = &cptestctx.external_client;
-
-    // Create project and pools in parallel
-    ops::join3(
-        create_default_ip_pools(&client),
-        create_project(client, PROJECT_NAME),
-        create_multicast_ip_pool(&client, "mcast-pool"),
-    )
-    .await;
-
-    let group_names =
-        ["limit-test-group-0", "limit-test-group-1", "limit-test-group-2"];
-
-    // Create instance first (groups will be implicitly created when attached)
-    let instance = instance_for_multicast_groups(
-        cptestctx,
-        PROJECT_NAME,
-        "mcast-instance-1",
-        false,
-        &[], // No groups at creation
-    )
-    .await;
-
-    // Attach instance to multiple groups (implicitly creates each group)
-    let multicast_group_names = &group_names;
-    for group_name in multicast_group_names {
-        multicast_group_attach(
-            cptestctx,
-            PROJECT_NAME,
-            "mcast-instance-1",
-            group_name,
-        )
-        .await;
-    }
-
-    // Wait for all groups to become active in parallel
-    wait_for_groups_active(client, multicast_group_names).await;
-
-    // Wait for members to reach "Left" state for each group
-    // (instance is stopped, so member starts in "Left" state with no sled_id)
-    for group_name in multicast_group_names {
-        wait_for_member_state(
-            cptestctx,
-            group_name,
-            instance.identity.id,
-            MulticastGroupMemberState::Left,
-        )
-        .await;
-    }
-
-    // Verify instance is member of multiple groups
-    for group_name in multicast_group_names {
-        let members_url = mcast_group_members_url(group_name);
-        let members = nexus_test_utils::http_testing::NexusRequest::iter_collection_authn::<MulticastGroupMember>(
-             client,
-             &members_url,
-             &format!("project={PROJECT_NAME}"),
-             None,
-         )
-         .await
-         .expect("Should list multicast group members")
-         .all_items;
-
-        assert_eq!(
-            members.len(),
-            1,
-            "Instance should be member of group {group_name}"
-        );
-        assert_eq!(members[0].parent_id, instance.identity.id);
-    }
-
-    cleanup_instances(cptestctx, client, PROJECT_NAME, &["mcast-instance-1"])
-        .await;
-    // Groups are implicitly deleted when last member (instance) is removed
-    // Only 3 groups were created (group_names[0..3])
-    ops::join3(
-        wait_for_group_deleted(cptestctx, group_names[0]),
-        wait_for_group_deleted(cptestctx, group_names[1]),
-        wait_for_group_deleted(cptestctx, group_names[2]),
     )
     .await;
 }
@@ -810,11 +650,28 @@ async fn test_multicast_migration_scenarios(
     )
     .await;
 
+    // Designated-forwarder election gates the external NAT-ingress entry to a
+    // single elected switch, while the underlay group stays on every switch
+    // for warm failover. The external group must therefore exist on exactly
+    // one switch, not both.
+    let mut external_switches = Vec::new();
     for (slot, dpd) in nexus_test_utils::dpd_clients_by_switch(cptestctx) {
-        dpd.multicast_group_get(&multicast_ip).await.unwrap_or_else(|e| {
-            panic!("{slot:?}: group should exist in DPD before migration: {e}")
-        });
+        match dpd.multicast_group_get(&multicast_ip).await {
+            Ok(_) => external_switches.push(slot),
+            Err(e) if e.status() == Some(StatusCode::NOT_FOUND) => {}
+            Err(e) => panic!(
+                "unexpected DPD error querying external group \
+                 {multicast_ip} on {slot:?}: {e}"
+            ),
+        }
     }
+    assert_eq!(
+        external_switches.len(),
+        1,
+        "external group should exist on exactly one elected switch before \
+         migration, found on {external_switches:?}"
+    );
+    let init_owner = external_switches[0];
 
     // Migrate instance
     let source_sled = nexus
@@ -874,12 +731,150 @@ async fn test_multicast_migration_scenarios(
 
     // Group-level DPD state is all Nexus owns. The rear-port move to the
     // target sled is owned by `ddmd`, derived from DDM peer subscriptions, and
-    // is not asserted here.
+    // is not asserted here. Migration does not change the designated forwarder,
+    // so the external group still exists on exactly one elected switch.
+    let mut external_switches_after_migration = Vec::new();
     for (slot, dpd) in nexus_test_utils::dpd_clients_by_switch(cptestctx) {
-        dpd.multicast_group_get(&multicast_ip).await.unwrap_or_else(|e| {
-            panic!("{slot:?}: group should exist in DPD after migration: {e}")
-        });
+        match dpd.multicast_group_get(&multicast_ip).await {
+            Ok(_) => external_switches_after_migration.push(slot),
+            Err(e) if e.status() == Some(StatusCode::NOT_FOUND) => {}
+            Err(e) => panic!(
+                "unexpected DPD error querying external group \
+                 {multicast_ip} on {slot:?}: {e}"
+            ),
+        }
     }
+    assert_eq!(
+        external_switches_after_migration.len(),
+        1,
+        "external group should exist on exactly one elected switch after \
+         migration, found on {external_switches_after_migration:?}"
+    );
+    assert_eq!(
+        external_switches_after_migration[0], init_owner,
+        "instance migration should not move external-group ownership"
+    );
+
+    // Put a duplicate external entry on the other switch.
+    let dpd_clients = nexus_test_utils::dpd_clients_by_switch(cptestctx);
+    let non_owner = *dpd_clients
+        .keys()
+        .find(|slot| **slot != init_owner)
+        .expect("two DPD switches should be available");
+    let owner_dpd = &dpd_clients[&init_owner];
+    let owner_response = owner_dpd
+        .multicast_group_get(&multicast_ip)
+        .await
+        .expect("owner should have the external group")
+        .into_inner();
+    let duplicate_entry = match owner_response {
+        dpd_types::MulticastGroupResponse::External {
+            group_ip,
+            tag,
+            internal_forwarding,
+            external_forwarding,
+            sources,
+            ..
+        } => dpd_types::MulticastGroupCreateExternalEntry {
+            group_ip,
+            tag: Some(tag),
+            internal_forwarding,
+            external_forwarding,
+            sources,
+        },
+        dpd_types::MulticastGroupResponse::Underlay { .. } => {
+            panic!("Expected an external group from the owner DPD")
+        }
+    };
+    dpd_clients[&non_owner]
+        .multicast_group_create_external(&duplicate_entry)
+        .await
+        .expect("should inject a duplicate external group");
+
+    let mut duplicate_slots = Vec::new();
+    for (slot, dpd) in &dpd_clients {
+        if dpd.multicast_group_get(&multicast_ip).await.is_ok() {
+            duplicate_slots.push(*slot);
+        }
+    }
+    // The map iterates in slot order, which need not match election order.
+    let mut both_slots = vec![init_owner, non_owner];
+    both_slots.sort();
+    assert_eq!(
+        duplicate_slots, both_slots,
+        "test setup should create an external duplicate on both switches"
+    );
+
+    // The next pass must keep the incumbent and remove the duplicate.
+    activate_multicast_reconciler(lockstep_client).await;
+
+    let mut repaired_slots = Vec::new();
+    for (slot, dpd) in &dpd_clients {
+        if dpd.multicast_group_get(&multicast_ip).await.is_ok() {
+            repaired_slots.push(*slot);
+        }
+    }
+    assert_eq!(
+        repaired_slots,
+        vec![init_owner],
+        "drift repair should retain the incumbent and evict the duplicate"
+    );
+
+    // Move the sole entry to the other switch.
+    //
+    // The hash still selects init_owner. The observed sole owner must win.
+    let owner_response = owner_dpd
+        .multicast_group_get(&multicast_ip)
+        .await
+        .expect("repaired owner should have the external group")
+        .into_inner();
+    let moved_entry = match owner_response {
+        dpd_types::MulticastGroupResponse::External {
+            group_ip,
+            tag,
+            internal_forwarding,
+            external_forwarding,
+            sources,
+            ..
+        } => dpd_types::MulticastGroupCreateExternalEntry {
+            group_ip,
+            tag: Some(tag),
+            internal_forwarding,
+            external_forwarding,
+            sources,
+        },
+        dpd_types::MulticastGroupResponse::Underlay { .. } => {
+            panic!("Expected an external group from the repaired owner DPD")
+        }
+    };
+    let delete_tag: dpd_types::MulticastTag = moved_entry
+        .tag
+        .as_deref()
+        .expect("injected entry should have a tag")
+        .parse()
+        .expect("DB multicast tag should be valid for DPD");
+    owner_dpd
+        .multicast_group_delete(&multicast_ip, &delete_tag)
+        .await
+        .expect("should remove the original external owner");
+    dpd_clients[&non_owner]
+        .multicast_group_create_external(&moved_entry)
+        .await
+        .expect("should create the external group on the new owner");
+
+    activate_multicast_reconciler(lockstep_client).await;
+
+    let mut incumbent_slots = Vec::new();
+    for (slot, dpd) in &dpd_clients {
+        if dpd.multicast_group_get(&multicast_ip).await.is_ok() {
+            incumbent_slots.push(*slot);
+        }
+    }
+    assert_eq!(
+        incumbent_slots,
+        vec![non_owner],
+        "drift check should preserve a sole incumbent over the hash"
+    );
 
     // Verify sled-agent state after migration: the target sled should
     // have the VMM subscription and M2P mapping. The source sled should

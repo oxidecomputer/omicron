@@ -85,6 +85,7 @@ use slog::info;
 use slog::warn;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::net::IpAddr;
@@ -95,6 +96,7 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
+use tokio::sync::Notify;
 use uuid::Uuid;
 
 use super::AttachedSubnetKind;
@@ -396,6 +398,13 @@ struct PortManagerInner {
     ///
     /// See <https://github.com/oxidecomputer/opte/issues/908>.
     mcast_underlay_sockets: MulticastFilterMap,
+
+    /// Notified whenever the multicast subscription set or M2P table changes,
+    /// so the DDM reconciler can promptly re-derive the underlay group
+    /// subscriptions this sled originates to its local `ddmd`. The reconciler
+    /// covers the full set on each pass regardless, so this notify is a
+    /// latency optimization, not a correctness need.
+    multicast_changed: Arc<Notify>,
 }
 
 impl PortManagerInner {
@@ -639,6 +648,7 @@ impl PortManager {
             eip_gateways: Mutex::new(Default::default()),
             underlay_nics: underlay_nics.to_vec(),
             mcast_underlay_sockets: MulticastFilterMap::new(),
+            multicast_changed: Arc::new(Notify::new()),
         });
 
         let mgr = Self { inner };
@@ -1341,6 +1351,7 @@ impl PortManager {
                 "removed" => ?to_remove,
                 "active_groups" => port_state.mcast_subscriptions.len(),
             );
+            self.inner.multicast_changed.notify_one();
         } else {
             debug!(
                 self.inner.log,
@@ -1351,6 +1362,34 @@ impl PortManager {
         }
 
         Ok(())
+    }
+
+    /// Get a handle notified whenever the multicast subscription set or
+    /// M2P table changes on this sled.
+    ///
+    /// The DDM reconciler waits on this to promptly re-derive the underlay
+    /// group subscriptions it originates to the local `ddmd` instance.
+    pub fn multicast_changed(&self) -> Arc<Notify> {
+        Arc::clone(&self.inner.multicast_changed)
+    }
+
+    /// List the overlay multicast group addresses this sled is currently
+    /// subscribed to across all OPTE ports.
+    ///
+    /// This is the union of per-port subscriptions, so a group with members
+    /// on more than one port appears once. Both guest VMMs and probes
+    /// subscribe through this manager, so the union covers every local
+    /// member. Source filters are intentionally dropped, as underlay
+    /// replication is keyed on the group's underlay address, and OPTE
+    /// enforces source filtering locally per port.
+    pub fn list_mcast_subscriptions(&self) -> Vec<IpAddr> {
+        let ports = self.inner.ports.lock().unwrap();
+        let groups: BTreeSet<IpAddr> = ports
+            .values()
+            .flat_map(|port_state| port_state.mcast_subscriptions.keys())
+            .copied()
+            .collect();
+        groups.into_iter().collect()
     }
 
     /// Install a multicast overlay-to-underlay (M2P) mapping in OPTE.
@@ -1448,6 +1487,7 @@ impl PortManager {
             }
         }
 
+        self.inner.multicast_changed.notify_one();
         Ok(())
     }
 
@@ -1475,6 +1515,7 @@ impl PortManager {
 
         self.inner.mcast_underlay_sockets.leave(&self.inner.log, addr);
 
+        self.inner.multicast_changed.notify_one();
         Ok(())
     }
 
@@ -1992,6 +2033,14 @@ impl PortTicket {
         };
         let port = &port_state.port;
         drop(ports);
+
+        // Removing the port drops its subscriptions from the sled-wide
+        // multicast union. Wake the DDM reconciler so the sled's receiver
+        // origination is withdrawn promptly instead of lingering until the
+        // next periodic poll.
+        if !port_state.mcast_subscriptions.is_empty() {
+            self.manager.multicast_changed.notify_one();
+        }
 
         // Cleanup the set of subnets we want to receive routes for.
         let remove_key = |routes: &mut HashMap<RouterId, RouteSet>,

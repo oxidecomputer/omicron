@@ -984,15 +984,15 @@ pub struct MulticastGroupReconcilerConfig {
     ///
     /// Implicit group creation and first-member attach are not atomic, and even
     /// static membership must propagate through the ddm/MRIB exchange before a
-    /// group is live. This grace gates reaping on the group's creation time so a
-    /// group whose first attach is still in flight is not collected prematurely.
+    /// group is live. The grace period gates reaping on the group's creation
+    /// time so a group whose first attach is still in flight is not collected
+    /// prematurely.
     ///
-    /// The value should bound that worst-case attach-and-propagate latency with
-    /// margin. A future IGMP/MLD hold-down for emptied "Active" groups (RFD
-    /// 0488) is a sibling timer, not a reuse of this knob: snooped membership
-    /// expiry must derive from the protocol's Group Membership Interval
-    /// (robustness variable x query interval + max response time, ~260s with
-    /// RFC 3376 defaults), which is far longer than this grace.
+    /// This grace period is distinct from snooped IGMP/MLD membership expiry
+    /// (RFD 0488), a separate and longer timer derived from the protocol's
+    /// Group Membership Interval (robustness variable * query interval plus max
+    /// response time, ~260s with RFC 3376 defaults). The two are not the same
+    /// value and should not be unified.
     #[serde_as(as = "DurationSeconds<u64>")]
     #[serde(
         default = "MulticastGroupReconcilerConfig::default_orphan_grace_secs"

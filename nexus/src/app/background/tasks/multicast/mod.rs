@@ -173,6 +173,7 @@
 //! [`instance_updater`]: crate::app::background::tasks::instance_updater
 //! [`MulticastGroupReconcilerConfig`]: nexus_config::MulticastGroupReconcilerConfig
 
+use std::collections::HashMap;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 
@@ -186,6 +187,8 @@ use nexus_db_model::MulticastGroup;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_types::internal_api::background::MulticastGroupReconcilerStatus;
+use omicron_uuid_kinds::MulticastGroupUuid;
+use sled_agent_types::early_networking::SwitchSlot;
 
 use crate::app::background::BackgroundTask;
 use crate::app::multicast::dataplane::MulticastDataplaneClient;
@@ -225,6 +228,18 @@ pub(crate) struct MulticastGroupReconciler {
     orphan_grace_period: chrono::TimeDelta,
     /// Whether multicast functionality is enabled.
     enabled: bool,
+    /// Per-pass placement and election drift counters for active groups.
+    /// Reset at the start of active-group reconciliation and folded into
+    /// the task status afterward.
+    drift_counters: groups::ActiveDriftCounters,
+    /// The last observed external ingress owner per active group, kept across
+    /// passes so a change in owner can be detected and counted as a
+    /// re-election.
+    ///
+    /// This is mutated only between passes (`fold_owner_observations`) and
+    /// is in-memory and per-Nexus: it resets on restart (the first pass
+    /// re-records silently) and each Nexus counts slot moves independently.
+    elected_owners: HashMap<MulticastGroupUuid, SwitchSlot>,
 }
 
 impl MulticastGroupReconciler {
@@ -245,6 +260,8 @@ impl MulticastGroupReconciler {
             group_concurrency_limit,
             orphan_grace_period,
             enabled,
+            drift_counters: groups::ActiveDriftCounters::default(),
+            elected_owners: HashMap::new(),
         }
     }
 
@@ -404,8 +421,13 @@ impl MulticastGroupReconciler {
         // Process member state changes. Underlay dataplane members are
         // programmed by ddmd from DDM peer subscriptions; the reconciler only
         // advances member DB state and manages OPTE subscriptions plus
-        // M2P/forwarding propagation via sled-agent.
-        match self.reconcile_member_states(opctx, &sled_client).await {
+        // M2P/forwarding propagation via sled-agent. The dataplane client is
+        // read-only here, observing the external entry's owner so forwarding
+        // stays co-located with it.
+        match self
+            .reconcile_member_states(opctx, &sled_client, &dataplane_client)
+            .await
+        {
             Ok(counts) => {
                 status.members_processed += counts.processed;
             }
@@ -439,6 +461,7 @@ impl MulticastGroupReconciler {
 
         // Reconcile active groups
         if let Some(switch_zone_client) = &switch_zone_client {
+            self.drift_counters.reset();
             match self
                 .reconcile_active_groups(
                     opctx,
@@ -448,13 +471,29 @@ impl MulticastGroupReconciler {
                 )
                 .await
             {
-                Ok(count) => status.groups_verified += count,
+                Ok((count, observations)) => {
+                    status.groups_verified += count;
+                    // Detect owner slot moves against the map recorded on a
+                    // previous pass, incrementing `groups_reelected`, before
+                    // the drift counters are read into the status below.
+                    self.fold_owner_observations(opctx, observations);
+                }
                 Err(e) => {
                     let msg =
                         format!("failed to reconcile active groups: {e:#}");
                     status.errors.push(msg);
                 }
             }
+            // Fold drift counters in even on error, since per-group handlers
+            // may have observed drift before the pass-level failure.
+            status.external_entries_misplaced = self
+                .drift_counters
+                .entries_misplaced
+                .load(std::sync::atomic::Ordering::Relaxed);
+            status.groups_reelected = self
+                .drift_counters
+                .groups_reelected
+                .load(std::sync::atomic::Ordering::Relaxed);
         } else {
             status.skipped.push("reconcile_active_groups".to_string());
         }
@@ -526,7 +565,6 @@ mod tests {
             );
         }
 
-        // Call the core implementation (imported via `use super::*`)
         let result = map_external_to_underlay_ip_impl(
             prefix_base,
             host_bits,
@@ -546,200 +584,126 @@ mod tests {
         Ok(result)
     }
 
-    /// Test IPv4 multicast mapping to admin-local IPv6 using default
-    /// prefix (ff04::/64). IPv4 fits in lower 32 bits.
+    /// Test IPv4 multicast mapping to admin-local IPv6 using the default
+    /// production prefix (ff04::/64). The IPv4 address fills the lower
+    /// 32 bits.
     #[test]
     fn test_map_ipv4_to_underlay_ipv6() {
-        let ipv4 = Ipv4Addr::new(224, 1, 2, 3);
-        let res = map_external_to_underlay_ip(IpAddr::V4(ipv4), 0);
+        let cases = [
+            // 224=0xe0, 1=0x01, 2=0x02, 3=0x03
+            (Ipv4Addr::new(224, 1, 2, 3), [0xe001, 0x0203]),
+            // Minimum IPv4 multicast address
+            (Ipv4Addr::new(224, 0, 0, 1), [0xe000, 0x0001]),
+            // Maximum IPv4 multicast address
+            (Ipv4Addr::new(239, 255, 255, 255), [0xefff, 0xffff]),
+            // Canonical doc example: 224.1.1.1 = 0xE0010101 -> ff04::e001:101
+            (Ipv4Addr::new(224, 1, 1, 1), [0xe001, 0x0101]),
+        ];
 
-        match res {
-            IpAddr::V6(ipv6) => {
-                // Should be ff04::e001:203
-                // (224=0xe0, 1=0x01, 2=0x02, 3=0x03)
-                assert_eq!(
-                    ipv6.segments(),
-                    [
-                        IPV6_ADMIN_SCOPED_MULTICAST_PREFIX,
-                        0x0000,
-                        0x0000,
-                        0x0000,
-                        0x0000,
-                        0x0000,
-                        0xe001,
-                        0x0203,
-                    ]
-                );
+        for (input, [seg6, seg7]) in cases {
+            match map_external_to_underlay_ip(IpAddr::V4(input), 0) {
+                IpAddr::V6(ipv6) => {
+                    assert_eq!(
+                        ipv6.segments(),
+                        [
+                            IPV6_ADMIN_SCOPED_MULTICAST_PREFIX,
+                            0x0000,
+                            0x0000,
+                            0x0000,
+                            0x0000,
+                            0x0000,
+                            seg6,
+                            seg7,
+                        ],
+                        "{input}"
+                    );
+                }
+                _ => panic!("Expected IPv6 result for {input}"),
             }
-            _ => panic!("Expected IPv6 result"),
-        }
-    }
-
-    /// Test minimum IPv4 multicast address using production prefix.
-    #[test]
-    fn test_map_ipv4_edge_cases() {
-        let ipv4_min = Ipv4Addr::new(224, 0, 0, 1);
-        let res = map_external_to_underlay_ip(IpAddr::V4(ipv4_min), 0);
-        match res {
-            IpAddr::V6(ipv6) => {
-                assert_eq!(
-                    ipv6.segments(),
-                    [
-                        IPV6_ADMIN_SCOPED_MULTICAST_PREFIX,
-                        0x0000,
-                        0x0000,
-                        0x0000,
-                        0x0000,
-                        0x0000,
-                        0xe000,
-                        0x0001,
-                    ]
-                );
-            }
-            _ => panic!("Expected IPv6 result"),
-        }
-
-        // Test maximum IPv4 multicast address using production prefix
-        let ipv4_max = Ipv4Addr::new(239, 255, 255, 255);
-        let res = map_external_to_underlay_ip(IpAddr::V4(ipv4_max), 0);
-        match res {
-            IpAddr::V6(ipv6) => {
-                assert_eq!(
-                    ipv6.segments(),
-                    [
-                        IPV6_ADMIN_SCOPED_MULTICAST_PREFIX,
-                        0x0000,
-                        0x0000,
-                        0x0000,
-                        0x0000,
-                        0x0000,
-                        0xefff,
-                        0xffff,
-                    ]
-                );
-            }
-            _ => panic!("Expected IPv6 result"),
         }
     }
 
     /// Test algorithm with wider /16 prefix (not used in production).
     ///
-    /// Tests site-local (ff05::/16) to admin-local (ff04::/16) with XOR folding.
-    /// With /16, we XOR upper 112 bits with lower 112 bits.
+    /// With /16, the upper 112 bits XOR with the lower 112 bits. Covers
+    /// site-local (ff05), global (ff0e), and already admin-local (ff04)
+    /// inputs.
     #[test]
-    fn test_xor_folding_16bit_site_local_to_admin_scoped() {
-        let ipv6_site_local = Ipv6Addr::new(
-            0xff05, 0x1234, 0x5678, 0x9abc, 0xdef0, 0x1234, 0x5678, 0x9abc,
-        );
-        let prefix_16: Ipv6Net = "ff04::/16".parse().unwrap();
-        let res = map_external_to_underlay_ip_with_prefix(
-            prefix_16,
-            IpAddr::V6(ipv6_site_local),
-            0,
-        )
-        .unwrap();
+    fn test_xor_folding_16bit_prefix() {
+        let prefix: Ipv6Net = "ff04::/16".parse().unwrap();
+        let cases = [
+            (
+                "site-local",
+                Ipv6Addr::new(
+                    0xff05, 0x1234, 0x5678, 0x9abc, 0xdef0, 0x1234, 0x5678,
+                    0x9abc,
+                ),
+                [
+                    IPV6_ADMIN_SCOPED_MULTICAST_PREFIX,
+                    0x1234,
+                    0x5678,
+                    0x9abc,
+                    0xdef0,
+                    0x1234,
+                    0x5678,
+                    0x65b9, // XOR folded last segment
+                ],
+            ),
+            (
+                "global",
+                Ipv6Addr::new(
+                    0xff0e, 0xabcd, 0x1234, 0x5678, 0x9abc, 0xdef0, 0x1234,
+                    0x5678,
+                ),
+                [
+                    IPV6_ADMIN_SCOPED_MULTICAST_PREFIX,
+                    0xabcd,
+                    0x1234,
+                    0x5678,
+                    0x9abc,
+                    0xdef0,
+                    0x1234,
+                    0xa976, // XOR folded last segment
+                ],
+            ),
+            (
+                "already admin-local",
+                Ipv6Addr::new(
+                    IPV6_ADMIN_SCOPED_MULTICAST_PREFIX,
+                    0x1111,
+                    0x2222,
+                    0x3333,
+                    0x4444,
+                    0x5555,
+                    0x6666,
+                    0x7777,
+                ),
+                [
+                    IPV6_ADMIN_SCOPED_MULTICAST_PREFIX,
+                    0x1111,
+                    0x2222,
+                    0x3333,
+                    0x4444,
+                    0x5555,
+                    0x6666,
+                    0x8873, // XOR folded last segment
+                ],
+            ),
+        ];
 
-        match res {
-            IpAddr::V6(ipv6) => {
-                // XOR result of 112-bit chunks
-                assert_eq!(
-                    ipv6.segments(),
-                    [
-                        IPV6_ADMIN_SCOPED_MULTICAST_PREFIX,
-                        0x1234,
-                        0x5678,
-                        0x9abc,
-                        0xdef0,
-                        0x1234,
-                        0x5678,
-                        0x65b9, // XOR folded last segment
-                    ]
-                );
+        for (name, input, expected) in cases {
+            let res = map_external_to_underlay_ip_with_prefix(
+                prefix,
+                IpAddr::V6(input),
+                0,
+            )
+            .unwrap();
+            match res {
+                IpAddr::V6(ipv6) => {
+                    assert_eq!(ipv6.segments(), expected, "{name} ({input})");
+                }
+                _ => panic!("Expected IPv6 result for {name} ({input})"),
             }
-            _ => panic!("Expected IPv6 result"),
-        }
-    }
-
-    /// Test algorithm with wider /16 prefix.
-    ///
-    /// Tests global (ff0e::/16) to admin-local (ff04::/16) with XOR folding.
-    /// With /16, we XOR upper 112 bits with lower 112 bits.
-    #[test]
-    fn test_xor_folding_16bit_global_to_admin_scoped() {
-        let ipv6_global = Ipv6Addr::new(
-            0xff0e, 0xabcd, 0x1234, 0x5678, 0x9abc, 0xdef0, 0x1234, 0x5678,
-        );
-        let prefix_16: Ipv6Net = "ff04::/16".parse().unwrap();
-        let res = map_external_to_underlay_ip_with_prefix(
-            prefix_16,
-            IpAddr::V6(ipv6_global),
-            0,
-        )
-        .unwrap();
-
-        match res {
-            IpAddr::V6(ipv6) => {
-                // XOR result of 112-bit chunks
-                assert_eq!(
-                    ipv6.segments(),
-                    [
-                        IPV6_ADMIN_SCOPED_MULTICAST_PREFIX,
-                        0xabcd,
-                        0x1234,
-                        0x5678,
-                        0x9abc,
-                        0xdef0,
-                        0x1234,
-                        0xa976, // XOR folded last segment
-                    ]
-                );
-            }
-            _ => panic!("Expected IPv6 result"),
-        }
-    }
-
-    /// Test algorithm with wider /16 prefix (not used in production).
-    ///
-    /// Admin-local multicast (ff04::/16) gets XOR folded like any other address.
-    /// With /16, we XOR upper 112 bits with lower 112 bits.
-    #[test]
-    fn test_xor_folding_16bit_already_admin_scoped() {
-        let ipv6_admin = Ipv6Addr::new(
-            IPV6_ADMIN_SCOPED_MULTICAST_PREFIX,
-            0x1111,
-            0x2222,
-            0x3333,
-            0x4444,
-            0x5555,
-            0x6666,
-            0x7777,
-        );
-        let prefix_16: Ipv6Net = "ff04::/16".parse().unwrap();
-        let res = map_external_to_underlay_ip_with_prefix(
-            prefix_16,
-            IpAddr::V6(ipv6_admin),
-            0,
-        )
-        .unwrap();
-
-        match res {
-            IpAddr::V6(ipv6) => {
-                // XOR result of 112-bit chunks
-                assert_eq!(
-                    ipv6.segments(),
-                    [
-                        IPV6_ADMIN_SCOPED_MULTICAST_PREFIX,
-                        0x1111,
-                        0x2222,
-                        0x3333,
-                        0x4444,
-                        0x5555,
-                        0x6666,
-                        0x8873, // XOR folded last segment
-                    ]
-                );
-            }
-            _ => panic!("Expected IPv6 result"),
         }
     }
 
@@ -756,7 +720,6 @@ mod tests {
             0,
         );
 
-        assert!(res.is_err());
         let err_msg = res.unwrap_err().to_string();
         assert!(
             err_msg.contains("has only 8 host bits")
@@ -816,119 +779,117 @@ mod tests {
         assert!(res.is_ok());
     }
 
-    /// Test XOR folding with /64 prefix: upper and lower 64-bit halves
-    /// are XORed together to produce unique mapping.
-    #[test]
-    fn test_xor_folding_with_64bit_prefix() {
-        let ipv6 = Ipv6Addr::new(
-            0xff0e, 0x1234, 0x5678, 0x9abc, 0x7ef0, 0x1122, 0x3344, 0x5566,
-        );
-        let prefix: Ipv6Net = "ff04::/64".parse().unwrap();
-        let res = map_external_to_underlay_ip_with_prefix(
-            prefix,
-            IpAddr::V6(ipv6),
-            0,
-        )
-        .unwrap();
-
-        match res {
-            IpAddr::V6(underlay) => {
-                // Expected: XOR of upper 64 bits (ff0e:1234:5678:9abc) and
-                // lower 64 bits (7ef0:1122:3344:5566) = 81fe:0316:653c:cfda
-                let segments = underlay.segments();
-                assert_eq!(segments[0], IPV6_ADMIN_SCOPED_MULTICAST_PREFIX);
-                assert_eq!(segments[1], 0x0000);
-                assert_eq!(segments[2], 0x0000);
-                assert_eq!(segments[3], 0x0000);
-                assert_eq!(segments[4], 0x81fe);
-                assert_eq!(segments[5], 0x0316);
-                assert_eq!(segments[6], 0x653c);
-                assert_eq!(segments[7], 0xcfda);
-            }
-            _ => panic!("Expected IPv6 result"),
-        }
-    }
-
-    /// Test site-local (ff05) to admin-local (ff04) with production /64 prefix.
+    /// Test XOR folding with production /64 prefix: the upper and lower
+    /// 64-bit halves XOR together into the host portion.
     ///
-    /// Compare to test_map_ipv6_multicast_to_admin_scoped which uses /16.
+    /// Covers global (ff0e), site-local (ff05), and already admin-local
+    /// (ff04) inputs.
     #[test]
-    fn test_xor_folding_64bit_site_local_to_admin_scoped() {
-        let ipv6_site_local = Ipv6Addr::new(
-            0xff05, 0x1234, 0x5678, 0x9abc, 0xdef0, 0x1234, 0x5678, 0x9abc,
-        );
+    fn test_xor_folding_64bit_prefix() {
         let prefix: Ipv6Net = "ff04::/64".parse().unwrap();
-        let res = map_external_to_underlay_ip_with_prefix(
-            prefix,
-            IpAddr::V6(ipv6_site_local),
-            0,
-        )
-        .unwrap();
+        let cases = [
+            // ff0e:1234:5678:9abc XOR 7ef0:1122:3344:5566
+            // = 81fe:0316:653c:cfda
+            (
+                "global",
+                Ipv6Addr::new(
+                    0xff0e, 0x1234, 0x5678, 0x9abc, 0x7ef0, 0x1122, 0x3344,
+                    0x5566,
+                ),
+                [
+                    IPV6_ADMIN_SCOPED_MULTICAST_PREFIX,
+                    0x0000,
+                    0x0000,
+                    0x0000,
+                    0x81fe,
+                    0x0316,
+                    0x653c,
+                    0xcfda,
+                ],
+            ),
+            // ff05:1234:5678:9abc XOR def0:1234:5678:9abc = 21f5:0:0:0
+            // (only the scope segment differs between the halves)
+            (
+                "site-local",
+                Ipv6Addr::new(
+                    0xff05, 0x1234, 0x5678, 0x9abc, 0xdef0, 0x1234, 0x5678,
+                    0x9abc,
+                ),
+                [
+                    IPV6_ADMIN_SCOPED_MULTICAST_PREFIX,
+                    0x0000,
+                    0x0000,
+                    0x0000,
+                    0x21f5,
+                    0x0000,
+                    0x0000,
+                    0x0000,
+                ],
+            ),
+            // ff04:1111:2222:3333 XOR 4444:5555:6666:7777
+            // = bb40:4444:4444:4444
+            (
+                "already admin-local",
+                Ipv6Addr::new(
+                    IPV6_ADMIN_SCOPED_MULTICAST_PREFIX,
+                    0x1111,
+                    0x2222,
+                    0x3333,
+                    0x4444,
+                    0x5555,
+                    0x6666,
+                    0x7777,
+                ),
+                [
+                    IPV6_ADMIN_SCOPED_MULTICAST_PREFIX,
+                    0x0000,
+                    0x0000,
+                    0x0000,
+                    0xbb40,
+                    0x4444,
+                    0x4444,
+                    0x4444,
+                ],
+            ),
+            // ff04:0:0:0 XOR 1234:5678:9abc:def0 = ed30:5678:9abc:def0
+            (
+                "admin-local, zero upper segments",
+                Ipv6Addr::new(
+                    IPV6_ADMIN_SCOPED_MULTICAST_PREFIX,
+                    0,
+                    0,
+                    0,
+                    0x1234,
+                    0x5678,
+                    0x9abc,
+                    0xdef0,
+                ),
+                [
+                    IPV6_ADMIN_SCOPED_MULTICAST_PREFIX,
+                    0x0000,
+                    0x0000,
+                    0x0000,
+                    0xed30,
+                    0x5678,
+                    0x9abc,
+                    0xdef0,
+                ],
+            ),
+        ];
 
-        match res {
-            IpAddr::V6(ipv6) => {
-                // /64 XOR folds 64-bit upper half (ff05:1234:5678:9abc) with
-                // 64-bit lower half (def0:1234:5678:9abc) into host portion.
-                // Upper XOR = ff05 ^ def0 = 21f5
-                // Remaining = 1234^1234=0, 5678^5678=0, 9abc^9abc=0
-                assert_eq!(
-                    ipv6.segments()[0],
-                    IPV6_ADMIN_SCOPED_MULTICAST_PREFIX
-                );
-                assert_eq!(ipv6.segments()[1], 0x0000);
-                assert_eq!(ipv6.segments()[2], 0x0000);
-                assert_eq!(ipv6.segments()[3], 0x0000);
-                assert_eq!(ipv6.segments()[4], 0x21f5);
-                assert_eq!(ipv6.segments()[5], 0x0000);
-                assert_eq!(ipv6.segments()[6], 0x0000);
-                assert_eq!(ipv6.segments()[7], 0x0000);
+        for (name, input, expected) in cases {
+            let res = map_external_to_underlay_ip_with_prefix(
+                prefix,
+                IpAddr::V6(input),
+                0,
+            )
+            .unwrap();
+            match res {
+                IpAddr::V6(ipv6) => {
+                    assert_eq!(ipv6.segments(), expected, "{name} ({input})");
+                }
+                _ => panic!("Expected IPv6 result for {name} ({input})"),
             }
-            _ => panic!("Expected IPv6 result"),
-        }
-    }
-
-    /// Test admin-local (ff04) input with production /64 prefix.
-    #[test]
-    fn test_xor_folding_64bit_already_admin_scoped() {
-        let ipv6_admin = Ipv6Addr::new(
-            IPV6_ADMIN_SCOPED_MULTICAST_PREFIX,
-            0x1111,
-            0x2222,
-            0x3333,
-            0x4444,
-            0x5555,
-            0x6666,
-            0x7777,
-        );
-        let prefix: Ipv6Net = "ff04::/64".parse().unwrap();
-        let res = map_external_to_underlay_ip_with_prefix(
-            prefix,
-            IpAddr::V6(ipv6_admin),
-            0,
-        )
-        .unwrap();
-
-        match res {
-            IpAddr::V6(ipv6) => {
-                // /64 XOR folds upper half (ff04:1111:2222:3333) with
-                // lower half (4444:5555:6666:7777) into host portion.
-                // ff04 ^ 4444 = bb40
-                // 1111 ^ 5555 = 4444
-                // 2222 ^ 6666 = 4444
-                // 3333 ^ 7777 = 4444
-                assert_eq!(
-                    ipv6.segments()[0],
-                    IPV6_ADMIN_SCOPED_MULTICAST_PREFIX
-                );
-                assert_eq!(ipv6.segments()[1], 0x0000);
-                assert_eq!(ipv6.segments()[2], 0x0000);
-                assert_eq!(ipv6.segments()[3], 0x0000);
-                assert_eq!(ipv6.segments()[4], 0xbb40);
-                assert_eq!(ipv6.segments()[5], 0x4444);
-                assert_eq!(ipv6.segments()[6], 0x4444);
-                assert_eq!(ipv6.segments()[7], 0x4444);
-            }
-            _ => panic!("Expected IPv6 result"),
         }
     }
 
@@ -998,87 +959,6 @@ mod tests {
         assert_ne!(res_site, res_global);
     }
 
-    /// Test that admin-local external addresses (ff04::) get XOR folded
-    /// like any other multicast address, producing unique mappings.
-    #[test]
-    fn test_admin_scope_xor_folding() {
-        let external = Ipv6Addr::new(
-            IPV6_ADMIN_SCOPED_MULTICAST_PREFIX,
-            0,
-            0,
-            0,
-            0x1234,
-            0x5678,
-            0x9abc,
-            0xdef0,
-        );
-
-        let prefix: Ipv6Net = "ff04::/64".parse().unwrap();
-        let underlay = map_external_to_underlay_ip_with_prefix(
-            prefix,
-            IpAddr::V6(external),
-            0,
-        )
-        .unwrap();
-
-        assert_ne!(IpAddr::V6(external), underlay);
-
-        // Verify XOR result: ff04:0:0:0 XOR 1234:5678:9abc:def0 = ed30:5678:9abc:def0
-        if let IpAddr::V6(u) = underlay {
-            assert_eq!(
-                u.segments(),
-                [
-                    IPV6_ADMIN_SCOPED_MULTICAST_PREFIX,
-                    0x0000,
-                    0x0000,
-                    0x0000,
-                    0xed30, // ff04 XOR 1234
-                    0x5678, // 0000 XOR 5678
-                    0x9abc, // 0000 XOR 9abc
-                    0xdef0, // 0000 XOR def0
-                ]
-            );
-        } else {
-            panic!("Expected IPv6 underlay");
-        }
-    }
-
-    /// Test IPv4 placement in /64: IPv4 address goes in lower 32 bits.
-    ///
-    /// 224.1.1.1 = 0xE0010101 → ff04::e001:101
-    #[test]
-    fn test_xor_fold_64bit_ipv4_placement() {
-        let ipv4 = Ipv4Addr::new(224, 1, 1, 1);
-        let prefix: Ipv6Net = "ff04::/64".parse().unwrap();
-
-        let res = map_external_to_underlay_ip_with_prefix(
-            prefix,
-            IpAddr::V4(ipv4),
-            0,
-        )
-        .unwrap();
-
-        if let IpAddr::V6(u) = res {
-            assert_eq!(
-                u.segments(),
-                [
-                    IPV6_ADMIN_SCOPED_MULTICAST_PREFIX,
-                    0x0000,
-                    0x0000,
-                    0x0000,
-                    0x0000,
-                    0x0000,
-                    0xe001, // 224.1 = 0xe001
-                    0x0101, // 1.1 = 0x0101
-                ]
-            );
-            // Verify canonical form from docs
-            assert_eq!(u.to_string(), "ff04::e001:101");
-        } else {
-            panic!("Expected IPv6 result");
-        }
-    }
-
     /// Same external IP with different salts should produce different underlay IPs.
     #[test]
     fn test_xor_fold_salt_changes_output() {
@@ -1104,7 +984,6 @@ mod tests {
         )
         .unwrap();
 
-        // All results should be different
         assert_ne!(res_salt_0, res_salt_1, "salt 0 vs 1 should differ");
         assert_ne!(res_salt_0, res_salt_255, "salt 0 vs 255 should differ");
         assert_ne!(res_salt_1, res_salt_255, "salt 1 vs 255 should differ");
@@ -1159,13 +1038,11 @@ mod tests {
             .unwrap();
 
             if let IpAddr::V6(u) = res {
-                // First segment must be admin-local multicast prefix (ff04)
                 assert_eq!(
                     u.segments()[0],
                     IPV6_ADMIN_SCOPED_MULTICAST_PREFIX,
                     "salt {salt} should preserve ff04 prefix"
                 );
-                // Result must be a multicast address
                 assert!(
                     u.is_multicast(),
                     "salt {salt} result must be multicast",
@@ -1316,7 +1193,6 @@ mod tests {
         assert_ne!(site_local, global, "ff05 vs ff0e should differ");
         assert_ne!(org_local, global, "ff08 vs ff0e should differ");
 
-        // All should be in ff04::/64
         for (name, addr) in
             [("site", site_local), ("org", org_local), ("global", global)]
         {
@@ -1372,12 +1248,10 @@ mod tests {
         let external: Ipv6Addr =
             "ff0e:abcd:1234:5678:9abc:def0:1122:3344".parse().unwrap();
 
-        // Collect results for salts 0-15
         let results: Vec<IpAddr> = (0u8..16)
             .map(|salt| map_external_to_underlay_ip(IpAddr::V6(external), salt))
             .collect();
 
-        // All should be unique
         let unique: std::collections::HashSet<_> = results.iter().collect();
         assert_eq!(
             unique.len(),
@@ -1385,7 +1259,6 @@ mod tests {
             "16 salts should produce 16 unique results"
         );
 
-        // All should be in ff04::/64
         for (i, addr) in results.iter().enumerate() {
             if let IpAddr::V6(v6) = addr {
                 assert_eq!(

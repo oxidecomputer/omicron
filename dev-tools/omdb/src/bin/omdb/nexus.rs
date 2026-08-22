@@ -2387,6 +2387,8 @@ fn print_task_multicast_reconciler(details: &serde_json::Value) {
     const EMPTY_GROUPS_MARKED: &str = "empty groups marked for deletion:";
     const MEMBERS_PROCESSED: &str = "members processed:";
     const MEMBERS_DELETED: &str = "members deleted:";
+    const ENTRIES_MISPLACED: &str = "external entries misplaced:";
+    const GROUPS_REELECTED: &str = "groups re-elected (switch owner moved):";
     const WIDTH: usize = const_max_len(&[
         GROUPS_CREATED,
         GROUPS_DELETED,
@@ -2394,6 +2396,8 @@ fn print_task_multicast_reconciler(details: &serde_json::Value) {
         EMPTY_GROUPS_MARKED,
         MEMBERS_PROCESSED,
         MEMBERS_DELETED,
+        ENTRIES_MISPLACED,
+        GROUPS_REELECTED,
     ]) + 1;
     const NUM_WIDTH: usize = 3;
 
@@ -2430,6 +2434,14 @@ fn print_task_multicast_reconciler(details: &serde_json::Value) {
     println!(
         "    {MEMBERS_DELETED:<WIDTH$}{:>NUM_WIDTH$}",
         status.members_deleted
+    );
+    println!(
+        "    {ENTRIES_MISPLACED:<WIDTH$}{:>NUM_WIDTH$}",
+        status.external_entries_misplaced
+    );
+    println!(
+        "    {GROUPS_REELECTED:<WIDTH$}{:>NUM_WIDTH$}",
+        status.groups_reelected
     );
 }
 

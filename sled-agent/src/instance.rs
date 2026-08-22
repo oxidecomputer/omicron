@@ -1497,8 +1497,17 @@ impl InstanceRunner {
     }
 
     fn refresh_external_ips_inner(&mut self) -> Result<(), Error> {
+        // An instance without a primary NIC has no OPTE port and thus no
+        // external IPs to refresh. The sled-wide refresh propagates
+        // per-instance errors, so returning `NoPrimaryNic` here would
+        // permanently fail `set_eip_gateways` for the whole sled whenever
+        // a NIC-less instance is running. Treat it as a successful no-op
+        // instead.
+        //
+        // Note: explicit add/delete operations still error, since those
+        // request a change that cannot be applied.
         let Some(primary_nic) = self.primary_nic() else {
-            return Err(Error::Opte(illumos_utils::opte::Error::NoPrimaryNic));
+            return Ok(());
         };
 
         self.port_manager
@@ -3408,6 +3417,73 @@ mod tests {
             .metrics_rx
             .try_recv()
             .expect_err("The metrics request queue should have one message");
+
+        logctx.cleanup_successful();
+    }
+
+    // A registered instance without a primary NIC has no OPTE port, so the
+    // sled-wide external IP refresh must treat it as a no-op. Propagating
+    // `NoPrimaryNic` instead would permanently fail `set_eip_gateways` for
+    // the whole sled.
+    #[tokio::test]
+    async fn test_refresh_external_ips_no_primary_nic() {
+        let logctx = omicron_test_utils::dev::test_setup_log(
+            "test_refresh_external_ips_no_primary_nic",
+        );
+        let log = logctx.log.new(o!(FileKv));
+
+        let test_objects = InstanceTestObjects::new(&log).await;
+
+        let (propolis_server, _propolis_client) =
+            propolis_mock_server(&logctx.log);
+        let propolis_addr = propolis_server.local_addr();
+
+        let instance_id = InstanceUuid::new_v4();
+        let propolis_id = PropolisUuid::from_untyped_uuid(PROPOLIS_ID);
+        let InstanceInitialState {
+            vmm_spec,
+            local_config,
+            vmm_runtime,
+            propolis_addr,
+            migration_id: _,
+        } = fake_instance_initial_state(propolis_addr);
+
+        let metadata = InstanceMetadata {
+            silo_id: Uuid::new_v4(),
+            project_id: Uuid::new_v4(),
+        };
+        let sled_identifiers = SledIdentifiers {
+            rack_id: Uuid::new_v4(),
+            sled_id: Uuid::new_v4(),
+            model: "fake-model".into(),
+            revision: 1,
+            serial: "fake-serial".into(),
+        };
+
+        test_objects
+            .instance_manager
+            .ensure_registered(
+                propolis_id,
+                InstanceEnsureBody {
+                    vmm_spec,
+                    local_config,
+                    instance_id,
+                    migration_id: None,
+                    vmm_runtime,
+                    propolis_addr,
+                    metadata,
+                },
+                sled_identifiers,
+            )
+            .await
+            .unwrap();
+
+        // The fixture instance has no NICs at all, hence no primary NIC.
+        test_objects
+            .instance_manager
+            .refresh_external_ips()
+            .await
+            .expect("refresh with a NIC-less instance should be a no-op");
 
         logctx.cleanup_successful();
     }

@@ -83,7 +83,7 @@ impl MulticastSwitchZoneClient {
     /// dynamic ports.
     ///
     /// Returns an error when no switch zones resolve, so the reconciler
-    /// retries rather than silently treating writes as noops.
+    /// retries rather than silently treating writes as no-ops.
     pub(crate) async fn new(
         resolver: Resolver,
         log: Logger,

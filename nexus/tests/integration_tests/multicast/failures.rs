@@ -32,7 +32,7 @@ use nexus_db_queries::context::OpContext;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils::resource_helpers::{
     create_default_ip_pools, create_instance, create_instance_with,
-    create_project, object_get, objects_list_page_authz,
+    create_project, object_get, object_put_error, objects_list_page_authz,
 };
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::instance::InstanceState;
@@ -718,10 +718,11 @@ async fn test_implicit_deletion_race_with_instance_join(
     wait_for_group_deleted(cptestctx, group_name).await;
 }
 
-/// Test that joining a deleted instance to a multicast group returns NOT_FOUND.
+/// Test that joining a deleted or never-existing instance to a multicast
+/// group returns NOT_FOUND.
 ///
-/// This verifies proper error handling when attempting to add an instance that
-/// was previously deleted to a multicast group.
+/// Both cases resolve through the same project-scoped instance name lookup,
+/// which treats a soft-deleted row and an absent row identically.
 #[nexus_test]
 async fn test_multicast_join_deleted_instance(
     cptestctx: &ControlPlaneTestContext,
@@ -779,6 +780,19 @@ async fn test_multicast_join_deleted_instance(
     .execute()
     .await
     .expect("Request should complete (with 404)");
+
+    // A never-created instance name takes the same lookup path and also
+    // returns NOT_FOUND
+    let bad_join_url = format!(
+        "/v1/instances/nonexistent-instance/multicast-groups/{group_name}?project={project_name}"
+    );
+    object_put_error(
+        client,
+        &bad_join_url,
+        &join_params,
+        StatusCode::NOT_FOUND,
+    )
+    .await;
 
     // Cleanup
     cleanup_instances(cptestctx, client, project_name, &[remaining_instance])

@@ -1287,13 +1287,21 @@ pub enum Unimpl {
     ProtectedLookup(Error),
 }
 
-/// Returns a mapping of clients for the Dendrite daemons of reachable switch zones.
-/// If we are unable to communicate with the switch zone and determine the mapping
-/// of SwitchSlot -> Zone Underlay Address, we omit an entry for that client.
-pub(crate) async fn dpd_clients(
+/// Resolve the reachable Dendrite switch zones, returning each switch's
+/// underlay address and a DPD client keyed by switch slot.
+///
+/// A switch appears in the result only when its Dendrite service resolves and
+/// reports a slot, so the address and the client are always consistent for a
+/// given slot.
+///
+/// Switches we cannot reach are omitted. The second element of
+/// the result is the number of Dendrite instances advertised in DNS, so
+/// callers can tell a complete mapping from a partial one.
+async fn dpd_switches(
     resolver: &internal_dns_resolver::Resolver,
     log: &slog::Logger,
-) -> Result<HashMap<SwitchSlot, dpd_client::Client>, String> {
+) -> Result<(HashMap<SwitchSlot, (Ipv6Addr, dpd_client::Client)>, usize), String>
+{
     let dpd_socketaddrs = match resolver
         .lookup_all_socket_v6(ServiceName::Dendrite)
         .await
@@ -1334,7 +1342,8 @@ pub(crate) async fn dpd_clients(
         })
         .collect();
 
-    let mut mappings: HashMap<SwitchSlot, dpd_client::Client> = HashMap::new();
+    let mut mappings: HashMap<SwitchSlot, (Ipv6Addr, dpd_client::Client)> =
+        HashMap::new();
 
     for (addr, client) in clients {
         let switch_slot = match client.switch_identifiers().await {
@@ -1359,10 +1368,59 @@ pub(crate) async fn dpd_clients(
             }
         };
 
-        mappings.insert(location, client);
+        mappings.insert(location, (*addr.ip(), client));
     }
 
-    Ok(mappings)
+    // A dendrite advertised in DNS that fails to report a slot leaves the
+    // result partial. Callers tolerate this (drift detection reconverges
+    // multicast forwarder placement once the switch is visible again), but
+    // surface it for operators.
+    if mappings.len() < dpd_socketaddrs.len() {
+        warn!(
+            log,
+            "some dendrite instances advertised in DNS did not report a \
+             switch slot";
+            "advertised" => dpd_socketaddrs.len(),
+            "reported" => mappings.len(),
+        );
+    }
+
+    Ok((mappings, dpd_socketaddrs.len()))
+}
+
+/// Returns a mapping of clients for the Dendrite daemons of reachable switch zones.
+/// If we are unable to communicate with the switch zone and determine the mapping
+/// of SwitchSlot -> Zone Underlay Address, we omit an entry for that client.
+pub(crate) async fn dpd_clients(
+    resolver: &internal_dns_resolver::Resolver,
+    log: &slog::Logger,
+) -> Result<HashMap<SwitchSlot, dpd_client::Client>, String> {
+    Ok(dpd_switches(resolver, log)
+        .await?
+        .0
+        .into_iter()
+        .map(|(slot, (_addr, client))| (slot, client))
+        .collect())
+}
+
+/// Returns the underlay address of each reachable Dendrite switch zone, keyed
+/// by switch slot.
+///
+/// Shares [`dpd_switches`] with [`dpd_clients`], so the slot set is exactly the
+/// DPD-reachable set used for designated-forwarder election. The returned
+/// address is the switch zone underlay address usable as a multicast forwarding
+/// next hop. An elected slot is therefore always addressable, so the ingress
+/// and egress election sites cannot pick a switch the other cannot reach.
+pub(crate) async fn dpd_switch_underlay_addrs(
+    resolver: &internal_dns_resolver::Resolver,
+    log: &slog::Logger,
+) -> Result<HashMap<SwitchSlot, Ipv6Addr>, String> {
+    Ok(dpd_switches(resolver, log)
+        .await?
+        .0
+        .into_iter()
+        .map(|(slot, (addr, _client))| (slot, addr))
+        .collect())
 }
 
 // We currently ignore the rack_id argument here, as the shared

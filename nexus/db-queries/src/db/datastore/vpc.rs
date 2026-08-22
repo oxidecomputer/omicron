@@ -2475,7 +2475,10 @@ impl DataStore {
         use nexus_db_schema::schema::internet_gateway_ip_pool as igw_pool;
         use nexus_db_schema::schema::internet_gateway_ip_pool::dsl as igw_pool_dsl;
         use nexus_db_schema::schema::network_interface as ni;
+        use nexus_db_schema::schema::probe;
+        use nexus_db_schema::schema::probe::dsl as probe_dsl;
         use nexus_db_schema::schema::vmm;
+        use omicron_uuid_kinds::GenericUuid;
 
         // We don't know at first glance which VPC ID each IP addr has.
         // VPC info is necessary to map back to the intended gateway.
@@ -2532,7 +2535,10 @@ impl DataStore {
             }
         }
 
-        // Map all individual IPs bound to IGWs to NICs in their VPC.
+        // Map all individual IPs bound to IGWs to instance and probe NICs
+        // in their VPC. Probe ephemeral IPs can be attached to a gateway
+        // per-address as well as via their parent pool, so probe NICs need
+        // this path too.
         let indiv_ip_mappings = ni::table
             .inner_join(igw::table.on(igw_dsl::vpc_id.eq(ni::vpc_id)))
             .inner_join(
@@ -2540,7 +2546,10 @@ impl DataStore {
                     .on(igw_ip_dsl::internet_gateway_id.eq(igw_dsl::id)),
             )
             .filter(ni::time_deleted.is_null())
-            .filter(ni::kind.eq(NetworkInterfaceKind::Instance))
+            .filter(ni::kind.eq_any(vec![
+                NetworkInterfaceKind::Instance,
+                NetworkInterfaceKind::Probe,
+            ]))
             .filter(igw_dsl::time_deleted.is_null())
             .filter(igw_ip_dsl::time_deleted.is_null())
             .select((igw_ip_dsl::address, ni::id, igw_dsl::id))
@@ -2565,13 +2574,64 @@ impl DataStore {
             }
         }
 
-        // TODO: service & probe EIP mappings.
+        // Probes are placed directly on a sled rather than through a VMM, so
+        // their ephemeral IPs are resolved with the probe record itself.
+        let probe_mappings = eip_dsl::external_ip
+            .inner_join(
+                probe::table.on(probe_dsl::id
+                    .nullable()
+                    .eq(eip::parent_id)
+                    .and(probe_dsl::sled.eq(sled_id.into_untyped_uuid()))),
+            )
+            .inner_join(
+                ni::table.on(ni::parent_id.nullable().eq(eip::parent_id)),
+            )
+            .inner_join(
+                igw_pool::table
+                    .on(eip_dsl::ip_pool_id.eq(igw_pool_dsl::ip_pool_id)),
+            )
+            .inner_join(
+                igw::table.on(igw_dsl::id
+                    .eq(igw_pool_dsl::internet_gateway_id)
+                    .and(igw_dsl::vpc_id.eq(ni::vpc_id))),
+            )
+            .filter(eip::time_deleted.is_null())
+            .filter(eip::is_probe.eq(true))
+            .filter(ni::time_deleted.is_null())
+            .filter(ni::kind.eq(NetworkInterfaceKind::Probe))
+            .filter(ni::is_primary.eq(true))
+            .filter(probe_dsl::time_deleted.is_null())
+            .filter(igw_dsl::time_deleted.is_null())
+            .filter(igw_pool_dsl::time_deleted.is_null())
+            .select((eip_dsl::ip, ni::id, igw_dsl::id))
+            .load_async::<(IpNetwork, Uuid, Uuid)>(&*conn)
+            .await;
+
+        match probe_mappings {
+            Ok(map) => {
+                for (ip, nic_id, inet_gw_id) in map {
+                    let per_nic: &mut HashMap<_, _> =
+                        out.entry(nic_id).or_default();
+                    let igw_list: &mut HashSet<_> =
+                        per_nic.entry(ip.ip()).or_default();
+
+                    igw_list.insert(inet_gw_id);
+                }
+            }
+            Err(e) => {
+                return Err(Error::non_resourcetype_not_found(&format!(
+                    "unable to find probe IGW mappings for sled {sled_id}: {e}"
+                )));
+            }
+        }
+
+        // TODO: service EIP mappings.
         //       note that the current sled-agent design
         //       does not yet allow us to re-ensure the set of
-        //       external IPs for non-instance entities.
+        //       external IPs for services.
         //       if we insert those here, we need to be sure that
         //       the mappings are ignored by sled-agent for new
-        //       services/probes/etc.
+        //       services.
 
         Ok(out)
     }

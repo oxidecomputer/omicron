@@ -364,7 +364,6 @@ mod tests {
         )
         .await;
 
-        // Attach instance
         datastore
             .multicast_group_member_attach(
                 &opctx,
@@ -451,7 +450,6 @@ mod tests {
         )
         .await;
 
-        // Attach instance
         datastore
             .multicast_group_member_attach(
                 &opctx,
@@ -597,7 +595,6 @@ mod tests {
         )
         .await;
 
-        // Attach instance
         datastore
             .multicast_group_member_attach(
                 &opctx,
@@ -618,7 +615,7 @@ mod tests {
                 MulticastGroupMemberState::Joined,
             )
             .await
-            .expect("Should transition to Joined");
+            .expect("Should transition to 'Joined'");
 
         // Attempt to reconcile - should return NotFound since not in Joining
         let conn = datastore.pool_connection_authorized(&opctx).await.unwrap();
@@ -632,7 +629,6 @@ mod tests {
         .await
         .expect("Should reconcile");
 
-        // Should return NotFound because member is not in Joining state
         assert_eq!(result.action, ReconcileAction::NotFound);
 
         // Verify member is still in Joined state
@@ -647,104 +643,6 @@ mod tests {
             .expect("Member should exist");
 
         assert_eq!(member.state, MulticastGroupMemberState::Joined);
-
-        db.terminate().await;
-        logctx.cleanup_successful();
-    }
-
-    #[tokio::test]
-    async fn test_reconcile_joining_migration_scenario() {
-        let logctx =
-            dev::test_setup_log("test_reconcile_joining_migration_scenario");
-        let db = TestDatabase::new_with_datastore(&logctx.log).await;
-        let (opctx, datastore) = (db.opctx(), db.datastore());
-
-        let setup = multicast::create_test_setup(
-            &opctx,
-            &datastore,
-            "reconcile-migration-pool",
-            "reconcile-migration-project",
-        )
-        .await;
-
-        // Create two sleds for migration scenario
-        let sled_id_a = setup.sled_id;
-
-        let sled_id_b = SledUuid::new_v4();
-        let sled_update_b =
-            SledUpdateBuilder::default().sled_id(sled_id_b).build();
-        datastore
-            .sled_upsert(sled_update_b)
-            .await
-            .expect("Should insert sled B");
-
-        let group = multicast::create_test_group_with_state(
-            &opctx,
-            &datastore,
-            "test-group",
-            "224.10.1.17",
-            true,
-        )
-        .await;
-
-        let (instance_id, _vmm) = create_instance_with_vmm(
-            &opctx,
-            &datastore,
-            &setup.authz_project,
-            "test-instance",
-            sled_id_a,
-        )
-        .await;
-
-        // Attach instance (starts on sled_a)
-        datastore
-            .multicast_group_member_attach(
-                &opctx,
-                MulticastGroupUuid::from_untyped_uuid(group.id()),
-                MemberParentRef::Instance(instance_id),
-                Some(NO_SOURCE_IPS),
-            )
-            .await
-            .expect("Should attach instance");
-
-        // Simulate migration: reconcile with sled_id_b
-        let conn = datastore.pool_connection_authorized(&opctx).await.unwrap();
-        let result = reconcile_joining_member(
-            &conn,
-            group.id(),
-            MemberParentRef::Instance(instance_id),
-            true,
-            Some(sled_id_b.into()),
-        )
-        .await
-        .expect("Should reconcile migration");
-
-        // Should update sled_id but remain in Joining
-        match result.action {
-            ReconcileAction::UpdatedSledId { old, new } => {
-                assert_eq!(old, Some(sled_id_a.into()));
-                assert_eq!(new, Some(sled_id_b.into()));
-            }
-            other => panic!("Expected UpdatedSledId, got {other:?}"),
-        }
-        assert_eq!(
-            result.current_state,
-            Some(MulticastGroupMemberState::Joining)
-        );
-
-        // Verify member remains in Joining state with new sled_id
-        let member = datastore
-            .multicast_group_member_get_by_group_and_parent(
-                &opctx,
-                MulticastGroupUuid::from_untyped_uuid(group.id()),
-                MemberParentRef::Instance(instance_id),
-            )
-            .await
-            .expect("Should get member")
-            .expect("Member should exist");
-
-        assert_eq!(member.state, MulticastGroupMemberState::Joining);
-        assert_eq!(member.sled_id, Some(sled_id_b.into()));
 
         db.terminate().await;
         logctx.cleanup_successful();

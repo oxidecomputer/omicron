@@ -10,16 +10,18 @@ use nexus_db_model::Probe;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_types::external_api::ip_pool;
+use nexus_types::external_api::multicast;
 use nexus_types::external_api::probe;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::{
-    CreateResult, DeleteResult, ListResultVec, LookupResult, NameOrId,
-    http_pagination::PaginatedBy,
+    CreateResult, DeleteResult, IpVersion, ListResultVec, LookupResult,
+    NameOrId, http_pagination::PaginatedBy,
 };
 use omicron_uuid_kinds::{GenericUuid, MulticastGroupUuid};
 
 use super::MAX_MULTICAST_GROUPS_PER_INSTANCE;
+use super::multicast::validate_member_source_ips;
 
 impl super::Nexus {
     /// List the probes in the given project.
@@ -81,7 +83,7 @@ impl super::Nexus {
         // Resolve and validate the requested multicast memberships before
         // inserting the probe row so a rejected request does not leave an
         // orphaned probe behind.
-        let to_attach = self
+        let (to_attach, created_group_ids) = self
             .resolve_probe_multicast_memberships(opctx, new_probe_params)
             .await?;
 
@@ -90,8 +92,9 @@ impl super::Nexus {
         // The probe row insert and all member attaches run in one transaction
         // inside the datastore, so the probe distributor never sees a committed
         // probe row without its committed member rows. A failed attach aborts
-        // the transaction, so no probe row is left behind on error.
-        let probe = self
+        // the transaction, so no probe row is left behind on error, and any
+        // group the resolution implicitly created is rolled back below.
+        let probe = match self
             .db_datastore
             .probe_create(
                 opctx,
@@ -101,7 +104,18 @@ impl super::Nexus {
                 ip_version.map(Into::into),
                 &to_attach,
             )
-            .await?;
+            .await
+        {
+            Ok(probe) => probe,
+            Err(err) => {
+                self.rollback_created_multicast_groups(
+                    opctx,
+                    &created_group_ids,
+                )
+                .await;
+                return Err(err);
+            }
+        };
 
         if !to_attach.is_empty() {
             self.background_tasks.task_multicast_reconciler.activate();
@@ -153,9 +167,15 @@ impl super::Nexus {
     /// per-parent cap threshold.
     ///
     /// Returns the resolved group IDs paired with the requested source IPs,
-    /// or an empty vector when multicast is disabled or no groups were
-    /// requested. The borrowed source IPs are tied to `params`, which the
-    /// caller holds across the subsequent attach operation.
+    /// alongside the IDs of groups the resolution implicitly created, or
+    /// empty vectors when multicast is disabled or no groups were requested.
+    /// The borrowed source IPs are tied to `params`, which the caller holds
+    /// across the subsequent attach operation. The caller uses the created
+    /// IDs to roll back if the probe insert itself fails.
+    ///
+    /// A rejection after an earlier spec implicitly created its group rolls
+    /// that creation back here, mirroring `resolve_multicast_group_specs`
+    /// on the instance update path.
     ///
     /// # Errors
     ///
@@ -163,6 +183,8 @@ impl super::Nexus {
     /// - A source list exceeds the per-member cap or holds duplicates
     /// - A group identifier fails to resolve
     /// - The same group appears more than once in the request
+    /// - A membership names or resolves to an IPv6 group, which the probe
+    ///   joiner does not yet support
     ///
     /// [`plan_multicast_group_changes`]: super::Nexus::plan_multicast_group_changes
     /// [`project_create_instance`]: super::Nexus::project_create_instance
@@ -170,9 +192,15 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         params: &'a probe::ProbeCreate,
-    ) -> Result<Vec<(MulticastGroupUuid, Option<&'a [IpAddr]>)>, Error> {
+    ) -> Result<
+        (
+            Vec<(MulticastGroupUuid, Option<&'a [IpAddr]>)>,
+            Vec<MulticastGroupUuid>,
+        ),
+        Error,
+    > {
         if !self.multicast_enabled() || params.multicast_groups.is_empty() {
-            return Ok(Vec::new());
+            return Ok((Vec::new(), Vec::new()));
         }
 
         if params.multicast_groups.len() > MAX_MULTICAST_GROUPS_PER_INSTANCE {
@@ -182,37 +210,112 @@ impl super::Nexus {
             )));
         }
 
-        let mut to_attach = Vec::with_capacity(params.multicast_groups.len());
-        let mut seen = HashSet::with_capacity(params.multicast_groups.len());
-        for spec in &params.multicast_groups {
-            let source_ips = spec.source_ips.as_deref();
-            // Per-member source list shape (count + duplicates), mirroring
-            // instance create. The group resolution below checks SSM
-            // semantics but not the list shape.
-            crate::app::multicast::validate_member_source_ips(source_ips)?;
-            let group_id = self
-                .resolve_multicast_group_identifier_with_sources(
-                    opctx,
-                    &spec.group,
-                    source_ips,
-                    spec.ip_version,
-                )
-                .await
-                .map_err(|e| {
-                    Error::invalid_request(format!(
-                        "failed to resolve multicast group {:?}: {e}",
-                        spec.group,
-                    ))
-                })?
-                .id;
-            if !seen.insert(group_id.into_untyped_uuid()) {
+        // Reject duplicate identifiers before any resolution runs.
+        for (idx, spec) in params.multicast_groups.iter().enumerate() {
+            if params.multicast_groups[..idx]
+                .iter()
+                .any(|prior| prior.group == spec.group)
+            {
                 return Err(Error::invalid_request(
                     "Duplicate multicast group specified in request",
                 ));
             }
-            to_attach.push((group_id, source_ips));
         }
-        Ok(to_attach)
+
+        let mut created_group_ids = Vec::new();
+        let res = async {
+            let mut to_attach =
+                Vec::with_capacity(params.multicast_groups.len());
+            let mut seen =
+                HashSet::with_capacity(params.multicast_groups.len());
+            for spec in &params.multicast_groups {
+                // The probe joiner only pins IPv4 joins today (see the
+                // `config/ipv6_scope` TODO in sled-agent's probe manager), so
+                // an IPv6 membership would join on whatever interface the
+                // kernel selects rather than the probe's OPTE port.
+                //
+                // For now, we reject the request forms that name IPv6
+                // outright, before any implicit group creation can run.
+                if matches!(spec.ip_version, Some(IpVersion::V6))
+                    || matches!(
+                        spec.group,
+                        multicast::MulticastGroupIdentifier::Ip(ip)
+                            if ip.is_ipv6()
+                    )
+                {
+                    return Err(Error::invalid_request(
+                        "probes do not support IPv6 multicast group \
+                         memberships",
+                    ));
+                }
+
+                let source_ips = spec.source_ips.as_deref();
+                // Per-member source list shape (count + duplicates), mirroring
+                // instance create. The group resolution below checks SSM
+                // semantics but not the list shape.
+                validate_member_source_ips(source_ips)?;
+                // Default the create-by-name pool hint to V4 so implicit
+                // creation can never mint an IPv6 group.
+                let resolved = self
+                    .resolve_multicast_group_identifier_with_sources(
+                        opctx,
+                        &spec.group,
+                        source_ips,
+                        spec.ip_version.or(Some(IpVersion::V4)),
+                    )
+                    .await
+                    .map_err(|e| {
+                        Error::invalid_request(format!(
+                            "failed to resolve multicast group {:?}: {e}",
+                            spec.group,
+                        ))
+                    })?;
+                let group_id = resolved.id;
+                if resolved.created {
+                    created_group_ids.push(group_id);
+                }
+
+                // A name or ID identifier can still resolve to an IPv6 group,
+                // so check the resolved group's address as well.
+                let selector = multicast::MulticastGroupSelector {
+                    multicast_group: multicast::MulticastGroupIdentifier::Id(
+                        group_id.into_untyped_uuid(),
+                    ),
+                };
+                let (.., db_group) = self
+                    .multicast_group_lookup(opctx, &selector)
+                    .await?
+                    .fetch()
+                    .await?;
+                if db_group.multicast_ip.ip().is_ipv6() {
+                    return Err(Error::invalid_request(
+                        "probes do not support IPv6 multicast group \
+                         memberships",
+                    ));
+                }
+
+                if !seen.insert(group_id.into_untyped_uuid()) {
+                    return Err(Error::invalid_request(
+                        "Duplicate multicast group specified in request",
+                    ));
+                }
+                to_attach.push((group_id, source_ips));
+            }
+            Ok(to_attach)
+        }
+        .await;
+
+        match res {
+            Ok(to_attach) => Ok((to_attach, created_group_ids)),
+            Err(err) => {
+                self.rollback_created_multicast_groups(
+                    opctx,
+                    &created_group_ids,
+                )
+                .await;
+                Err(err)
+            }
+        }
     }
 
     /// Delete a probe.

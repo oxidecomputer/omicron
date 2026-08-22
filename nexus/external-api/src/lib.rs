@@ -6935,10 +6935,10 @@ pub trait NexusExternalApi {
     /// the group must already exist.
     ///
     /// Source IPs are optional for ASM addresses but required for SSM addresses
-    /// (232.0.0.0/8 for IPv4, ff3x::/32 for IPv6). Duplicate source IPs in a
-    /// single request are rejected. Per-member source list is capped at 32, and
-    /// the union of source IPs across all members of a single group is capped
-    /// at 256.
+    /// (232.0.0.0/8 for IPv4, the per-scope ff3x::/32 blocks for IPv6, per
+    /// RFC 4607). Duplicate source IPs in a single request are
+    /// rejected. Per-member source list is capped at 32, and the union of
+    /// source IPs across all members of a single group is capped at 256.
     #[endpoint {
         method = PUT,
         path = "/v1/instances/{instance}/multicast-groups/{multicast_group}",
@@ -6963,10 +6963,10 @@ pub trait NexusExternalApi {
     /// the group must already exist.
     ///
     /// Source IPs are optional for ASM addresses but required for SSM addresses
-    /// (232.0.0.0/8 for IPv4, ff3x::/32 for IPv6). Duplicate source IPs in a
-    /// single request are rejected. Per-member source list is capped at 32, and
-    /// the union of source IPs across all members of a single group is capped
-    /// at 256.
+    /// (232.0.0.0/8 for IPv4, the per-scope ff3x::/32 blocks for IPv6, per
+    /// RFC 4607). Duplicate source IPs in a single request are
+    /// rejected. Per-member source list is capped at 32, and the union of
+    /// source IPs across all members of a single group is capped at 256.
     #[endpoint {
         method = PUT,
         path = "/v1/instances/{instance}/multicast-groups/{multicast_group}",
@@ -6996,7 +6996,8 @@ pub trait NexusExternalApi {
     /// the group must already exist.
     ///
     /// Source IPs are optional for ASM addresses but required for SSM addresses
-    /// (232.0.0.0/8 for IPv4, ff3x::/32 for IPv6). Duplicate IPs in the request
+    /// (232.0.0.0/8 for IPv4, the per-scope ff3x::/32 blocks for IPv6, per
+    /// RFC 4607). Duplicate IPs in the request
     /// are automatically deduplicated, with a maximum of 64 source IPs allowed.
     #[endpoint {
         method = PUT,

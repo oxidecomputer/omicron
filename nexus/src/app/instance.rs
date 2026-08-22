@@ -665,7 +665,7 @@ impl super::Nexus {
     /// Failures are logged rather than returned so the caller can surface
     /// the error that triggered the rollback. The datastore guard leaves a
     /// group alone if a concurrent request attached a member in the meantime.
-    async fn rollback_created_multicast_groups(
+    pub(super) async fn rollback_created_multicast_groups(
         &self,
         opctx: &OpContext,
         created_group_ids: &[MulticastGroupUuid],

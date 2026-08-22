@@ -2007,11 +2007,12 @@ impl DataStore {
 
     /// Look up an SSM multicast pool linked to the caller's silo.
     ///
-    /// Per [RFC 4607], Source-Specific Multicast (SSM) addresses (IPv4 232/8,
-    /// IPv6 ff3x::/32) are used when source IPs are specified. This method
-    /// finds pools with ranges in these SSM address spaces, which is required
-    /// when creating a multicast group with `source_ips` but without an
-    /// explicit pool or IP address.
+    /// Source-Specific Multicast (SSM) addresses are used when source IPs are
+    /// specified: IPv4 232/8 and the per-scope IPv6 ff3x::/32 blocks, per
+    /// [RFC 4607].
+    /// This method finds pools with ranges in these SSM address spaces, which
+    /// is required when creating a multicast group with `source_ips` but
+    /// without an explicit pool or IP address.
     ///
     /// Prefers the default pool if one exists. If no default exists, falls
     /// back to any linked SSM pool, selecting alphabetically by name (arbitrary
@@ -2036,7 +2037,7 @@ impl DataStore {
             LookupType::ByOther("SSM multicast pool for current silo".into());
 
         // We need to find multicast pools with SSM ranges.
-        // SSM ranges are: IPv4 232.0.0.0/8, IPv6 ff3x::/32
+        // SSM ranges are: IPv4 232.0.0.0/8, IPv6 ff3x::/32 per scope
         let mut query = ip_pool::table
             .inner_join(ip_pool_resource::table)
             .inner_join(
@@ -3891,7 +3892,8 @@ mod test {
             LookupType::ById(asm_v6_pool.id()),
         );
 
-        // Add IPv6 ASM range (ff0e::/16 is ASM, not ff3x::/32 which is SSM)
+        // Add IPv6 ASM range (ff0e::/16 is ASM, outside the ff3x::/32 SSM
+        // blocks)
         let asm_v6_range = IpRange::V6(
             Ipv6Range::new(
                 "ff0e::1".parse().unwrap(),
@@ -4108,7 +4110,7 @@ mod test {
             LookupType::ById(ssm_v6_pool.id()),
         );
 
-        // Add IPv6 SSM range (ff3x::/32 is SSM per RFC 4607)
+        // Add IPv6 SSM range (inside ff3e::/32, the global-scope SSM block)
         let ssm_v6_range = IpRange::V6(
             Ipv6Range::new(
                 "ff3e::1".parse().unwrap(),

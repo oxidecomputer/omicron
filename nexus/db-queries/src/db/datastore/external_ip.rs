@@ -1008,7 +1008,7 @@ impl DataStore {
         use nexus_db_schema::schema::external_ip::dsl;
         let now = Utc::now();
         // Probes only ever own an ephemeral external IP, so there is no kind to
-        // exclude here: every probe-owned row is torn down on probe delete.
+        // exclude here as every probe-owned row is torn down on probe delete.
         diesel::update(dsl::external_ip)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::is_probe.eq(true))
