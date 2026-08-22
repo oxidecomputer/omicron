@@ -33,6 +33,7 @@ internet-checksum.workspace = true
 ispf.workspace = true
 macaddr.workspace = true
 nexus-lockstep-client.workspace = true
+omicron-common.workspace = true
 omicron-sled-agent.workspace = true
 omicron-test-utils.workspace = true
 omicron-uuid-kinds.workspace = true
@@ -57,3 +58,8 @@ uuid.workspace = true
 [target.'cfg(target_os = "illumos")'.dependencies]
 # See omicron-rpaths for more about the "fmd-adm-sys" dependency.
 fmd-adm-sys.workspace = true
+# illumos `ip(4P)` types IP_MULTICAST_TTL as a one-byte `uchar_t`, and rejects
+# socket2's 4-byte `c_int` form with EINVAL, so the multicast pinger sets the
+# option directly via libc.
+# https://illumos.org/man/4P/ip
+libc.workspace = true
