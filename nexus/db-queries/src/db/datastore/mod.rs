@@ -94,6 +94,7 @@ mod disk;
 mod dns;
 mod ereport;
 mod external_ip;
+mod external_service_ip_pool;
 mod external_subnet;
 pub mod fm;
 mod fm_config;
