@@ -2957,10 +2957,10 @@ pub(in crate::db::datastore) mod test {
             all_groups: &AllGroups,
         ) {
             for our_group_name in &self.groups {
-                let (affinity, group_id) = all_groups
-                    .id_by_name
-                    .get(our_group_name)
-                    .expect("Group not found: {our_group_name}");
+                let (affinity, group_id) =
+                    all_groups.id_by_name.get(our_group_name).unwrap_or_else(
+                        || panic!("Group not found: {our_group_name}"),
+                    );
                 match *affinity {
                     Affinity::Positive => {
                         add_instance_to_affinity_group(

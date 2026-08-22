@@ -363,7 +363,10 @@ async fn get_values_from_file<const N: usize>(
         }
     }
     if !keys.is_empty() {
-        bail!("Could not find keys: {:?}", keys.keys().collect::<Vec<_>>(),);
+        bail!(
+            "Could not find keys {:?} in {path}",
+            keys.keys().collect::<Vec<_>>(),
+        );
     }
     Ok(values)
 }
@@ -449,30 +452,21 @@ async fn unpack_gzip(
     task.await?
 }
 
-async fn clickhouse_confirm_binary_works(binary: &Utf8Path) -> Result<()> {
+async fn confirm_binary_works(binary: &Utf8Path, args: &[&str]) -> Result<()> {
     let mut cmd = Command::new(binary);
-    cmd.args(["server", "--version"]);
+    cmd.args(args);
 
-    let output =
-        cmd.output().await.context(format!("Failed to run {binary}"))?;
+    let output = cmd
+        .output()
+        .await
+        .with_context(|| format!("Failed to run {binary}"))?;
     if !output.status.success() {
-        let stderr =
-            String::from_utf8(output.stderr).unwrap_or_else(|_| String::new());
-        bail!("{binary} failed: {} (stderr: {stderr})", output.status);
-    }
-    Ok(())
-}
-
-async fn cockroach_confirm_binary_works(binary: &Utf8Path) -> Result<()> {
-    let mut cmd = Command::new(binary);
-    cmd.arg("version");
-
-    let output =
-        cmd.output().await.context(format!("Failed to run {binary}"))?;
-    if !output.status.success() {
-        let stderr =
-            String::from_utf8(output.stderr).unwrap_or_else(|_| String::new());
-        bail!("{binary} failed: {} (stderr: {stderr})", output.status);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        bail!(
+            "{binary} {args:?} failed: {} (stdout: {stdout}, stderr: {stderr})",
+            output.status
+        );
     }
     Ok(())
 }
@@ -566,6 +560,18 @@ async fn download_file_and_verify(
 }
 
 impl Downloader<'_> {
+    async fn read_version_file(&self, filename: &str) -> Result<String> {
+        let path = self.versions_dir.join(filename);
+        let contents = tokio::fs::read_to_string(&path)
+            .await
+            .with_context(|| format!("Failed to read version from {path}"))?;
+        let version = contents.trim();
+        if version.is_empty() {
+            bail!("Version file {path} should not be empty");
+        }
+        Ok(version.to_string())
+    }
+
     async fn download_cargo_hack(&self) -> Result<()> {
         let os = os_name()?;
         let arch = arch()?;
@@ -580,11 +586,7 @@ impl Downloader<'_> {
         )
         .await?;
 
-        let versions_path = self.versions_dir.join("cargo_hack_version");
-        let version = tokio::fs::read_to_string(&versions_path)
-            .await
-            .context("Failed to read version from {versions_path}")?;
-        let version = version.trim();
+        let version = self.read_version_file("cargo_hack_version").await?;
 
         let (platform, supported_arch) = match (os, arch) {
             (Os::Illumos, Arch::X86_64) => ("unknown-illumos", "x86_64"),
@@ -632,11 +634,7 @@ impl Downloader<'_> {
         )
         .await?;
 
-        let versions_path = self.versions_dir.join("clickhouse_version");
-        let version = tokio::fs::read_to_string(&versions_path)
-            .await
-            .context("Failed to read version from {versions_path}")?;
-        let version = version.trim();
+        let version = self.read_version_file("clickhouse_version").await?;
 
         const S3_BUCKET: &'static str =
             "https://oxide-clickhouse-build.s3.us-west-2.amazonaws.com";
@@ -668,7 +666,8 @@ impl Downloader<'_> {
         let clickhouse_binary = destination_dir.join("clickhouse");
 
         info!(self.log, "Checking that binary works");
-        clickhouse_confirm_binary_works(&clickhouse_binary).await?;
+        confirm_binary_works(&clickhouse_binary, &["server", "--version"])
+            .await?;
 
         Ok(())
     }
@@ -725,10 +724,12 @@ impl Downloader<'_> {
         let binary_dir = destination_dir.join("bin");
         tokio::fs::create_dir_all(&binary_dir).await?;
         let src = tarball_path.with_file_name("cockroach").join("cockroach");
-        tokio::fs::copy(src, &cockroach_binary).await?;
+        tokio::fs::copy(&src, &cockroach_binary).await.with_context(|| {
+            format!("Failed to copy {src} to {cockroach_binary}")
+        })?;
 
         info!(self.log, "Checking that binary works");
-        cockroach_confirm_binary_works(&cockroach_binary).await?;
+        confirm_binary_works(&cockroach_binary, &["version"]).await?;
 
         Ok(())
     }

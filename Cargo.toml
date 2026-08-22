@@ -433,6 +433,9 @@ declare_interior_mutable_const = "warn"
 # We'd like to warn on lossy casts in the future, but lossless casts are the
 # easiest ones to convert over.
 cast_lossless = "warn"
+# This lint catches format-style placeholders in string literals outside format
+# macros, e.g. `.context("failed to read {path}")`.
+literal_string_with_formatting_args = "warn"
 
 [workspace.dependencies]
 anyhow = "1.0"
