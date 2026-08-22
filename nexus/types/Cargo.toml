@@ -33,6 +33,7 @@ ipnet.workspace = true
 ipnetwork.workspace = true
 itertools.workspace = true
 newtype_derive.workspace = true
+omicron-generation-kinds.workspace = true
 omicron-uuid-kinds.workspace = true
 openssl.workspace = true
 owo-colors.workspace = true
