@@ -1220,7 +1220,7 @@ mod tests {
     use nexus_types::internal_api::params::DnsConfigParams;
     use omicron_common::address::REPO_DEPOT_PORT;
     use omicron_common::address::get_sled_address;
-    use omicron_common::api::external::Generation;
+    use omicron_generation_kinds::Generation;
     use omicron_test_utils::dev::test_setup_log;
     use sled_agent_types::inventory::{OmicronZoneConfig, ZoneKind};
     use slog_error_chain::InlineErrorChain;

@@ -33,6 +33,7 @@ diesel.workspace = true
 nexus-db-model.workspace = true
 nexus-db-queries = { workspace = true, features = ["testing"] }
 nexus-db-schema.workspace = true
+omicron-generation-kinds.workspace = true
 omicron-test-utils.workspace = true
 proptest.workspace = true
 test-strategy.workspace = true

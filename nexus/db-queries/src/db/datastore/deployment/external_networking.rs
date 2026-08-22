@@ -677,12 +677,12 @@ mod tests {
     use omicron_common::address::NEXUS_OPTE_IPV6_SUBNET;
     use omicron_common::address::NTP_OPTE_IPV4_SUBNET;
     use omicron_common::address::NUM_SOURCE_NAT_PORTS;
-    use omicron_common::api::external::Generation;
     use omicron_common::api::external::MacAddr;
     use omicron_common::api::external::Vni;
     use omicron_common::api::internal::shared::PrivateIpv4Config;
     use omicron_common::api::internal::shared::PrivateIpv6Config;
     use omicron_common::zpool_name::ZpoolName;
+    use omicron_generation_kinds::Generation;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::ExternalIpUuid;
     use omicron_uuid_kinds::ZpoolUuid;
