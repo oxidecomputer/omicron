@@ -481,6 +481,7 @@ pub mod vpc {
     pub use crate::v2026_08_19_02::vpc::SubnetCreateDefaults;
     pub use crate::v2026_08_19_02::vpc::VpcCreate;
     pub use crate::v2026_08_19_02::vpc::VpcCreateDefaults;
+    pub use crate::v2026_08_19_02::vpc::VpcCreateDefaultsSelection;
 }
 
 pub mod asset {

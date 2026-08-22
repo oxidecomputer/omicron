@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use super::vpc::VpcCreateDefaults;
+use super::vpc::VpcCreateDefaultsSelection;
 use crate::v2025_11_20_00;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use schemars::JsonSchema;
@@ -12,12 +12,12 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ProjectCreateDefaults {
-    /// Create a default VPC with the selected VPC defaults.
+    /// Create a default VPC with all or explicitly selected VPC defaults.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub vpc: Option<VpcCreateDefaults>,
+    pub vpc: Option<VpcCreateDefaultsSelection>,
 }
 
-/// Create-time parameters for a `Project`.
+/// Create-time parameters for a `Project`
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct ProjectCreate {
     #[serde(flatten)]
@@ -40,7 +40,9 @@ impl From<v2025_11_20_00::project::ProjectCreate> for ProjectCreate {
 #[cfg(test)]
 mod tests {
     use super::{ProjectCreate, ProjectCreateDefaults};
-    use crate::v2026_08_19_02::vpc::{SubnetCreateDefaults, VpcCreateDefaults};
+    use crate::v2026_08_19_02::vpc::{
+        SubnetCreateDefaults, VpcCreateDefaults, VpcCreateDefaultsSelection,
+    };
     use serde_json::json;
 
     #[test]
@@ -66,30 +68,54 @@ mod tests {
             ProjectCreateDefaults { vpc: None }
         );
 
+        let vpc_all: ProjectCreate = serde_json::from_value(json!({
+            "name": "my-project",
+            "description": "My project",
+            "defaults": { "vpc": { "type": "all" } },
+        }))
+        .unwrap();
+        assert_eq!(
+            vpc_all.defaults.unwrap(),
+            ProjectCreateDefaults {
+                vpc: Some(VpcCreateDefaultsSelection::All),
+            }
+        );
+
         let vpc_only: ProjectCreate = serde_json::from_value(json!({
             "name": "my-project",
             "description": "My project",
-            "defaults": { "vpc": {} },
+            "defaults": {
+                "vpc": { "type": "explicit", "defaults": {} },
+            },
         }))
         .unwrap();
         assert_eq!(
             vpc_only.defaults.unwrap(),
             ProjectCreateDefaults {
-                vpc: Some(VpcCreateDefaults { subnet: None }),
+                vpc: Some(VpcCreateDefaultsSelection::Explicit {
+                    defaults: VpcCreateDefaults { subnet: None },
+                }),
             }
         );
 
-        let all: ProjectCreate = serde_json::from_value(json!({
+        let selected: ProjectCreate = serde_json::from_value(json!({
             "name": "my-project",
             "description": "My project",
-            "defaults": { "vpc": { "subnet": {} } },
+            "defaults": {
+                "vpc": {
+                    "type": "explicit",
+                    "defaults": { "subnet": {} },
+                },
+            },
         }))
         .unwrap();
         assert_eq!(
-            all.defaults.unwrap(),
+            selected.defaults.unwrap(),
             ProjectCreateDefaults {
-                vpc: Some(VpcCreateDefaults {
-                    subnet: Some(SubnetCreateDefaults {}),
+                vpc: Some(VpcCreateDefaultsSelection::Explicit {
+                    defaults: VpcCreateDefaults {
+                        subnet: Some(SubnetCreateDefaults {}),
+                    },
                 }),
             }
         );
@@ -97,9 +123,22 @@ mod tests {
         let duplicate_vpc = r#"{
             "name": "my-project",
             "description": "My project",
-            "defaults": { "vpc": {}, "vpc": { "subnet": {} } }
+            "defaults": {
+                "vpc": { "type": "all" },
+                "vpc": { "type": "explicit", "defaults": {} }
+            }
         }"#;
         assert!(serde_json::from_str::<ProjectCreate>(duplicate_vpc).is_err());
+
+        let missing_selection_type = json!({
+            "name": "my-project",
+            "description": "My project",
+            "defaults": { "vpc": {} },
+        });
+        assert!(
+            serde_json::from_value::<ProjectCreate>(missing_selection_type)
+                .is_err()
+        );
 
         let unknown_default = json!({
             "name": "my-project",

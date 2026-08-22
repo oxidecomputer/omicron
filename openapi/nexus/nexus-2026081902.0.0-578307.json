@@ -26549,7 +26549,7 @@
         ]
       },
       "ProjectCreate": {
-        "description": "Create-time parameters for a `Project`.",
+        "description": "Create-time parameters for a `Project`",
         "type": "object",
         "properties": {
           "defaults": {
@@ -26579,10 +26579,10 @@
         "properties": {
           "vpc": {
             "nullable": true,
-            "description": "Create a default VPC with the selected VPC defaults.",
+            "description": "Create a default VPC with all or explicitly selected VPC defaults.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/VpcCreateDefaults"
+                "$ref": "#/components/schemas/VpcCreateDefaultsSelection"
               }
             ]
           }
@@ -30982,7 +30982,7 @@
         ]
       },
       "VpcCreate": {
-        "description": "Create-time parameters for a `Vpc`.",
+        "description": "Create-time parameters for a `Vpc`",
         "type": "object",
         "properties": {
           "defaults": {
@@ -31034,6 +31034,45 @@
           }
         },
         "additionalProperties": false
+      },
+      "VpcCreateDefaultsSelection": {
+        "description": "Select default resources to create with a VPC.",
+        "oneOf": [
+          {
+            "description": "Create all current and future default resources.",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "all"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "Create only the explicitly selected default resources.",
+            "type": "object",
+            "properties": {
+              "defaults": {
+                "$ref": "#/components/schemas/VpcCreateDefaults"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "explicit"
+                ]
+              }
+            },
+            "required": [
+              "defaults",
+              "type"
+            ]
+          }
+        ]
       },
       "VpcFirewallIcmpFilter": {
         "type": "object",
