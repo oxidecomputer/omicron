@@ -858,7 +858,7 @@ impl InstanceRunner {
         // This needs to be done only after publishing the final VMM state to
         // Nexus so that Nexus is guaranteed to have received notice of the
         // VMM's terminal state before it begins to see "no such VMM" errors
-        // from the instance manager. Otherwise it is possible for Nexus to
+        // from the instance manager. Otherwise, it is possible for Nexus to
         // conclude that a cleanly-stopped instance has gone missing and should
         // be restarted.
         ticket.deregister();
@@ -2331,7 +2331,11 @@ impl InstanceRunner {
         // for them.
         let mut opte_ports = Vec::with_capacity(self.requested_nics.len());
         let mut opte_port_names = Vec::with_capacity(self.requested_nics.len());
+        let mcast_cfg = self.multicast_group_cfgs();
         for nic in self.requested_nics.iter() {
+            // Multicast subscriptions target the primary NIC only.
+            // See the TODO on ensure_multicast_groups.
+            let groups: &[_] = if nic.primary { &mcast_cfg } else { &[] };
             let port = self.port_manager.create_port(PortCreateParams {
                 nic,
                 external_ips: &self.external_ips,
@@ -2343,6 +2347,7 @@ impl InstanceRunner {
                     .copied()
                     .map(Into::into)
                     .collect(),
+                multicast_groups: groups,
                 mtu: if nic.primary { self.primary_nic_mtu } else { None },
             })?;
             opte_port_names.push(port.0.name().to_string());
@@ -2625,12 +2630,13 @@ impl InstanceRunner {
         &mut self,
         membership: &InstanceMulticastMembership,
     ) -> Result<(), Error> {
-        // Similar logic to add_external_ip - save state for rollback
+        // Save pre-call state so rollback restores exactly what was
+        // present, mirroring add_external_ip's old_config pattern.
+        let old_groups = self.multicast_groups.clone();
         let out = self.join_multicast_group_inner(membership).await;
 
         if out.is_err() {
-            // Rollback state on error
-            self.multicast_groups.retain(|m| m != membership);
+            self.multicast_groups = old_groups;
         }
         out
     }
@@ -2639,14 +2645,13 @@ impl InstanceRunner {
         &mut self,
         membership: &InstanceMulticastMembership,
     ) -> Result<(), Error> {
-        // Similar logic to delete_external_ip - save state for rollback
+        // Save pre-call state so rollback restores exactly what was
+        // present, mirroring delete_external_ip's old_config pattern.
+        let old_groups = self.multicast_groups.clone();
         let out = self.leave_multicast_group_inner(membership).await;
 
         if out.is_err() {
-            // Rollback state on error - readd the membership if it was removed
-            if !self.multicast_groups.contains(membership) {
-                self.multicast_groups.push(membership.clone());
-            }
+            self.multicast_groups = old_groups;
         }
         out
     }
@@ -2655,105 +2660,90 @@ impl InstanceRunner {
         self.refresh_multicast_groups_inner()
     }
 
-    async fn join_multicast_group_inner(
-        &mut self,
-        membership: &InstanceMulticastMembership,
-    ) -> Result<(), Error> {
-        // Check for duplicate membership (idempotency)
-        if self.multicast_groups.contains(membership) {
-            return Ok(());
-        }
+    /// Convert `InstanceMulticastMembership` list to OPTE
+    /// `MulticastGroupCfg` list.
+    fn multicast_group_cfgs(
+        &self,
+    ) -> Vec<illumos_utils::opte::MulticastGroupCfg> {
+        self.multicast_groups
+            .iter()
+            .map(|m| illumos_utils::opte::MulticastGroupCfg {
+                group_ip: m.group_ip,
+                sources: m.sources.clone(),
+            })
+            .collect()
+    }
 
-        // Add to local state
-        self.multicast_groups.push(membership.clone());
-
-        // Update OPTE configuration
+    /// Sync the current multicast group memberships to OPTE via the
+    /// port manager.
+    ///
+    // TODO: subscriptions target the primary NIC only.
+    // InstanceMulticastMembership carries no NIC identifier, same as
+    // external IPs and attached subnets (though not firewall rules,
+    // which fan out across all VPC ports by VNI). If per-NIC multicast
+    // is needed, the membership type needs a NIC field and both this
+    // function and setup_propolis_zone must be updated.
+    fn ensure_multicast_groups(&self) -> Result<(), Error> {
         let Some(primary_nic) = self.primary_nic() else {
             return Err(Error::Opte(illumos_utils::opte::Error::NoPrimaryNic));
         };
 
-        // Convert InstanceMulticastMembership to MulticastGroupCfg
-        let multicast_cfg: Vec<illumos_utils::opte::MulticastGroupCfg> = self
-            .multicast_groups
-            .iter()
-            .map(|membership| illumos_utils::opte::MulticastGroupCfg {
-                group_ip: membership.group_ip,
-                sources: membership.sources.clone(),
-            })
-            .collect();
-
-        // Validate multicast configuration with OPTE
         self.port_manager.multicast_groups_ensure(
             primary_nic.id,
             primary_nic.kind,
-            &multicast_cfg,
+            &self.multicast_group_cfgs(),
         )?;
 
-        // TODO: Configure underlay multicast group addresses on the zone's vNIC.
-        // This should add the multicast group addresses to the zone's network
-        // interface so it can receive underlay multicast traffic (physical
-        // network layer). Rack-wide dataplane forwarding is handled by the
-        // RPW reconciler + DPD.
-        // See also: port_manager.rs multicast_groups_ensure() TODO about
-        // configuring OPTE port-level multicast group membership.
-
         Ok(())
+    }
+
+    async fn join_multicast_group_inner(
+        &mut self,
+        membership: &InstanceMulticastMembership,
+    ) -> Result<(), Error> {
+        if !Self::record_multicast_membership(
+            &mut self.multicast_groups,
+            membership,
+        ) {
+            return Ok(());
+        }
+
+        self.ensure_multicast_groups()?;
+        Ok(())
+    }
+
+    /// Record `membership` in `groups`, keyed on the group IP.
+    ///
+    /// An instance has one source filter per group. A repeat join with a
+    /// different source list replaces the stored filter instead of retaining
+    /// both filters in memory.
+    fn record_multicast_membership(
+        groups: &mut Vec<InstanceMulticastMembership>,
+        membership: &InstanceMulticastMembership,
+    ) -> bool {
+        match groups.iter_mut().find(|m| m.group_ip == membership.group_ip) {
+            Some(existing) if existing.sources == membership.sources => false,
+            Some(existing) => {
+                existing.sources = membership.sources.clone();
+                true
+            }
+            None => {
+                groups.push(membership.clone());
+                true
+            }
+        }
     }
 
     async fn leave_multicast_group_inner(
         &mut self,
         membership: &InstanceMulticastMembership,
     ) -> Result<(), Error> {
-        // Remove from local state
-        self.multicast_groups.retain(|m| m != membership);
-
-        // Update OPTE configuration
-        let Some(primary_nic) = self.primary_nic() else {
-            return Err(Error::Opte(illumos_utils::opte::Error::NoPrimaryNic));
-        };
-
-        // Convert InstanceMulticastMembership to MulticastGroupCfg
-        let multicast_cfg: Vec<illumos_utils::opte::MulticastGroupCfg> = self
-            .multicast_groups
-            .iter()
-            .map(|membership| illumos_utils::opte::MulticastGroupCfg {
-                group_ip: membership.group_ip,
-                sources: membership.sources.clone(),
-            })
-            .collect();
-
-        self.port_manager.multicast_groups_ensure(
-            primary_nic.id,
-            primary_nic.kind,
-            &multicast_cfg,
-        )?;
-
-        Ok(())
+        self.multicast_groups.retain(|m| m.group_ip != membership.group_ip);
+        self.ensure_multicast_groups()
     }
 
     fn refresh_multicast_groups_inner(&mut self) -> Result<(), Error> {
-        // Update OPTE configuration
-        let Some(primary_nic) = self.primary_nic() else {
-            return Err(Error::Opte(illumos_utils::opte::Error::NoPrimaryNic));
-        };
-
-        // Convert InstanceMulticastMembership to MulticastGroupCfg
-        let multicast_cfg: Vec<illumos_utils::opte::MulticastGroupCfg> = self
-            .multicast_groups
-            .iter()
-            .map(|membership| illumos_utils::opte::MulticastGroupCfg {
-                group_ip: membership.group_ip,
-                sources: membership.sources.clone(),
-            })
-            .collect();
-
-        self.port_manager.multicast_groups_ensure(
-            primary_nic.id,
-            primary_nic.kind,
-            &multicast_cfg,
-        )?;
-
-        Ok(())
+        self.ensure_multicast_groups()
     }
 }
 
@@ -3864,6 +3854,30 @@ mod tests {
 
         assert_eq!(membership1, membership2);
         assert_ne!(membership1, membership3);
+    }
+
+    #[test]
+    fn multicast_membership_is_keyed_on_group_ip() {
+        let group_ip = IpAddr::V4(Ipv4Addr::new(239, 1, 1, 1));
+        let old_membership = InstanceMulticastMembership {
+            group_ip,
+            sources: vec![IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1))],
+        };
+        let replacement = InstanceMulticastMembership {
+            group_ip,
+            sources: vec![IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2))],
+        };
+        let mut groups = vec![old_membership];
+
+        assert!(InstanceRunner::record_multicast_membership(
+            &mut groups,
+            &replacement,
+        ));
+        assert_eq!(groups, vec![replacement.clone()]);
+        assert!(!InstanceRunner::record_multicast_membership(
+            &mut groups,
+            &replacement,
+        ));
     }
 
     #[test]

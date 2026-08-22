@@ -749,6 +749,13 @@ impl super::Nexus {
         current_group_ids: &HashSet<Uuid>,
         spec: &multicast::MulticastGroupJoinSpec,
     ) -> Result<ResolvedMulticastMembership, Error> {
+        // Reconfiguration can reach this resolver without passing through the
+        // instance-create or single-group join API validation. Keep the
+        // per-member source list invariant at this boundary as well.
+        crate::app::multicast::validate_member_source_ips(
+            spec.source_ips.as_deref(),
+        )?;
+
         match self.resolve_multicast_group_identifier(opctx, &spec.group).await
         {
             // A spec that omits `source_ips` preserves the existing filter, so
@@ -959,6 +966,15 @@ impl super::Nexus {
                 "An instance may not join more than {} multicast groups",
                 MAX_MULTICAST_GROUPS_PER_INSTANCE,
             )));
+        }
+
+        // The per-member source list shape is checked here rather than only in
+        // the saga so a malformed join spec fails the create request outright
+        // instead of unwinding a partially executed saga.
+        for join_spec in &params.multicast_groups {
+            crate::app::multicast::validate_member_source_ips(
+                join_spec.source_ips.as_deref(),
+            )?;
         }
 
         // Requiring jumbo frames on a new instance requires the fleet-wide
