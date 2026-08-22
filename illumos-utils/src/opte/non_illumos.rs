@@ -5,8 +5,9 @@
 //! Mock / dummy versions of the OPTE module, for non-illumos platforms.
 //!
 //! Most methods are either `unimplemented!()` or silent noops.
-//! Multicast subscribe/unsubscribe is an exception, as it maintains real
-//! in-memory state because port manager tests assert on subscription contents.
+//! Multicast subscribe/unsubscribe and external IP sets are exceptions, as
+//! they maintain real in-memory state because port manager tests assert on
+//! their contents.
 
 use crate::addrobj::AddrObject;
 use oxide_vpc::api::AddRouterEntryReq;
@@ -202,6 +203,10 @@ pub(crate) struct PortData {
     pub routes: Vec<RouteInfo>,
     /// Multicast group subscriptions: group IP → source filter.
     pub mcast_subscriptions: HashMap<IpAddr, SourceFilter>,
+    /// The last-applied external IP request. This simulates the NAT layer's
+    /// per-port configuration, including the external-IP-to-internet-gateway
+    /// (EIP-to-IGW) map that keys the NAT rules.
+    pub external_ips: Option<SetExternalIpsReq>,
 }
 
 #[derive(Debug)]
@@ -287,6 +292,7 @@ impl Handle {
                     port,
                     routes: Vec::new(),
                     mcast_subscriptions: HashMap::new(),
+                    external_ips: None,
                 });
             }
         }
@@ -382,9 +388,14 @@ impl Handle {
     /// Set the external IPs in use by a port.
     pub fn set_external_ips(
         &self,
-        _: &SetExternalIpsReq,
+        req: &SetExternalIpsReq,
     ) -> Result<NoResp, OpteError> {
-        unimplemented!("Not yet used in tests")
+        let mut inner = opte_state().lock().unwrap();
+        let Some(port_data) = inner.ports.get_mut(&req.port_name) else {
+            return Err(OpteError::NoPort(req.port_name.clone()));
+        };
+        port_data.external_ips = Some(req.clone());
+        Ok(NO_RESPONSE)
     }
 
     /// Set a mapping from a virtual NIC to a physical host.

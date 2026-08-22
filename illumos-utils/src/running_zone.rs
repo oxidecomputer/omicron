@@ -291,7 +291,66 @@ impl RunningZone {
     /// Boots a new zone.
     ///
     /// Note that the zone must already be configured to be booted.
+    ///
+    /// On failure, the zone is synchronously halted and removed before the
+    /// `InstalledZone` (and any OPTE port tickets it holds) is dropped.
+    /// While the zone still holds a VNIC layered over a port's `xde`
+    /// device, dropping the port fails as busy and leaks it along with
+    /// its MAC. Any later `create_xde` for the same interface then fails
+    /// with `MacExists`.
+    ///
+    /// When the cleanup halt itself fails, the zone is dropped anyway and
+    /// its ports may leak as above. Callers with a retry path should use
+    /// [`Self::try_boot`] and hold the returned zone until a later halt
+    /// succeeds.
     pub async fn boot(zone: InstalledZone) -> Result<Self, BootError> {
+        Self::try_boot(zone).await.map_err(|(e, _zone)| e)
+    }
+
+    /// Boots a new zone, handing the zone back when cleanup fails.
+    ///
+    /// Like [`Self::boot`], except that when the cleanup halt after a boot
+    /// failure also fails, the error carries the zone instead of dropping
+    /// it while it is still live. The caller can hold the wrapper, retry
+    /// the halt later, and release the OPTE ports only once the zone is
+    /// gone.
+    ///
+    /// The returned wrapper has no zone ID since boot never confirmed
+    /// one, so dropping it does not spawn another halt.
+    pub async fn try_boot(
+        zone: InstalledZone,
+    ) -> Result<Self, (BootError, Option<Self>)> {
+        match Self::boot_inner(&zone).await {
+            Ok(id) => Ok(RunningZone { id: Some(id), inner: zone }),
+            Err(e) => {
+                if let Err(halt_err) = zone
+                    .zones_api
+                    .halt_and_remove_logged(&zone.log, &zone.name)
+                    .await
+                {
+                    warn!(
+                        zone.log,
+                        "Failed to halt zone after boot failure";
+                        "zone" => &zone.name,
+                        "error" => %halt_err,
+                    );
+                    // The zone may still hold VNICs over its OPTE ports'
+                    // `xde` devices. Hand it back so the caller can retry
+                    // the halt rather than dropping the port tickets under
+                    // a live zone.
+                    return Err((
+                        e,
+                        Some(RunningZone { id: None, inner: zone }),
+                    ));
+                }
+                Err((e, None))
+            }
+        }
+    }
+
+    /// Boot the zone, wait for it to reach the single-user SMF milestone,
+    /// and return its ID.
+    async fn boot_inner(zone: &InstalledZone) -> Result<i32, BootError> {
         // Boot the zone.
         info!(zone.log, "Booting {} zone", zone.name);
 
@@ -317,9 +376,7 @@ impl RunningZone {
                 BootError::NoZoneId { zone: zone.name.clone() }
             })?;
 
-        let running_zone = RunningZone { id: Some(id), inner: zone };
-
-        Ok(running_zone)
+        Ok(id)
     }
 
     /// Create a fake running zone for use in tests.

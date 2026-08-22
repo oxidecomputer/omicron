@@ -56,7 +56,7 @@ use slog::{debug, error};
 
 use super::MAX_MULTICAST_GROUPS_PER_INSTANCE;
 use nexus_db_lookup::{LookupPath, lookup};
-use nexus_db_model::Name;
+use nexus_db_model::{MemberParentRef, Name};
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::datastore::multicast::ExternalMulticastGroupWithSources;
 use nexus_db_queries::{authz, db};
@@ -419,9 +419,9 @@ impl super::Nexus {
 
         let current_members = self
             .db_datastore
-            .multicast_group_members_list_by_instance(
+            .multicast_group_members_list_by_parent(
                 opctx,
-                instance_id,
+                MemberParentRef::Instance(instance_id),
                 &DataPageParams::max_page(),
             )
             .await?;
@@ -493,22 +493,22 @@ impl super::Nexus {
             // Check the per-group source IP union cap up front for a
             // descriptive 400 in the non-racing common case. The datastore
             // CTE enforces the same bound atomically inside
-            // `multicast_group_member_attach_to_instance`.
+            // `multicast_group_member_attach`.
             if let Some(sources) = source_ips.filter(|s| !s.is_empty()) {
                 self.validate_group_source_union(
                     opctx,
                     group_id,
-                    instance_id,
+                    MemberParentRef::Instance(instance_id),
                     sources,
                 )
                 .await?;
             }
 
             self.db_datastore
-                .multicast_group_member_attach_to_instance(
+                .multicast_group_member_attach(
                     opctx,
                     group_id,
-                    instance_id,
+                    MemberParentRef::Instance(instance_id),
                     source_ips,
                 )
                 .await
@@ -944,15 +944,13 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         group_id: MulticastGroupUuid,
-        instance_id: InstanceUuid,
+        parent: MemberParentRef,
         proposed: &[IpAddr],
     ) -> Result<(), external::Error> {
         let mut union = self
             .db_datastore
-            .multicast_group_source_union_excluding_instance(
-                opctx,
-                group_id,
-                instance_id,
+            .multicast_group_source_union_excluding_parent(
+                opctx, group_id, parent,
             )
             .await?;
         union.extend(proposed.iter().copied());
@@ -1107,10 +1105,12 @@ impl super::Nexus {
         // Idempotent: if member doesn't exist, return success
         let member = match self
             .db_datastore
-            .multicast_group_member_get_by_group_and_instance(
+            .multicast_group_member_get_by_group_and_parent(
                 opctx,
                 MulticastGroupUuid::from_untyped_uuid(authz_group.id()),
-                InstanceUuid::from_untyped_uuid(authz_instance.id()),
+                MemberParentRef::Instance(InstanceUuid::from_untyped_uuid(
+                    authz_instance.id(),
+                )),
             )
             .await?
         {
@@ -1199,9 +1199,11 @@ impl super::Nexus {
         let (.., authz_instance) =
             instance_lookup.lookup_for(authz::Action::Read).await?;
         self.db_datastore
-            .multicast_group_members_list_by_instance(
+            .multicast_group_members_list_by_parent(
                 opctx,
-                InstanceUuid::from_untyped_uuid(authz_instance.id()),
+                MemberParentRef::Instance(InstanceUuid::from_untyped_uuid(
+                    authz_instance.id(),
+                )),
                 pagparams,
             )
             .await

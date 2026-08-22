@@ -107,17 +107,46 @@ struct RouteSet {
     active_ports: usize,
 }
 
+/// The System VPC Internet Gateway default routes seeded onto service
+/// ports, whose routes the control plane does not manage dynamically.
+///
+/// See the seeding rationale in `create_port`. The seed is a per-port need,
+/// so paths that mutate shared route sets must preserve these entries on
+/// seeded ports.
+fn seeded_igw_defaults() -> [ResolvedVpcRoute; 2] {
+    let target =
+        ApiRouterTarget::InternetGateway(InternetGatewayRouterTarget::System);
+    [
+        ResolvedVpcRoute {
+            dest: IpNet::V4(Ipv4Net::new(Ipv4Addr::UNSPECIFIED, 0).unwrap()),
+            target,
+        },
+        ResolvedVpcRoute {
+            dest: IpNet::V6(Ipv6Net::new(Ipv6Addr::UNSPECIFIED, 0).unwrap()),
+            target,
+        },
+    ]
+}
+
 /// Mutable per-port state tracked alongside the immutable `Port`.
 #[derive(Debug)]
 struct PortState {
     port: Port,
     /// Active multicast subscriptions, mapping group IP to source filter.
     mcast_subscriptions: HashMap<IpAddr, SourceFilter>,
+    /// The last-applied external IP configuration.
+    ///
+    /// When the external-IP-to-internet-gateway (EIP-to-IGW) mappings
+    /// change, NAT rules need fresh gateway tags. Instance ports get theirs
+    /// from the instance manager, but no equivalent exists for probe ports,
+    /// so `external_ips_refresh_probes` replays this stored configuration
+    /// instead.
+    external_ips: ExternalIpConfig,
 }
 
 impl PortState {
-    fn new(port: Port) -> Self {
-        Self { port, mcast_subscriptions: HashMap::new() }
+    fn new(port: Port, external_ips: ExternalIpConfig) -> Self {
+        Self { port, mcast_subscriptions: HashMap::new(), external_ips }
     }
 }
 
@@ -297,6 +326,34 @@ fn multicast_cfg_to_source_filter(cfg: &MulticastGroupCfg) -> SourceFilter {
     }
 }
 
+/// Internet Gateway mappings for external IPs, plus the bookkeeping
+/// needed to retry a failed port refresh.
+#[derive(Debug)]
+struct EipGatewayState {
+    /// Mappings of associated Internet Gateways for all External IPs
+    /// attached to each NIC.
+    ///
+    /// IGW IDs are specific to the VPC of each NIC.
+    mappings: HashMap<Uuid, HashMap<IpAddr, HashSet<Uuid>>>,
+    /// Advanced each time the mappings change.
+    generation: external::Generation,
+    /// Latest generation whose port refresh completed successfully.
+    /// While this trails `generation`, a refresh remains pending, so an
+    /// identical re-push after a failed refresh retries instead of
+    /// leaving ports keyed to stale mappings until the next change.
+    refreshed_generation: external::Generation,
+}
+
+impl Default for EipGatewayState {
+    fn default() -> Self {
+        Self {
+            mappings: HashMap::new(),
+            generation: external::Generation::new(),
+            refreshed_generation: external::Generation::new(),
+        }
+    }
+}
+
 #[derive(Debug)]
 struct PortManagerInner {
     log: Logger,
@@ -315,11 +372,8 @@ struct PortManagerInner {
     /// Map of all current resolved routes.
     routes: Mutex<HashMap<RouterId, RouteSet>>,
 
-    /// Mappings of associated Internet Gateways for all External IPs
-    /// attached to each NIC.
-    ///
-    /// IGW IDs are specific to the VPC of each NIC.
-    eip_gateways: Mutex<HashMap<Uuid, HashMap<IpAddr, HashSet<Uuid>>>>,
+    /// Internet Gateway mappings for external IPs. See [`EipGatewayState`].
+    eip_gateways: Mutex<EipGatewayState>,
 
     /// Underlay NIC address objects (e.g., for "cxgbe0", "cxgbe1").
     ///
@@ -715,6 +769,7 @@ impl PortManager {
             matches!(nic.kind, NetworkInterfaceKind::Service { .. });
         let is_instance =
             matches!(nic.kind, NetworkInterfaceKind::Instance { .. });
+        let is_probe = matches!(nic.kind, NetworkInterfaceKind::Probe { .. });
         let mac = *nic.mac;
         let vni = Vni::new(nic.vni).unwrap();
         let gateway = Gateway::from_ip_config(&nic.ip_config);
@@ -768,12 +823,10 @@ impl PortManager {
             // attempts to acquire this lock, in order to remove itself on drop.
             // We need to drop the lock before that, to avoid a deadlock, so
             // let's do it right away, after inserting.
-            let old = self
-                .inner
-                .ports
-                .lock()
-                .unwrap()
-                .insert((nic.id, nic.kind), PortState::new(port.clone()));
+            let old = self.inner.ports.lock().unwrap().insert(
+                (nic.id, nic.kind),
+                PortState::new(port.clone(), external_ips.clone()),
+            );
             assert!(
                 old.is_none(),
                 "Duplicate OPTE port detected: interface_id = {}, kind = {:?}",
@@ -781,10 +834,11 @@ impl PortManager {
                 nic.kind,
             );
 
-            // Ports for Probes/Services cannot have EIP<->IGW mappings filled
-            // in dynamically today, so to keep use of their EIPs working we
-            // leave them untagged at both the `nat` and `router` layer.
-            if is_instance {
+            // Service ports have no dynamically maintained EIP-to-IGW
+            // mappings today. A gateway tag without a mapping would break
+            // their external IPs, so their entries stay untagged at both
+            // the `nat` and `router` layer.
+            if is_instance || is_probe {
                 // This is effectively re-asserting the external IP config in order to
                 // set the EIP<->IGW mapping. While this should be part of `vpc_cfg`,
                 // this currently needs to happen here to prevent a case where an old
@@ -812,37 +866,21 @@ impl PortManager {
 
         // Create the default set of routes for a new port.
         //
-        // This creates an empty route set for instance ports, but adds a rule
-        // targeting the System VPC Internet Gateway for service ports.
+        // The shared route set for a router key holds only routes the
+        // control plane pushes through the vpc_routes RPW, so it starts
+        // empty for every port kind. Instance and probe ports receive all
+        // of their routes that way. Probe ports' outbound NAT rules match
+        // the Internet Gateway tag exactly, so they also depend on the
+        // EIP-to-IGW mappings ensured above and refreshed via
+        // `external_ips_refresh_probes`.
         //
-        // We need this during bootstrapping NTP or other very early services,
-        // before the control plane database has started.
-        let default_route_set = |is_service: bool| {
-            let mut route_set = RouteSet {
-                version: None,
-                routes: HashSet::new(),
-                active_ports: 0,
-            };
-            if !is_service {
-                return route_set;
-            }
-            let target = ApiRouterTarget::InternetGateway(
-                InternetGatewayRouterTarget::System,
-            );
-            route_set.routes.insert(ResolvedVpcRoute {
-                dest: IpNet::V4(
-                    Ipv4Net::new(Ipv4Addr::UNSPECIFIED, 0).unwrap(),
-                ),
-                target,
-            });
-            route_set.routes.insert(ResolvedVpcRoute {
-                dest: IpNet::V6(
-                    Ipv6Net::new(Ipv6Addr::UNSPECIFIED, 0).unwrap(),
-                ),
-                target,
-            });
-            route_set
-        };
+        // Service ports additionally need default routes targeting the
+        // System VPC Internet Gateway before the control plane database has
+        // started (bootstrapping NTP or other very early services). These
+        // are programmed onto the service port only. Merging them into the
+        // shared set would leak the seed onto instance or probe ports
+        // sharing the router key and make the next route-set replacement
+        // compute deletions against routes Nexus never issued.
 
         // Add routes to a new port and the shared set of all routes in this
         // port manager.
@@ -854,15 +892,24 @@ impl PortManager {
         let add_routes = |route_map: &mut HashMap<RouterId, RouteSet>,
                           key: RouterId|
          -> Result<(), Error> {
-            let route_set = route_map
-                .entry(key)
-                .or_insert_with(|| default_route_set(is_service));
+            let route_set = route_map.entry(key).or_default();
             route_set.active_ports += 1;
             let class = match key.kind {
                 RouterKind::System => RouterClass::System,
                 RouterKind::Custom(_) => RouterClass::Custom,
             };
-            for route in &route_set.routes {
+            // The IGW defaults for a service port go onto this port only,
+            // skipping any identical route the RPW has already placed in
+            // the shared set.
+            let port_only_seed = if is_service {
+                seeded_igw_defaults()
+                    .into_iter()
+                    .filter(|route| !route_set.routes.contains(route))
+                    .collect()
+            } else {
+                Vec::new()
+            };
+            for route in route_set.routes.iter().chain(&port_only_seed) {
                 let request = AddRouterEntryReq {
                     class,
                     port_name: port_name.clone(),
@@ -971,8 +1018,14 @@ impl PortManager {
         let hdl = Handle::new()?;
 
         // Propagate deltas out to all ports.
-        for port_state in ports.values() {
+        for ((_, nic_kind), port_state) in ports.iter() {
             let port = &port_state.port;
+            // Service ports carry seeded IGW defaults that Nexus does not
+            // manage. A route-set replacement must not strip the seed from
+            // these ports, nor program a duplicate when the new set holds
+            // an identical default.
+            let keep_seed =
+                matches!(nic_kind, NetworkInterfaceKind::Service { .. });
             // Fetch deltas for all router keys: system, IPv4 subnet, and IPv6
             // subnet.
             let system_delta = deltas.get(&port.system_router_key());
@@ -998,6 +1051,9 @@ impl PortManager {
                 );
 
                 for route in to_delete {
+                    if keep_seed && seeded_igw_defaults().contains(route) {
+                        continue;
+                    }
                     let route = DelRouterEntryReq {
                         class,
                         port_name: port.name().into(),
@@ -1016,6 +1072,9 @@ impl PortManager {
                 }
 
                 for route in to_add {
+                    if keep_seed && seeded_igw_defaults().contains(route) {
+                        continue;
+                    }
                     let route = AddRouterEntryReq {
                         class,
                         port_name: port.name().into(),
@@ -1041,15 +1100,29 @@ impl PortManager {
     /// Set Internet Gateway mappings for all external IPs in use
     /// by attached [NetworkInterface]s.
     ///
-    /// Returns whether the internal mappings were changed.
-    pub fn set_eip_gateways(&self, mappings: ExternalIpGatewayMap) -> bool {
-        let mut gateways = self.inner.eip_gateways.lock().unwrap();
+    /// Returns `Some(generation)` when attached ports must have their
+    /// external IPs re-ensured, either because the mappings changed or a
+    /// prior refresh never completed. Callers acknowledge a completed
+    /// refresh via [`Self::eip_gateways_refreshed`].
+    pub fn set_eip_gateways(
+        &self,
+        mappings: ExternalIpGatewayMap,
+    ) -> Option<external::Generation> {
+        let mut state = self.inner.eip_gateways.lock().unwrap();
+        if state.mappings != mappings.mappings {
+            state.mappings = mappings.mappings;
+            state.generation = state.generation.next();
+        }
+        (state.generation > state.refreshed_generation)
+            .then_some(state.generation)
+    }
 
-        let changed = &*gateways != &mappings.mappings;
-
-        *gateways = mappings.mappings;
-
-        changed
+    /// Record that ports were successfully refreshed against the mappings
+    /// at `generation`. A newer push may have raced the refresh, in which
+    /// case the pending state is preserved.
+    pub fn eip_gateways_refreshed(&self, generation: external::Generation) {
+        let mut state = self.inner.eip_gateways.lock().unwrap();
+        state.refreshed_generation = state.refreshed_generation.max(generation);
     }
 
     /// Lookup an OPTE port, and ensure its external IP config is up to date.
@@ -1059,12 +1132,66 @@ impl PortManager {
         nic_kind: NetworkInterfaceKind,
         external_ips: &ExternalIpConfig,
     ) -> Result<(), Error> {
-        let ports = self.inner.ports.lock().unwrap();
-        let port_state = ports.get(&(nic_id, nic_kind)).ok_or_else(|| {
-            Error::ExternalIpUpdateMissingPort(nic_id, nic_kind)
-        })?;
+        let mut ports = self.inner.ports.lock().unwrap();
+        let port_state =
+            ports.get_mut(&(nic_id, nic_kind)).ok_or_else(|| {
+                Error::ExternalIpUpdateMissingPort(nic_id, nic_kind)
+            })?;
 
-        self.external_ips_ensure_port(&port_state.port, nic_id, external_ips)
+        self.external_ips_ensure_port(&port_state.port, nic_id, external_ips)?;
+        port_state.external_ips = external_ips.clone();
+        Ok(())
+    }
+
+    /// Re-apply the external IP config of every probe port, picking up the
+    /// current Internet Gateway mappings.
+    ///
+    /// Instance ports are refreshed through the instance manager, which
+    /// serializes this against in-flight external IP changes. Probe external
+    /// IPs are fixed at provisioning and have no other writer, so they are
+    /// re-ensured here from the per-port stored config.
+    ///
+    /// Every probe port is attempted before reporting failure so one bad
+    /// port does not leave the rest keyed to stale mappings.
+    ///
+    /// Note: this returns the first error encountered.
+    pub fn external_ips_refresh_probes(&self) -> Result<(), Error> {
+        // Snapshot probe ports so the OPTE ioctls below run without holding
+        // the port map lock, which would stall unrelated port operations.
+        let probes: Vec<(Uuid, Port, ExternalIpConfig)> = {
+            let ports = self.inner.ports.lock().unwrap();
+            ports
+                .iter()
+                .filter(|((_, nic_kind), _)| {
+                    matches!(nic_kind, NetworkInterfaceKind::Probe { .. })
+                })
+                .map(|((nic_id, _), port_state)| {
+                    (
+                        *nic_id,
+                        port_state.port.clone(),
+                        port_state.external_ips.clone(),
+                    )
+                })
+                .collect()
+        };
+
+        // Attempt every port even after a failure (no short-circuiting),
+        // surfacing the first error.
+        probes
+            .into_iter()
+            .map(|(nic_id, port, external_ips)| {
+                self.external_ips_ensure_port(&port, nic_id, &external_ips)
+                    .inspect_err(|e| {
+                        error!(
+                            self.inner.log,
+                            "failed to refresh external IPs for probe port";
+                            "nic_id" => %nic_id,
+                            "port" => port.name(),
+                            "error" => %e,
+                        );
+                    })
+            })
+            .fold(Ok(()), Result::and)
     }
 
     /// Ensure external IPs for an OPTE port are up to date.
@@ -1075,7 +1202,7 @@ impl PortManager {
         external_ips: &ExternalIpConfig,
     ) -> Result<(), Error> {
         let egw_lock = self.inner.eip_gateways.lock().unwrap();
-        let inet_gw_map = egw_lock.get(&nic_id).cloned();
+        let inet_gw_map = egw_lock.mappings.get(&nic_id).cloned();
         drop(egw_lock);
 
         // NOTE: The Option::map() call here is a bit confusing.
@@ -1128,17 +1255,18 @@ impl PortManager {
         multicast_groups: &[MulticastGroupCfg],
     ) -> Result<(), Error> {
         // Validate and build the new subscription set before acquiring locks.
-        let mut new_subs: HashMap<IpAddr, SourceFilter> = HashMap::new();
-        for group in multicast_groups {
-            if !group.group_ip.is_multicast() {
-                return Err(Error::InvalidPortIpConfig(format!(
-                    "not a multicast address: {}",
-                    group.group_ip,
-                )));
-            }
-            new_subs
-                .insert(group.group_ip, multicast_cfg_to_source_filter(group));
-        }
+        let new_subs: HashMap<IpAddr, SourceFilter> = multicast_groups
+            .iter()
+            .map(|group| {
+                if !group.group_ip.is_multicast() {
+                    return Err(Error::InvalidPortIpConfig(format!(
+                        "not a multicast address: {}",
+                        group.group_ip,
+                    )));
+                }
+                Ok((group.group_ip, multicast_cfg_to_source_filter(group)))
+            })
+            .collect::<Result<_, Error>>()?;
 
         let hdl = Handle::new()?;
 
@@ -1157,7 +1285,6 @@ impl PortManager {
             .copied()
             .collect();
 
-        let removed = to_remove.len();
         for group_ip in &to_remove {
             debug!(
                 self.inner.log,
@@ -1166,8 +1293,6 @@ impl PortManager {
                 "group" => %group_ip,
             );
 
-            // Effectively infallible, as the IPs are verified as multicast,
-            // the operation is idempotent, and the port exists.
             hdl.mcast_unsubscribe(&McastUnsubscribeReq {
                 port_name: port_name.clone(),
                 group: (*group_ip).into(),
@@ -1177,45 +1302,43 @@ impl PortManager {
         }
 
         // Subscribe to new groups or update changed filters.
-        let mut added = 0usize;
-        for (group_ip, filter) in &new_subs {
-            let needs_subscribe =
-                match port_state.mcast_subscriptions.get(group_ip) {
-                    None => true,
-                    Some(current) => current != filter,
-                };
-
-            if needs_subscribe {
-                added += 1;
-                debug!(
-                    self.inner.log,
-                    "subscribing to multicast group";
-                    "port" => &port_name,
-                    "group" => %group_ip,
-                    "filter" => ?filter,
-                );
-
-                // Effectively infallible as the IPs are verified as multicast,
-                // the operation is idempotent, and the port exists.
-                hdl.mcast_subscribe(&McastSubscribeReq {
-                    port_name: port_name.clone(),
-                    group: (*group_ip).into(),
-                    filter: filter.clone(),
-                })?;
-
+        let added: Vec<IpAddr> = new_subs
+            .iter()
+            .filter(|(group_ip, filter)| {
                 port_state
                     .mcast_subscriptions
-                    .insert(*group_ip, filter.clone());
-            }
+                    .get(group_ip)
+                    .is_none_or(|current| current != *filter)
+            })
+            .map(|(group_ip, _)| *group_ip)
+            .collect();
+
+        for group_ip in &added {
+            let filter = &new_subs[group_ip];
+            debug!(
+                self.inner.log,
+                "subscribing to multicast group";
+                "port" => &port_name,
+                "group" => %group_ip,
+                "filter" => ?filter,
+            );
+
+            hdl.mcast_subscribe(&McastSubscribeReq {
+                port_name: port_name.clone(),
+                group: (*group_ip).into(),
+                filter: filter.clone(),
+            })?;
+
+            port_state.mcast_subscriptions.insert(*group_ip, filter.clone());
         }
 
-        if added > 0 || removed > 0 {
+        if !added.is_empty() || !to_remove.is_empty() {
             info!(
                 self.inner.log,
                 "multicast subscriptions updated";
                 "port" => &port_name,
-                "added" => added,
-                "removed" => removed,
+                "added" => ?added,
+                "removed" => ?to_remove,
                 "active_groups" => port_state.mcast_subscriptions.len(),
             );
         } else {
@@ -1934,12 +2057,15 @@ impl Drop for PortTicket {
 mod tests {
     use super::PortCreateParams;
     use super::PortManager;
+    use super::PortTicket;
     #[cfg(target_os = "illumos")]
     use crate::addrobj::AddrObject;
     use crate::opte::Error;
     use crate::opte::Handle;
+    use crate::opte::Port;
     use macaddr::MacAddr6;
     use omicron_common::api::external::{MacAddr, Vni};
+    use omicron_common::api::internal::shared::ExternalIpGatewayMap;
     use omicron_common::api::internal::shared::InternetGatewayRouterTarget;
     use omicron_common::api::internal::shared::PrivateIpConfig;
     use omicron_common::api::internal::shared::PrivateIpv4Config;
@@ -1966,6 +2092,7 @@ mod tests {
     use sled_agent_types::inventory::SourceNatConfigV4;
     use sled_agent_types::inventory::SourceNatConfigV6;
     use sled_agent_types::multicast::MulticastGroupCfg;
+    use std::collections::HashMap;
     use std::collections::HashSet;
     use std::net::IpAddr;
     use std::net::Ipv4Addr;
@@ -2011,7 +2138,7 @@ mod tests {
     #[cfg(target_os = "illumos")]
     const LOOPBACK_IF: &str = "lo0";
 
-    /// Returns `true` iff `netstat -g -f inet6` reports `group` as a
+    /// Reports whether `netstat -g -f inet6` lists `group` as a
     /// membership on `interface`.
     ///
     /// Used to verify that `join_multicast_v6`/leave on the filter
@@ -2062,8 +2189,6 @@ mod tests {
             PortManager::new(logctx.log.clone(), Ipv6Addr::LOCALHOST, &[]);
         let default_ipv4_route =
             IpNet::V4(Ipv4Net::new(Ipv4Addr::UNSPECIFIED, 0).unwrap());
-        let default_ipv6_route =
-            IpNet::V6(Ipv6Net::new(Ipv6Addr::UNSPECIFIED, 0).unwrap());
 
         // Information about our builtin services VPC System Router.
         //
@@ -2079,9 +2204,9 @@ mod tests {
 
         // First, create a port for a service.
         //
-        // At this point, we'll insert a single default route, because this is a
-        // service point, from `0.0.0.0/0 -> InternetGateway(None)`, and then
-        // add this route to OPTE.
+        // At this point, the seeded default routes targeting the System IGW
+        // are programmed onto the port itself, while the shared route set
+        // for the router key stays empty until Nexus pushes routes.
         let private_subnet =
             Ipv4Net::new(Ipv4Addr::new(172, 20, 0, 0), 24).unwrap();
         let private_ipv4_addr0 = Ipv4Addr::new(172, 20, 0, 4);
@@ -2133,11 +2258,9 @@ mod tests {
             })
             .unwrap();
 
-        // At this point, we should have inserted a single default route. That
-        // is because the port is for an Oxide service, and so we automatically
-        // add a default route to the IGW. This doesn't have an ID for the IGW,
-        // since we haven't launched Nexus or the database -- until that time,
-        // we don't know that IGW's ID.
+        // The seeded defaults are a per-port need for services, applied to
+        // the port only. The shared route set tracks what Nexus pushes, and
+        // nothing has been pushed yet.
         let system_routes = manager
             .inner
             .routes
@@ -2146,29 +2269,11 @@ mod tests {
             .get(&port0.system_router_key())
             .unwrap()
             .clone();
-
-        // We actually have two route-sets, one for the system and one for the
-        // custom router. We're only interested in the former though.
-        assert_eq!(
-            system_routes.routes.len(),
-            2,
-            "We should have two default routes in the VPC's System Router"
+        assert!(
+            system_routes.routes.is_empty(),
+            "The shared System Router route set should start empty, with \
+            the seeded service defaults programmed onto the port only"
         );
-        for route in system_routes.routes.iter() {
-            assert!(
-                route.dest == default_ipv4_route
-                    || route.dest == default_ipv6_route,
-                "VPC System Router should have a default route"
-            );
-            assert_eq!(
-                route.target,
-                RouterTarget::InternetGateway(
-                    InternetGatewayRouterTarget::System
-                ),
-                "VPC System Router default route should target the \
-                System Internet Gateway"
-            );
-        }
 
         // In OPTE, we should have one route, also squished down to this
         // default route.
@@ -2198,12 +2303,11 @@ mod tests {
         // PUT some routes.
         //
         // Simulate a PUT /vpc-routes from Nexus. Now that Nexus has launched
-        // and loaded builtin data to the database, it knows the ID of our the
-        // IGW of the System Router in the builtin services VPC. This ID is
-        // included in the list of routes. Because that set does _not_ contain
-        // the implicit route added above, that one is _removed_ from the one
-        // existing port. An equivalent one is added though, since the IGW is
-        // ignored at this point when setting the route in OPTE.
+        // and loaded builtin data to the database, it knows the ID of the
+        // IGW of the System Router in the builtin services VPC. The pushed
+        // default is identical to the seed already programmed onto the
+        // service port, so the port is left untouched rather than receiving
+        // a duplicate.
         let mut new_routes = vec![ResolvedVpcRouteSet {
             id: port0.system_router_key(),
             version: Some(RouterVersion {
@@ -2269,12 +2373,10 @@ mod tests {
 
         // Create a new port.
         //
-        // Now, when we create this new port, we'll again implicitly create that
-        // default route. Since we _also_ have the route in the previous step
-        // pointing to an explicit IGW, we'll call add_router_entry twice for
-        // this point on creation, but not the other port since we don't modify
-        // it when we create this second port. That happens when we call
-        // `vpc_routes_ensure` below.
+        // The new port receives the pushed default from the shared set plus
+        // its own seeded IPv6 default, with the IPv4 seed skipped because
+        // the shared set already holds an identical route. The first port
+        // is not modified when this second port is created.
         let external_ip_config1 = ExternalIpConfig {
             v4: Some(ExternalIpv4Config {
                 source_nat: Some(
@@ -2314,10 +2416,9 @@ mod tests {
             })
             .unwrap();
 
-        // When creating the system port, we automatically added a default route
-        // pointing to IGW(None). In the previous behavior, this was considered
-        // different from IGW(ID) -- that's incorrect, because we throw away the
-        // ID when we set route in OPTE itself.
+        // The shared set still holds only the pushed default. The per-port
+        // seeds never enter it, so adding the second port changes nothing
+        // here.
         //
         // We should have exactly one default route here and at OPTE, pointing
         // to the services VPC System Router's IGW, without an explicit ID.
@@ -2438,6 +2539,712 @@ mod tests {
                     target the services IGW, after creating the second port",
                 );
             }
+        }
+
+        logctx.cleanup_successful();
+    }
+
+    // A probe port is created with no routes, like an instance port and
+    // unlike a service port. Nexus's VPC route RPW pushes its routes, and
+    // its NAT rules are keyed by the EIP-to-IGW mappings pushed alongside
+    // them. This holds in both branches of `create_port`: creating the
+    // shared route set and joining one that already exists.
+    #[test]
+    fn probe_port_created_without_seeded_routes() {
+        let logctx = test_setup_log("probe_port_created_without_seeded_routes");
+        let handle = Handle::new().unwrap();
+        let _state = ensure_xde_underlay(&handle);
+
+        let manager =
+            PortManager::new(logctx.log.clone(), Ipv6Addr::LOCALHOST, &[]);
+
+        // Create a probe port. Probes only support an Ephemeral external IP.
+        let (probe_port, _probe_ticket) = create_v4_port(
+            &manager,
+            NetworkInterfaceKind::Probe { id: Uuid::new_v4() },
+            Uuid::new_v4(),
+            PRIVATE_IP0,
+            EIP0,
+            0x01,
+        );
+
+        // The shared route set is created empty. The RPW fills it.
+        let system_routes = manager
+            .inner
+            .routes
+            .lock()
+            .unwrap()
+            .get(&probe_port.system_router_key())
+            .unwrap()
+            .clone();
+        assert!(
+            system_routes.routes.is_empty(),
+            "a probe's System Router should start empty"
+        );
+
+        {
+            let state = handle.state().lock().unwrap();
+            let port_data = state.ports.get("opte0").unwrap();
+            assert!(
+                port_data.routes.is_empty(),
+                "a probe port should have no routes at OPTE on creation"
+            );
+            // External IPs are ensured at creation so that a mapping already
+            // known to the port manager applies immediately. None have been
+            // pushed here.
+            let external_ips = port_data.external_ips.as_ref().unwrap();
+            assert!(
+                external_ips.inet_gw_map.is_none(),
+                "no IGW mappings should be applied before Nexus pushes them"
+            );
+        }
+
+        // Push a resolved default route so the shared set is non-empty
+        // before a second probe joins it.
+        let igw_id = Uuid::new_v4();
+        let default_ipv4_route =
+            IpNet::V4(Ipv4Net::new(Ipv4Addr::UNSPECIFIED, 0).unwrap());
+        manager
+            .vpc_routes_ensure(vec![ResolvedVpcRouteSet {
+                id: probe_port.system_router_key(),
+                version: Some(RouterVersion {
+                    router_id: Uuid::new_v4(),
+                    version: 1,
+                }),
+                routes: HashSet::from([ResolvedVpcRoute {
+                    dest: default_ipv4_route,
+                    target: RouterTarget::InternetGateway(
+                        InternetGatewayRouterTarget::Instance(igw_id),
+                    ),
+                }]),
+            }])
+            .unwrap();
+
+        // The second probe shares the same VNI and subnet, so it joins the
+        // pre-existing route set rather than creating a fresh one.
+        let (_probe_port1, _probe_ticket1) = create_v4_port(
+            &manager,
+            NetworkInterfaceKind::Probe { id: Uuid::new_v4() },
+            Uuid::new_v4(),
+            PRIVATE_IP1,
+            EIP1,
+            0x02,
+        );
+
+        {
+            let state = handle.state().lock().unwrap();
+            assert_eq!(state.ports.len(), 2);
+
+            for name in ["opte0", "opte1"] {
+                let port_data = state.ports.get(name).unwrap();
+                assert_eq!(
+                    port_data.routes.len(),
+                    1,
+                    "{name} should carry only the resolved route"
+                );
+                assert!(
+                    matches!(
+                        port_data.routes[0].target,
+                        oxide_vpc::api::RouterTarget::InternetGateway(Some(id))
+                            if id == igw_id
+                    ),
+                    "{name} should target the resolved gateway, not a seed"
+                );
+            }
+        }
+
+        logctx.cleanup_successful();
+    }
+
+    // A service port created first seeds its IGW defaults onto itself only.
+    // A probe port that later shares the same router key must not inherit
+    // them. It starts with no routes until the RPW pushes some.
+    #[test]
+    fn probe_port_after_service_port_gets_no_seeded_routes() {
+        let logctx = test_setup_log(
+            "probe_port_after_service_port_gets_no_seeded_routes",
+        );
+        let handle = Handle::new().unwrap();
+        let _state = ensure_xde_underlay(&handle);
+
+        let manager =
+            PortManager::new(logctx.log.clone(), Ipv6Addr::LOCALHOST, &[]);
+
+        let (_service_port, _service_ticket) = create_v4_port(
+            &manager,
+            NetworkInterfaceKind::Service { id: Uuid::new_v4() },
+            Uuid::new_v4(),
+            PRIVATE_IP0,
+            EIP0,
+            0x01,
+        );
+
+        let (probe_port, _probe_ticket) = create_v4_port(
+            &manager,
+            NetworkInterfaceKind::Probe { id: Uuid::new_v4() },
+            Uuid::new_v4(),
+            PRIVATE_IP1,
+            EIP1,
+            0x02,
+        );
+
+        let system_routes = manager
+            .inner
+            .routes
+            .lock()
+            .unwrap()
+            .get(&probe_port.system_router_key())
+            .unwrap()
+            .clone();
+        assert!(
+            system_routes.routes.is_empty(),
+            "the shared route set should not hold the service seed"
+        );
+
+        {
+            let state = handle.state().lock().unwrap();
+            let service_data = state.ports.get("opte0").unwrap();
+            assert!(
+                service_data
+                    .routes
+                    .iter()
+                    .any(|route| route.is_system_default_ipv4_route()),
+                "the service port should carry its seeded default"
+            );
+            let probe_data = state.ports.get("opte1").unwrap();
+            assert!(
+                probe_data.routes.is_empty(),
+                "a probe port created after a service port should not \
+                 inherit the seeded service defaults"
+            );
+        }
+
+        logctx.cleanup_successful();
+    }
+
+    // Nexus's VPC route RPW resolves a project VPC's default route to that
+    // VPC's own gateway UUID and pushes EIP-to-IGW mappings that key probe
+    // NAT rules to the same UUID. Outbound NAT rules match the router tag
+    // exactly, so the route target and the NAT keying must agree, whether
+    // the probe port exists at push time or is created after.
+    #[test]
+    fn probe_ports_follow_igw_mappings() {
+        let logctx = test_setup_log("probe_ports_follow_igw_mappings");
+        let handle = Handle::new().unwrap();
+        let _state = ensure_xde_underlay(&handle);
+
+        let manager =
+            PortManager::new(logctx.log.clone(), Ipv6Addr::LOCALHOST, &[]);
+        let default_ipv4_route =
+            IpNet::V4(Ipv4Net::new(Ipv4Addr::UNSPECIFIED, 0).unwrap());
+
+        let igw_id = Uuid::new_v4();
+        let nic_id0 = Uuid::new_v4();
+        let nic_id1 = Uuid::new_v4();
+
+        let assert_tagged_for_igw = |port_name: &str, eip: Ipv4Addr| {
+            let state = handle.state().lock().unwrap();
+            let port_data = state.ports.get(port_name).unwrap();
+
+            assert!(
+                !port_data
+                    .routes
+                    .iter()
+                    .any(|route| route.is_system_default_ipv4_route()),
+                "{port_name} should carry no bare System default route"
+            );
+            assert_eq!(
+                port_data.routes.len(),
+                1,
+                "{port_name} should carry exactly the RPW-resolved default \
+                route"
+            );
+            assert!(
+                matches!(
+                    port_data.routes[0].target,
+                    oxide_vpc::api::RouterTarget::InternetGateway(Some(id))
+                        if id == igw_id
+                ),
+                "{port_name} default route should target the resolved gateway"
+            );
+
+            let external_ips = port_data.external_ips.as_ref().unwrap();
+            let gw_map = external_ips.inet_gw_map.as_ref().unwrap();
+            let gws = gw_map
+                .get(&IpAddr::V4(eip).into())
+                .expect("the probe's ephemeral IP should be mapped");
+            assert!(
+                gws.contains(&igw_id),
+                "{port_name} NAT keying should name the same gateway as the \
+                router tag"
+            );
+        };
+
+        let (probe_port, _probe_ticket) = create_v4_port(
+            &manager,
+            NetworkInterfaceKind::Probe { id: Uuid::new_v4() },
+            nic_id0,
+            PRIVATE_IP0,
+            EIP0,
+            0x01,
+        );
+
+        // Simulate the RPW's mapping push and the refresh sled-agent runs
+        // when the mappings change.
+        let mappings =
+            igw_mappings(&[(nic_id0, EIP0, igw_id), (nic_id1, EIP1, igw_id)]);
+        assert!(
+            manager
+                .set_eip_gateways(ExternalIpGatewayMap { mappings })
+                .is_some()
+        );
+        manager.external_ips_refresh_probes().unwrap();
+
+        // Simulate the RPW route push. The resolved default route names the
+        // project VPC's own gateway rather than the System gateway.
+        let new_routes = vec![ResolvedVpcRouteSet {
+            id: probe_port.system_router_key(),
+            version: Some(RouterVersion {
+                router_id: Uuid::new_v4(),
+                version: 1,
+            }),
+            routes: HashSet::from([ResolvedVpcRoute {
+                dest: default_ipv4_route,
+                target: RouterTarget::InternetGateway(
+                    InternetGatewayRouterTarget::Instance(igw_id),
+                ),
+            }]),
+        }];
+        manager.vpc_routes_ensure(new_routes).unwrap();
+
+        assert_tagged_for_igw("opte0", EIP0);
+
+        // A probe port created after the pushes receives the shared route
+        // set and the already-known mapping at creation.
+        //
+        // Dropping a PortTicket releases its port, and the assertion below
+        // needs the port alive.
+        let (_probe_port1, _probe_ticket1) = create_v4_port(
+            &manager,
+            NetworkInterfaceKind::Probe { id: Uuid::new_v4() },
+            nic_id1,
+            PRIVATE_IP1,
+            EIP1,
+            0x02,
+        );
+
+        assert_tagged_for_igw("opte1", EIP1);
+
+        logctx.cleanup_successful();
+    }
+
+    /// Ephemeral external IPs for ports created via `create_v4_port`.
+    const EIP0: Ipv4Addr = Ipv4Addr::new(10, 0, 0, 4);
+    const EIP1: Ipv4Addr = Ipv4Addr::new(10, 0, 0, 5);
+    const EIP2: Ipv4Addr = Ipv4Addr::new(10, 0, 0, 6);
+
+    /// Private IPs within the fixture subnet 172.30.0.0/24.
+    const PRIVATE_IP0: Ipv4Addr = Ipv4Addr::new(172, 30, 0, 4);
+    const PRIVATE_IP1: Ipv4Addr = Ipv4Addr::new(172, 30, 0, 5);
+    const PRIVATE_IP2: Ipv4Addr = Ipv4Addr::new(172, 30, 0, 6);
+
+    /// Create a v4-only port with an ephemeral external IP.
+    ///
+    /// Port names are assigned by the manager in creation order (opte0,
+    /// opte1, ...), independent of the NIC name.
+    fn create_v4_port(
+        manager: &PortManager,
+        kind: NetworkInterfaceKind,
+        nic_id: Uuid,
+        private_ip: Ipv4Addr,
+        ephemeral_ip: Ipv4Addr,
+        mac_last_octet: u8,
+    ) -> (Port, PortTicket) {
+        let private_subnet =
+            Ipv4Net::new(Ipv4Addr::new(172, 30, 0, 0), 24).unwrap();
+        let ip_config =
+            PrivateIpConfig::new_ipv4(private_ip, private_subnet).unwrap();
+        let external_ips = ExternalIpConfig {
+            v4: Some(ExternalIpv4Config {
+                ephemeral_ip: Some(ephemeral_ip),
+                ..Default::default()
+            }),
+            v6: None,
+        };
+        manager
+            .create_port(PortCreateParams {
+                nic: &NetworkInterface {
+                    id: nic_id,
+                    kind,
+                    name: "net0".parse().unwrap(),
+                    ip_config,
+                    mac: MacAddr(MacAddr6::new(
+                        0xa8,
+                        0x40,
+                        0x25,
+                        0x00,
+                        0x00,
+                        mac_last_octet,
+                    )),
+                    vni: 100.try_into().unwrap(),
+                    primary: true,
+                    slot: 0,
+                },
+                external_ips: &external_ips,
+                firewall_rules: &[],
+                dhcp_config: DhcpCfg {
+                    hostname: None,
+                    host_domain: None,
+                    domain_search_list: Vec::new(),
+                    dns4_servers: Vec::new(),
+                    dns6_servers: Vec::new(),
+                },
+                attached_subnets: vec![],
+                multicast_groups: &[],
+                mtu: None,
+            })
+            .unwrap()
+    }
+
+    /// Build a nested EIP-to-IGW mapping table from (nic, eip, igw) entries.
+    fn igw_mappings(
+        entries: &[(Uuid, Ipv4Addr, Uuid)],
+    ) -> HashMap<Uuid, HashMap<IpAddr, HashSet<Uuid>>> {
+        let mut mappings: HashMap<Uuid, HashMap<IpAddr, HashSet<Uuid>>> =
+            HashMap::new();
+        for (nic_id, eip, igw_id) in entries {
+            mappings
+                .entry(*nic_id)
+                .or_default()
+                .entry(IpAddr::V4(*eip))
+                .or_default()
+                .insert(*igw_id);
+        }
+        mappings
+    }
+
+    // `external_ips_refresh_probes` re-ensures probe ports only. Instance
+    // ports are refreshed through the instance manager, and service ports
+    // never have external IPs ensured, so neither should be touched even
+    // when mappings exist for their NICs.
+    #[test]
+    fn external_ips_refresh_probes_skips_non_probe_ports() {
+        let logctx =
+            test_setup_log("external_ips_refresh_probes_skips_non_probe_ports");
+        let handle = Handle::new().unwrap();
+        let _state = ensure_xde_underlay(&handle);
+
+        let manager =
+            PortManager::new(logctx.log.clone(), Ipv6Addr::LOCALHOST, &[]);
+
+        let igw_id = Uuid::new_v4();
+        let instance_nic = Uuid::new_v4();
+        let service_nic = Uuid::new_v4();
+        let probe_nic = Uuid::new_v4();
+
+        let (_instance_port, _instance_ticket) = create_v4_port(
+            &manager,
+            NetworkInterfaceKind::Instance { id: Uuid::new_v4() },
+            instance_nic,
+            PRIVATE_IP0,
+            EIP0,
+            0x01,
+        );
+        let (_service_port, _service_ticket) = create_v4_port(
+            &manager,
+            NetworkInterfaceKind::Service { id: Uuid::new_v4() },
+            service_nic,
+            PRIVATE_IP1,
+            EIP1,
+            0x02,
+        );
+        let (_probe_port, _probe_ticket) = create_v4_port(
+            &manager,
+            NetworkInterfaceKind::Probe { id: Uuid::new_v4() },
+            probe_nic,
+            PRIVATE_IP2,
+            EIP2,
+            0x03,
+        );
+
+        // Mappings cover all three NICs, so an errant non-probe refresh
+        // would show up as a populated gateway map below.
+        let mappings = igw_mappings(&[
+            (instance_nic, EIP0, igw_id),
+            (service_nic, EIP1, igw_id),
+            (probe_nic, EIP2, igw_id),
+        ]);
+
+        assert!(
+            manager
+                .set_eip_gateways(ExternalIpGatewayMap { mappings })
+                .is_some()
+        );
+        manager.external_ips_refresh_probes().unwrap();
+
+        {
+            let state = handle.state().lock().unwrap();
+            assert_eq!(state.ports.len(), 3);
+
+            // The instance port was ensured at creation, before the
+            // mappings arrived, and the refresh must not have re-ensured
+            // it since.
+            let instance_data = state.ports.get("opte0").unwrap();
+            assert!(
+                instance_data
+                    .external_ips
+                    .as_ref()
+                    .unwrap()
+                    .inet_gw_map
+                    .is_none(),
+                "instance port should not be re-ensured by the probe refresh"
+            );
+
+            // Service ports never have external IPs ensured at all.
+            let service_data = state.ports.get("opte1").unwrap();
+            assert!(
+                service_data.external_ips.is_none(),
+                "service port should not be re-ensured by the probe refresh"
+            );
+
+            // The probe port picks up the new mapping.
+            let probe_data = state.ports.get("opte2").unwrap();
+            let gw_map = probe_data
+                .external_ips
+                .as_ref()
+                .unwrap()
+                .inet_gw_map
+                .as_ref()
+                .unwrap();
+            let gws = gw_map
+                .get(&IpAddr::V4(EIP2).into())
+                .expect("the probe's ephemeral IP should be mapped");
+            assert!(gws.contains(&igw_id));
+        }
+
+        logctx.cleanup_successful();
+    }
+
+    // A failure ensuring one probe port must not prevent refreshing the
+    // rest. Removing a port from the simulated OPTE state makes its
+    // `set_external_ips` fail with `NoPort` while the other succeeds.
+    #[test]
+    fn external_ips_refresh_probes_attempts_all_ports() {
+        let logctx =
+            test_setup_log("external_ips_refresh_probes_attempts_all_ports");
+        let handle = Handle::new().unwrap();
+        let _state = ensure_xde_underlay(&handle);
+
+        let manager =
+            PortManager::new(logctx.log.clone(), Ipv6Addr::LOCALHOST, &[]);
+
+        let igw_id = Uuid::new_v4();
+        let nic_id0 = Uuid::new_v4();
+        let nic_id1 = Uuid::new_v4();
+
+        let (_probe_port0, _probe_ticket0) = create_v4_port(
+            &manager,
+            NetworkInterfaceKind::Probe { id: Uuid::new_v4() },
+            nic_id0,
+            PRIVATE_IP0,
+            EIP0,
+            0x01,
+        );
+
+        let (_probe_port1, _probe_ticket1) = create_v4_port(
+            &manager,
+            NetworkInterfaceKind::Probe { id: Uuid::new_v4() },
+            nic_id1,
+            PRIVATE_IP1,
+            EIP1,
+            0x02,
+        );
+
+        let mappings =
+            igw_mappings(&[(nic_id0, EIP0, igw_id), (nic_id1, EIP1, igw_id)]);
+        assert!(
+            manager
+                .set_eip_gateways(ExternalIpGatewayMap { mappings })
+                .is_some()
+        );
+
+        // Simulate a per-port OPTE failure by removing the first port
+        // from the simulated kernel state. The port ticket's later
+        // cleanup tolerates the missing port.
+        {
+            let mut state = handle.state().lock().unwrap();
+            state
+                .ports
+                .remove("opte0")
+                .expect("the first probe port should exist before removal");
+        }
+
+        let result = manager.external_ips_refresh_probes();
+        assert!(result.is_err(), "refresh should report the failed port");
+
+        // The surviving probe must have been refreshed despite the other
+        // port's failure, regardless of iteration order.
+        {
+            let state = handle.state().lock().unwrap();
+            assert_eq!(state.ports.len(), 1);
+            let port_data = state.ports.get("opte1").unwrap();
+            let gw_map = port_data
+                .external_ips
+                .as_ref()
+                .unwrap()
+                .inet_gw_map
+                .as_ref()
+                .unwrap();
+            let gws = gw_map
+                .get(&IpAddr::V4(EIP1).into())
+                .expect("the surviving probe's ephemeral IP should be mapped");
+            assert!(gws.contains(&igw_id));
+        }
+
+        logctx.cleanup_successful();
+    }
+
+    // An unacknowledged mapping push stays pending, so an identical
+    // re-push after a failed refresh retries instead of stranding ports
+    // on stale IGW keying. Acknowledging a stale generation number must not
+    // clear a newer pending change.
+    #[test]
+    fn set_eip_gateways_tracks_pending_refresh() {
+        let logctx = test_setup_log("set_eip_gateways_tracks_pending_refresh");
+        let manager =
+            PortManager::new(logctx.log.clone(), Ipv6Addr::LOCALHOST, &[]);
+
+        let igw_id = Uuid::new_v4();
+        let nic_id = Uuid::new_v4();
+        let mappings = igw_mappings(&[(nic_id, EIP0, igw_id)]);
+
+        // The first push changes the mappings and leaves a refresh pending.
+        let first = manager
+            .set_eip_gateways(ExternalIpGatewayMap {
+                mappings: mappings.clone(),
+            })
+            .expect("first push should leave a refresh pending");
+
+        // An identical re-push before acknowledgment reports the same
+        // pending refresh.
+        assert_eq!(
+            manager.set_eip_gateways(ExternalIpGatewayMap {
+                mappings: mappings.clone(),
+            }),
+            Some(first),
+        );
+
+        // Once acknowledged, an identical re-push reports nothing pending.
+        manager.eip_gateways_refreshed(first);
+        assert_eq!(
+            manager.set_eip_gateways(ExternalIpGatewayMap {
+                mappings: mappings.clone(),
+            }),
+            None,
+        );
+
+        // A changed push advances to a new generation, and acknowledging
+        // the stale one leaves the refresh pending.
+        let mut updated = mappings;
+        updated
+            .get_mut(&nic_id)
+            .unwrap()
+            .get_mut(&IpAddr::V4(EIP0))
+            .unwrap()
+            .insert(Uuid::new_v4());
+
+        let second = manager
+            .set_eip_gateways(ExternalIpGatewayMap {
+                mappings: updated.clone(),
+            })
+            .expect("changed push should leave a refresh pending");
+
+        assert!(second > first);
+        manager.eip_gateways_refreshed(first);
+        assert_eq!(
+            manager
+                .set_eip_gateways(ExternalIpGatewayMap { mappings: updated }),
+            Some(second),
+        );
+
+        logctx.cleanup_successful();
+    }
+
+    // A route set replacement must not delete the seeded System default
+    // routes on a service port. The keep_seed check in `vpc_routes_ensure`
+    // skips them during the deletion pass.
+    #[test]
+    fn service_port_seed_survives_route_set_replacement() {
+        let logctx =
+            test_setup_log("service_port_seed_survives_route_set_replacement");
+        let handle = Handle::new().unwrap();
+        let _state = ensure_xde_underlay(&handle);
+
+        let manager =
+            PortManager::new(logctx.log.clone(), Ipv6Addr::LOCALHOST, &[]);
+
+        let igw_id = Uuid::new_v4();
+        let (port, _ticket) = create_v4_port(
+            &manager,
+            NetworkInterfaceKind::Service { id: Uuid::new_v4() },
+            Uuid::new_v4(),
+            PRIVATE_IP0,
+            EIP0,
+            0x01,
+        );
+
+        {
+            let state = handle.state().lock().unwrap();
+            let port_data = state.ports.get("opte0").unwrap();
+            assert!(
+                port_data
+                    .routes
+                    .iter()
+                    .any(|route| route.is_system_default_ipv4_route()),
+                "service port should carry the seeded System default route"
+            );
+        }
+
+        // Replace the route set with one naming only a non-default route.
+        // The seeded defaults are absent from the new set but must survive
+        // the deletion pass.
+        let pushed_dest =
+            IpNet::V4(Ipv4Net::new(Ipv4Addr::new(10, 1, 0, 0), 16).unwrap());
+        manager
+            .vpc_routes_ensure(vec![ResolvedVpcRouteSet {
+                id: port.system_router_key(),
+                version: Some(RouterVersion {
+                    router_id: Uuid::new_v4(),
+                    version: 1,
+                }),
+                routes: HashSet::from([ResolvedVpcRoute {
+                    dest: pushed_dest,
+                    target: RouterTarget::InternetGateway(
+                        InternetGatewayRouterTarget::Instance(igw_id),
+                    ),
+                }]),
+            }])
+            .unwrap();
+
+        {
+            let state = handle.state().lock().unwrap();
+            let port_data = state.ports.get("opte0").unwrap();
+
+            assert!(
+                port_data
+                    .routes
+                    .iter()
+                    .any(|route| route.is_system_default_ipv4_route()),
+                "seeded System default should survive the replacement"
+            );
+            assert!(
+                port_data.routes.iter().any(|route| matches!(
+                    route.target,
+                    oxide_vpc::api::RouterTarget::InternetGateway(Some(id))
+                        if id == igw_id
+                )),
+                "the pushed route should be programmed"
+            );
         }
 
         logctx.cleanup_successful();
@@ -2651,7 +3458,6 @@ mod tests {
             panic!("Expected DualStack config")
         };
 
-        // Check IPv4 configuration
         assert_eq!(ipv4.private_ip, priv_ipv4.into());
         assert_eq!(
             ipv4.vpc_subnet,
@@ -2670,7 +3476,6 @@ mod tests {
         assert!(ipv4.external_ips.ephemeral_ip.is_none());
         assert!(ipv4.external_ips.floating_ips.is_empty());
 
-        // Check IPv6 configuration
         assert_eq!(ipv6.private_ip, priv_ipv6.into());
         assert_eq!(
             ipv6.vpc_subnet,
@@ -2995,7 +3800,6 @@ mod tests {
 
         let group1: IpAddr = "239.2.2.1".parse().unwrap();
 
-        // Subscribe to a multicast group.
         manager
             .multicast_groups_ensure(
                 nic_id,
@@ -3004,7 +3808,6 @@ mod tests {
             )
             .unwrap();
 
-        // Verify subscription tracking exists.
         {
             let ports = manager.inner.ports.lock().unwrap();
             let port_state = ports.get(&(nic_id, nic_kind)).unwrap();
@@ -3019,7 +3822,6 @@ mod tests {
         // and its subscription tracking.
         ticket.release();
 
-        // Verify port is removed entirely.
         {
             let ports = manager.inner.ports.lock().unwrap();
             assert!(
@@ -3370,13 +4172,13 @@ mod tests {
         logctx.cleanup_successful();
     }
 
-    /// Verify that `set_mcast_m2p` rejects an underlay address outside the
-    /// admin-local multicast subnet (ff04::/16) with the proper error.
+    /// Verify that `set_mcast_m2p` and `clear_mcast_m2p` reject an underlay
+    /// address outside the admin-local multicast subnet (ff04::/16) with
+    /// the proper error.
     #[test]
-    fn multicast_m2p_set_rejects_non_admin_local_underlay() {
-        let logctx = test_setup_log(
-            "multicast_m2p_set_rejects_non_admin_local_underlay",
-        );
+    fn multicast_m2p_rejects_non_admin_local_underlay() {
+        let logctx =
+            test_setup_log("multicast_m2p_rejects_non_admin_local_underlay");
         let handle = Handle::new().unwrap();
         let _state = ensure_xde_underlay(&handle);
 
@@ -3391,37 +4193,18 @@ mod tests {
                 group,
                 underlay: bad_underlay,
             })
-            .expect_err("non-admin-local underlay must be rejected");
+            .expect_err("set with non-admin-local underlay must be rejected");
         assert!(
             matches!(err, Error::InvalidMcastUnderlay(addr) if addr == bad_underlay),
             "expected InvalidMcastUnderlay({bad_underlay}), got {err:?}",
         );
-
-        logctx.cleanup_successful();
-    }
-
-    /// Verify that `clear_mcast_m2p` rejects an underlay address outside
-    /// the admin-local multicast subnet (ff04::/16) with the proper error.
-    #[test]
-    fn multicast_m2p_clear_rejects_non_admin_local_underlay() {
-        let logctx = test_setup_log(
-            "multicast_m2p_clear_rejects_non_admin_local_underlay",
-        );
-        let handle = Handle::new().unwrap();
-        let _state = ensure_xde_underlay(&handle);
-
-        let manager =
-            PortManager::new(logctx.log.clone(), Ipv6Addr::LOCALHOST, &[]);
-
-        let group: IpAddr = "239.10.10.52".parse().unwrap();
-        let bad_underlay: Ipv6Addr = "fd00::2".parse().unwrap();
 
         let err = manager
             .clear_mcast_m2p(&sled_agent_types::multicast::ClearMcast2Phys {
                 group,
                 underlay: bad_underlay,
             })
-            .expect_err("non-admin-local underlay must be rejected");
+            .expect_err("clear with non-admin-local underlay must be rejected");
         assert!(
             matches!(err, Error::InvalidMcastUnderlay(addr) if addr == bad_underlay),
             "expected InvalidMcastUnderlay({bad_underlay}), got {err:?}",
@@ -3480,7 +4263,6 @@ mod tests {
             "xde M2P entry must be rolled back after join failure, found {listed:?}",
         );
 
-        // No socket should be present either.
         {
             let sockets =
                 manager.inner.mcast_underlay_sockets.sockets.lock().unwrap();

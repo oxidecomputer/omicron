@@ -1267,18 +1267,18 @@ impl SledAgent {
             "IGW mapping received";
             "values" => ?mappings
         );
-        let changed = self.inner.port_manager.set_eip_gateways(mappings);
+        let refresh_generation =
+            self.inner.port_manager.set_eip_gateways(mappings);
 
         // TODO(kyle)
         // There is a substantial downside to this approach, which is that
         // we can currently only do correct Internet Gateway association for
-        // *Instances* -- sled agent does not remember the ExtIPs associated
-        // with Services or with Probes.
+        // Instances and Probes, as the sled agent does not remember the ExtIPs
+        // associated with Services.
         //
-        // In practice, services should not have more than one IGW. Not having
-        // identical source IP selection for Probes is a little sad, though.
-        // OPTE will follow the old (single-IGW) behaviour when no mappings
-        // are installed.
+        // In practice, services should not have more than one IGW. OPTE
+        // will follow the old (single-IGW) behaviour when no mappings are
+        // installed.
         //
         // My gut feeling is that the correct place for External IPs to
         // live is on each NetworkInterface, which makes it far simpler for
@@ -1286,8 +1286,19 @@ impl SledAgent {
         // via RPW. This is how we would make this correct in general.
         // My understanding is that NetworkInterface's schema makes its way into
         // the ledger, and I'm not comfortable redoing that this close to a release.
-        if changed {
-            self.inner.instances.refresh_external_ips().await?;
+        if let Some(generation) = refresh_generation {
+            // Attempt both refreshes before propagating an error so a
+            // failure in one port class does not leave the other on stale
+            // IGW keying. The generation is only acknowledged when both
+            // succeed, so a failed refresh is retried on the next push
+            // even if the mappings are unchanged.
+            let instance_result =
+                self.inner.instances.refresh_external_ips().await;
+            let probe_result =
+                self.inner.port_manager.external_ips_refresh_probes();
+            instance_result?;
+            probe_result?;
+            self.inner.port_manager.eip_gateways_refreshed(generation);
             info!(self.log, "IGW mapping changed; external IPs refreshed");
         }
 

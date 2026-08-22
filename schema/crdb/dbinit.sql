@@ -8780,6 +8780,13 @@ CREATE TYPE IF NOT EXISTS omicron.public.multicast_group_member_origin AS ENUM (
     'igmp_snooped'
 );
 
+CREATE TYPE IF NOT EXISTS omicron.public.multicast_group_member_parent_kind AS ENUM (
+    /* A guest instance. */
+    'instance',
+    /* A probe (network connectivity diagnostic). */
+    'probe'
+);
+
 /*
  * External multicast groups (customer-facing, allocated from IP pools)
  * Following the bifurcated design from RFD 488
@@ -8886,10 +8893,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.multicast_group_member (
     /* External group for customer/external membership */
     external_group_id UUID NOT NULL,
 
-    /* Parent instance or service (following external_ip pattern) */
+    /* Parent instance or probe (following external_ip pattern) */
     parent_id UUID NOT NULL,
 
-    /* Sled hosting the parent instance (NULL when stopped) */
+    /* Sled hosting the parent (NULL when stopped) */
     sled_id UUID,
 
     /* RPW state for reliable operations */
@@ -8911,7 +8918,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.multicast_group_member (
     source_ips INET[] NOT NULL DEFAULT ARRAY[]::INET[],
 
     /* Origin of this membership (static API vs snooped IGMP/MLD soft-state) */
-    membership_origin omicron.public.multicast_group_member_origin NOT NULL DEFAULT 'static'
+    membership_origin omicron.public.multicast_group_member_origin NOT NULL DEFAULT 'static',
+
+    /* Discriminator for `parent_id`. */
+    parent_kind omicron.public.multicast_group_member_parent_kind NOT NULL DEFAULT 'instance'
 );
 
 /* External Multicast Group Indexes */
@@ -9062,10 +9072,13 @@ CREATE INDEX IF NOT EXISTS multicast_member_by_parent_and_group ON omicron.publi
     external_group_id
 ) WHERE time_deleted IS NULL;
 
--- Business logic constraint: one instance per group (also serves queries)
--- Supports: SELECT ... WHERE external_group_id = ? AND parent_id = ? AND time_deleted IS NULL
-CREATE UNIQUE INDEX IF NOT EXISTS multicast_member_unique_parent_per_group ON omicron.public.multicast_group_member (
+-- One parent (instance or probe) per group, keyed by
+-- (external_group_id, parent_kind, parent_id) so two members with the same
+-- UUID across kinds are not collapsed by the unique constraint.
+-- Supports: SELECT ... WHERE external_group_id = ? AND parent_kind = ? AND parent_id = ? AND time_deleted IS NULL
+CREATE UNIQUE INDEX IF NOT EXISTS multicast_member_unique_kind_parent_per_group ON omicron.public.multicast_group_member (
     external_group_id,
+    parent_kind,
     parent_id
 ) WHERE time_deleted IS NULL;
 
@@ -9402,7 +9415,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '296.0.0', NULL)
+    (TRUE, NOW(), NOW(), '297.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

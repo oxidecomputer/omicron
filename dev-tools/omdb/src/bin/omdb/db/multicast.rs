@@ -27,12 +27,15 @@
 //! | RANGE        | ASM or SSM based on IP range         |
 //! | UNDERLAY_IP  | Underlay group IP (blank if none)    |
 //! | SOURCES      | Source allowlist, or "-" (any)       |
-//! | MEMBERS      | Comma-separated "instance@sled" list |
+//! | MEMBERS      | Comma-separated "<parent>@sled" list |
 //! | VNI          | Virtual network ID                   |
 //! | CREATED      | Creation timestamp                   |
 //!
 //! Note: SOURCES "-" also appears when a group has no members; use MEMBERS
 //! column or `info` command to distinguish from any-source members.
+//!
+//! Note: MEMBERS uses `"name@sled"` for instances and `"probe:name@sled"`
+//! for probes.
 //!
 //! Filters: `--state`, `--pool`
 //!
@@ -42,7 +45,8 @@
 //! |--------------|------------------------------------------|
 //! | ID           | Member UUID                              |
 //! | GROUP_NAME   | Parent group name                        |
-//! | PARENT_ID    | Instance UUID                            |
+//! | PARENT_KIND  | "Instance" or "Probe"                    |
+//! | PARENT_ID    | Instance or Probe UUID per PARENT_KIND   |
 //! | STATE        | Member state ("Joining"/"Joined"/"Left") |
 //! | MULTICAST_IP | Group multicast IP                       |
 //! | SOURCES      | Source allowlist, or "-" (any)           |
@@ -68,7 +72,8 @@
 //! | Column       | Description                    |
 //! |--------------|--------------------------------|
 //! | ID           | Member UUID                    |
-//! | INSTANCE     | Instance name                  |
+//! | PARENT_KIND  | "Instance" or "Probe"          |
+//! | PARENT       | Instance or probe name         |
 //! | STATE        | Member state                   |
 //! | MULTICAST_IP | Group multicast IP             |
 //! | SOURCES      | Allowlist, or "-" (any)        |
@@ -84,13 +89,14 @@ use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::{DateTime, Utc};
 use clap::{Args, Subcommand, ValueEnum};
 use diesel::prelude::*;
+use itertools::{Either, Itertools};
 use tabled::Tabled;
 use uuid::Uuid;
 
 use nexus_db_model::{
     ExternalMulticastGroup, IpPool, IpPoolRange, IpPoolType,
-    MulticastGroupMember, MulticastGroupMemberState, MulticastGroupState,
-    UnderlayMulticastGroup,
+    MulticastGroupMember, MulticastGroupMemberParentKind,
+    MulticastGroupMemberState, MulticastGroupState, UnderlayMulticastGroup,
 };
 use nexus_db_queries::db::DataStore;
 use nexus_types::identity::Resource;
@@ -245,6 +251,7 @@ struct MulticastGroupRow {
 struct MulticastMemberRow {
     id: Uuid,
     group_name: String,
+    parent_kind: MulticastGroupMemberParentKind,
     parent_id: Uuid,
     state: MulticastGroupMemberState,
     multicast_ip: std::net::IpAddr,
@@ -260,7 +267,8 @@ struct MulticastMemberRow {
 #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
 struct MulticastInfoMemberRow {
     id: Uuid,
-    instance: String,
+    parent_kind: MulticastGroupMemberParentKind,
+    parent: String,
     state: MulticastGroupMemberState,
     multicast_ip: std::net::IpAddr,
     /// Source IPs for source filtering ("-" = any source)
@@ -291,6 +299,7 @@ pub(super) async fn cmd_db_multicast_groups(
     use nexus_db_schema::schema::ip_pool::dsl as pool_dsl;
     use nexus_db_schema::schema::multicast_group::dsl;
     use nexus_db_schema::schema::multicast_group_member::dsl as member_dsl;
+    use nexus_db_schema::schema::probe::dsl as probe_dsl;
     use nexus_db_schema::schema::sled::dsl as sled_dsl;
     use nexus_db_schema::schema::underlay_multicast_group::dsl as underlay_dsl;
 
@@ -399,27 +408,44 @@ pub(super) async fn cmd_db_multicast_groups(
         map
     };
 
-    // Batch lookup instance names
-    let parent_ids: Vec<Uuid> = members.iter().map(|m| m.parent_id).collect();
-    let instance_names: HashMap<Uuid, String> = if parent_ids.is_empty() {
-        HashMap::new()
-    } else {
-        instance_dsl::instance
-            .filter(instance_dsl::id.eq_any(parent_ids))
+    // Batch lookup for parent names per kind. `parent_id` is opaque at the
+    // table level. The discriminator on the member row selects which
+    // table (`instance` or `probe`) to resolve it against.
+    let (instance_ids, probe_ids): (Vec<Uuid>, Vec<Uuid>) =
+        members.iter().partition_map(|member| match member.parent_kind {
+            MulticastGroupMemberParentKind::Instance => {
+                Either::Left(member.parent_id)
+            }
+            MulticastGroupMemberParentKind::Probe => {
+                Either::Right(member.parent_id)
+            }
+        });
+    let mut parent_names: HashMap<Uuid, String> = HashMap::new();
+    if !instance_ids.is_empty() {
+        let rows: Vec<(Uuid, String)> = instance_dsl::instance
+            .filter(instance_dsl::id.eq_any(instance_ids))
             .select((instance_dsl::id, instance_dsl::name))
-            .get_results_async::<(Uuid, String)>(&*conn)
+            .get_results_async(&*conn)
             .await
-            .context("fetching instance names")?
-            .into_iter()
-            .collect()
-    };
+            .context("fetching instance names")?;
+        parent_names.extend(rows);
+    }
+    if !probe_ids.is_empty() {
+        let rows: Vec<(Uuid, String)> = probe_dsl::probe
+            .filter(probe_dsl::id.eq_any(probe_ids))
+            .select((probe_dsl::id, probe_dsl::name))
+            .get_results_async(&*conn)
+            .await
+            .context("fetching probe names")?;
+        parent_names.extend(rows);
+    }
 
     // Batch lookup sled serials
     let sled_ids: Vec<Uuid> = members
         .iter()
         .filter_map(|m| m.sled_id.map(|s| s.into_untyped_uuid()))
         .collect();
-    let sled_serials: HashMap<Uuid, String> = if sled_ids.is_empty() {
+    let sled_serials: HashMap<SledUuid, String> = if sled_ids.is_empty() {
         HashMap::new()
     } else {
         sled_dsl::sled
@@ -429,26 +455,35 @@ pub(super) async fn cmd_db_multicast_groups(
             .await
             .context("fetching sled serials")?
             .into_iter()
+            .map(|(id, serial)| (SledUuid::from_untyped_uuid(id), serial))
             .collect()
     };
 
-    // Build group_id -> formatted members string
-    let mut members_map: HashMap<Uuid, Vec<String>> = HashMap::new();
-    for member in &members {
-        let inst_name = instance_names
-            .get(&member.parent_id)
-            .cloned()
-            .unwrap_or_else(|| member.parent_id.to_string());
-        let sled_serial = member
-            .sled_id
-            .and_then(|s| sled_serials.get(&s.into_untyped_uuid()).cloned())
-            .unwrap_or_else(|| "-".to_string());
-        let formatted = format!("{inst_name}@{sled_serial}");
-        members_map
-            .entry(member.external_group_id)
-            .or_default()
-            .push(formatted);
-    }
+    // Build a mapping from group_id -> formatted members string. The parent
+    // prefix distinguishes instances ("name@sled") from probes
+    // ("probe:name@sled").
+    let mut members_map: HashMap<Uuid, Vec<String>> = members
+        .iter()
+        .map(|member| {
+            let parent_name = parent_names
+                .get(&member.parent_id)
+                .cloned()
+                .unwrap_or_else(|| member.parent_id.to_string());
+            let sled_serial = member
+                .sled_id
+                .and_then(|s| sled_serials.get(&s.into()))
+                .map_or("-", String::as_str);
+            let formatted = match member.parent_kind {
+                MulticastGroupMemberParentKind::Instance => {
+                    format!("{parent_name}@{sled_serial}")
+                }
+                MulticastGroupMemberParentKind::Probe => {
+                    format!("probe:{parent_name}@{sled_serial}")
+                }
+            };
+            (member.external_group_id, formatted)
+        })
+        .into_group_map();
 
     // Sort each group's members for deterministic output
     for v in members_map.values_mut() {
@@ -609,6 +644,7 @@ pub(super) async fn cmd_db_multicast_members(
             MulticastMemberRow {
                 id: member.id,
                 group_name,
+                parent_kind: member.parent_kind,
                 parent_id: member.parent_id,
                 state: member.state,
                 multicast_ip: member.multicast_ip.ip(),
@@ -717,6 +753,7 @@ pub(super) async fn cmd_db_multicast_info(
     use nexus_db_schema::schema::ip_pool::dsl as pool_dsl;
     use nexus_db_schema::schema::multicast_group::dsl as group_dsl;
     use nexus_db_schema::schema::multicast_group_member::dsl as member_dsl;
+    use nexus_db_schema::schema::probe::dsl as probe_dsl;
     use nexus_db_schema::schema::sled::dsl as sled_dsl;
     use nexus_db_schema::schema::underlay_multicast_group::dsl as underlay_dsl;
 
@@ -865,17 +902,37 @@ pub(super) async fn cmd_db_multicast_info(
     } else {
         println!("\nMEMBERS ({}):", members.len());
 
-        // Batch lookup instance names (parent_id references instances)
-        let parent_ids: Vec<Uuid> =
-            members.iter().map(|member| member.parent_id).collect();
-        let instances: Vec<(Uuid, String)> = instance_dsl::instance
-            .filter(instance_dsl::id.eq_any(parent_ids))
-            .select((instance_dsl::id, instance_dsl::name))
-            .get_results_async(&*conn)
-            .await
-            .context("fetching instance names")?;
-        let instance_map: HashMap<Uuid, String> =
-            instances.into_iter().collect();
+        // Batch lookup for parent names per kind. `parent_id` is opaque at the
+        // table level. The discriminator on the member row selects which
+        // table (`instance` or `probe`) to resolve it against.
+        let (instance_ids, probe_ids): (Vec<Uuid>, Vec<Uuid>) =
+            members.iter().partition_map(|member| match member.parent_kind {
+                MulticastGroupMemberParentKind::Instance => {
+                    Either::Left(member.parent_id)
+                }
+                MulticastGroupMemberParentKind::Probe => {
+                    Either::Right(member.parent_id)
+                }
+            });
+        let mut parent_map: HashMap<Uuid, String> = HashMap::new();
+        if !instance_ids.is_empty() {
+            let rows: Vec<(Uuid, String)> = instance_dsl::instance
+                .filter(instance_dsl::id.eq_any(instance_ids))
+                .select((instance_dsl::id, instance_dsl::name))
+                .get_results_async(&*conn)
+                .await
+                .context("fetching instance names")?;
+            parent_map.extend(rows);
+        }
+        if !probe_ids.is_empty() {
+            let rows: Vec<(Uuid, String)> = probe_dsl::probe
+                .filter(probe_dsl::id.eq_any(probe_ids))
+                .select((probe_dsl::id, probe_dsl::name))
+                .get_results_async(&*conn)
+                .await
+                .context("fetching probe names")?;
+            parent_map.extend(rows);
+        }
 
         // Batch lookup sled serials
         let sled_ids: Vec<Uuid> = members
@@ -892,19 +949,22 @@ pub(super) async fn cmd_db_multicast_info(
                 .await
                 .context("fetching sled serials")?
         };
-        let sled_map: HashMap<Uuid, String> = sleds.into_iter().collect();
+        let sled_map: HashMap<SledUuid, String> = sleds
+            .into_iter()
+            .map(|(id, serial)| (SledUuid::from_untyped_uuid(id), serial))
+            .collect();
 
         let rows: Vec<MulticastInfoMemberRow> = members
             .into_iter()
             .map(|member| {
-                let instance_name = instance_map
+                let parent_name = parent_map
                     .get(&member.parent_id)
                     .cloned()
                     .unwrap_or_else(|| member.parent_id.to_string());
                 let sled_serial = member
                     .sled_id
-                    .and_then(|s| sled_map.get(&s.into_untyped_uuid()).cloned())
-                    .unwrap_or_else(|| "-".to_string());
+                    .and_then(|s| sled_map.get(&s.into()))
+                    .map_or_else(|| "-".to_string(), Clone::clone);
                 let sources = Some(&member.source_ips)
                     .filter(|ips| !ips.is_empty())
                     .map(|ips| {
@@ -916,7 +976,8 @@ pub(super) async fn cmd_db_multicast_info(
                     .unwrap_or_else(|| "-".to_string());
                 MulticastInfoMemberRow {
                     id: member.id,
-                    instance: instance_name,
+                    parent_kind: member.parent_kind,
+                    parent: parent_name,
                     state: member.state,
                     multicast_ip: member.multicast_ip.ip(),
                     sources,
