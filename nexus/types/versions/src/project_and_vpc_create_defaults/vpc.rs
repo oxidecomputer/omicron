@@ -8,6 +8,17 @@ use oxnet::Ipv6Net;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+/// Select default resources to create with a VPC.
+#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum VpcCreateDefaultsSelection {
+    /// Create all current and future default resources.
+    All,
+
+    /// Create only the explicitly selected default resources.
+    Explicit { defaults: VpcCreateDefaults },
+}
+
 /// Default resources to create with a VPC.
 #[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]

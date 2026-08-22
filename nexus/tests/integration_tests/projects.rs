@@ -21,6 +21,7 @@ use nexus_test_utils::resource_helpers::create_project_image;
 use nexus_test_utils::resource_helpers::create_vpc;
 use nexus_test_utils::resource_helpers::grant_iam;
 use nexus_test_utils::resource_helpers::object_create;
+use nexus_test_utils::resource_helpers::object_create_error;
 use nexus_test_utils::resource_helpers::objects_list_page_authz;
 use nexus_test_utils::resource_helpers::project_get;
 use nexus_test_utils::resource_helpers::projects_list;
@@ -121,6 +122,46 @@ async fn test_project_create_defaults(cptestctx: &ControlPlaneTestContext) {
         (vpcs.len(), subnets.len())
     }
 
+    async fn assert_default_nic_error(
+        client: &ClientTestContext,
+        project: &str,
+    ) {
+        let error = object_create_error(
+            client,
+            &format!("/v1/instances?project={project}"),
+            &instance::InstanceCreate {
+                identity: IdentityMetadataCreateParams {
+                    name: "my-instance".parse().unwrap(),
+                    description: String::new(),
+                },
+                ncpus: InstanceCpuCount(4),
+                memory: ByteCount::from_gibibytes_u32(1),
+                hostname: "the-host".parse().unwrap(),
+                user_data: Vec::new(),
+                ssh_public_keys: Some(Vec::new()),
+                network_interfaces: Default::default(),
+                external_ips: Vec::new(),
+                disks: Vec::new(),
+                boot_disk: None,
+                cpu_platform: None,
+                start: false,
+                auto_restart_policy: Default::default(),
+                anti_affinity_groups: Vec::new(),
+                multicast_groups: Vec::new(),
+                enable_jumbo_frames: false,
+            },
+            StatusCode::NOT_FOUND,
+        )
+        .await;
+        assert_eq!(error.error_code.as_deref(), Some("Not Found"));
+        assert_eq!(
+            error.message,
+            "this project has no VPC or subnet named \"default\", so a \
+             default network interface cannot be created; pass explicit \
+             network interface parameters or create the VPC/subnet first",
+        );
+    }
+
     create(client, "defaults-omitted", None).await;
     assert_eq!(default_counts(client, "defaults-omitted").await, (1, 1));
 
@@ -131,28 +172,44 @@ async fn test_project_create_defaults(cptestctx: &ControlPlaneTestContext) {
     )
     .await;
     assert_eq!(default_counts(client, "defaults-empty").await, (0, 0));
+    assert_default_nic_error(client, "defaults-empty").await;
+
+    create(
+        client,
+        "defaults-vpc-all",
+        Some(project::ProjectCreateDefaults {
+            vpc: Some(vpc::VpcCreateDefaultsSelection::All),
+        }),
+    )
+    .await;
+    assert_eq!(default_counts(client, "defaults-vpc-all").await, (1, 1));
 
     create(
         client,
         "defaults-vpc-only",
         Some(project::ProjectCreateDefaults {
-            vpc: Some(vpc::VpcCreateDefaults { subnet: None }),
-        }),
-    )
-    .await;
-    assert_eq!(default_counts(client, "defaults-vpc-only").await, (1, 0));
-
-    create(
-        client,
-        "defaults-all",
-        Some(project::ProjectCreateDefaults {
-            vpc: Some(vpc::VpcCreateDefaults {
-                subnet: Some(vpc::SubnetCreateDefaults {}),
+            vpc: Some(vpc::VpcCreateDefaultsSelection::Explicit {
+                defaults: vpc::VpcCreateDefaults { subnet: None },
             }),
         }),
     )
     .await;
-    assert_eq!(default_counts(client, "defaults-all").await, (1, 1));
+    assert_eq!(default_counts(client, "defaults-vpc-only").await, (1, 0));
+    assert_default_nic_error(client, "defaults-vpc-only").await;
+
+    create(
+        client,
+        "defaults-selected",
+        Some(project::ProjectCreateDefaults {
+            vpc: Some(vpc::VpcCreateDefaultsSelection::Explicit {
+                defaults: vpc::VpcCreateDefaults {
+                    subnet: Some(vpc::SubnetCreateDefaults {}),
+                },
+            }),
+        }),
+    )
+    .await;
+    assert_eq!(default_counts(client, "defaults-selected").await, (1, 1));
 }
 
 async fn delete_project_default_subnet(

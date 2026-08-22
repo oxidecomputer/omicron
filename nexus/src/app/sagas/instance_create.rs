@@ -772,6 +772,14 @@ async fn create_default_primary_network_interface(
         .vpc_subnet_name(&internal_default_name)
         .fetch()
         .await
+        .map_err(|error| match error {
+            Error::ObjectNotFound { .. } => Error::non_resourcetype_not_found(
+                "this project has no VPC or subnet named \"default\", so a \
+                 default network interface cannot be created; pass explicit \
+                 network interface parameters or create the VPC/subnet first",
+            ),
+            error => error,
+        })
         .map_err(saga_action_failed)?;
     let interface = db::model::IncompleteNetworkInterface::new_instance(
         *interface_id,

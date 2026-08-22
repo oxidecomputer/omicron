@@ -84,7 +84,14 @@ fn default_vpc_defaults(
 ) -> Option<Option<&vpc::VpcCreateDefaults>> {
     match &project_create.defaults {
         None => Some(None),
-        Some(defaults) => defaults.vpc.as_ref().map(Some),
+        Some(defaults) => {
+            defaults.vpc.as_ref().map(|selection| match selection {
+                vpc::VpcCreateDefaultsSelection::All => None,
+                vpc::VpcCreateDefaultsSelection::Explicit { defaults } => {
+                    Some(defaults)
+                }
+            })
+        }
     }
 }
 
@@ -210,7 +217,14 @@ mod test {
         assert_eq!(default_vpc_defaults(&project_create), None);
 
         project_create.defaults = Some(project::ProjectCreateDefaults {
-            vpc: Some(vpc::VpcCreateDefaults { subnet: None }),
+            vpc: Some(vpc::VpcCreateDefaultsSelection::All),
+        });
+        assert_eq!(default_vpc_defaults(&project_create), Some(None));
+
+        project_create.defaults = Some(project::ProjectCreateDefaults {
+            vpc: Some(vpc::VpcCreateDefaultsSelection::Explicit {
+                defaults: vpc::VpcCreateDefaults { subnet: None },
+            }),
         });
         assert!(
             default_vpc_defaults(&project_create)
@@ -221,8 +235,10 @@ mod test {
         );
 
         project_create.defaults = Some(project::ProjectCreateDefaults {
-            vpc: Some(vpc::VpcCreateDefaults {
-                subnet: Some(vpc::SubnetCreateDefaults {}),
+            vpc: Some(vpc::VpcCreateDefaultsSelection::Explicit {
+                defaults: vpc::VpcCreateDefaults {
+                    subnet: Some(vpc::SubnetCreateDefaults {}),
+                },
             }),
         });
         assert!(
