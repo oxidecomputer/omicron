@@ -21,7 +21,6 @@ use nexus_types::external_api::instance::{
     PrivateIpStackCreate,
 };
 use nexus_types::external_api::{instance, ip_pool, multicast};
-use nexus_types::identity::Resource;
 use nexus_types::saga::saga_action_failed;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::Name;
@@ -105,7 +104,24 @@ struct ExternalIpParams {
 struct MulticastParams {
     serialized_authn: authn::saga::Serialized,
     instance_id: InstanceUuid,
+    group_index: usize,
+    /// Stable identity for the group-resolution operation.
+    ///
+    /// It lets an implicit group creation remain owned by this action when
+    /// Steno repeats the action.
+    group_creation_id: Uuid,
+    /// Stable identity for the membership created by this saga action.
+    member_id: Uuid,
     join_spec: multicast::MulticastGroupJoinSpec,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+struct MulticastJoinOutput {
+    member_id: Uuid,
+    group_id: MulticastGroupUuid,
+    created: bool,
+    /// Whether the returned member row has this action's stable member ID.
+    owned: bool,
 }
 
 // instance create saga: actions
@@ -371,6 +387,9 @@ impl NexusSaga for SagaInstanceCreate {
             let mcast_params = MulticastParams {
                 serialized_authn: params.serialized_authn.clone(),
                 instance_id,
+                group_index: i,
+                group_creation_id: Uuid::new_v4(),
+                member_id: Uuid::new_v4(),
                 join_spec,
             };
 
@@ -1065,15 +1084,21 @@ async fn sic_allocate_instance_external_ip_undo(
 }
 
 /// Add the instance to a multicast group using the request parameters at
-/// index `group_index`, returning Some(()) if a group is joined (or None if
-/// no group is specified).
+/// index `group_index`, returning `Some(MulticastJoinOutput)` on join or
+/// `None` when multicast is disabled.
 async fn sic_join_instance_multicast_group(
     sagactx: NexusActionContext,
-) -> Result<Option<()>, ActionError> {
+) -> Result<Option<MulticastJoinOutput>, ActionError> {
     let osagactx = sagactx.user_data();
     let datastore = osagactx.datastore();
-    let MulticastParams { serialized_authn, instance_id, join_spec } =
-        sagactx.saga_params()?;
+    let MulticastParams {
+        serialized_authn,
+        instance_id,
+        group_creation_id,
+        member_id,
+        join_spec,
+        ..
+    } = sagactx.saga_params()?;
 
     let opctx =
         crate::context::op_context_for_saga_action(&sagactx, &serialized_authn);
@@ -1084,53 +1109,60 @@ async fn sic_join_instance_multicast_group(
                "multicast not enabled, skipping multicast group member attachment";
                "instance_id" => %instance_id,
                "join_spec" => ?join_spec);
-        return Ok(Some(()));
+        return Ok(None);
     }
 
     // Resolve the multicast group identifier to a group ID.
     // a) For IP-based identifiers, this implicitly auto-creates the group if it
     //    doesn't exist.
-    // b) For name/ID identifiers, the group must already exist.
+    // b) For name-based identifiers, this may implicitly create the group when
+    //    a default pool is available.
+    // c) ID-based identifiers require an existing group.
     // Validation (address family + SSM) happens inside resolve.
-    let group_id = osagactx
+    let resolved = osagactx
         .nexus()
-        .resolve_multicast_group_identifier_with_sources(
+        .resolve_multicast_group_identifier_with_sources_and_creation_id(
             &opctx,
             &join_spec.group,
             join_spec.source_ips.as_deref(),
             join_spec.ip_version,
+            Some(group_creation_id),
         )
         .await
         .map_err(saga_action_failed)?;
+    let group_id = resolved.id;
 
     // Add the instance as a member of the multicast group in "Joining" state.
     //
-    // We use `multicast_group_member_attach_to_instance` (same as explicit join API) which
-    // doesn't require the group to be in "Active" state. This supports
-    // auto-created groups (which start in "Creating" state)
+    // We use the same atomic attach operation as the explicit join API, with
+    // a stable member ID. It doesn't require the group to be in "Active"
+    // state, which supports auto-created groups (which start in "Creating"
+    // state).
     //
     // The RPW reconciler handles transitioning both group and member to active states.
-    if let Err(e) = datastore
-        .multicast_group_member_attach_to_instance(
+    //
+    // On attach failure, any implicitly created group is left in place for
+    // the reconciler's orphan pass. Soft-deleting it here would strand this
+    // saga's stable creation ID on a dead row, so a re-executed action could
+    // neither recover the group (resolution finds only live rows) nor
+    // re-create it (unique conflict on the stable ID).
+    //
+    // Recovery via the stable ID spans the orphan pass: a re-execution that
+    // finds its group already reaped (ORPHAN_GROUP_MIN_AGE) restores the
+    // soft-deleted row, which is safe because a memberless group never
+    // reaches the dataplane. What remains unrecoverable is a row the
+    // reconciler has since hard-deleted while another group claimed its IP
+    // or name, which surfaces as an expired recovery window.
+    let attach_result = datastore
+        .multicast_group_member_attach_to_instance_with_id(
             &opctx,
             group_id,
             instance_id,
+            member_id,
             join_spec.source_ips.as_deref(),
         )
         .await
-    {
-        match e {
-            Error::ObjectAlreadyExists { .. } => {
-                debug!(
-                    opctx.log,
-                    "multicast member already exists";
-                    "instance_id" => %instance_id,
-                );
-                return Ok(Some(()));
-            }
-            e => return Err(saga_action_failed(e)),
-        }
-    }
+        .map_err(saga_action_failed)?;
 
     info!(
         osagactx.log(),
@@ -1139,7 +1171,12 @@ async fn sic_join_instance_multicast_group(
         "instance_id" => %instance_id
     );
 
-    Ok(Some(()))
+    Ok(Some(MulticastJoinOutput {
+        member_id: attach_result.id,
+        group_id,
+        created: resolved.created,
+        owned: attach_result.id == member_id,
+    }))
 }
 
 async fn sic_join_instance_multicast_group_undo(
@@ -1147,45 +1184,47 @@ async fn sic_join_instance_multicast_group_undo(
 ) -> Result<(), anyhow::Error> {
     let osagactx = sagactx.user_data();
     let datastore = osagactx.datastore();
-    let MulticastParams { serialized_authn, join_spec, .. } =
+    let MulticastParams { serialized_authn, group_index, .. } =
         sagactx.saga_params()?;
 
     let opctx =
         crate::context::op_context_for_saga_action(&sagactx, &serialized_authn);
 
-    // Check if multicast is enabled - if not, no cleanup needed since we didn't attach
-    if !osagactx.nexus().multicast_enabled() {
-        debug!(osagactx.log(),
-               "multicast not enabled, skipping multicast group member undo";
-               "join_spec" => ?join_spec);
+    let output = sagactx.lookup::<Option<MulticastJoinOutput>>(&format!(
+        "multicast-group-{group_index}"
+    ))?;
+    let Some(output) = output else {
         return Ok(());
+    };
+
+    // Delete only the exact member row this action owns. The row ID
+    // prevents undo from deleting a replacement membership created after a
+    // concurrent detach/reattach, and `owned` skips a membership this
+    // action found rather than established.
+    //
+    // A row another actor already removed leaves nothing to undo here, and the
+    // group cleanup below still runs.
+    if output.owned {
+        datastore
+            .multicast_group_member_delete_by_id(&opctx, output.member_id)
+            .await?;
     }
 
-    // Get the instance ID from the saga context
-    let instance_id = sagactx.lookup::<InstanceUuid>("instance_id")?;
-
-    // Look up the multicast group by identifier using the existing nexus method
-    let multicast_group_selector = multicast::MulticastGroupSelector {
-        multicast_group: join_spec.group.clone(),
-    };
-    let multicast_group_lookup = osagactx
-        .nexus()
-        .multicast_group_lookup(&opctx, &multicast_group_selector)
-        .await?;
-    // Undo uses same permission as forward action (Read on multicast group)
-    let (.., db_group) =
-        multicast_group_lookup.fetch_for(authz::Action::Read).await?;
-
-    // Delete only this instance's membership in the group, not all members.
-    // This ensures saga undo doesn't affect other instances that may have
-    // independently joined the same group.
-    datastore
-        .multicast_group_member_delete_by_group_and_instance(
-            &opctx,
-            MulticastGroupUuid::from_untyped_uuid(db_group.id()),
-            instance_id,
-        )
-        .await?;
+    // The action may have implicitly created the group even when the member
+    // row already existed, so cleanup is not gated on member insertion.
+    if output.created {
+        if let Err(e) = datastore
+            .multicast_group_mark_removal_if_empty(&opctx, output.group_id)
+            .await
+        {
+            error!(
+                osagactx.log(),
+                "failed to clean up multicast group after saga undo";
+                "group_id" => %output.group_id,
+                "error" => ?e,
+            );
+        }
+    }
 
     Ok(())
 }
@@ -1469,7 +1508,7 @@ async fn sic_move_to_stopped(
 }
 
 #[cfg(test)]
-pub mod test {
+pub mod tests {
     use crate::{
         app::saga::create_saga_dag, app::sagas::instance_create::Params,
         app::sagas::instance_create::SagaInstanceCreate,
@@ -1482,15 +1521,22 @@ pub mod test {
     use dropshot::test_util::ClientTestContext;
     use nexus_db_queries::authn::saga::Serialized;
     use nexus_db_queries::context::OpContext;
+    use nexus_db_queries::db;
     use nexus_db_queries::db::datastore::DataStore;
+    use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
+    use nexus_db_queries::db::model::MulticastGroupMember;
     use nexus_test_utils::resource_helpers::DiskTest;
     use nexus_test_utils::resource_helpers::create_default_ip_pools;
     use nexus_test_utils::resource_helpers::create_disk;
+    use nexus_test_utils::resource_helpers::create_multicast_ip_pool;
     use nexus_test_utils::resource_helpers::create_project;
+    use nexus_test_utils::resource_helpers::link_ip_pool;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::external_api::instance as instance_types;
     use nexus_types::external_api::instance::InstanceCpuCount;
     use nexus_types::external_api::ip_pool::PoolSelector;
+    use nexus_types::external_api::multicast as multicast_types;
+    use nexus_types::identity::Resource;
     use omicron_common::address::IpVersion;
     use omicron_common::api::external::{
         ByteCount, IdentityMetadataCreateParams,
@@ -1498,6 +1544,7 @@ pub mod test {
     use omicron_sled_agent::sim::SledAgent;
     use sled_agent_types::early_networking::SwitchSlot;
     use std::collections::HashSet;
+    use std::net::{IpAddr, Ipv4Addr};
     use uuid::Uuid;
 
     type ControlPlaneTestContext =
@@ -1506,9 +1553,22 @@ pub mod test {
     const INSTANCE_NAME: &str = "my-instance";
     const PROJECT_NAME: &str = "springfield-squidport";
     const DISK_NAME: &str = "my-disk";
+    const MULTICAST_POOL_NAME: &str = "mcast-pool";
+
+    /// Multicast address within the default range of
+    /// [`create_multicast_ip_pool`] (224.1.0.0 - 224.1.255.255).
+    ///
+    /// Joining by IP implicitly creates the group, so the saga exercises both
+    /// the member insert and the created-group cleanup on unwind.
+    const MULTICAST_GROUP_IP: Ipv4Addr = Ipv4Addr::new(224, 1, 0, 10);
 
     async fn create_org_project_and_disk(client: &ClientTestContext) -> Uuid {
         create_default_ip_pools(&client).await;
+        // A multicast pool covering `MULTICAST_GROUP_IP` is required for the
+        // saga's join-by-IP node to resolve a pool and create the group.
+        create_multicast_ip_pool(&client, MULTICAST_POOL_NAME, None).await;
+        link_ip_pool(&client, MULTICAST_POOL_NAME, &DEFAULT_SILO.id(), false)
+            .await;
         let project = create_project(client, PROJECT_NAME).await;
         create_disk(&client, PROJECT_NAME, DISK_NAME).await;
         project.identity.id
@@ -1548,7 +1608,13 @@ pub mod test {
                 start: false,
                 auto_restart_policy: Default::default(),
                 anti_affinity_groups: Vec::new(),
-                multicast_groups: Vec::new(),
+                multicast_groups: vec![multicast_types::MulticastGroupJoinSpec {
+                    group: multicast_types::MulticastGroupIdentifier::Ip(
+                        IpAddr::V4(MULTICAST_GROUP_IP),
+                    ),
+                    source_ips: None,
+                    ip_version: None,
+                }],
                 enable_jumbo_frames: false,
             },
             boundary_switches: HashSet::from([SwitchSlot::Switch0]),
@@ -1567,11 +1633,40 @@ pub mod test {
         // Build the saga DAG with the provided test parameters and run it
         let opctx = test_helpers::test_opctx(&cptestctx);
         let params = new_test_params(&opctx, project_id);
-        nexus
+        let output = nexus
             .sagas
             .saga_execute::<SagaInstanceCreate>(params)
             .await
             .expect("Saga should have succeeded");
+
+        // The join-by-IP node implicitly creates the group and inserts the
+        // membership, so both records must be live once the saga completes.
+        let instance = output
+            .lookup_node_output::<db::model::Instance>("instance_record")
+            .expect("Saga should have created an instance record");
+        let datastore = nexus.datastore();
+        let members = live_multicast_group_members(datastore).await;
+        assert_eq!(
+            members.len(),
+            1,
+            "Received {} live multicast group members, expected 1",
+            members.len()
+        );
+        assert_eq!(
+            members[0].multicast_ip.ip(),
+            IpAddr::V4(MULTICAST_GROUP_IP),
+            "Received a member for an unexpected multicast address"
+        );
+        assert_eq!(
+            members[0].parent_id,
+            instance.id(),
+            "Multicast member should belong to the instance the saga created"
+        );
+        assert!(
+            !no_multicast_group_records_exist(datastore).await,
+            "Implicitly created multicast group should still exist after \
+             the saga completes"
+        );
     }
 
     async fn no_instance_records_exist(datastore: &DataStore) -> bool {
@@ -1625,6 +1720,48 @@ pub mod test {
             .is_none()
     }
 
+    /// Live (not soft-deleted) multicast group members.
+    ///
+    /// Undo and instance deletion soft-delete members, so only rows with a
+    /// null `time_deleted` represent membership the system still considers
+    /// real.
+    async fn live_multicast_group_members(
+        datastore: &DataStore,
+    ) -> Vec<MulticastGroupMember> {
+        use nexus_db_schema::schema::multicast_group_member::dsl;
+
+        dsl::multicast_group_member
+            .filter(dsl::time_deleted.is_null())
+            .select(MulticastGroupMember::as_select())
+            .get_results_async::<MulticastGroupMember>(
+                &*datastore.pool_connection_for_tests().await.unwrap(),
+            )
+            .await
+            .unwrap()
+    }
+
+    async fn no_multicast_group_records_exist(datastore: &DataStore) -> bool {
+        use nexus_db_queries::db::model::ExternalMulticastGroup;
+        use nexus_db_schema::schema::multicast_group::dsl;
+
+        dsl::multicast_group
+            .filter(dsl::time_deleted.is_null())
+            .select(ExternalMulticastGroup::as_select())
+            .first_async::<ExternalMulticastGroup>(
+                &*datastore.pool_connection_for_tests().await.unwrap(),
+            )
+            .await
+            .optional()
+            .unwrap()
+            .is_none()
+    }
+
+    async fn no_multicast_group_member_records_exist(
+        datastore: &DataStore,
+    ) -> bool {
+        live_multicast_group_members(datastore).await.is_empty()
+    }
+
     async fn disk_is_detached(datastore: &DataStore) -> bool {
         use nexus_db_queries::db::model::Disk;
         use nexus_db_schema::schema::disk::dsl;
@@ -1656,6 +1793,8 @@ pub mod test {
         assert!(no_instance_records_exist(datastore).await);
         assert!(no_network_interface_records_exist(datastore).await);
         assert!(no_external_ip_records_exist(datastore).await);
+        assert!(no_multicast_group_member_records_exist(datastore).await);
+        assert!(no_multicast_group_records_exist(datastore).await);
         assert!(
             test_helpers::no_sled_resource_vmm_records_exist(cptestctx).await
         );

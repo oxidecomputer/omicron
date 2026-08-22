@@ -11,11 +11,13 @@ use crate::app::sagas::declare_saga_actions;
 use nexus_db_lookup::LookupPath;
 use nexus_db_queries::{authn, authz, db};
 use nexus_types::saga::saga_action_failed;
+use omicron_common::api::external::DataPageParams;
+use omicron_uuid_kinds::MulticastGroupUuid;
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid};
 use serde::Deserialize;
 use serde::Serialize;
 use sled_agent_types::early_networking::SwitchSlot;
-use slog::{debug, info};
+use slog::{debug, error, info};
 use steno::ActionError;
 
 // instance delete saga: input parameters
@@ -164,14 +166,43 @@ async fn sid_leave_multicast_groups(
         return Ok(());
     }
 
-    // Mark all multicast group memberships for this instance as deleted
-    datastore
-        .multicast_group_members_mark_for_removal(
+    let instance_id = InstanceUuid::from_untyped_uuid(instance_id);
+    let groups = datastore
+        .multicast_group_members_list_by_instance(
             &opctx,
-            InstanceUuid::from_untyped_uuid(instance_id),
+            instance_id,
+            &DataPageParams::max_page(),
         )
         .await
         .map_err(saga_action_failed)?;
+
+    // Mark all multicast group memberships for this instance as deleted
+    datastore
+        .multicast_group_members_mark_for_removal(&opctx, instance_id)
+        .await
+        .map_err(saga_action_failed)?;
+
+    // The instance may have been the last member of a group. Mark each
+    // emptied group for deletion. The datastore guard makes this safe if a
+    // concurrent join added another member. Failures are logged rather than
+    // failing the saga, since this action registers no undo and the
+    // reconciler's orphan pass also reaps memberless groups.
+    for member in groups {
+        let group_id =
+            MulticastGroupUuid::from_untyped_uuid(member.external_group_id);
+        if let Err(e) = datastore
+            .multicast_group_mark_removal_if_empty(&opctx, group_id)
+            .await
+        {
+            error!(
+                osagactx.log(),
+                "failed to mark emptied multicast group for removal";
+                "group_id" => %group_id,
+                "error" => ?e,
+            );
+        }
+    }
+    osagactx.nexus().background_tasks.task_multicast_reconciler.activate();
 
     info!(
         osagactx.log(),
@@ -225,10 +256,10 @@ async fn sid_detach_external_subnets(
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use crate::{
         app::saga::create_saga_dag,
-        app::sagas::instance_create::test::verify_clean_slate,
+        app::sagas::instance_create::tests::verify_clean_slate,
         app::sagas::instance_delete::Params,
         app::sagas::instance_delete::SagaInstanceDelete,
     };

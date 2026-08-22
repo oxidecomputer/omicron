@@ -1418,6 +1418,7 @@ async fn siu_commit_instance_updates(
                            sled_id after migration";
                           "instance_id" => %instance_id,
                           "new_sled_id" => %new_sled_id);
+                    nexus.background_tasks.task_multicast_reconciler.activate();
                 }
             }
         }

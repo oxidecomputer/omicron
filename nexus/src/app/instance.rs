@@ -29,6 +29,7 @@ use nexus_db_model::InstanceIntendedState as IntendedState;
 use nexus_db_model::InstanceUpdate;
 use nexus_db_model::IpAttachState;
 use nexus_db_model::IpKind;
+use nexus_db_model::MulticastGroupMember;
 use nexus_db_model::Vmm as DbVmm;
 use nexus_db_model::VmmState as DbVmmState;
 use nexus_db_queries::authn;
@@ -37,6 +38,8 @@ use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::datastore::InstanceAndActiveVmm;
+use nexus_db_queries::db::datastore::multicast::ExpectedMulticastMembership;
+use nexus_db_queries::db::datastore::multicast::MulticastMembershipChange;
 use nexus_db_queries::db::identity::Resource;
 use nexus_db_queries::db::model::InstanceStateComputer;
 use nexus_types::external_api::disk;
@@ -87,7 +90,8 @@ use sled_agent_types::instance::ExternalIps;
 use sled_agent_types::inventory::SourceNatConfig;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeSet;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
+use std::collections::HashSet;
 use std::matches;
 use std::net::IpAddr;
 use std::net::SocketAddr;
@@ -347,6 +351,143 @@ async fn normalize_anti_affinity_groups(
         .collect::<Vec<NameOrId>>())
 }
 
+/// A multicast group resolved for an instance membership request.
+struct ResolvedMulticastMembership {
+    group_id: MulticastGroupUuid,
+    source_ips: Option<Vec<IpAddr>>,
+    created: bool,
+}
+
+/// Resolved multicast memberships for an instance update.
+struct ResolvedMulticastGroups {
+    memberships: Vec<ResolvedMulticastMembership>,
+}
+
+/// A multicast membership change plan for an instance update.
+///
+/// Resolution is separated from mutation so that specs are validated before
+/// any part of the instance configuration is persisted.
+struct MulticastGroupChangePlan {
+    /// The memberships this plan was built against, rechecked by the
+    /// reconfiguration transaction.
+    expected_memberships: Vec<ExpectedMulticastMembership>,
+    changes: Vec<MulticastMembershipChange>,
+    /// Groups this request implicitly created, for rollback when a later
+    /// failure leaves them memberless.
+    created_group_ids: Vec<MulticastGroupUuid>,
+}
+
+impl MulticastGroupChangePlan {
+    /// Build a change plan from the current memberships and resolved request.
+    ///
+    /// This is deliberately pure: it performs only set and source-filter
+    /// transformations, making the membership diff independently testable.
+    fn from_memberships(
+        current_memberships: &[MulticastGroupMember],
+        resolved: ResolvedMulticastGroups,
+    ) -> Self {
+        let requested_group_ids: HashSet<_> = resolved
+            .memberships
+            .iter()
+            .map(|membership| membership.group_id.into_untyped_uuid())
+            .collect();
+
+        let leave_changes = current_memberships
+            .iter()
+            .filter(|member| {
+                !requested_group_ids.contains(&member.external_group_id)
+            })
+            .map(|member| MulticastMembershipChange::Leave {
+                group_id: MulticastGroupUuid::from_untyped_uuid(
+                    member.external_group_id,
+                ),
+            });
+
+        // A group this request created cannot already be a current membership,
+        // so every created group also produces a join change.
+        let created_group_ids = resolved
+            .memberships
+            .iter()
+            .filter(|membership| membership.created)
+            .map(|membership| membership.group_id)
+            .collect();
+
+        // A membership the instance already holds is re-attached only when the
+        // request names a source filter that differs from the stored one.
+        //
+        // Ordering within the filter is not significant, so just compare as
+        // sets.
+        let current_source_ips: HashMap<Uuid, HashSet<IpAddr>> =
+            current_memberships
+                .iter()
+                .map(|member| {
+                    (
+                        member.external_group_id,
+                        member.source_ips.iter().map(|ip| ip.ip()).collect(),
+                    )
+                })
+                .collect();
+
+        let join_changes: Vec<_> = resolved
+            .memberships
+            .into_iter()
+            .filter(|membership| {
+                let Some(current) = current_source_ips
+                    .get(&membership.group_id.into_untyped_uuid())
+                else {
+                    return true;
+                };
+                membership.source_ips.as_ref().is_some_and(|requested| {
+                    requested.iter().copied().collect::<HashSet<_>>()
+                        != *current
+                })
+            })
+            .map(|membership| MulticastMembershipChange::Join {
+                group_id: membership.group_id,
+                source_ips: membership.source_ips,
+            })
+            .collect();
+
+        // Groups whose stored filter this plan rewrites. Their sources join
+        // the snapshot, so a filter another request rewrote in the meantime is
+        // reported as a conflict rather than overwritten.
+        let rewritten_group_ids: HashSet<Uuid> = join_changes
+            .iter()
+            .filter_map(|change| match change {
+                MulticastMembershipChange::Join { group_id, .. } => {
+                    let group_id = group_id.into_untyped_uuid();
+                    current_source_ips
+                        .contains_key(&group_id)
+                        .then_some(group_id)
+                }
+                MulticastMembershipChange::Leave { .. } => None,
+            })
+            .collect();
+
+        let expected_memberships = current_source_ips
+            .iter()
+            .map(|(group_id, source_ips)| ExpectedMulticastMembership {
+                group_id: MulticastGroupUuid::from_untyped_uuid(*group_id),
+                source_ips: rewritten_group_ids
+                    .contains(group_id)
+                    .then(|| source_ips.iter().copied().collect()),
+            })
+            .collect();
+
+        // Leave and join sets are disjoint, so ordering by group ID gives
+        // every reconfiguration the same order over `multicast_group` rows.
+        // Without it, two requests touching the same groups in opposite orders
+        // conflict and retry.
+        let mut changes: Vec<_> = leave_changes.chain(join_changes).collect();
+        changes.sort_unstable_by_key(|change| match change {
+            MulticastMembershipChange::Leave { group_id }
+            | MulticastMembershipChange::Join { group_id, .. } => *group_id,
+        });
+
+        Self { expected_memberships, changes, created_group_ids }
+    }
+}
+
 impl super::Nexus {
     /// Look up an instance by name or UUID.
     ///
@@ -389,17 +530,28 @@ impl super::Nexus {
         }
     }
 
-    /// Handle multicast group membership changes during instance reconfiguration.
+    /// Resolve requested multicast group membership changes into a plan.
     ///
-    /// Diff is computed against the instance's active memberships only
-    /// (i.e., rows with `time_deleted IS NULL`). Removed ("Left") rows are
-    /// ignored here and handled by the reconciler.
-    async fn handle_multicast_group_changes(
+    /// Resolution implicitly creates groups that do not yet exist, so it runs
+    /// before the instance record is written. A request rejected for a
+    /// duplicate or invalid spec then leaves the rest of the instance
+    /// configuration untouched, and the groups this request created are
+    /// dropped before the error is returned.
+    ///
+    /// The diff is computed against membership rows with `time_deleted IS
+    /// NULL`. That includes rows in the "Left" state, since instance stop
+    /// transitions members to "Left" without setting `time_deleted`. As
+    /// reconfiguration requires a stopped instance, "Left" rows are the
+    /// common case. Only rows soft-deleted by an explicit detach are
+    /// excluded.
+    ///
+    /// `Ok(None)` means multicast is disabled and no membership work applies.
+    async fn plan_multicast_group_changes(
         &self,
         opctx: &OpContext,
         authz_instance: &authz::Instance,
         multicast_groups: &[multicast::MulticastGroupJoinSpec],
-    ) -> Result<(), Error> {
+    ) -> Result<Option<MulticastGroupChangePlan>, Error> {
         let instance_id = authz_instance.id();
 
         // Check if multicast is enabled -> if not, skip all multicast operations
@@ -408,7 +560,15 @@ impl super::Nexus {
                    "multicast not enabled, skipping multicast group changes";
                    "instance_id" => %instance_id,
                    "requested_groups_count" => multicast_groups.len());
-            return Ok(());
+            return Ok(None);
+        }
+
+        // Enforce the same per-instance bound as instance create.
+        if multicast_groups.len() > MAX_MULTICAST_GROUPS_PER_INSTANCE {
+            return Err(Error::invalid_request(&format!(
+                "An instance may not join more than {} multicast groups",
+                MAX_MULTICAST_GROUPS_PER_INSTANCE,
+            )));
         }
 
         debug!(
@@ -439,120 +599,191 @@ impl super::Nexus {
             "current_group_ids" => ?current_group_ids
         );
 
-        // Resolve multicast group identifiers to group IDs.
-        //
-        // For existing memberships (group already in current_group_ids), we just
-        // need the ID - no validation needed since source_ips: None means
-        // "preserve existing sources".
-        //
-        // For new memberships, we resolve (which creates groups if needed) and
-        // validation (address family + SSM) happens inside resolve.
-        let mut new_group_ids = HashSet::new();
-        let mut group_source_ips: HashMap<Uuid, Option<Vec<std::net::IpAddr>>> =
-            HashMap::new();
-        for spec in multicast_groups {
-            // Check if this is an existing membership by looking up the group ID first
-            let group_uuid = match self
-                .resolve_multicast_group_identifier(opctx, &spec.group)
-                .await
+        // Reject duplicate identifiers before any resolution runs, since
+        // resolution can implicitly create a group that a later rejection
+        // would leave behind with no members.
+        for (idx, spec) in multicast_groups.iter().enumerate() {
+            if multicast_groups[..idx]
+                .iter()
+                .any(|prior| prior.group == spec.group)
             {
-                Ok(id) => {
-                    let uuid = id.into_untyped_uuid();
-                    // If already a member, skip validation (None = preserve)
-                    if !current_group_ids.contains(&uuid) {
-                        // New membership - validate (address family + SSM)
-                        self.resolve_multicast_group_identifier_with_sources(
-                            opctx,
-                            &spec.group,
-                            spec.source_ips.as_deref(),
-                            spec.ip_version,
-                        )
-                        .await?;
-                    }
-                    uuid
-                }
-                Err(Error::ObjectNotFound { .. }) => {
-                    // Group doesn't exist: resolve will create it (and validate accordingly)
-                    let id = self
-                        .resolve_multicast_group_identifier_with_sources(
-                            opctx,
-                            &spec.group,
-                            spec.source_ips.as_deref(),
-                            spec.ip_version,
-                        )
-                        .await?;
-                    id.into_untyped_uuid()
-                }
-                Err(e) => return Err(e),
-            };
-            new_group_ids.insert(group_uuid);
-            group_source_ips.insert(group_uuid, spec.source_ips.clone());
+                return Err(Error::invalid_request(
+                    "Duplicate multicast group specified in request",
+                ));
+            }
         }
 
-        // Validate no duplicate groups were specified
-        if new_group_ids.len() != multicast_groups.len() {
-            return Err(Error::invalid_request(
-                "Duplicate multicast group specified in request",
-            ));
-        }
+        // Resolve the specs, rolling back any groups this request implicitly
+        // created if resolution rejects the request partway. The identifier
+        // deduplication above cannot catch aliases (a group's IP
+        // alongside its generated name), and a later spec can fail validation
+        // after an earlier spec already created a group.
+        let resolved = self
+            .resolve_multicast_group_specs(
+                opctx,
+                &current_group_ids,
+                multicast_groups,
+            )
+            .await?;
+        let plan = MulticastGroupChangePlan::from_memberships(
+            &current_memberships,
+            resolved,
+        );
 
-        // Determine which groups to leave and join
-        let groups_to_leave: Vec<_> =
-            current_group_ids.difference(&new_group_ids).cloned().collect();
-        let groups_to_join: Vec<_> =
-            new_group_ids.difference(&current_group_ids).cloned().collect();
+        let groups_to_leave = plan
+            .changes
+            .iter()
+            .filter(|change| {
+                matches!(change, MulticastMembershipChange::Leave { .. })
+            })
+            .count();
+
+        let groups_to_join = plan
+            .changes
+            .iter()
+            .filter(|change| {
+                matches!(change, MulticastMembershipChange::Join { .. })
+            })
+            .count();
 
         debug!(
             opctx.log,
-            "membership changes";
+            "planned membership changes";
             "instance_id" => %instance_id,
-            "groups_to_leave" => ?groups_to_leave,
-            "groups_to_join" => ?groups_to_join
+            "groups_to_leave" => groups_to_leave,
+            "groups_to_join" => groups_to_join
         );
 
-        // Remove members from groups that are no longer wanted
-        for group_id in groups_to_leave {
-            debug!(
-                opctx.log,
-                "removing member from group";
-                "instance_id" => %instance_id,
-                "group_id" => %group_id
-            );
-            self.datastore()
-                .multicast_group_member_detach_by_group_and_instance(
+        Ok(Some(plan))
+    }
+
+    /// Remove groups a request implicitly created that never gained a member.
+    ///
+    /// Failures are logged rather than returned so the caller can surface
+    /// the error that triggered the rollback. The datastore guard leaves a
+    /// group alone if a concurrent request attached a member in the meantime.
+    async fn rollback_created_multicast_groups(
+        &self,
+        opctx: &OpContext,
+        created_group_ids: &[MulticastGroupUuid],
+    ) {
+        for group_id in created_group_ids {
+            if let Err(rollback_err) = self
+                .datastore()
+                .multicast_group_mark_removal_if_empty(opctx, *group_id)
+                .await
+            {
+                error!(
+                    opctx.log,
+                    "failed to rollback orphaned multicast group";
+                    "group_id" => %group_id,
+                    "error" => ?rollback_err,
+                );
+            }
+        }
+    }
+
+    /// Resolve requested multicast group specs to membership values.
+    ///
+    /// For existing memberships (group already in `current_group_ids`), only
+    /// the ID is needed. `source_ips: None` means to "preserve existing
+    /// sources".
+    ///
+    /// For new memberships, resolution implicitly creates missing groups and
+    /// validates address family and SSM sources.
+    async fn resolve_multicast_group_specs(
+        &self,
+        opctx: &OpContext,
+        current_group_ids: &HashSet<Uuid>,
+        multicast_groups: &[multicast::MulticastGroupJoinSpec],
+    ) -> Result<ResolvedMulticastGroups, Error> {
+        let mut created_group_ids = Vec::new();
+        let res = async {
+            let mut memberships = Vec::with_capacity(multicast_groups.len());
+            let mut resolved_group_ids = HashSet::new();
+
+            for spec in multicast_groups {
+                let membership = self
+                    .resolve_multicast_group_spec(
+                        opctx,
+                        current_group_ids,
+                        spec,
+                    )
+                    .await?;
+                if membership.created {
+                    created_group_ids.push(membership.group_id);
+                }
+
+                if !resolved_group_ids
+                    .insert(membership.group_id.into_untyped_uuid())
+                {
+                    return Err(Error::invalid_request(
+                        "Duplicate multicast group specified in request",
+                    ));
+                }
+                memberships.push(membership);
+            }
+
+            Ok(ResolvedMulticastGroups { memberships })
+        }
+        .await;
+
+        match res {
+            Ok(resolved) => Ok(resolved),
+            Err(err) => {
+                self.rollback_created_multicast_groups(
                     opctx,
-                    MulticastGroupUuid::from_untyped_uuid(group_id),
-                    InstanceUuid::from_untyped_uuid(instance_id),
+                    &created_group_ids,
                 )
-                .await?;
+                .await;
+                Err(err)
+            }
+        }
+    }
+
+    /// Resolve one requested membership, preserving an existing membership's
+    /// source filter semantics.
+    async fn resolve_multicast_group_spec(
+        &self,
+        opctx: &OpContext,
+        current_group_ids: &HashSet<Uuid>,
+        spec: &multicast::MulticastGroupJoinSpec,
+    ) -> Result<ResolvedMulticastMembership, Error> {
+        match self.resolve_multicast_group_identifier(opctx, &spec.group).await
+        {
+            // A spec that omits `source_ips` preserves the existing filter, so
+            // a current membership needs no resolution. Source validation is
+            // skipped along with it, since an SSM membership joined earlier
+            // already carries sources the spec is not restating.
+            Ok(group_id)
+                if spec.source_ips.is_none()
+                    && current_group_ids
+                        .contains(&group_id.into_untyped_uuid()) =>
+            {
+                return Ok(ResolvedMulticastMembership {
+                    group_id,
+                    source_ips: None,
+                    created: false,
+                });
+            }
+            Ok(_) | Err(Error::ObjectNotFound { .. }) => {}
+            Err(err) => return Err(err),
         }
 
-        // Add members to new groups with their source_ips.
-        // Validation (address family + SSM) already happened in resolve.
-        for group_id in groups_to_join {
-            let source_ips = group_source_ips
-                .get(&group_id)
-                .cloned()
-                .expect("group_id must be in group_source_ips");
+        let resolved = self
+            .resolve_multicast_group_identifier_with_sources(
+                opctx,
+                &spec.group,
+                spec.source_ips.as_deref(),
+                spec.ip_version,
+            )
+            .await?;
 
-            debug!(
-                opctx.log,
-                "adding member to group (reconciler will handle dataplane updates)";
-                "instance_id" => %instance_id,
-                "group_id" => %group_id,
-                "source_ips" => ?source_ips
-            );
-            self.datastore()
-                .multicast_group_member_attach_to_instance(
-                    opctx,
-                    MulticastGroupUuid::from_untyped_uuid(group_id),
-                    InstanceUuid::from_untyped_uuid(instance_id),
-                    source_ips.as_deref(),
-                )
-                .await?;
-        }
-
-        Ok(())
+        Ok(ResolvedMulticastMembership {
+            group_id: resolved.id,
+            source_ips: spec.source_ips.clone(),
+            created: resolved.created,
+        })
     }
 
     pub(crate) async fn instance_reconfigure(
@@ -625,27 +856,62 @@ impl super::Nexus {
             enable_jumbo_frames: *enable_jumbo_frames,
         };
 
-        // Update the instance configuration
-        let result = self
-            .datastore()
-            .instance_reconfigure(opctx, &authz_instance, update)
-            .await;
+        // Plan multicast membership changes before the instance record is
+        // written so a request rejected for a duplicate or invalid spec
+        // leaves the rest of the configuration untouched.
+        //
+        // Planning implicitly creates groups the request names. Resolution
+        // drops them itself when it rejects the request, and the failure arm
+        // below drops them when the reconfiguration transaction fails. The
+        // reconciler's orphan pass remains the fallback for a creation whose
+        // rollback also fails.
+        let multicast_plan = match multicast_groups {
+            Some(multicast_groups) => {
+                self.plan_multicast_group_changes(
+                    opctx,
+                    &authz_instance,
+                    multicast_groups,
+                )
+                .await?
+            }
+            None => None,
+        };
 
-        // Handle multicast group updates if specified
-        if let Some(multicast_groups) = multicast_groups {
-            self.handle_multicast_group_changes(
+        // Apply membership mutations and update the instance configuration in
+        // one datastore transaction. The expected group IDs let the
+        // transaction reject a stale plan after it locks the instance row.
+        let expected_memberships = multicast_plan
+            .as_ref()
+            .map(|plan| plan.expected_memberships.as_slice());
+        let multicast_changes = multicast_plan
+            .as_ref()
+            .map(|plan| plan.changes.as_slice())
+            .unwrap_or_default();
+        let instance_result = match self
+            .datastore()
+            .instance_reconfigure_with_multicast(
                 opctx,
                 &authz_instance,
-                multicast_groups,
+                update,
+                expected_memberships,
+                multicast_changes,
             )
-            .await?;
-        }
+            .await
+        {
+            Ok(result) => result,
+            Err(e) => {
+                if let Some(plan) = &multicast_plan {
+                    self.rollback_created_multicast_groups(
+                        opctx,
+                        &plan.created_group_ids,
+                    )
+                    .await;
+                }
+                return Err(e);
+            }
+        };
 
-        // Return early with any database errors before activating reconciler
-        let instance_result = result?;
-
-        // Activate multicast reconciler after successful reconfiguration if multicast groups were modified
-        if multicast_groups.is_some() {
+        if multicast_plan.is_some() {
             self.background_tasks.task_multicast_reconciler.activate();
         }
 
@@ -3025,12 +3291,14 @@ fn instance_start_allowed(
 mod tests {
     use super::super::Nexus;
     use super::*;
+    use chrono::Utc;
     use core::time::Duration;
     use futures::{SinkExt, StreamExt};
     use instance::InstanceNetworkInterfaceAttachment;
+    use ipnetwork::IpNetwork;
     use nexus_db_model::{
-        Instance as DbInstance, InstanceState as DbInstanceState,
-        VmmCpuPlatform, VmmState as DbVmmState,
+        Generation, Instance as DbInstance, InstanceState as DbInstanceState,
+        MulticastGroupMemberState, VmmCpuPlatform, VmmState as DbVmmState,
     };
     use nexus_types::external_api::instance;
     use omicron_common::api::external::{
@@ -3343,5 +3611,208 @@ mod tests {
             primary_nic_mtu_for_jumbo_frames(true, true),
             Some(omicron_common::address::EXTERNAL_JUMBO_FRAMES_MTU),
         );
+    }
+
+    fn source_ip(last_octet: u8) -> IpAddr {
+        IpAddr::V4(Ipv4Addr::new(10, 0, 0, last_octet))
+    }
+
+    /// Build a stored membership for `group_id` with the given source filter.
+    ///
+    /// [`MulticastGroupChangePlan::from_memberships`] reads only the group ID
+    /// and the source list, so the remaining columns carry placeholders.
+    fn stored_member(
+        group_id: MulticastGroupUuid,
+        source_ips: &[IpAddr],
+    ) -> MulticastGroupMember {
+        MulticastGroupMember {
+            id: Uuid::new_v4(),
+            time_created: Utc::now(),
+            time_modified: Utc::now(),
+            time_deleted: None,
+            external_group_id: group_id.into_untyped_uuid(),
+            parent_id: Uuid::new_v4(),
+            sled_id: None,
+            state: MulticastGroupMemberState::Joined,
+            version_added: Generation::new(),
+            version_removed: None,
+            multicast_ip: IpNetwork::from(IpAddr::V4(Ipv4Addr::new(
+                224, 0, 1, 1,
+            ))),
+            source_ips: source_ips
+                .iter()
+                .copied()
+                .map(IpNetwork::from)
+                .collect(),
+        }
+    }
+
+    fn requested_membership(
+        group_id: MulticastGroupUuid,
+        source_ips: Option<Vec<IpAddr>>,
+    ) -> ResolvedMulticastMembership {
+        ResolvedMulticastMembership { group_id, source_ips, created: false }
+    }
+
+    fn plan_joins(
+        plan: &MulticastGroupChangePlan,
+    ) -> Vec<(MulticastGroupUuid, Option<Vec<IpAddr>>)> {
+        plan.changes
+            .iter()
+            .filter_map(|change| match change {
+                MulticastMembershipChange::Join { group_id, source_ips } => {
+                    Some((*group_id, source_ips.clone()))
+                }
+                MulticastMembershipChange::Leave { .. } => None,
+            })
+            .collect()
+    }
+
+    fn plan_leaves(plan: &MulticastGroupChangePlan) -> Vec<MulticastGroupUuid> {
+        plan.changes
+            .iter()
+            .filter_map(|change| match change {
+                MulticastMembershipChange::Leave { group_id } => {
+                    Some(*group_id)
+                }
+                MulticastMembershipChange::Join { .. } => None,
+            })
+            .collect()
+    }
+
+    /// The snapshot entry for `group_id`, as `None` when the group is absent
+    /// and `Some(None)` when it is present without a source filter.
+    fn snapshot_sources(
+        plan: &MulticastGroupChangePlan,
+        group_id: MulticastGroupUuid,
+    ) -> Option<Option<HashSet<IpAddr>>> {
+        plan.expected_memberships
+            .iter()
+            .find(|membership| membership.group_id == group_id)
+            .map(|membership| {
+                membership
+                    .source_ips
+                    .as_ref()
+                    .map(|ips| ips.iter().copied().collect())
+            })
+    }
+
+    /// The snapshot carries sources only for groups whose stored filter the
+    /// plan rewrites, including a rewrite that clears the filter outright.
+    /// Preserving requests tolerate concurrent source drift, so widening this
+    /// would turn benign races into spurious conflicts.
+    #[test]
+    fn test_multicast_plan_snapshots_sources_only_for_rewritten_groups() {
+        let rewritten = MulticastGroupUuid::new_v4();
+        let cleared = MulticastGroupUuid::new_v4();
+        let preserved = MulticastGroupUuid::new_v4();
+        let dropped = MulticastGroupUuid::new_v4();
+        let added = MulticastGroupUuid::new_v4();
+        let current = vec![
+            stored_member(rewritten, &[source_ip(1)]),
+            stored_member(cleared, &[source_ip(6)]),
+            stored_member(preserved, &[source_ip(3)]),
+            stored_member(dropped, &[source_ip(4)]),
+        ];
+
+        let plan = MulticastGroupChangePlan::from_memberships(
+            &current,
+            ResolvedMulticastGroups {
+                memberships: vec![
+                    requested_membership(rewritten, Some(vec![source_ip(2)])),
+                    requested_membership(cleared, Some(Vec::new())),
+                    requested_membership(preserved, None),
+                    requested_membership(added, Some(vec![source_ip(5)])),
+                ],
+            },
+        );
+
+        assert_eq!(
+            snapshot_sources(&plan, rewritten),
+            Some(Some(HashSet::from([source_ip(1)]))),
+        );
+        assert_eq!(
+            snapshot_sources(&plan, cleared),
+            Some(Some(HashSet::from([source_ip(6)]))),
+        );
+        assert_eq!(snapshot_sources(&plan, preserved), Some(None));
+        assert_eq!(snapshot_sources(&plan, dropped), Some(None));
+        // A group the instance does not already belong to has no stored filter
+        // to conflict against.
+        assert_eq!(snapshot_sources(&plan, added), None);
+
+        assert_eq!(plan_leaves(&plan), vec![dropped]);
+        let joins = plan_joins(&plan);
+        assert_eq!(joins.len(), 3, "Received {joins:?}");
+        assert!(joins.contains(&(rewritten, Some(vec![source_ip(2)]))));
+        assert!(joins.contains(&(cleared, Some(Vec::new()))));
+        assert!(joins.contains(&(added, Some(vec![source_ip(5)]))));
+
+        assert!(plan.created_group_ids.is_empty());
+    }
+
+    /// A request that leaves a membership's effective filter unchanged produces
+    /// no join, whether it declines to name sources at all, restates an empty
+    /// filter that already matches the stored one, or restates the stored
+    /// sources in a different order (filters compare as sets).
+    #[test]
+    fn test_multicast_plan_skips_joins_for_unchanged_filters() {
+        let unspecified = MulticastGroupUuid::new_v4();
+        let already_empty = MulticastGroupUuid::new_v4();
+        let reordered = MulticastGroupUuid::new_v4();
+        let current = vec![
+            stored_member(unspecified, &[source_ip(1), source_ip(2)]),
+            stored_member(already_empty, &[]),
+            stored_member(reordered, &[source_ip(1), source_ip(2)]),
+        ];
+
+        let plan = MulticastGroupChangePlan::from_memberships(
+            &current,
+            ResolvedMulticastGroups {
+                memberships: vec![
+                    requested_membership(unspecified, None),
+                    requested_membership(already_empty, Some(Vec::new())),
+                    requested_membership(
+                        reordered,
+                        Some(vec![source_ip(2), source_ip(1)]),
+                    ),
+                ],
+            },
+        );
+
+        assert!(plan.changes.is_empty(), "Received {:?}", plan.changes);
+        assert_eq!(snapshot_sources(&plan, unspecified), Some(None));
+        assert_eq!(snapshot_sources(&plan, already_empty), Some(None));
+        assert_eq!(snapshot_sources(&plan, reordered), Some(None));
+    }
+
+    /// Groups the request created are tracked for rollback, and each one also
+    /// joins because a newly created group cannot already have a membership.
+    #[test]
+    fn test_multicast_plan_tracks_created_groups() {
+        let created = MulticastGroupUuid::new_v4();
+        let existing = MulticastGroupUuid::new_v4();
+
+        let plan = MulticastGroupChangePlan::from_memberships(
+            &[],
+            ResolvedMulticastGroups {
+                memberships: vec![
+                    ResolvedMulticastMembership {
+                        group_id: created,
+                        source_ips: Some(vec![source_ip(1)]),
+                        created: true,
+                    },
+                    requested_membership(existing, None),
+                ],
+            },
+        );
+
+        assert_eq!(plan.created_group_ids, vec![created]);
+        let joins = plan_joins(&plan);
+        assert_eq!(joins.len(), 2, "Received {joins:?}");
+        assert!(joins.contains(&(created, Some(vec![source_ip(1)]))));
+        assert!(joins.contains(&(existing, None)));
+        assert!(plan_leaves(&plan).is_empty());
+        assert!(plan.expected_memberships.is_empty());
     }
 }

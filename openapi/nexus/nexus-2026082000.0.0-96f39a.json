@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "2026081901.0.0"
+    "version": "2026082000.0.0"
   },
   "paths": {
     "/device/auth": {
@@ -6264,7 +6264,7 @@
           "experimental"
         ],
         "summary": "Fetch multicast group",
-        "description": "The group can be specified by name, UUID, or multicast IP address. (e.g., \"224.1.2.3\" or \"ff38::1\").",
+        "description": "The group can be specified by name, UUID, or multicast IP address. (e.g., \"224.1.2.3\" or \"ff38::8000:1\").",
         "operationId": "multicast_group_view",
         "parameters": [
           {
@@ -9449,7 +9449,7 @@
           "system/ip-pools"
         ],
         "summary": "Add range to IP pool",
-        "description": "For multicast pools, all ranges must be either Any-Source Multicast (ASM) or Source-Specific Multicast (SSM), but not both. Mixing ASM and SSM ranges in the same pool is not allowed.\n\nASM: IPv4 addresses outside 232.0.0.0/8, IPv6 addresses with flag field != 3 SSM: IPv4 addresses in 232.0.0.0/8, IPv6 addresses with flag field = 3",
+        "description": "For multicast pools, all ranges must be either Any-Source Multicast (ASM) or Source-Specific Multicast (SSM), but not both. Mixing ASM and SSM ranges in the same pool is not allowed.\n\nASM: IPv4 addresses outside 232.0.0.0/8, IPv6 addresses outside ff3x::/32 SSM: IPv4 addresses in 232.0.0.0/8, IPv6 addresses within ff3x::/32",
         "operationId": "system_ip_pool_range_add",
         "parameters": [
           {
@@ -24203,7 +24203,7 @@
         ]
       },
       "IpPoolCreate": {
-        "description": "Create-time parameters for an `IpPool`.\n\nFor multicast pools, all ranges must be either Any-Source Multicast (ASM) or Source-Specific Multicast (SSM), but not both. Mixing ASM and SSM ranges in the same pool is not allowed.\n\nASM: IPv4 addresses outside 232.0.0.0/8, IPv6 addresses with flag field != 3 SSM: IPv4 addresses in 232.0.0.0/8, IPv6 addresses with flag field = 3",
+        "description": "Create-time parameters for an `IpPool`.\n\nFor multicast pools, all ranges must be either Any-Source Multicast (ASM) or Source-Specific Multicast (SSM), but not both. Mixing ASM and SSM ranges in the same pool is not allowed.\n\nASM: IPv4 addresses outside 232.0.0.0/8, IPv6 addresses outside ff3x::/32 SSM: IPv4 addresses in 232.0.0.0/8, IPv6 addresses within ff3x::/32",
         "type": "object",
         "properties": {
           "assignment": {

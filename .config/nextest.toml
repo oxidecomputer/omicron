@@ -71,6 +71,14 @@ priority = 10
 filter = 'binary_id(omicron-nexus::test_all) and test(::schema::)'
 threads-required = 4
 
+[[profile.default.overrides]]
+# Each of these tests starts its own CockroachDB, and many also start a full
+# simulated control plane (Nexus, ClickHouse, DNS, sled-agents). Running one
+# per CPU oversubscribes the machine and can starve unrelated processes, so
+# have each test occupy multiple slots to bound concurrency.
+filter = 'rdeps(nexus-test-utils) + package(nexus-db-schema)'
+threads-required = 4
+
 [[profile.ci.overrides]]
 # `omicron-test-utils` is included in this block that uses a longer-than-normal
 # timeout because under some conditions it waits for CockroachDB to shut down

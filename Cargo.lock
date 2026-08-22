@@ -659,7 +659,7 @@ dependencies = [
 [[package]]
 name = "bhyve_api"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=046f74302e2ea09a75b0a6810645d42c7df6644a#046f74302e2ea09a75b0a6810645d42c7df6644a"
+source = "git+https://github.com/oxidecomputer/propolis?rev=3c07d60a77d528018fded2f0a434cafe724f3423#3c07d60a77d528018fded2f0a434cafe724f3423"
 dependencies = [
  "bhyve_api_sys",
  "libc",
@@ -669,7 +669,7 @@ dependencies = [
 [[package]]
 name = "bhyve_api_sys"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=046f74302e2ea09a75b0a6810645d42c7df6644a#046f74302e2ea09a75b0a6810645d42c7df6644a"
+source = "git+https://github.com/oxidecomputer/propolis?rev=3c07d60a77d528018fded2f0a434cafe724f3423#3c07d60a77d528018fded2f0a434cafe724f3423"
 dependencies = [
  "libc",
  "strum 0.26.3",
@@ -1594,7 +1594,13 @@ dependencies = [
 [[package]]
 name = "client-common"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=ce015cde17a1ebc839ae482026d522cf0e369a3b#ce015cde17a1ebc839ae482026d522cf0e369a3b"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=f74e74694b2df8c88c862b6e32409898ad85ded5#f74e74694b2df8c88c862b6e32409898ad85ded5"
+dependencies = [
+ "oxnet",
+ "schemars 0.8.22",
+ "serde",
+ "thiserror 2.0.18",
+]
 
 [[package]]
 name = "clipboard-win"
@@ -1740,7 +1746,7 @@ dependencies = [
 [[package]]
 name = "common"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/dendrite?rev=04a52a3240a26c58f03e1cf40353d67ff69d76b6#04a52a3240a26c58f03e1cf40353d67ff69d76b6"
+source = "git+https://github.com/oxidecomputer/dendrite?rev=0d48b5a39dc49d30b228ae01f04b8cc27a161e74#0d48b5a39dc49d30b228ae01f04b8cc27a161e74"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2651,7 +2657,7 @@ dependencies = [
 [[package]]
 name = "ddm-admin-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=ce015cde17a1ebc839ae482026d522cf0e369a3b#ce015cde17a1ebc839ae482026d522cf0e369a3b"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=f74e74694b2df8c88c862b6e32409898ad85ded5#f74e74694b2df8c88c862b6e32409898ad85ded5"
 dependencies = [
  "ddm-api-types-versions",
  "oxnet",
@@ -2665,20 +2671,23 @@ dependencies = [
 [[package]]
 name = "ddm-api-types-versions"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=ce015cde17a1ebc839ae482026d522cf0e369a3b#ce015cde17a1ebc839ae482026d522cf0e369a3b"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=f74e74694b2df8c88c862b6e32409898ad85ded5#f74e74694b2df8c88c862b6e32409898ad85ded5"
 dependencies = [
+ "client-common",
  "ddm-protocol",
  "oxnet",
  "schemars 0.8.22",
  "serde",
+ "serde_json",
  "serde_repr",
+ "thiserror 2.0.18",
  "uuid",
 ]
 
 [[package]]
 name = "ddm-protocol"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=ce015cde17a1ebc839ae482026d522cf0e369a3b#ce015cde17a1ebc839ae482026d522cf0e369a3b"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=f74e74694b2df8c88c862b6e32409898ad85ded5#f74e74694b2df8c88c862b6e32409898ad85ded5"
 dependencies = [
  "oxnet",
  "schemars 0.8.22",
@@ -3311,11 +3320,11 @@ dependencies = [
 [[package]]
 name = "dpd-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/dendrite?rev=04a52a3240a26c58f03e1cf40353d67ff69d76b6#04a52a3240a26c58f03e1cf40353d67ff69d76b6"
+source = "git+https://github.com/oxidecomputer/dendrite?rev=0d48b5a39dc49d30b228ae01f04b8cc27a161e74#0d48b5a39dc49d30b228ae01f04b8cc27a161e74"
 dependencies = [
  "async-trait",
  "chrono",
- "common 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=04a52a3240a26c58f03e1cf40353d67ff69d76b6)",
+ "common 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=0d48b5a39dc49d30b228ae01f04b8cc27a161e74)",
  "crc8",
  "futures",
  "http",
@@ -6908,7 +6917,7 @@ dependencies = [
 [[package]]
 name = "mg-admin-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=ce015cde17a1ebc839ae482026d522cf0e369a3b#ce015cde17a1ebc839ae482026d522cf0e369a3b"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=f74e74694b2df8c88c862b6e32409898ad85ded5#f74e74694b2df8c88c862b6e32409898ad85ded5"
 dependencies = [
  "chrono",
  "client-common",
@@ -6928,7 +6937,7 @@ dependencies = [
 [[package]]
 name = "mg-api-types"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=ce015cde17a1ebc839ae482026d522cf0e369a3b#ce015cde17a1ebc839ae482026d522cf0e369a3b"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=f74e74694b2df8c88c862b6e32409898ad85ded5#f74e74694b2df8c88c862b6e32409898ad85ded5"
 dependencies = [
  "mg-api-types-versions",
 ]
@@ -6936,14 +6945,16 @@ dependencies = [
 [[package]]
 name = "mg-api-types-versions"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=ce015cde17a1ebc839ae482026d522cf0e369a3b#ce015cde17a1ebc839ae482026d522cf0e369a3b"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=f74e74694b2df8c88c862b6e32409898ad85ded5#f74e74694b2df8c88c862b6e32409898ad85ded5"
 dependencies = [
  "chrono",
+ "client-common",
  "nom 8.0.0",
  "num_enum 0.7.6",
  "oxnet",
  "schemars 0.8.22",
  "serde",
+ "serde_json",
  "slog",
  "thiserror 2.0.18",
  "uuid",
@@ -8199,7 +8210,7 @@ dependencies = [
  "chrono",
  "crucible-agent-client",
  "dns-service-client",
- "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=04a52a3240a26c58f03e1cf40353d67ff69d76b6)",
+ "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=0d48b5a39dc49d30b228ae01f04b8cc27a161e74)",
  "dropshot",
  "fmd-adm-sys",
  "futures",
@@ -9188,7 +9199,7 @@ dependencies = [
  "display-error-chain",
  "dns-server",
  "dns-service-client",
- "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=04a52a3240a26c58f03e1cf40353d67ff69d76b6)",
+ "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=0d48b5a39dc49d30b228ae01f04b8cc27a161e74)",
  "dropshot",
  "ereport-types",
  "expectorate",
@@ -11917,7 +11928,7 @@ dependencies = [
 [[package]]
 name = "propolis-api-types-versions"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=046f74302e2ea09a75b0a6810645d42c7df6644a#046f74302e2ea09a75b0a6810645d42c7df6644a"
+source = "git+https://github.com/oxidecomputer/propolis?rev=3c07d60a77d528018fded2f0a434cafe724f3423#3c07d60a77d528018fded2f0a434cafe724f3423"
 dependencies = [
  "crucible-client-types",
  "propolis_types",
@@ -11930,7 +11941,7 @@ dependencies = [
 [[package]]
 name = "propolis-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=046f74302e2ea09a75b0a6810645d42c7df6644a#046f74302e2ea09a75b0a6810645d42c7df6644a"
+source = "git+https://github.com/oxidecomputer/propolis?rev=3c07d60a77d528018fded2f0a434cafe724f3423#3c07d60a77d528018fded2f0a434cafe724f3423"
 dependencies = [
  "async-trait",
  "base64 0.21.7",
@@ -11954,7 +11965,7 @@ dependencies = [
 [[package]]
 name = "propolis-mock-server"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=046f74302e2ea09a75b0a6810645d42c7df6644a#046f74302e2ea09a75b0a6810645d42c7df6644a"
+source = "git+https://github.com/oxidecomputer/propolis?rev=3c07d60a77d528018fded2f0a434cafe724f3423#3c07d60a77d528018fded2f0a434cafe724f3423"
 dependencies = [
  "anyhow",
  "base64 0.21.7",
@@ -11986,7 +11997,7 @@ dependencies = [
 [[package]]
 name = "propolis_api_types"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=046f74302e2ea09a75b0a6810645d42c7df6644a#046f74302e2ea09a75b0a6810645d42c7df6644a"
+source = "git+https://github.com/oxidecomputer/propolis?rev=3c07d60a77d528018fded2f0a434cafe724f3423#3c07d60a77d528018fded2f0a434cafe724f3423"
 dependencies = [
  "crucible-client-types",
  "propolis-api-types-versions",
@@ -11995,7 +12006,7 @@ dependencies = [
 [[package]]
 name = "propolis_types"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=046f74302e2ea09a75b0a6810645d42c7df6644a#046f74302e2ea09a75b0a6810645d42c7df6644a"
+source = "git+https://github.com/oxidecomputer/propolis?rev=3c07d60a77d528018fded2f0a434cafe724f3423#3c07d60a77d528018fded2f0a434cafe724f3423"
 dependencies = [
  "schemars 0.8.22",
  "serde",
@@ -13614,9 +13625,9 @@ checksum = "1bc711410fbe7399f390ca1c3b60ad0f53f80e95c5eb935e52268a0e2cd49acc"
 
 [[package]]
 name = "serde"
-version = "1.0.228"
+version = "1.0.229"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9a8e94ea7f378bd32cbbd37198a4a91436180c5bb472411e48b5ec2e2124ae9e"
+checksum = "4148590afebada386688f18773da617792bf2ef03ffc1e4cbd2b1d45b023e0ba"
 dependencies = [
  "serde_core",
  "serde_derive",
@@ -13664,22 +13675,22 @@ dependencies = [
 
 [[package]]
 name = "serde_core"
-version = "1.0.228"
+version = "1.0.229"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "41d385c7d4ca58e59fc732af25c3983b67ac852c1a25000afe1175de458b67ad"
+checksum = "67dca2c9c51e58a4791a4b1ed58308b39c64224d349a935ab5039aa360942a48"
 dependencies = [
  "serde_derive",
 ]
 
 [[package]]
 name = "serde_derive"
-version = "1.0.228"
+version = "1.0.229"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d540f220d3187173da220f885ab66608367b6574e925011a9353e4badda91d79"
+checksum = "e7a5d71263a5a7d47b41f6b3f06ba276f10cc18b0931f1799f710578e2309348"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.117",
+ "syn 3.0.3",
 ]
 
 [[package]]
@@ -14429,7 +14440,7 @@ dependencies = [
  "bootstrap-agent-lockstep-types",
  "chrono",
  "daft",
- "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=04a52a3240a26c58f03e1cf40353d67ff69d76b6)",
+ "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=0d48b5a39dc49d30b228ae01f04b8cc27a161e74)",
  "dropshot",
  "either",
  "futures",
@@ -15435,6 +15446,17 @@ name = "syn"
 version = "2.0.117"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e665b8803e7b1d2a727f4023456bbbbe74da67099c585258af0ad9c5013b9b99"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "unicode-ident",
+]
+
+[[package]]
+name = "syn"
+version = "3.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "53e9bae58849f64dfa4f5d5ae372c8341f7305f82a3868709269343628b659a3"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -17632,7 +17654,7 @@ name = "wicket-common"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=04a52a3240a26c58f03e1cf40353d67ff69d76b6)",
+ "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=0d48b5a39dc49d30b228ae01f04b8cc27a161e74)",
  "dropshot",
  "gateway-client",
  "gateway-types",
@@ -17700,7 +17722,7 @@ dependencies = [
  "clap",
  "debug-ignore",
  "display-error-chain",
- "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=04a52a3240a26c58f03e1cf40353d67ff69d76b6)",
+ "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=0d48b5a39dc49d30b228ae01f04b8cc27a161e74)",
  "dropshot",
  "either",
  "expectorate",

@@ -8758,8 +8758,7 @@ CREATE SEQUENCE IF NOT EXISTS omicron.public.multicast_group_version START 1 INC
 CREATE TYPE IF NOT EXISTS omicron.public.multicast_group_state AS ENUM (
     'creating',
     'active',
-    'deleting',
-    'deleted'
+    'deleting'
 );
 
 -- Multicast group member state for RPW pattern
@@ -8797,9 +8796,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.multicast_group (
     /* DPD tag to couple external/underlay state for this group */
     tag STRING(63),
 
-    /* Current state of the multicast group (for RPW) */
-    state omicron.public.multicast_group_state NOT NULL DEFAULT 'creating',
-
     /* Sync versioning */
     version_added INT8 NOT NULL DEFAULT nextval('omicron.public.multicast_group_version'),
     version_removed INT8,
@@ -8807,6 +8803,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.multicast_group (
     /* Salt for underlay IP collision avoidance (XORed into mapping) */
     /* Note: Column added via migration, must be at end for schema compatibility */
     underlay_salt INT2,
+
+    /* Current state of the multicast group (for RPW) */
+    /* Note: Recreated by migration, must be at end for schema compatibility */
+    state omicron.public.multicast_group_state NOT NULL DEFAULT 'creating',
 
     /* Constraints */
     -- External groups: IPv4 multicast or non-admin-local IPv6
@@ -9062,7 +9062,7 @@ CREATE INDEX IF NOT EXISTS multicast_member_group_state ON omicron.public.multic
 ) WHERE time_deleted IS NULL;
 
 -- RPW cleanup of soft-deleted members
--- Supports: DELETE FROM multicast_group_member WHERE state = 'Left' AND time_deleted IS NOT NULL
+-- Supports: DELETE FROM multicast_group_member WHERE state = 'left' AND time_deleted IS NOT NULL
 CREATE INDEX IF NOT EXISTS multicast_member_cleanup ON omicron.public.multicast_group_member (
     state
 ) WHERE time_deleted IS NOT NULL;
@@ -9387,7 +9387,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '294.0.0', NULL)
+    (TRUE, NOW(), NOW(), '295.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

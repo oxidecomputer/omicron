@@ -16,7 +16,7 @@
 use std::net::IpAddr;
 
 use async_bb8_diesel::AsyncRunQueryDsl;
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use diesel::prelude::*;
 use diesel::result::{
     DatabaseErrorKind::UniqueViolation,
@@ -172,7 +172,7 @@ impl DataStore {
     /// the group as fully operational.
     ///
     /// Note: this is the only valid state transition via this API. To delete a
-    /// group, use [`Self::mark_multicast_group_for_removal_if_no_members`] which
+    /// group, use [`Self::multicast_group_mark_removal_if_empty`] which
     /// handles the "Deleting" state transition along with setting `time_deleted`.
     pub async fn multicast_group_set_active(
         &self,
@@ -250,21 +250,46 @@ impl DataStore {
         opctx: &OpContext,
         params: &MulticastGroupCreate,
     ) -> CreateResult<ExternalMulticastGroup> {
+        self.multicast_group_create_with_id(opctx, params, None).await
+    }
+
+    /// Allocate an external multicast group, optionally using a caller-supplied
+    /// ID.
+    ///
+    /// The optional ID is used by saga actions whose parameters survive action
+    /// retries. Ordinary callers should use [`Self::multicast_group_create`]
+    /// and let the datastore generate the ID.
+    pub async fn multicast_group_create_with_id(
+        &self,
+        opctx: &OpContext,
+        params: &MulticastGroupCreate,
+        group_id: Option<Uuid>,
+    ) -> CreateResult<ExternalMulticastGroup> {
         let ip_allocation = match params.multicast_ip {
             Some(ip) => MulticastIpAllocation::Explicit { ip },
             None => {
                 MulticastIpAllocation::Auto { ip_version: params.ip_version }
             }
         };
-        self.allocate_external_multicast_group(
-            opctx,
-            MulticastGroupAllocationParams {
-                identity: params.identity.clone(),
-                ip_allocation,
-                has_sources: params.has_sources,
-            },
-        )
-        .await
+        let allocation_params = MulticastGroupAllocationParams {
+            identity: params.identity.clone(),
+            ip_allocation,
+            has_sources: params.has_sources,
+        };
+        match group_id {
+            Some(group_id) => {
+                self.allocate_external_multicast_group_with_id(
+                    opctx,
+                    allocation_params,
+                    group_id,
+                )
+                .await
+            }
+            None => {
+                self.allocate_external_multicast_group(opctx, allocation_params)
+                    .await
+            }
+        }
     }
 
     /// Fetch an external multicast group by ID.
@@ -399,11 +424,27 @@ impl DataStore {
     /// - `Ok(true)` if the group was marked for deletion (no members existed)
     /// - `Ok(false)` if the group still has members (not marked)
     /// - `Err` on database errors
-    pub async fn mark_multicast_group_for_removal_if_no_members(
+    pub async fn multicast_group_mark_removal_if_empty(
         &self,
         opctx: &OpContext,
         group_id: MulticastGroupUuid,
     ) -> Result<bool, external::Error> {
+        let conn = self.pool_connection_authorized(opctx).await?;
+        self.multicast_group_mark_removal_if_empty_on_conn(&conn, group_id)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// Mark a multicast group for deletion using an existing database
+    /// connection.
+    ///
+    /// Returns the raw diesel error so transactional callers can hand
+    /// retryable errors back to the retry wrapper.
+    pub(crate) async fn multicast_group_mark_removal_if_empty_on_conn(
+        &self,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        group_id: MulticastGroupUuid,
+    ) -> Result<bool, diesel::result::Error> {
         use nexus_db_schema::schema::multicast_group;
         use nexus_db_schema::schema::multicast_group_member;
         let now = Utc::now();
@@ -431,11 +472,96 @@ impl DataStore {
                 multicast_group::time_deleted.eq(now),
                 multicast_group::time_modified.eq(now),
             ))
-            .execute_async(&*self.pool_connection_authorized(opctx).await?)
-            .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+            .execute_async(conn)
+            .await?;
 
         Ok(rows > 0)
+    }
+
+    /// Restore a soft-deleted multicast group that never reached the
+    /// dataplane.
+    ///
+    /// This reverses [`Self::multicast_group_mark_removal_if_empty`] for the
+    /// narrow case where the reconciler's orphan pass reaped an implicitly
+    /// created group before its first member attached. A saga action holding
+    /// the group's stable creation ID owns that row, so restoring it lets a
+    /// re-executed action make progress instead of failing permanently once
+    /// the reap has taken the ID.
+    ///
+    /// The `underlay_group_id IS NULL` guard is what makes this safe.
+    /// `underlay_group_id` is only ever written when the reconciler links an
+    /// underlay group on the way to "Active", and it is never cleared again,
+    /// so a NULL value proves the group never entered the dataplane and owes
+    /// no DPD teardown. A group that reached "Active" and was torn down still
+    /// owes that teardown and is therefore not eligible.
+    ///
+    /// `time_created` is reset because the orphan pass ages groups from that
+    /// column, so the restored group needs a fresh grace window in which to
+    /// gain its member.
+    ///
+    /// `Ok(None)` covers a row that fails the guards, a unique-constraint
+    /// conflict from a live group that has since claimed the same IP or
+    /// name, and a pool range deleted while the row was soft-deleted.
+    /// The range-liveness guard matters because `ip_pool_delete_range` only
+    /// counts live groups, so a range can be deleted out from under a
+    /// tombstone and restoring the row would leave it referencing a removed
+    /// range.
+    pub async fn multicast_group_resurrect_if_unactivated(
+        &self,
+        opctx: &OpContext,
+        group_id: MulticastGroupUuid,
+    ) -> Result<Option<ExternalMulticastGroup>, external::Error> {
+        use nexus_db_schema::schema::ip_pool_range;
+        use nexus_db_schema::schema::multicast_group::dsl;
+
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        // The pool range reference is immutable on the row, so it can be
+        // read ahead of the guarded update and checked for liveness inside
+        // it. A range deleted between the two statements still refuses the
+        // update, and a range deleted after the update sees a live group
+        // and is refused by `ip_pool_delete_range`.
+        let Some(range_id) = dsl::multicast_group
+            .filter(dsl::id.eq(group_id.into_untyped_uuid()))
+            .select(dsl::ip_pool_range_id)
+            .get_result_async::<Uuid>(&*conn)
+            .await
+            .optional()
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?
+        else {
+            return Ok(None);
+        };
+
+        let now = Utc::now();
+        let result = diesel::update(dsl::multicast_group)
+            .filter(dsl::id.eq(group_id.into_untyped_uuid()))
+            .filter(dsl::time_deleted.is_not_null())
+            .filter(dsl::state.eq(MulticastGroupState::Deleting))
+            .filter(dsl::underlay_group_id.is_null())
+            .filter(diesel::dsl::exists(
+                ip_pool_range::table
+                    .filter(ip_pool_range::id.eq(range_id))
+                    .filter(ip_pool_range::time_deleted.is_null()),
+            ))
+            .set((
+                dsl::time_deleted.eq(None::<DateTime<Utc>>),
+                dsl::state.eq(MulticastGroupState::Creating),
+                dsl::time_created.eq(now),
+                dsl::time_modified.eq(now),
+            ))
+            .returning(ExternalMulticastGroup::as_returning())
+            .get_result_async(&*conn)
+            .await;
+
+        match result {
+            Ok(group) => Ok(Some(group)),
+            Err(NotFound) => Ok(None),
+            // IP and name uniqueness is enforced by partial indexes on
+            // `time_deleted IS NULL`, so clearing `time_deleted` conflicts
+            // with any live group that took the IP or name after the reap.
+            Err(DatabaseError(UniqueViolation, _)) => Ok(None),
+            Err(e) => Err(public_error_from_diesel(e, ErrorHandler::Server)),
+        }
     }
 
     /// Delete a multicast group permanently.
@@ -565,8 +691,25 @@ impl DataStore {
         opctx: &OpContext,
         params: MulticastGroupAllocationParams,
     ) -> CreateResult<ExternalMulticastGroup> {
-        let group_id = Uuid::new_v4();
+        self.allocate_external_multicast_group_with_id(
+            opctx,
+            params,
+            Uuid::new_v4(),
+        )
+        .await
+    }
 
+    /// Allocate an external multicast group using a caller-supplied ID.
+    ///
+    /// The normal create path generates the ID internally. A saga that may
+    /// execute its action more than once supplies a stable ID so it can
+    /// recognize a group it created on an earlier invocation.
+    pub(crate) async fn allocate_external_multicast_group_with_id(
+        &self,
+        opctx: &OpContext,
+        params: MulticastGroupAllocationParams,
+        group_id: Uuid,
+    ) -> CreateResult<ExternalMulticastGroup> {
         // Pool resolution based on IP allocation method:
         // - Explicit IP: infer pool from address (pools have non-overlapping ranges)
         // - Auto: use default multicast pool based on has_sources preference
@@ -1893,7 +2036,7 @@ mod tests {
         // Test transition to "Deleting"
         // Since this group has no members, it should be marked for deletion
         let marked = datastore
-            .mark_multicast_group_for_removal_if_no_members(
+            .multicast_group_mark_removal_if_empty(
                 &opctx,
                 MulticastGroupUuid::from_untyped_uuid(group.id()),
             )
@@ -1980,7 +2123,7 @@ mod tests {
 
         // Try to mark for removal
         let marked = datastore
-            .mark_multicast_group_for_removal_if_no_members(&opctx, group_id)
+            .multicast_group_mark_removal_if_empty(&opctx, group_id)
             .await
             .expect("Should not error");
 
@@ -1998,6 +2141,314 @@ mod tests {
             group.state,
             MulticastGroupState::Active,
             "Group should remain Active when it has members"
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    /// Exercise the stable-ID retry paths for saga-created groups around the
+    /// empty-group sweep.
+    ///
+    /// Before the reconciler sweep, a retried action must find its live group
+    /// by the stable creation ID. After it, the soft-deleted row still holds
+    /// the stable ID, so lookup by that ID finds nothing and re-creation
+    /// fails, with neither reviving the dead row. Restoring it is the job of
+    /// [`DataStore::multicast_group_resurrect_if_unactivated`], covered by
+    /// the resurrection test below. Attach behavior against "Creating" and
+    /// "Deleting" groups is covered by the member attach tests.
+    #[tokio::test]
+    async fn test_stable_id_retry_before_and_after_sweep() {
+        let logctx =
+            dev::test_setup_log("test_stable_id_retry_before_and_after_sweep");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        multicast::create_test_setup(
+            &opctx,
+            &datastore,
+            "stable-id-pool",
+            "stable-id-project",
+        )
+        .await;
+
+        // Retry before the sweep: the group created with a stable ID is
+        // still live, so a repeated action finds it by that ID.
+        let group_id = Uuid::new_v4();
+        let params = MulticastGroupCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "stable-id-group".parse().unwrap(),
+                description: "group recovered by a retried action".to_string(),
+            },
+            multicast_ip: Some("224.10.1.60".parse().unwrap()),
+            has_sources: false,
+            ip_version: None,
+        };
+        let group = datastore
+            .multicast_group_create_with_id(&opctx, &params, Some(group_id))
+            .await
+            .expect("Should create group with stable ID");
+        assert_eq!(
+            group.id(),
+            group_id,
+            "Received a group ID that differs from the stable creation ID"
+        );
+
+        datastore
+            .multicast_group_fetch(
+                &opctx,
+                MulticastGroupUuid::from_untyped_uuid(group_id),
+            )
+            .await
+            .expect("Should find live group by stable ID on retry");
+
+        // Retry after the sweep: the memberless group is reaped, recovery by
+        // stable ID finds nothing, and re-creation cannot reuse the ID held
+        // by the soft-deleted row.
+        let marked = datastore
+            .multicast_group_mark_removal_if_empty(
+                &opctx,
+                MulticastGroupUuid::from_untyped_uuid(group_id),
+            )
+            .await
+            .expect("Should sweep the memberless group");
+        assert!(marked, "Received an unswept group from the empty-group pass");
+
+        let recovery = datastore
+            .multicast_group_fetch(
+                &opctx,
+                MulticastGroupUuid::from_untyped_uuid(group_id),
+            )
+            .await;
+        assert!(
+            recovery.is_err(),
+            "Received a live group for a stable ID that was already swept"
+        );
+
+        let recreate = datastore
+            .multicast_group_create_with_id(&opctx, &params, Some(group_id))
+            .await;
+        assert!(
+            recreate.is_err(),
+            "Received a new group for a stable ID held by a soft-deleted row"
+        );
+
+        // The failed re-creation must not resurrect the dead row.
+        let still_gone = datastore
+            .multicast_group_fetch(
+                &opctx,
+                MulticastGroupUuid::from_untyped_uuid(group_id),
+            )
+            .await;
+        assert!(
+            still_gone.is_err(),
+            "Received a resurrected group after a failed re-creation"
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    /// Exercise resurrection of a reaped group across its eligibility guards.
+    ///
+    /// A reaped group that never activated is restored to "Creating" with its
+    /// stable ID intact and a refreshed grace window. Resurrection declines
+    /// for a group linked to an underlay (it owes DPD teardown) and for a row
+    /// that is already live.
+    #[tokio::test]
+    async fn test_resurrect_reaped_group_before_activation() {
+        let logctx = dev::test_setup_log(
+            "test_resurrect_reaped_group_before_activation",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        multicast::create_test_setup(
+            &opctx,
+            &datastore,
+            "resurrect-pool",
+            "resurrect-project",
+        )
+        .await;
+
+        let make_params = |name: &str, ip: &str| MulticastGroupCreate {
+            identity: IdentityMetadataCreateParams {
+                name: name.parse().unwrap(),
+                description: "group for resurrection tests".to_string(),
+            },
+            multicast_ip: Some(ip.parse().unwrap()),
+            has_sources: false,
+            ip_version: None,
+        };
+
+        // A memberless group reaped by the orphan pass is restored to
+        // "Creating" with its stable ID intact.
+        let reaped_id = Uuid::new_v4();
+        let reaped = datastore
+            .multicast_group_create_with_id(
+                &opctx,
+                &make_params("resurrect-reaped", "224.10.1.70"),
+                Some(reaped_id),
+            )
+            .await
+            .expect("Should create group with stable ID");
+        let original_time_created = reaped.time_created();
+
+        assert!(
+            datastore
+                .multicast_group_mark_removal_if_empty(
+                    &opctx,
+                    MulticastGroupUuid::from_untyped_uuid(reaped_id),
+                )
+                .await
+                .expect("Should sweep the memberless group"),
+            "Received an unswept group from the empty-group pass"
+        );
+
+        let restored = datastore
+            .multicast_group_resurrect_if_unactivated(
+                &opctx,
+                MulticastGroupUuid::from_untyped_uuid(reaped_id),
+            )
+            .await
+            .expect("Should not error resurrecting a reaped group")
+            .expect("Should resurrect a reaped group that never activated");
+        assert_eq!(
+            restored.state,
+            MulticastGroupState::Creating,
+            "Received state {:?} instead of 'Creating'",
+            restored.state
+        );
+        assert!(
+            restored.time_deleted().is_none(),
+            "Received a still soft-deleted group after resurrection"
+        );
+        assert!(
+            restored.time_created() > original_time_created,
+            "Received an unchanged time_created, so the orphan pass grace \
+             window was not refreshed"
+        );
+
+        // The restored row is live again, so ordinary lookups find it.
+        datastore
+            .multicast_group_fetch(
+                &opctx,
+                MulticastGroupUuid::from_untyped_uuid(reaped_id),
+            )
+            .await
+            .expect("Should find the resurrected group by stable ID");
+
+        // A group that reached the dataplane still owes DPD teardown, which
+        // `underlay_group_id` being set records.
+        let activated_id = Uuid::new_v4();
+        let activated = datastore
+            .multicast_group_create_with_id(
+                &opctx,
+                &make_params("resurrect-activated", "224.10.1.71"),
+                Some(activated_id),
+            )
+            .await
+            .expect("Should create group with stable ID");
+        datastore
+            .ensure_underlay_multicast_group(
+                &opctx,
+                activated,
+                "ff04::70".parse().unwrap(),
+            )
+            .await
+            .expect("Should link an underlay group");
+        assert!(
+            datastore
+                .multicast_group_mark_removal_if_empty(
+                    &opctx,
+                    MulticastGroupUuid::from_untyped_uuid(activated_id),
+                )
+                .await
+                .expect("Should sweep the memberless group"),
+            "Received an unswept group from the empty-group pass"
+        );
+
+        assert!(
+            datastore
+                .multicast_group_resurrect_if_unactivated(
+                    &opctx,
+                    MulticastGroupUuid::from_untyped_uuid(activated_id),
+                )
+                .await
+                .expect("Should not error declining resurrection")
+                .is_none(),
+            "Received a resurrected group that had already been linked to an \
+             underlay group"
+        );
+
+        // A live group is not soft-deleted, so there is nothing to reverse.
+        assert!(
+            datastore
+                .multicast_group_resurrect_if_unactivated(
+                    &opctx,
+                    MulticastGroupUuid::from_untyped_uuid(reaped_id),
+                )
+                .await
+                .expect("Should not error declining resurrection")
+                .is_none(),
+            "Received a resurrected group for a row that was already live"
+        );
+
+        // A pool range deleted while the group was soft-deleted refuses
+        // resurrection, since `ip_pool_delete_range` only counts live
+        // groups and the restored row would reference a removed range. A
+        // second pool keeps its range free of the live groups above.
+        let setup2 = multicast::create_test_setup_with_range(
+            &opctx,
+            &datastore,
+            "resurrect-pool-2",
+            "resurrect-project-2",
+            (224, 10, 2, 1),
+            (224, 10, 2, 254),
+        )
+        .await;
+        let orphaned_id = Uuid::new_v4();
+        datastore
+            .multicast_group_create_with_id(
+                &opctx,
+                &make_params("resurrect-orphaned", "224.10.2.70"),
+                Some(orphaned_id),
+            )
+            .await
+            .expect("Should create group with stable ID");
+        assert!(
+            datastore
+                .multicast_group_mark_removal_if_empty(
+                    &opctx,
+                    MulticastGroupUuid::from_untyped_uuid(orphaned_id),
+                )
+                .await
+                .expect("Should sweep the memberless group"),
+            "Received an unswept group from the empty-group pass"
+        );
+
+        let range2 = IpRange::V4(
+            Ipv4Range::new(
+                Ipv4Addr::new(224, 10, 2, 1),
+                Ipv4Addr::new(224, 10, 2, 254),
+            )
+            .unwrap(),
+        );
+        datastore
+            .ip_pool_delete_range(&opctx, &setup2.authz_pool, &range2)
+            .await
+            .expect("Should delete a range with only soft-deleted groups");
+
+        assert!(
+            datastore
+                .multicast_group_resurrect_if_unactivated(
+                    &opctx,
+                    MulticastGroupUuid::from_untyped_uuid(orphaned_id),
+                )
+                .await
+                .expect("Should not error declining resurrection")
+                .is_none(),
+            "Received a resurrected group whose pool range was deleted"
         );
 
         db.terminate().await;

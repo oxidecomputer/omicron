@@ -123,6 +123,7 @@ use omicron_uuid_kinds::{
     SledUuid,
 };
 
+use super::groups::ORPHAN_GROUP_MIN_AGE;
 use super::{MulticastGroupReconciler, StateTransition, SwitchBackplanePort};
 use crate::app::multicast::dataplane::MulticastDataplaneClient;
 
@@ -423,7 +424,7 @@ impl MulticastGroupReconciler {
         // This should be impossible under normal operation because:
         // 1. Members can only be added to "Creating" or "Active" groups
         // 2. Groups only transition to "Deleting" when there are no active
-        //    members (`mark_multicast_group_for_removal_if_no_members`)
+        //    members (`multicast_group_mark_removal_if_empty`)
         //
         // However, we provide a fallthrough case for robustness.
         if group.time_deleted().is_some()
@@ -506,13 +507,17 @@ impl MulticastGroupReconciler {
         }
 
         // Delete the member (sets `time_deleted`, `state`="Left", and clears `sled_id`)
-        self.datastore
+        let deleted = self
+            .datastore
             .multicast_group_member_delete_by_id(
                 opctx,
                 member.id.into_untyped_uuid(),
             )
             .await
             .context("failed to delete member for deleted group")?;
+        if !deleted {
+            return Ok(StateTransition::NoChange);
+        }
 
         info!(
             opctx.log,
@@ -2179,12 +2184,22 @@ impl MulticastGroupReconciler {
         let mut groups_marked = 0;
 
         for group in active_groups {
+            // Skip recently created groups, mirroring the grace applied to
+            // "Creating" orphans. Activation requires a member, so an empty
+            // "Active" group has already lost its first member. Joins still
+            // cluster around creation, and reaping here would fail a racing
+            // join whose attach has not landed with a group-not-found error.
+            let age = chrono::Utc::now() - group.time_created();
+            if age <= ORPHAN_GROUP_MIN_AGE {
+                continue;
+            }
+
             // Atomically mark for deletion only if no members exist.
             // This is race-safe: the NOT EXISTS guard in the datastore method
             // ensures we don't delete a group that just gained a member.
             let marked = self
                 .datastore
-                .mark_multicast_group_for_removal_if_no_members(
+                .multicast_group_mark_removal_if_empty(
                     opctx,
                     MulticastGroupUuid::from_untyped_uuid(group.id()),
                 )
@@ -2214,7 +2229,7 @@ impl MulticastGroupReconciler {
     }
 
     /// Get all members for a group.
-    async fn get_group_members(
+    pub(super) async fn get_group_members(
         &self,
         opctx: &OpContext,
         group_id: Uuid,

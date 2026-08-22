@@ -88,13 +88,17 @@ pub(crate) mod dataplane;
 ///   need to specify sources upfront.
 /// - Sources are optional for filtering (IGMPv3/MLDv2), not required.
 ///
-/// This validation applies to all SSM joins (new or existing groups) because
-/// every member must explicitly declare their source subscriptions.
+/// This validation applies to a join that establishes a membership, since
+/// every member must declare its own source subscriptions. A repeat join that
+/// omits `source_ips` preserves the filter already stored on the membership,
+/// so callers skip this check for that case.
 ///
 /// # Arguments
 /// - `group_ip`: The multicast group's IP address
-/// - `source_ips`: The source IPs for the membership (None = no sources,
-///   Some([]) = empty, both invalid for SSM)
+/// - `source_ips`: Requested source IPs. `None` is missing for a new
+///   membership (a repeat join that omits it preserves the stored filter and
+///   skips this validation). `Some([])` is an explicit empty list. Both are
+///   invalid for a new SSM membership.
 ///
 /// # Returns
 /// - `Ok(())` if validation passes (ASM address, or SSM with sources)
@@ -109,6 +113,18 @@ pub(crate) fn validate_ssm_sources(
         ));
     }
     Ok(())
+}
+
+/// Outcome of resolving a multicast group identifier.
+///
+/// Distinguishes groups the resolution implicitly created from pre-existing
+/// ones so callers can roll back their own creations without touching groups
+/// a concurrent request created first.
+pub(crate) struct ResolvedGroup {
+    /// The resolved group ID.
+    pub(crate) id: MulticastGroupUuid,
+    /// Whether this resolution created the group.
+    pub(crate) created: bool,
 }
 
 impl super::Nexus {
@@ -162,10 +178,25 @@ impl super::Nexus {
         opctx: &OpContext,
         params: &MulticastGroupCreate,
     ) -> CreateResult<db::model::ExternalMulticastGroup> {
+        self.multicast_group_create_with_id(opctx, params, None).await
+    }
+
+    /// Create a multicast group, optionally with a stable ID.
+    ///
+    /// The stable-ID form is for saga actions whose parameters survive action
+    /// retries. Ordinary callers should use [`Self::multicast_group_create`].
+    pub(crate) async fn multicast_group_create_with_id(
+        &self,
+        opctx: &OpContext,
+        params: &MulticastGroupCreate,
+        group_id: Option<uuid::Uuid>,
+    ) -> CreateResult<db::model::ExternalMulticastGroup> {
         // Create multicast group (fleet-scoped, uses DEFAULT_MULTICAST_VNI)
         // Pool resolution (from explicit IP or default) happens in datastore.
-        let group =
-            self.db_datastore.multicast_group_create(opctx, params).await?;
+        let group = self
+            .db_datastore
+            .multicast_group_create_with_id(opctx, params, group_id)
+            .await?;
 
         // Activate reconciler to process the new group ("Creating" → "Active")
         self.background_tasks.task_multicast_reconciler.activate();
@@ -310,6 +341,10 @@ impl super::Nexus {
     /// - **IP/name joins**: Creates the group implicitly if it doesn't exist
     /// - **ID joins**: The group must already exist (returns error otherwise)
     /// - **Source IPs**: Optional for ASM, required for SSM addresses (232/8, ff3x::/32)
+    /// - **Existing member**: A repeat join acts as an update, rewriting the
+    ///   source filter when source IPs are given and leaving the membership
+    ///   untouched when omitted. Omitting them on an SSM group is accepted,
+    ///   since the filter stored on the membership already carries sources
     /// - **IP version**: Required when joining by name if multiple default pools exist
     pub(crate) async fn instance_join_multicast_group(
         self: &Arc<Self>,
@@ -331,10 +366,6 @@ impl super::Nexus {
             instance_lookup.lookup_for(authz::Action::Modify).await?;
         let instance_id = InstanceUuid::from_untyped_uuid(authz_instance.id());
 
-        // Multicast joins during instance create are limited to at most
-        // MAX_MULTICAST_GROUPS_PER_INSTANCE entries, primarily to bound saga
-        // length. We impose the same limit here for consistency, but may want
-        // to revisit doing so depending on customer need.
         let current_members = self
             .db_datastore
             .multicast_group_members_list_by_instance(
@@ -344,44 +375,108 @@ impl super::Nexus {
             )
             .await?;
 
-        if current_members.len() >= MAX_MULTICAST_GROUPS_PER_INSTANCE {
-            return Err(external::Error::invalid_request(&format!(
-                "An instance may not join more than {} multicast groups",
-                MAX_MULTICAST_GROUPS_PER_INSTANCE,
-            )));
-        }
+        // A join that omits `source_ips` keeps the filter the membership
+        // already stores, so it carries no source list for SSM validation to
+        // inspect. Resolve by lookup first and, when the instance already
+        // holds a membership in the resolved group, skip the validating
+        // resolver that would otherwise reject the omitted sources of an SSM
+        // group. A lookup that finds nothing falls through, leaving implicit
+        // creation and its validation to the resolver below.
+        let existing_membership = if source_ips.is_none() {
+            match self
+                .resolve_multicast_group_identifier(opctx, group_identifier)
+                .await
+            {
+                Ok(group_id)
+                    if current_members.iter().any(|m| {
+                        m.external_group_id == group_id.into_untyped_uuid()
+                    }) =>
+                {
+                    Some(group_id)
+                }
+                Ok(_) | Err(external::Error::ObjectNotFound { .. }) => None,
+                Err(e) => return Err(e),
+            }
+        } else {
+            None
+        };
 
         // Find or create the group based on identifier type.
         // SSM validation happens inside resolve functions.
-        let group_id = match group_identifier {
-            multicast::MulticastGroupIdentifier::Ip(ip) => {
-                self.resolve_or_create_group_by_ip(opctx, *ip, source_ips)
-                    .await?
-            }
-            multicast::MulticastGroupIdentifier::Name(name) => {
-                self.resolve_or_create_group_by_name(
+        let resolved = match existing_membership {
+            Some(id) => ResolvedGroup { id, created: false },
+            None => {
+                self.resolve_multicast_group_identifier_with_sources(
                     opctx,
-                    name.clone().into(),
+                    group_identifier,
                     source_ips,
                     ip_version,
                 )
                 .await?
             }
-            multicast::MulticastGroupIdentifier::Id(id) => {
-                self.resolve_group_by_id(opctx, *id, source_ips).await?
+        };
+        let group_id = resolved.id;
+        let already_member = current_members
+            .iter()
+            .any(|m| m.external_group_id == group_id.into_untyped_uuid());
+
+        let attach = async {
+            // Multicast joins during instance create are limited to at most
+            // MAX_MULTICAST_GROUPS_PER_INSTANCE entries, primarily to bound
+            // saga length. We impose the same limit here for consistency, but
+            // may want to revisit doing so depending on customer need. Joining
+            // a group the instance is already a member of does not count
+            // against the limit, since that path rewrites the existing
+            // member's source filter when `source_ips` is supplied, rather
+            // than adding a membership. Omitting `source_ips` preserves the
+            // existing filter.
+            if !already_member
+                && current_members.len() >= MAX_MULTICAST_GROUPS_PER_INSTANCE
+            {
+                return Err(external::Error::invalid_request(&format!(
+                    "An instance may not join more than {} multicast groups",
+                    MAX_MULTICAST_GROUPS_PER_INSTANCE,
+                )));
+            }
+
+            self.db_datastore
+                .multicast_group_member_attach_to_instance(
+                    opctx,
+                    group_id,
+                    instance_id,
+                    source_ips,
+                )
+                .await
+        }
+        .await;
+
+        let member = match attach {
+            Ok(result) => result.member,
+            Err(e) => {
+                // A group this join implicitly created has no members. The
+                // reconciler's orphan pass would reap it eventually, but
+                // removing it here keeps a failed join from leaving a
+                // transient group behind. The datastore guard leaves the
+                // group alone if a concurrent join attached a member in the
+                // meantime.
+                if resolved.created {
+                    if let Err(rollback_err) = self
+                        .db_datastore
+                        .multicast_group_mark_removal_if_empty(opctx, group_id)
+                        .await
+                    {
+                        error!(
+                            opctx.log,
+                            "failed to rollback implicitly created multicast \
+                             group after member attach failure";
+                            "group_id" => %group_id,
+                            "error" => ?rollback_err,
+                        );
+                    }
+                }
+                return Err(e);
             }
         };
-
-        // Attach the member with its source IPs
-        let member = self
-            .db_datastore
-            .multicast_group_member_attach_to_instance(
-                opctx,
-                group_id,
-                instance_id,
-                source_ips,
-            )
-            .await?;
 
         // Activate reconciler to process the new member
         self.background_tasks.task_multicast_reconciler.activate();
@@ -395,17 +490,38 @@ impl super::Nexus {
     /// different sources.
     ///
     /// Validates source IPs (address family match, SSM requirements) upfront.
+    ///
+    /// `creation_id` gives a saga action a stable ID for a group it creates, so
+    /// that a retry recovers ownership instead of reporting the group as
+    /// pre-existing.
+    ///
+    /// Recovery spans the reconciler's orphan pass: a reaped group that never
+    /// reached the dataplane is restored on retry, and a hard-deleted row
+    /// frees the ID for re-creation. Only a soft-deleted row that reached the
+    /// dataplane blocks retries, surfaced as an expired recovery window until
+    /// cleanup hard-deletes it.
     async fn resolve_or_create_group_by_ip(
         &self,
         opctx: &OpContext,
         ip: IpAddr,
         source_ips: Option<&[IpAddr]>,
-    ) -> Result<MulticastGroupUuid, external::Error> {
+        creation_id: Option<uuid::Uuid>,
+    ) -> Result<ResolvedGroup, external::Error> {
         // Source IPs must match the multicast group's address family
         validate_source_address_family(ip, source_ips)?;
 
         // SSM groups always require sources when joining
         validate_ssm_sources(ip, source_ips)?;
+
+        // A saga action may be retried after it created the group. Recover
+        // ownership from the stable ID before resolving by the user-facing
+        // identifier, whose normal result would report `created: false`.
+        if let Some(owned) = self
+            .resolve_saga_owned_group(opctx, creation_id, source_ips)
+            .await?
+        {
+            return Ok(owned);
+        }
 
         // Try to find existing group by IP
         match self.db_datastore.multicast_group_lookup_by_ip(opctx, ip).await {
@@ -417,9 +533,12 @@ impl super::Nexus {
                     external::LookupType::ById(existing.identity.id),
                 );
                 opctx.authorize(authz::Action::Read, &authz_group).await?;
-                return Ok(MulticastGroupUuid::from_untyped_uuid(
-                    existing.identity.id,
-                ));
+                return Ok(ResolvedGroup {
+                    id: MulticastGroupUuid::from_untyped_uuid(
+                        existing.identity.id,
+                    ),
+                    created: false,
+                });
             }
             Err(external::Error::ObjectNotFound { .. }) => {
                 // Fall through to creation
@@ -442,16 +561,44 @@ impl super::Nexus {
         };
 
         // Create the group; on conflict -> re-lookup
-        match self.multicast_group_create(opctx, &create_params).await {
-            Ok(created) => {
-                Ok(MulticastGroupUuid::from_untyped_uuid(created.identity.id))
+        let create_result = match creation_id {
+            Some(creation_id) => {
+                self.multicast_group_create_with_id(
+                    opctx,
+                    &create_params,
+                    Some(creation_id),
+                )
+                .await
             }
+            None => self.multicast_group_create(opctx, &create_params).await,
+        };
+        match create_result {
+            Ok(created) => Ok(ResolvedGroup {
+                id: MulticastGroupUuid::from_untyped_uuid(created.identity.id),
+                created: true,
+            }),
             Err(external::Error::ObjectAlreadyExists { .. }) => {
                 // Another request created it first -> re-lookup
-                let group = self
+                let group = match self
                     .db_datastore
                     .multicast_group_lookup_by_ip(opctx, ip)
-                    .await?;
+                    .await
+                {
+                    Ok(group) => group,
+                    // With a stable creation ID, a conflict with no live
+                    // row means the sweeper reaped this action's own
+                    // soft-deleted group, not that a concurrent winner
+                    // exists. Reporting not-found here would be misleading.
+                    Err(external::Error::ObjectNotFound { .. })
+                        if creation_id.is_some() =>
+                    {
+                        return Err(external::Error::unavail(
+                            "stable multicast group recovery window \
+                             expired; retry the join",
+                        ));
+                    }
+                    Err(e) => return Err(e),
+                };
                 // Authorize Read for audit trail symmetry
                 let authz_group = authz::MulticastGroup::new(
                     authz::FLEET,
@@ -459,7 +606,12 @@ impl super::Nexus {
                     external::LookupType::ById(group.identity.id),
                 );
                 opctx.authorize(authz::Action::Read, &authz_group).await?;
-                Ok(MulticastGroupUuid::from_untyped_uuid(group.identity.id))
+                Ok(ResolvedGroup {
+                    id: MulticastGroupUuid::from_untyped_uuid(
+                        group.identity.id,
+                    ),
+                    created: false,
+                })
             }
             Err(e) => Err(e),
         }
@@ -477,13 +629,26 @@ impl super::Nexus {
     /// - Existing group: Validates immediately (address family + SSM)
     /// - New group: Validates after pool allocation, since the IP is unknown
     ///   until then. If validation fails, the group is rolled back.
+    ///
+    /// `creation_id` carries the same saga-retry recovery described on
+    /// [`Self::resolve_or_create_group_by_ip`].
     async fn resolve_or_create_group_by_name(
         &self,
         opctx: &OpContext,
         name: Name,
         source_ips: Option<&[IpAddr]>,
         ip_version: Option<external::IpVersion>,
-    ) -> Result<MulticastGroupUuid, external::Error> {
+        creation_id: Option<uuid::Uuid>,
+    ) -> Result<ResolvedGroup, external::Error> {
+        // See the IP resolver for why this check must precede the normal
+        // name lookup on a retried saga action.
+        if let Some(owned) = self
+            .resolve_saga_owned_group(opctx, creation_id, source_ips)
+            .await?
+        {
+            return Ok(owned);
+        }
+
         let selector = multicast::MulticastGroupSelector {
             multicast_group: multicast::MulticastGroupIdentifier::Name(
                 name.clone().into(),
@@ -498,9 +663,12 @@ impl super::Nexus {
                 let group_ip = db_group.multicast_ip.ip();
                 validate_source_address_family(group_ip, source_ips)?;
                 validate_ssm_sources(group_ip, source_ips)?;
-                return Ok(MulticastGroupUuid::from_untyped_uuid(
-                    db_group.identity.id,
-                ));
+                return Ok(ResolvedGroup {
+                    id: MulticastGroupUuid::from_untyped_uuid(
+                        db_group.identity.id,
+                    ),
+                    created: false,
+                });
             }
             Err(external::Error::ObjectNotFound { .. }) => {
                 // Fall through to create
@@ -521,7 +689,18 @@ impl super::Nexus {
         };
 
         // Create the group; on conflict -> re-lookup
-        match self.multicast_group_create(opctx, &create_params).await {
+        let create_result = match creation_id {
+            Some(creation_id) => {
+                self.multicast_group_create_with_id(
+                    opctx,
+                    &create_params,
+                    Some(creation_id),
+                )
+                .await
+            }
+            None => self.multicast_group_create(opctx, &create_params).await,
+        };
+        match create_result {
             Ok(created) => {
                 let group_id =
                     MulticastGroupUuid::from_untyped_uuid(created.identity.id);
@@ -539,9 +718,7 @@ impl super::Nexus {
                 {
                     if let Err(rollback_err) = self
                         .db_datastore
-                        .mark_multicast_group_for_removal_if_no_members(
-                            opctx, group_id,
-                        )
+                        .multicast_group_mark_removal_if_empty(opctx, group_id)
                         .await
                     {
                         error!(
@@ -555,16 +732,111 @@ impl super::Nexus {
                     return Err(e);
                 }
 
-                Ok(group_id)
+                Ok(ResolvedGroup { id: group_id, created: true })
             }
             Err(external::Error::ObjectAlreadyExists { .. }) => {
                 // Another request created it first -> re-lookup
                 let (.., db_group) =
-                    group_lookup.fetch_for(authz::Action::Read).await?;
+                    match group_lookup.fetch_for(authz::Action::Read).await {
+                        Ok(fetched) => fetched,
+                        // Same expired-recovery case as the IP resolver: the
+                        // stable-ID conflict came from this action's own reaped
+                        // row, so no live group backs the name.
+                        Err(external::Error::ObjectNotFound { .. })
+                            if creation_id.is_some() =>
+                        {
+                            return Err(external::Error::unavail(
+                                "stable multicast group recovery window \
+                                 expired; retry the join",
+                            ));
+                        }
+                        Err(e) => return Err(e),
+                    };
                 let group_ip = db_group.multicast_ip.ip();
                 validate_source_address_family(group_ip, source_ips)?;
                 validate_ssm_sources(group_ip, source_ips)?;
-                Ok(MulticastGroupUuid::from_untyped_uuid(db_group.identity.id))
+                Ok(ResolvedGroup {
+                    id: MulticastGroupUuid::from_untyped_uuid(
+                        db_group.identity.id,
+                    ),
+                    created: false,
+                })
+            }
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Recover a group implicitly created by a retried saga action.
+    ///
+    /// `creation_id` is generated once while building the saga DAG, so a group
+    /// found by that ID belongs to that action. A missing ID is normal on the
+    /// first invocation and falls through to ordinary identifier resolution.
+    ///
+    /// If no live row carries the ID, the group may have been reaped by the
+    /// reconciler's orphan pass, which happens routinely for a saga recovered
+    /// after a Nexus restart. Ownership of the ID is enough to restore such a
+    /// group, provided it never reached the dataplane.
+    async fn resolve_saga_owned_group(
+        &self,
+        opctx: &OpContext,
+        creation_id: Option<uuid::Uuid>,
+        source_ips: Option<&[IpAddr]>,
+    ) -> Result<Option<ResolvedGroup>, external::Error> {
+        let Some(creation_id) = creation_id else {
+            return Ok(None);
+        };
+
+        let selector = multicast::MulticastGroupSelector {
+            multicast_group: multicast::MulticastGroupIdentifier::Id(
+                creation_id,
+            ),
+        };
+        let group_lookup =
+            self.multicast_group_lookup(opctx, &selector).await?;
+        match group_lookup.fetch_for(authz::Action::Read).await {
+            Ok((.., db_group)) => {
+                let group_ip = db_group.multicast_ip.ip();
+                validate_source_address_family(group_ip, source_ips)?;
+                validate_ssm_sources(group_ip, source_ips)?;
+                Ok(Some(ResolvedGroup {
+                    id: MulticastGroupUuid::from_untyped_uuid(
+                        db_group.identity.id,
+                    ),
+                    created: true,
+                }))
+            }
+            Err(external::Error::ObjectNotFound { .. }) => {
+                let Some(db_group) = self
+                    .db_datastore
+                    .multicast_group_resurrect_if_unactivated(
+                        opctx,
+                        MulticastGroupUuid::from_untyped_uuid(creation_id),
+                    )
+                    .await?
+                else {
+                    // Hard-deleted, or the IP or name was reclaimed by a live
+                    // group. Fall back to ordinary resolution.
+                    return Ok(None);
+                };
+
+                // Authorize Read for audit trail symmetry with the live-row
+                // arm above.
+                let authz_group = authz::MulticastGroup::new(
+                    authz::FLEET,
+                    db_group.identity.id,
+                    external::LookupType::ById(db_group.identity.id),
+                );
+                opctx.authorize(authz::Action::Read, &authz_group).await?;
+
+                let group_ip = db_group.multicast_ip.ip();
+                validate_source_address_family(group_ip, source_ips)?;
+                validate_ssm_sources(group_ip, source_ips)?;
+                Ok(Some(ResolvedGroup {
+                    id: MulticastGroupUuid::from_untyped_uuid(
+                        db_group.identity.id,
+                    ),
+                    created: true,
+                }))
             }
             Err(e) => Err(e),
         }
@@ -618,7 +890,8 @@ impl super::Nexus {
         Ok(MulticastGroupUuid::from_untyped_uuid(db_group.identity.id))
     }
 
-    /// Resolve a multicast group identifier to a UUID, with source IP support.
+    /// Resolve a multicast group identifier with source IP support, reporting
+    /// whether resolution implicitly created the group.
     ///
     /// This is the preferred method for resolving multicast group identifiers
     /// when source IPs may be provided (from `MulticastGroupJoinSpec`).
@@ -653,10 +926,32 @@ impl super::Nexus {
         identifier: &multicast::MulticastGroupIdentifier,
         source_ips: Option<&[IpAddr]>,
         ip_version: Option<external::IpVersion>,
-    ) -> Result<MulticastGroupUuid, external::Error> {
+    ) -> Result<ResolvedGroup, external::Error> {
+        self.resolve_multicast_group_identifier_with_sources_and_creation_id(
+            opctx, identifier, source_ips, ip_version, None,
+        )
+        .await
+    }
+
+    /// Resolve a multicast identifier while retaining ownership of an
+    /// implicitly created group across action retries.
+    pub(crate) async fn resolve_multicast_group_identifier_with_sources_and_creation_id(
+        &self,
+        opctx: &OpContext,
+        identifier: &multicast::MulticastGroupIdentifier,
+        source_ips: Option<&[IpAddr]>,
+        ip_version: Option<external::IpVersion>,
+        creation_id: Option<uuid::Uuid>,
+    ) -> Result<ResolvedGroup, external::Error> {
         match identifier {
             multicast::MulticastGroupIdentifier::Ip(ip) => {
-                self.resolve_or_create_group_by_ip(opctx, *ip, source_ips).await
+                self.resolve_or_create_group_by_ip(
+                    opctx,
+                    *ip,
+                    source_ips,
+                    creation_id,
+                )
+                .await
             }
             multicast::MulticastGroupIdentifier::Name(name) => {
                 // Name-based: implicit auto-create if default pool exists.
@@ -665,12 +960,15 @@ impl super::Nexus {
                     name.clone().into(),
                     source_ips,
                     ip_version,
+                    creation_id,
                 )
                 .await
             }
             multicast::MulticastGroupIdentifier::Id(id) => {
                 // ID-based: lookup only (UUID implies existing resource).
-                self.resolve_group_by_id(opctx, *id, source_ips).await
+                self.resolve_group_by_id(opctx, *id, source_ips)
+                    .await
+                    .map(|id| ResolvedGroup { id, created: false })
             }
         }
     }
@@ -731,7 +1029,7 @@ impl super::Nexus {
         // and the mark-for-removal call.
         if self
             .db_datastore
-            .mark_multicast_group_for_removal_if_no_members(
+            .multicast_group_mark_removal_if_empty(
                 opctx,
                 MulticastGroupUuid::from_untyped_uuid(authz_group.id()),
             )

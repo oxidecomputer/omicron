@@ -3089,10 +3089,10 @@ table! {
         multicast_ip -> Inet,
         underlay_group_id -> Nullable<Uuid>,
         tag -> Nullable<Text>,
-        state -> crate::enums::MulticastGroupStateEnum,
         version_added -> Int8,
         version_removed -> Nullable<Int8>,
         underlay_salt -> Nullable<Int2>,
+        state -> crate::enums::MulticastGroupStateEnum,
     }
 }
 
@@ -3127,7 +3127,12 @@ table! {
 }
 
 // Allow multicast tables to appear together for NOT EXISTS subqueries
-allow_tables_to_appear_in_same_query!(multicast_group, multicast_group_member);
+allow_tables_to_appear_in_same_query!(
+    multicast_group,
+    underlay_multicast_group,
+    multicast_group_member
+);
+allow_tables_to_appear_in_same_query!(multicast_group, ip_pool_range);
 
 allow_tables_to_appear_in_same_query!(user_data_export, snapshot, image);
 

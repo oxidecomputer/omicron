@@ -4,14 +4,14 @@
 
 //! Saga for applying multicast dataplane configuration via DPD.
 //!
-//! Atomically applies external and underlay multicast configuration via DPD.
-//! Either both are successfully applied on all switches, or partial changes
-//! are rolled back.
+//! Applies external and underlay multicast configuration via DPD. A partial
+//! failure leaves the group in "Creating", and the reconciler restarts the
+//! saga on subsequent passes until every switch converges on the intended
+//! configuration.
 //!
 //! Triggered by RPW reconciler when a multicast group is in "Creating" state
 //! and needs dataplane updates.
 
-use anyhow::Context;
 use serde::{Deserialize, Serialize};
 use slog::{debug, warn};
 use steno::{ActionError, DagBuilder, Node};
@@ -64,6 +64,13 @@ declare_saga_actions! {
     FETCH_GROUP_DATA -> "group_data" {
         + mgde_fetch_group_data
     }
+    // Steno does not run a failed node's own undo, so a `create_groups`
+    // call that partially configures switches before erroring is not
+    // rolled back here. That is deliberate: the group stays "Creating",
+    // the reconciler restarts the saga, and the dataplane client's
+    // CONFLICT paths fill in missing switches while leaving configured
+    // ones forwarding. Attribute drift on configured switches heals in
+    // the "Active" drift check.
     UPDATE_DATAPLANE -> "update_responses" {
         + mgde_update_dataplane
         - mgde_rollback_dataplane
@@ -150,19 +157,21 @@ async fn mgde_fetch_group_data(
         .await
         .map_err(saga_action_failed)?;
 
-    // Validate groups are in correct state
+    // "Active" is allowed for crash recovery. Rejecting it would
+    // prevent replay of already-applied DPD state.
     match external_group.state {
-        nexus_db_model::MulticastGroupState::Creating => {}
+        nexus_db_model::MulticastGroupState::Creating
+        | nexus_db_model::MulticastGroupState::Active => {}
         other_state => {
             warn!(
                 osagactx.log(),
-                "external group not in 'Creating' state for DPD";
+                "external group not in 'Creating' or 'Active' state for DPD";
                 "external_group_id" => %params.external_group_id,
                 "external_group_name" => external_group.name().as_str(),
                 "current_state" => ?other_state
             );
             return Err(saga_action_failed(Error::internal_error(&format!(
-                "External group {} is in state {other_state:?}, expected 'Creating'",
+                "External group {} is in state {other_state:?}, expected 'Creating' or 'Active'",
                 params.external_group_id
             ))));
         }
@@ -249,6 +258,12 @@ async fn mgde_update_dataplane(
     })
 }
 
+/// Undo `mgde_update_dataplane` by removing the groups written to DPD.
+///
+/// Errors are logged rather than returned because a failed undo action
+/// permanently strands the saga in Steno. DPD state left behind is keyed
+/// by the group tag. The next reconciler pass rewrites it while the group
+/// is still "Creating" or removes it by tag once the group is "Deleting".
 async fn mgde_rollback_dataplane(
     sagactx: NexusActionContext,
 ) -> Result<(), anyhow::Error> {
@@ -258,17 +273,33 @@ async fn mgde_rollback_dataplane(
     let GroupData { external_group, .. } =
         sagactx.lookup::<GroupData>("group_data")?;
 
-    let multicast_tag = external_group.tag.clone().ok_or_else(|| {
-        saga_action_failed(Error::internal_error("multicast group missing tag"))
-    })?;
+    let Some(multicast_tag) = external_group.tag.clone() else {
+        warn!(
+            osagactx.log(),
+            "multicast group missing tag, skipping dataplane rollback";
+            "external_group_id" => %params.external_group_id,
+        );
+        return Ok(());
+    };
 
-    // Use MulticastDataplaneClient for consistent cleanup
-    let dataplane = MulticastDataplaneClient::new(
+    let dataplane = match MulticastDataplaneClient::new(
         osagactx.nexus().resolver().clone(),
         osagactx.log().clone(),
     )
     .await
-    .map_err(saga_action_failed)?;
+    {
+        Ok(client) => client,
+        Err(e) => {
+            warn!(
+                osagactx.log(),
+                "failed to create dataplane client during saga rollback, \
+                 next reconciler pass converges the dataplane";
+                "tag" => %multicast_tag,
+                "error" => ?e,
+            );
+            return Ok(());
+        }
+    };
 
     debug!(
         osagactx.log(),
@@ -279,10 +310,16 @@ async fn mgde_rollback_dataplane(
         "external_group_name" => external_group.name().as_str(),
     );
 
-    dataplane
-        .remove_groups(&multicast_tag)
-        .await
-        .context("failed to cleanup multicast groups during saga rollback")?;
+    if let Err(e) = dataplane.remove_groups(&multicast_tag).await {
+        warn!(
+            osagactx.log(),
+            "failed to remove multicast groups during saga rollback, \
+             next reconciler pass converges the dataplane";
+            "tag" => %multicast_tag,
+            "error" => ?e,
+        );
+        return Ok(());
+    }
 
     debug!(
         osagactx.log(),
@@ -454,12 +491,16 @@ mod test {
         );
     }
 
-    /// Test that the saga rejects external groups that are not in "Creating" state.
+    /// Test that the saga accepts "Active" groups (crash recovery) but
+    /// still rejects groups that are not in flight.
     ///
-    /// The saga validates that external groups are in "Creating" state before applying
-    /// DPD configuration. This test verifies that validation works correctly.
+    /// `mgde_fetch_group_data` allows "Creating" and "Active" states. Re-running the
+    /// saga over a group whose `mgde_update_group_state` already committed
+    /// must succeed through the original DAG so recovery does not roll back
+    /// correctly-applied DPD state. Other states (e.g., "Deleting") are still
+    /// out of scope and must be rejected.
     #[nexus_test(server = crate::Server)]
-    async fn test_saga_rejects_non_creating_state(
+    async fn test_saga_accepts_active_rejects_terminal_state(
         cptestctx: &ControlPlaneTestContext,
     ) {
         let client = &cptestctx.external_client;
@@ -541,19 +582,44 @@ mod test {
             .await
             .expect("Group should transition to Active state");
 
-        // Try to run saga on Active group - should fail
+        // Re-running the saga on an "Active" group simulates crash-recovery
+        // re-execution: the saga must succeed through the original DAG and
+        // leave the already-applied DPD state in place.
         let params = Params {
             serialized_authn: Serialized::for_opctx(&opctx),
             external_group_id: external_group.id(),
             underlay_group_id: underlay_group.id,
         };
 
+        nexus
+            .sagas
+            .saga_execute::<SagaMulticastGroupDpdEnsure>(params)
+            .await
+            .expect(
+                "Saga should succeed when re-run against an 'Active' group",
+            );
+
+        // Transition the group to "Deleting" and re-run the saga. The saga
+        // must refuse to run against a group in neither "Creating" nor
+        // "Active".
+        let marked = datastore
+            .multicast_group_mark_removal_if_empty(&opctx, group_id)
+            .await
+            .expect("group should mark for removal");
+        assert!(marked, "group should transition to Deleting");
+
+        let params = Params {
+            serialized_authn: Serialized::for_opctx(&opctx),
+            external_group_id: external_group.id(),
+            underlay_group_id: underlay_group.id,
+        };
         let result = nexus
             .sagas
             .saga_execute::<SagaMulticastGroupDpdEnsure>(params)
             .await;
-
-        // Saga should reject Active group
-        assert!(result.is_err(), "Saga should reject group in Active state");
+        assert!(
+            result.is_err(),
+            "Saga should reject a group in neither 'Creating' nor 'Active'",
+        );
     }
 }
