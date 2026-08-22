@@ -16,7 +16,7 @@ use std::{collections::BTreeMap, sync::LazyLock};
 ///
 /// This must be updated when you change the database schema.  Refer to
 /// schema/crdb/README.adoc in the root of this repository for details.
-pub const SCHEMA_VERSION: Version = Version::new(296, 0, 0);
+pub const SCHEMA_VERSION: Version = Version::new(297, 0, 0);
 
 /// List of all past database schema versions, in *reverse* order
 ///
@@ -28,9 +28,10 @@ pub static KNOWN_VERSIONS: LazyLock<Vec<KnownVersion>> = LazyLock::new(|| {
         // |  leaving the first copy as an example for the next person.
         // v
         // KnownVersion::new(next_int, "unique-dirname-with-the-sql-files"),
-        KnownVersion::new(296, "multicast-member-parent-kind"),
-        KnownVersion::new(295, "multicast-member-origin"),
-        KnownVersion::new(294, "drop-multicast-deleted-state"),
+        KnownVersion::new(297, "multicast-member-parent-kind"),
+        KnownVersion::new(296, "multicast-member-origin"),
+        KnownVersion::new(295, "drop-multicast-deleted-state"),
+        KnownVersion::new(294, "external-service-ip-pool"),
         KnownVersion::new(293, "add-rendezvous-sled-bp-availability"),
         KnownVersion::new(292, "allow-ddm-traffic"),
         KnownVersion::new(291, "bgp-peer-src-addr"),
