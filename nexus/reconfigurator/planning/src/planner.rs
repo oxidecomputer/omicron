@@ -62,7 +62,7 @@ use nexus_types::external_api::sled::SledPolicy;
 use nexus_types::external_api::sled::SledState;
 use nexus_types::inventory::Collection;
 use nexus_types::inventory::SpType;
-use omicron_common::api::external::Generation;
+use omicron_generation_kinds::Generation;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;

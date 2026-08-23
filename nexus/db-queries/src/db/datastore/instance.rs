@@ -2264,7 +2264,6 @@ mod tests {
     use nexus_types::external_api::project;
     use nexus_types::identity::Asset;
     use nexus_types::silo::DEFAULT_SILO_ID;
-    use omicron_common::api::external;
     use omicron_common::api::external::ByteCount;
     use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_test_utils::dev;
@@ -2513,7 +2512,9 @@ mod tests {
                 &InstanceUuid::from_untyped_uuid(authz_instance.id()),
                 &InstanceRuntimeState {
                     time_updated: Utc::now(),
-                    generation: Generation(external::Generation::from_u32(2)),
+                    generation: Generation(
+                        omicron_generation_kinds::Generation::from_u32(2),
+                    ),
                     propolis_id: None,
                     dst_propolis_id: None,
                     migration_id: None,
@@ -2683,7 +2684,9 @@ mod tests {
                 &InstanceUuid::from_untyped_uuid(authz_instance.id()),
                 &InstanceRuntimeState {
                     time_updated: Utc::now(),
-                    generation: Generation(external::Generation::from_u32(2)),
+                    generation: Generation(
+                        omicron_generation_kinds::Generation::from_u32(2),
+                    ),
                     propolis_id: None,
                     dst_propolis_id: None,
                     migration_id: None,
@@ -2728,7 +2731,9 @@ mod tests {
                 &InstanceUuid::from_untyped_uuid(authz_instance.id()),
                 &InstanceRuntimeState {
                     time_updated: Utc::now(),
-                    generation: Generation(external::Generation::from_u32(2)),
+                    generation: Generation(
+                        omicron_generation_kinds::Generation::from_u32(2),
+                    ),
                     propolis_id: None,
                     dst_propolis_id: None,
                     migration_id: None,
@@ -2804,7 +2809,9 @@ mod tests {
                 &InstanceUuid::from_untyped_uuid(authz_instance.id()),
                 &InstanceRuntimeState {
                     time_updated: Utc::now(),
-                    generation: Generation(external::Generation::from_u32(2)),
+                    generation: Generation(
+                        omicron_generation_kinds::Generation::from_u32(2),
+                    ),
                     propolis_id: None,
                     dst_propolis_id: None,
                     migration_id: None,
@@ -2866,7 +2873,9 @@ mod tests {
         .expect("instance should be locked");
         let new_runtime = &InstanceRuntimeState {
             time_updated: Utc::now(),
-            generation: Generation(external::Generation::from_u32(2)),
+            generation: Generation(
+                omicron_generation_kinds::Generation::from_u32(2),
+            ),
             propolis_id: Some(Uuid::new_v4()),
             dst_propolis_id: None,
             migration_id: None,
@@ -2971,7 +2980,9 @@ mod tests {
         // acquired.
         let new_runtime = &InstanceRuntimeState {
             time_updated: Utc::now(),
-            generation: Generation(external::Generation::from_u32(2)),
+            generation: Generation(
+                omicron_generation_kinds::Generation::from_u32(2),
+            ),
             propolis_id: Some(Uuid::new_v4()),
             dst_propolis_id: Some(Uuid::new_v4()),
             migration_id: Some(Uuid::new_v4()),
@@ -3000,9 +3011,9 @@ mod tests {
                     &lock,
                     &InstanceRuntimeState {
                         time_updated: Utc::now(),
-                        generation: Generation(external::Generation::from_u32(
-                            2
-                        )),
+                        generation: Generation(
+                            omicron_generation_kinds::Generation::from_u32(2)
+                        ),
                         propolis_id: None,
                         dst_propolis_id: None,
                         migration_id: None,

@@ -13,7 +13,7 @@ use dropshot::{
     Body, ConfigDropshot, FreeformBody, HttpError, HttpResponseOk, HttpServer,
     Path, RequestContext, ServerBuilder,
 };
-use omicron_common::api::external::Generation;
+use omicron_generation_kinds::Generation;
 use repo_depot_api::*;
 use tokio::sync::{AcquireError, OwnedSemaphorePermit, Semaphore, watch};
 

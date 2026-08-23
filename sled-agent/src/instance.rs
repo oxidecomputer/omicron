@@ -2768,8 +2768,9 @@ mod tests {
     use dropshot::HttpServer;
     use internal_dns_resolver::Resolver;
     use omicron_common::FileKv;
-    use omicron_common::api::external::{Generation, Hostname};
+    use omicron_common::api::external::Hostname;
     use omicron_common::api::internal::shared::{DhcpConfig, SledIdentifiers};
+    use omicron_generation_kinds::Generation;
 
     use omicron_uuid_kinds::InternalZpoolUuid;
     use propolis_client::ClientInfo;
