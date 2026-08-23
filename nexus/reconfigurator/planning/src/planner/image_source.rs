@@ -19,7 +19,7 @@ use nexus_types::{
     },
     inventory::Collection,
 };
-use omicron_common::api::external::Generation;
+use omicron_generation_kinds::Generation;
 use omicron_uuid_kinds::{MupdateOverrideUuid, OmicronZoneUuid, SledUuid};
 use sled_agent_types::inventory::{
     BootPartitionContents, BootPartitionDetails, ManifestBootInventory,

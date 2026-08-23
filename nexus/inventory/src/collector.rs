@@ -716,8 +716,8 @@ mod test {
     use iddqd::id_ord_map;
     use nexus_types::inventory::Collection;
     use omicron_cockroach_metrics::CockroachClusterAdminClient;
-    use omicron_common::api::external::Generation;
     use omicron_common::zpool_name::ZpoolName;
+    use omicron_generation_kinds::Generation;
     use omicron_sled_agent::sim;
     use omicron_uuid_kinds::OmicronZoneUuid;
     use omicron_uuid_kinds::SledUuid;

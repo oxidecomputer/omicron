@@ -100,11 +100,11 @@ use nexus_types::deployment::PendingMgsUpdates;
 use nexus_types::deployment::ZoneRunningStatus;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
-use omicron_common::api::external::Generation;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use omicron_common::bail_unless;
+use omicron_generation_kinds::Generation;
 use omicron_uuid_kinds::BlueprintKind;
 use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::GenericUuid;
@@ -1582,7 +1582,7 @@ impl DataStore {
         let internal_dns_version = *blueprint_row.internal_dns_version;
         let external_dns_version = *blueprint_row.external_dns_version;
         let target_release_minimum_generation =
-            *blueprint_row.target_release_minimum_generation;
+            blueprint_row.target_release_minimum_generation.into();
         let nexus_generation = *blueprint_row.nexus_generation;
         let external_networking_generation =
             *blueprint_row.external_networking_generation;

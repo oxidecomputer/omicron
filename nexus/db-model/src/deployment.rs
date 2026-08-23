@@ -7,6 +7,7 @@
 
 use crate::inventory::{HwRotSlot, SpMgsSlot, SpType, ZoneType};
 use crate::omicron_zone_config::{self, OmicronZoneNic};
+use crate::typed_generation::DbTypedGeneration;
 use crate::typed_uuid::DbTypedUuid;
 use crate::{
     ArtifactHash, ByteCount, DbArtifactVersion, DbOximeterReadMode,
@@ -64,6 +65,7 @@ use nexus_types::deployment::{
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::SLED_PREFIX_LENGTH;
 use omicron_common::zpool_name::ZpoolName;
+use omicron_generation_kinds::TargetReleaseGenerationKind;
 use omicron_uuid_kinds::{
     BlueprintKind, BlueprintUuid, DatasetKind, ExternalIpKind, ExternalIpUuid,
     GenericUuid, MupdateOverrideKind, OmicronZoneKind, OmicronZoneUuid,
@@ -91,7 +93,8 @@ pub struct Blueprint {
     pub time_created: DateTime<Utc>,
     pub creator: String,
     pub comment: String,
-    pub target_release_minimum_generation: Generation,
+    pub target_release_minimum_generation:
+        DbTypedGeneration<TargetReleaseGenerationKind>,
     pub nexus_generation: Generation,
     pub source: DbBpSource,
     pub external_networking_generation: Generation,
@@ -111,9 +114,9 @@ impl From<&'_ nexus_types::deployment::Blueprint> for Blueprint {
             time_created: bp.time_created,
             creator: bp.creator.clone(),
             comment: bp.comment.clone(),
-            target_release_minimum_generation: Generation(
-                bp.target_release_minimum_generation,
-            ),
+            target_release_minimum_generation: bp
+                .target_release_minimum_generation
+                .into(),
             nexus_generation: Generation(bp.nexus_generation),
             source: DbBpSource::from(&bp.source),
             external_networking_generation: Generation(
@@ -130,8 +133,9 @@ impl From<Blueprint> for nexus_types::deployment::BlueprintMetadata {
             parent_blueprint_id: value.parent_blueprint_id.map(From::from),
             internal_dns_version: *value.internal_dns_version,
             external_dns_version: *value.external_dns_version,
-            target_release_minimum_generation: *value
-                .target_release_minimum_generation,
+            target_release_minimum_generation: value
+                .target_release_minimum_generation
+                .into(),
             nexus_generation: *value.nexus_generation,
             cockroachdb_fingerprint: value.cockroachdb_fingerprint,
             cockroachdb_setting_preserve_downgrade:

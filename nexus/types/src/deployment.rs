@@ -34,9 +34,9 @@ use omicron_common::address::SLED_PREFIX_LENGTH;
 use omicron_common::address::SLED_RESERVED_ADDRESSES;
 use omicron_common::address::get_sled_address;
 use omicron_common::api::external::ByteCount;
-use omicron_common::api::external::Generation;
 use omicron_common::api::internal::shared::DatasetKind;
 use omicron_common::disk::DatasetName;
+use omicron_generation_kinds::{Generation, TargetReleaseGeneration};
 use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::MupdateOverrideUuid;
@@ -251,7 +251,7 @@ pub struct Blueprint {
     /// Once an operator sets a new target release, its generation will be 6 or
     /// higher. Reconfigurator will then know that it is back in charge of
     /// driving the system to the target release.
-    pub target_release_minimum_generation: Generation,
+    pub target_release_minimum_generation: TargetReleaseGeneration,
 
     /// The generation of the active group of Nexuses
     ///
@@ -3409,7 +3409,7 @@ pub struct BlueprintMetadata {
     /// The minimum generation for the target release.
     ///
     /// See [`Blueprint::target_release_minimum_generation`].
-    pub target_release_minimum_generation: Generation,
+    pub target_release_minimum_generation: TargetReleaseGeneration,
     /// The Nexus generation number
     ///
     /// See [`Blueprint::nexus_generation`].

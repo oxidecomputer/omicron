@@ -92,13 +92,13 @@ use ntp_admin_client::{
     Client as NtpAdminClient, Error as NtpAdminError, types::TimeSync,
 };
 use omicron_common::address::{COCKROACH_ADMIN_PORT, NTP_ADMIN_PORT};
-use omicron_common::api::external::Generation;
 use omicron_common::api::internal::nexus::Certificate;
 use omicron_common::backoff::{
     BackoffError, retry_notify, retry_policy_internal_service_aggressive,
 };
 use omicron_common::disk::DatasetKind;
 use omicron_ddm_admin_client::DdmError;
+use omicron_generation_kinds::Generation;
 use omicron_ledger::{self as ledger};
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::RackUuid;
@@ -1629,8 +1629,9 @@ mod test {
             AZ_PREFIX_LENGTH, IpRange, Ipv6Subnet, RACK_PREFIX_LENGTH,
             SLED_PREFIX_LENGTH, get_sled_address,
         },
-        api::external::{AllowedSourceIps, ByteCount, Generation},
+        api::external::{AllowedSourceIps, ByteCount},
     };
+    use omicron_generation_kinds::Generation;
     use omicron_uuid_kinds::SledUuid;
     use oxnet::Ipv6Net;
     use sled_agent_types::disk::DiskIdentity;

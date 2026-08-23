@@ -355,9 +355,9 @@ mod test {
     use omicron_common::address::SLED_PREFIX_LENGTH;
     use omicron_common::address::get_sled_address;
     use omicron_common::address::get_switch_zone_address;
-    use omicron_common::api::external::Generation;
     use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_common::zpool_name::ZpoolName;
+    use omicron_generation_kinds::{Generation, TargetReleaseGeneration};
     use omicron_test_utils::dev::test_setup_log;
     use omicron_uuid_kinds::BlueprintUuid;
     use omicron_uuid_kinds::ExternalIpUuid;
@@ -708,7 +708,7 @@ mod test {
             parent_blueprint_id: None,
             internal_dns_version: initial_dns_generation,
             external_dns_version: Generation::new(),
-            target_release_minimum_generation: Generation::new(),
+            target_release_minimum_generation: TargetReleaseGeneration::new(),
             nexus_generation: Generation::new(),
             external_networking_generation: Generation::new(),
             cockroachdb_fingerprint: String::new(),

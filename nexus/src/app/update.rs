@@ -16,7 +16,6 @@ use futures::Stream;
 use illumos_utils::zone::PROPOLIS_ZONE_PREFIX;
 use nexus_auth::authz;
 use nexus_db_lookup::LookupPath;
-use nexus_db_model::Generation;
 use nexus_db_model::TufRepoUpload;
 use nexus_db_model::TufTrustRoot;
 use nexus_db_model::saga_types::Saga;
@@ -648,7 +647,7 @@ impl super::Nexus {
 
         // Update activity is suspended if the current target release generation
         // is less than the blueprint's minimum generation
-        let suspended = *db_target_release.generation
+        let suspended = db_target_release.generation()
             < blueprint_target.blueprint.target_release_minimum_generation;
 
         // Decide whether to surface a "contact support" signal based on health
@@ -759,9 +758,9 @@ impl super::Nexus {
         // TargetReleaseDescription from the previous generation if available,
         // otherwise fall back to Initial.
         let prev_repo_id =
-            if let Some(prev_gen) = target_release.generation.prev() {
+            if let Some(prev_gen) = target_release.generation().prev() {
                 self.datastore()
-                    .target_release_get_generation(opctx, Generation(prev_gen))
+                    .target_release_get_generation(opctx, prev_gen)
                     .await
                     .internal_context("fetching previous target release")?
                     .and_then(|r| r.tuf_repo_id)

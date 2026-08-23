@@ -251,8 +251,8 @@ mod test {
     use nexus_types::external_api::sled::SledState;
     use omicron_common::address::Ipv6Subnet;
     use omicron_common::api::external;
-    use omicron_common::api::external::Generation;
     use omicron_common::zpool_name::ZpoolName;
+    use omicron_generation_kinds::{Generation, TargetReleaseGeneration};
     use omicron_uuid_kinds::BlueprintUuid;
     use omicron_uuid_kinds::OmicronZoneUuid;
     use omicron_uuid_kinds::PhysicalDiskUuid;
@@ -327,7 +327,7 @@ mod test {
             parent_blueprint_id: Some(current_target.target_id),
             internal_dns_version: dns_version,
             external_dns_version: dns_version,
-            target_release_minimum_generation: Generation::new(),
+            target_release_minimum_generation: TargetReleaseGeneration::new(),
             nexus_generation: Generation::new(),
             external_networking_generation: Generation::new(),
             cockroachdb_fingerprint: String::new(),

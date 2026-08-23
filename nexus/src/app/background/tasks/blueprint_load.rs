@@ -218,7 +218,7 @@ mod test {
         Blueprint, BlueprintSource, BlueprintTarget,
         CockroachDbPreserveDowngrade, OximeterReadMode, PendingMgsUpdates,
     };
-    use omicron_common::api::external::Generation;
+    use omicron_generation_kinds::{Generation, TargetReleaseGeneration};
     use omicron_uuid_kinds::BlueprintUuid;
     use serde::Deserialize;
     use std::collections::BTreeMap;
@@ -245,7 +245,8 @@ mod test {
                 parent_blueprint_id: Some(parent_blueprint_id),
                 internal_dns_version: Generation::new(),
                 external_dns_version: Generation::new(),
-                target_release_minimum_generation: Generation::new(),
+                target_release_minimum_generation: TargetReleaseGeneration::new(
+                ),
                 nexus_generation: Generation::new(),
                 external_networking_generation: Generation::new(),
                 cockroachdb_fingerprint: String::new(),
