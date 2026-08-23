@@ -85,6 +85,13 @@ impl TryFrom<i64> for M2Slot {
             // drive B is assigned slot 18.
             17 => Ok(Self::A),
             18 => Ok(Self::B),
+            // Synthetic disks (file-backed vdevs in test environments) are
+            // assigned their config-order index offset by sled-storage's
+            // SYNTHETIC_SLOT_OFFSET (1024). Configs conventionally list the
+            // two M.2 vdevs first, so the pair lands on the first two offset
+            // slots; mapping them lets test sleds determine a boot disk.
+            1024 => Ok(Self::A),
+            1025 => Ok(Self::B),
             _ => bail!("unexpected M.2 slot {value}"),
         }
     }
@@ -162,5 +169,34 @@ impl FromStr for CompressionAlgorithm {
             }
         };
         Ok(c)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use assert_matches::assert_matches;
+
+    #[test]
+    fn m2_slot_from_i64() {
+        // Real gimlets: drive A is slot 17, drive B is slot 18.
+        assert_matches!(M2Slot::try_from(17), Ok(M2Slot::A));
+        assert_matches!(M2Slot::try_from(18), Ok(M2Slot::B));
+
+        // Synthetic disks are offset by sled-storage's
+        // SYNTHETIC_SLOT_OFFSET. Configs list the two M.2 vdevs first, so
+        // the pair lands on the first two offset slots; keep these in sync
+        // with that offset.
+        assert_matches!(M2Slot::try_from(1024), Ok(M2Slot::A));
+        assert_matches!(M2Slot::try_from(1025), Ok(M2Slot::B));
+
+        for slot in [0, 16, 19, 1023, 1026] {
+            assert_matches!(
+                M2Slot::try_from(slot),
+                Err(_),
+                "slot {} should not convert",
+                slot
+            );
+        }
     }
 }

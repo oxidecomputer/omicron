@@ -34,6 +34,9 @@ pub enum DiskError {
 pub struct SyntheticDisk {
     raw: RawSyntheticDisk,
     zpool_name: ZpoolName,
+    // `raw.path` as resolved against the synthetic disk root; the config may
+    // name vdevs relative to it.
+    resolved_path: Utf8PathBuf,
 }
 
 // By adding slots at an "offset", this acts as a barrier against synthetic
@@ -42,6 +45,9 @@ pub struct SyntheticDisk {
 // This shouldn't happen in prod, and is an unlikely test-only scenario, but
 // we'd still like to protect against it, since it could confuse the inventory
 // system.
+//
+// M2Slot::try_from maps the first two offset slots (1024, 1025) to M.2 slots
+// A/B; keep these in sync.
 const SYNTHETIC_SLOT_OFFSET: i64 = 1024;
 
 // A generic name for the firmware in slot1 of an NVMe device.
@@ -89,7 +95,7 @@ impl SyntheticDisk {
         .await
         .unwrap();
 
-        Self { raw, zpool_name }
+        Self { raw, zpool_name, resolved_path: path }
     }
 }
 
@@ -352,8 +358,17 @@ impl Disk {
                 Partition::BootImage,
                 raw,
             ),
-            Self::Synthetic(_) => {
-                Err(PooledDiskError::SyntheticDiskNoDevfsPath)
+            Self::Synthetic(disk) => {
+                // Synthetic disks have no partitions; a sibling file next to
+                // the backing vdev stands in for the boot image slice so host
+                // phase 2 contents can be read and written in test
+                // environments. The file is not created here; environments
+                // that want host phase 2 to work seed it with a boot image
+                // (header + phase 2 artifact), and reads of a missing file
+                // report an error just as an unreadable partition would.
+                let mut path = disk.resolved_path.clone().into_string();
+                path.push_str(".boot_image");
+                Ok(Utf8PathBuf::from(path))
             }
         }
     }

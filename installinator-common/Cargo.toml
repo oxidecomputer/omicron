@@ -26,5 +26,6 @@ oxide-update-engine-types.workspace = true
 omicron-workspace-hack.workspace = true
 
 [dev-dependencies]
+camino-tempfile.workspace = true
 proptest.workspace = true
 test-strategy.workspace = true

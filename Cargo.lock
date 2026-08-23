@@ -5894,6 +5894,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "camino",
+ "camino-tempfile",
  "illumos-utils",
  "installinator-common-versions",
  "libc",

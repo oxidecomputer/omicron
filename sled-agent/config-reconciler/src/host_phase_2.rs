@@ -469,13 +469,20 @@ mod boot_partition_details {
             BootPartitionError::OpenDevfs { path: path.clone(), err }
         })?;
 
-        // Determine the disk's block size.
-        let mut block_size = MediaInfoExtended::from_fd(f.as_raw_fd())
-            .map_err(|err| BootPartitionError::MediaInfoExtended {
-                path: path.clone(),
-                err,
-            })?
-            .logical_block_size as usize;
+        // Determine the disk's block size. Synthetic boot images in test
+        // environments are regular files, which reject the media info ioctl;
+        // fall back to a fixed block size for them.
+        let is_file = f.metadata().map(|m| m.is_file()).unwrap_or(false);
+        let mut block_size = if is_file {
+            512
+        } else {
+            MediaInfoExtended::from_fd(f.as_raw_fd())
+                .map_err(|err| BootPartitionError::MediaInfoExtended {
+                    path: path.clone(),
+                    err,
+                })?
+                .logical_block_size as usize
+        };
 
         // We expect a block_size of 512 or 4096 in practice, but that's a
         // pretty small amount to read at once. If we have a block size that
