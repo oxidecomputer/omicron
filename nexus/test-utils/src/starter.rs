@@ -1025,15 +1025,22 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
                     measurements: BTreeSet::new(),
                 })
                 .await
-                .expect("Failed to configure sled agent {sled_id} with zones");
+                .unwrap_or_else(|err| {
+                    panic!(
+                        "Failed to configure sled agent {sled_id} \
+                         with zones: {err:?}"
+                    )
+                });
 
             client
                 .write_network_bootstore_config(&early_network_config)
                 .await
-                .expect(
-                    "Failed to write early networking config \
-                     to bootstore on sled {sled_id}",
-                );
+                .unwrap_or_else(|err| {
+                    panic!(
+                        "Failed to write early networking config \
+                         to bootstore on sled {sled_id}: {err:?}"
+                    )
+                });
         }
     }
 

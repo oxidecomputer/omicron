@@ -4453,6 +4453,9 @@ async fn cmd_db_region_replacement_status(
                         .await?;
 
                 if let Some(repair_progress) = maybe_repair_progress {
+                    // {wide_bar:.green}, etc. are indicatif template
+                    // placeholders, not Rust format args.
+                    #[expect(clippy::literal_string_with_formatting_args)]
                     let bar = ProgressBar::with_draw_target(
                         Some(repair_progress.total_items as u64),
                         ProgressDrawTarget::stdout(),
@@ -4553,6 +4556,9 @@ async fn cmd_db_region_replacement_info(
                     .await?;
 
             if let Some(repair_progress) = maybe_repair_progress {
+                // {wide_bar:.green}, etc. are indicatif template
+                // placeholders, not Rust format args.
+                #[expect(clippy::literal_string_with_formatting_args)]
                 let bar = ProgressBar::with_draw_target(
                     Some(repair_progress.total_items as u64),
                     ProgressDrawTarget::stdout(),
