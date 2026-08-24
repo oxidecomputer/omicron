@@ -1201,6 +1201,7 @@ fn display_sled_config(
         remove_mupdate_override,
         host_phase_2,
         measurements,
+        update_disposition,
     } = config;
 
     writeln!(f, "\n{label} SLED CONFIG")?;
@@ -1208,6 +1209,7 @@ fn display_sled_config(
 
     writeln!(indented, "generation: {}", generation)?;
     writeln!(indented, "remove_mupdate_override: {remove_mupdate_override:?}")?;
+    writeln!(indented, "update_disposition: {update_disposition:?}")?;
 
     let display_host_phase_2_desired = |desired| match desired {
         HostPhase2DesiredContents::CurrentContents => {
