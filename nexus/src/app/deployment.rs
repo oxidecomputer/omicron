@@ -1279,6 +1279,9 @@ pub enum SetTargetDebugWriterPhase2<'a> {
     },
 
     /// We've encountered an error and will be ignoring subsequent operations.
+    // The specific error is only used for tests.  Rather than sprinkle
+    // `cfg(test)` around all the bookkeeping, we just allow this to be
+    // dead_code in non-test builds.
     Failed(#[cfg_attr(not(test), expect(dead_code))] anyhow::Error),
 }
 
