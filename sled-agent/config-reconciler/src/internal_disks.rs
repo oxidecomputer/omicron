@@ -345,6 +345,14 @@ impl InternalDisks {
         })
     }
 
+    /// Whether the boot image in `slot` is a synthetic disk's stand-in file
+    /// rather than a real M.2 partition.
+    pub(crate) fn boot_image_is_synthetic(&self, slot: M2Slot) -> Option<bool> {
+        self.disks.iter().find_map(|disk| {
+            (disk.slot == Some(slot)).then_some(disk.boot_image_is_synthetic)
+        })
+    }
+
     /// Returns all `CONFIG_DATASET` paths within available M.2 disks.
     pub fn all_config_datasets(
         &self,
@@ -478,6 +486,10 @@ mod internal_disk_details {
         pub(super) slot: Option<M2Slot>,
         pub(super) boot_image_raw_devfs_path:
             Result<Utf8PathBuf, Arc<PooledDiskError>>,
+
+        // A synthetic disk's boot image is a regular file, so it rejects the
+        // disk ioctls a real M.2 answers.
+        pub(super) boot_image_is_synthetic: bool,
     }
 
     // Special ID type for `InternalDiskDetails` that lets us guarantee we sort
@@ -548,6 +560,7 @@ impl From<&'_ Disk> for InternalDiskDetails {
             boot_image_raw_devfs_path: disk
                 .boot_image_devfs_path(true)
                 .map_err(Arc::new),
+            boot_image_is_synthetic: disk.is_synthetic(),
         }
     }
 }
@@ -580,6 +593,9 @@ impl InternalDiskDetails {
             boot_image_raw_devfs_path: boot_image_raw_devfs_path.ok_or_else(
                 || Arc::new(PooledDiskError::SyntheticDiskNoDevfsPath),
             ),
+            // Tests reach the boot image through fakes rather than the real
+            // reader/writer, so the kind never matters to them.
+            boot_image_is_synthetic: false,
         }
     }
 

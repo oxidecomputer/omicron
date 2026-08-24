@@ -58,18 +58,12 @@ impl RawDiskWriter {
             .open(path)
             .await?;
 
-        // Synthetic boot images in test environments are regular files, which
-        // reject the media info ioctl. Writes are O_SYNC, so a device-sized
-        // block would fsync every few hundred bytes; use 1 MiB, matching what
-        // the boot partition reader settles on.
-        let block_size = if f.metadata().await?.is_file() {
-            1024 * 1024
-        } else {
-            let media_info = MediaInfoExtended::from_fd(f.as_raw_fd())?;
-            media_info.logical_block_size as usize
-        };
+        let media_info = MediaInfoExtended::from_fd(f.as_raw_fd())?;
 
-        let inner = BlockSizeBufWriter::with_block_size(block_size, f);
+        let inner = BlockSizeBufWriter::with_block_size(
+            media_info.logical_block_size as usize,
+            f,
+        );
 
         Ok(Self { inner })
     }
@@ -94,11 +88,8 @@ impl RawDiskWriter {
             match dkio::flush_write_cache(f.as_raw_fd()) {
                 Ok(()) => Ok(()),
                 // Some drives don't support `flush_write_cache`; we don't want
-                // to fail in this case. Regular files (synthetic boot images
-                // in test environments) reject the ioctl entirely; sync_all
-                // above already covers them.
+                // to fail in this case.
                 Err(err) if err.raw_os_error() == Some(libc::ENOTSUP) => Ok(()),
-                Err(err) if err.raw_os_error() == Some(libc::ENOTTY) => Ok(()),
                 Err(err) => Err(err),
             }
         })
@@ -128,26 +119,5 @@ impl AsyncWrite for RawDiskWriter {
         cx: &mut Context<'_>,
     ) -> Poll<Result<(), io::Error>> {
         Pin::new(&mut self.inner).poll_shutdown(cx)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use camino_tempfile::tempdir;
-
-    // Synthetic boot images are regular files, which reject the media info
-    // ioctl. Writes are O_SYNC, so the fallback block size is what keeps a
-    // 1 GiB-scale phase 2 write from fsyncing itself to a crawl.
-    #[tokio::test]
-    async fn regular_file_uses_one_mib_blocks() {
-        let dir = tempdir().expect("created tempdir");
-        let path = dir.path().join("boot_image");
-        std::fs::write(&path, b"synthetic boot image").expect("wrote file");
-
-        let writer = RawDiskWriter::open(path.as_std_path())
-            .await
-            .expect("opened regular file");
-        assert_eq!(writer.block_size(), 1024 * 1024);
     }
 }

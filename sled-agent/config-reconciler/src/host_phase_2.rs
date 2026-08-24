@@ -10,6 +10,7 @@ use crate::ResolverStatusExt;
 use crate::SledAgentArtifactStore;
 use camino::Utf8Path;
 use camino::Utf8PathBuf;
+use installinator_common::BlockSizeBufWriter;
 use installinator_common::RawDiskWriter;
 use sled_agent_types::disk::M2Slot;
 use sled_agent_types::inventory::BootPartitionContents as BootPartitionContentsInventory;
@@ -27,8 +28,12 @@ use std::io;
 use std::io::BufRead as _;
 use std::io::BufReader;
 use std::io::Read as _;
+use std::pin::Pin;
 use std::sync::Arc;
+use std::task::Context;
+use std::task::Poll;
 use tokio::io::AsyncWrite;
+use tokio::io::AsyncWriteExt as _;
 use tufaceous_artifact::ArtifactHash;
 
 #[derive(Debug, thiserror::Error)]
@@ -146,29 +151,72 @@ impl BootPartitionReconciler {
             &desired.slot_b,
         );
 
-        let (slot_a, slot_b) = futures::join!(
-            Self::reconcile_slot::<_, RawDiskReader, RawDiskWriter>(
-                M2Slot::A,
+        // Synthetic boot images need a writer that issues no disk ioctls.
+        let synthetic = internal_disks
+            .boot_image_is_synthetic(M2Slot::A)
+            .or_else(|| internal_disks.boot_image_is_synthetic(M2Slot::B))
+            .unwrap_or(false);
+        let (slot_a, slot_b) = if synthetic {
+            self.reconcile_slots::<_, RawDiskReader, SyntheticDiskWriter>(
                 internal_disks,
-                &mut self.cached_slot_a,
                 prepared_slot_a.desired_contents(),
-                artifact_store,
-                log,
-            ),
-            Self::reconcile_slot::<_, RawDiskReader, RawDiskWriter>(
-                M2Slot::B,
-                internal_disks,
-                &mut self.cached_slot_b,
                 prepared_slot_b.desired_contents(),
                 artifact_store,
                 log,
-            ),
-        );
+            )
+            .await
+        } else {
+            self.reconcile_slots::<_, RawDiskReader, RawDiskWriter>(
+                internal_disks,
+                prepared_slot_a.desired_contents(),
+                prepared_slot_b.desired_contents(),
+                artifact_store,
+                log,
+            )
+            .await
+        };
         BootPartitionContents {
             boot_disk: self.determine_boot_disk(internal_disks),
             slot_a,
             slot_b,
         }
+    }
+
+    /// Reconcile both slots concurrently. Split out so the writer type is
+    /// chosen once, rather than at each slot.
+    async fn reconcile_slots<
+        T: SledAgentArtifactStore,
+        R: DiskReader,
+        W: DiskWriter,
+    >(
+        &mut self,
+        internal_disks: &InternalDisks,
+        desired_a: &HostPhase2DesiredContents,
+        desired_b: &HostPhase2DesiredContents,
+        artifact_store: &T,
+        log: &Logger,
+    ) -> (
+        Result<BootPartitionDetails, BootPartitionError>,
+        Result<BootPartitionDetails, BootPartitionError>,
+    ) {
+        futures::join!(
+            Self::reconcile_slot::<_, R, W>(
+                M2Slot::A,
+                internal_disks,
+                &mut self.cached_slot_a,
+                desired_a,
+                artifact_store,
+                log,
+            ),
+            Self::reconcile_slot::<_, R, W>(
+                M2Slot::B,
+                internal_disks,
+                &mut self.cached_slot_b,
+                desired_b,
+                artifact_store,
+                log,
+            ),
+        )
     }
 
     fn determine_boot_disk(
@@ -397,6 +445,66 @@ impl DiskWriterFile for RawDiskWriter {
     }
 }
 
+/// Writer for a synthetic disk's boot image: a regular file standing in for an
+/// M.2 partition. Like [`RawDiskWriter`] without the disk ioctls, so the block
+/// size is fixed and `sync_all` is the only flush.
+struct SyntheticDiskWriter {
+    inner: BlockSizeBufWriter<tokio::fs::File>,
+}
+
+impl SyntheticDiskWriter {
+    // Writes are O_SYNC, so a device-sized block would fsync every few hundred
+    // bytes; 1 MiB matches what the boot partition reader settles on.
+    const BLOCK_SIZE: usize = 1024 * 1024;
+}
+
+impl DiskWriter for SyntheticDiskWriter {
+    type F = SyntheticDiskWriter;
+
+    async fn open(path: &Utf8Path) -> io::Result<Self::F> {
+        let f = tokio::fs::OpenOptions::new()
+            .create(false)
+            .write(true)
+            .truncate(false)
+            .custom_flags(libc::O_SYNC)
+            .open(path)
+            .await?;
+        let inner = BlockSizeBufWriter::with_block_size(Self::BLOCK_SIZE, f);
+        Ok(Self { inner })
+    }
+}
+
+impl DiskWriterFile for SyntheticDiskWriter {
+    async fn finalize(mut self) -> io::Result<()> {
+        self.inner.flush().await?;
+        self.inner.into_inner().sync_all().await
+    }
+}
+
+impl AsyncWrite for SyntheticDiskWriter {
+    fn poll_write(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<Result<usize, io::Error>> {
+        Pin::new(&mut self.inner).poll_write(cx, buf)
+    }
+
+    fn poll_flush(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Result<(), io::Error>> {
+        Pin::new(&mut self.inner).poll_flush(cx)
+    }
+
+    fn poll_shutdown(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Result<(), io::Error>> {
+        Pin::new(&mut self.inner).poll_shutdown(cx)
+    }
+}
+
 trait DiskReader {
     async fn read(
         slot: M2Slot,
@@ -451,9 +559,15 @@ mod boot_partition_details {
     ) -> Result<BootPartitionDetails, BootPartitionError> {
         match internal_disks.boot_image_raw_devfs_path(slot) {
             Some(Ok(path)) => {
-                tokio::task::spawn_blocking(|| read_blocking(path))
-                    .await
-                    .expect("read_blocking() did not panic")
+                // Block size settled from the disk kind, not asked of the file.
+                let is_synthetic = internal_disks
+                    .boot_image_is_synthetic(slot)
+                    .unwrap_or(false);
+                tokio::task::spawn_blocking(move || {
+                    read_blocking(path, is_synthetic)
+                })
+                .await
+                .expect("read_blocking() did not panic")
             }
             Some(Err(err)) => Err(BootPartitionError::DetermineDevfsPath(err)),
             None => Err(BootPartitionError::NoDiskInSlot),
@@ -462,6 +576,7 @@ mod boot_partition_details {
 
     fn read_blocking(
         path: Utf8PathBuf,
+        is_synthetic: bool,
     ) -> Result<BootPartitionDetails, BootPartitionError> {
         const ONE_MIB: usize = 1024 * 1024;
 
@@ -469,11 +584,8 @@ mod boot_partition_details {
             BootPartitionError::OpenDevfs { path: path.clone(), err }
         })?;
 
-        // Determine the disk's block size. Synthetic boot images in test
-        // environments are regular files, which reject the media info ioctl;
-        // fall back to a fixed block size for them.
-        let is_file = f.metadata().map(|m| m.is_file()).unwrap_or(false);
-        let mut block_size = if is_file {
+        // Determine the disk's block size.
+        let mut block_size = if is_synthetic {
             512
         } else {
             MediaInfoExtended::from_fd(f.as_raw_fd())

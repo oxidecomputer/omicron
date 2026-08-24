@@ -348,6 +348,15 @@ impl Disk {
         }
     }
 
+    /// Whether this is a synthetic disk: a file-backed stand-in used by test
+    /// environments rather than real hardware. Mirrors [`RawDisk::is_synthetic`].
+    pub fn is_synthetic(&self) -> bool {
+        match self {
+            Self::Real(_) => false,
+            Self::Synthetic(_) => true,
+        }
+    }
+
     pub fn boot_image_devfs_path(
         &self,
         raw: bool,

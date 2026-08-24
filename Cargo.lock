@@ -5894,7 +5894,6 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "camino",
- "camino-tempfile",
  "illumos-utils",
  "installinator-common-versions",
  "libc",
@@ -14249,6 +14248,7 @@ dependencies = [
  "installinator-common",
  "key-manager",
  "key-manager-types",
+ "libc",
  "ntp-admin-client",
  "omicron-common",
  "omicron-ledger",
