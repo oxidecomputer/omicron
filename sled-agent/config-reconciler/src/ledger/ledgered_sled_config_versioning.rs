@@ -342,7 +342,7 @@ pub(super) mod tests {
             latest_version_path.into(),
         )
         .await
-        .expect("read v14 config");
+        .expect("read expected config");
 
         // Reading old configs should rewrite the file to match the newest
         // version.

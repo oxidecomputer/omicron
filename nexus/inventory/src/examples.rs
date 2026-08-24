@@ -434,7 +434,7 @@ pub fn representative() -> Representative {
         remove_mupdate_override: None,
         host_phase_2: HostPhase2DesiredSlots::current_contents(),
         measurements: Default::default(),
-        update_disposition: OmicronSledUpdateDisposition::Available,
+        update_disposition: OmicronSledUpdateDisposition::Evacuating,
     };
 
     // Create iterator producing fixed IDs.

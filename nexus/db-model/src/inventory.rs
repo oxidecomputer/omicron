@@ -2713,8 +2713,7 @@ impl From<InvDataset> for nexus_types::inventory::Dataset {
 impl_enum_type!(
     InvSledUpdateDispositionEnum:
 
-    /// Database representation of the availability half of a sled's
-    /// `update_disposition`.
+    /// Database representation of a sled's `update_disposition`.
     #[derive(
         Copy,
         Clone,

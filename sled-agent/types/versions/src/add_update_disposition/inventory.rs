@@ -6,7 +6,7 @@
 //!
 //! * Add [`OmicronSledUpdateDisposition`] type
 //! * Add `update_disposition` to [`OmicronSledConfig`]
-//! * New definitions of types that include directly or transitively include
+//! * New definitions of types that directly or transitively include
 //!   `OmicronSledConfig`:
 //!     * [`ConfigReconcilerInventory`]
 //!     * [`ConfigReconcilerInventoryStatus`]
@@ -59,7 +59,9 @@ use std::time::Duration;
 /// sled should be evacuated as well as blueprint-specific metadata. From
 /// sled-agent itself, we only need to know the high-level state; we use this to
 /// determine whether or not to accept new VMM registration requests.
-#[derive(Clone, Copy, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[derive(
+    Clone, Copy, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum OmicronSledUpdateDisposition {
     Available,
@@ -83,10 +85,7 @@ pub struct OmicronSledConfig {
     pub remove_mupdate_override: Option<MupdateOverrideUuid>,
     #[serde(default = "HostPhase2DesiredSlots::current_contents")]
     pub host_phase_2: HostPhase2DesiredSlots,
-    // We purposely skip a serde default here to work around some ledger
-    // versioning quirks
     pub measurements: BTreeSet<OmicronSingleMeasurement>,
-
     pub update_disposition: OmicronSledUpdateDisposition,
 }
 
@@ -170,14 +169,24 @@ impl From<ConfigReconcilerInventory>
     for crate::v16::inventory::ConfigReconcilerInventory
 {
     fn from(value: ConfigReconcilerInventory) -> Self {
+        let ConfigReconcilerInventory {
+            last_reconciled_config,
+            external_disks,
+            datasets,
+            orphaned_datasets,
+            zones,
+            boot_partitions,
+            remove_mupdate_override,
+        } = value;
+
         Self {
-            last_reconciled_config: value.last_reconciled_config.into(),
-            external_disks: value.external_disks,
-            datasets: value.datasets,
-            orphaned_datasets: value.orphaned_datasets,
-            zones: value.zones,
-            boot_partitions: value.boot_partitions,
-            remove_mupdate_override: value.remove_mupdate_override,
+            last_reconciled_config: last_reconciled_config.into(),
+            external_disks,
+            datasets,
+            orphaned_datasets,
+            zones,
+            boot_partitions,
+            remove_mupdate_override,
         }
     }
 }
@@ -255,26 +264,46 @@ pub struct Inventory {
 
 impl From<Inventory> for crate::v46::inventory::Inventory {
     fn from(value: Inventory) -> Self {
+        let Inventory {
+            sled_id,
+            sled_agent_address,
+            sled_role,
+            baseboard_id,
+            usable_hardware_threads,
+            usable_physical_ram,
+            cpu_family,
+            reservoir_size,
+            disks,
+            zpools,
+            datasets,
+            ledgered_sled_config,
+            reconciler_status,
+            last_reconciliation,
+            file_source_resolver,
+            smf_services_enabled_not_online,
+            reference_measurements,
+            fmd,
+        } = value;
+
         Self {
-            sled_id: value.sled_id,
-            sled_agent_address: value.sled_agent_address,
-            sled_role: value.sled_role,
-            baseboard_id: value.baseboard_id,
-            usable_hardware_threads: value.usable_hardware_threads,
-            usable_physical_ram: value.usable_physical_ram,
-            cpu_family: value.cpu_family,
-            reservoir_size: value.reservoir_size,
-            disks: value.disks,
-            zpools: value.zpools,
-            datasets: value.datasets,
-            ledgered_sled_config: value.ledgered_sled_config.map(From::from),
-            reconciler_status: value.reconciler_status.into(),
-            last_reconciliation: value.last_reconciliation.map(From::from),
-            file_source_resolver: value.file_source_resolver,
-            smf_services_enabled_not_online: value
-                .smf_services_enabled_not_online,
-            reference_measurements: value.reference_measurements,
-            fmd: value.fmd,
+            sled_id,
+            sled_agent_address,
+            sled_role,
+            baseboard_id,
+            usable_hardware_threads,
+            usable_physical_ram,
+            cpu_family,
+            reservoir_size,
+            disks,
+            zpools,
+            datasets,
+            ledgered_sled_config: ledgered_sled_config.map(From::from),
+            reconciler_status: reconciler_status.into(),
+            last_reconciliation: last_reconciliation.map(From::from),
+            file_source_resolver,
+            smf_services_enabled_not_online,
+            reference_measurements,
+            fmd,
         }
     }
 }

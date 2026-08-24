@@ -4865,10 +4865,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_dataset (
 
 -- A sled's update disposition in inventory.
 --
--- TODO-john This is the same as `sled_update_availability`. Should we reuse
--- that, or is it better to keep these separate since that one is only one part
--- of the larger blueprint update disposition enum? OmicronSledConfig only cares
--- about these two states.
+-- This is analogous to the `sled_update_availability` enum used as a part of
+-- storing update disposition in blueprints. We use a separate enum (despite
+-- currently having identical variants) because there are separate Rust
+-- types, and it allows the two to evolve independently.
 CREATE TYPE IF NOT EXISTS omicron.public.inv_sled_update_disposition AS ENUM (
     -- Available for use for all provisions.
     'available',
