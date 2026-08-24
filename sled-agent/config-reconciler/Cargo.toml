@@ -26,9 +26,11 @@ illumos-utils.workspace = true
 installinator-common.workspace = true
 key-manager.workspace = true
 key-manager-types.workspace = true
+libc.workspace = true
 sled-agent-types-versions.workspace = true
 ntp-admin-client.workspace = true
 omicron-common.workspace = true
+omicron-debug-dropbox.workspace = true
 omicron-ledger.workspace = true
 omicron-uuid-kinds.workspace = true
 rand.workspace = true
@@ -55,6 +57,7 @@ omicron-workspace-hack.workspace = true
 assert_matches.workspace = true
 camino-tempfile-ext.workspace = true
 expectorate.workspace = true
+filetime.workspace = true
 illumos-utils = { workspace = true, features = ["testing"] }
 omicron-common = { workspace = true, features = ["testing"] }
 omicron-test-utils.workspace = true
@@ -65,6 +68,7 @@ serde_json.workspace = true
 sled-agent-resolvable-files-examples.workspace = true
 sled-storage = { workspace = true, features = ["testing"] }
 test-strategy.workspace = true
+walkdir.workspace = true
 xshell.workspace = true
 
 [features]

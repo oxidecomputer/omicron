@@ -672,6 +672,13 @@ table! {
 }
 
 table! {
+    external_service_ip_pool (service, ip_pool_id) {
+        service -> crate::enums::ExternalServiceKindEnum,
+        ip_pool_id -> Uuid,
+    }
+}
+
+table! {
     ip_pool_resource (ip_pool_id, resource_type, resource_id) {
         ip_pool_id -> Uuid,
         resource_type -> crate::enums::IpPoolResourceTypeEnum,
@@ -2127,6 +2134,7 @@ table! {
         host_phase_2_desired_slot_a -> Nullable<Text>,
         host_phase_2_desired_slot_b -> Nullable<Text>,
         measurements -> Nullable<Array<Text>>,
+        update_disposition -> crate::enums::InvSledUpdateDispositionEnum,
     }
 }
 
