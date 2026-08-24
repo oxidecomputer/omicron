@@ -264,12 +264,32 @@ impl VmmReservoirManager {
             );
         }
         info!(self.log, "Setting reservoir size to {reservoir_size} bytes");
-        vmm_reservoir::ReservoirControl::set(reservoir_size)?;
 
-        self.reservoir_size.store(reservoir_size.to_bytes(), Ordering::SeqCst);
+        let actual_size = match vmm_reservoir::ReservoirControl::set(
+            reservoir_size,
+        ) {
+            Ok(()) => reservoir_size,
+            Err(vmm_reservoir::Error::ReservoirError {
+                error,
+                current_size: Some(size),
+            }) => {
+                // TODO: When we hit this error condition we really would like
+                // to keep retrying in the background to get to our intended
+                // size.
+                warn!(
+                    self.log,
+                    "Reservoir resize failed but reservoir is currently at {size} bytes";
+                    "error" => &error,
+                );
+                size
+            }
+            Err(e) => return Err(e.into()),
+        };
+
+        self.reservoir_size.store(actual_size.to_bytes(), Ordering::SeqCst);
         info!(
             self.log,
-            "Finished setting reservoir size to {reservoir_size} bytes"
+            "Finished setting reservoir size to {actual_size} bytes"
         );
         self.size_updated_tx.send(()).unwrap();
 
