@@ -163,6 +163,11 @@ async fn test_nexus_boots_before_dendrite() {
     starter.start_ddm(SwitchSlot::Switch1).await;
     info!(log, "Started ddm");
 
+    info!(log, "Starting lldp");
+    starter.start_lldp(SwitchSlot::Switch0).await;
+    starter.start_lldp(SwitchSlot::Switch1).await;
+    info!(log, "Started lldp");
+
     info!(log, "Populating internal DNS records");
     starter
         .record_switch_dns(
