@@ -17,7 +17,7 @@ pub(crate) struct Filename(String);
 
 #[derive(Debug, Error)]
 #[error(
-    "string is not a valid filename (has slashes or is '', '.', or '..'): {0}"
+    "string is not a valid filename (has slashes or is '', '.', or '..'): {0:?}"
 )]
 pub(crate) struct BadFilename(String);
 
