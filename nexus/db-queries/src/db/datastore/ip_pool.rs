@@ -1128,7 +1128,6 @@ impl DataStore {
         .filter(ip_pool::id.eq(authz_pool.id()))
         .filter(ip_pool::time_deleted.is_null())
         .filter(silo::time_deleted.is_null())
-        .filter(silo::discoverable.eq(true))
         .select(IpPoolResource::as_select())
         .load_async::<IpPoolResource>(
             &*self.pool_connection_authorized(opctx).await?,
