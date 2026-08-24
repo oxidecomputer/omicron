@@ -22,6 +22,7 @@ use omicron_uuid_kinds::PropolisUuid;
 use oxnet::IpNet;
 use sled_agent_config_reconciler::AvailableDatasetsReceiver;
 use sled_agent_config_reconciler::CurrentlyManagedZpoolsReceiver;
+use sled_agent_config_reconciler::UpdateDispositionReceiver;
 use sled_agent_types::attached_subnet::AttachedSubnet;
 use sled_agent_types::attached_subnet::AttachedSubnets;
 use sled_agent_types::instance::*;
@@ -102,6 +103,7 @@ impl InstanceManager {
         zone_bundler: ZoneBundler,
         vmm_reservoir_manager: VmmReservoirManagerHandle,
         metrics_queue: MetricsRequestQueue,
+        update_disposition_rx: UpdateDispositionReceiver,
     ) -> Result<InstanceManager, Error> {
         Self::new_inner(
             log,
@@ -114,6 +116,7 @@ impl InstanceManager {
             ZoneBuilderFactory::new(),
             vmm_reservoir_manager,
             metrics_queue,
+            update_disposition_rx,
         )
     }
 
@@ -133,6 +136,7 @@ impl InstanceManager {
         zone_builder_factory: ZoneBuilderFactory,
         vmm_reservoir_manager: VmmReservoirManagerHandle,
         metrics_queue: MetricsRequestQueue,
+        update_disposition_rx: UpdateDispositionReceiver,
     ) -> Result<InstanceManager, Error> {
         let (tx, rx) = mpsc::channel(QUEUE_SIZE);
         let (terminate_tx, terminate_rx) = mpsc::unbounded_channel();
@@ -152,6 +156,7 @@ impl InstanceManager {
             zone_bundler,
             zone_builder_factory,
             metrics_queue,
+            update_disposition_rx,
         };
 
         let runner_handle =
@@ -556,6 +561,12 @@ struct InstanceManagerRunner {
     zone_bundler: ZoneBundler,
     zone_builder_factory: ZoneBuilderFactory,
     metrics_queue: MetricsRequestQueue,
+
+    // Watch channel receiver which notifies us if this sled is available for
+    // VMM registration or is in the process of being evacuated for an update
+    // (in which case we should reject new VMM registrations while continuing
+    // to allow operations on existing VMMs).
+    update_disposition_rx: UpdateDispositionReceiver,
 }
 
 impl InstanceManagerRunner {
@@ -582,7 +593,8 @@ impl InstanceManagerRunner {
                             break;
                         },
                     }
-                },
+                }
+
                 // If the set of currently-managed zpools has changed, shut down
                 // any instances due to disks that have disappeared out from
                 // under them.
@@ -601,6 +613,27 @@ impl InstanceManagerRunner {
                         }
                     }
                 }
+
+                // If our update disposition has changed, copy the disposition
+                // into our internal watch channel (which is both how we report
+                // our status to inventory and how we decide whether to accept
+                // new VMM registrations).
+                result = self.update_disposition_rx.changed() => {
+                    match result {
+                        Ok(()) => {
+                            // TODO-john
+                        }
+                        Err(_) => {
+                            warn!(
+                                self.log,
+                                "InstanceManager's 'update disposition' \
+                                 channel closed; shutting down",
+                            );
+                            break;
+                        }
+                    }
+                }
+
                 request = self.rx.recv() => {
                     let request_variant = request.as_ref().map(|r| r.to_string());
                     let result = match request {

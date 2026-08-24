@@ -13,6 +13,7 @@ use sled_agent_types::inventory::InventoryDataset;
 use sled_agent_types::inventory::InventoryDisk;
 use sled_agent_types::inventory::InventoryZpool;
 use sled_agent_types::inventory::OmicronSledConfig;
+use sled_agent_types::inventory::OmicronSledUpdateDisposition;
 use sled_storage::config::MountConfig;
 use sled_storage::disk::Disk;
 use sled_storage::nested_dataset::NestedDatasetConfig;
@@ -105,6 +106,56 @@ pub struct LedgerTaskSpawnToken {
 pub struct ConfigReconcilerSpawnToken {
     common: SpawnTokenCommon,
     ledger_rx: watch::Receiver<CurrentSledConfig>,
+}
+
+impl ConfigReconcilerSpawnToken {
+    /// Create a new watch channel receiver containing this sled's update
+    /// disposition.
+    pub fn subscribe_update_disposition(&self) -> UpdateDispositionReceiver {
+        UpdateDispositionReceiver { ledger_rx: self.ledger_rx.clone() }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CurrentUpdateDisposition {
+    ConfigNotAvailable,
+    Known(OmicronSledUpdateDisposition),
+}
+
+#[derive(Debug, Clone)]
+pub struct UpdateDispositionReceiver {
+    ledger_rx: watch::Receiver<CurrentSledConfig>,
+}
+
+impl UpdateDispositionReceiver {
+    /// Read the current update disposition, if available, and mark the
+    /// underlying watch channel value as seen.
+    pub fn current_and_update(&mut self) -> CurrentUpdateDisposition {
+        match &*self.ledger_rx.borrow_and_update() {
+            CurrentSledConfig::WaitingForInternalDisks
+            | CurrentSledConfig::WaitingForInitialConfig => {
+                CurrentUpdateDisposition::ConfigNotAvailable
+            }
+            CurrentSledConfig::Ledgered(config) => {
+                CurrentUpdateDisposition::Known(config.update_disposition)
+            }
+        }
+    }
+
+    /// Waits for a change notification in the underlying watch channel, then
+    /// marks the current value as seen.
+    ///
+    /// `changed()` may return spuriously: `UpdateDispositionReceiver` wraps a
+    /// watch channel containing the entire sled config, so `changed()` returns
+    /// any time any part of the sled config changes, not only when the update
+    /// disposition changes.
+    // If spurious `changed()` notifications becomes problematic, we can revisit
+    // this implementation (e.g., add an intermediate channel that only contains
+    // the update disposition). But sled config changes are relatively
+    // infrequent, so the occasional extra wakeup here seems pretty harmless.
+    pub async fn changed(&mut self) -> Result<(), watch::error::RecvError> {
+        self.ledger_rx.changed().await
+    }
 }
 
 #[derive(Debug)]

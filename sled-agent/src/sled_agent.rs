@@ -700,6 +700,7 @@ impl SledAgent {
             long_running_task_handles.zone_bundler.clone(),
             vmm_reservoir_manager.clone(),
             metrics_manager.request_queue(),
+            config_reconciler_spawn_token.subscribe_update_disposition(),
         )?;
 
         let svc_config =
