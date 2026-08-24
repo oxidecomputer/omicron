@@ -293,19 +293,50 @@ impl From<Error> for dropshot::HttpError {
                             InlineErrorChain::new(&err).to_string(),
                         )
                     }
-                    e => HttpError::for_internal_error(
-                        InlineErrorChain::new(&e).to_string(),
-                    ),
+                    err @ (crate::instance::Error::Timeout(_)
+                    | crate::instance::Error::VnicCreation(_)
+                    | crate::instance::Error::Notification(_)
+                    | crate::instance::Error::Migration(_)
+                    | crate::instance::Error::NicNotInPropolisSpec(_)
+                    | crate::instance::Error::ZoneCommand(_)
+                    | crate::instance::Error::ZoneBoot(_)
+                    | crate::instance::Error::ZoneEnsureAddress(_)
+                    | crate::instance::Error::ZoneInstall(_)
+                    | crate::instance::Error::SerdeJsonError(_)
+                    | crate::instance::Error::Opte(_)
+                    | crate::instance::Error::InvalidHostname(_)
+                    | crate::instance::Error::ResolveError(_)
+                    | crate::instance::Error::VmNotRunning(_)
+                    | crate::instance::Error::PropolisAlreadyRegistered(_)
+                    | crate::instance::Error::U2NotFound
+                    | crate::instance::Error::Io(_)
+                    | crate::instance::Error::FailedSendChannelClosed
+                    | crate::instance::Error::FailedSendClientClosed
+                    | crate::instance::Error::RequestDropped(_)) => {
+                        HttpError::for_internal_error(
+                            InlineErrorChain::new(&err).to_string(),
+                        )
+                    }
                 }
             }
             Error::Instance(
                 e @ crate::instance_manager::Error::NoSuchVmm(_),
             ) => HttpError::for_not_found(
                 Some(NO_SUCH_INSTANCE.to_string()),
-                // NoSuchVmm has no source error, so it's currently not necessary to use a
-                // chain-logging adapter here, but if that changes in the future, the compiler
-                // won't complain.
+                // NoSuchVmm has no source error, so it's currently not
+                // necessary to use a chain-logging adapter here, but if that
+                // changes in the future, the compiler won't complain.
                 InlineErrorChain::new(&e).to_string(),
+            ),
+            err @ Error::Instance(
+                crate::instance_manager::Error::Opte(_)
+                | crate::instance_manager::Error::Underlay(_)
+                | crate::instance_manager::Error::ZoneBundle(_)
+                | crate::instance_manager::Error::FailedSendInstanceManagerClosed
+                | crate::instance_manager::Error::FailedSendClientClosed
+                | crate::instance_manager::Error::RequestDropped(_),
+            ) => HttpError::for_internal_error(
+                InlineErrorChain::new(&err).to_string(),
             ),
             Error::ZoneBundle(ref inner) => match inner {
                 BundleError::NoStorage | BundleError::Unavailable { .. } => {
@@ -326,7 +357,32 @@ impl From<Error> for dropshot::HttpError {
                         inner.to_string(),
                     )
                 }
-                _ => HttpError::for_internal_error(
+                err @ (BundleError::Command { .. }
+                | BundleError::CreateDirectory { .. }
+                | BundleError::OpenBundleFile { .. }
+                | BundleError::AddBundleData { .. }
+                | BundleError::ReadBundleData { .. }
+                | BundleError::CopyArchive { .. }
+                | BundleError::ReadDirectory { .. }
+                | BundleError::Metadata { .. }
+                | BundleError::Serialization(_)
+                | BundleError::Deserialization(_)
+                | BundleError::Task(_)
+                | BundleError::FailedSend(_)
+                | BundleError::DroppedRequest(_)
+                | BundleError::BundleFailed(_)
+                | BundleError::Zone(_)
+                | BundleError::PathBuf(_)
+                | BundleError::Cleanup(_)
+                | BundleError::CreateSnapshot(_)
+                | BundleError::DestroySnapshot(_)
+                | BundleError::ListSnapshot(_)
+                | BundleError::EnsureDataset(_)
+                | BundleError::DestroyDataset(_)
+                | BundleError::ListDatasets(_)
+                | BundleError::SetProperty(_)
+                | BundleError::GetProperty(_)
+                | BundleError::WalkDir(_)) => HttpError::for_internal_error(
                     InlineErrorChain::new(&err).to_string(),
                 ),
             },
@@ -334,8 +390,29 @@ impl From<Error> for dropshot::HttpError {
                 let err = omicron_common::api::external::Error::from(err);
                 err.into()
             }
-            e => HttpError::for_internal_error(
-                InlineErrorChain::new(&e).to_string(),
+            err @ (Error::BootDiskNotFound
+            | Error::Config(_)
+            | Error::BackingFs(_)
+            | Error::SwapDevice(_)
+            | Error::Etherstub(_)
+            | Error::EtherstubVnic(_)
+            | Error::Bootstrap(_)
+            | Error::DeleteAddress(_)
+            | Error::Underlay(_)
+            | Error::SledSubnet { .. }
+            | Error::Opte(_)
+            | Error::Hardware(_)
+            | Error::ResolveError(_)
+            | Error::ZpoolList(_)
+            | Error::Bootstore(_)
+            | Error::EarlyNetworkDeserialize(_)
+            | Error::SupportBundle(_)
+            | Error::Metrics(_)
+            | Error::UnexpectedRevision(_)
+            | Error::RepoDepotStart(_)
+            | Error::TimeNotSynchronized
+            | Error::Rot(_)) => HttpError::for_internal_error(
+                InlineErrorChain::new(&err).to_string(),
             ),
         }
     }
