@@ -76,6 +76,12 @@ pub enum Error {
         "address {0} is not within the underlay multicast subnet (ff04::/16)"
     )]
     InvalidMcastUnderlay(Ipv6Addr),
+
+    #[error(
+        "failed to install NIC multicast MAC filter for underlay {0}, \
+         caller should retry"
+    )]
+    UnderlayMcastJoinFailed(Ipv6Addr),
 }
 
 /// Delete all xde devices on the system.

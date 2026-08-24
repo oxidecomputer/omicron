@@ -513,11 +513,15 @@ impl AttachMemberToGroupStatement {
         // Return all columns so caller gets full member record
         // Column order must match schema: id, time_created, time_modified, time_deleted,
         // external_group_id, parent_id, sled_id, state, version_added, version_removed,
-        // multicast_ip, source_ips
+        // multicast_ip, source_ips, membership_origin
+        //
+        // membership_origin is not written by the INSERT (its column DEFAULT
+        // 'static' applies) nor by the ON CONFLICT path (a reactivated member
+        // preserves its original origin), so it is returned but never set here.
         out.push_sql(
             " RETURNING id, time_created, time_modified, time_deleted, \
              external_group_id, parent_id, sled_id, state, version_added, \
-             version_removed, multicast_ip, source_ips",
+             version_removed, multicast_ip, source_ips, membership_origin",
         );
         Ok(())
     }
@@ -533,11 +537,11 @@ impl AttachMemberToGroupStatement {
     ) -> QueryResult<()> {
         // Column order must match schema: id, time_created, time_modified, time_deleted,
         // external_group_id, parent_id, sled_id, state, version_added, version_removed,
-        // multicast_ip, source_ips
+        // multicast_ip, source_ips, membership_origin
         out.push_sql(
             "SELECT id, time_created, time_modified, time_deleted, \
              external_group_id, parent_id, sled_id, state, version_added, \
-             version_removed, multicast_ip, source_ips \
+             version_removed, multicast_ip, source_ips, membership_origin \
              FROM upserted_member CROSS JOIN validation",
         );
         Ok(())

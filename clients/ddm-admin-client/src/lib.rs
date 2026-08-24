@@ -8,6 +8,10 @@
 #![allow(clippy::clone_on_copy)]
 pub use ddm_admin_client::Error;
 pub use ddm_admin_client::types;
+pub use ddm_api_types_versions::latest::db::{
+    MulticastRoute, PeerInfo, PeerStatus,
+};
+pub use ddm_api_types_versions::latest::net::MulticastOrigin;
 
 use ddm_admin_client::Client as InnerClient;
 use either::Either;
@@ -101,6 +105,38 @@ impl Client {
         request: &EnableStatsRequest,
     ) -> Result<(), Error<types::Error>> {
         self.inner.enable_stats(request).await.map(|resp| resp.into_inner())
+    }
+
+    /// Returns DDM peer information including interface names.
+    ///
+    /// The `if_name` field on each peer provides a live sled-to-port
+    /// mapping, identifying which switch port a peer sled is connected
+    /// through (e.g., `"tfportrear0_0"`).
+    pub async fn get_peers(
+        &self,
+    ) -> Result<std::collections::HashMap<String, PeerInfo>, Error<types::Error>>
+    {
+        self.inner.get_peers().await.map(|resp| resp.into_inner())
+    }
+
+    /// Returns multicast routes learned from DDM peers.
+    ///
+    /// Each route includes the origin (overlay/underlay mapping),
+    /// the nexthop peer that advertised it, and the path vector.
+    pub async fn get_multicast_groups(
+        &self,
+    ) -> Result<Vec<MulticastRoute>, Error<types::Error>> {
+        self.inner.get_multicast_groups().await.map(|resp| resp.into_inner())
+    }
+
+    /// Returns multicast origins that this DDM instance is advertising.
+    pub async fn get_originated_multicast_groups(
+        &self,
+    ) -> Result<Vec<MulticastOrigin>, Error<types::Error>> {
+        self.inner
+            .get_originated_multicast_groups()
+            .await
+            .map(|resp| resp.into_inner())
     }
 
     /// Returns the addresses of connected sleds.

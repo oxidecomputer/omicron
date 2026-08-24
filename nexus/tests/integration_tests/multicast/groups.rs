@@ -1,7 +1,6 @@
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
-//
 
 //! Integration tests for multicast group APIs and IP pool operations.
 //!
@@ -286,31 +285,26 @@ async fn test_multicast_group_member_operations(
         })
         .expect("Should find underlay group IP in DPD response");
 
-    // Get the underlay group directly
-    let underlay_group = dpd_client
+    // Get the underlay group directly. Group-level programming is all Nexus
+    // owns in DPD. Per-member underlay forwarding (rear ports, Underlay
+    // direction) is programmed by `ddmd` from DDM peer subscriptions, so member
+    // contents are not asserted here.
+    dpd_client
         .multicast_group_get_underlay(&underlay_ip)
         .await
         .expect("Should get underlay group from DPD");
 
-    assert_eq!(
-        underlay_group.members.len(),
-        1,
-        "Underlay group should have exactly 1 member after member addition"
-    );
-
-    // Assert all underlay members use rear (backplane) ports with Underlay direction
-    for member in &underlay_group.members {
-        assert!(
-            matches!(member.port_id, dpd_client::types::PortId::Rear(_)),
-            "Underlay member should use rear (backplane) port, got: {:?}",
-            member.port_id
-        );
-        assert_eq!(
-            member.direction,
-            dpd_client::types::Direction::Underlay,
-            "Underlay member should have Underlay direction"
-        );
-    }
+    // MRIB: an any-source join yields exactly the (*,G) wildcard route on
+    // every switch, targeting the same admin-local underlay group that DPD
+    // programmed. mg-lower advertises this route to peer sleds via DDM.
+    assert_mrib_route_sources(
+        cptestctx,
+        external_multicast_ip,
+        &[None],
+        Some(underlay_ip.0),
+        "wildcard MRIB route once the member is joined",
+    )
+    .await;
 
     // Test removing instance from multicast group using instance-centric DELETE
     let member_remove_url = format!(
@@ -330,6 +324,9 @@ async fn test_multicast_group_member_operations(
     // Wait for both Nexus group and DPD group to be deleted
     wait_for_group_deleted(cptestctx, group_name).await;
     wait_for_group_deleted_from_dpd(cptestctx, external_multicast_ip).await;
+
+    // MRIB route is withdrawn along with the dataplane teardown.
+    assert_mrib_route_absent(cptestctx, external_multicast_ip).await;
 }
 
 #[nexus_test]
@@ -361,11 +358,12 @@ async fn test_instance_multicast_endpoints(
     let instance = create_instance(client, project_name, instance_name).await;
     let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
 
-    // Simulate and wait for instance to be fully running with sled_id assigned
+    // Simulate and wait for instance to be fully running. The first
+    // `wait_for_member_state` @ "Joined" also waits for sled assignment
+    // before its assertion.
     let nexus = &cptestctx.server.server_context().nexus;
     instance_simulate(nexus, &instance_id).await;
     instance_wait_for_state(client, instance_id, InstanceState::Running).await;
-    wait_for_instance_sled_assignment(cptestctx, &instance_id).await;
 
     // Case: List instance multicast groups (should be empty initially)
     let instance_groups_url = format!(
@@ -655,6 +653,9 @@ async fn test_instance_deletion_removes_multicast_memberships(
     assert_eq!(members.len(), 1, "Instance should be a member of the group");
     assert_eq!(members[0].instance_id, instance.identity.id);
 
+    // Verify MRIB route exists while group is active with a joined member.
+    assert_mrib_route_exists(cptestctx, multicast_ip).await;
+
     // Case: Instance deletion should clean up multicast memberships
     cleanup_instances(cptestctx, client, project_name, &[instance_name]).await;
 
@@ -669,6 +670,9 @@ async fn test_instance_deletion_removes_multicast_memberships(
 
     // Wait for reconciler to clean up DPD state (activates reconciler repeatedly until DPD confirms deletion)
     wait_for_group_deleted_from_dpd(cptestctx, multicast_ip).await;
+
+    // Verify MRIB route was withdrawn after group deletion.
+    assert_mrib_route_absent(cptestctx, multicast_ip).await;
 }
 
 /// Test that the multicast_ip field is correctly populated in MulticastGroupMember API responses.
@@ -1060,7 +1064,7 @@ async fn test_ssm_source_ip_behavior(cptestctx: &ControlPlaneTestContext) {
         .flatten()
         .filter_map(|src| match src {
             dpd_types::IpSrc::Exact(ip) => Some(*ip),
-            dpd_types::IpSrc::Any => None, // Any-source (ASM) wildcard
+            dpd_types::IpSrc::Any => None, // any-source (ASM) wildcard
         })
         .collect();
     dpd_source_ips.sort();
@@ -1069,6 +1073,72 @@ async fn test_ssm_source_ip_behavior(cptestctx: &ControlPlaneTestContext) {
         dpd_source_ips, expected_union_sources,
         "DPD external group sources should be union of all member sources"
     );
+
+    // MRIB: one (S,G) static route per source in the union, on every switch.
+    // Routes require a "Joined" member, so converge membership first.
+    wait_for_all_members_joined(cptestctx, ssm_union_ip).await;
+    let union_mrib: Vec<Option<IpAddr>> =
+        expected_union_sources.iter().copied().map(Some).collect();
+    assert_mrib_route_sources(
+        cptestctx,
+        multicast_ip,
+        &union_mrib,
+        None,
+        "one (S,G) MRIB route per source in the union",
+    )
+    .await;
+
+    // Case: (S,G) source-set narrowing on member detach.
+    // As specific-source members leave, the DPD union must shrink to the
+    // remaining members' sources. SSM groups never wildcard, so the DPD
+    // source list stays `Some(...)` throughout.
+    multicast_group_detach(
+        client,
+        project_name,
+        instance_names[2],
+        ssm_union_ip,
+    )
+    .await;
+    let mut expected_after_inst3 = vec![source1, source2];
+    expected_after_inst3.sort();
+    wait_for_dpd_source_filter(
+        cptestctx,
+        multicast_ip,
+        Some(expected_after_inst3),
+        "DPD union should shrink to {source1, source2} after inst-3 detaches",
+    )
+    .await;
+    assert_mrib_route_sources(
+        cptestctx,
+        multicast_ip,
+        &[Some(source1), Some(source2)],
+        None,
+        "MRIB (S,G) routes narrow after inst-3 detaches",
+    )
+    .await;
+
+    multicast_group_detach(
+        client,
+        project_name,
+        instance_names[1],
+        ssm_union_ip,
+    )
+    .await;
+    wait_for_dpd_source_filter(
+        cptestctx,
+        multicast_ip,
+        Some(vec![source1]),
+        "DPD union should shrink to {source1} after inst-2 detaches",
+    )
+    .await;
+    assert_mrib_route_sources(
+        cptestctx,
+        multicast_ip,
+        &[Some(source1)],
+        None,
+        "MRIB (S,G) routes narrow after inst-2 detaches",
+    )
+    .await;
 
     // Case: IPv6 source with IPv4 group should fail
     let ipv4_ssm_ip = "232.1.0.20";
@@ -1227,6 +1297,312 @@ async fn test_ssm_source_ip_behavior(cptestctx: &ControlPlaneTestContext) {
     for (group_name, _) in &group_configs {
         wait_for_group_deleted(cptestctx, group_name).await;
     }
+
+    // MRIB routes are withdrawn with group deletion.
+    assert_mrib_route_absent(cptestctx, multicast_ip).await;
+}
+
+/// Read the DPD external group source filter as a sorted [`Option<Vec<IpAddr>>`].
+///
+/// `None` indicates DPD-level source filtering is disabled (the (*,G) case
+/// produced by [`compute_sources_for_dpd`] when any ASM member has empty
+/// `source_ips`). `Some(sorted)` is the (S,G) union written by Nexus.
+///
+/// [`dpd_types::IpSrc::Any`] entries are automatically filtered out.
+/// Nexus only emits [`dpd_types::IpSrc::Exact`] today.
+async fn dpd_external_source_filter(
+    cptestctx: &ControlPlaneTestContext,
+    multicast_ip: IpAddr,
+) -> Option<Vec<IpAddr>> {
+    let dpd_response = dpd_client(cptestctx)
+        .multicast_group_get(&multicast_ip)
+        .await
+        .expect("DPD should have external group")
+        .into_inner();
+    match dpd_response {
+        dpd_types::MulticastGroupResponse::External { sources, .. } => sources
+            .map(|srcs| {
+                let mut ips: Vec<IpAddr> = srcs
+                    .iter()
+                    .filter_map(|src| match src {
+                        dpd_types::IpSrc::Exact(ip) => Some(*ip),
+                        dpd_types::IpSrc::Any => None,
+                    })
+                    .collect();
+                ips.sort();
+                ips
+            }),
+        dpd_types::MulticastGroupResponse::Underlay { .. } => {
+            panic!("Expected External group from DPD, got Underlay")
+        }
+    }
+}
+
+/// Activate the multicast reconciler and poll DPD until the external group's
+/// source filter matches what's expected. Use this after an attach/detach where the
+/// test asserts on DPD's converged (S,G) / (*,G) state.
+async fn wait_for_dpd_source_filter(
+    cptestctx: &ControlPlaneTestContext,
+    multicast_ip: IpAddr,
+    expected: Option<Vec<IpAddr>>,
+    msg: &str,
+) {
+    activate_then_wait_for_condition(
+        &cptestctx.lockstep_client,
+        || async {
+            let actual =
+                dpd_external_source_filter(cptestctx, multicast_ip).await;
+            if actual == expected {
+                Ok(())
+            } else {
+                Err(CondCheckError::<()>::NotYet { status: Some("source filter does not match expected".to_string()) })
+            }
+        },
+        &POLL_INTERVAL,
+        &POLL_TIMEOUT,
+    )
+    .await
+    .unwrap_or_else(|err| {
+        panic!(
+            "{msg}: expected {expected:?}, last observed mismatch ({err:?})",
+        )
+    });
+}
+
+/// Test ASM source-filter transitions across (*,G) and (S,G).
+///
+/// Source filtering for an ASM group is the union of all members' source IPs,
+/// unless any member has empty `source_ips`, in which case the switch-level
+/// filter is disabled (DPD `sources = None`, i.e. (*,G)). This test exercises
+/// the transitions on a single group:
+///
+/// 1. Specific-only union grows. Members join with disjoint sources.
+/// 2. Widen (S,G) -> (*,G). An any-source member joins, and DPD `sources`
+///    becomes `None`.
+/// 3. Two-any-source aggregation. A second any-source member joins, then the
+///    first leaves. DPD must remain `None` to prove `has_any_source_member`
+///    is OR-aggregated across live members rather than a stuck flag.
+/// 4. Narrow (*,G) -> (S,G). The last any-source member detaches, and DPD
+///    `sources` returns to the remaining specific-source union.
+/// 5. Specific union shrinks. A specific-source member detaches, and the DPD
+///    union contracts.
+#[nexus_test]
+async fn test_asm_source_filter_transitions(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let project_name = "asm-src-transitions";
+
+    ops::join3(
+        create_project(&client, project_name),
+        create_default_ip_pools(&client),
+        create_multicast_ip_pool_with_range(
+            &client,
+            "asm-transitions-pool",
+            (224, 2, 0, 0),
+            (224, 2, 0, 100),
+        ),
+    )
+    .await;
+
+    // Instance names encode each member's role in the test sequence. The
+    // `specific-` prefix denotes a member that subscribes to a single source
+    // (an (S,G) contributor). The `any-source-` prefix denotes a member that
+    // subscribes to all sources, which forces the group's switch-level filter
+    // off (turning the group into (*,G)). The trailing letter or digit
+    // distinguishes peers that play the same role: two specific-source
+    // members exercise union growth and shrink, and two any-source members
+    // exercise OR-aggregation of `has_any_source_member` across live members.
+    let specific_a = "asm-specific-source-a";
+    let specific_b = "asm-specific-source-b";
+    let any_source_1 = "asm-any-source-1";
+    let any_source_2 = "asm-any-source-2";
+    let instance_names = [specific_a, specific_b, any_source_1, any_source_2];
+    for name in &instance_names {
+        create_instance(client, project_name, name).await;
+    }
+
+    let group_ip_str = "224.2.0.10";
+    let group_ip: IpAddr = group_ip_str.parse().unwrap();
+    let source_a = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1));
+    let source_b = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2));
+
+    // Step 1: specific-source-a joins. DPD union is {source_a}.
+    multicast_group_attach_with_sources(
+        cptestctx,
+        project_name,
+        specific_a,
+        group_ip_str,
+        Some(vec![source_a]),
+    )
+    .await;
+    wait_for_group_active(client, group_ip_str).await;
+    wait_for_dpd_source_filter(
+        cptestctx,
+        group_ip,
+        Some(vec![source_a]),
+        "DPD should program (S,G) with the only specific source",
+    )
+    .await;
+
+    // MRIB routes require a "Joined" member, so converge membership once
+    // here. specific-source-a never detaches, so the group keeps a joined
+    // member for the remainder of the test.
+    wait_for_all_members_joined(cptestctx, group_ip_str).await;
+    assert_mrib_route_sources(
+        cptestctx,
+        group_ip,
+        &[Some(source_a)],
+        None,
+        "one (S,G) MRIB route for the only specific source",
+    )
+    .await;
+
+    // specific-source-b joins, so the DPD union grows to {source_a, source_b}.
+    multicast_group_attach_with_sources(
+        cptestctx,
+        project_name,
+        specific_b,
+        group_ip_str,
+        Some(vec![source_b]),
+    )
+    .await;
+    let mut expected_specific = vec![source_a, source_b];
+    expected_specific.sort();
+    wait_for_dpd_source_filter(
+        cptestctx,
+        group_ip,
+        Some(expected_specific.clone()),
+        "DPD union should grow to include both specific sources",
+    )
+    .await;
+    assert_mrib_route_sources(
+        cptestctx,
+        group_ip,
+        &[Some(source_a), Some(source_b)],
+        None,
+        "MRIB (S,G) routes grow with the specific union",
+    )
+    .await;
+
+    // Step 2: any-source-1 joins. DPD widens (S,G) to (*,G).
+    multicast_group_attach_with_sources(
+        cptestctx,
+        project_name,
+        any_source_1,
+        group_ip_str,
+        None,
+    )
+    .await;
+    wait_for_dpd_source_filter(
+        cptestctx,
+        group_ip,
+        None,
+        "DPD source filter should be disabled once any member is any-source",
+    )
+    .await;
+
+    // MRIB and DPD diverge for mixed membership: DPD collapses to (*,G)
+    // (filter disabled), while the MRIB keeps one route per specific source
+    // plus the any-source wildcard so each subscription stays addressable.
+    assert_mrib_route_sources(
+        cptestctx,
+        group_ip,
+        &[Some(source_a), Some(source_b), None],
+        None,
+        "MRIB keeps specific routes plus the wildcard for mixed membership",
+    )
+    .await;
+
+    // Step 3: any-source-2 joins, then any-source-1 detaches. DPD must stay
+    // (*,G) across the swap: the group is any-source as long as any live
+    // member is any-source, independent of join/detach order.
+    multicast_group_attach_with_sources(
+        cptestctx,
+        project_name,
+        any_source_2,
+        group_ip_str,
+        None,
+    )
+    .await;
+    wait_for_dpd_source_filter(
+        cptestctx,
+        group_ip,
+        None,
+        "DPD should stay disabled with two any-source members",
+    )
+    .await;
+    assert_mrib_route_sources(
+        cptestctx,
+        group_ip,
+        &[Some(source_a), Some(source_b), None],
+        None,
+        "MRIB wildcard persists with two any-source members",
+    )
+    .await;
+
+    multicast_group_detach(client, project_name, any_source_1, group_ip_str)
+        .await;
+    wait_for_dpd_source_filter(
+        cptestctx,
+        group_ip,
+        None,
+        "DPD should stay disabled while any-source-2 is still any-source",
+    )
+    .await;
+    assert_mrib_route_sources(
+        cptestctx,
+        group_ip,
+        &[Some(source_a), Some(source_b), None],
+        None,
+        "MRIB wildcard persists while any-source-2 remains",
+    )
+    .await;
+
+    // Step 4: any-source-2 detaches. DPD narrows (*,G) to (S,G) back to the
+    // remaining specific-source union.
+    multicast_group_detach(client, project_name, any_source_2, group_ip_str)
+        .await;
+    wait_for_dpd_source_filter(
+        cptestctx,
+        group_ip,
+        Some(expected_specific),
+        "DPD source filter should re-enable with the remaining specific union",
+    )
+    .await;
+    assert_mrib_route_sources(
+        cptestctx,
+        group_ip,
+        &[Some(source_a), Some(source_b)],
+        None,
+        "MRIB wildcard withdrawn once no member is any-source",
+    )
+    .await;
+
+    // Step 5: specific-source-b detaches. DPD union contracts to {source_a}.
+    multicast_group_detach(client, project_name, specific_b, group_ip_str)
+        .await;
+    wait_for_dpd_source_filter(
+        cptestctx,
+        group_ip,
+        Some(vec![source_a]),
+        "DPD union should contract after the second specific member leaves",
+    )
+    .await;
+    assert_mrib_route_sources(
+        cptestctx,
+        group_ip,
+        &[Some(source_a)],
+        None,
+        "MRIB (S,G) routes contract with the specific union",
+    )
+    .await;
+
+    cleanup_instances(cptestctx, client, project_name, &instance_names).await;
+    wait_for_group_deleted(cptestctx, group_ip_str).await;
+
+    // MRIB routes are withdrawn with group deletion.
+    assert_mrib_route_absent(cptestctx, group_ip).await;
 }
 
 /// Test default pool behavior when no pool is specified on member join.

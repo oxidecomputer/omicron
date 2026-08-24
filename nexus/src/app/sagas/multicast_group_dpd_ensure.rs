@@ -301,6 +301,20 @@ async fn mgde_rollback_dataplane(
         }
     };
 
+    // Client construction tolerates DPD resolution failure by returning an
+    // empty client map, so the error arm above cannot catch that case. An
+    // empty map would make `remove_groups` a vacuous success, so warn here
+    // instead of logging a rollback that removed nothing.
+    if dataplane.switch_count() == 0 {
+        warn!(
+            osagactx.log(),
+            "no DPD clients available during saga rollback, next reconciler \
+             pass converges the dataplane";
+            "tag" => %multicast_tag,
+        );
+        return Ok(());
+    }
+
     debug!(
         osagactx.log(),
         "rolling back multicast additions";
