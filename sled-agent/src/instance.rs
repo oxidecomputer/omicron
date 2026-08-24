@@ -2777,6 +2777,7 @@ mod tests {
     use propolis_client::types::{
         InstanceMigrateStatusResponse, InstanceStateMonitorResponse,
     };
+    use sled_agent_config_reconciler::UpdateDispositionReceiver;
     use sled_agent_config_reconciler::{
         CurrentlyManagedZpoolsReceiver, InternalDiskDetails,
         InternalDisksReceiver,
@@ -2785,6 +2786,7 @@ mod tests {
     use sled_agent_types::instance::ExternalIpv4Config;
     use sled_agent_types::instance::ExternalIpv6Config;
     use sled_agent_types::instance::InstanceEnsureBody;
+    use sled_agent_types::inventory::OmicronSledUpdateDisposition;
     use sled_agent_types::inventory::SourceNatConfigV6;
     use sled_agent_types::zone_bundle::CleanupContext;
     use sled_agent_types_versions::v1;
@@ -3136,6 +3138,9 @@ mod tests {
                     zone_builder_factory,
                     vmm_reservoir_manager,
                     metrics_queue,
+                    UpdateDispositionReceiver::fake_static(
+                        OmicronSledUpdateDisposition::Available,
+                    ),
                 )
                 .unwrap();
 

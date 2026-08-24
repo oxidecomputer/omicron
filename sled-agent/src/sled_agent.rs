@@ -7,7 +7,9 @@
 use crate::artifact_store::{ArtifactStore, SledAgentArtifactStoreWrapper};
 use crate::config::Config;
 use crate::hardware_monitor::HardwareMonitorHandle;
-use crate::instance_manager::InstanceManager;
+use crate::instance_manager::{
+    InstanceManager, VmmRegistrationDisallowedReason,
+};
 use crate::long_running_tasks::LongRunningTaskHandles;
 use crate::metrics::{MetricsManager, MetricsRequestQueue};
 use crate::nexus::{
@@ -226,6 +228,8 @@ impl From<Error> for dropshot::HttpError {
 
         const NO_SUCH_INSTANCE: &str = "NO_SUCH_INSTANCE";
         const INSTANCE_CHANNEL_FULL: &str = "INSTANCE_CHANNEL_FULL";
+        const SLED_CONFIG_NOT_YET_LOADED: &str = "SLED_CONFIG_NOT_YET_LOADED";
+        const SLED_EVACUATING: &str = "SLED_EVACUATING";
         const SUBNET_ALREADY_ATTACHED: &str = "SUBNET_ALREADY_ATTACHED";
         match err {
             Error::Instance(InstanceManagerError::Instance(instance_error)) => {
@@ -323,8 +327,28 @@ impl From<Error> for dropshot::HttpError {
                 HttpError::for_not_found(
                     Some(NO_SUCH_INSTANCE.to_string()),
                     // NoSuchVmm has no source error, so it's currently not
-                    // necessary to use a chain-logging adapter here, but if that
-                    // changes in the future, the compiler won't complain.
+                    // necessary to use a chain-logging adapter here, but if
+                    // that changes in the future, the compiler won't complain.
+                    InlineErrorChain::new(&e).to_string(),
+                )
+            }
+            Error::Instance(
+                e @ InstanceManagerError::VmmRegistrationDisallowed(reason),
+            ) => {
+                let code = match reason {
+                    VmmRegistrationDisallowedReason::ConfigNotYetLoaded => {
+                        SLED_CONFIG_NOT_YET_LOADED
+                    }
+                    VmmRegistrationDisallowedReason::SledEvacuating => {
+                        SLED_EVACUATING
+                    }
+                };
+                HttpError::for_unavail(
+                    Some(code.to_string()),
+                    // VmmRegistrationDisallowed has no source error, so it's
+                    // currently not necessary to use a chain-logging adapter
+                    // here, but if that changes in the future, the compiler
+                    // won't complain.
                     InlineErrorChain::new(&e).to_string(),
                 )
             }

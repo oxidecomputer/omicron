@@ -28,13 +28,42 @@ use sled_agent_types::attached_subnet::AttachedSubnets;
 use sled_agent_types::instance::*;
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
-use std::collections::BTreeMap;
 use std::sync::Arc;
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::{mpsc, oneshot, watch};
 use uuid::Uuid;
+
+mod jobs;
+
+use self::jobs::CanEnsureVmmResult;
+use self::jobs::InstanceManagerJobsStatus;
+use self::jobs::Jobs;
 
 // The depth of the request queue for the instance manager.
 const QUEUE_SIZE: usize = 256;
+
+/// Reasons we may reject VMM registration requests.
+#[derive(Debug, Clone, Copy)]
+pub enum VmmRegistrationDisallowedReason {
+    /// We haven't yet loaded our sled config, so we don't know whether we're
+    /// available for new VMMs or are still in the evacuating state from an
+    /// update.
+    ConfigNotYetLoaded,
+    /// This sled is being evacuated for an update.
+    SledEvacuating,
+}
+
+impl VmmRegistrationDisallowedReason {
+    fn error_display(&self) -> &'static str {
+        match self {
+            VmmRegistrationDisallowedReason::ConfigNotYetLoaded => {
+                "sled config not yet loaded"
+            }
+            VmmRegistrationDisallowedReason::SledEvacuating => {
+                "sled evacuating for update"
+            }
+        }
+    }
+}
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -63,6 +92,9 @@ pub enum Error {
 
     #[error("Instance Manager dropped our request")]
     RequestDropped(#[from] oneshot::error::RecvError),
+
+    #[error("new VMM registrations not allowed: {}", .0.error_display())]
+    VmmRegistrationDisallowed(VmmRegistrationDisallowedReason),
 }
 
 pub(crate) struct InstanceManagerServices {
@@ -88,6 +120,14 @@ struct InstanceManagerInternal {
 /// All instances currently running on the sled.
 pub struct InstanceManager {
     inner: Arc<InstanceManagerInternal>,
+
+    // Watch channel receiver that allows us to report on the current status of
+    // `Jobs`, including both whether we're rejecting new VMM registrations and
+    // how many VMM registrations currently exist.
+    //
+    // Reconfigurator uses this information to determine when this sled is done
+    // being evacuated for update.
+    jobs_status_rx: watch::Receiver<InstanceManagerJobsStatus>,
 }
 
 impl InstanceManager {
@@ -136,19 +176,21 @@ impl InstanceManager {
         zone_builder_factory: ZoneBuilderFactory,
         vmm_reservoir_manager: VmmReservoirManagerHandle,
         metrics_queue: MetricsRequestQueue,
-        update_disposition_rx: UpdateDispositionReceiver,
+        mut update_disposition_rx: UpdateDispositionReceiver,
     ) -> Result<InstanceManager, Error> {
         let (tx, rx) = mpsc::channel(QUEUE_SIZE);
         let (terminate_tx, terminate_rx) = mpsc::unbounded_channel();
 
         let log = log.new(o!("component" => "InstanceManager"));
+        let (jobs, jobs_status_rx) =
+            Jobs::new(update_disposition_rx.current_and_update());
         let runner = InstanceManagerRunner {
             log: log.clone(),
             rx,
             terminate_tx,
             terminate_rx,
             nexus_client,
-            jobs: BTreeMap::new(),
+            jobs,
             vnic_allocator,
             port_manager,
             currently_managed_zpools_rx,
@@ -168,7 +210,14 @@ impl InstanceManager {
                 vmm_reservoir_manager,
                 runner_handle,
             }),
+            jobs_status_rx,
         })
+    }
+
+    // TODO: Plumb this status through inventory. Part of omicron#11121.
+    #[allow(unused)]
+    pub fn jobs_status(&self) -> InstanceManagerJobsStatus {
+        *self.jobs_status_rx.borrow()
     }
 
     pub async fn ensure_registered(
@@ -552,7 +601,7 @@ struct InstanceManagerRunner {
     // instance, we could avoid the methods within "instance.rs" that panic
     // if the Propolis client hasn't been initialized.
     /// A mapping from a Propolis ID to the [Instance] that Propolis incarnates.
-    jobs: BTreeMap<PropolisUuid, Instance>,
+    jobs: Jobs,
 
     vnic_allocator: VnicAllocator<Etherstub>,
     port_manager: PortManager,
@@ -621,7 +670,9 @@ impl InstanceManagerRunner {
                 result = self.update_disposition_rx.changed() => {
                     match result {
                         Ok(()) => {
-                            // TODO-john
+                            self.jobs.set_update_disposition(
+                                self.update_disposition_rx.current_and_update(),
+                            );
                         }
                         Err(_) => {
                             warn!(
@@ -758,8 +809,8 @@ impl InstanceManagerRunner {
             "metadata" => ?metadata,
         );
 
-        let instance = {
-            if let Some(existing_instance) = self.jobs.get(&propolis_id) {
+        let instance = match self.jobs.can_ensure_vmm(propolis_id) {
+            CanEnsureVmmResult::Exists(existing_instance) => {
                 if instance_id != existing_instance.id() {
                     info!(&self.log,
                           "Propolis ID already used by another instance";
@@ -778,7 +829,8 @@ impl InstanceManagerRunner {
                     );
                     existing_instance
                 }
-            } else {
+            }
+            CanEnsureVmmResult::CanRegister(registration_slot) => {
                 info!(&self.log,
                       "registering new instance";
                       "instance_id" => %instance_id,
@@ -821,9 +873,20 @@ impl InstanceManagerRunner {
                     sled_identifiers,
                     metadata,
                 )?;
-                let _old = self.jobs.insert(propolis_id, instance);
-                assert!(_old.is_none());
-                &self.jobs.get(&propolis_id).unwrap()
+                registration_slot.insert(instance)
+            }
+            CanEnsureVmmResult::CannotRegister(reason) => {
+                warn!(
+                    &self.log,
+                    "rejecting new VMM registration";
+                    "instance_id" => %instance_id,
+                    "propolis_id" => %propolis_id,
+                    "migration_id" => ?migration_id,
+                    "reason" => reason.error_display(),
+                );
+                // The VMM doesn't already exist, but we must disallow new
+                // registrations.
+                return Err(Error::VmmRegistrationDisallowed(reason));
             }
         };
         let (tx, rx) = oneshot::channel();
@@ -916,7 +979,7 @@ impl InstanceManagerRunner {
         tx: oneshot::Sender<Result<(), Error>>,
     ) -> Result<(), Error> {
         let mut channels = vec![];
-        for (_, instance) in &self.jobs {
+        for (_, instance) in self.jobs.iter() {
             let (tx, rx_new) = oneshot::channel();
             instance.refresh_external_ips(tx)?;
             channels.push(rx_new);

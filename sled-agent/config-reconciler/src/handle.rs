@@ -156,6 +156,27 @@ impl UpdateDispositionReceiver {
     pub async fn changed(&mut self) -> Result<(), watch::error::RecvError> {
         self.ledger_rx.changed().await
     }
+
+    #[cfg(any(test, feature = "testing"))]
+    pub fn fake_static(
+        update_disposition: OmicronSledUpdateDisposition,
+    ) -> Self {
+        // The only field that matters here is `update_disposition`; it's the
+        // only thing read by `current_and_update`.
+        let config =
+            OmicronSledConfig { update_disposition, ..Default::default() };
+        let (ledger_tx, ledger_rx) =
+            watch::channel(CurrentSledConfig::Ledgered(Box::new(config)));
+        // spawn a task that keeps the tx channel alive as long as there are any
+        // receivers. this allows receivers to call `.changed()` - it won't
+        // return (because we never change the contents), but would fail if we
+        // dropped tx entirely.
+        tokio::spawn(async move {
+            ledger_tx.closed().await;
+            std::mem::drop(ledger_tx);
+        });
+        Self { ledger_rx }
+    }
 }
 
 #[derive(Debug)]
