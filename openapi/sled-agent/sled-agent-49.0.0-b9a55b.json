@@ -7544,7 +7544,7 @@
         "type": "object",
         "properties": {
           "datasets": {
-            "title": "IdOrdMapAsMap",
+            "title": "IdOrdMap",
             "x-rust-type": {
               "crate": "iddqd",
               "parameters": [
@@ -7555,13 +7555,14 @@
               "path": "iddqd::IdOrdMap",
               "version": "*"
             },
-            "type": "object",
-            "additionalProperties": {
+            "type": "array",
+            "items": {
               "$ref": "#/components/schemas/DatasetConfig"
-            }
+            },
+            "uniqueItems": true
           },
           "disks": {
-            "title": "IdOrdMapAsMap",
+            "title": "IdOrdMap",
             "x-rust-type": {
               "crate": "iddqd",
               "parameters": [
@@ -7572,28 +7573,17 @@
               "path": "iddqd::IdOrdMap",
               "version": "*"
             },
-            "type": "object",
-            "additionalProperties": {
+            "type": "array",
+            "items": {
               "$ref": "#/components/schemas/OmicronPhysicalDiskConfig"
-            }
+            },
+            "uniqueItems": true
           },
           "generation": {
             "$ref": "#/components/schemas/Generation"
           },
           "host_phase_2": {
-            "default": {
-              "slot_a": {
-                "type": "current_contents"
-              },
-              "slot_b": {
-                "type": "current_contents"
-              }
-            },
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/HostPhase2DesiredSlots"
-              }
-            ]
+            "$ref": "#/components/schemas/HostPhase2DesiredSlots"
           },
           "measurements": {
             "type": "array",
@@ -7614,7 +7604,7 @@
             "$ref": "#/components/schemas/OmicronSledUpdateDisposition"
           },
           "zones": {
-            "title": "IdOrdMapAsMap",
+            "title": "IdOrdMap",
             "x-rust-type": {
               "crate": "iddqd",
               "parameters": [
@@ -7625,16 +7615,18 @@
               "path": "iddqd::IdOrdMap",
               "version": "*"
             },
-            "type": "object",
-            "additionalProperties": {
+            "type": "array",
+            "items": {
               "$ref": "#/components/schemas/OmicronZoneConfig"
-            }
+            },
+            "uniqueItems": true
           }
         },
         "required": [
           "datasets",
           "disks",
           "generation",
+          "host_phase_2",
           "measurements",
           "update_disposition",
           "zones"

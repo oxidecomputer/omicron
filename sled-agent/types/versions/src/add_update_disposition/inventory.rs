@@ -72,18 +72,10 @@ pub enum OmicronSledUpdateDisposition {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
 pub struct OmicronSledConfig {
     pub generation: Generation,
-    // Serialize and deserialize disks, datasets, and zones as maps for
-    // backwards compatibility. Newer IdOrdMaps should not use IdOrdMapAsMap.
-    #[serde(
-        with = "iddqd::id_ord_map::IdOrdMapAsMap::<OmicronPhysicalDiskConfig>"
-    )]
     pub disks: IdOrdMap<OmicronPhysicalDiskConfig>,
-    #[serde(with = "iddqd::id_ord_map::IdOrdMapAsMap::<DatasetConfig>")]
     pub datasets: IdOrdMap<DatasetConfig>,
-    #[serde(with = "iddqd::id_ord_map::IdOrdMapAsMap::<OmicronZoneConfig>")]
     pub zones: IdOrdMap<OmicronZoneConfig>,
     pub remove_mupdate_override: Option<MupdateOverrideUuid>,
-    #[serde(default = "HostPhase2DesiredSlots::current_contents")]
     pub host_phase_2: HostPhase2DesiredSlots,
     pub measurements: BTreeSet<OmicronSingleMeasurement>,
     pub update_disposition: OmicronSledUpdateDisposition,
