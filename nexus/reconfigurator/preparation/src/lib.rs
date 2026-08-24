@@ -632,8 +632,8 @@ pub async fn reconfigurator_state_assemble(
     target_blueprint: BlueprintTarget,
     intended_target_blueprint: Option<BlueprintUuid>,
 ) -> Result<UnstableReconfiguratorState, anyhow::Error> {
-    // It's also useful to include information about any DNS generations
-    // mentioned in any blueprints.
+    // Include information about any DNS generations mentioned in any
+    // blueprints.
     let blueprints_list = &blueprints;
     let fetch_dns_group = |dns_group: DnsGroup| async move {
         let latest_version = datastore

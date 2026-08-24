@@ -125,14 +125,22 @@ impl super::Nexus {
         let blueprint = self
             .blueprint_view(opctx, *new_target.target_id.as_untyped_uuid())
             .await?;
+        let blueprint_id = blueprint.id;
+        // Currently, this can only be used on systems that already have a
+        // target blueprint set, so this blueprint must have a parent.
+        let Some(parent_id) = blueprint.parent_blueprint_id else {
+            bail!("desired blueprint has no parent");
+        };
+        let parent =
+            self.blueprint_view(opctx, *parent_id.as_untyped_uuid()).await?;
         reconfigurator_state_assemble(
             opctx,
             datastore,
             planning_context.planning_input,
             IdOrdMap::from_iter([inventory]),
-            IdOrdMap::from_iter([blueprint.clone()]),
+            IdOrdMap::from_iter([parent, blueprint]),
             planning_context.target,
-            Some(blueprint.id),
+            Some(blueprint_id),
         )
         .await
     }
@@ -1290,7 +1298,7 @@ impl<'a> SetTargetDebugWriterPhase2<'a> {
         {
             debug!(&log, "attempting to remove intent file after failure");
             intent_deposit.cancel_and_attempt_delete().await;
-            warn!(&log, "removed intent file after failure");
+            warn!(&log, "attempted to remove intent file after failure");
         }
     }
 
@@ -1320,11 +1328,25 @@ impl<'a> SetTargetDebugWriterPhase2<'a> {
             ..intent_state
         };
 
-        // unwrap(): we checked this in `SetTargetDebugFile::new()`.
-        let blueprint = committed_state
+        let Some(blueprint) = committed_state
             .blueprints
             .get(&committed_state.target_blueprint.target_id)
-            .unwrap();
+        else {
+            // This should be impossible  That's because the new target_id
+            // *should* be the one that was previously the intended target id,
+            // and we checked in `SetTargetDebugWriterReady::new()` that that
+            // blueprint was present.  However, it's conceivable for the caller
+            // to give us a different target blueprint here.  That's not good or
+            // right, but our job is to save a state file matching whatever they
+            // told us -- if we can.
+            error!(
+                log,
+                "caller setting target to a blueprint different from previous \
+                 intended target and it is not also being saved";
+                "blueprint_id" => %committed_state.target_blueprint.target_id,
+            );
+            return;
+        };
         let name = blueprint_debug_filename(&blueprint, commit_reason);
         let committed_str = match serde_json::to_string(&committed_state) {
             Ok(s) => s,

@@ -173,10 +173,10 @@ pub fn file_checksum(path: PathBuf) -> Result<String> {
 /// Temporary directory used for tests
 ///
 /// Unlike typical temporary directories, this one is preserved by default, but
-/// cleaned up on `Drop` if the caller invokes `cleanup_successful()`.  The
-/// usual pattern is that you create one of these in which to put temporary
-/// files, then when your test succeeds, you call `cleanup_successful()`.  If
-/// the test fails, the directory will be kept around for debugging.
+/// cleaned up if the caller invokes `cleanup_successful()`.  The usual pattern
+/// is that you create one of these in which to put temporary files, then when
+/// your test succeeds, you call `cleanup_successful()`.  If the test fails, the
+/// directory will be kept around for debugging.
 pub struct TestTempDir {
     log: Logger,
     tempdir: Option<Utf8TempDir>,

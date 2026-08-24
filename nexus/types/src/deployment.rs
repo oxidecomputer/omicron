@@ -3507,11 +3507,11 @@ pub struct UnstableReconfiguratorState {
     pub target_blueprint: BlueprintTarget,
     /// If non-`None`, then this file was created as the system was attempting
     /// to make this blueprint the new target
-    // We use `serde(default)` to supporting deserializing older-format state
-    // files as though they contained `None` for this field.  That's always
-    // correct because prior to adding this field, by construction, files didn't
-    // have an intended target blueprint.  (In other words, adding this field
-    // was a semantically compatible change.  Its presence (or absence) does not
+    // We use `serde(default)` to support deserializing older-format state files
+    // as though they contained `None` for this field.  That's always correct
+    // because prior to adding this field, by construction, files didn't have an
+    // intended target blueprint.  (In other words, adding this field was a
+    // semantically compatible change.  Its presence (or absence) does not
     // require interpreting anything else in this structure differently.)
     //
     // This format is documented as unstable, so this isn't strictly necessary.

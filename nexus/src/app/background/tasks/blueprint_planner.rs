@@ -297,7 +297,7 @@ impl BlueprintPlanner {
         // potentially debug the planning choices we made.  The details of
         // writing out the files are handled by `SetTargetDebugWriter`.
         //
-        // The part of the process is best-effort.  If any of it fails, we'll
+        // This part of the process is best-effort.  If any of it fails, we'll
         // proceed anyway.
         let maybe_debug_intent = reconfigurator_state_assemble(
             opctx,

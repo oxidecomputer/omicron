@@ -26,6 +26,7 @@ use nexus_types::external_api::update::TufRepoUploadStatus;
 use pretty_assertions::assert_eq;
 use semver::Version;
 use serde::Deserialize;
+use std::assert_matches;
 use std::collections::HashSet;
 use std::fmt::Debug;
 use tufaceous::edit::{Ed25519Key, RepositoryEditor, Root};
@@ -39,6 +40,7 @@ use nexus_types::deployment::ReconfiguratorConfig;
 use nexus_types::deployment::ReconfiguratorConfigParam;
 use nexus_types::deployment::ReconfiguratorStateInput;
 use nexus_types::deployment::UnstableReconfiguratorState;
+use nexus_types::internal_api::background::BlueprintPlannerStatus;
 use omicron_nexus::app::DEBUG_DROPBOX_PRODUCER_RECONFIGURATOR;
 use omicron_test_utils::dev::dropbox::DropboxReader;
 use omicron_test_utils::dev::poll::CondCheckError;
@@ -1228,6 +1230,10 @@ async fn test_debug_files(cptestctx: &ControlPlaneTestContext) {
     .await
     .expect("autoplanner should have created new blueprint within 60s");
 
+    // We know that the planner has gotten far enough to set the new target
+    // blueprint, but it might still be saving out files.  Wait for it to come
+    // to rest.
+    let _ = run_blueprint_planner(&cptestctx.lockstep_client).await;
     let files = dropbox.load_new::<UnstableReconfiguratorState>();
     assert_eq!(files.len(), 1);
     let file = files.into_iter().next().expect("non-empty Vec");
@@ -1239,7 +1245,8 @@ async fn test_debug_files(cptestctx: &ControlPlaneTestContext) {
 
     // Case: autoplanner produces no files when it doesn't generate a new
     // blueprint.
-    let _ = run_blueprint_planner(&cptestctx.lockstep_client).await;
+    let status = run_blueprint_planner(&cptestctx.lockstep_client).await;
+    assert_matches!(status, BlueprintPlannerStatus::Unchanged { .. });
     let files = dropbox.load_new::<UnstableReconfiguratorState>();
     assert!(files.is_empty());
 
