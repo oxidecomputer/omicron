@@ -71,6 +71,7 @@ members = [
     "gateway-test-utils",
     "gateway-types",
     "gateway-types/versions",
+    "generation-kinds",
     "git-version",
     "illumos-utils",
     "installinator-api",
@@ -268,6 +269,7 @@ default-members = [
     "gateway-test-utils",
     "gateway-types",
     "gateway-types/versions",
+    "generation-kinds",
     "git-version",
     "illumos-utils",
     "installinator-api",
@@ -501,7 +503,7 @@ crucible-client-types = { git = "https://github.com/oxidecomputer/crucible", rev
 # NOTE: See above!
 csv = "1.3.1"
 curve25519-dalek = "4"
-daft = { version = "0.1.7", features = ["derive", "newtype-uuid1", "oxnet01", "uuid1"] }
+daft = { version = "0.1.8", features = ["derive", "newtype-uuid1", "oxnet01", "uuid1"] }
 display-error-chain = "0.2.2"
 omicron-ddm-admin-client = { path = "clients/ddm-admin-client" }
 datatest-stable = "0.3.2"
@@ -924,6 +926,15 @@ newtype-uuid = { version = "1.3.2", default-features = false }
 newtype-uuid-macros = "0.1.0"
 omicron-uuid-kinds = { path = "uuid-kinds", features = ["serde", "schemars08", "uuid-v4"] }
 
+# oxide-generation is set to default-features = false for the same reason
+# as newtype-uuid above: omicron-generation-kinds should not depend on std, so
+# that a no-std library can access the kinds. Uses of omicron-generation-kinds
+# _within omicron_ will have std and the other features enabled because they'll
+# refer to it via omicron-generation-kinds.workspace = true.
+oxide-generation = { version = "0.1.3", default-features = false }
+oxide-generation-macros = "0.2.0"
+omicron-generation-kinds = { path = "generation-kinds", features = ["serde", "schemars08", "slog2"] }
+
 scim2-rs = { git = "https://github.com/oxidecomputer/scim2-rs", rev = "163606c052ee30b16dfab282fca721dd81e0868a" }
 scim2-test-client = { git = "https://github.com/oxidecomputer/scim2-rs", rev = "163606c052ee30b16dfab282fca721dd81e0868a" }
 
@@ -1152,14 +1163,17 @@ path = "workspace-hack"
 # Several crates such as crucible and propolis have have a Git dependency on
 # this repo. Omicron itself depends on these crates, which can lead to two
 # copies of these crates in the dependency graph. (As a Git dependency, and as
-# a path dependency.) The goal of omicron-uuid-kinds is to provide a unified
-# registry of UUID kinds. Two copies of the same kinds floating around is
-# unnecessary and painful.
+# a path dependency.) The goal of omicron-uuid-kinds and
+# omicron-generation-kinds is to provide unified registries of UUID and
+# generation kinds. Two copies of the same kinds floating around is unnecessary
+# and painful.
 #
-# This directive ensures that whenever we see omicron-uuid-kinds as a Git
-# dependency, we'll use the path dependency version of the crate instead.
+# These directives ensure that whenever we see omicron-uuid-kinds or
+# omicron-generation-kinds as a Git dependency, we'll use the path dependency
+# version of the crate instead.
 #
-# See also: uuid-kinds/README.adoc.
+# See also: uuid-kinds/README.adoc and generation-kinds/README.adoc.
 [patch."https://github.com/oxidecomputer/omicron"]
-omicron-uuid-kinds = { path = "uuid-kinds" }
 omicron-common = { path = "common" }
+omicron-generation-kinds = { path = "generation-kinds" }
+omicron-uuid-kinds = { path = "uuid-kinds" }
