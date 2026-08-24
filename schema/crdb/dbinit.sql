@@ -6426,7 +6426,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.vmm (
      *
      * NULL when its state has not been modified by an update.
      */
-    stopped_for_update_disposition_generation INT8,
+    stop_for_update_disposition_generation INT8,
 
     -- If a VMM is in the 'failed' state, it must have a failure reason; if it
     -- is not in the failed state, it must not have a failure reason.

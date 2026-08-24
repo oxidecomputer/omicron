@@ -5387,7 +5387,7 @@ async fn cmd_db_instance_info(
                     generation: _,
                     state: _,
                     failure_reason: _,
-                    stopped_for_update_disposition_generation: _,
+                    stop_for_update_disposition_generation: _,
                 } = vmm;
                 VmmRow {
                     state: VmmStateRow::from(vmm),
@@ -8123,7 +8123,7 @@ fn prettyprint_vmm(
     const STATE: &'static str = "state";
     const FAILURE_REASON: &'static str = "  failure reason";
     const FAILURE_NOTE: &'static str = "  note";
-    const STOPPED_FOR_UPDATE: &'static str = "  update disposition";
+    const STOP_FOR_UPDATE: &'static str = "  marked to stop for sled update";
     const WIDTH: usize = const_max_len(&[
         ID,
         CREATED,
@@ -8137,7 +8137,7 @@ fn prettyprint_vmm(
         ADDRESS,
         FAILURE_REASON,
         FAILURE_NOTE,
-        STOPPED_FOR_UPDATE,
+        STOP_FOR_UPDATE,
     ]);
 
     let width = std::cmp::max(width, Some(WIDTH)).unwrap_or(WIDTH);
@@ -8154,7 +8154,7 @@ fn prettyprint_vmm(
         generation,
         time_state_updated,
         failure_reason,
-        stopped_for_update_disposition_generation,
+        stop_for_update_disposition_generation,
     } = vmm;
 
     println!("{indent}{ID:>width$}: {id}");
@@ -8190,9 +8190,11 @@ fn prettyprint_vmm(
             width = indent.len(),
         );
     }
-    if let Some(ud_generation) = stopped_for_update_disposition_generation {
+    if let Some(ud_generation) = stop_for_update_disposition_generation {
         let u_g = u64::from(ud_generation.0);
-        println!("{indent}{STOPPED_FOR_UPDATE:>width$}: generation {u_g}");
+        println!(
+            "{indent}{STOP_FOR_UPDATE:>width$}: update disposition generation {u_g}"
+        );
     }
 
     let g = u64::from(generation.0);
@@ -8290,7 +8292,7 @@ async fn cmd_db_vmm_list(
                 generation: _,
                 state: _,
                 failure_reason: _,
-                stopped_for_update_disposition_generation: _,
+                stop_for_update_disposition_generation: _,
             } = vmm;
             let sled = match sled {
                 Some(sled) => sled.serial_number(),

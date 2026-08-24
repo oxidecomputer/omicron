@@ -461,7 +461,7 @@ mod test {
                     generation: Generation::new(),
                     state: VmmState::SagaUnwound,
                     failure_reason: None,
-                    stopped_for_update_disposition_generation: None,
+                    stop_for_update_disposition_generation: None,
                 },
             )
             .await

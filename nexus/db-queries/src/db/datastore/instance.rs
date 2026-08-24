@@ -3089,7 +3089,7 @@ mod tests {
                     generation: Generation::new(),
                     state: VmmState::Running,
                     failure_reason: None,
-                    stopped_for_update_disposition_generation: None,
+                    stop_for_update_disposition_generation: None,
                 },
             )
             .await
@@ -3152,7 +3152,7 @@ mod tests {
                     generation: Generation::new(),
                     state: VmmState::Running,
                     failure_reason: None,
-                    stopped_for_update_disposition_generation: None,
+                    stop_for_update_disposition_generation: None,
                 },
             )
             .await
@@ -3250,7 +3250,7 @@ mod tests {
                     generation: Generation::new(),
                     state: VmmState::Stopped,
                     failure_reason: None,
-                    stopped_for_update_disposition_generation: None,
+                    stop_for_update_disposition_generation: None,
                 },
             )
             .await
@@ -3291,7 +3291,7 @@ mod tests {
                     generation: Generation::new(),
                     state: VmmState::Running,
                     failure_reason: None,
-                    stopped_for_update_disposition_generation: None,
+                    stop_for_update_disposition_generation: None,
                 },
             )
             .await
@@ -3392,7 +3392,7 @@ mod tests {
                     generation: Generation::new(),
                     state: VmmState::Running,
                     failure_reason: None,
-                    stopped_for_update_disposition_generation: None,
+                    stop_for_update_disposition_generation: None,
                 },
             )
             .await
@@ -3537,7 +3537,7 @@ mod tests {
                             generation: Generation::new(),
                             state: VmmState::Running,
                             failure_reason: None,
-                            stopped_for_update_disposition_generation: None,
+                            stop_for_update_disposition_generation: None,
                         },
                     )
                     .await

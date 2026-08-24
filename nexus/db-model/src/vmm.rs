@@ -81,7 +81,7 @@ pub struct Vmm {
     /// stop.
     ///
     /// NULL when its state has not been modified by an update.
-    pub stopped_for_update_disposition_generation: Option<Generation>,
+    pub stop_for_update_disposition_generation: Option<Generation>,
 }
 
 impl Vmm {
@@ -112,7 +112,7 @@ impl Vmm {
             state: VmmState::Creating,
             cpu_platform,
             failure_reason: None,
-            stopped_for_update_disposition_generation: None,
+            stop_for_update_disposition_generation: None,
         }
     }
 
