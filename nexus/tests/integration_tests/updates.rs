@@ -32,6 +32,7 @@ use tufaceous::edit::{Ed25519Key, RepositoryEditor, Root};
 use tufaceous_artifact::{Artifact, ArtifactSet, KnownArtifactTags, SpTags};
 
 use crate::integration_tests::target_release::set_target_release_for_mupdate_recovery_with_expected_status;
+use slog_error_chain::InlineErrorChain;
 
 const TRUST_ROOTS_URL: &str = "/v1/system/update/trust-roots";
 
@@ -267,7 +268,7 @@ async fn test_repo_upload() -> Result<()> {
 
     // Wait for all the copy requests to complete.
     futures::future::join_all(cptestctx.sled_agents.iter().map(|sled_agent| {
-        sled_agent.sled_agent().artifact_store().wait_for_copy_tasks()
+        sled_agent.sled_agent().artifact_store().wait_for_writers()
     }))
     .await;
 
@@ -1052,4 +1053,19 @@ async fn test_request_without_api_version(cptestctx: &ControlPlaneTestContext) {
         NexusRequest::new(req_builder).authn_as(AuthnMode::PrivilegedUser);
     let status: update::UpdateStatus = req.execute_and_parse_unwrap().await;
     assert_eq!(status.target_release.0, None);
+}
+
+/// Test that in a stock test environment, one can run the planner and get a new
+/// blueprint.
+#[nexus_test(configure_second_nexus = true)]
+async fn test_stock_planner(cptestctx: &ControlPlaneTestContext) {
+    let nexus_client = cptestctx.lockstep_client();
+    let _blueprint =
+        nexus_client.blueprint_regenerate().await.unwrap_or_else(|error| {
+            panic!(
+                "unexpectedly failed to generate new blueprint in stock test \
+                 environment: {}",
+                InlineErrorChain::new(&error)
+            );
+        });
 }

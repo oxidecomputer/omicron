@@ -14,9 +14,11 @@ use illumos_utils::zpool::ZpoolName;
 use key_manager::StorageKeyRequester;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::internal::shared::DatasetKind;
-use omicron_common::disk::{
-    CompressionAlgorithm, DatasetName, DiskIdentity, DiskVariant, GzipLevel,
-};
+use omicron_common::disk::DatasetName;
+use sled_agent_types::disk::CompressionAlgorithm;
+use sled_agent_types::disk::DiskIdentity;
+use sled_agent_types::disk::DiskVariant;
+use sled_agent_types::disk::GzipLevel;
 use slog::{Logger, debug, info, warn};
 use slog_error_chain::InlineErrorChain;
 use std::process::Stdio;

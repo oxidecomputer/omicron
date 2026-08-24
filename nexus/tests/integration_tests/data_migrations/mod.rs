@@ -24,6 +24,8 @@ use semver::Version;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 
+mod add_rendezvous_sled_bp_availability;
+mod add_sled_update_disposition;
 mod audit_log_credential_id;
 mod bgp_config_max_paths_not_null;
 mod bgp_unnumbered_peer_cleanup;
@@ -42,6 +44,7 @@ mod ereporter_restart_rack_id;
 mod fix_leaked_bp_oximeter_read_policy_rows;
 mod fix_session_token_column_order;
 mod inv_clear_mupdate_override;
+mod normalize_service_external_ips;
 mod one_big_ereport_table;
 mod populate_db_metadata_nexus;
 mod positive_quotas;
@@ -104,6 +107,9 @@ pub(crate) fn get_migration_checks() -> BTreeMap<Version, DataMigrationFns> {
     register!(ereporter_restart_latest_ereport);
     register!(tufaceous_v2);
     register!(prune_service_nat_entries);
+    register!(add_sled_update_disposition);
+    register!(normalize_service_external_ips);
+    register!(add_rendezvous_sled_bp_availability);
 
     map
 }
