@@ -33,8 +33,12 @@ pub enum Error {
     #[error("Failed to open vmm ctl fd")]
     VmCtlOpen(#[source] std::io::Error),
 
-    #[error("Failed to resize reservoir: {error}")]
-    ReservoirError { error: std::io::Error, current_size: Option<ByteCount> },
+    #[error("Failed to resize reservoir")]
+    ReservoirError {
+        #[source]
+        error: std::io::Error,
+        current_size: Option<ByteCount>,
+    },
 }
 
 /// Controls the size of the memory reservoir

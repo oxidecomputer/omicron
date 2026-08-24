@@ -7,7 +7,7 @@
 use illumos_utils::vmm_reservoir;
 use omicron_common::api::external::ByteCount;
 use slog::Logger;
-use slog_error_chain::SlogInlineError;
+use slog_error_chain::{InlineErrorChain, SlogInlineError};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread;
@@ -279,7 +279,7 @@ impl VmmReservoirManager {
                 warn!(
                     self.log,
                     "Reservoir resize failed but reservoir is currently at {size} bytes";
-                    "error" => &error,
+                    InlineErrorChain::new(&error),
                 );
                 size
             }
