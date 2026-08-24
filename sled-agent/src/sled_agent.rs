@@ -219,6 +219,8 @@ impl From<Error> for omicron_common::api::external::Error {
 // Provide a more specific HTTP error for some sled agent errors.
 impl From<Error> for dropshot::HttpError {
     fn from(err: Error) -> Self {
+        use crate::instance::Error as InstanceError;
+        use crate::instance_manager::Error as InstanceManagerError;
         use dropshot::ClientErrorStatusCode;
         use dropshot::ErrorStatusCode;
 
@@ -226,14 +228,12 @@ impl From<Error> for dropshot::HttpError {
         const INSTANCE_CHANNEL_FULL: &str = "INSTANCE_CHANNEL_FULL";
         const SUBNET_ALREADY_ATTACHED: &str = "SUBNET_ALREADY_ATTACHED";
         match err {
-            Error::Instance(crate::instance_manager::Error::Instance(
-                instance_error,
-            )) => {
+            Error::Instance(InstanceManagerError::Instance(instance_error)) => {
                 match instance_error {
                     // The instance's request channel is full, so it cannot
                     // currently process this request. Shed load, but indicate
                     // to the client that it can try again later.
-                    err @ crate::instance::Error::FailedSendChannelFull => {
+                    err @ InstanceError::FailedSendChannelFull => {
                         HttpError::for_unavail(
                             Some(INSTANCE_CHANNEL_FULL.to_string()),
                             // InlineErrorChain isn't really necessary here, but include it anyway,
@@ -241,7 +241,7 @@ impl From<Error> for dropshot::HttpError {
                             InlineErrorChain::new(&err).to_string(),
                         )
                     }
-                    crate::instance::Error::Propolis(propolis_error) => {
+                    InstanceError::Propolis(propolis_error) => {
                         if let Some(status_code) =
                             propolis_error.status().and_then(|status| {
                                 ErrorStatusCode::try_from(status).ok()
@@ -269,13 +269,13 @@ impl From<Error> for dropshot::HttpError {
                             propolis_error.to_string(),
                         )
                     }
-                    crate::instance::Error::Transition(omicron_error) => {
+                    InstanceError::Transition(omicron_error) => {
                         // Preserve the status associated with the wrapped
                         // Omicron error so that Nexus will see it in the
                         // Progenitor client error it gets back.
                         HttpError::from(omicron_error)
                     }
-                    crate::instance::Error::Terminating => {
+                    InstanceError::Terminating => {
                         HttpError::for_client_error(
                             Some(NO_SUCH_INSTANCE.to_string()),
                             ClientErrorStatusCode::GONE,
@@ -285,7 +285,7 @@ impl From<Error> for dropshot::HttpError {
                             InlineErrorChain::new(&instance_error).to_string(),
                         )
                     }
-                    err @ crate::instance::Error::SubnetAlreadyAttached(_) => {
+                    err @ InstanceError::SubnetAlreadyAttached(_) => {
                         HttpError::for_client_error(
                             Some(SUBNET_ALREADY_ATTACHED.to_string()),
                             ClientErrorStatusCode::CONFLICT,
@@ -293,48 +293,48 @@ impl From<Error> for dropshot::HttpError {
                             InlineErrorChain::new(&err).to_string(),
                         )
                     }
-                    err @ (crate::instance::Error::Timeout(_)
-                    | crate::instance::Error::VnicCreation(_)
-                    | crate::instance::Error::Notification(_)
-                    | crate::instance::Error::Migration(_)
-                    | crate::instance::Error::NicNotInPropolisSpec(_)
-                    | crate::instance::Error::ZoneCommand(_)
-                    | crate::instance::Error::ZoneBoot(_)
-                    | crate::instance::Error::ZoneEnsureAddress(_)
-                    | crate::instance::Error::ZoneInstall(_)
-                    | crate::instance::Error::SerdeJsonError(_)
-                    | crate::instance::Error::Opte(_)
-                    | crate::instance::Error::InvalidHostname(_)
-                    | crate::instance::Error::ResolveError(_)
-                    | crate::instance::Error::VmNotRunning(_)
-                    | crate::instance::Error::PropolisAlreadyRegistered(_)
-                    | crate::instance::Error::U2NotFound
-                    | crate::instance::Error::Io(_)
-                    | crate::instance::Error::FailedSendChannelClosed
-                    | crate::instance::Error::FailedSendClientClosed
-                    | crate::instance::Error::RequestDropped(_)) => {
+                    err @ (InstanceError::Timeout(_)
+                    | InstanceError::VnicCreation(_)
+                    | InstanceError::Notification(_)
+                    | InstanceError::Migration(_)
+                    | InstanceError::NicNotInPropolisSpec(_)
+                    | InstanceError::ZoneCommand(_)
+                    | InstanceError::ZoneBoot(_)
+                    | InstanceError::ZoneEnsureAddress(_)
+                    | InstanceError::ZoneInstall(_)
+                    | InstanceError::SerdeJsonError(_)
+                    | InstanceError::Opte(_)
+                    | InstanceError::InvalidHostname(_)
+                    | InstanceError::ResolveError(_)
+                    | InstanceError::VmNotRunning(_)
+                    | InstanceError::PropolisAlreadyRegistered(_)
+                    | InstanceError::U2NotFound
+                    | InstanceError::Io(_)
+                    | InstanceError::FailedSendChannelClosed
+                    | InstanceError::FailedSendClientClosed
+                    | InstanceError::RequestDropped(_)) => {
                         HttpError::for_internal_error(
                             InlineErrorChain::new(&err).to_string(),
                         )
                     }
                 }
             }
-            Error::Instance(
-                e @ crate::instance_manager::Error::NoSuchVmm(_),
-            ) => HttpError::for_not_found(
-                Some(NO_SUCH_INSTANCE.to_string()),
-                // NoSuchVmm has no source error, so it's currently not
-                // necessary to use a chain-logging adapter here, but if that
-                // changes in the future, the compiler won't complain.
-                InlineErrorChain::new(&e).to_string(),
-            ),
+            Error::Instance(e @ InstanceManagerError::NoSuchVmm(_)) => {
+                HttpError::for_not_found(
+                    Some(NO_SUCH_INSTANCE.to_string()),
+                    // NoSuchVmm has no source error, so it's currently not
+                    // necessary to use a chain-logging adapter here, but if that
+                    // changes in the future, the compiler won't complain.
+                    InlineErrorChain::new(&e).to_string(),
+                )
+            }
             err @ Error::Instance(
-                crate::instance_manager::Error::Opte(_)
-                | crate::instance_manager::Error::Underlay(_)
-                | crate::instance_manager::Error::ZoneBundle(_)
-                | crate::instance_manager::Error::FailedSendInstanceManagerClosed
-                | crate::instance_manager::Error::FailedSendClientClosed
-                | crate::instance_manager::Error::RequestDropped(_),
+                InstanceManagerError::Opte(_)
+                | InstanceManagerError::Underlay(_)
+                | InstanceManagerError::ZoneBundle(_)
+                | InstanceManagerError::FailedSendInstanceManagerClosed
+                | InstanceManagerError::FailedSendClientClosed
+                | InstanceManagerError::RequestDropped(_),
             ) => HttpError::for_internal_error(
                 InlineErrorChain::new(&err).to_string(),
             ),
