@@ -974,10 +974,15 @@ mod test {
             SledCpuFamily::AmdMilan,
         );
 
-        let agent =
-            sim::Server::start(&config, &log, false, &simulated_upstairs, 0)
-                .await
-                .unwrap();
+        let agent = sim::Server::start(
+            &config,
+            &log,
+            sim::NexusRegistration::Background,
+            &simulated_upstairs,
+            0,
+        )
+        .await
+        .unwrap();
 
         // Pretend to put some zones onto this sled.  We don't need to test this
         // exhaustively here because there are builder tests that exercise a
