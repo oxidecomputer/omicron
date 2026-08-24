@@ -1926,10 +1926,15 @@ pub async fn start_sled_agent_with_config(
     sled_index: u16,
     simulated_upstairs: &Arc<sim::SimulatedUpstairs>,
 ) -> Result<sim::Server, String> {
-    let server =
-        sim::Server::start(&config, &log, true, simulated_upstairs, sled_index)
-            .await
-            .map_err(|e| e.to_string())?;
+    let server = sim::Server::start(
+        &config,
+        &log,
+        sim::NexusRegistration::WaitForCompletion,
+        simulated_upstairs,
+        sled_index,
+    )
+    .await
+    .map_err(|e| format!("{e:#}"))?;
     Ok(server)
 }
 
