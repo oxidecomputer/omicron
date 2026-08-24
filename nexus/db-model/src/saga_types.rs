@@ -14,6 +14,7 @@
 
 use super::impl_enum_type;
 
+use crate::typed_generation::DbTypedGeneration;
 use chrono::DateTime;
 use chrono::Utc;
 use diesel::backend::Backend;
@@ -23,8 +24,8 @@ use diesel::serialize::{self, ToSql};
 use diesel::sql_types;
 use nexus_db_schema::schema::{saga, saga_node_event};
 use omicron_common::api::external::Error;
-use omicron_common::api::external::Generation;
 use omicron_common::now_db_precision;
+use omicron_generation_kinds::{SagaAdoptGeneration, SagaAdoptGenerationKind};
 use omicron_uuid_kinds::{GenericUuid, OmicronZoneUuid};
 use serde::{Deserialize, Serialize};
 use std::convert::TryFrom;
@@ -251,7 +252,7 @@ pub(crate) struct SagaRow {
     saga_dag: serde_json::Value,
     saga_state: SagaState,
     current_sec: Option<SecId>,
-    adopt_generation: super::Generation,
+    adopt_generation: DbTypedGeneration<SagaAdoptGenerationKind>,
     adopt_time: chrono::DateTime<chrono::Utc>,
 
     // Abandonment metadata. These are only set when `saga_state` is
@@ -312,7 +313,7 @@ type SagaRowColumns = (
     serde_json::Value,
     SagaState,
     Option<SecId>,
-    super::Generation,
+    DbTypedGeneration<SagaAdoptGenerationKind>,
     DateTime<Utc>,
     Option<DateTime<Utc>>,
     Option<SagaReasonAbandoned>,
@@ -457,7 +458,7 @@ pub struct Saga {
     pub saga_dag: serde_json::Value,
     pub saga_state: SagaExecState,
     pub current_sec: Option<SecId>,
-    pub adopt_generation: super::Generation,
+    pub adopt_generation: SagaAdoptGeneration,
     pub adopt_time: DateTime<Utc>,
 }
 
@@ -483,7 +484,7 @@ impl Saga {
             // `SagaCachedState` only contains non-abandoned variants.
             saga_state: state.into(),
             current_sec: Some(creator),
-            adopt_generation: Generation::new().into(),
+            adopt_generation: SagaAdoptGeneration::new(),
             adopt_time: now,
         }
     }
@@ -509,7 +510,7 @@ impl Saga {
             saga_dag: dag,
             saga_state: SagaExecState::Abandoned(abandon_metadata),
             current_sec: Some(creator),
-            adopt_generation: Generation::new().into(),
+            adopt_generation: SagaAdoptGeneration::new(),
             adopt_time: now,
         }
     }
@@ -552,7 +553,7 @@ impl TryFrom<SagaRow> for Saga {
             saga_dag,
             saga_state,
             current_sec,
-            adopt_generation,
+            adopt_generation: adopt_generation.into(),
             adopt_time,
         })
     }
@@ -583,7 +584,7 @@ impl From<&Saga> for SagaRow {
             saga_dag: saga.saga_dag.clone(),
             saga_state: saga.saga_state.clone().into(),
             current_sec: saga.current_sec,
-            adopt_generation: saga.adopt_generation,
+            adopt_generation: saga.adopt_generation.into(),
             adopt_time: saga.adopt_time,
             abandon_time,
             abandon_reason,
@@ -633,7 +634,10 @@ type SagaInsertValues = (
     diesel::dsl::Eq<saga::saga_dag, serde_json::Value>,
     diesel::dsl::Eq<saga::saga_state, SagaState>,
     diesel::dsl::Eq<saga::current_sec, Option<SecId>>,
-    diesel::dsl::Eq<saga::adopt_generation, super::Generation>,
+    diesel::dsl::Eq<
+        saga::adopt_generation,
+        DbTypedGeneration<SagaAdoptGenerationKind>,
+    >,
     diesel::dsl::Eq<saga::adopt_time, DateTime<Utc>>,
     diesel::dsl::Eq<saga::abandon_time, Option<DateTime<Utc>>>,
     diesel::dsl::Eq<saga::abandon_reason, Option<SagaReasonAbandoned>>,
@@ -922,7 +926,7 @@ mod test {
             saga_dag: serde_json::Value::Null,
             saga_state,
             current_sec: Some(SecId(Uuid::new_v4())),
-            adopt_generation: Generation::new().into(),
+            adopt_generation: SagaAdoptGeneration::new().into(),
             adopt_time: Utc::now(),
             abandon_time,
             abandon_reason,

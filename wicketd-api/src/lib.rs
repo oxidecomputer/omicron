@@ -98,25 +98,6 @@ pub trait WicketdApi {
         params: TypedBody<GetBgpAuthKeyParams>,
     ) -> Result<HttpResponseOk<GetBgpAuthKeyInfoResponse>, HttpError>;
 
-    /// Update the RSS config recovery silo user password hash.
-    #[endpoint {
-        method = PUT,
-        path = "/rack-setup/config/recovery-user-password-hash"
-    }]
-    async fn put_rss_config_recovery_user_password_hash(
-        rqctx: RequestContext<Self::Context>,
-        body: TypedBody<PutRssRecoveryUserPasswordHash>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
-
-    /// Reset all RSS configuration to their default values.
-    #[endpoint {
-        method = DELETE,
-        path = "/rack-setup/config"
-    }]
-    async fn delete_rss_config(
-        rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
-
     /// Query current state of rack setup.
     #[endpoint {
         method = GET,
@@ -313,11 +294,6 @@ pub struct CurrentRssUserConfig {
 pub struct GetBgpAuthKeyParams {
     /// Checks that these keys are valid.
     pub check_valid: BTreeSet<BgpAuthKeyId>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
-pub struct PutRssRecoveryUserPasswordHash {
-    pub hash: omicron_passwords::NewPasswordHash,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]

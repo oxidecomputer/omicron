@@ -176,38 +176,6 @@ impl WicketdApi for WicketdApiImpl {
         Ok(HttpResponseOk(GetBgpAuthKeyInfoResponse { data }))
     }
 
-    async fn put_rss_config_recovery_user_password_hash(
-        rqctx: RequestContext<Self::Context>,
-        body: TypedBody<PutRssRecoveryUserPasswordHash>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        let ctx = rqctx.context();
-
-        let mut config = ctx.rss_or_multirack_join_config.lock().unwrap();
-
-        let rss_config = config.rss_config_mut_or_conflict(
-            "cannot put recovery user password when not preparing for RSS",
-        )?;
-
-        rss_config.set_recovery_user_password_hash(body.into_inner().hash);
-
-        Ok(HttpResponseUpdatedNoContent())
-    }
-
-    async fn delete_rss_config(
-        rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        let ctx = rqctx.context();
-
-        let mut config = ctx.rss_or_multirack_join_config.lock().unwrap();
-        let rss_config = config.rss_config_mut_or_conflict(
-            "cannot delete RSS config when not preparing for RSS",
-        )?;
-
-        *rss_config = Default::default();
-
-        Ok(HttpResponseUpdatedNoContent())
-    }
-
     async fn get_rack_setup_state(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<RackOperationStatus>, HttpError> {
