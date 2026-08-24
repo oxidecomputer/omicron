@@ -85,9 +85,8 @@ const SERVICE_POOL_IPV6_NAME: &str = "oxide-service-pool-v6";
 /// retrying until Nexus accepts it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NexusRegistration {
-    /// Return from [`Server::start`] only after Nexus has accepted the
-    /// registration, so that the sled exists in the db's `sled` table by the
-    /// time [`Server::start`] returns.
+    /// Wait until Nexus has accepted the registration, so that the sled exists
+    /// in the db's `sled` table by the time [`Server::start`] returns.
     ///
     /// If registration fails, [`Server::start`] will return an error.
     WaitForCompletion,
