@@ -3737,8 +3737,9 @@ impl DataStore {
                                 zones: IdOrdMap::default(),
                                 host_phase_2: sled_config.host_phase_2.into(),
                                 measurements: sled_config.measurements.into(),
-                                // TODO-john FIX THIS
-                                update_disposition: sled_agent_types::inventory::OmicronSledUpdateDisposition::Available,
+                                update_disposition: sled_config
+                                    .update_disposition
+                                    .into(),
                             },
                         })
                         .map_err(|e| {
@@ -5311,6 +5312,7 @@ impl ConfigReconcilerRows {
             config.remove_mupdate_override,
             config.host_phase_2.clone(),
             config.measurements.clone(),
+            config.update_disposition,
         ));
         self.disks.extend(config.disks.iter().map(|disk| {
             InvOmicronSledConfigDisk::new(

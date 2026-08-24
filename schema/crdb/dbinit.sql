@@ -4863,6 +4863,19 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_dataset (
     PRIMARY KEY (inv_collection_id, sled_id, name)
 );
 
+-- A sled's update disposition in inventory.
+--
+-- TODO-john This is the same as `sled_update_availability`. Should we reuse
+-- that, or is it better to keep these separate since that one is only one part
+-- of the larger blueprint update disposition enum? OmicronSledConfig only cares
+-- about these two states.
+CREATE TYPE IF NOT EXISTS omicron.public.inv_sled_update_disposition AS ENUM (
+    -- Available for use for all provisions.
+    'available',
+    -- Disallowed for all use + migratable instances are being evacuated.
+    'evacuating'
+);
+
 CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_sled_config (
     -- where this observation came from
     -- (foreign key into `inv_collection` table)
@@ -4886,6 +4899,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_sled_config (
 
     -- the set of artifact hashes used with trust quorum, can be empty
     measurements STRING(64)[],
+
+    -- current update disposition, controlling whether new VMM registrations are
+    -- accepted
+    update_disposition omicron.public.inv_sled_update_disposition NOT NULL,
 
     PRIMARY KEY (inv_collection_id, id)
 );

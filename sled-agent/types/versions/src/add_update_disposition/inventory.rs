@@ -59,7 +59,7 @@ use std::time::Duration;
 /// sled should be evacuated as well as blueprint-specific metadata. From
 /// sled-agent itself, we only need to know the high-level state; we use this to
 /// determine whether or not to accept new VMM registration requests.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum OmicronSledUpdateDisposition {
     Available,
