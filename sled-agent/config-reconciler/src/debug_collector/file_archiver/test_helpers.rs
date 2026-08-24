@@ -14,6 +14,7 @@ use anyhow::anyhow;
 use anyhow::bail;
 use camino::Utf8Path;
 use camino::Utf8PathBuf;
+use camino_tempfile::Utf8TempDir;
 use chrono::DateTime;
 use chrono::Utc;
 use iddqd::IdOrdItem;
@@ -30,6 +31,45 @@ use strum::EnumDiscriminants;
 use strum::EnumIter;
 use strum::IntoDiscriminant;
 use strum::IntoEnumIterator;
+
+/// Temporary directory that is preserved on test failure.
+///
+/// The path is printed to stderr on creation.  Call `cleanup()` at the end
+/// of a successful test to delete it.  If `cleanup()` is never called
+/// (e.g., the test panicked), the directory is preserved for inspection.
+pub struct TestDir {
+    dir: Option<Utf8TempDir>,
+}
+
+impl TestDir {
+    pub fn new() -> Self {
+        let dir =
+            camino_tempfile::tempdir().expect("failed to create temp dir");
+        eprintln!("test directory: {}", dir.path());
+        TestDir { dir: Some(dir) }
+    }
+
+    pub fn path(&self) -> &Utf8Path {
+        // unwrap(): this is only `None` after `cleanup()`, but it's
+        // immediately dropped at that point.
+        self.dir.as_ref().unwrap().path()
+    }
+
+    pub fn cleanup(mut self) {
+        drop(self.dir.take());
+    }
+}
+
+impl Drop for TestDir {
+    fn drop(&mut self) {
+        if let Some(dir) = self.dir.take() {
+            let path = dir.keep();
+            eprintln!(
+                "test directory preserved (test may have failed): {path}"
+            );
+        }
+    }
+}
 
 /// Loads the filenames in the test data
 pub(crate) fn load_test_files() -> anyhow::Result<IdOrdMap<TestFile>> {
@@ -166,6 +206,27 @@ pub(crate) enum TestFileKind {
         zone_name: String,
         zone_root: String,
     },
+    DebugDropbox {
+        zone_name: String,
+        zone_root: String,
+    },
+    /// a debug dropbox deposit that's still being staged
+    ///
+    /// These files may be only partially written, so they must never be
+    /// archived.
+    DebugDropboxStaged {
+        zone_name: String,
+        zone_root: String,
+    },
+    /// a file nested more deeply than the debug dropbox's on-disk protocol
+    /// allows (i.e., below a producer's directory rather than in it)
+    ///
+    /// The archiver only looks one level below the dropbox root, so these files
+    /// are not archived.
+    DebugDropboxTooDeep {
+        zone_name: String,
+        zone_root: String,
+    },
     GlobalLogSmfRotated,
     GlobalLogSmfLive,
     GlobalLogSyslogRotated,
@@ -186,6 +247,9 @@ impl TestFileKind {
             | TestFileKind::LogSmfLive { .. }
             | TestFileKind::LogSyslogRotated { .. }
             | TestFileKind::LogSyslogLive { .. }
+            | TestFileKind::DebugDropbox { .. }
+            | TestFileKind::DebugDropboxStaged { .. }
+            | TestFileKind::DebugDropboxTooDeep { .. }
             | TestFileKind::GlobalLogSmfRotated
             | TestFileKind::GlobalLogSmfLive
             | TestFileKind::GlobalLogSyslogRotated
@@ -203,7 +267,10 @@ impl TestFileKind {
             TestFileKind::LogSmfRotated { zone_name, zone_root }
             | TestFileKind::LogSmfLive { zone_name, zone_root }
             | TestFileKind::LogSyslogRotated { zone_name, zone_root }
-            | TestFileKind::LogSyslogLive { zone_name, zone_root } => {
+            | TestFileKind::LogSyslogLive { zone_name, zone_root }
+            | TestFileKind::DebugDropbox { zone_name, zone_root }
+            | TestFileKind::DebugDropboxStaged { zone_name, zone_root }
+            | TestFileKind::DebugDropboxTooDeep { zone_name, zone_root } => {
                 Some((zone_name, Utf8Path::new(zone_root)))
             }
             TestFileKind::GlobalLogSmfRotated
@@ -212,6 +279,29 @@ impl TestFileKind {
             | TestFileKind::GlobalLogSyslogLive => {
                 Some(("global", Utf8Path::new("/")))
             }
+        }
+    }
+
+    /// Returns whether the archiver should have archived this file
+    ///
+    /// Most kinds of files are expected to be archived on a "final" pass.  The
+    /// exceptions are files that we don't care about either way and files that
+    /// must never be archived.
+    pub fn is_archived(&self) -> bool {
+        match self {
+            TestFileKind::Ignored
+            | TestFileKind::DebugDropboxStaged { .. }
+            | TestFileKind::DebugDropboxTooDeep { .. } => false,
+            TestFileKind::ProcessCoreDump { .. }
+            | TestFileKind::LogSmfRotated { .. }
+            | TestFileKind::LogSmfLive { .. }
+            | TestFileKind::LogSyslogRotated { .. }
+            | TestFileKind::LogSyslogLive { .. }
+            | TestFileKind::DebugDropbox { .. }
+            | TestFileKind::GlobalLogSmfRotated
+            | TestFileKind::GlobalLogSmfLive
+            | TestFileKind::GlobalLogSyslogRotated
+            | TestFileKind::GlobalLogSyslogLive => true,
         }
     }
 }
@@ -252,6 +342,32 @@ impl TryFrom<&Utf8Path> for TestFileKind {
                     Ok(TestFileKind::LogSmfLive { zone_name, zone_root })
                 } else {
                     Ok(TestFileKind::LogSmfRotated { zone_name, zone_root })
+                }
+            } else if s.contains(&format!(
+                "{}/{}/",
+                omicron_debug_dropbox::DEBUG_DROPBOX_PATH,
+                omicron_debug_dropbox::RESERVED_PRODUCER_NAME,
+            )) {
+                Ok(TestFileKind::DebugDropboxStaged { zone_name, zone_root })
+            } else if let Some((_, dropbox_relative)) =
+                s.split_once(omicron_debug_dropbox::DEBUG_DROPBOX_PATH)
+            {
+                // The dropbox's on-disk protocol puts each deposit directly
+                // inside a producer's directory, so a deposit is exactly two
+                // components below the dropbox root.
+                let ncomponents =
+                    Utf8Path::new(dropbox_relative.trim_start_matches('/'))
+                        .components()
+                        .count();
+                if ncomponents > 2 {
+                    Ok(TestFileKind::DebugDropboxTooDeep {
+                        zone_name,
+                        zone_root,
+                    })
+                } else if ncomponents == 2 {
+                    Ok(TestFileKind::DebugDropbox { zone_name, zone_root })
+                } else {
+                    Err(anyhow!("unknown test file kind (dropbox producer?)"))
                 }
             } else {
                 Err(anyhow!("unknown non-global zone test file kind"))
@@ -348,6 +464,42 @@ impl FileLister for TestLister<'_> {
                     Ok(Filename::try_from(filename.to_owned())
                         .expect("filename has no slashes"))
                 })
+            })
+            .collect()
+    }
+
+    fn list_directories(
+        &self,
+        path: &Utf8Path,
+    ) -> Vec<Result<Filename, anyhow::Error>> {
+        // Keep track of the last path that was listed.
+        *self.last_listed.lock().unwrap() = Some(path.to_owned());
+
+        // Inject any errors we've been configured to inject.
+        if let Some(fail_path) = self.injected_error {
+            if path == fail_path {
+                return vec![Err(anyhow!("injected error for {fail_path:?}"))];
+            }
+        }
+
+        // Return the set of immediate subdirectory names under `path`.
+        let mut seen = BTreeSet::new();
+        self.files
+            .iter()
+            .filter_map(|file_path| {
+                // Strip the query path prefix.  The remainder should be at
+                // least two components: a subdirectory name and a filename.
+                let rest = file_path.strip_prefix(path).ok()?;
+                let mut components = rest.components();
+                let subdir = components.next()?.as_str().to_owned();
+                // Only include paths that go deeper than one component.
+                components.next()?;
+                if seen.insert(subdir.clone()) {
+                    Some(Ok(Filename::try_from(subdir)
+                        .expect("subdir name is a valid Filename")))
+                } else {
+                    None
+                }
             })
             .collect()
     }

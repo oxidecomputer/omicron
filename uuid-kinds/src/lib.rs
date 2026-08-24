@@ -56,6 +56,9 @@ impl_typed_uuid_kinds! {
         ConsoleSession = {},
         Dataset = {},
         DemoSaga = {},
+        // A virtual disk (the customer-facing `disk` resource), as opposed to
+        // PhysicalDisk below.
+        Disk = {},
         Downstairs = {},
         DownstairsRegion = {},
         EreporterRestart = {},
@@ -67,6 +70,7 @@ impl_typed_uuid_kinds! {
         FmdResource = {},
         Instance = {},
         InternalZpool = {},
+        IpPool = {},
         LoopbackAddress = {},
         MulticastGroup = {},
         Measurement = {},
