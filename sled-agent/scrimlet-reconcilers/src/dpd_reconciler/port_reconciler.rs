@@ -360,6 +360,7 @@ struct DiffablePortSettings {
     fec: Option<LinkFec>,
     speed: LinkSpeed,
     addrs: BTreeSet<IpAddr>,
+    allow_ddm_traffic: bool,
 }
 
 impl IdOrdItem for DiffablePortSettings {
@@ -400,6 +401,7 @@ impl From<&'_ PortConfig> for DiffablePortSettings {
                     }
                 })
                 .collect(),
+            allow_ddm_traffic: port.allow_ddm_traffic,
         }
     }
 }
@@ -480,6 +482,7 @@ impl TryFrom<(DpdQsfp, DpdPortSettings)> for DiffablePortSettings {
             fec,
             speed,
             addrs,
+            allow_ddm_traffic: sole_link.params.allow_ddm_traffic,
         })
     }
 }
@@ -524,6 +527,7 @@ impl From<&'_ DiffablePortSettings> for DpdPortSettings {
             DpdLinkSettings {
                 addrs,
                 params: DpdLinkCreate {
+                    allow_ddm_traffic: port.allow_ddm_traffic,
                     autoneg,
                     fec,
                     kr,
