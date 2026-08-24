@@ -15,6 +15,7 @@ iddqd.workspace = true
 sled-agent-types-versions.workspace = true
 nexus-types.workspace = true
 omicron-common.workspace = true
+omicron-generation-kinds.workspace = true
 omicron-passwords.workspace = true
 omicron-uuid-kinds.workspace = true
 omicron-workspace-hack.workspace = true
