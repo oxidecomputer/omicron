@@ -34,9 +34,9 @@ use omicron_common::api::external;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
-use omicron_common::api::external::Generation;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
+use omicron_generation_kinds::SupportBundleGeneration;
 use omicron_uuid_kinds::CaseUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
@@ -220,7 +220,7 @@ impl DataStore {
         opctx: &OpContext,
         id: SupportBundleUuid,
         case_id: CaseUuid,
-        expected_generation: Generation,
+        expected_generation: SupportBundleGeneration,
         params: SupportBundleCreateParams<'_>,
     ) -> Result<SupportBundle, FmSupportBundleCreateError> {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
@@ -255,7 +255,7 @@ impl DataStore {
                             .returning(SupportBundle::as_returning());
                     let guarded = SitrepGuardedInsert::<SupportBundle, _>::new(
                         id.into_untyped_uuid(),
-                        expected_generation.into(),
+                        expected_generation,
                         insert,
                     );
                     match guarded.execute_async(&conn).await? {
@@ -970,6 +970,7 @@ mod test {
     use omicron_common::api::external::ByteCount;
     use omicron_common::api::external::LookupType;
     use omicron_common::api::internal::shared::DatasetKind::Debug as DebugDatasetKind;
+    use omicron_generation_kinds::AlertGeneration;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::BlueprintUuid;
     use omicron_uuid_kinds::DatasetUuid;
@@ -2150,7 +2151,7 @@ mod test {
     }
 
     fn make_fm_sitrep(
-        support_bundle_generation: external::Generation,
+        support_bundle_generation: SupportBundleGeneration,
     ) -> nexus_types::fm::Sitrep {
         use nexus_types::fm::Sitrep;
         use nexus_types::fm::SitrepMetadata;
@@ -2165,7 +2166,7 @@ mod test {
                 time_created: chrono::Utc::now(),
                 parent_sitrep_id: None,
                 next_inv_min_time_started: chrono::Utc::now(),
-                alert_generation: external::Generation::new(),
+                alert_generation: AlertGeneration::new(),
                 support_bundle_generation,
             },
             cases: Default::default(),
@@ -2189,7 +2190,7 @@ mod test {
         datastore
             .fm_sitrep_insert(
                 opctx,
-                make_fm_sitrep(external::Generation::from_u32(3)),
+                make_fm_sitrep(SupportBundleGeneration::from_u32(3)),
                 None,
             )
             .await
@@ -2203,7 +2204,7 @@ mod test {
                 &opctx,
                 bundle_id,
                 case_id,
-                external::Generation::from_u32(3),
+                SupportBundleGeneration::from_u32(3),
                 SupportBundleCreateParams {
                     reason: "fm happy path",
                     nexus_id,
@@ -2229,8 +2230,8 @@ mod test {
             .await
             .unwrap();
         assert_eq!(
-            marker.created_at_generation,
-            Generation::from(external::Generation::from_u32(3))
+            marker.created_at_generation(),
+            SupportBundleGeneration::from_u32(3)
         );
 
         db.terminate().await;
@@ -2253,7 +2254,7 @@ mod test {
         datastore
             .fm_sitrep_insert(
                 opctx,
-                make_fm_sitrep(external::Generation::new()),
+                make_fm_sitrep(SupportBundleGeneration::new()),
                 None,
             )
             .await
@@ -2282,7 +2283,7 @@ mod test {
                 &opctx,
                 bundle_id,
                 CaseUuid::new_v4(),
-                external::Generation::new(),
+                SupportBundleGeneration::new(),
                 SupportBundleCreateParams {
                     reason: "should hit existing row",
                     nexus_id: OmicronZoneUuid::new_v4(),
@@ -2325,7 +2326,7 @@ mod test {
         datastore
             .fm_sitrep_insert(
                 opctx,
-                make_fm_sitrep(external::Generation::from_u32(5)),
+                make_fm_sitrep(SupportBundleGeneration::from_u32(5)),
                 None,
             )
             .await
@@ -2336,7 +2337,7 @@ mod test {
                 &opctx,
                 SupportBundleUuid::new_v4(),
                 CaseUuid::new_v4(),
-                external::Generation::new(),
+                SupportBundleGeneration::new(),
                 SupportBundleCreateParams {
                     reason: "stale activation",
                     nexus_id: OmicronZoneUuid::new_v4(),
@@ -2376,11 +2377,11 @@ mod test {
                 .values(vec![
                     RendezvousSupportBundleCreated::new(
                         present_a,
-                        Generation::new(),
+                        SupportBundleGeneration::new(),
                     ),
                     RendezvousSupportBundleCreated::new(
                         present_b,
-                        Generation::new(),
+                        SupportBundleGeneration::new(),
                     ),
                 ])
                 .execute_async(&*conn)
